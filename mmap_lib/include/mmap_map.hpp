@@ -701,6 +701,7 @@ private:
     }
 
     if(mmap_fd >= 0 && empty()) {
+      mmap_size = 0; // forget memoize size
       unlink(mmap_name.c_str());
     }
 
@@ -747,6 +748,7 @@ private:
     mmap_txt_base = reinterpret_cast<uint64_t *>(base);
   }
 
+#if 0
 	std::tuple<uint64_t *, size_t> create_mmap(std::string name, int fd, size_t size) const {
     auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1, std::placeholders::_2);
 
@@ -755,6 +757,7 @@ private:
 
 		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
 	}
+#endif
 
   __attribute__((noinline,cold)) void setup_mmap(size_t n_entries) const {
 		assert(mmap_base == nullptr);
@@ -782,10 +785,12 @@ private:
         new_mmap_size = calc_mmap_size(n_entries);
       }else if (mmap_size==0) { // first reload
         int sz = read(mmap_fd,&n_entries,8);
-        if (sz!=8) {
+        if (sz!=8) { // Still not mmap
+          n_entries = InitialNumElements;
+        }else if (n_entries==0) { // mmap but all zeroes
           n_entries = InitialNumElements;
         }else{
-          n_entries++; // We read mMask at base 0
+          n_entries++;
           assert(n_entries>=InitialNumElements);
         }
         new_mmap_size = calc_mmap_size(n_entries);

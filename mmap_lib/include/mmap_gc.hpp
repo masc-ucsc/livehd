@@ -20,6 +20,8 @@
 #define MMAP_LIB_UNLIKELY(x) __builtin_expect((x), 0)
 #endif
 
+//#define MMAP_GC_TRACE 1
+
 namespace mmap_lib {
 struct mmap_gc_entry {
   static inline int global_age = 1;
@@ -71,7 +73,7 @@ protected:
     if (n_open_fds < n_max_fds && may_recycle_fds > 4) n_recycle_fds = may_recycle_fds / 4;
     if (n_open_mmaps < n_max_mmaps && may_recycle_mmaps > 4) n_recycle_mmaps = may_recycle_mmaps / 4;
 
-#if 0
+#ifdef MMAP_GC_TRACE
     std::cerr << "trying:"
       << " may_recycle_fds:" << may_recycle_fds << " may_recycle_mmaps:" << may_recycle_mmaps
       << " n_recycle_fds:" << n_recycle_fds << " n_recycle_mmaps:" << n_recycle_mmaps
@@ -82,7 +84,7 @@ protected:
     std::sort(sorted.begin(), sorted.end(), [](const mmap_gc_entry &a, const mmap_gc_entry &b) { return a.age < b.age; });
 
     if (MMAP_LIB_UNLIKELY(mmap_gc_entry::global_age > 32768)) {  // infrequent but enough for coverage/testing
-      mmap_gc_entry::global_age = sorted.size();
+      mmap_gc_entry::global_age = sorted.size()+1;
       int age                   = 1;
       for (const auto e : sorted) {
         auto it        = mmap_gc_pool.find(e.base);
@@ -130,7 +132,7 @@ protected:
       }
     }
 
-#if 0
+#ifdef MMAP_GC_TRACE
     std::cerr << "gc:" << n_gc
       << " n_open_mmaps:" << n_open_mmaps << " n_max_mmaps:" << n_max_mmaps
       << " n_open_fds:" << n_open_fds << " n_max_fds:" << n_max_fds << "\n";
@@ -157,13 +159,26 @@ protected:
       return false;
     }
 
+    if (it->first==nullptr) {
+      std::cerr << "EIN ";
+    }
+#ifdef MMAP_GC_TRACE
+    std::cerr
+      << "mmap_gc_pool del name:" << it->second.name
+      << " fd:" << it->second.fd
+      << " base:" << it->first
+      << " base[0]:" << *(int *)it->first
+      << std::endl;
+#endif
+
+    //::msync(it->first, it->second.size, MS_SYNC);
+    ::munmap(it->first, it->second.size);
+    n_open_mmaps--;
+
     if (it->second.fd >= 0) {
       ::close(it->second.fd);
       n_open_fds--;
     }
-
-    ::munmap(it->first, it->second.size);
-    n_open_mmaps--;
 
     // std::cerr << "mmap_gc_pool del name:" << it->second.name << " fd:" << it->second.fd << " base:" << it->first << std::endl;
 
@@ -247,8 +262,8 @@ public:
   // mmap_map.hpp:    mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
   // mmap_vector.hpp: mmap_fd     = mmap_gc::open(mmap_name);
   static int open(const std::string &name) {
-#if 0
-    std::cerr << "mmap_gc_pool open filename:" << name 
+#ifdef MMAP_GC_TRACE
+    std::cerr << "mmap_gc_pool open filename:" << name
       << " n_open_fds=" << n_open_fds
       << " n_open_mmaps=" << n_open_mmaps
       << "\n";

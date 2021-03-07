@@ -36,9 +36,11 @@ if [ $# -eq 0 ]; then
 else
   file=$(basename $1)
   if [ "${file#*.}" == "hi.pb" ]; then
+    echo "Using High Level FIRRTL"
     pts=$(basename $1 ".hi.pb")
     FIRRTL_LEVEL='hi'
   elif [ "${file#*.}" == "lo.pb" ]; then
+    echo "Using Low Level FIRRTL"
     pts=$(basename $1 ".lo.pb")
     FIRRTL_LEVEL='lo'
   elif [ "${file#*.}" == "ch.pb" ]; then
