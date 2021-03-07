@@ -276,6 +276,8 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
   // Add register's name to the global list.
   register_names.insert(id.substr(1, id.length() - 1));  // Use substr to remove "#"
 
+
+
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
     std::string_view acc_name_bw;
@@ -288,6 +290,13 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id,
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(acc_name_bw));
     lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bitwidth))));
+  } else {
+  // if from chirrtl, the register bw is not explicit, create a dummy lhs(#x) = rhs(#x.__q_pin) for SSA to continue
+    std::string_view acc_name;
+    acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__q_pin"));
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(id)));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(acc_name)));
   }
 
 
@@ -1031,8 +1040,6 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node, const bool is_rhs) {
   auto flattened_str  = FlattenExpression(ln, parent_node, expr);
   auto alter_full_str = get_full_name(ln, parent_node, flattened_str, false); // Note: I put false here so if reg I get the "#"
-  /* fmt::print("DEBUG-0 flattened_str:{}\n", flattened_str); */
-  /* fmt::print("DEBUG-1 alter_full_str:{}\n", alter_full_str); */
 
   if (alter_full_str[0] == '$') {
     flattened_str = absl::StrCat("$inp_", flattened_str);
@@ -1619,7 +1626,6 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {     // UIntLiteral
       expr_string = absl::StrCat(expr.uint_literal().value().value(), "ubits", expr.uint_literal().width().value());
-      /* expr_string = expr.uint_literal().value().value(); */
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {     // SIntLiteral
