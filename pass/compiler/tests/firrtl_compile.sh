@@ -63,14 +63,9 @@ pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 
 # pts='Test1'
 # pts='Life'
-# pts=''
 # pts='VecShiftRegisterParam'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
-# pts='Xor32Thread8'
-# pts='Xor64Thread8'
-# pts='Xor128Thread8'
-# pts='Xor800Thread8'
 # pts='Flop'
 
 LGSHELL=./bazel-bin/main/lgshell
