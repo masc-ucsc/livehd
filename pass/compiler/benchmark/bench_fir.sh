@@ -9,7 +9,7 @@ if [ ! -d ./livehd_regression ]; then
   cd ../../
 fi
 
-FIRRTL_LEVEL='hi'
+FIRRTL_LEVEL='ch'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
@@ -30,9 +30,9 @@ fi
 
 
 pts=''
-for filename in ./livehd_regression/synthetic/generated/*.hi.pb
+for filename in ./livehd_regression/synthetic/generated/*.${FIRRTL_LEVEL}.pb
 do
-  pt=$(basename "$filename" .hi.pb) # ./foo/bar.scala -> bar 
+  pt=$(basename "$filename" .${FIRRTL_LEVEL}.pb) # ./foo/bar.scala -> bar 
   pts+="$pt "
 done
 
@@ -43,9 +43,9 @@ echo -e "All Benchmark Patterns:" '\n'$pts
 
 
 firrtl_test() {
-  echo "-------------------- Chirrtl -> hi.pb --------------------" > stat.protogen
-  echo "-------------------- LiveHD (hi.pb -> Verilog(Cgen)) -----" > stat.livehd
-  echo "-------------------- LiveHD (hi.pb -> Verilog(Yosys)) ----" > stat.livehd-yosys
+  echo "-------------------- Chirrtl -> ${FIRRTL_LEVEL}.pb --------------------" > stat.protogen
+  echo "-------------------- LiveHD (${FIRRTL_LEVEL}.pb -> Verilog(Cgen)) -----" > stat.livehd
+  echo "-------------------- LiveHD (${FIRRTL_LEVEL}.pb -> Verilog(Yosys)) ----" > stat.livehd-yosys
   echo "-------------------- FIRRTL (Chirrtl -> Verilog) ---------" > stat.firrtl
 
 
@@ -54,7 +54,7 @@ firrtl_test() {
   echo ""
   echo ""
   echo "======================================================================"
-  echo "                         hiFIRRTL Full Compilation"
+  echo "                         ${FIRRTL_LEVEL}FIRRTL Full Compilation"
   echo "======================================================================"
   for pt in $1
   do
@@ -83,96 +83,32 @@ firrtl_test() {
 
 
 
-    # firrtl compilation
-    if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir ]; then
-      echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.fir in ${PATTERN_PATH}"
-      exit 1
-    else
-      echo $pt
-      echo "---------- Chirrtl Compilation: $pt.hi.fir ----------"
-      echo "-------- FIRRTL Compilation Time --------" > pp_firrtl
-      perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X verilog
-      perf stat -o pp3 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
+    # # firrtl compilation
+    # if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir ]; then
+    #   echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.fir in ${PATTERN_PATH}"
+    #   exit 1
+    # else
+    #   echo $pt
+    #   echo "---------- Chirrtl Compilation: $pt.hi.fir ----------"
+    #   echo "-------- FIRRTL Compilation Time --------" > pp_firrtl
+    #   perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X verilog
+    #   perf stat -o pp3 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
 
-      echo "      ${pt}"    >> stat.protogen
-      grep elapsed pp3      >> stat.protogen
-      echo "      ${pt}"    >> stat.livehd
-      grep elapsed pp       >> stat.livehd
-      echo "      ${pt}"    >> stat.livehd-yosys
-      grep elapsed pp-yosys >> stat.livehd-yosys
-      echo "      ${pt}"    >> stat.firrtl
-      grep elapsed pp2      >> stat.firrtl
+    #   echo "      ${pt}"    >> stat.protogen
+    #   grep elapsed pp3      >> stat.protogen
+    #   echo "      ${pt}"    >> stat.livehd
+    #   grep elapsed pp       >> stat.livehd
+    #   echo "      ${pt}"    >> stat.livehd-yosys
+    #   grep elapsed pp-yosys >> stat.livehd-yosys
+    #   echo "      ${pt}"    >> stat.firrtl
+    #   grep elapsed pp2      >> stat.firrtl
 
-      cat stat.protogen
-      cat stat.livehd-yosys
-      cat stat.livehd
-      cat stat.firrtl
-    fi
+    #   cat stat.protogen
+    #   cat stat.livehd-yosys
+    #   cat stat.livehd
+    #   cat stat.firrtl
+    # fi
   done #end of for
-
-
-
-
-
-  # for pt in $1
-  # do
-  #   # compile only if foo.scala is not exists
-  #   if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir ]; then
-  #     echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.fir in ${PATTERN_PATH}"
-  #     exit 1
-  #   else
-  #     echo $pt
-  #     echo "---------- Chirrtl Compilation: $pt.hi.fir ----------"
-  #     echo "-------- FIRRTL Compilation Time --------" > pp_firrtl
-  #     perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X verilog
-  #     perf stat -o pp3 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
-
-  #     echo "      ${pt}" >> stat.protogen
-  #     grep elapsed pp3 >> stat.protogen
-  #     echo "      ${pt}" >> stat.livehd
-  #     grep elapsed pp >> stat.livehd
-  #     echo "      ${pt}" >> stat.livehd-yosys
-  #     grep elapsed pp-yosys >> stat.livehd-yosys
-  #     echo "      ${pt}" >> stat.firrtl
-  #     grep elapsed pp2 >> stat.firrtl
-
-  #     cat stat.protogen
-  #     cat stat.livehd-yosys
-  #     cat stat.livehd
-  #     cat stat.firrtl
-  #   fi
-  # done
-
-
-  # # Logic Equivalence Check
-  # for pt in $1
-  # do
-  #   echo ""
-  #   echo ""
-  #   echo ""
-  #   echo "----------------------------------------------------"
-  #   echo "Logic Equivalence Check"
-  #   echo "----------------------------------------------------"
-    
-  #   if [ "${FIRRTL_LEVEL}" == "hi" ]; then
-  #       python3 ${POST_IO_RENAME} "${pt}.v"
-  #   fi
-
-  #   ${LGCHECK} --implementation=${pt}.v --reference=${PATTERN_PATH}/${pt}.v
-
-  #   if [ $? -eq 0 ]; then
-  #     echo "Successfully pass LEC!"
-  #   else
-  #       echo "FAIL: "${pt}".v !== "${pt}".gld.v"
-  #       exit 1
-  #   fi
-  # done
-
-  # rm -f *.v
-  # rm -f *.dot
-  # rm -f *.tcl
-  # rm -f lgcheck*
-  # rm -rf lgdb
 }
 
 firrtl_test "$pts"
