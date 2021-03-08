@@ -16,7 +16,7 @@ POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
 PATTERN_PATH=./livehd_regression/synthetic/generated
 FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 LGDB=/local/scrap/masc/swang203/lgdb
-GVIZ='false'
+GVIZ='true'
 
 rm -rf $LGDB
 if [ ! -f $LGSHELL ]; then
@@ -81,9 +81,9 @@ fucntion() {
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
                                 |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
                                 |> inou.cgen.verilog"
-    perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
-                                |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
-                                |> inou.yosys.fromlg hier:true" 
+    # perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
+    #                             |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
+    #                             |> inou.yosys.fromlg hier:true" 
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then

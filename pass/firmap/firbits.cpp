@@ -907,6 +907,5 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
   }
 
   /* fmt::print("DEBUG firmap insertion:{}\n", node.get_driver_pin("Y").debug_name()); */
-  /* fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign)); */
-  fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }
