@@ -37,27 +37,25 @@ do
 done
 
 
-pts='Snx1024Insts256'
-
+# pts='Snx1024Insts256'
+# pts='Snx64Insts16 Snx640Insts16'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
-firrtl_test() {
-  echo "-------------------- Chirrtl -> ${FIRRTL_LEVEL}.pb --------------------" > stat.protogen
-  echo "-------------------- LiveHD (${FIRRTL_LEVEL}.pb -> Verilog(Cgen)) -----" > stat.livehd
-  echo "-------------------- LiveHD (${FIRRTL_LEVEL}.pb -> Verilog(Yosys)) ----" > stat.livehd-yosys
-  echo "-------------------- FIRRTL (Chirrtl -> Verilog) ---------" > stat.firrtl
+fucntion() {
+  echo "-------------------- Chisel3 (Chisel -> ${FIRRTL_LEVEL}.pb)-------------" > stat.chiesel3-pb
+  echo "-------------------- LiveHD  (${FIRRTL_LEVEL}.pb -> Verilog(Cgen)) -----" > stat.livehd
+  echo "-------------------- LiveHD  (${FIRRTL_LEVEL}.pb -> Verilog(Yosys)) ----" > stat.livehd-yosys
+  echo "-------------------- FIRRTL  (Chirrtl -> Verilog) ---------"              > stat.firrtl
 
-
-
-  echo ""
-  echo ""
-  echo ""
-  echo "======================================================================"
-  echo "                         ${FIRRTL_LEVEL}FIRRTL Full Compilation"
-  echo "======================================================================"
   for pt in $1
   do
+    echo ""
+    echo ""
+    echo ""
+    echo "======================================================================"
+    echo "                     LiveHD ${FIRRTL_LEVEL}.pb Full Compilation: ${pt}.pb"
+    echo "======================================================================"
     # livehd compilation
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
@@ -82,33 +80,61 @@ firrtl_test() {
     fi
 
 
+    echo ""
+    echo ""
+    echo ""
+    echo "======================================================================"
+    echo "                     FIRRTL Compilation from Chirrtl: ${pt}.fir"
+    echo "======================================================================"
 
-    # # firrtl compilation
-    # if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir ]; then
-    #   echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.fir in ${PATTERN_PATH}"
-    #   exit 1
-    # else
-    #   echo $pt
-    #   echo "---------- Chirrtl Compilation: $pt.hi.fir ----------"
-    #   echo "-------- FIRRTL Compilation Time --------" > pp_firrtl
-    #   perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X verilog
-    #   perf stat -o pp3 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.fir -X none --custom-transforms firrtl.transforms.WriteHighPB
+    # firrtl compilation
+    if [ ! -f ${PATTERN_PATH}/${pt}.fir ]; then
+      echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
+      exit 1
+    else
+      echo $pt
+      perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
 
-    #   echo "      ${pt}"    >> stat.protogen
-    #   grep elapsed pp3      >> stat.protogen
-    #   echo "      ${pt}"    >> stat.livehd
-    #   grep elapsed pp       >> stat.livehd
-    #   echo "      ${pt}"    >> stat.livehd-yosys
-    #   grep elapsed pp-yosys >> stat.livehd-yosys
-    #   echo "      ${pt}"    >> stat.firrtl
-    #   grep elapsed pp2      >> stat.firrtl
+      echo "      ${pt}"    >> stat.livehd
+      grep elapsed pp       >> stat.livehd
+      echo "      ${pt}"    >> stat.livehd-yosys
+      grep elapsed pp-yosys >> stat.livehd-yosys
+      echo "      ${pt}"    >> stat.firrtl
+      grep elapsed pp2      >> stat.firrtl
 
-    #   cat stat.protogen
-    #   cat stat.livehd-yosys
-    #   cat stat.livehd
-    #   cat stat.firrtl
-    # fi
+    fi
+
+
+    echo ""
+    echo ""
+    echo ""
+    echo "======================================================================"
+    echo "                     Chisel3 Protobuf Compilation : ${pt}.scala"
+    echo "======================================================================"
+    if [ ! -f ${PATTERN_PATH}/${pt}.scala ]; then
+      echo "ERROR: could not find ${pt}.scala in ${PATTERN_PATH}"
+      exit 1
+    else
+      rm -f livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/*.scala
+      cp ${PATTERN_PATH}/${pt}.scala  livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/
+      pushd .
+      cd livehd_regression/fir_regression/chisel_bootstrap
+
+      # CHIRRTL PB
+      perf stat -o pp3 sbt "runMain chisel3.stage.ChiselMain --no-run-firrtl --chisel-output-file ${pt}.ch.pb --module ${pt}.${pt}"
+      echo "      ${pt}"    >> ../../../stat.chiesel3-pb
+      grep elapsed pp3      >> ../../../stat.chiesel3-pb
+      rm -f ${pt}.ch.pb
+      rm -f ${pt}.anno.json
+      popd
+    fi
   done #end of for
+
+
+  cat stat.chiesel3-pb
+  cat stat.livehd-yosys
+  cat stat.livehd
+  cat stat.firrtl
 }
 
-firrtl_test "$pts"
+fucntion "$pts"

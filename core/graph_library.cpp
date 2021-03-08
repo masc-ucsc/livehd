@@ -226,9 +226,10 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
         // LGraph::warn("overwrite lgraph:{} source from {} to {}", name, attributes[it->second].source, source);  // LCOV_EXCL_LINE
         attributes[it->second].source = source;
       } else {
+        auto src = attributes[it->second].source;
         LGraph::error("No overwrite lgraph:{} because it changed source from {} to {} (LGraph::delete first)",
                       name,
-                      attributes[it->second].source,
+                      src,
                       source);  // LCOV_EXCL_LINE
       }
     }
