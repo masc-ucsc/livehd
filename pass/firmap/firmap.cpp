@@ -180,9 +180,12 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
   assert(inp.size()==2); // e1 and e2
 
   I(old_node.is_type_sub());
-  for (auto &e:old_node.inp_edges()) {
+  for (auto &e : old_node.inp_edges()) {
+	fmt::print("DEBUG0\n");
     if (fbmap.find(e.driver.get_compact_flat()) == fbmap.end()) {
+			fmt::print("DEBUG1\n");
       old_node.dump();
+			fmt::print("DEBUG2 old_node_dpin name:{}\n", old_node.debug_name());
       Pass::error("dpin:{} cannot found in fbmap", e.driver.debug_name());
     }
 

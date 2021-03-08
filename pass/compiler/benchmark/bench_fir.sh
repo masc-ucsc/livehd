@@ -20,12 +20,12 @@ GVIZ='false'
 
 rm -rf $LGDB
 if [ ! -f $LGSHELL ]; then
-    if [ -f ./main/lgshell ]; then
-        LGSHELL=./main/lgshell
-        echo "lgshell is in $(pwd)"
-    else
-        echo "ERROR: could not find lgshell binary in $(pwd)";
-    fi
+  if [ -f ./main/lgshell ]; then
+    LGSHELL=./main/lgshell
+    echo "lgshell is in $(pwd)"
+  else
+    echo "ERROR: could not find lgshell binary in $(pwd)";
+  fi
 fi
 
 
@@ -42,14 +42,20 @@ echo $pts
 
 
 pts='Snx1024Insts256'
-# pts='Snx64Insts16'
+pts='Snx512Insts128'
+pts='Snx256Insts64'
+pts='Snx128Insts32'
+pts='Snx64Insts16'
+pts='Snx32Insts8'
+pts='Snx16Insts4'
+pts='Snx8Insts2'
 
 
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
 fucntion() {
-  echo "-------------------- Chisel3 (Chisel -> ${FIRRTL_LEVEL}.pb)-------------" > stat.chiesel3-pb
+  # echo "-------------------- Chisel3 (Chisel -> ${FIRRTL_LEVEL}.pb)-------------" > stat.chiesel3-pb
   echo "-------------------- LiveHD  (${FIRRTL_LEVEL}.pb -> Verilog(Cgen)) -----" > stat.livehd
   echo "-------------------- LiveHD  (${FIRRTL_LEVEL}.pb -> Verilog(Yosys)) ----" > stat.livehd-yosys
   echo "-------------------- FIRRTL  (Chirrtl -> Verilog) ---------"              > stat.firrtl
@@ -111,38 +117,39 @@ fucntion() {
     fi
 
 
-    echo ""
-    echo ""
-    echo ""
-    echo "======================================================================"
-    echo "                     Chisel3 Protobuf Compilation : ${pt}.scala"
-    echo "======================================================================"
-    if [ ! -f ${PATTERN_PATH}/${pt}.scala ]; then
-      echo "ERROR: could not find ${pt}.scala in ${PATTERN_PATH}"
-      exit 1
-    else
-      rm -f livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/*.scala
-      cp ${PATTERN_PATH}/${pt}.scala  livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/
-      pushd .
-      cd livehd_regression/fir_regression/chisel_bootstrap
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "======================================================================"
+    # echo "                     Chisel3 Protobuf Compilation : ${pt}.scala"
+    # echo "======================================================================"
+    # if [ ! -f ${PATTERN_PATH}/${pt}.scala ]; then
+    #   echo "ERROR: could not find ${pt}.scala in ${PATTERN_PATH}"
+    #   exit 1
+    # else
+    #   rm -f livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/*.scala
+    #   cp ${PATTERN_PATH}/${pt}.scala  livehd_regression/fir_regression/chisel_bootstrap/src/main/scala/
+    #   pushd .
+    #   cd livehd_regression/fir_regression/chisel_bootstrap
 
-      # CHIRRTL PB
-      sbt "runMain chisel3.stage.ChiselMain --no-run-firrtl --chisel-output-file ${pt}.ch.pb --module ${pt}.${pt}" > pp3
+    #   # CHIRRTL PB
+    #   sbt "runMain chisel3.stage.ChiselMain --no-run-firrtl --chisel-output-file ${pt}.ch.pb --module ${pt}.${pt}" > pp3
       
 
-      echo "      ${pt}"      >> ../../../stat.chiesel3-pb
-      grep "Total time" pp3   >> ../../../stat.chiesel3-pb
-      rm -f ${pt}.ch.pb
-      rm -f ${pt}.anno.json
-      popd
-    fi
+    #   echo "      ${pt}"      >> ../../../stat.chiesel3-pb
+    #   grep "Total time" pp3   >> ../../../stat.chiesel3-pb
+    #   rm -f ${pt}.ch.pb
+    #   rm -f ${pt}.anno.json
+    #   popd
+    # fi
   done #end of for
 
 
-  cat stat.chiesel3-pb  >  stat.summary
+  cat stat.chisel3-pb   >  stat.summary
   cat stat.livehd-yosys >> stat.summary
   cat stat.livehd       >> stat.summary
   cat stat.firrtl       >> stat.summary
+  cat stat.chisel3-full >> stat.summary
   cat stat.summary
 
   rm *.v
