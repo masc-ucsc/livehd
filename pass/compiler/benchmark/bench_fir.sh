@@ -29,16 +29,22 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 
-pts=''
+unsorted=''
 for filename in ./livehd_regression/synthetic/generated/*.${FIRRTL_LEVEL}.pb
 do
   pt=$(basename "$filename" .${FIRRTL_LEVEL}.pb) # ./foo/bar.scala -> bar 
-  pts+="$pt "
+  unsorted+="$pt "
 done
 
+#bash natural sort
+pts=$(echo $unsorted | tr " " "\n" | sort -V)
+echo $pts
 
-# pts='Snx1024Insts256'
-# pts='Snx64Insts16 Snx640Insts16'
+
+pts='Snx1024Insts256'
+# pts='Snx64Insts16'
+
+
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -121,9 +127,11 @@ fucntion() {
       cd livehd_regression/fir_regression/chisel_bootstrap
 
       # CHIRRTL PB
-      perf stat -o pp3 sbt "runMain chisel3.stage.ChiselMain --no-run-firrtl --chisel-output-file ${pt}.ch.pb --module ${pt}.${pt}"
-      echo "      ${pt}"    >> ../../../stat.chiesel3-pb
-      grep elapsed pp3      >> ../../../stat.chiesel3-pb
+      sbt "runMain chisel3.stage.ChiselMain --no-run-firrtl --chisel-output-file ${pt}.ch.pb --module ${pt}.${pt}" > pp3
+      
+
+      echo "      ${pt}"      >> ../../../stat.chiesel3-pb
+      grep "Total time" pp3   >> ../../../stat.chiesel3-pb
       rm -f ${pt}.ch.pb
       rm -f ${pt}.anno.json
       popd
@@ -131,10 +139,13 @@ fucntion() {
   done #end of for
 
 
-  cat stat.chiesel3-pb
-  cat stat.livehd-yosys
-  cat stat.livehd
-  cat stat.firrtl
+  cat stat.chiesel3-pb  >  stat.summary
+  cat stat.livehd-yosys >> stat.summary
+  cat stat.livehd       >> stat.summary
+  cat stat.firrtl       >> stat.summary
+  cat stat.summary
+
+  rm *.v
 }
 
 fucntion "$pts"
