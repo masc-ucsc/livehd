@@ -45,10 +45,10 @@ pts='Snx1024Insts256'
 pts='Snx512Insts128'
 pts='Snx256Insts64'
 pts='Snx128Insts32'
-pts='Snx64Insts16'
-pts='Snx32Insts8'
-pts='Snx16Insts4'
-pts='Snx8Insts2'
+# pts='Snx64Insts16'
+# pts='Snx32Insts8'
+# pts='Snx16Insts4'
+# pts='Snx8Insts2'
 
 
 echo -e "All Benchmark Patterns:" '\n'$pts
@@ -74,9 +74,9 @@ fucntion() {
         exit 1
     fi 
 
-    perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
-                                |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
-                                |> inou.cgen.verilog" 
+    # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
+    #                             |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
+    #                             |> inou.cgen.verilog" 
 
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
                                 |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
@@ -92,29 +92,28 @@ fucntion() {
     fi
 
 
-    echo ""
-    echo ""
-    echo ""
-    echo "======================================================================"
-    echo "                     FIRRTL Compilation from Chirrtl: ${pt}.fir"
-    echo "======================================================================"
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "======================================================================"
+    # echo "                     FIRRTL Compilation from Chirrtl: ${pt}.fir"
+    # echo "======================================================================"
 
-    # firrtl compilation
-    if [ ! -f ${PATTERN_PATH}/${pt}.fir ]; then
-      echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
-      exit 1
-    else
-      echo $pt
-      perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
+    # # firrtl compilation
+    # if [ ! -f ${PATTERN_PATH}/${pt}.fir ]; then
+    #   echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
+    #   exit 1
+    # else
+    #   echo $pt
+    #   perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
 
-      echo "      ${pt}"    >> stat.livehd
-      grep elapsed pp       >> stat.livehd
-      echo "      ${pt}"    >> stat.livehd-yosys
-      grep elapsed pp-yosys >> stat.livehd-yosys
-      echo "      ${pt}"    >> stat.firrtl
-      grep elapsed pp2      >> stat.firrtl
-
-    fi
+    #   echo "      ${pt}"    >> stat.livehd
+    #   grep elapsed pp       >> stat.livehd
+    #   echo "      ${pt}"    >> stat.livehd-yosys
+    #   grep elapsed pp-yosys >> stat.livehd-yosys
+    #   echo "      ${pt}"    >> stat.firrtl
+    #   grep elapsed pp2      >> stat.firrtl
+    # fi
 
 
     # echo ""
@@ -145,14 +144,14 @@ fucntion() {
   done #end of for
 
 
-  cat stat.chisel3-pb   >  stat.summary
-  cat stat.livehd-yosys >> stat.summary
-  cat stat.livehd       >> stat.summary
-  cat stat.firrtl       >> stat.summary
-  cat stat.chisel3-full >> stat.summary
-  cat stat.summary
+  # cat stat.chisel3-pb   >  stat.summary
+  # cat stat.livehd-yosys >> stat.summary
+  # cat stat.livehd       >> stat.summary
+  # cat stat.firrtl       >> stat.summary
+  # cat stat.chisel3-full >> stat.summary
+  # cat stat.summary
 
-  rm *.v
+  # rm *.v
 }
 
 fucntion "$pts"
