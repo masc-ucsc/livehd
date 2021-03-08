@@ -176,15 +176,21 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
 
   Lconst e1_bits;
   Lconst n;
-  for (auto &old_spin : old_node.inp_connected_pins()) {
-    if (fbmap.find(old_spin.get_driver_pin().get_compact_flat()) == fbmap.end())
-      Pass::error("dpin:{} cannot found in fbmap", old_spin.get_driver_pin().debug_name());
+  auto inp = old_node.inp_edges_ordered();
+  assert(inp.size()==2); // e1 and e2
 
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      e1_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
-      pinmap.insert_or_assign(old_spin, new_node_mask.setup_sink_pin("A")); // e1 -> mask
+  I(old_node.is_type_sub());
+  for (auto &e:old_node.inp_edges()) {
+    if (fbmap.find(e.driver.get_compact_flat()) == fbmap.end()) {
+      old_node.dump();
+      Pass::error("dpin:{} cannot found in fbmap", e.driver.debug_name());
+    }
+
+    if (e.sink.get_type_sub_pin_name() == "e1") {
+      e1_bits = fbmap[e.driver.get_compact_flat()].get_bits();
+      pinmap.insert_or_assign(e.sink, new_node_mask.setup_sink_pin("A")); // e1 -> mask
     } else { //e2
-      n = old_spin.get_driver_node().get_type_const();
+      n = e.driver.get_type_const();
     }
   }
 
