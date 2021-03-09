@@ -1135,7 +1135,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
       }
     }
 
-    fmt::print("    hello-3\n");
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
       sign  = it->second.get_sign();
@@ -1145,7 +1144,5 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  fmt::print("    firmap insertion:{}\n", node.get_driver_pin("Y").debug_name());
-  fmt::print("    insert fmbap:{}\n", node.get_driver_pin("Y").debug_name());
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }
