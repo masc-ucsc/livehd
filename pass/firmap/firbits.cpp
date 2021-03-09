@@ -904,7 +904,7 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
       I(driver_list.size()==1);
       auto h_dpin = driver_list[0];
 
-      fmt::print("    hello-2, h_dpin:{}\n", h_dpin.debug_name());
+      fmt::print("    hello-2, h_spin:{}\n", h_spin.debug_name());
       I(!h_dpin.is_invalid()); // connected
       I(h_dpin != e.driver);
 

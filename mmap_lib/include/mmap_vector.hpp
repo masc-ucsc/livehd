@@ -157,7 +157,7 @@ protected:
     mmap_base        = nullptr;
     entries_size     = nullptr;
     mmap_fd          = -1;
-    entries_capacity = 0;
+    //entries_capacity = 0;
 
     return false;
   }
@@ -319,7 +319,7 @@ public:
     *entries_size = 0;  // Setting zero, triggers an unlink when calling gc_done
 
     mmap_gc::recycle(mmap_base);
-    assert(entries_capacity == 0);
+    entries_capacity = 0;
     assert(entries_size == nullptr);
   }
 

@@ -550,6 +550,7 @@ Node_pin_iterator LGraph::inp_driver(const Node_pin &spin) const {
   I(spin.is_sink());
   I(spin.get_class_lgraph() == this);
 
+
   Node_pin_iterator piter;
   each_pin(spin, [this, &piter, &spin](Index_ID idx2) {
     auto            n = node_internal[idx2].get_num_local_inputs();
