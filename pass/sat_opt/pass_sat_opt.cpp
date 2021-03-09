@@ -11,7 +11,6 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-
 //#define DEBUG
 
 /*
@@ -203,18 +202,21 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			 #endif
 	  }
 	  
-	  	/*else if (node.get_type_op() == Ntype_op::Sum) {
+	 else if (node.get_type_op() == Ntype_op::Sum) {
 			  auto a_input = node.get_sink_pin("A").inp_edges();
+        std::cout << "a is -> " << &a_input << "\n";
 			  auto b_input = node.get_sink_pin("B").inp_edges();
-			  			  
+			  std::cout << "b is -> " << &b_input << "\n";
 			  auto a_result = sat.vec_add(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[a_input[1].driver.get_compact()]);
+        std::cout << "a_result is -> " << &a_result << "\n";
 			  auto b_result = sat.vec_add(dpin2sat_var[b_input[0].driver.get_compact()], dpin2sat_var[b_input[1].driver.get_compact()]);
-			  
+			  std::cout << "b_result is -> " << &b_result << "\n";
 			  auto sum_result = sat.vec_sub(a_result, b_result);
+        std::cout << "sum_result is -> " << &sum_result << "\n";
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = sum_result;
 
 			  fmt::print("--Debug Sum: {}\n", node.setup_driver_pin().debug_name());
-	  }*/
+	  }
 	  else if (node.get_type_op() == Ntype_op::LT) {
 			  auto a_input = node.get_sink_pin("A").inp_edges();
 			  auto b_input = node.get_sink_pin("B").inp_edges();
@@ -240,9 +242,9 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 	  else if (node.get_type_op() == Ntype_op::SHL) {
 			  auto a_input = node.get_sink_pin("a").inp_edges();
 			  auto b_input = node.get_sink_pin("b").inp_edges();
-			  			  
+			  std::cout << "a and b inputs gotten \n"; 
 			  auto shl_result = sat.vec_shift_left(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()], false, false, false);
-
+        std::cout << "shl_result gotten \n";
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = shl_result;
 
 			  fmt::print("--Debug SHL: {}\n", node.setup_driver_pin().debug_name());
