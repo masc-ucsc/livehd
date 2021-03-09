@@ -137,6 +137,8 @@ protected:
   void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
   void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) const;
 
+  void each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visited, const std::function<bool(Node &, Lg_type_id)> fn);
+
 public:
   LGraph()               = delete;
   LGraph(const LGraph &) = delete;
@@ -234,6 +236,7 @@ public:
   void each_hier_fast_direct(const std::function<bool(Node &)>);
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
   void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
+  void each_sub_hierarchical_unique_direct(const std::function<bool(Node &, Lg_type_id)> fn);
 
   template <typename FN>
   void each_sub_fast(const FN f1) {
@@ -248,6 +251,22 @@ public:
     } else {
       I(false);
       each_sub_fast_direct(f1);  // Better error message if I keep this
+    }
+  };
+
+  template <typename FN>
+  void each_sub_hierarchical_unique(const FN f1) {
+    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
+      each_sub_hierarchical_unique_direct(f1);
+    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
+      auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
+        f1(node, l_lgid);
+        return true;
+      };
+      each_sub_hierarchical_unique_direct(f2);
+    } else {
+      I(false);
+      each_sub_hierarchical_unique_direct(f1);  // Better error message if I keep this
     }
   };
 

@@ -11,7 +11,9 @@
 
 void Firmap::do_firbits_analysis(LGraph *lg) {
   Lbench b("pass.firbits");
-  for (auto node : lg->forward(true)) {
+
+  lg->regenerate_htree(); // called bottom up, and the hierarchy may have been unfinished before
+  for (auto node : lg->forward()) {
     #ifndef NDEBUG
       fmt::print("{}\n", node.debug_name());
     #endif
@@ -55,6 +57,10 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
       }
     #endif
   }  // end of lg->forward()
+
+  /* if (firbits_issues) { */
+  /*   Pass::error("firbits cannot be propagated, something wrong in firbits analysis!"); */
+  /* } */
 }
 
 void Firmap::analysis_lg_flop(Node &node) {
@@ -81,7 +87,7 @@ void Firmap::analysis_lg_flop(Node &node) {
       fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
       fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
     #endif
-    not_finished = true;
+    firbits_issues = true;
     return;
   }
 }
@@ -115,7 +121,7 @@ void Firmap::analysis_lg_mux(Node &node) {
 
   if (no_one_ready) {
       // should wait till at least one of the inputs is ready
-      not_finished = true;
+      firbits_issues = true;
       return;
   }
   fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign));
@@ -138,7 +144,7 @@ void Firmap::analysis_lg_mux(Node &node) {
   /*     } */
   /*   } else { */
   /*     // should wait till every input is ready */
-  /*     not_finished = true; */
+  /*     firbits_issues = true; */
   /*     return; */
   /*   } */
   /* } */
@@ -171,7 +177,7 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr) {
     #ifndef NDEBUG
       fmt::print("    {} input driver {} not ready\n", node_attr.debug_name(), parent_attr_dpin.debug_name());
     #endif
-    not_finished = true;
+    firbits_issues = true;
     return;
   }
 
@@ -272,7 +278,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
     #ifndef NDEBUG
       fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_lhs.debug_name());
     #endif
-    not_finished = true;
+    firbits_issues = true;
     return;
   }
 
@@ -284,7 +290,7 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
     #ifndef NDEBUG
       fmt::print("    {} input driver {} not ready\n", node_dp.debug_name(), dpin_rhs.debug_name());
     #endif
-    not_finished = true;
+    firbits_issues = true;
     return;
   }
 
@@ -385,7 +391,7 @@ void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -408,7 +414,7 @@ void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -433,7 +439,7 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -459,7 +465,7 @@ void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -482,7 +488,7 @@ void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edge
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
   }
@@ -499,7 +505,7 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -524,7 +530,7 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -546,7 +552,7 @@ void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -569,7 +575,7 @@ void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -598,7 +604,7 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -623,7 +629,7 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -647,7 +653,7 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -677,7 +683,7 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -701,7 +707,7 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -722,7 +728,7 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -744,7 +750,7 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -768,7 +774,7 @@ void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -792,7 +798,7 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -819,7 +825,7 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -849,7 +855,7 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
-      not_finished = true;
+      firbits_issues = true;
       return;
     }
 
@@ -883,20 +889,40 @@ void Firmap::analysis_fir_const(Node &node) {
 }
 
 void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
+  fmt::print("DEBUG: {}\n", node.debug_name());
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
+    fmt::print("    hello-1, e.driver:{}\n", e.driver.debug_name());
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
-      #ifndef NDEBUG
-        fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-      #endif
-      not_finished = true;
-      return;
+
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      fmt::print("    hello-2, h_dpin:{}\n", h_dpin.debug_name());
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      auto down_pin = h_spin.get_driver_pin();
+      fmt::print("HERE:{} down:{} down:{}\n",h_dpin.debug_name(), down_pin.debug_name(), h_dpin.debug_name());
+
+      it = fbmap.find(h_dpin.get_compact_flat());
+      if (it == fbmap.end()) {
+        //h_spin.get_top_lgraph()->get_htree().dump();
+        #ifndef NDEBUG
+          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
+        #endif
+        firbits_issues = true;
+        return;
+      }
     }
 
+    fmt::print("    hello-3\n");
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
       sign  = it->second.get_sign();
@@ -906,6 +932,7 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
     }
   }
 
-  /* fmt::print("DEBUG firmap insertion:{}\n", node.get_driver_pin("Y").debug_name()); */
+  fmt::print("    firmap insertion:{}\n", node.get_driver_pin("Y").debug_name());
+  fmt::print("    insert fmbap:{}\n", node.get_driver_pin("Y").debug_name());
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2) + 1, sign));
 }

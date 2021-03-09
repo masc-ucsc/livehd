@@ -11,7 +11,8 @@
 
 class Firmap {
 protected:
-  bool not_finished;
+  bool firbits_issues = false;
+  bool firmap_issues  = false;
   absl::flat_hash_map<Node_pin::Compact_flat, Firrtl_bits> fbmap;
   absl::flat_hash_map<Node_pin, Node_pin> pinmap; //old_pin to new_pin for both dpin and spin
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>> spinmap_xorr; //special case for xorr one old spin -> multi newspin

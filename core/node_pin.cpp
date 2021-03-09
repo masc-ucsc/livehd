@@ -99,7 +99,13 @@ Lconst Node_pin::get_type_const() const {
 }
 
 Node_pin Node_pin::get_non_hierarchical() const {
+  I(is_hierarchical());
   return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
+}
+
+Node_pin Node_pin::get_hierarchical() const {
+  I(!is_hierarchical());
+  return Node_pin(current_g, current_g, Hierarchy_tree::root_index(), idx, pid, sink);
 }
 
 Node_pin Node_pin::switch_to_sink() const {

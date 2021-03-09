@@ -181,12 +181,10 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
 
   I(old_node.is_type_sub());
   for (auto &e : old_node.inp_edges()) {
-	fmt::print("DEBUG0\n");
     if (fbmap.find(e.driver.get_compact_flat()) == fbmap.end()) {
-			fmt::print("DEBUG1\n");
       old_node.dump();
-			fmt::print("DEBUG2 old_node_dpin name:{}\n", old_node.debug_name());
-      Pass::error("dpin:{} cannot found in fbmap", e.driver.debug_name());
+      fmt::print("e.driver:{}\n", e.driver.debug_name());
+      Pass::error("1.dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
     }
 
     if (e.sink.get_type_sub_pin_name() == "e1") {

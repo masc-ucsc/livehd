@@ -151,7 +151,9 @@ fucntion() {
   # cat stat.chisel3-full >> stat.summary
   # cat stat.summary
 
-  # rm *.v
+  # rm -f *.dot
+  # rm -f *.v
+  # rm -f *.tcl
 }
 
 fucntion "$pts"

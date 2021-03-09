@@ -128,8 +128,22 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
   // hierarchical traversal
   for (auto &lg : lgs) {
     ++lgcnt;
+    // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
+
+      // for sub lgraphs
+      lg->each_sub_hierarchical_unique([&fm, &gv, this](Node &node, Lg_type_id lgid) {
+         fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
+         LGraph *lg_sub = LGraph::open(path, lgid);
+         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
+         fm.do_firbits_analysis(lg_sub);
+         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());
+         fm.do_firbits_analysis(lg_sub);
+         gviz ? gv.do_from_lgraph(lg_sub, "gioc.firbits-ed") : void(); 
+      });
+
+      // for top lgraph
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
