@@ -1343,8 +1343,6 @@ void Cprop::bwd_del_node(Node &node) {
 
   node.del_node();
 
-  return;
-
   while (!potential.empty()) {
     auto n = potential.front();
     potential.pop_front();
