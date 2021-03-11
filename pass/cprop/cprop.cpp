@@ -61,6 +61,9 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
 }
 
 void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) {
+  if (inp_edges_ordered.size()>32)
+    return; // Do not over flatten
+
   auto op = node.get_type_op();
   I(op == Ntype_op::Sum);
   bool all_edges_deleted = true;

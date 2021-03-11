@@ -17,7 +17,10 @@
 // #define DEBUG_SLOW
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
-    : Lgraph_base_core(_path, _name, _lgid), node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes")) {
+    : Lgraph_base_core(_path, _name, _lgid)
+    , node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
+    , deleted_edges(path, absl::StrCat("lg_", std::to_string(_lgid), "_del_edges"))
+    , deleted_pins (path, absl::StrCat("lg_", std::to_string(_lgid), "_del_pins")) {
   I(lgid);  // No id zero allowed
 
   library = Graph_library::instance(path);
@@ -43,6 +46,8 @@ void LGraph_Base::clear() {
   idx_insert_cache.clear();
 
   node_internal.clear();
+  deleted_edges.clear();
+  deleted_pins.clear();
 
   Lgraph_base_core::clear();
 
@@ -218,6 +223,7 @@ void LGraph_Base::print_stats() const {
   auto n_edges = n_short_edges + n_long_edges;
 
   fmt::print("path:{} name:{}\n", path, name);
+  fmt::print("  del_edges:{} del_pins:{}\n", deleted_edges.size(), deleted_pins.size());
   fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f} deleted:{:.1f}%\n",
              node_internal.size(),
              bytes / 1024,

@@ -705,6 +705,16 @@ private:
       unlink(mmap_name.c_str());
     }
 
+    assert(mmap_base);
+
+    local_mMask                  = mmap_base[0];
+    local_mNumElements           = mmap_base[1];
+		local_mMaxNumElementsAllowed = mmap_base[2];
+
+    mMask                  = &local_mMask;
+    mNumElements           = &local_mNumElements;
+		mMaxNumElementsAllowed = &local_mMaxNumElementsAllowed;
+
     mmap_base = nullptr;
     // NOTE: preserve mmap_size to avoid read file in reload
     // mmap_size = 0;
@@ -1083,19 +1093,20 @@ private:
 		return insertion_idx;
 	}
 
-  static inline uint64_t static_mNumElements           = 0;
-  static inline uint64_t static_mMask                  = 0;
-  static inline uint64_t static_mMaxNumElementsAllowed = 0;
+  // Local s used when mmap_base is nullptr to remember the value without requiring reload
+  mutable uint64_t local_mNumElements           = 0;
+  mutable uint64_t local_mMask                  = 0;
+  mutable uint64_t local_mMaxNumElementsAllowed = 0;
   static inline InfoType static_InitialInfoInc         = InitialInfoInc;
   static inline InfoType static_InitialInfoHashShift   = InitialInfoHashShift;
 
   void setup_pointers() {
 
-		assert(static_mMask==0);
+		assert(local_mMask==0);
 
-		mNumElements           = &static_mNumElements;
-		mMask                  = &static_mMask;
-		mMaxNumElementsAllowed = &static_mMaxNumElementsAllowed;
+		mNumElements           = &local_mNumElements;
+		mMask                  = &local_mMask;
+		mMaxNumElementsAllowed = &local_mMaxNumElementsAllowed;
 		mInfoInc               = &static_InitialInfoInc;
 		mInfoHashShift         = &static_InitialInfoHashShift;
 
@@ -1105,6 +1116,7 @@ private:
     }
 #endif
   }
+
 public:
 	using iterator = Iter<false>;
 	using const_iterator = Iter<true>;
@@ -1140,12 +1152,16 @@ public:
 	void clear() {
 		if (mmap_base != nullptr) {
       mmap_gc::recycle(mmap_base);
+      assert(mmap_base==nullptr);
 		}
     if (!mmap_name.empty()) {
       unlink(mmap_name.c_str());
     }
-    mmap_base = nullptr;
-    mmap_size = 0;
+
+    local_mNumElements           = 0;
+    local_mMask                  = 0;
+    local_mMaxNumElementsAllowed = 0;
+    assert(*mNumElements == 0);
 
     if constexpr (using_sview) {
       assert(using_sview);
@@ -1479,7 +1495,10 @@ private:
 		uint8_t const* const oldInfo  = mInfo;
 
     assert(mmap_fd == -1);
-    mmap_base = nullptr;
+    mmap_base                    = nullptr;
+    local_mMask                  = 0; // reset for new mmap
+    local_mNumElements           = 0;
+    local_mMaxNumElementsAllowed = 0;
 		setup_mmap(numBuckets);
 
     assert(old_mmap_base != mmap_base);
@@ -1575,6 +1594,7 @@ private:
 
 	template <typename Arg, typename Data>
 		iterator doCreate(Arg&& key, Data&& val) {
+      reload();
 			while (true) {
 				int idx;
 				InfoType info;

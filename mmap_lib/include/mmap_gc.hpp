@@ -51,8 +51,8 @@ protected:
   static inline int n_open_mmaps = 0;
   static inline int n_open_fds   = 0;
 
-  static inline int n_max_mmaps = 2048;
-  static inline int n_max_fds   = 750;
+  static inline int n_max_mmaps = 500;
+  static inline int n_max_fds   = 500;
 
   static void recycle_older() {
     // Recycle around 1/2 of the newer open fds with mmap

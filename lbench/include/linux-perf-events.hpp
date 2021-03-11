@@ -80,11 +80,11 @@ public:
       return;
 
     if (ioctl(fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP) == -1) {
-      report_error("ioctl(PERF_EVENT_IOC_RESET)");
+      report_error("linux-perf-events ioctl(PERF_EVENT_IOC_RESET)");
     }
 
     if (ioctl(fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP) == -1) {
-      report_error("ioctl(PERF_EVENT_IOC_ENABLE)");
+      report_error("linux-perf-events ioctl(PERF_EVENT_IOC_ENABLE)");
     }
   }
 
@@ -93,12 +93,12 @@ public:
       return;
 
     if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
-      report_error("ioctl(PERF_EVENT_IOC_DISABLE)");
+      report_error("linux-perf-events ioctl(PERF_EVENT_IOC_DISABLE)");
     }
 
     lseek(fd, SEEK_SET, 0);
     if (read(fd, temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
-      report_error("read_stop");
+      report_error("linux-perf-events read_stop");
     }
     // our actual results are in slots 1,3,5, ... of this structure
     // we really should be checking our ids obtained earlier to be safe
@@ -111,7 +111,7 @@ public:
     if (fd == -1)
       return;
     if (read(fd, temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
-      report_error("read_sample");
+      report_error("linux-perf-events read_sample");
     }
     // our actual results are in slots 1,3,5, ... of this structure
     // we really should be checking our ids obtained earlier to be safe

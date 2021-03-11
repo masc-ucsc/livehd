@@ -46,6 +46,9 @@ private:
     int result = -1;
     char line[128];
 
+    if (file==nullptr)
+      return 0;
+
     while(fgets(line, 128, file) != nullptr) {
       if(strncmp(line, "VmRSS:", 6) == 0) {
         result = parseLine(line);

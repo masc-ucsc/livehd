@@ -344,13 +344,16 @@ public:
   Node_pin          get_driver_pin() const;  // common 0 or 1 driver case
   Node_pin_iterator inp_driver() const; // handle 0 to inf driver case
 
-  bool del_driver(Node_pin &dst);
-  bool del_sink(Node_pin &dst);
-  bool del(Node_pin &dst) {
-    if (dst.is_sink() && is_driver())
-      return del_sink(dst);
-    I(dst.is_driver() && is_sink());
-    return del_driver(dst);
+  void del_driver(Node_pin &dst);
+  void del_sink(Node_pin &dst);
+  void del(Node_pin &dst) {
+    if (dst.is_sink()) {
+      I(is_driver());
+      del_sink(dst);
+    }else{
+      I(dst.is_driver() && is_sink()); // they must be opposite
+      del_driver(dst);
+    }
   }
   void del(); // del self and all connections
 

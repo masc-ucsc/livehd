@@ -11,6 +11,7 @@
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
 #include "mmap_vector.hpp"
+#include "edge.hpp"
 
 class Fwd_edge_iterator;
 class Bwd_edge_iterator;
@@ -21,6 +22,8 @@ class LGraph_Base : public Lgraph_base_core {
 private:
 protected:
   mmap_lib::vector<Node_internal> node_internal;
+  mmap_lib::map<XEdge::Compact, bool> deleted_edges;
+  mmap_lib::map<Node_pin::Compact, bool> deleted_pins;
 
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;

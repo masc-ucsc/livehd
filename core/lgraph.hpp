@@ -83,7 +83,7 @@ protected:
 
   void del_pin(const Node_pin &pin);
   void del_node(const Node &node);
-  bool del_edge(const Node_pin &dpin, const Node_pin &spin);
+  void del_edge(const Node_pin &dpin, const Node_pin &spin);
 
   bool has_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
@@ -134,8 +134,8 @@ protected:
     return node_internal[nid].get_type() == Ntype_op::Sub;
   }
 
-  void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin) const;
-  void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) const;
+  static void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
+  static void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
 
   void each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visited, const std::function<bool(Node &, Lg_type_id)> fn);
 
@@ -163,14 +163,7 @@ public:
     return htree;
   }
 
-  void add_edge(const Node_pin &dpin, const Node_pin &spin) {
-    I(dpin.is_driver());
-    I(spin.is_sink());
-    I(spin.get_class_lgraph() == dpin.get_class_lgraph());
-
-    add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
-  }
-
+  void add_edge(const Node_pin &dpin, const Node_pin &spin);
   void add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
     add_edge(dpin, spin);
     set_bits(dpin.get_root_idx(), bits);
