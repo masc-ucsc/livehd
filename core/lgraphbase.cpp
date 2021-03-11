@@ -1,26 +1,23 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lgraphbase.hpp"
 
 #include <iostream>
 #include <set>
 
-#include "mmap_map.hpp"
-#include "node.hpp"
-#include "node_pin.hpp"
-#include "lgraphbase.hpp"
 #include "attribute.hpp"
 #include "graph_library.hpp"
 #include "iassert.hpp"
 #include "lgedgeiter.hpp"
+#include "mmap_map.hpp"
+#include "node.hpp"
+#include "node_pin.hpp"
 
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
-    : Lgraph_base_core(_path, _name, _lgid)
-    , node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
-    , deleted_edges(path, absl::StrCat("lg_", std::to_string(_lgid), "_del_edges"))
-    , deleted_pins (path, absl::StrCat("lg_", std::to_string(_lgid), "_del_pins")) {
+    : Lgraph_base_core(_path, _name, _lgid), node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes")) {
   I(lgid);  // No id zero allowed
 
   library = Graph_library::instance(path);
@@ -46,8 +43,6 @@ void LGraph_Base::clear() {
   idx_insert_cache.clear();
 
   node_internal.clear();
-  deleted_edges.clear();
-  deleted_pins.clear();
 
   Lgraph_base_core::clear();
 
@@ -212,7 +207,7 @@ void LGraph_Base::print_stats() const {
         if (node_internal[i].is_master_root())
           n_master++;
       }
-    }else if (node_internal[i].is_free_state()) {
+    } else if (node_internal[i].is_free_state()) {
       n_deleted++;
     } else {
       n_extra++;
@@ -223,22 +218,20 @@ void LGraph_Base::print_stats() const {
   auto n_edges = n_short_edges + n_long_edges;
 
   fmt::print("path:{} name:{}\n", path, name);
-  fmt::print("  del_edges:{} del_pins:{}\n", deleted_edges.size(), deleted_pins.size());
   fmt::print("  size:{} kbytes:{} bytes/node:{:.2f} bytes/edge:{:.2f} edges/master:{:.2f} deleted:{:.1f}%\n",
              node_internal.size(),
              bytes / 1024,
              bytes / (1 + n_nodes),
              bytes / (1 + n_edges),
              (double)n_edges / (1 + n_master),
-             100.0*n_deleted/(1+n_nodes+n_deleted+n_extra)
-             );
+             100.0 * n_deleted / (1 + n_nodes + n_deleted + n_extra));
   fmt::print("  total master:{} root:{} node:{} extra:{} root/ratio:{:.2f} extra/ratio:{:.2f}\n",
              n_master,
              n_roots,
              n_nodes,
              n_extra,
-             n_roots / (1.0 + n_nodes + n_extra+n_deleted),
-             n_extra / (1.0 + n_nodes + n_extra+n_deleted));
+             n_roots / (1.0 + n_nodes + n_extra + n_deleted),
+             n_extra / (1.0 + n_nodes + n_extra + n_deleted));
   fmt::print("  total bytes/master:{:.2f} bytes/root:{:.2f} bytes/node:{:.2f} bytes/extra:{:.2f}\n",
              bytes / n_master,
              bytes / n_roots,
@@ -260,7 +253,7 @@ void LGraph_Base::print_stats() const {
 static inline unsigned long long get_cycles(void) {
   unsigned int low, high;
 
-  asm volatile("rdtsc" : "=a" (low), "=d" (high));
+  asm volatile("rdtsc" : "=a"(low), "=d"(high));
 
   return low | ((unsigned long long)high) << 32;
 }
@@ -269,16 +262,16 @@ static inline unsigned long long get_cycles(void) {
 Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Index_ID start_nid, const Port_ID dst_pid,
                                            const Index_ID root_idx) {
 #ifdef PERF_OUTPUT_PIN
-  auto start = get_cycles();
+  auto             start          = get_cycles();
   static long long total_cycles_1 = 0;
-  static long long total_1 = 0;
+  static long long total_1        = 0;
   static long long total_cycles_2 = 0;
-  static long long total_2 = 0;
+  static long long total_2        = 0;
   static long long total_cycles_3 = 0;
-  static long long total_3 = 0;
-  static long long total_4 = 0;
-  static long long total_5 = 0;
-  static long long total_6 = 0;
+  static long long total_3        = 0;
+  static long long total_4        = 0;
+  static long long total_5        = 0;
+  static long long total_6        = 0;
 #endif
 
 #ifdef DEBUG_SLOW
@@ -288,23 +281,23 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   const auto *ptr = node_internal.ref(start_nid);
   if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
 #ifdef PERF_OUTPUT_PIN
-      auto end = get_cycles();
-      total_cycles_1+= (end-start);
-      total_1++;
-      static int conta=0;
-      if (conta++>1000) {
-        fmt::print("_1:{}/{} _2:{}/{} _3:{}/{} _4:{} _5:{} _6:{}\n",
-                   total_cycles_1,
-                   total_1,
-                   total_cycles_2,
-                   total_2,
-                   total_cycles_3,
-                   total_3,
-                   total_4,
-                   total_5,
-                   total_6);
-        conta = 0;
-      }
+    auto end = get_cycles();
+    total_cycles_1 += (end - start);
+    total_1++;
+    static int conta = 0;
+    if (conta++ > 1000) {
+      fmt::print("_1:{}/{} _2:{}/{} _3:{}/{} _4:{} _5:{} _6:{}\n",
+                 total_cycles_1,
+                 total_1,
+                 total_cycles_2,
+                 total_2,
+                 total_cycles_3,
+                 total_3,
+                 total_4,
+                 total_5,
+                 total_6);
+      conta = 0;
+    }
 #endif
     return start_nid;
   }
@@ -363,11 +356,11 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
 }
 
 Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID nid, const Port_ID pid) const {
-  I(node_internal[nid].get_dst_pid() != pid); // short-cut for common case
+  I(node_internal[nid].get_dst_pid() != pid);  // short-cut for common case
   I(node_internal[nid].is_master_root());
   I(node_internal[nid].is_valid());
 
-  Index_ID idx2  = nid;
+  Index_ID idx2 = nid;
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pid && node_internal[idx2].is_root()) {
       return idx2;
@@ -608,8 +601,8 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
   auto dst_nid = node_internal[dst_idx].get_master_root_nid();
   auto op      = node_internal[dst_nid].get_type();
   if (Ntype::is_single_driver_per_pin(op)) {
-    int total = 0;
-    auto idx = dst_nid;
+    int  total = 0;
+    auto idx   = dst_nid;
     while (true) {
       if (node_internal[idx].get_dst_pid() == inp_pid)
         total += node_internal[idx].get_num_local_inputs();
@@ -635,6 +628,5 @@ void LGraph_Base::error_int(std::string_view text) {
 }
 
 void LGraph_Base::info_int(std::string_view text) {
-  fmt::print("info:{}\n", text); // to be used by future warning/error reporting system
+  fmt::print("info:{}\n", text);  // to be used by future warning/error reporting system
 }
-

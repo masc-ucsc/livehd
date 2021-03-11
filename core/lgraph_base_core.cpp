@@ -1,16 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lgraph_base_core.hpp"
 
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "graph_library.hpp"
+#include "lgedgeiter.hpp"
 #include "mmap_map.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
-#include "lgraph_base_core.hpp"
-#include "graph_library.hpp"
-#include "lgedgeiter.hpp"
 #include "tech_library.hpp"
 
 static_assert(sizeof(Hierarchy_data) == 8);
@@ -38,7 +38,13 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
 }
 
 Lgraph_base_core::Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
-    : _p(_path), path(_path), name(_name), unique_name(absl::StrCat(_path,"/",_lgid.value)), long_name(absl::StrCat("lgraph_", _name)), lgid(_lgid), locked(false) {
+    : _p(_path)
+    , path(_path)
+    , name(_name)
+    , unique_name(absl::StrCat(_path, "/", _lgid.value))
+    , long_name(absl::StrCat("lgraph_", _name))
+    , lgid(_lgid)
+    , locked(false) {
   assert(lgid);
 }
 

@@ -60,12 +60,12 @@ protected:
     Setup_path(std::string_view path);
   };
 
-  Setup_path  _p;  // Must be first in base object
-  std::string path;
-  std::string name;
+  Setup_path        _p;  // Must be first in base object
+  std::string       path;
+  std::string       name;
   const std::string unique_name;
-  std::string long_name;
-  Lg_type_id  lgid;
+  std::string       long_name;
+  Lg_type_id        lgid;
 
   bool locked;
 
@@ -79,7 +79,7 @@ public:
   virtual void clear();
   virtual void sync();
 
-  const std::string &get_unique_name() const { return unique_name; }
+  const std::string& get_unique_name() const { return unique_name; }
 
   std::string_view get_name() const { return std::string_view(name); }
 

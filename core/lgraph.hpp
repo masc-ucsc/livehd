@@ -2,15 +2,15 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
+#include "cell.hpp"
 #include "edge.hpp"
 #include "graph_library.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "lgraphbase.hpp"
-#include "node_pin.hpp"
 #include "node.hpp"
+#include "node_pin.hpp"
 #include "node_type.hpp"
-#include "cell.hpp"
 
 class LGraph : public LGraph_Node_Type {
 protected:
@@ -61,7 +61,7 @@ protected:
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;
 
-  Node_pin_iterator inp_driver(const Node_pin &spin) const; // 1 or 0 drivers allowed for correct graphs
+  Node_pin_iterator inp_driver(const Node_pin &spin) const;  // 1 or 0 drivers allowed for correct graphs
 
   bool has_outputs(const Node &node) const;
   bool has_inputs(const Node &node) const;
@@ -88,21 +88,21 @@ protected:
   bool has_graph_io(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
-    nid = node_internal[nid].get_nid();
+    nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
 
   bool has_graph_input(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
-    nid = node_internal[nid].get_nid();
+    nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid;
   }
 
   bool has_graph_output(Index_ID idx) const {
     I(static_cast<Index_ID>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
-    nid = node_internal[nid].get_nid();
+    nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_output_nid;
   }
 
@@ -195,8 +195,8 @@ public:
   Node create_node(const Ntype_op op, Bits_t bits);
 
   Node create_node_const(const Lconst &value);
-  Node create_node_const(std::string_view val)     { return create_node_const(Lconst(val)); }
-  Node create_node_const(int64_t val)              { return create_node_const(Lconst(val)); }
+  Node create_node_const(std::string_view val) { return create_node_const(Lconst(val)); }
+  Node create_node_const(int64_t val) { return create_node_const(Lconst(val)); }
   // Node create_node_const(int64_t val, Bits_t bits) { return create_node_const(Lconst(val, bits)); }
 
   Node create_node_lut(const Lconst &value);
@@ -209,8 +209,8 @@ public:
   void dump();
   void dump_down_nodes();
 
-  Node get_graph_input_node(bool hier=false);
-  Node get_graph_output_node(bool hier=false);
+  Node get_graph_input_node(bool hier = false);
+  Node get_graph_output_node(bool hier = false);
 
   Node_pin get_graph_input(std::string_view str);
   Node_pin get_graph_output(std::string_view str);
@@ -222,9 +222,9 @@ public:
   // Iterators defined in the lgraph_each.cpp
 
   void each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const;
-  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical=false);
-  void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
-  void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical=false);
+  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical = false);
+  void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
+  void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
 
   void each_hier_fast_direct(const std::function<bool(Node &)>);
   void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
@@ -262,5 +262,4 @@ public:
       each_sub_hierarchical_unique_direct(f1);  // Better error message if I keep this
     }
   };
-
 };

@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "mmap_map.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "mmap_map.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
 #include "sub_node.hpp"
@@ -13,17 +13,15 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
   struct Pair_type {
     Pair_type(LGraph *lg, Hierarchy_index hidx, Index_ID idx, Port_ID pid, Port_ID _pos)
-      : dpin(lg, lg, hidx, idx, pid, false)
-      , pos(_pos) {
-      }
+        : dpin(lg, lg, hidx, idx, pid, false), pos(_pos) {}
     Node_pin dpin;
     Port_ID  pos;
   };
   std::vector<Pair_type> pin_pair;
 
-  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+  auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
     Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
 
     Index_ID nid = Hardcoded_output_nid;
@@ -75,9 +73,8 @@ void LGraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 }
 
 void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const {
-
   Index_ID first_idx2 = dpin.get_root_idx();
-  Index_ID idx2 = first_idx2;
+  Index_ID idx2       = first_idx2;
 
   bool should_not_find = false;
 
@@ -87,19 +84,19 @@ void LGraph::each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1
     if (!cont)
       return;
 
-    do{
+    do {
       if (node_internal[idx2].is_last_state()) {
 #ifndef NDEBUG
         idx2 = node_internal[idx2].get_master_root_nid();
         I(idx2 == dpin.get_node().get_nid());
-        should_not_find = true; // loop and try the others (should not have it before root)
+        should_not_find = true;  // loop and try the others (should not have it before root)
 #else
         return;
 #endif
-      }else{
+      } else {
         idx2 = node_internal[idx2].get_next();
       }
-      if (idx2==first_idx2)
+      if (idx2 == first_idx2)
         return;
     } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
   }
@@ -109,13 +106,13 @@ void LGraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierar
   if (node_internal.size() < Hardcoded_output_nid)
     return;
 
-  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+  auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
     I(!io_pin->is_invalid());
     if (io_pin->is_input()) {
       Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
-      auto idx = find_idx_from_pid(Hardcoded_input_nid, pid);
+      auto    idx = find_idx_from_pid(Hardcoded_input_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
         if (dpin.has_name())
@@ -129,16 +126,16 @@ void LGraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
   if (node_internal.size() < Hardcoded_output_nid)
     return;
 
-  auto hidx = hierarchical? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
+  auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for(const auto *io_pin:get_self_sub_node().get_io_pins()) {
+  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
     I(!io_pin->is_invalid());
     if (io_pin->is_output()) {
       Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
-      auto idx = find_idx_from_pid(Hardcoded_output_nid, pid);
+      auto    idx = find_idx_from_pid(Hardcoded_output_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        if (dpin.has_name()) // It could be partially deleted
+        if (dpin.has_name())  // It could be partially deleted
           f1(dpin);
       }
     }
@@ -164,8 +161,8 @@ void LGraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
 void LGraph::each_hier_fast_direct(const std::function<bool(Node &)> f) {
   const auto ht = ref_htree();
 
-  for (const auto& hidx : ht->depth_preorder()) {
-    LGraph* lg = ht->ref_lgraph(hidx);
+  for (const auto &hidx : ht->depth_preorder()) {
+    LGraph *lg = ht->ref_lgraph(hidx);
     for (auto fn : lg->fast()) {
       Node hn(this, lg, hidx, fn.nid);
 
@@ -177,7 +174,7 @@ void LGraph::each_hier_fast_direct(const std::function<bool(Node &)> f) {
 }
 
 void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn) {
-  const auto &m = get_down_nodes_map();
+  const auto &         m = get_down_nodes_map();
   std::set<Lg_type_id> visited;
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_ID cid = it->first.nid;
@@ -192,11 +189,13 @@ void LGraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> 
       cont = fn(node, it->second);
       visited.insert(it->second);
     }
-    if (!cont) return;
+    if (!cont)
+      return;
   }
 }
 
-void LGraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visited, const std::function<bool(Node &, Lg_type_id)> fn) {
+void LGraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &                        visited,
+                                                     const std::function<bool(Node &, Lg_type_id)> fn) {
   const auto &m = get_down_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_ID cid = it->first.nid;
@@ -217,7 +216,8 @@ void LGraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visit
         }
       }
     }
-    if (!cont) return;
+    if (!cont)
+      return;
   }
 }
 
@@ -225,4 +225,3 @@ void LGraph::each_sub_hierarchical_unique_direct(const std::function<bool(Node &
   std::set<Lg_type_id> visited;
   each_sub_hierarchical_unique_direct_int(visited, fn);
 }
-

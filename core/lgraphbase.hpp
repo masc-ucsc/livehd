@@ -7,11 +7,11 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "edge.hpp"
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
 #include "mmap_vector.hpp"
-#include "edge.hpp"
 
 class Fwd_edge_iterator;
 class Bwd_edge_iterator;
@@ -22,8 +22,6 @@ class LGraph_Base : public Lgraph_base_core {
 private:
 protected:
   mmap_lib::vector<Node_internal> node_internal;
-  mmap_lib::map<XEdge::Compact, bool> deleted_edges;
-  mmap_lib::map<Node_pin::Compact, bool> deleted_pins;
 
   static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;
@@ -140,17 +138,17 @@ public:
   static void info_int(std::string_view text);
 
   template <typename S, typename... Args>
-  static void error(const S& format, Args&&... args) {
+  static void error(const S &format, Args &&...args) {
     error_int(fmt::format(format, args...));
   }
 
   template <typename S, typename... Args>
-  static void warn(const S& format, Args&&... args) {
+  static void warn(const S &format, Args &&...args) {
     warn_int(fmt::format(format, args...));
   }
 
   template <typename S, typename... Args>
-  static void info(const S& format, Args&&... args) {
+  static void info(const S &format, Args &&...args) {
     info_int(fmt::format(format, args...));
   }
 };
