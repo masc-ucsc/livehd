@@ -13,6 +13,8 @@
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 
+//#define USE_DELETED 1
+
 LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source)
     : LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
     , LGraph_Node_Type(_path, _name, get_lgid())
@@ -226,12 +228,27 @@ Node_pin LGraph::add_graph_output(std::string_view str_sv, Port_ID pos, uint32_t
 
 Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
   I(node.get_class_lgraph() == this);
+
   Node_pin_iterator xiter;
+  absl::flat_hash_set<Port_ID> xiter_set;
+
+#ifdef USE_DELETED
+  auto &del_edges = node.get_top_lgraph()->deleted_edges;
+  auto &del_pins  = node.get_top_lgraph()->deleted_pins;
+  if (!del_edges.empty() || !del_pins.empty()) { // slower
+    for(auto &e:out_edges(node)) {
+      if (xiter_set.contains(e.driver.get_pid()))
+        continue;
+
+      xiter.emplace_back(e.driver);
+      xiter_set.insert(e.driver.get_pid());
+    }
+    return xiter;
+  }
+#endif
 
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
-
-  absl::flat_hash_set<Port_ID> xiter_set;
 
   auto pid = node_internal[idx2].get_dst_pid();
   while (true) {
@@ -264,10 +281,25 @@ Node_pin_iterator LGraph::out_connected_pins(const Node &node) const {
 Node_pin_iterator LGraph::inp_connected_pins(const Node &node) const {
   I(node.get_class_lgraph() == this);
   Node_pin_iterator xiter;
+  absl::flat_hash_set<Port_ID> xiter_set;
+
+#ifdef USE_DELETED
+  auto &del_edges = node.get_top_lgraph()->deleted_edges;
+  auto &del_pins  = node.get_top_lgraph()->deleted_pins;
+  if (!del_edges.empty() || !del_pins.empty()) { // slower
+    for(auto &e:inp_edges(node)) {
+      if (xiter_set.contains(e.sink.get_pid()))
+        continue;
+
+      xiter.emplace_back(e.sink);
+      xiter_set.insert(e.sink.get_pid());
+    }
+    return xiter;
+  }
+#endif
 
   Index_ID idx2 = node.get_nid();
   I(node_internal[idx2].is_master_root());
-  absl::flat_hash_set<Port_ID> xiter_set;
 
   auto pid = node_internal[idx2].get_dst_pid();
   while (true) {
@@ -888,7 +920,7 @@ void LGraph::del_pin(const Node_pin &pin) {
 
 #ifdef USE_DELETED
   auto &del_pins  = pin.get_top_lgraph()->deleted_pins;
-  del_pin.insert(pin.get_compact(), true);
+  del_pins.set(pin.get_compact(), true);
   return;
 #endif
 
@@ -913,10 +945,10 @@ void LGraph::del_node(const Node &node) {
 #ifdef USE_DELETED
     auto &del_pins = node.get_top_lgraph()->deleted_pins;
     for(auto &dpin:node.out_connected_pins()) {
-      del_pins.insert(dpin.get_compact());
+      del_pins.set(dpin.get_compact(), true);
     }
     for(auto &spin:node.inp_connected_pins()) {
-      del_pins.insert(spin.get_compact());
+      del_pins.set(spin.get_compact(), true);
     }
     return;
 #endif
@@ -1381,6 +1413,7 @@ void LGraph::add_edge(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.is_sink());
   I(spin.get_top_lgraph() == dpin.get_top_lgraph());
 
+#ifdef USE_DELETED
   auto &del_edges = dpin.get_top_lgraph()->deleted_edges;
   auto &del_pins  = dpin.get_top_lgraph()->deleted_pins;
 
@@ -1395,6 +1428,7 @@ void LGraph::add_edge(const Node_pin &dpin, const Node_pin &spin) {
     del_edges.erase(edge.get_compact());
     return;
   }
+#endif
 
   add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
 }

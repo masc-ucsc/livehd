@@ -44,6 +44,12 @@ insert/delete) compressed graphs can reach 10 bits per edge vs the expected
 we should not sacrifice speed, insertion/deletion, bidirectional, and Index_ID
 stability.
 
+Functions that need to be faster than currently. All these ops should have at most O(n_edges/32+n_pins).
+* del_edge
+* del_pin
+* del_node
+* get_num_inputs
+* get_num_outputs
 
 Some characteristic that we want:
 

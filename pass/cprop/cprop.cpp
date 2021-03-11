@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <string>
+#include <deque>
 
 #include "lbench.hpp"
 #include "lgcpp_plugin.hpp"
@@ -1138,9 +1139,6 @@ void Cprop::do_trans(LGraph *lg) {
 	do {
 		tuple_issues = false;
 		for (auto node : lg->forward()) {
-      #ifndef NDEBUG
-			  fmt::print("{}\n", node.debug_name());
-      #endif
 			auto op = node.get_type_op();
 
 			auto inp_edges_ordered = node.inp_edges_ordered();
@@ -1336,7 +1334,8 @@ void Cprop::bwd_del_node(Node &node) {
 
   I(!node.is_type_loop_breaker());
 
-  std::vector<Node> potential;
+  absl::flat_hash_set<Node::Compact> potential_set;
+  std::deque<Node>                  potential;
 
   for (auto e : node.inp_edges()) {
     potential.emplace_back(e.driver.get_node());
@@ -1344,15 +1343,21 @@ void Cprop::bwd_del_node(Node &node) {
 
   node.del_node();
 
-  while (!potential.empty()) {
-    auto n = potential.back();
-    potential.pop_back();
+  return;
 
-    if (!n.is_invalid() && !n.has_outputs() && !n.is_type_loop_breaker()) {
+  while (!potential.empty()) {
+    auto n = potential.front();
+    potential.pop_front();
+
+    if (!n.is_invalid() && !n.is_type_loop_breaker() && !n.has_outputs()) {
       for (auto e : n.inp_edges()) {
         if (e.driver.is_graph_io())
           continue;
+        auto d_node = e.driver.get_node();
+        if (potential_set.contains(d_node.get_compact()))
+          continue;
         potential.emplace_back(e.driver.get_node());
+        potential_set.insert(d_node.get_compact());
       }
       n.del_node();
     }
