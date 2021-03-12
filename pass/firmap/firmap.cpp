@@ -169,6 +169,8 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg) {
   }
 }
 
+
+
 // e1 tail n = e1 & (pow(2, (e1.fbits - n) - 1))
 void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
@@ -176,19 +178,28 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg) {
 
   Lconst e1_bits;
   Lconst n;
-  auto inp = old_node.inp_edges_ordered();
-  assert(inp.size()==2); // e1 and e2
-
+  I(old_node.inp_edges_ordered().size()==2); // e1 and e2
   I(old_node.is_type_sub());
+
   for (auto &e : old_node.inp_edges()) {
-    if (fbmap.find(e.driver.get_compact_flat()) == fbmap.end()) {
-      old_node.dump();
-      fmt::print("e.driver:{}\n", e.driver.debug_name());
-      Pass::error("1.dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+    auto it = fbmap.find(e.driver.get_compact_flat());
+    if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
+      if (it == fbmap.end()) {
+        Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+      }
     }
 
     if (e.sink.get_type_sub_pin_name() == "e1") {
-      e1_bits = fbmap[e.driver.get_compact_flat()].get_bits();
+      e1_bits = it->second.get_bits();
       pinmap.insert_or_assign(e.sink, new_node_mask.setup_sink_pin("A")); // e1 -> mask
     } else { //e2
       n = e.driver.get_type_const();
@@ -215,17 +226,32 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg) {
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
   Lconst e1_bits;
   Lconst n;
-  for (auto old_spin : old_node.inp_connected_pins()) {
-    if (fbmap.find(old_spin.get_driver_pin().get_compact_flat()) == fbmap.end())
-      Pass::error("dpin:{} cannot found in fbmap", old_spin.get_driver_pin().debug_name());
 
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      e1_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
-      pinmap.insert_or_assign(old_spin, new_node_sra.setup_sink_pin("a")); // e1 -> sra
+  for (auto &e : old_node.inp_edges()) {
+    auto it = fbmap.find(e.driver.get_compact_flat());
+    if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
+      if (it == fbmap.end()) {
+        Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+      }
+    }
+
+    if (e.sink.get_type_sub_pin_name() == "e1") {
+      e1_bits = it->second.get_bits();
+      pinmap.insert_or_assign(e.sink, new_node_sra.setup_sink_pin("a")); // e1 -> sra
     } else { //e2
-      n = old_spin.get_driver_node().get_type_const();
+      n = e.driver.get_type_const();
     }
   }
+
 
   auto shamt = e1_bits - n;
   auto new_node_const_sra = new_lg->create_node_const(shamt);
@@ -282,17 +308,32 @@ void Firmap::map_node_fir_cat(Node &old_node, LGraph *new_lg) {
   auto new_node_shl = new_lg->create_node(Ntype_op::SHL);
   auto new_node_tp  = new_lg->create_node(Ntype_op::Tposs);
   auto new_node_or  = new_lg->create_node(Ntype_op::Or);
-  for (auto old_spin : old_node.inp_connected_pins()) {
-    if (fbmap.find(old_spin.get_driver_pin().get_compact_flat()) == fbmap.end())
-      Pass::error("dpin:{} cannot found in fbmap", old_spin.get_driver_pin().debug_name());
 
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      pinmap.insert_or_assign(old_spin, new_node_shl.setup_sink_pin("a")); // e1 -> shl
+
+  for (auto &e : old_node.inp_edges()) {
+    if (e.sink == old_node.setup_sink_pin("e1")) {
+      pinmap.insert_or_assign(e.sink, new_node_shl.setup_sink_pin("a")); // e1 -> shl
     } else { //e2
-      auto e2_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
+      auto it = fbmap.find(e.driver.get_compact_flat());
+      if (it == fbmap.end()) {
+        auto h_spin = e.sink.get_hierarchical();
+        auto driver_list = h_spin.inp_driver();
+        I(driver_list.size()==1);
+        auto h_dpin = driver_list[0];
+
+        I(!h_dpin.is_invalid()); // connected
+        I(h_dpin != e.driver);
+
+        it = fbmap.find(h_dpin.get_compact_flat());
+        if (it == fbmap.end()) {
+          Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+        }
+      }
+
+      auto e2_bits = it->second.get_bits();
       auto new_node_const = new_lg->create_node_const(e2_bits);
       new_node_const.setup_driver_pin().connect_sink(new_node_shl.setup_sink_pin("b")); // e2.fbits -> shl
-      pinmap.insert_or_assign(old_spin, new_node_or.setup_sink_pin("A")); // e2 -> or
+      pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A")); // e2 -> or
     }
   }
 
@@ -327,19 +368,34 @@ void Firmap::map_node_fir_xorr(Node &old_node, LGraph *new_lg) {
   auto new_node_xor   = new_lg->create_node(Ntype_op::Xor);
   auto new_node_const = new_lg->create_node_const(1);
 
-  for (auto old_spin : old_node.inp_connected_pins()) {
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      I(fbmap.find(old_spin.get_driver_pin().get_compact_flat()) != fbmap.end());
+  for (auto &e : old_node.inp_edges()) {
+    if (e.sink.get_type_sub_pin_name() == "e1") {
+      auto it = fbmap.find(e.driver.get_compact_flat());
+      if (it == fbmap.end()) {
+        auto h_spin = e.sink.get_hierarchical();
+        auto driver_list = h_spin.inp_driver();
+        I(driver_list.size()==1);
+        auto h_dpin = driver_list[0];
+
+        I(!h_dpin.is_invalid()); // connected
+        I(h_dpin != e.driver);
+
+        it = fbmap.find(h_dpin.get_compact_flat());
+        if (it == fbmap.end()) {
+          Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+        }
+      }
+
       std::vector<Node_pin> new_spins;
       new_spins.emplace_back(new_node_xor.setup_sink_pin("A"));  
-      auto e1_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
+      auto e1_bits = it->second.get_bits();
       for (uint32_t i = 1; i < e1_bits; i++) {
         auto new_node_sra = new_lg->create_node(Ntype_op::SRA);
         new_spins.emplace_back(new_node_sra.setup_sink_pin("a")); 
         new_node_sra.setup_sink_pin("b").connect_driver(new_lg->create_node_const(i));
         new_node_xor.setup_sink_pin("A").connect_driver(new_node_sra.setup_driver_pin());
       }
-      spinmap_xorr.insert_or_assign(old_spin, new_spins);
+      spinmap_xorr.insert_or_assign(e.sink, new_spins);
     }
   }
 
@@ -359,28 +415,45 @@ void Firmap::map_node_fir_andr(Node &old_node, LGraph *new_lg) {
   auto new_node_ror  = new_lg->create_node(Ntype_op::Ror);
   auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
 
-  for (auto old_spin : old_node.inp_connected_pins()) {
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      auto e1_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
-      auto e1_sign = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_sign();
+  for (auto &e : old_node.inp_edges()) {
+    if (e.sink.get_type_sub_pin_name() == "e1") {
+      auto it = fbmap.find(e.driver.get_compact_flat());
+      if (it == fbmap.end()) {
+        auto h_spin = e.sink.get_hierarchical();
+        auto driver_list = h_spin.inp_driver();
+        I(driver_list.size()==1);
+        auto h_dpin = driver_list[0];
+
+        I(!h_dpin.is_invalid()); // connected
+        I(h_dpin != e.driver);
+
+        it = fbmap.find(h_dpin.get_compact_flat());
+        if (it == fbmap.end()) {
+          Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+        }
+      }
+
+      auto e1_bits = it->second.get_bits();
+      auto e1_sign = it->second.get_sign();
 
       // unsigned graph input will have a tposs in the future(BW will insert
       // it), the extra MSB(0) of this tposs will cause the following Not_op
       // semantic wrong, hence, we add an Or_op with MSB(1) to avoid problem
-      auto parent_node = old_spin.get_driver_node();
+      auto parent_node = e.driver.get_node();
       bool cond1 = parent_node.get_type_op() == Ntype_op::AttrSet;
       bool cond2 = cond1 && parent_node.setup_sink_pin("name").get_driver_pin().is_graph_input();
       if (cond2 && !e1_sign) {
         auto new_node_or    = new_lg->create_node(Ntype_op::Or);
         auto new_node_const = new_lg->create_node_const(Lconst(1UL) << Lconst(e1_bits));
-        pinmap.insert_or_assign(old_spin, new_node_or.setup_sink_pin("A"));
+        pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A"));
         new_node_const.setup_driver_pin().connect_sink(new_node_or.setup_sink_pin("A"));
         new_node_or.setup_driver_pin().connect_sink(new_node_not1.setup_sink_pin("a"));
       } else {
-        pinmap.insert_or_assign(old_spin, new_node_not1.setup_sink_pin("a"));
+        pinmap.insert_or_assign(e.sink, new_node_not1.setup_sink_pin("a"));
       }
     }
   }
+
 
   new_node_not1.setup_driver_pin().connect_sink(new_node_ror.setup_sink_pin("A"));
   new_node_ror.setup_driver_pin().connect_sink(new_node_not2.setup_sink_pin("a"));
@@ -416,28 +489,47 @@ void Firmap::map_node_fir_and_or_xor(Node &old_node, LGraph *new_lg, std::string
 void Firmap::map_node_fir_not(Node &old_node, LGraph *new_lg) {
   auto new_node_not = new_lg->create_node(Ntype_op::Not);
   auto new_node_tp = new_lg->create_node(Ntype_op::Tposs);
-  for (auto old_spin : old_node.inp_connected_pins()) {
-    if (old_spin == old_node.setup_sink_pin("e1")) {
-      auto e1_bits = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_bits();
-      auto e1_sign = fbmap[old_spin.get_driver_pin().get_compact_flat()].get_sign();
+
+  for (auto &e : old_node.inp_edges()) {
+    if (e.sink.get_type_sub_pin_name() == "e1") {
+      auto it = fbmap.find(e.driver.get_compact_flat());
+      if (it == fbmap.end()) {
+        auto h_spin = e.sink.get_hierarchical();
+        auto driver_list = h_spin.inp_driver();
+        I(driver_list.size()==1);
+        auto h_dpin = driver_list[0];
+
+        I(!h_dpin.is_invalid()); // connected
+        I(h_dpin != e.driver);
+
+        it = fbmap.find(h_dpin.get_compact_flat());
+        if (it == fbmap.end()) {
+          Pass::error("dpin:{} cannot found in fbmap hier:{}", e.driver.debug_name(), e.driver.is_hierarchical());
+        }
+      }
+
+      auto e1_bits = it->second.get_bits();
+      auto e1_sign = it->second.get_sign();
 
       // unsigned graph input will have a tposs in the future(BW will insert
       // it), the extra MSB(0) of this tposs will cause the following Not_op
       // semantic wrong, hence, we add an Or_op with MSB(1) to avoid problem
-      auto parent_node = old_spin.get_driver_node();
+      auto parent_node = e.driver.get_node();
       bool cond1 = parent_node.get_type_op() == Ntype_op::AttrSet;
       bool cond2 = cond1 && parent_node.setup_sink_pin("name").get_driver_pin().is_graph_input();
       if (cond2 && !e1_sign) {
         auto new_node_or    = new_lg->create_node(Ntype_op::Or);
         auto new_node_const = new_lg->create_node_const(Lconst(1UL) << Lconst(e1_bits));
-        pinmap.insert_or_assign(old_spin, new_node_or.setup_sink_pin("A"));
+        pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A"));
         new_node_const.setup_driver_pin().connect_sink(new_node_or.setup_sink_pin("A"));
         new_node_or.setup_driver_pin().connect_sink(new_node_not.setup_sink_pin("a"));
       } else {
-        pinmap.insert_or_assign(old_spin, new_node_not.setup_sink_pin("a"));
+        pinmap.insert_or_assign(e.sink, new_node_not.setup_sink_pin("a"));
       }
     }
   }
+
+
   new_node_not.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -494,9 +586,6 @@ void Firmap::map_node_fir_dshr(Node &old_node, LGraph *new_lg) {
 void Firmap::map_node_fir_dshl(Node &old_node, LGraph *new_lg) {
   auto new_node_shl = new_lg->create_node(Ntype_op::SHL);
   for (auto old_spin : old_node.inp_connected_pins()) {
-    if (fbmap.find(old_spin.get_driver_pin().get_compact_flat()) == fbmap.end())
-      Pass::error("dpin:{} cannot found in fbmap", old_spin.get_driver_pin().debug_name());
-
     if (old_spin == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(old_spin, new_node_shl.setup_sink_pin("a"));
     } else { //e2
