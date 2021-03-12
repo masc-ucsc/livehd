@@ -134,13 +134,17 @@ void Lcompiler::global_firrtl_bits_analysis_map() {
 
       // for sub lgraphs
       lg->each_sub_hierarchical_unique([&fm, &gv, this](Node &node, Lg_type_id lgid) {
-         fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
-         LGraph *lg_sub = LGraph::open(path, lgid);
-         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
-         fm.do_firbits_analysis(lg_sub);
-         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());
-         fm.do_firbits_analysis(lg_sub);
-         gviz ? gv.do_from_lgraph(lg_sub, "gioc.firbits-ed") : void(); 
+        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
+        LGraph *lg_sub = LGraph::open(path, lgid);
+        if (lg_sub->get_name().substr(0,6) == "__fir_") {
+          fmt::print("DEBUG subgraph name:{}\n", lg_sub->get_name());
+          I(false); 
+        }
+        fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
+        fm.do_firbits_analysis(lg_sub);
+        fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());
+        fm.do_firbits_analysis(lg_sub);
+        gviz ? gv.do_from_lgraph(lg_sub, "gioc.firbits-ed") : void(); 
       });
 
       // for top lgraph

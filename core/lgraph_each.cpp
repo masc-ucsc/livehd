@@ -208,7 +208,7 @@ void LGraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &     
     bool cont = true;
     if (visited.find(it->second) == visited.end()) {
       visited.insert(it->second);
-      LGraph *lg = LGraph::open(get_path(), lgid);
+      LGraph *lg = LGraph::open(get_path(), it->second);
       if (lg != nullptr) {
         if (!lg->is_empty()) {
           lg->each_sub_hierarchical_unique_direct_int(visited, fn);

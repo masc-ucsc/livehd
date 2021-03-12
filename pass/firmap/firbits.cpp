@@ -388,6 +388,15 @@ void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -411,6 +420,15 @@ void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -436,6 +454,15 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -462,6 +489,15 @@ void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -485,6 +521,15 @@ void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edge
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -502,6 +547,15 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -527,6 +581,15 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -549,6 +612,15 @@ void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -572,6 +644,15 @@ void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -601,6 +682,15 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -626,6 +716,15 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -650,6 +749,15 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -680,6 +788,15 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -704,6 +821,15 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -725,6 +851,15 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -747,6 +882,15 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -771,6 +915,15 @@ void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -795,6 +948,15 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -822,6 +984,15 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -852,6 +1023,15 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
+      auto h_spin = e.sink.get_hierarchical();
+      auto driver_list = h_spin.inp_driver();
+      I(driver_list.size()==1);
+      auto h_dpin = driver_list[0];
+
+      I(!h_dpin.is_invalid()); // connected
+      I(h_dpin != e.driver);
+
+      it = fbmap.find(h_dpin.get_compact_flat());
       #ifndef NDEBUG
         fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
       #endif
@@ -898,7 +1078,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
     fmt::print("    hello-1, e.driver:{}\n", e.driver.debug_name());
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end()) {
-
       auto h_spin = e.sink.get_hierarchical();
       auto driver_list = h_spin.inp_driver();
       I(driver_list.size()==1);
@@ -913,7 +1092,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
 
       it = fbmap.find(h_dpin.get_compact_flat());
       if (it == fbmap.end()) {
-        //h_spin.get_top_lgraph()->get_htree().dump();
         #ifndef NDEBUG
           fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
         #endif
