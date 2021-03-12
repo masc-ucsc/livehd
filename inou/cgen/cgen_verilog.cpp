@@ -163,9 +163,12 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto pos_node = node.get_sink_pin("b").get_driver_node();
     if (pos_node.is_type_const()) {
-      auto pos = pos_node.get_type_const().to_verilog();
-      final_expr = absl::StrCat(lhs, "[", pos ,":0]");
-    }else{
+      auto lpos = pos_node.get_type_const();
+      if (lpos.is_i()) {
+        final_expr = absl::StrCat(lhs, "[", lpos.to_i()-1 ,":0]");
+      }
+    }
+    if (final_expr.empty()) {
       auto bits = node.get_sink_pin("b").get_driver_pin().get_bits();
       auto pos_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
 
@@ -431,6 +434,39 @@ void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
   }
 }
 
+void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned) {
+
+  pin2var.emplace(dpin.get_compact_class(), name);
+  int bits = dpin.get_bits();
+
+  std::string reg_str;
+  if (out_unsigned) {
+    reg_str = "reg ";
+  }else{
+    reg_str = "reg signed ";
+  }
+
+  --bits; //[0:0] is 1 bit already
+  if (out_unsigned)
+    --bits;
+
+  if (bits<=0) {
+    absl::StrAppend(&buffer, reg_str, name , ";\n");
+  }else{
+    absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name , ";\n");
+  }
+
+  if (dpin.is_type_flop()) {
+    auto name_next = get_append_to_name(name, "_next ");
+
+    if (bits<=0) {
+      absl::StrAppend(&buffer, reg_str, name_next , ";\n");
+    }else{
+      absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name_next , ";\n");
+    }
+  }
+}
+
 void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
   // IDEA: This pass can create "sub-blocks in lg". Two blocks can process in
@@ -473,6 +509,16 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
 
         absl::StrAppend(&buffer, "reg signed [", node.get_driver_pin().get_bits()-1, ":0] ", name_sel , ";\n");
       }
+    }else if (op == Ntype_op::Sext) {
+      auto b_dpin = node.get_sink_pin("b").get_driver_pin();
+      if (!b_dpin.is_invalid() && b_dpin.is_type_const()) {
+        auto dpin2 = node.get_sink_pin("a").get_driver_pin();
+        std::string name2 = get_scaped_name(dpin2.get_wire_name());
+        bool out_unsigned2 = dpin2.get_type_op() == Ntype_op::Tposs;
+        add_to_pin2var(buffer, dpin2, name2, out_unsigned2);
+      }
+      if (node.has_name() && node.get_name()[0] != '_')
+        continue;
     }else if (op == Ntype_op::Tposs) {
       name = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
       out_unsigned = true; // Tposs needs a variable because converts/removes sign
@@ -484,37 +530,8 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
         continue;
     }
 
-    pin2var.emplace(dpin.get_compact_class(), name);
-    int bits = dpin.get_bits();
-
-    std::string reg_str;
-    if (out_unsigned) {
-      reg_str = "reg ";
-    }else{
-      reg_str = "reg signed ";
-    }
-
-    --bits; //[0:0] is 1 bit already
-    if (out_unsigned)
-      --bits;
-
-    if (bits<=0) {
-      absl::StrAppend(&buffer, reg_str, name , ";\n");
-    }else{
-      absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name , ";\n");
-    }
-
-    if (node.is_type_flop()) {
-      auto name_next = get_append_to_name(name, "_next ");
-
-      if (bits<=0) {
-        absl::StrAppend(&buffer, reg_str, name_next , ";\n");
-      }else{
-        absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name_next , ";\n");
-      }
-    }
+    add_to_pin2var(buffer, dpin, name, out_unsigned);
   }
-
 }
 
 std::tuple<std::string, int> Cgen_verilog::setup_file(LGraph *lg) const {

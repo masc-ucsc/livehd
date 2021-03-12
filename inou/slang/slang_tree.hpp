@@ -42,14 +42,16 @@ protected:
   bool process_top_instance(const slang::InstanceSymbol& symbol);
   bool process(const slang::AssignmentExpression& expr);
   std::string_view process_expression(const slang::Expression& expr);
+  std::string_view process_reduce_and(const slang::UnaryExpression& uexpr);
 
   std::string_view create_mask_stmts(std::string_view dest_max_bit);
   std::string_view create_bit_not_stmts(std::string_view var_name);
   std::string_view create_logical_not_stmts(std::string_view var_name);
-  std::string_view create_and_reduce_stmts(std::string_view var_name);
-  std::string_view create_or_reduce_stmts(std::string_view var_name);
-  std::string_view create_xor_reduce_stmts(std::string_view var_name); 
+  std::string_view create_reduce_or_stmts(std::string_view var_name);
+  std::string_view create_reduce_xor_stmts(std::string_view var_name);
 
+  std::string_view create_sra_stmts(std::string_view a_var, std::string_view b_var);
+  std::string_view create_pick_bit_stmts(std::string_view a_var, std::string_view pos);
   std::string_view create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_bit_or_stmts(std::vector<std::string_view> var);

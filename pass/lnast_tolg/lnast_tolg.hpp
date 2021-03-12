@@ -47,6 +47,7 @@ protected:
   void process_ast_func_def_op      (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_for_op           (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_while_op         (LGraph *lg, const Lnast_nid &lnidx);
+  void process_ast_reduce_and       (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_tuple_struct     (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_concat_op        (LGraph *lg, const Lnast_nid &lnidx);
   void process_ast_tuple_add_op     (LGraph *lg, const Lnast_nid &lnidx_ta);

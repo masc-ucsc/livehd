@@ -198,118 +198,116 @@ bool Pass_lnastfmt::is_ssa(std::string_view test_string) {
 }
 
 Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std::shared_ptr<Lnast> ln, const mmap_lib::Tree_index& it) {
-  
+
   //auto orig_node_token = ln->get_token(it);
   //auto orig_node_subs = ln->get_subs(it);
   auto orig_node_name = lnastfmted->add_string(ln->get_name(it));
   auto orig_node_type = ln->get_type(it);
-  Lnast_node new_node; 
+  Lnast_node new_node;
   if (orig_node_type.is_ref()) {
     new_node = Lnast_node::create_ref(orig_node_name);
   } else if (orig_node_type.is_top()) {
     new_node = Lnast_node::create_top();
   } else if (orig_node_type.is_stmts()) {
-    new_node = Lnast_node::create_stmts(); 
+    new_node = Lnast_node::create_stmts();
   } else if (orig_node_type.is_if()) {
-    new_node = Lnast_node::create_if(); 
+    new_node = Lnast_node::create_if();
   } else if (orig_node_type.is_uif()) {
-    new_node = Lnast_node::create_uif(); 
+    new_node = Lnast_node::create_uif();
   } else if (orig_node_type.is_for()) {
-    new_node = Lnast_node::create_for(); 
+    new_node = Lnast_node::create_for();
   } else if (orig_node_type.is_while()) {
-    new_node = Lnast_node::create_while(); 
+    new_node = Lnast_node::create_while();
   } else if (orig_node_type.is_phi()) {
-    new_node = Lnast_node::create_phi(); 
+    new_node = Lnast_node::create_phi();
   } else if (orig_node_type.is_hot_phi()) {
-    new_node = Lnast_node::create_hot_phi(); 
+    new_node = Lnast_node::create_hot_phi();
   } else if (orig_node_type.is_func_call()) {
-    new_node = Lnast_node::create_func_call(); 
+    new_node = Lnast_node::create_func_call();
   } else if (orig_node_type.is_func_def()) {
-    new_node = Lnast_node::create_func_def(); 
+    new_node = Lnast_node::create_func_def();
   } else if (orig_node_type.is_assign()) {
-    new_node = Lnast_node::create_assign(); 
+    new_node = Lnast_node::create_assign();
   } else if (orig_node_type.is_dp_assign()) {
-    new_node = Lnast_node::create_dp_assign(); 
+    new_node = Lnast_node::create_dp_assign();
   } else if (orig_node_type.is_mut()) {
-    new_node = Lnast_node::create_mut(); 
+    new_node = Lnast_node::create_mut();
   } else if (orig_node_type.is_bit_and()) {
-    new_node = Lnast_node::create_bit_and(); 
+    new_node = Lnast_node::create_bit_and();
   } else if (orig_node_type.is_bit_or()) {
-    new_node = Lnast_node::create_bit_or(); 
+    new_node = Lnast_node::create_bit_or();
   } else if (orig_node_type.is_bit_not()) {
-    new_node = Lnast_node::create_bit_not(); 
+    new_node = Lnast_node::create_bit_not();
   } else if (orig_node_type.is_bit_xor()) {
-    new_node = Lnast_node::create_bit_xor(); 
+    new_node = Lnast_node::create_bit_xor();
   } else if (orig_node_type.is_logical_and()) {
-    new_node = Lnast_node::create_logical_and(); 
+    new_node = Lnast_node::create_logical_and();
   } else if (orig_node_type.is_logical_or()) {
-    new_node = Lnast_node::create_logical_or(); 
+    new_node = Lnast_node::create_logical_or();
   } else if (orig_node_type.is_logical_not()) {
-    new_node = Lnast_node::create_logical_not(); 
-  } else if (orig_node_type.is_reduce_and()) {
-    new_node = Lnast_node::create_reduce_and(); 
+    new_node = Lnast_node::create_logical_not();
   } else if (orig_node_type.is_reduce_or()) {
-    new_node = Lnast_node::create_reduce_or(); 
+    new_node = Lnast_node::create_reduce_or();
   } else if (orig_node_type.is_reduce_xor()) {
-    new_node = Lnast_node::create_reduce_xor(); 
+    new_node = Lnast_node::create_reduce_xor();
   } else if (orig_node_type.is_plus()) {
-    new_node = Lnast_node::create_plus(); 
+    new_node = Lnast_node::create_plus();
   } else if (orig_node_type.is_minus()) {
-    new_node = Lnast_node::create_minus(); 
+    new_node = Lnast_node::create_minus();
   } else if (orig_node_type.is_mult()) {
-    new_node = Lnast_node::create_mult(); 
+    new_node = Lnast_node::create_mult();
   } else if (orig_node_type.is_div()) {
-    new_node = Lnast_node::create_div(); 
+    new_node = Lnast_node::create_div();
   } else if (orig_node_type.is_mod()) {
-    new_node = Lnast_node::create_mod(); 
+    new_node = Lnast_node::create_mod();
   } else if (orig_node_type.is_shl()) {
-    new_node = Lnast_node::create_shl(); 
+    new_node = Lnast_node::create_shl();
   } else if (orig_node_type.is_shr()) {
-    new_node = Lnast_node::create_shr(); 
+    new_node = Lnast_node::create_shr();
   } else if (orig_node_type.is_sra()) {
-    new_node = Lnast_node::create_sra(); 
+    new_node = Lnast_node::create_sra();
   } else if (orig_node_type.is_sext()) {
-    new_node = Lnast_node::create_sext(); 
+    new_node = Lnast_node::create_sext();
   } else if (orig_node_type.is_zext()) {
-    new_node = Lnast_node::create_zext(); 
+    new_node = Lnast_node::create_zext();
   } else if (orig_node_type.is_is()) {
-    new_node = Lnast_node::create_is(); 
+    new_node = Lnast_node::create_is();
   } else if (orig_node_type.is_ne()) {
-    new_node = Lnast_node::create_ne(); 
+    new_node = Lnast_node::create_ne();
   } else if (orig_node_type.is_eq()) {
-    new_node = Lnast_node::create_eq(); 
+    new_node = Lnast_node::create_eq();
   } else if (orig_node_type.is_lt()) {
-    new_node = Lnast_node::create_lt(); 
+    new_node = Lnast_node::create_lt();
   } else if (orig_node_type.is_le()) {
-    new_node = Lnast_node::create_le(); 
+    new_node = Lnast_node::create_le();
   } else if (orig_node_type.is_gt()) {
-    new_node = Lnast_node::create_gt(); 
+    new_node = Lnast_node::create_gt();
   } else if (orig_node_type.is_ge()) {
-    new_node = Lnast_node::create_ge(); 
+    new_node = Lnast_node::create_ge();
   } else if (orig_node_type.is_tuple()) {
-    new_node = Lnast_node::create_tuple(); 
+    new_node = Lnast_node::create_tuple();
   } else if (orig_node_type.is_tuple_concat()) {
-    new_node = Lnast_node::create_tuple_concat(); 
+    new_node = Lnast_node::create_tuple_concat();
   } else if (orig_node_type.is_tuple_delete()) {
-    new_node = Lnast_node::create_tuple_delete(); 
+    new_node = Lnast_node::create_tuple_delete();
   } else if (orig_node_type.is_select()) {
-    new_node = Lnast_node::create_select(); 
+    new_node = Lnast_node::create_select();
   } else if (orig_node_type.is_ref()) {
-    new_node = Lnast_node::create_ref(orig_node_name); 
+    new_node = Lnast_node::create_ref(orig_node_name);
   } else if (orig_node_type.is_const()) {
-    new_node = Lnast_node::create_const(orig_node_name); 
+    new_node = Lnast_node::create_const(orig_node_name);
   } else if (orig_node_type.is_assert()) {
-    new_node = Lnast_node::create_assert(); 
+    new_node = Lnast_node::create_assert();
   } else if (orig_node_type.is_err_flag()) {
-    new_node = Lnast_node::create_err_flag(); 
+    new_node = Lnast_node::create_err_flag();
   } else if (orig_node_type.is_tuple_add()) {
-    new_node = Lnast_node::create_tuple_add(); 
+    new_node = Lnast_node::create_tuple_add();
   } else if (orig_node_type.is_tuple_get()) {
-    new_node = Lnast_node::create_tuple_get(); 
+    new_node = Lnast_node::create_tuple_get();
   } else if (orig_node_type.is_attr_set()) {
-    new_node = Lnast_node::create_attr_set(); 
+    new_node = Lnast_node::create_attr_set();
   } else if (orig_node_type.is_attr_get()) {
-    new_node = Lnast_node::create_attr_get(); 
+    new_node = Lnast_node::create_attr_get();
   } else {
     I(false, "Please check the node type and add it");
   }

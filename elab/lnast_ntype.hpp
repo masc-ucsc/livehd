@@ -39,7 +39,7 @@ public:
     Lnast_ntype_logical_not,  // !
 
     // reduce ops
-    Lnast_ntype_reduce_and,
+    // NO reduce AND because the operation is bitwidth sensitive
     Lnast_ntype_reduce_or,
     Lnast_ntype_reduce_xor,
 
@@ -122,7 +122,6 @@ protected:
     "lor",
     "lnot",
 
-    "rand",
     "ror",
     "rxor",
 
@@ -204,7 +203,6 @@ public:
   static constexpr Lnast_ntype create_logical_or()   { return Lnast_ntype(Lnast_ntype_logical_or); }
   static constexpr Lnast_ntype create_logical_not()  { return Lnast_ntype(Lnast_ntype_logical_not); }
 
-  static constexpr Lnast_ntype create_reduce_and()   { return Lnast_ntype(Lnast_ntype_reduce_and); }
   static constexpr Lnast_ntype create_reduce_or()    { return Lnast_ntype(Lnast_ntype_reduce_or); }
   static constexpr Lnast_ntype create_reduce_xor()   { return Lnast_ntype(Lnast_ntype_reduce_xor); }
 
@@ -271,7 +269,6 @@ public:
   bool constexpr is_logical_or()   const { return val == Lnast_ntype_logical_or; }
   bool constexpr is_logical_not()  const { return val == Lnast_ntype_logical_not; }
 
-  bool constexpr is_reduce_and()   const { return val == Lnast_ntype_reduce_and; }
   bool constexpr is_reduce_or()    const { return val == Lnast_ntype_reduce_or; }
   bool constexpr is_reduce_xor()   const { return val == Lnast_ntype_reduce_xor; }
 
@@ -318,8 +315,7 @@ public:
                                                   (val == Lnast_ntype_logical_or)  ||
                                                   (val == Lnast_ntype_logical_not); }
 
-  bool constexpr is_reduce_op()    const { return (val == Lnast_ntype_reduce_and) ||
-                                                  (val == Lnast_ntype_reduce_or)  ||
+  bool constexpr is_reduce_op()    const { return (val == Lnast_ntype_reduce_or)  ||
                                                   (val == Lnast_ntype_reduce_xor); }
 
   bool constexpr is_unary_op()     const { return (val == Lnast_ntype_bit_not) ||
@@ -339,7 +335,6 @@ public:
                                                   (val == Lnast_ntype_bit_xor) ||
                                                   (val == Lnast_ntype_logical_and) ||
                                                   (val == Lnast_ntype_logical_or) ||
-                                                  (val == Lnast_ntype_reduce_and) ||
                                                   (val == Lnast_ntype_reduce_or) ||
                                                   (val == Lnast_ntype_reduce_xor) ||
                                                   (val == Lnast_ntype_plus) ||
@@ -353,7 +348,17 @@ public:
                                                   (val == Lnast_ntype_gt) ||
                                                   (val == Lnast_ntype_ge); }
 
-  bool constexpr is_basic_op() const   { return (val>=Lnast_ntype_bit_and && val <=Lnast_ntype_ge); }
+  // basic_op have 1 to 1 translation between LNAST and LGraph
+  bool constexpr is_direct_lgraph_op() const   {
+    return (val>=Lnast_ntype_bit_and && val <=Lnast_ntype_ge)
+      && val != Lnast_ntype_reduce_xor
+      && val != Lnast_ntype_mod
+      && val != Lnast_ntype_shr
+      && val != Lnast_ntype_zext
+      && val != Lnast_ntype_is
+      && val != Lnast_ntype_ne
+      && val != Lnast_ntype_le;
+  }
 
   std::string_view debug_name() const { return namemap[val]; }
 

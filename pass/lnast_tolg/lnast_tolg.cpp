@@ -47,7 +47,7 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
       process_ast_dp_assign_op(lg, lnidx);
     } else if (ntype.is_logical_op()) {
       process_ast_logical_op(lg, lnidx);
-    } else if (ntype.is_basic_op()) {
+    } else if (ntype.is_direct_lgraph_op()) {
       process_ast_nary_op(lg, lnidx);
     } else if (ntype.is_attr_set()) {
       process_ast_attr_set_op(lg, lnidx);
@@ -84,6 +84,7 @@ void Lnast_tolg::process_ast_stmts(LGraph *lg, const Lnast_nid &lnidx_stmts) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
     } else {
+      fmt::print("FIXME: implement op:{}\n",ntype.debug_name());
       I(false);
       return;
     }
@@ -1493,6 +1494,7 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_not] = Ntype_op::Not;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_or]  = Ntype_op::Ror;
 
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_reduce_or]   = Ntype_op::Ror;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]      = Ntype_op::Or;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_and]     = Ntype_op::And;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_or]      = Ntype_op::Or;

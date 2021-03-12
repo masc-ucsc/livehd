@@ -46,6 +46,8 @@ private:
   void create_combinational(std::string &buffer, LGraph *lg);
   void create_outputs(std::string &buffer, LGraph *lg);
   void create_registers(std::string &buffer, LGraph *lg);
+
+  void add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned);
   void create_locals(std::string &buffer, LGraph *lg);
 
   std::tuple<std::string, int> setup_file(LGraph *lg) const;

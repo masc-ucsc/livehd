@@ -70,7 +70,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_logical_or)
   CREATE_LNAST_NODE(_logical_not)
 
-  CREATE_LNAST_NODE(_reduce_and)
   CREATE_LNAST_NODE(_reduce_or)
   CREATE_LNAST_NODE(_reduce_xor)
 

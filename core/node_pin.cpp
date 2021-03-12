@@ -87,6 +87,12 @@ bool Node_pin::is_type_const() const {
   return current_g->is_type_const(nid);
 }
 
+bool Node_pin::is_type_flop() const {
+  auto nid = current_g->get_node_nid(idx);
+  auto op = current_g->get_type_op(nid);
+  return op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop;
+}
+
 bool Node_pin::is_type_loop_breaker() const {
   auto nid = current_g->get_node_nid(idx);
   auto op = current_g->get_type_op(nid);

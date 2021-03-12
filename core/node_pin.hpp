@@ -314,6 +314,7 @@ public:
 
   // Some redundant code with node (implemented because frequent)
   bool             is_type_const() const;
+  bool             is_type_flop() const;
   bool             is_type_loop_breaker() const;
   Lconst           get_type_const() const;
 
