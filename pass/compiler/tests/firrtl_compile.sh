@@ -67,7 +67,7 @@ pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
 # pts='VecShiftRegisterSimple '
 # pts='VecSearch '
 # pts='Flop'
-pts='VecShiftRegister '
+# pts='VecShiftRegister '
 
 
 
