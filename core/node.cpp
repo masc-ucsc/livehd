@@ -348,13 +348,11 @@ bool Node::is_type_tup() const {
 bool Node::is_type_loop_breaker() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
-    /* //FIXME->sh: delet __fir stuff after the two lg->fast() lgraph firmap clone is working */
     const auto sub_name = get_type_sub_node().get_name();
     if (sub_name.substr(0, 6) == "__fir_") 
       return false; 
     return true;
   }
-
   return Ntype::is_loop_breaker(op);
 }
 

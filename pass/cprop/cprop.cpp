@@ -1335,10 +1335,15 @@ void Cprop::bwd_del_node(Node &node) {
   I(!node.is_type_loop_breaker());
 
   absl::flat_hash_set<Node::Compact> potential_set;
-  std::deque<Node>                  potential;
+  std::deque<Node>                   potential;
 
   for (auto e : node.inp_edges()) {
+    // if (potential_set.contains(node.get_compact()))
+    if (potential_set.contains(e.driver.get_node().get_compact()))
+      continue;
     potential.emplace_back(e.driver.get_node());
+    // potential_set.insert(node.get_compact());
+    potential_set.insert(e.driver.get_node().get_compact());
   }
 
   node.del_node();
@@ -1347,7 +1352,9 @@ void Cprop::bwd_del_node(Node &node) {
     auto n = potential.front();
     potential.pop_front();
 
-    if (!n.is_invalid() && !n.is_type_loop_breaker() && !n.has_outputs()) {
+    I(!n.is_invalid());
+
+    if (!n.is_type_loop_breaker() && !n.has_outputs()) {
       for (auto e : n.inp_edges()) {
         if (e.driver.is_graph_io())
           continue;
