@@ -86,42 +86,42 @@ fucntion() {
     fi
 
 
-    echo ""
-    echo ""
-    echo ""
-    echo "======================================================================"
-    echo "                     FIRRTL Compilation from Chirrtl: ${pt}.fir"
-    echo "======================================================================"
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "======================================================================"
+    # echo "                     FIRRTL Compilation from Chirrtl: ${pt}.fir"
+    # echo "======================================================================"
 
-    # firrtl compilation
-    if [ ! -f ${PATTERN_PATH}/${pt}.fir ]; then
-      echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
-      exit 1
-    else
-      # echo $pt
-      # perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
+    # # firrtl compilation
+    # if [ ! -f ${PATTERN_PATH}/${pt}.fir ]; then
+    #   echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
+    #   exit 1
+    # else
+    #   # echo $pt
+    #   # perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
 
-      mv perf.data perf.data.${pt}
-      mv perf.data.old perf.data.old.${pt}
-      echo "      ${pt}"    >> stat.livehd
-      grep elapsed pp       >> stat.livehd
-      echo "      ${pt}"    >> stat.livehd-yosys
-      grep elapsed pp-yosys >> stat.livehd-yosys
-      echo "      ${pt}"    >> stat.fir2verilog
-      grep elapsed pp2      >> stat.fir2verilog
-    fi
+    #   mv perf.data perf.data.${pt}
+    #   mv perf.data.old perf.data.old.${pt}
+    #   echo "      ${pt}"    >> stat.livehd
+    #   grep elapsed pp       >> stat.livehd
+    #   echo "      ${pt}"    >> stat.livehd-yosys
+    #   grep elapsed pp-yosys >> stat.livehd-yosys
+    #   echo "      ${pt}"    >> stat.fir2verilog
+    #   grep elapsed pp2      >> stat.fir2verilog
+    # fi
     
     # note: Chisel->ch.pb is recorded during synthetic pattern generation
   done #end of for
 
 
-  cat stat.chisel3-full >  stat.summary
-  cat stat.chisel3-pb   >> stat.summary
-  cat stat.livehd-yosys >> stat.summary
-  cat stat.livehd       >> stat.summary
-  cat stat.fir2verilog  >> stat.summary
-  cat stat.chisel3-fir  >> stat.summary
-  cat stat.summary
+  # cat stat.chisel3-full >  stat.summary
+  # cat stat.chisel3-pb   >> stat.summary
+  # cat stat.livehd-yosys >> stat.summary
+  # cat stat.livehd       >> stat.summary
+  # cat stat.fir2verilog  >> stat.summary
+  # cat stat.chisel3-fir  >> stat.summary
+  # cat stat.summary
 
   # rm -f *.dot
   rm -f *.v
