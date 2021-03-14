@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "lcompiler.hpp"
+#include <bits/stdint-uintn.h>
 #include "inou_graphviz.hpp"
 #include "lnast_tolg.hpp"
 #include "cprop.hpp"
@@ -9,7 +10,8 @@
 #include "firmap.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz) 
-  : path(_path), odir(_odir), top(_top), gviz(_gviz) {}
+  : path(_path), odir(_odir), top(_top), gviz(_gviz) {
+  }
 
 
 void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
@@ -60,7 +62,7 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
 }
 
 
-void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
+void Lcompiler::fir_thread_ln2lg_cprop(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
@@ -86,12 +88,13 @@ void Lcompiler::add_firrtl_thread(std::shared_ptr<Lnast> ln) {
 
 
   for (const auto &lg : local_lgs) {
-    Cprop    cp(false, false);  // hier = false, gioc = false
+    Cprop cp(false, false);  // hier = false, gioc = false
 
     fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
   }
+
 
   std::lock_guard<std::mutex> guard(lgs_mutex);
   for(auto *lg:local_lgs)
@@ -117,7 +120,7 @@ void Lcompiler::global_io_connection() {
 }
 
 
-void Lcompiler::global_firrtl_bits_analysis_map() {
+void Lcompiler::bottom_up_firbits_analysis_map() {
   Graphviz gv(true, false, odir);
   Firmap   fm;   
 
@@ -206,8 +209,5 @@ void Lcompiler::global_bitwidth_inference() {
     Pass::error("Top module not specified from multiple Pyrope source codes!\n");
 }
 
-std::vector<LGraph *> Lcompiler::wait_all() {
-  /* thread_pool.wait_all(); */
-  return lgs;
-}
+
 

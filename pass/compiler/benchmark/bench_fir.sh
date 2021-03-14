@@ -15,10 +15,16 @@ LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
 PATTERN_PATH=./livehd_regression/synthetic/generated
 FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
-LGDB=/local/scrap/masc/swang203/lgdb
-GVIZ='false'
-# INSTANCES='16'
-INSTANCES='256'
+
+if [ "${PWD##/home/}" != "${PWD}" ]; then
+  LGDB=./lgdb
+else
+  LGDB=/local/scrap/masc/swang203/lgdb
+fi
+
+GVIZ='true'
+INSTANCES='16'
+# INSTANCES='256'
 
 rm -rf $LGDB
 if [ ! -f $LGSHELL ]; then
@@ -42,7 +48,7 @@ done
 pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
-# pts='Snx1024Insts256'
+pts='Snx1280Insts16'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -65,16 +71,13 @@ fucntion() {
         exit 1
     fi 
 
-    perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
-                                |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
-                                |> inou.cgen.verilog" 
+    perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
-    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
-                                |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
-                                |> inou.cgen.verilog"
-    perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
-                                |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
-                                |> inou.yosys.fromlg hier:true" 
+    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
+
+    # perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
+    #                             |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
+    #                             |> inou.yosys.fromlg hier:true" 
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -95,9 +98,11 @@ fucntion() {
       echo "ERROR: could not find ${pt}.fir in ${PATTERN_PATH}"
       exit 1
     else
-      echo $pt
-      perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
+      # echo $pt
+      # perf stat -o pp2 $FIRRTL_EXE -i   ${PATTERN_PATH}/${pt}.fir -X verilog
 
+      mv perf.data perf.data.${pt}
+      mv perf.data.old perf.data.old.${pt}
       echo "      ${pt}"    >> stat.livehd
       grep elapsed pp       >> stat.livehd
       echo "      ${pt}"    >> stat.livehd-yosys
@@ -118,9 +123,10 @@ fucntion() {
   cat stat.chisel3-fir  >> stat.summary
   cat stat.summary
 
-  rm -f *.dot
+  # rm -f *.dot
   rm -f *.v
   rm -f *.tcl
+  rm -f pp*
 }
 
 fucntion "$pts"
