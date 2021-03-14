@@ -22,6 +22,14 @@ void Prp_lnast::print_ast_node(mmap_lib::Tree_index idx) {
 #endif
 }
 
+void Prp_lnast::dump(mmap_lib::Tree_index idx) const {
+  for (const auto &index : ast->depth_preorder(idx)) {
+    const auto &node = ast->get_data(index);
+    std::string indent(index.level, ' ');
+    fmt::print("{} l:{} p:{} rule = {}, token = {}\n", indent, index.level, index.pos, rule_id_to_string(node.rule_id), scan_text(node.token_entry));
+  }
+}
+
 void Prp_lnast::get_next_temp_var() {
   int carry     = 1;
   int pos       = current_temp_var.size() - 1;
@@ -130,7 +138,7 @@ Lnast_node Prp_lnast::eval_rule(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tr
     case Prp_rule_bit_selection_bracket: PRINT_DBG_LN("Prp_rule_bit_selection_bracket\n"); break;
     case Prp_rule_bit_selection_notation:
       PRINT_DBG_LN("Prp_rule_bit_selection_notation\n");
-      return eval_bit_selection_notation(idx_start_ast, idx_start_ln);
+      return eval_bit_selection_notation(idx_start_ast, "");
       break;
     case Prp_rule_tuple_array_bracket: PRINT_DBG_LN("Prp_rule_tuple_array_bracket\n"); break;
     case Prp_rule_tuple_array_notation:
@@ -1568,21 +1576,30 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   return dot_lhs;
 }
 
-Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
-  (void)idx_start_ln;
+Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, std::string_view lhs_var) {
   mmap_lib::Tree_index idx_nxt_ln = cur_stmts;
 
-  // go down to the identifier being selected
-  auto select_expr_idx = ast->get_child(idx_start_ast);
-  select_expr_idx      = ast->get_sibling_next(select_expr_idx);
-  select_expr_idx      = ast->get_child(select_expr_idx);
-  select_expr_idx      = ast->get_sibling_next(select_expr_idx);  // skip the [
-  print_ast_node(select_expr_idx);
-  // first evaluate the select expression if it exists
-  bool       sel_exists = scan_text(ast->get_data(select_expr_idx).token_entry) != "]";
+  mmap_lib::Tree_index lhs_var_idx;
+  mmap_lib::Tree_index child_at_idx;
+  if (lhs_var.empty()) {
+    lhs_var_idx     = ast->get_child(idx_start_ast);
+    auto select_expr_idx = ast->get_sibling_next(lhs_var_idx);
+    child_at_idx    = ast->get_child(select_expr_idx);         // @
+  }else{
+    child_at_idx = ast->get_child(idx_start_ast);
+  }
   Lnast_node sel_rhs;
-  if (sel_exists) {
-    sel_rhs = eval_rule(select_expr_idx, idx_nxt_ln);
+
+  bool sel_exists = false;
+  I(get_token(ast->get_data(child_at_idx).token_entry).tok == Token_id_at);
+  auto select_expr_idx      = ast->get_sibling_next(child_at_idx);  // skip the @
+
+  if (!select_expr_idx.is_invalid()) {
+    bool close_parenthesis = get_token(ast->get_data(select_expr_idx).token_entry).tok == Token_id_cp;
+    if (!close_parenthesis) {
+      sel_rhs = eval_tuple(select_expr_idx, idx_nxt_ln);
+      sel_exists = true;
+    }
   }
   fmt::print("FIXME to parse foo@(ddd)\n");
   // create bit select node
@@ -1595,11 +1612,25 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   get_next_temp_var();
 
   // add the identifier of the register being selected
-  lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
+  if (lhs_var.empty()) {
+    lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(lhs_var_idx).token_entry)));
+  }else{
+    lnast->add_child(idx_sel_root, Lnast_node::create_ref(lhs_var));
+  }
 
   // add the rhs value of the select expression
   if (sel_exists) {
     lnast->add_child(idx_sel_root, sel_rhs);
+  }
+
+  auto another_child = ast->get_child(select_expr_idx);
+  while (!another_child.is_invalid()) {
+    auto rule_id = ast->get_data(another_child).rule_id;
+    if (rule_id == Prp_rule_bit_selection_bracket) {
+      retnode = eval_bit_selection_notation(another_child, lnast_temp);
+      break;
+    }
+    another_child = ast->get_sibling_next(another_child);
   }
 
   return retnode;

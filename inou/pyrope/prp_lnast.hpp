@@ -51,7 +51,7 @@ protected:
                                  mmap_lib::Tree_index idx_piped_val = mmap_lib::Tree_index(-1, -1),
                                  Lnast_node piped_node = Lnast_node(), Lnast_node name_node = Lnast_node());
   Lnast_node eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
-  Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
+  Lnast_node eval_bit_selection_notation(mmap_lib::Tree_index idx_start_ast, std::string_view lhs_var);
   Lnast_node eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln);
   Lnast_node eval_scope_declaration(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln,
                                     Lnast_node name_node = Lnast_node());
@@ -75,6 +75,7 @@ protected:
 
   // debugging
   void print_ast_node(mmap_lib::Tree_index idx);
+  void dump(mmap_lib::Tree_index idx) const;
 
 public:
   std::unique_ptr<Lnast> prp_ast_to_lnast(std::string_view module_name);

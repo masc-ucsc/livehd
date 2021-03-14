@@ -118,23 +118,9 @@ void Elab_scanner::add_token(Etoken &t) {
     } else if (last_tok.tok == Token_id_dollar) {   // $foo
       token_list.back().fuse_token(Token_id_input, t);
       return;
-    } else if (last_tok.tok == Token_id_at) {        // @foo
-      token_list.back().fuse_token(Token_id_reference, t);
-      return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
-                                              || last_tok.tok == Token_id_input || last_tok.tok == Token_id_reference) {  // foo
+                                              || last_tok.tok == Token_id_input ) {  // foo
       token_list.back().append_token(t);
-      return;
-    }
-  } else if (last_tok.tok == Token_id_at) {
-    if (t.tok == Token_id_dollar) {  // @$
-      token_list.back().fuse_token(Token_id_reference, t);
-      return;
-    } else if (t.tok == Token_id_pound) {  // @#
-      token_list.back().fuse_token(Token_id_reference, t);
-      return;
-    } else if (t.tok == Token_id_percent) {  // @%
-      token_list.back().fuse_token(Token_id_reference, t);
       return;
     }
   }

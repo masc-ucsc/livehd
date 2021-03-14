@@ -805,6 +805,10 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &p
     RULE_SUCCESS("Matched rule_not_in_implicit; found a colon.\n", Prp_rule_not_in_implicit);
   }
 
+  if (SCAN_IS_TOKEN(Token_id_at)) {
+    RULE_SUCCESS("Matched rule_not_in_implicit; found a @.\n", Prp_rule_not_in_implicit);
+  }
+
   if (SCAN_IS_TOKEN(Token_id_obr)) {
     if (SCAN_IS_TOKEN(Token_id_obr)) {
       RULE_SUCCESS("Matched rule_not_in_implicit; found two open brackets.\n", Prp_rule_not_in_implicit);
@@ -1164,8 +1168,8 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
     op = true;
 
   Token_id toks[]
-      = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar, Token_id_reference};
-  if (!SCAN_IS_TOKENS(toks, 7, Prp_rule_reference)) {
+      = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar};
+  if (!SCAN_IS_TOKENS(toks, 6, Prp_rule_reference)) {
     RULE_FAILED("Failed rule_identifier; couldn't find a name.\n");
   }
 
@@ -1346,6 +1350,7 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
   bool next = true;
   INIT_PSEUDO_FAIL();
 
+#if 0
   while (next) {
     UPDATE_PSEUDO_FAIL();
     if (!SCAN_IS_TOKEN(Token_id_obr, Prp_rule_bit_selection_bracket)) {
@@ -1362,6 +1367,22 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
         next = false;
       }
       if (!SCAN_IS_TOKEN(Token_id_cbr, Prp_rule_bit_selection_bracket)) {
+        PSEUDO_FAIL();
+        next = false;
+      }
+    }
+  }
+#endif
+
+  while (next) {
+    UPDATE_PSEUDO_FAIL();
+    if (!SCAN_IS_TOKEN(Token_id_at, Prp_rule_bit_selection_bracket)) {
+      next = false;
+    } else {
+      if (CHECK_RULE(&Prp::rule_tuple_notation)) {
+      }else if (SCAN_IS_TOKEN(Token_id_num, Prp_rule_numerical_constant)) {
+      }else if (SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier)) {
+      }else{
         PSEUDO_FAIL();
         next = false;
       }

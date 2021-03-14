@@ -118,7 +118,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
       if (e.sink.get_pid() == 0) {
         add_expression(add_seq, "+", e.driver);
       }else{
-        add_expression(sub_seq, "-", e.driver);
+        add_expression(sub_seq, "+", e.driver);
       }
     }
 
