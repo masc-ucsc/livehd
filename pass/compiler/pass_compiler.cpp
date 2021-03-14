@@ -79,11 +79,11 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, Thread_pool &pool) {
   for (const auto &lnast : var.lnasts) {
-    compiler.fir_thread_ln2lg_cprop(lnast);
-    (void) pool;
-    // pool.add(&Lcompiler::fir_thread_ln2lg_cprop, std::ref(compiler), std::ref(lnast));
+    // compiler.fir_thread_ln2lg_cprop(lnast);
+    // (void) pool;
+    pool.add(&Lcompiler::fir_thread_ln2lg_cprop, compiler, lnast);
   }
-  // pool.wait_all();
+  pool.wait_all();
   
 
   // compiler.add_thread(&Lcompiler::fir_thread_firbtis);
