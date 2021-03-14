@@ -50,7 +50,7 @@ TEST_F(GTest1, interface) {
     }
 
     pool.wait_all();
-    std::cout << "n:" << n << "finished total:" << total << std::endl;
+    std::cout << "n:" << n << " finished total:" << total << std::endl;
     std::cout << "test1.a:" << t1.a << std::endl;
 
     EXPECT_EQ(t1.a, 3);
