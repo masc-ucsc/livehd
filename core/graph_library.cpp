@@ -326,6 +326,8 @@ Sub_node &Graph_library::setup_sub(std::string_view name, std::string_view sourc
 Lg_type_id Graph_library::add_name(std::string_view name, std::string_view source) {
   I(source != "");
 
+  std::lock_guard<std::mutex> guard(lgs_mutex);
+
   Lg_type_id id = try_get_recycled_id();
   if (id == 0) {
     id = attributes.size();
@@ -354,6 +356,7 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
     LGraph::error("graph_library: file to rename {} does not exit", orig);
     return false;
   }
+
   Lg_type_id id = it->second;
 
   auto dest_it = name2id.find(dest);
@@ -362,6 +365,8 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
     I(it2 != global_name2lgraph[path].end());
     expunge(dest);
   }
+
+  std::lock_guard<std::mutex> guard(lgs_mutex);
 
   auto it2 = global_name2lgraph[path].find(orig);
   if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
@@ -493,6 +498,8 @@ void Graph_library::expunge(std::string_view name) {
     I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
     return;  // already gone
   }
+
+  std::lock_guard<std::mutex> guard(lgs_mutex);
 
   auto it3 = global_name2lgraph[path].find(name);
   if (it3 != global_name2lgraph[path].end()) {

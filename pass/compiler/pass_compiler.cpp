@@ -13,10 +13,12 @@ void Pass_compiler::setup() {
   m1.add_label_optional("top",     "specify the top module");
   m1.add_label_optional("odir",    "output directory", ".");
   m1.add_label_optional("gviz",    "dump graphviz");
-  m1.add_label_optional("threads", "specify thread number, default is #cores");
 
   register_pass(m1);
 }
+
+
+
 
 Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
 
@@ -27,11 +29,9 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto odir      = pc.get_odir(var);
   auto top       = pc.check_option_top(var);
   auto gviz      = pc.check_option_gviz(var);
-  auto threads   = pc.check_option_threads(var);
   bool is_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
-  Thread_pool pool(threads);
   fmt::print("top module_name is: {}\n", top);
 
   if (var.lnasts.empty()) {
@@ -54,13 +54,12 @@ void Pass_compiler::compile(Eprp_var &var) {
       seed_lg = LGraph::create(path, "__firop_seed", "-");
       setup_firmap_library(seed_lg);
     }
-
-    firrtl_compilation(var, compiler, pool);
+    firrtl_compilation(var, compiler);
   } else {
     pyrope_compilation(var, compiler);
   }
 
-  auto lgs = compiler.wait_all(pool);
+  auto lgs = compiler.wait_all();
   var.add(lgs);
   return;
 }
@@ -77,13 +76,13 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 
 
-void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, Thread_pool &pool) {
+void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
   for (const auto &lnast : var.lnasts) {
     // compiler.fir_thread_ln2lg_cprop(lnast);
     // (void) pool;
-    pool.add(&Lcompiler::fir_thread_ln2lg_cprop, compiler, lnast);
+    thread_pool.add(&Lcompiler::fir_thread_ln2lg_cprop, compiler, lnast);
   }
-  pool.wait_all();
+  thread_pool.wait_all();
   
 
   // compiler.add_thread(&Lcompiler::fir_thread_firbtis);
@@ -259,15 +258,6 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
   lg->ref_library()->sync();
 }
 
-uint8_t Pass_compiler::check_option_threads(Eprp_var &var) {
-  uint8_t threads;
-  if (var.has_label("threads")) {
-    threads = std::stoi((std::string)var.get("threads"));
-  } else {
-    threads = 0;
-  }
-  return threads;
-}
 
 bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   bool gviz_en;

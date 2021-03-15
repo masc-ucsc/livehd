@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <mutex>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -23,6 +24,8 @@ class LGraph;
 
 class Graph_library {
 protected:
+  std::mutex lgs_mutex;
+
   struct Graph_attributes {
     LGraph *    lg;
     std::string source;  // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty,
@@ -90,7 +93,8 @@ public:
   bool exists(Lg_type_id lgid) const {
     if (attributes.size() <= lgid || lgid.is_invalid())
       return false;
-    I(attributes.size() == sub_nodes.size());
+    I(attributes.size() > lgid);
+    I(sub_nodes.size()  > lgid);
     return sub_nodes[lgid].get_lgid() == lgid;
   }
 
@@ -99,18 +103,20 @@ public:
   Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
 
   Sub_node *ref_sub(Lg_type_id lgid) {
+    // TODO?: ReadLock RII (std::shared_lock<lock>)
     graph_library_clean = false;
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);
-    I(attributes.size() == sub_nodes.size());
+    I(sub_nodes.size()  > lgid);
     I(sub_nodes[lgid].get_lgid() == lgid);
     return &sub_nodes[lgid];
   }
 
   const Sub_node &get_sub(Lg_type_id lgid) const {
+    // TODO?: ReadLock RII (std::shared_lock<lock>)
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);
-    I(attributes.size() == sub_nodes.size());
+    I(sub_nodes.size()  > lgid);
     I(sub_nodes[lgid].get_lgid() == lgid);
     return sub_nodes[lgid];
   }

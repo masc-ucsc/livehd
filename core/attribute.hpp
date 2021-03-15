@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include "absl/container/flat_hash_map.h"
 #include "lgraph.hpp"
 #include "mmap_bimap.hpp"
@@ -9,9 +11,10 @@
 
 template <const char *Name, typename Base, typename Attr_data>
 class Attribute {
+  inline static std::mutex lgs_mutex;
   inline static absl::flat_hash_map<std::string, Attr_data *> lg2attr;
-  inline static const LGraph *           last_lg   = nullptr;
-  inline static Attr_data *              last_attr = nullptr;
+  inline static __thread const LGraph *           last_lg   = nullptr;
+  inline static __thread Attr_data *              last_attr = nullptr;
 
   static std::string_view get_base() {
     if constexpr (std::is_same<Base, Node>::value) {
@@ -29,6 +32,8 @@ class Attribute {
 
     const auto key = absl::StrCat(lg->get_unique_name(), Name);
     //fmt::print("key:{} attr:{} lg:{}\n", key, Name, (void *)lg);
+  
+    std::lock_guard<std::mutex> guard(lgs_mutex);
 
     auto it = lg2attr.find(key);
     if (likely(it != lg2attr.end())) {

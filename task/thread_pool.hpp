@@ -165,3 +165,5 @@ public:
   }
 };
 
+extern Thread_pool thread_pool;
+

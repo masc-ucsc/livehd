@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <mutex>
 #include <cassert>
 #include <climits>
 #include <functional>
@@ -45,6 +46,8 @@ struct mmap_gc_entry {
 
 class mmap_gc {
 protected:
+  static inline std::mutex lgs_mutex;
+
   using gc_pool_type = absl::flat_hash_map<void *, mmap_gc_entry>;  // pointer stability for delete
   static inline gc_pool_type mmap_gc_pool;
 
@@ -253,6 +256,8 @@ public:
   /* LCOV_EXCL_STOP */
 
   static void delete_file(void *base) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     auto it = mmap_gc_pool.find(base);
     assert(it != mmap_gc_pool.end());
     assert(it->second.fd >= 0);
@@ -267,29 +272,35 @@ public:
   // mmap_map.hpp:    mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
   // mmap_vector.hpp: mmap_fd     = mmap_gc::open(mmap_name);
   static int open(const std::string &name) {
+    {
+      std::lock_guard<std::mutex> guard(lgs_mutex);
+
 #ifdef MMAP_GC_TRACE
-    std::cerr << "mmap_gc_pool open filename:" << name
-      << " n_open_fds=" << n_open_fds
-      << " n_open_mmaps=" << n_open_mmaps
-      << "\n";
+      std::cerr << "mmap_gc_pool open filename:" << name
+        << " n_open_fds=" << n_open_fds
+        << " n_open_mmaps=" << n_open_mmaps
+        << "\n";
 #endif
 #ifndef NDEBUG
-    for (const auto &e : mmap_gc_pool) {
-      if (e.second.fd < 0) continue;
-      assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
-    }
+      for (const auto &e : mmap_gc_pool) {
+        if (e.second.fd < 0) continue;
+        assert(e.second.name != name); // No name duplicate (may be OK for multithreaded access)
+      }
 #endif
 
-    if (n_open_fds > 500) {
-      recycle_older();
-    }
+      if (n_open_fds > 500) {
+        recycle_older();
+      }
 
-    int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd >= 0) {
-      n_open_fds++;
-      return fd;
+      int fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
+      if (fd >= 0) {
+        n_open_fds++;
+        return fd;
+      }
     }
     try_collect_fd();
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
       n_open_fds++;
@@ -307,6 +318,8 @@ public:
   // mmap_map.hpp:    mmap_gc::recycle(mmap_base);
   // mmap_vector.hpp: mmap_gc::recycle(mmap_base);
   static void recycle(void *base) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     // Remove from gc
     auto it = mmap_gc_pool.find(base);
     assert(it != mmap_gc_pool.end());
@@ -323,6 +336,8 @@ public:
   // std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
   static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size,
                                          std::function<bool(void *, bool)> gc_function) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     auto [base, final_size] = mmap_step(name, fd, size);
     if (base == MAP_FAILED) {
       try_collect_mmap();
@@ -353,6 +368,8 @@ public:
   // mmap_vector.hpp: mmap_base     = reinterpret_cast<uint8_t *>(mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size));
   // mmap_map.hpp:    mmap_txt_base = reinterpret_cast<uint64_t *>(mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size));
   static std::tuple<void *, size_t> remap(std::string_view mmap_name, void *mmap_old_base, size_t old_size, size_t new_size) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     if (new_size & 0xFFF) {
       new_size >>= 12;
       new_size++;
@@ -429,6 +446,8 @@ public:
   }
 
   static void try_collect_fd() {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     // std::cerr << "try_collect_fd\n";
     if (n_open_fds < n_max_fds) {  // readjust max
       n_max_fds = 1 + 3 * n_open_fds / 4;

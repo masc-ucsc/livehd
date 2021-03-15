@@ -42,12 +42,12 @@ public:
   void add_pyrope_thread(std::shared_ptr<Lnast> lnast);
   void fir_thread_ln2lg_cprop(std::shared_ptr<Lnast> lnast);
   
-  std::string_view get_top() {return top;};
+  std::string_view get_top() { return top; };
 
 
 
-  std::vector<LGraph *> wait_all(Thread_pool &pool) {
-    pool.wait_all();
+  std::vector<LGraph *> wait_all() {
+    thread_pool.wait_all();
     return lgs;
   }
 };
