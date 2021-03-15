@@ -301,7 +301,7 @@ public:
     try_collect_fd();
     std::lock_guard<std::mutex> guard(lgs_mutex);
 
-    fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
+    auto fd = ::open(name.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
       n_open_fds++;
       return fd;
