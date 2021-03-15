@@ -63,9 +63,13 @@ public:
 
     I(last_lg == lg); // setup table forces this
 
-    const auto key = absl::StrCat(lg->get_unique_name(), Name);
-    I(lg2attr[key] == last_attr);
-    lg2attr.erase(key);
+    {
+      std::lock_guard<std::mutex> guard(lgs_mutex);
+
+      const auto key = absl::StrCat(lg->get_unique_name(), Name);
+      I(lg2attr[key] == last_attr);
+      lg2attr.erase(key);
+    }
 
     last_attr->clear();
     delete last_attr;  // Delete does not clear
@@ -81,6 +85,9 @@ public:
     }
 
     const auto key = absl::StrCat(lg->get_unique_name(), Name);
+
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     auto it = lg2attr.find(key);
     if (it == lg2attr.end())
       return;

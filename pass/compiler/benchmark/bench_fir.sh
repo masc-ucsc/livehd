@@ -27,6 +27,7 @@ INSTANCES='16'
 # INSTANCES='256'
 
 rm -rf $LGDB
+
 if [ ! -f $LGSHELL ]; then
   if [ -f ./main/lgshell ]; then
     LGSHELL=./main/lgshell
@@ -48,7 +49,7 @@ done
 pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
-pts='Snx1280Insts16'
+pts='Snx64Insts16'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -71,7 +72,7 @@ fucntion() {
         exit 1
     fi 
 
-    perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
+    # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
 
@@ -124,7 +125,7 @@ fucntion() {
   # cat stat.summary
 
   # rm -f *.dot
-  rm -f *.v
+  # rm -f *.v
   rm -f *.tcl
   rm -f pp*
 }

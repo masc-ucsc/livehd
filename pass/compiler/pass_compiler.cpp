@@ -75,7 +75,6 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 
 
-
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
   for (const auto &lnast : var.lnasts) {
     // compiler.fir_thread_ln2lg_cprop(lnast);

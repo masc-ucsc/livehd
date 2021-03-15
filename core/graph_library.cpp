@@ -215,7 +215,7 @@ Lg_type_id Graph_library::reset_id(std::string_view name, std::string_view sourc
   const auto &it = name2id.find(name);
   if (it != name2id.end()) {
     // Maybe it was a sub before, or reloaded, or the ID got recycled
-    attributes[it->second].version = max_next_version.value++;
+    attributes[it->second].version = max_next_version++;
     if (attributes[it->second].source != source) {
       if (source == "-") {
         LGraph::warn("keeping lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
@@ -339,7 +339,7 @@ Lg_type_id Graph_library::add_name(std::string_view name, std::string_view sourc
   I(id < sub_nodes.size());
   sub_nodes[id].reset(name, id);
   attributes[id].source  = source;
-  attributes[id].version = max_next_version.value++;
+  attributes[id].version = max_next_version++;
 
   graph_library_clean = false;
 
@@ -387,13 +387,16 @@ bool Graph_library::rename_name(std::string_view orig, std::string_view dest) {
 }
 
 void Graph_library::update(Lg_type_id lgid) {
+  //RDlock;
+
   I(lgid < attributes.size());
 
   if (attributes[lgid].version == (max_next_version - 1))
     return;
 
   graph_library_clean      = false;
-  attributes[lgid].version = max_next_version.value++;
+
+  attributes[lgid].version = max_next_version++;
 }
 
 void Graph_library::reload() {
@@ -499,7 +502,7 @@ void Graph_library::expunge(std::string_view name) {
     return;  // already gone
   }
 
-  std::lock_guard<std::mutex> guard(lgs_mutex);
+  std::lock_guard<std::mutex> guard(lgs_mutex); // WRlock
 
   auto it3 = global_name2lgraph[path].find(name);
   if (it3 != global_name2lgraph[path].end()) {
@@ -609,6 +612,7 @@ Lg_type_id Graph_library::register_lgraph(std::string_view name, std::string_vie
   GI(global_name2lgraph[path].find(name) != global_name2lgraph[path].end(), global_name2lgraph[path][name] == lg);
   Lg_type_id id = reset_id(name, source);
 
+  std::lock_guard<std::mutex> guard(lgs_mutex); //FIXME->sh: added by Sheng-Hong  // 100% -> 50%
   global_name2lgraph[path][name] = lg;
 
   attributes[id].lg = lg; // It could be already set if there was a copy

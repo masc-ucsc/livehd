@@ -24,7 +24,7 @@ class LGraph;
 
 class Graph_library {
 protected:
-  std::mutex lgs_mutex;
+  inline static std::mutex lgs_mutex;
 
   struct Graph_attributes {
     LGraph *    lg;
@@ -53,19 +53,21 @@ protected:
   using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
   using Recycled_id        = absl::flat_hash_set<uint64_t>;
 
-  Lg_type_id        max_next_version;
   const std::string path;
   const std::string library_file;
 
-  Name2id                       name2id;
-  Recycled_id                   recycled_id;
-  std::vector<Graph_attributes> attributes;
-  std::vector<Sub_node>         sub_nodes;
+  // Begin protected for MT
+  Name2id                       name2id;          // WR protect on add entries, RD protect any access
+  Recycled_id                   recycled_id;      // WR protect on add entries, RD protect any access
+  std::vector<Graph_attributes> attributes;       // WR protect on add entries, RD protect any access
+  std::vector<Sub_node>         sub_nodes;        // WR protect on add entries, RD protect any access
 
-  static Global_instances   global_instances;
-  static Global_name2lgraph global_name2lgraph;
+  static Global_instances   global_instances;     // WR protect on add entries, RD protect any access
+  static Global_name2lgraph global_name2lgraph;   // WR protect on add entries, RD protect any access
+  // End protect for MT
 
-  bool graph_library_clean;
+  std::atomic<uint32_t>         max_next_version; // Atomic, no need to lock for this
+  bool graph_library_clean;                       // No need to worry, atomic, no need to protect
 
   Graph_library() { max_next_version = 1; }
 
@@ -80,6 +82,7 @@ protected:
   Lg_type_id try_get_recycled_id();
   void       recycle_id(Lg_type_id lgid);
 
+
 public:
   Graph_library(const Graph_library &s) = delete;
   Graph_library &operator=(const Graph_library &) = delete;
@@ -89,6 +92,8 @@ public:
   static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid);
   LGraph *       try_find_lgraph(std::string_view name) const;
   LGraph *       try_find_lgraph(Lg_type_id lgid) const;
+
+  Lg_type_id get_max_version() const { return max_next_version-1; }
 
   bool exists(Lg_type_id lgid) const {
     if (attributes.size() <= lgid || lgid.is_invalid())
@@ -103,6 +108,7 @@ public:
   Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
 
   Sub_node *ref_sub(Lg_type_id lgid) {
+
     // TODO?: ReadLock RII (std::shared_lock<lock>)
     graph_library_clean = false;
     I(lgid > 0);  // 0 is invalid lgid
@@ -166,10 +172,6 @@ public:
   // TODO: Change to Graph_library &instance...
   static Graph_library *instance(std::string_view path);
 
-  Lg_type_id get_max_version() const {
-    assert(max_next_version > 0);
-    return max_next_version - 1;
-  }
 
 #if 0
   // DEPRECATED

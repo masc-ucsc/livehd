@@ -485,6 +485,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
   int pos = 0;
   for(auto e:tup->key_map) {
     std::string_view e_name{e.first};
+    (void) e_name;
     auto e_node = e.second.get_node();
     if (!e_node.is_type_const()) {
       LGraph::info("tuple {} can not be indexed with {} key:{} because it is not constant", get_name(), tup->get_name(), e.first);
