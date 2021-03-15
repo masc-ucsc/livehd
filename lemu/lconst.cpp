@@ -113,7 +113,7 @@ Lconst::Lconst(const Container &v) {
 
 Lconst::Lconst() {
   explicit_str  = false;
-  bits          = 1;
+  bits          = 0; // zero bits. Nothing is set 0 or ""
   num           = 0;
 }
 
@@ -321,22 +321,31 @@ Lconst Lconst::tposs_op() const {
 
 Lconst Lconst::add_op(const Lconst &o) const {
 
-  if (explicit_str || o.explicit_str) {
-    auto max_bits = std::max(bits, o.bits);
-
+  if (unlikely(explicit_str || o.explicit_str)) {
+    if (explicit_str && o.explicit_str) {
+      return Lconst(absl::StrCat(to_string(), o.to_string()));
+    }
     std::string str;
     std::string o_str;
-    if (explicit_str)
+    if (bits==0)
+      str == "";
+    else if (explicit_str)
       str = to_string();
-    if (o.explicit_str)
-      o_str = o.to_string();
+    else if (is_i())
+      str = std::to_string(to_i());
+    else
+      str = to_yosys();
 
-    if (str.size()*8==bits && o_str.size()*8==o.bits) { // Both strings (concat)
-      return Lconst(absl::StrCat(str, o_str));
-    }
-    std::string qmarks("0b");
-    qmarks.append(max_bits, '?');
-    return Lconst(qmarks);
+    if (o.bits==0)
+      o_str = "";
+    else if (o.explicit_str)
+      o_str = o.to_string();
+    else if (o.is_i())
+      o_str = std::to_string(o.to_i());
+    else
+      o_str = o.to_yosys();
+
+    return Lconst(absl::StrCat(str, o_str));
   }
 
   Number res_num = get_num() + o.get_num();

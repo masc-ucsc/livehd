@@ -717,7 +717,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
       const auto &c2_ta      = child;
       auto        tup_add    = ta_map[i - 2];
       auto        value_spin = tup_add.setup_sink_pin("value");  // value
-      auto        value_dpin = setup_ref_node_dpin(lg, c2_ta);
+      auto        value_dpin = setup_ref_node_dpin(lg, c2_ta, true);
       lg->add_edge(value_dpin, value_spin);
       i++;
     } else {
@@ -726,7 +726,7 @@ void Lnast_tolg::process_ast_tuple_add_op(LGraph *lg, const Lnast_nid &lnidx_ta)
       auto tup_add  = lg->create_node(Ntype_op::TupAdd);
       auto tn_spin  = tup_add.setup_sink_pin("tuple_name");
       auto tup_name = ta_name[i - 1];
-      if (!is_const_num(tup_name)) {
+      if (true || !is_const_num(tup_name)) {
         auto tn_dpin  = setup_tuple_ref(lg, tup_name);
         lg->add_edge(tn_dpin, tn_spin);
       }
@@ -961,6 +961,12 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
   auto vname = lnast->get_vname(lnidx_opd);
   I(!name.empty());
 
+  if (lnast->get_type(lnidx_opd).is_const()) { // High priority in search to avoid alias
+    auto node_dpin = create_const(lg, vname);
+    name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
+    return node_dpin;
+  }
+
   const auto &it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto node = it->second.get_node();
@@ -998,8 +1004,6 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(LGraph *lg, const Lnast_nid &lnidx_opd,
     node_dpin.set_name(name.substr(0, name.size() - 2));
     name2dpin[name] = node_dpin;
     return node_dpin;
-  } else if (is_const_num(name)) {
-    node_dpin = create_const(lg, vname);
   } else if (is_register(name)) {
     // note-I: the register is first appear at the rhs! Create a floating Or to represent this reg
     // later, this Or should be driven by the reg q-pin at the end of program sequence

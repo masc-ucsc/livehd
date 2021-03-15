@@ -51,7 +51,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
     top_sts_nid = get_first_child(top_nid);
   }
 
-  std::string tmp_str = "err_var_undefined";
+  std::string tmp_str = "0b?";
   std::string err_var = "err_var";
   auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(Etoken()));
   add_child(asg_nid, Lnast_node::create_ref(add_string(err_var)));

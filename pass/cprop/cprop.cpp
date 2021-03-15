@@ -157,8 +157,8 @@ bool Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
     if (!drv_node.is_type_const())
       continue;
     const auto &lc = drv_node.get_type_const();
-    if (lc.is_string())
-      continue;
+//    if (lc.is_string())
+//      continue;
     n_inputs_constant++;
   }
 
@@ -647,8 +647,14 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
   // FIXME: We can get rid of the "position" pin, Use the :num:label
   if (node.is_sink_connected("position")) {
     auto node2 = node.get_sink_pin("position").get_driver_node();
-    if (node2.is_type_const())
-      key_pos = node2.get_type_const().to_i();
+    if (node2.is_type_const()) {
+      auto v = node2.get_type_const();
+      if (!v.is_i()) {
+        I(key_name.empty() || key_name == v.to_string()); // FIXME: we should get rid of field (position can be a string too)
+        return std::make_tuple(tup_name, v.to_string());
+      }
+      key_pos = v.to_i();
+    }
   }
 
   I(!(tup_name.size() && key_name.size() && tup_name[0] == '%' && key_name[0] == '%')); // key_name = key_name.substr(1);
