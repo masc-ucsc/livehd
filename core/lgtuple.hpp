@@ -59,6 +59,9 @@ public:
 
 	static int              get_first_level_pos(std::string_view key);
 	static std::string_view get_first_level_name(std::string_view key);
+	static int              get_last_level_pos(std::string_view key) {
+    return get_first_level_pos(get_last_level(key));
+  }
 
 	static bool is_single_level(std::string_view key) {
 		return key.find('.') == std::string::npos;
@@ -95,6 +98,7 @@ public:
   const Node_pin &get_dpin() const { I(is_scalar()); return get_dpin(""); }
 
   std::shared_ptr<Lgtuple> get_sub_tuple(std::string_view key) const;
+  std::shared_ptr<Lgtuple> get_sub_tuple(std::shared_ptr<Lgtuple const> tup) const;
 
   void del(std::string_view key);
 

@@ -478,6 +478,40 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 	return tup;
 }
 
+std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> tup) const {
+  // create a dpin or subtuple with the selected fields
+  std::shared_ptr<Lgtuple> ret_tup;
+
+  int pos = 0;
+  for(auto e:tup->key_map) {
+    std::string_view e_name{e.first};
+    auto e_node = e.second.get_node();
+    if (!e_node.is_type_const()) {
+      LGraph::info("tuple {} can not be indexed with {} key:{} because it is not constant", get_name(), tup->get_name(), e.first);
+      return nullptr;
+    }
+    auto v = e_node.get_type_const();
+    std::string txt;
+    if (v.is_i()) {
+      txt = std::to_string(v.to_i());
+    }else{
+      txt = v.to_string();
+    }
+    auto dpin = get_dpin(txt);
+    if (dpin.is_invalid()) {
+      LGraph::info("tuple {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, txt);
+      return nullptr;
+    }
+    if (!ret_tup) {
+			ret_tup = std::make_shared<Lgtuple>(get_name());
+    }
+    ret_tup->key_map.emplace_back(std::to_string(pos), dpin);
+    ++pos;
+  }
+
+  return ret_tup;
+}
+
 void Lgtuple::del(std::string_view key) {
   if (key.empty()) {
 		key_map.clear();

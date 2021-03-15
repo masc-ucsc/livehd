@@ -632,9 +632,9 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
   int              key_pos = -1;
 
   if (node.is_sink_connected("field")) {
-    auto node2 = node.get_sink_pin("field").get_driver_node();
-    if (node2.get_type_op() == Ntype_op::TupKey)
-      key_name = node2.get_driver_pin().get_name();
+    auto field_node = node.get_sink_pin("field").get_driver_node();
+    if (field_node.get_type_op() == Ntype_op::TupKey)
+      key_name = field_node.get_driver_pin().get_name();
   }
 
   for (const auto &dpin : node.setup_sink_pin("tuple_name").inp_driver()) {
@@ -783,9 +783,30 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
   }
 
   const auto &node_tup = ptup_it->second;
-  auto        val_dpin = node_tup->get_dpin(key_name);
 
+  if (key_name.empty()) {
+    if (node.is_sink_connected("position")) {
+      auto field_node  = node.get_sink_pin("position").get_driver_node();
 
+      auto fieldtup_it = node2tuple.find(field_node.get_compact());
+      if (fieldtup_it != node2tuple.end()) {
+        auto sub_tup = node_tup->get_sub_tuple(fieldtup_it->second);
+        if (sub_tup) {
+          if (sub_tup->is_scalar() && !child_is_tg_qpin_fetch) {
+            auto dpin = sub_tup->get_dpin();
+           collapse_forward_for_pin(node, dpin);
+          } else {
+            node2tuple[node.get_compact()] = sub_tup;
+          }
+          return true;
+        }
+      }
+    }
+    Pass::info("tuple_get {} for tuple {} has no way to find field",node.debug_name(), tup_name);
+    return false;
+  }
+
+  auto val_dpin = node_tup->get_dpin(key_name);
   if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
     int conta = 0;
     for (auto it : node_tup->get_level_attributes(key_name)) {
@@ -795,9 +816,9 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
 
       if (conta == 0) {
 
-      #ifndef NDEBUG
+#ifndef NDEBUG
         fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n", node.debug_name(), it.first, it.second.debug_name());
-      #endif
+#endif
         // Reuse current node. First delete input edges
         for (auto &e : inp_edges_ordered) {
           e.del_edge();
@@ -818,6 +839,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
     }
     return true;
   }
+ 
 
   I(!key_name.empty());
   auto sub_tup = node_tup->get_sub_tuple(key_name);
