@@ -328,7 +328,8 @@ Lconst Lconst::add_op(const Lconst &o) const {
     std::string str;
     std::string o_str;
     if (bits==0)
-      str == "";
+      // str == "";
+      str = "";
     else if (explicit_str)
       str = to_string();
     else if (is_i())

@@ -2,6 +2,7 @@
 #include "pass_compiler.hpp"
 #include <bits/stdint-uintn.h>
 #include <cstddef>
+#include "lcompiler.hpp"
 
 static Pass_plugin sample("pass_compiler", Pass_compiler::setup);
 
@@ -16,7 +17,6 @@ void Pass_compiler::setup() {
 
   register_pass(m1);
 }
-
 
 
 
@@ -65,8 +65,11 @@ void Pass_compiler::compile(Eprp_var &var) {
 }
 
 void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
-  for (const auto &lnast : var.lnasts)
-    compiler.add_pyrope_thread(lnast);
+  compiler.do_prp_lnast2lgraph(var.lnasts);
+
+  // TODO: try to separate local cprop/bw out of do_prp_lnast2lgraph()
+  // compiler.do_local_cprop_bitwidth();
+
 
   // FIXME: I think that global should be called only if top is set
   compiler.global_io_connection();
@@ -76,24 +79,10 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
-  for (const auto &lnast : var.lnasts) {
-    // compiler.fir_thread_ln2lg_cprop(lnast);
-    // (void) pool;
-    thread_pool.add(&Lcompiler::fir_thread_ln2lg, compiler, lnast);
-  }
-  thread_pool.wait_all();
-
-  // for (const auto &lg : compiler.)
-  
-
-  
-
-  // compiler.add_thread(&Lcompiler::fir_thread_firbtis);
-  // compiler.wait_all();
-  // compiler.add_thread(&Lcompiler::fir_thread_firmap_bw)
-  // compiler.wait_all();
-  compiler.bottom_up_firbits_analysis_map();
-  compiler.local_bitwidth_inference();
+  compiler.do_fir_lnast2lgraph(var.lnasts);
+  compiler.do_cprop();
+  compiler.do_firbits();
+  compiler.do_firmap_bitwidth();
 }
 
 
