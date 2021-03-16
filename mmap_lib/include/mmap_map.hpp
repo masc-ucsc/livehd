@@ -749,6 +749,12 @@ private:
 		return total;
 	}
 
+	size_t calc_num_entries(size_t mmap_size) const {
+		size_t total = mmap_size - (3+2)*sizeof(uint64_t) - sizeof(uint64_t);
+    auto n = total / (sizeof(Node)+sizeof(uint8_t));
+		return n-1;
+	}
+
 	void grow_txt_mmap(size_t size) {
     assert(mmap_txt_size<size);
     assert(mmap_txt_base);
@@ -806,6 +812,8 @@ private:
         new_mmap_size = calc_mmap_size(n_entries);
       } else {
         assert(new_mmap_size); // preserve last size
+        n_entries = calc_num_entries(new_mmap_size);
+        assert(n_entries>=InitialNumElements);
       }
     }
 
@@ -824,9 +832,9 @@ private:
 
 		mInfo = reinterpret_cast<uint8_t*>(&mmap_base[5]);
 		if (*mMask == n_entries - 1 || n_entries==0) {
-			assert(*mMaxNumElementsAllowed<*mMask);
+			assert(*mMaxNumElementsAllowed<=*mMask);
 			assert(calc_mmap_size(*mMask+1)<=mmap_size);
-			assert(mInfo[*mMask+1] == 1); // Sentinel
+			//assert(mInfo[*mMask+1] == 1); // Sentinel
 			mKeyVals = reinterpret_cast<Node*>(&mmap_base[5+(*mMask+9)/sizeof(uint64_t)]);
     }else{
 			assert(*mMaxNumElementsAllowed <= n_entries); // less due to load factor

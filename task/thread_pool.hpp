@@ -21,6 +21,8 @@
 #include "spmc.hpp"
 #endif
 
+#define DISABLE_THREAD_POOL
+
 template <class Func, class... Args> inline auto forward_as_lambda(Func &&func, Args &&... args) {
   return [f   = std::forward<decltype(func)>(func),
           tup = std::tuple<std::conditional_t<std::is_lvalue_reference_v<Args>, Args, std::remove_reference_t<Args>>...>(
@@ -86,20 +88,18 @@ class Thread_pool {
   }
 
   void add_(std::function<void(void)> job) {
-    //static int n_inline=0;
-    //static int n_thread=0;
-    //if (((n_thread+n_inline)&0xFFFF)==0) {
-      //std::cout << "n_thread:" << n_thread << " n_inline:" << n_inline << "\n";
-    //}
+#ifdef DISABLE_THREAD_POOL
+    job();
+    return;
+#else
     if(jobs_left > 48) { //FIXME->sh: what if not so much core?
-      //++n_inline;
       job();
       return;
     }
-    //++n_thread;
     jobs_left.fetch_add(1, std::memory_order_relaxed);
     queue.enqueue(job);
     job_available_var.notify_one();
+#endif
   }
 
 public:

@@ -641,6 +641,12 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
     if (dpin.has_name()) {
       tup_name = dpin.get_name();
       break;
+    } else if (dpin.is_type_const()) {
+      auto v = dpin.get_node().get_type_const();
+      if (v.is_string()) {
+        tup_name = v.to_string();
+        break;
+      }
     }
   }
 
@@ -962,13 +968,15 @@ void Cprop::process_sext(Node &node, XEdge_iterator &inp_edges_ordered) {
 
 std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) {
   auto up_node = up_dpin.get_node();
+  if (up_node.is_type_const())
+    return nullptr;
+
   auto ptup_it = node2tuple.find(up_node.get_compact());
   if (ptup_it == node2tuple.end()) {
     return nullptr;
   }
 
-  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || up_node.get_type_op() == Ntype_op::Flop
-    || up_node.get_type_op() == Ntype_op::TupRef || up_node.get_type_op() == Ntype_op::Mux);
+  I(up_node.get_type_op() == Ntype_op::TupAdd || up_node.get_type_op() == Ntype_op::TupGet || up_node.get_type_op() == Ntype_op::Flop || up_node.get_type_op() == Ntype_op::Mux);
 
   return ptup_it->second;
 }
@@ -996,11 +1004,11 @@ void Cprop::process_tuple_add(Node &node) {
     }
   }
 
-
   if (!node_tup) {
+    I(!parent_tup);
     node_tup = std::make_shared<Lgtuple>(tup_name);  // new tuple if not already created
     if (!value_tup && !parent_dpin.is_invalid()) {
-      if (parent_dpin.get_node().get_type_op() != Ntype_op::TupRef)
+      if (key_name.empty())
         node_tup->add("", parent_dpin);  // the chain was a constant
     }
   }
