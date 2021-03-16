@@ -79,9 +79,13 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
   for (const auto &lnast : var.lnasts) {
     // compiler.fir_thread_ln2lg_cprop(lnast);
     // (void) pool;
-    thread_pool.add(&Lcompiler::fir_thread_ln2lg_cprop, compiler, lnast);
+    thread_pool.add(&Lcompiler::fir_thread_ln2lg, compiler, lnast);
   }
   thread_pool.wait_all();
+
+  // for (const auto &lg : compiler.)
+  
+
   
 
   // compiler.add_thread(&Lcompiler::fir_thread_firbtis);

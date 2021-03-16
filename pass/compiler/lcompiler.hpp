@@ -40,7 +40,8 @@ public:
   void global_bitwidth_inference();
   void bottom_up_firbits_analysis_map();
   void add_pyrope_thread(std::shared_ptr<Lnast> lnast);
-  void fir_thread_ln2lg_cprop(std::shared_ptr<Lnast> lnast);
+  void fir_thread_ln2lg(std::shared_ptr<Lnast> lnast);
+  void fir_thread_cprop();
   
   std::string_view get_top() { return top; };
 

@@ -62,7 +62,18 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
 }
 
 
-void Lcompiler::fir_thread_ln2lg_cprop(std::shared_ptr<Lnast> ln) {
+void Lcompiler::fir_thread_cprop() {
+  Graphviz gv(true, false, odir); 
+  for (const auto &lg : lgs) {
+    Cprop cp(false, false);  // hier = false, gioc = false
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
+    cp.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+  }
+}
+
+
+void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   Graphviz gv(true, false, odir); 
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   
@@ -85,16 +96,6 @@ void Lcompiler::fir_thread_ln2lg_cprop(std::shared_ptr<Lnast> ln) {
     for (const auto &lg : local_lgs) 
       gv.do_from_lgraph(lg, "local.raw"); 
   }
-
-
-  for (const auto &lg : local_lgs) {
-    Cprop cp(false, false);  // hier = false, gioc = false
-
-    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
-    cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
-  }
-
 
   std::lock_guard<std::mutex> guard(lgs_mutex); // guarding Lcompiler::lgs
   for(auto *lg:local_lgs)

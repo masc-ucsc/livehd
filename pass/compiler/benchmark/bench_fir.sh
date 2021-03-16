@@ -19,7 +19,7 @@ FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 if [ "${PWD##/home/}" != "${PWD}" ]; then
   LGDB=./lgdb
 else
-  LGDB=/local/scrap/masc/swang203/lgdb
+  LGDB=/local/scrap/masc/swang203/lgdb   # NSF
 fi
 
 GVIZ='true'
@@ -49,7 +49,15 @@ done
 pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
+# ^^^^^^^^^^^^
+
+pb generation from chipyard
+
+# ^^^^^^^^^^^^
+
+
 pts='Snx64Insts16'
+pts='BOOMSmall' # BOOMSamm.pb
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
