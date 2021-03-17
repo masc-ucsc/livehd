@@ -105,11 +105,12 @@ public:
 
   Sub_node &reset_sub(std::string_view name, std::string_view source);
   Sub_node &setup_sub(std::string_view name, std::string_view source);
-  Sub_node &setup_sub(std::string_view name) { return setup_sub(name, "-"); }
+  Sub_node &setup_sub(std::string_view name);
 
   Sub_node *ref_sub(Lg_type_id lgid) {
 
     // TODO?: ReadLock RII (std::shared_lock<lock>)
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
     graph_library_clean = false;
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);
@@ -120,6 +121,7 @@ public:
 
   const Sub_node &get_sub(Lg_type_id lgid) const {
     // TODO?: ReadLock RII (std::shared_lock<lock>)
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
     I(lgid > 0);  // 0 is invalid lgid
     I(attributes.size() > lgid);
     I(sub_nodes.size()  > lgid);
@@ -127,8 +129,12 @@ public:
     return sub_nodes[lgid];
   }
 
-  Sub_node *      ref_sub(std::string_view name) { return ref_sub(get_lgid(name)); }
-  const Sub_node &get_sub(std::string_view name) const { return get_sub(get_lgid(name)); }
+  Sub_node * ref_sub(std::string_view name) { 
+    return ref_sub(get_lgid(name)); 
+  }
+  const Sub_node &get_sub(std::string_view name) const { 
+    return get_sub(get_lgid(name)); 
+  }
 
   Lg_type_id add_name(std::string_view name, std::string_view source);
   bool       rename_name(std::string_view orig, std::string_view dest);

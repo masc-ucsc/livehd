@@ -49,15 +49,9 @@ done
 pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
-# ^^^^^^^^^^^^
-
-pb generation from chipyard
-
-# ^^^^^^^^^^^^
 
 
 pts='Snx64Insts16'
-pts='BOOMSmall' # BOOMSamm.pb
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -82,7 +76,8 @@ fucntion() {
 
     # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
-    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
+    # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
+    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
 
     # perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
     #                             |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true 
@@ -113,7 +108,7 @@ fucntion() {
     #   mv perf.data perf.data.${pt}
     #   mv perf.data.old perf.data.old.${pt}
     #   echo "      ${pt}"    >> stat.livehd
-    #   grep elapsed pp       >> stat.livehd
+      grep elapsed pp       >> stat.livehd
     #   echo "      ${pt}"    >> stat.livehd-yosys
     #   grep elapsed pp-yosys >> stat.livehd-yosys
     #   echo "      ${pt}"    >> stat.fir2verilog
@@ -131,6 +126,7 @@ fucntion() {
   # cat stat.fir2verilog  >> stat.summary
   # cat stat.chisel3-fir  >> stat.summary
   # cat stat.summary
+  cat stat.livehd
 
   # rm -f *.dot
   # rm -f *.v

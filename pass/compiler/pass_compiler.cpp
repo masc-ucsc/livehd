@@ -80,9 +80,9 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
   compiler.do_fir_lnast2lgraph(var.lnasts);
-  compiler.do_cprop();
-  compiler.do_firbits();
-  compiler.do_firmap_bitwidth();
+  // compiler.do_cprop();
+  // compiler.do_firbits();
+  // compiler.do_firmap_bitwidth();
 }
 
 
