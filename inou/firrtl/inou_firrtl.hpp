@@ -8,6 +8,7 @@
 
 #include <string>
 #include <tuple>
+#include <mutex>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -25,6 +26,7 @@
 class Inou_firrtl : public Pass {
 protected:
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, std::string> op2firsub;
+  inline static std::mutex lgs_mutex;
 
   enum class Leaf_type { Const_num, Const_str, Ref};
   //----------- FOR toLNAST ----------

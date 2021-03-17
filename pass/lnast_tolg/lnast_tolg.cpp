@@ -1382,6 +1382,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
   }
 #endif
 
+  std::unique_lock<std::mutex> guard(lgs_mutex);
   auto *library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
     #ifndef NDEBUG
@@ -1397,6 +1398,7 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       subg_node = lg->create_node_sub(func_name);
       sub       = library->ref_sub(func_name);
     }
+    guard.unlock();
 
     subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
 
@@ -1462,11 +1464,13 @@ void Lnast_tolg::process_ast_func_def_op(LGraph *lg, const Lnast_nid &lnidx) {
   auto field_dpin = setup_field_dpin(lg, "__function_call");
   field_dpin.connect_sink(field_spin);
 
+  std::unique_lock<std::mutex> guard(lgs_mutex);
   auto *library = Graph_library::instance(path);
   Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {
     lgid = library->get_lgid(subg_module_name);
   }
+  guard.unlock();
 
   auto value_dpin = lg->create_node_const(Lconst(lgid)).setup_driver_pin();
   value_dpin.connect_sink(value_spin);

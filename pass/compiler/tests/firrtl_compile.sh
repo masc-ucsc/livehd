@@ -33,6 +33,8 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
+  pts='EnableShiftRegister'
+
 else
   file=$(basename $1)
   if [ "${file#*.}" == "hi.pb" ]; then

@@ -3,6 +3,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <mutex>
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -19,6 +20,7 @@ public:
   std::vector<LGraph *> do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts);
 
 private:
+  inline static std::mutex lgs_mutex;
   std::shared_ptr<Lnast> lnast;
   std::string_view module_name;
   std::string_view path;
