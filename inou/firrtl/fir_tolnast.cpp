@@ -1999,10 +1999,10 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
     fpath = "lgdb";
   }
 
-  std::unique_lock<std::mutex> guard(lgs_mutex);
   auto *library = Graph_library::instance(fpath);
+  fmt::print("DEBUG2\n");
   auto &sub = library->reset_sub(mod_name, file_name);
-  guard.unlock();
+  // also add %/$
   return sub;
 }
 

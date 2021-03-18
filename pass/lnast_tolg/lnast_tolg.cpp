@@ -20,6 +20,7 @@ std::vector<LGraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
   if (src.empty())
     src = "-";
 
+  // move %/$ generation at the pb->lnast
   lg = LGraph::create(path, module_name, src);
   name2dpin["$"] = lg->add_graph_input("$", Port_invalid, 0);
   setup_tuple_ref(lg, "%");
@@ -1394,6 +1395,9 @@ void Lnast_tolg::process_ast_func_call_op(LGraph *lg, const Lnast_nid &lnidx_fc)
       auto lgid = library->get_lgid(func_name);
       subg_node = lg->create_node_sub(lgid);
       sub       = library->ref_sub(lgid);
+
+
+
     } else {
       subg_node = lg->create_node_sub(func_name);
       sub       = library->ref_sub(func_name);

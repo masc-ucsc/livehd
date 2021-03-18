@@ -73,80 +73,41 @@ protected:
 
   explicit Graph_library(std::string_view _path);
 
-  void clean_library();
+  void clean_library_int();
 
   ~Graph_library() { }
 
-  Lg_type_id reset_id(std::string_view name, std::string_view source);
+  Lg_type_id reset_id_int(std::string_view name, std::string_view source);
 
-  Lg_type_id try_get_recycled_id();
-  void       recycle_id(Lg_type_id lgid);
+  Lg_type_id try_get_recycled_id_int();
+  void       recycle_id_int(Lg_type_id lgid);
 
+  static bool exists_int(std::string_view path, std::string_view name);
+  bool        exists_int(Lg_type_id lgid) const;
+  
 
-public:
-  Graph_library(const Graph_library &s) = delete;
-  Graph_library &operator=(const Graph_library &) = delete;
+  static LGraph * try_find_lgraph_int(std::string_view path, std::string_view name);
+  static LGraph * try_find_lgraph_int(std::string_view path, Lg_type_id lgid);
+  LGraph        * try_find_lgraph_int(std::string_view name) const;
+  LGraph        * try_find_lgraph_int(Lg_type_id lgid) const;
+ 
+  Sub_node       & reset_sub_int(std::string_view name, std::string_view source);
+  Sub_node       & setup_sub_int(std::string_view name, std::string_view source);
+  Sub_node       & setup_sub_int(std::string_view name);
+  Sub_node       * ref_sub_int(Lg_type_id lgid);
+  const Sub_node & get_sub_int(Lg_type_id lgid) const;
 
-  static bool    exists(std::string_view path, std::string_view name);
-  static LGraph *try_find_lgraph(std::string_view path, std::string_view name);
-  static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid);
-  LGraph *       try_find_lgraph(std::string_view name) const;
-  LGraph *       try_find_lgraph(Lg_type_id lgid) const;
+  Lg_type_id add_name_int(std::string_view name, std::string_view source);
+  bool       rename_name_int(std::string_view orig, std::string_view dest);
 
-  Lg_type_id get_max_version() const { return max_next_version-1; }
-
-  bool exists(Lg_type_id lgid) const {
-    if (attributes.size() <= lgid || lgid.is_invalid())
-      return false;
-    I(attributes.size() > lgid);
-    I(sub_nodes.size()  > lgid);
-    return sub_nodes[lgid].get_lgid() == lgid;
-  }
-
-  Sub_node &reset_sub(std::string_view name, std::string_view source);
-  Sub_node &setup_sub(std::string_view name, std::string_view source);
-  Sub_node &setup_sub(std::string_view name);
-
-  Sub_node *ref_sub(Lg_type_id lgid) {
-
-    // TODO?: ReadLock RII (std::shared_lock<lock>)
-    // std::lock_guard<std::mutex> guard(lgs_mutex);
-    graph_library_clean = false;
-    I(lgid > 0);  // 0 is invalid lgid
-    I(attributes.size() > lgid);
-    I(sub_nodes.size()  > lgid);
-    I(sub_nodes[lgid].get_lgid() == lgid);
-    return &sub_nodes[lgid];
-  }
-
-  const Sub_node &get_sub(Lg_type_id lgid) const {
-    // TODO?: ReadLock RII (std::shared_lock<lock>)
-    // std::lock_guard<std::mutex> guard(lgs_mutex);
-    I(lgid > 0);  // 0 is invalid lgid
-    I(attributes.size() > lgid);
-    I(sub_nodes.size()  > lgid);
-    I(sub_nodes[lgid].get_lgid() == lgid);
-    return sub_nodes[lgid];
-  }
-
-  Sub_node * ref_sub(std::string_view name) { 
-    return ref_sub(get_lgid(name)); 
-  }
-  const Sub_node &get_sub(std::string_view name) const { 
-    return get_sub(get_lgid(name)); 
-  }
-
-  Lg_type_id add_name(std::string_view name, std::string_view source);
-  bool       rename_name(std::string_view orig, std::string_view dest);
-
-  std::string_view get_name(Lg_type_id lgid) const {
+  std::string_view get_name_int(Lg_type_id lgid) const {
     I(lgid > 0);  // 0 is invalid lgid
     I(sub_nodes.size() > lgid);
     I(sub_nodes[lgid].get_lgid() == lgid);
     return sub_nodes[lgid].get_name();
   }
 
-  Lg_type_id get_lgid(std::string_view name) const {
+  Lg_type_id get_lgid_int(std::string_view name) const {
     const auto &it = name2id.find(name);
     if (it != name2id.end()) {
       return it->second;
@@ -154,62 +115,208 @@ public:
     return 0;  // Invalid ID
   }
 
-  std::string_view get_source(Lg_type_id lgid) const {
+  std::string_view get_source_int(Lg_type_id lgid) const {
     assert(lgid > 0);  // 0 is invalid lgid
     assert(attributes.size() > lgid);
     return attributes[lgid].source;
   }
 
-  std::string_view get_source(std::string_view name) const { return get_source(get_lgid(name)); }
-
-  // int lgraph_count() const { return attributes.size() - 1; }
-
-  void update(Lg_type_id lgid);
-
-  Lg_type_id get_version(Lg_type_id lgid) const {
+  void update_int(Lg_type_id lgid);
+  Lg_type_id get_version_int(Lg_type_id lgid) const {
     if (attributes.size() < lgid)
       return 0;  // Invalid ID
 
     return attributes[lgid].version;
   }
 
-  bool has_name(std::string_view name) const { return name2id.find(name) != name2id.end(); }
+  bool has_name_int(std::string_view name) const { 
+    return name2id.find(name) != name2id.end(); 
+  }
+
+  static Graph_library *instance_int(std::string_view path);
+
+  Lg_type_id  copy_lgraph_int(std::string_view name, std::string_view new_name);
+  Lg_type_id  register_lgraph_int(std::string_view name, std::string_view source, LGraph *lg);
+  void        unregister_int(std::string_view name, Lg_type_id lgid, LGraph *lg = 0);
+  void        expunge_int(std::string_view name);
+  void        clear_int(Lg_type_id lgid);
+  void        sync_int() { clean_library_int();}
+  static void sync_all_int(); 
+  static void shutdown_int(); 
+  void        reload_int();
+
+
+public:
+  Graph_library(const Graph_library &s) = delete;
+  Graph_library &operator=(const Graph_library &) = delete;
+
+  static bool exists(std::string_view path, std::string_view name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return exists_int(path, name);
+  }
+
+  bool exists(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return exists_int(lgid);
+  }
+
+  static LGraph *try_find_lgraph(std::string_view path, std::string_view name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return  try_find_lgraph_int(path, name);
+  }
+
+  static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return try_find_lgraph_int(path, lgid);
+  }
+
+  LGraph * try_find_lgraph(std::string_view name) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return try_find_lgraph_int(name);
+
+  }
+
+  LGraph * try_find_lgraph(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return try_find_lgraph_int(lgid);
+  }
+
+  Lg_type_id get_max_version() const { return max_next_version-1; }
+
+  Sub_node &reset_sub(std::string_view name, std::string_view source) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return reset_sub_int(name, source);
+  }
+
+  Sub_node &setup_sub(std::string_view name, std::string_view source) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return setup_sub_int(name, source);
+  }
+
+  Sub_node &setup_sub(std::string_view name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return setup_sub_int(name);
+  }
+
+  Sub_node *ref_sub(Lg_type_id lgid) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return ref_sub_int(lgid);
+  }
+
+  const Sub_node &get_sub(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_sub_int(lgid);
+  }
+
+
+  Sub_node *ref_sub(std::string_view name) { 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return ref_sub_int(get_lgid(name)); 
+  }
+
+  const Sub_node &get_sub(std::string_view name) const { 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_sub_int(get_lgid(name)); 
+  }
+
+
+
+  Lg_type_id add_name(std::string_view name, std::string_view source) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return add_name_int(name, source);
+  }
+
+  bool rename_name(std::string_view orig, std::string_view dest) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return rename_name_int(orig, dest);
+    
+  }
+
+  std::string_view get_name(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_name_int(lgid);
+  }
+
+  Lg_type_id get_lgid(std::string_view name) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_lgid_int(name);
+  }
+
+  std::string_view get_source(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_source_int(lgid);
+  }
+
+  std::string_view get_source(std::string_view name) const { 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_source_int(get_lgid_int(name)); 
+  }
+
+
+  void update(Lg_type_id lgid) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    update_int(lgid);
+  }
+
+  Lg_type_id get_version(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return get_version_int(lgid);
+  }
+
+  bool has_name(std::string_view name) const { 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return has_name_int(name);
+  }
 
   // TODO: Change to Graph_library &instance...
-  static Graph_library *instance(std::string_view path);
-
-
-#if 0
-  // DEPRECATED
-  unsigned int get_lgid_bits() const {
-    // FIXME: if the lgid_bits increases (more lgraphs) all the attributes must be recomputed (create callback interface)
-    uint32_t sz = attributes.size();
-    int val = sizeof(sz)*8 - __builtin_clz(sz+1);
-    if (val<8)
-      return 8;
-    return val;
+  static Graph_library *instance(std::string_view path) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return instance_int(path);
   }
-#endif
 
-  // deprecated bool expunge_lgraph(std::string_view name, LGraph *lg);
 
-  Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name);
-  Lg_type_id register_sub(std::string_view name);
-  Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg);
-  void       unregister(std::string_view name, Lg_type_id lgid, LGraph *lg = 0);  // unregister open instance
-  void       expunge(std::string_view name);  // Delete completely, even if open instances exists
+  Lg_type_id copy_lgraph(std::string_view name, std::string_view new_name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return copy_lgraph_int(name, new_name);
+  }
 
-  void clear(Lg_type_id lgid);
+  Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    return register_lgraph_int(name, source, lg);
+  }
 
-  void sync() { clean_library(); }
 
-  static void sync_all();  // Called when running out of mmaps
-  static void shutdown();  // Called on program exit to clean pointers (asan)
+  void unregister(std::string_view name, Lg_type_id lgid, LGraph *lg = 0) {  // unregister open instance
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    unregister_int(name, lgid, lg);
+  }
+  
+  void expunge(std::string_view name) {  // Delete completely, even if open instances exists
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    expunge_int(name);
+  }
+  
+  void clear(Lg_type_id lgid) {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    clear_int(lgid);
+  }
 
-  absl::Span<const Sub_node> get_sub_nodes() const {
-    I(sub_nodes.size() >= 1);
-    return absl::MakeSpan(sub_nodes).subspan(1);
-  };
+  void sync() { 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    sync_int();
+  }
+
+  static void sync_all() {  // Called when running out of mmaps
+    // std::lock_guard<std::mutex> guard(lgs_mutex); 
+    sync_all_int();
+  }
+
+
+  static void shutdown() { // Called on program exit to clean pointers (asan)
+    // std::lock_guard<std::mutex> guard(lgs_mutex); 
+    shutdown_int();
+  }
+
 
   absl::Span<const std::string> get_liberty() const { return absl::MakeSpan(liberty_list); };
   absl::Span<const std::string> get_sdc() const { return absl::MakeSpan(sdc_list); };
@@ -221,5 +328,8 @@ public:
   void each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
   void each_lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
 
-  void reload();
+  void reload() {
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
+    reload_int();
+  }
 };
