@@ -20,6 +20,40 @@ jobs:
 
       - run: bazel ${{ matrix.action }} --test_tag_filters=-fixme --test_output=all -s //...
 
+  clang:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        action: ["build", "test"]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install Clang
+        run: |
+          ubuntu_codename=`lsb_release -c | cut -f2`
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$ubuntu_codename/ llvm-toolchain-$ubuntu_codename-$LLVM_VERSION main"
+          sudo apt-get update
+          sudo apt-get install -y clang-$LLVM_VERSION llvm-$LLVM_VERSION lld-$LLVM_VERSION
+          sudo ln -sf /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
+          sudo ln -sf /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-$LLVM_VERSION /usr/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-$LLVM_VERSION /usr/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-$LLVM_VERSION /usr/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
+          sudo ln -sf /usr/bin/llvm-config-$LLVM_VERSION /usr/bin/llvm-config
+        env:
+          LLVM_VERSION: 11
+
+      - run: sudo apt install -y build-essential
+      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
+      - run: sudo chmod +x /usr/local/bin/bazel
+
+      - run: bazel ${{ matrix.action }} --config=clang --test_tag_filters=-fixme --test_output=all -s //...
+
   coverage-always-pass:
     runs-on: ubuntu-20.04
 
