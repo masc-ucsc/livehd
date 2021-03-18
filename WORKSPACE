@@ -141,9 +141,9 @@ new_git_repository(
 new_git_repository(
     name = "slang",
     build_file_content = """filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])""",
-    commit = "b247da1849be56b00422626857532bb16830fb1f", # Jan 13, 2021 c0cf9a643f05df63268ecbfe561e9af37c9a62a8", # Nov 2nd, 2020
+    commit = "eb23621fc9afeb4a04af524ab31abb4ea622b0bf",
     remote = "https://github.com/MikePopoloski/slang.git",
-    shallow_since = "1610328265 -0500",
+    shallow_since = "1615948061 -0400",
 )
 
 new_git_repository(
