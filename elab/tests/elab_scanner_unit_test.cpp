@@ -174,9 +174,5 @@ TEST_F(Elab_test, token_refs) {
   EXPECT_EQ(scanner.debug_token_list[2], "@$inp");
   EXPECT_EQ(scanner.debug_token_list[3], "@%out");
   EXPECT_EQ(scanner.debug_token_list[4], "@%");
-
-  for (auto i=0;i<scanner.debug_token_list.size();++i) {
-    EXPECT_EQ(scanner.scan_get_token(i).tok, Token_id_reference);
-  }
 }
 
