@@ -1,0 +1,47 @@
+name: Ubuntu
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gcc:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        action: ["build", "test"]
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - run: sudo apt install -y build-essential
+      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
+      - run: sudo chmod +x /usr/local/bin/bazel
+
+      - run: bazel ${{ matrix.action }} --test_tag_filters=-fixme --test_output=all -s //...
+
+  coverage-always-pass:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - run: sudo apt install -y build-essential
+      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
+      - run: sudo chmod +x /usr/local/bin/bazel
+
+      - name: Print the list of targets
+        run: bazel query --output label_kind //...
+
+      - run: bazel coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //... || true
+
+      - name: Get a comma-separated list of coverage reports
+        id: get_coverage_files
+        run: |
+          coverage_reports=`find ./bazel-testlogs/ -name 'coverage.dat' | tr '\n' ',' | head -c -1`
+          echo $coverage_reports
+          echo ::set-output name=COVERAGE_REPORTS::$coverage_reports
+
+      - uses: codecov/codecov-action@v1
+        with:
+          files: ${{ steps.get_coverage_files.outputs.COVERAGE_REPORTS }}
