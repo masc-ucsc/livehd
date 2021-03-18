@@ -74,12 +74,12 @@ rules_proto_toolchains()
 
 http_archive(
     name = "rules_foreign_cc",
-    sha256 = "21177439c27c994fd9b6e04d4ed6cec79d7dbcf174649f8d70e396dd582d1c82",
-    strip_prefix = "rules_foreign_cc-ed95b95affecaa3ea3bf7bab3e0ab6aa847dfb06",
-    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/ed95b95affecaa3ea3bf7bab3e0ab6aa847dfb06.zip"],
+    sha256 = "b7f38c6a6830eac6f2840c567b452d7c096d6352a6717c243a69508b99c74de5",
+    strip_prefix = "rules_foreign_cc-ede2c80a51030c8b5b965680c32768b5acb03f95",
+    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/ede2c80a51030c8b5b965680c32768b5acb03f95.zip"],
 )
 
-load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
+load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
 rules_foreign_cc_dependencies()
 
 # abseil-cpp
