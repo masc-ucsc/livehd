@@ -508,6 +508,29 @@ void Graph_library::reload_int() {
   }
 }
 
+LGraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
+  std::lock_guard<std::mutex> guard(lgs_mutex); 
+  auto *lg = try_find_lgraph_int(name);
+  if (lg)
+    return lg;
+
+  I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+
+  Lg_type_id lgid = reset_id_int(name, source);
+
+  lg = new LGraph(path, name, lgid);
+
+  global_name2lgraph[path][name] = lg;
+  attributes[lgid].lg = lg; // It could be already set if there was a copy
+
+#ifndef NDEBUG
+  const auto &it = name2id.find(name);
+  I(it != name2id.end());
+  I(sub_nodes[lgid].get_name() == name);
+#endif
+
+  return lg;
+}
 
 Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path + "/" + "graph_library.json") {
   graph_library_clean = true;
@@ -641,6 +664,8 @@ Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_vie
 }
 
 Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string_view source, LGraph *lg) {
+  I(false); // deprecated
+
   if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
     I(global_name2lgraph[path][name] == lg);
     I(attributes.size() > lg->get_lgid());

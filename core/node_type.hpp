@@ -51,7 +51,7 @@ protected:
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id lgid) noexcept;
+  explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id _lgid) noexcept;
 
   const Node_down_map &get_down_nodes_map() const { return subid_map; };
 };

@@ -64,13 +64,13 @@ protected:
   std::string       path;
   std::string       name;
   const std::string unique_name;
-  std::string       long_name;
-  Lg_type_id        lgid;
+  const std::string long_name;
+  const Lg_type_id  lgid;
 
   bool locked;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id lgid);
+  explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
   virtual ~Lgraph_base_core(){};
 
 public:

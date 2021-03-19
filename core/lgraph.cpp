@@ -13,9 +13,9 @@
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 
-LGraph::LGraph(std::string_view _path, std::string_view _name, std::string_view _source)
-    : LGraph_Base(_path, _name, Graph_library::instance(_path)->register_lgraph(_name, _source, this))
-    , LGraph_Node_Type(_path, _name, get_lgid())
+LGraph::LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
+    : LGraph_Base(_path, _name, _lgid)
+    , LGraph_Node_Type(_path, _name, _lgid)
     , htree(this) {
   I(_name.find('/') == std::string::npos);  // No path in name
 
@@ -30,11 +30,9 @@ LGraph::~LGraph() {
 bool LGraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
 LGraph *LGraph::create(std::string_view path, std::string_view name, std::string_view source) {
-  LGraph *lg = Graph_library::try_find_lgraph(path, name);
-  if (lg == nullptr) {
-    lg = new LGraph(path, name, source);
-  }
-
+  auto *lib = Graph_library::instance(path);
+  I(lib);
+  auto *lg = lib->setup_lgraph(name, source);
   lg->clear();
 
   return lg;
@@ -77,7 +75,7 @@ LGraph *LGraph::open(std::string_view path, Lg_type_id lgid) {
   auto        name = lib->get_name(lgid);
   std::string source{lib->get_source(lgid)};
 
-  return new LGraph(path, name, source);
+  return lib->setup_lgraph(name, source);
 }
 
 LGraph *LGraph::open(std::string_view path, std::string_view name) {
@@ -95,7 +93,7 @@ LGraph *LGraph::open(std::string_view path, std::string_view name) {
 
   std::string source{lib->get_source(name)};
 
-  return new LGraph(path, name, source);
+  return lib->setup_lgraph(name, source);
 }
 
 void LGraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {

@@ -121,11 +121,10 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) {
   for (const auto &ln : lnasts) {
-    // compiler.fir_thread_ln2lg_cprop(lnast);
-    // (void) pool;
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);
   }
   thread_pool.wait_all();
+  // Graph_library::sync_all();
 }
 
 void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {

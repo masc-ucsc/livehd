@@ -57,13 +57,13 @@ protected:
   const std::string library_file;
 
   // Begin protected for MT
-  Name2id                       name2id;          // WR protect on add entries, RD protect any access
-  Recycled_id                   recycled_id;      // WR protect on add entries, RD protect any access
-  std::vector<Graph_attributes> attributes;       // WR protect on add entries, RD protect any access
-  std::vector<Sub_node>         sub_nodes;        // WR protect on add entries, RD protect any access
+  Name2id                       name2id;              // WR protect on add entries, RD protect any access
+  Recycled_id                   recycled_id;          // WR protect on add entries, RD protect any access
+  std::vector<Graph_attributes> attributes;           // WR protect on add entries, RD protect any access
+  std::vector<Sub_node>         sub_nodes;            // WR protect on add entries, RD protect any access
 
-  static Global_instances   global_instances;     // WR protect on add entries, RD protect any access
-  static Global_name2lgraph global_name2lgraph;   // WR protect on add entries, RD protect any access
+  static Global_instances       global_instances;     // WR protect on add entries, RD protect any access
+  static Global_name2lgraph     global_name2lgraph;   // WR protect on add entries, RD protect any access
   // End protect for MT
 
   std::atomic<uint32_t>         max_next_version; // Atomic, no need to lock for this
@@ -211,12 +211,12 @@ public:
 
   Sub_node *ref_sub(std::string_view name) { 
     std::lock_guard<std::mutex> guard(lgs_mutex); 
-    return ref_sub_int(get_lgid(name)); 
+    return ref_sub_int(get_lgid_int(name)); 
   }
 
   const Sub_node &get_sub(std::string_view name) const { 
     std::lock_guard<std::mutex> guard(lgs_mutex); 
-    return get_sub_int(get_lgid(name)); 
+    return get_sub_int(get_lgid_int(name)); 
   }
 
 
@@ -280,11 +280,7 @@ public:
     return copy_lgraph_int(name, new_name);
   }
 
-  Lg_type_id register_lgraph(std::string_view name, std::string_view source, LGraph *lg) {
-    std::lock_guard<std::mutex> guard(lgs_mutex); 
-    return register_lgraph_int(name, source, lg);
-  }
-
+  LGraph *setup_lgraph(std::string_view name, std::string_view source);
 
   void unregister(std::string_view name, Lg_type_id lgid, LGraph *lg = 0) {  // unregister open instance
     std::lock_guard<std::mutex> guard(lgs_mutex); 
@@ -307,7 +303,7 @@ public:
   }
 
   static void sync_all() {  // Called when running out of mmaps
-    // std::lock_guard<std::mutex> guard(lgs_mutex); 
+    std::lock_guard<std::mutex> guard(lgs_mutex); 
     sync_all_int();
   }
 

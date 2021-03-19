@@ -5,7 +5,6 @@
 #include <iostream>
 #include <set>
 
-#include "attribute.hpp"
 #include "graph_library.hpp"
 #include "iassert.hpp"
 #include "lgedgeiter.hpp"
@@ -18,7 +17,6 @@
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
     : Lgraph_base_core(_path, _name, _lgid), node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes")) {
-  I(lgid);  // No id zero allowed
 
   library = Graph_library::instance(path);
 }

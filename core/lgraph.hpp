@@ -22,13 +22,14 @@ protected:
   friend class Fwd_edge_iterator;
   friend class Bwd_edge_iterator;
   friend class Fast_edge_iterator;
+  friend class Graph_library;
 
   // Memoize tables that provide hints (not certainty because add/del operations)
   std::array<Index_ID, 16> memoize_const_hint;
 
   Hierarchy_tree htree;
 
-  explicit LGraph(std::string_view _path, std::string_view _name, std::string_view _source);
+  explicit LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
 
   Index_ID get_root_idx(Index_ID idx) const {
     if (node_internal[idx].is_root())
