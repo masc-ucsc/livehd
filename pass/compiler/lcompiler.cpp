@@ -74,7 +74,6 @@ void Lcompiler::prp_thread_local_cprop_bitwidth(LGraph *lg, Cprop &cp, Bitwidth 
   gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void(); 
 }
 
-
 void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   gviz ? gv.do_from_lnast(ln, "raw") : void(); 
   

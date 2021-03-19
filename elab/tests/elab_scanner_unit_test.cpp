@@ -163,16 +163,3 @@ TEST_F(Elab_test, token_io) {
   EXPECT_EQ(scanner.scan_get_token(2).tok, Token_id_register);
 }
 
-TEST_F(Elab_test, token_refs) {
-  std::string_view txt1(" @ref @_ref_ @$inp @%out @% ");
-  scanner.parse_inline(txt1);
-
-  EXPECT_EQ(5, scanner.debug_token_list.size());
-
-  EXPECT_EQ(scanner.debug_token_list[0], "@ref");
-  EXPECT_EQ(scanner.debug_token_list[1], "@_ref_");
-  EXPECT_EQ(scanner.debug_token_list[2], "@$inp");
-  EXPECT_EQ(scanner.debug_token_list[3], "@%out");
-  EXPECT_EQ(scanner.debug_token_list[4], "@%");
-}
-
