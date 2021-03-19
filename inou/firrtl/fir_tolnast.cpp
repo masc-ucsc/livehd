@@ -2000,9 +2000,8 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
   }
 
   auto *library = Graph_library::instance(fpath);
-  fmt::print("DEBUG2\n");
   auto &sub = library->reset_sub(mod_name, file_name);
-  // also add %/$
+  //FIXME->sh: also add %/$ ?
   return sub;
 }
 

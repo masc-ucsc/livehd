@@ -59,11 +59,8 @@ void Pass_compiler::compile(Eprp_var &var) {
     pyrope_compilation(var, compiler);
   }
 
-  fmt::print("DEBUG-4\n");
   auto lgs = compiler.wait_all();
-  fmt::print("DEBUG-5\n");
   var.add(lgs);
-  fmt::print("DEBUG-6\n");
   return;
 }
 
@@ -83,16 +80,15 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 #ifdef DISABLE_THREAD_POOL
-  fmt::print("DEBUG-0\n");
   compiler.do_fir_lnast2lgraph(var.lnasts);
   compiler.do_cprop();
   compiler.do_firbits();
   compiler.do_firmap_bitwidth();
-  fmt::print("DEBUG-3\n");
 #else
-  fmt::print("DEBUG-1\n");
   compiler.do_fir_lnast2lgraph(var.lnasts);
-  // compiler.do_cprop();
+  compiler.do_cprop();
+  compiler.do_firbits();
+  // compiler.do_firmap_bitwidth();
 #endif
 }
 

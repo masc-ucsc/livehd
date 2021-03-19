@@ -159,13 +159,43 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 
 void Lcompiler::do_cprop() {
   Cprop cp(false, false);  // hier = false, gioc = false
+  auto lgcnt = 0;
+  auto hit = false;
+  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
 
-  for (const auto &lg : lgs) {
-    thread_pool.add(&Lcompiler::fir_thread_cprop, this, lg, cp); 
+  // hierarchical traversal
+  for (auto &lg : lgs) {
+    ++lgcnt;
+    // bottom up approach to parallelly analyze the firbits
+    if (lg->get_name() == top_name_before_mapping) {
+      hit = true;
+      lg->each_sub_hierarchical_unique([this, &cp](Node &node, Lg_type_id lgid) {
+        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
+        LGraph *lg_sub = LGraph::open(path, lgid);
+        fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+        cp.do_trans(lg_sub);
+        gviz ? gv.do_from_lgraph(lg_sub, "local.cprop-ed") : void();
+      });
+
+      // for top lgraph
+      fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
+      cp.do_trans(lg);
+      gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+    }  
   }
-  thread_pool.wait_all();
+
+  if (lgcnt > 1 && hit == false) 
+    Pass::error("Top module not specified for firrtl codes!\n");
+
+
+  // for (const auto &lg : lgs) {
+  //   thread_pool.add(&Lcompiler::fir_thread_cprop, this, lg, cp); 
+  // }
+  // thread_pool.wait_all();
+
 }
 
+// FIXME->sh: to be deprecated by bottom-up paralellism
 void Lcompiler::fir_thread_cprop(LGraph *lg, Cprop &cp) {
   fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
   cp.do_trans(lg);
@@ -210,8 +240,6 @@ void Lcompiler::do_firbits() {
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
 
-      // for sub lgraphs
-      // lg->each_sub_hierarchical_unique([&fm, &gv, this](Node &node, Lg_type_id lgid) {
       lg->each_sub_hierarchical_unique([this](Node &node, Lg_type_id lgid) {
         fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
         LGraph *lg_sub = LGraph::open(path, lgid);
@@ -227,10 +255,9 @@ void Lcompiler::do_firbits() {
       fm.do_firbits_analysis(lg);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
+      gviz ? gv.do_from_lgraph(lg, "gioc.firbits-ed") : void(); 
     }
-    gviz ? gv.do_from_lgraph(lg, "gioc.firbits-ed") : void(); 
   }
-
   if (lgcnt > 1 && hit == false) 
     Pass::error("Top module not specified for firrtl codes!\n");
 }
