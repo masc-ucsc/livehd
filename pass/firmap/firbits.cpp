@@ -11,6 +11,7 @@
 
 void Firmap::do_firbits_analysis(LGraph *lg) {
   Lbench b("pass.firbits");
+  lgid = lg->get_lgid();
 
   lg->regenerate_htree(); // called bottom up, and the hierarchy may have been unfinished before
   for (auto node : lg->forward()) {
@@ -125,30 +126,6 @@ void Firmap::analysis_lg_mux(Node &node) {
       return;
   }
   fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign));
-  /* Bits_t max_bits     = 0; */
-  /* bool   sign         = false; */
-  /* bool   is_1st_input = true; */
-  /* for (auto e : inp_edges) { */
-  /*   if (e.sink.get_pid() == 0) */
-  /*     continue;  // Skip select */
-
-  /*   auto it = fbmap.find(e.driver.get_compact_flat()); */
-  /*   if (it != fbmap.end()) { */
-  /*     if (is_1st_input) { */
-  /*       max_bits     = it->second.get_bits(); */
-  /*       sign         = it->second.get_sign(); */
-  /*       is_1st_input = false; */
-  /*     } else { */
-  /*       I(sign == it->second.get_sign()); */
-  /*       max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits; */
-  /*     } */
-  /*   } else { */
-  /*     // should wait till every input is ready */
-  /*     firbits_issues = true; */
-  /*     return; */
-  /*   } */
-  /* } */
-  /* fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign)); */
 }
 
 void Firmap::analysis_lg_const(Node &node) {
