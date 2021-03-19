@@ -6,6 +6,19 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+http_archive(
+   name = "rules_foreign_cc",
+   sha256 = "c2cdcf55ffaf49366725639e45dedd449b8c3fe22b54e31625eb80ce3a240f1e",
+   strip_prefix = "rules_foreign_cc-0.1.0",
+   url = "https://github.com/bazelbuild/rules_foreign_cc/archive/0.1.0.zip",
+)
+
+load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies(register_preinstalled_tools = False)
+#load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
+#bazel_skylib_workspace()
+#load("//deps:repositories.bzl", "repositories")
+#repositories()
 
 #git_repository(
     #name = "bazel_skylib",
@@ -72,15 +85,6 @@ load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_
 rules_proto_dependencies()
 rules_proto_toolchains()
 
-http_archive(
-    name = "rules_foreign_cc",
-    sha256 = "b7f38c6a6830eac6f2840c567b452d7c096d6352a6717c243a69508b99c74de5",
-    strip_prefix = "rules_foreign_cc-ede2c80a51030c8b5b965680c32768b5acb03f95",
-    urls = ["https://github.com/bazelbuild/rules_foreign_cc/archive/ede2c80a51030c8b5b965680c32768b5acb03f95.zip"],
-)
-
-load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
-rules_foreign_cc_dependencies()
 
 # abseil-cpp
 http_archive(
