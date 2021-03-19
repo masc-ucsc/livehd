@@ -22,6 +22,7 @@ sh_test(
         "//main:lgshell",
         "//inou/yosys:verilog_tests",
         ],
+    tags = ["fixme", "flaky"],
 )
 
 cc_test(
@@ -31,4 +32,5 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         ":pass_sample",
     ],
+    tags = ["fixme", "flaky"],
 )

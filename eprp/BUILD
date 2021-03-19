@@ -23,5 +23,6 @@ cc_test(
         "@com_google_absl//absl/strings",
         ":eprp",
     ],
+    tags = ["fixme", "flaky"],
 )
 

@@ -90,6 +90,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
+    tags = ["fixme"],
 )
 
 cc_test(
@@ -117,6 +118,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "@fmt//:fmt",
     ],
+    tags = ["fixme", "timeout"],
 )
 
 cc_test(
