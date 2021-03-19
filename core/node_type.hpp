@@ -1,6 +1,7 @@
 //  this file is distributed under the bsd 3-clause license. see license for details.
 #pragma once
 
+#include "lgraph_base_core.hpp"
 #include "lgraphbase.hpp"
 #include "mmap_bimap.hpp"
 #include "mmap_map.hpp"
@@ -51,7 +52,7 @@ protected:
 
 public:
   LGraph_Node_Type() = delete;
-  explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id _lgid) noexcept;
+  explicit LGraph_Node_Type(std::string_view path, std::string_view name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
 
   const Node_down_map &get_down_nodes_map() const { return subid_map; };
 };

@@ -29,7 +29,7 @@ protected:
 
   Hierarchy_tree htree;
 
-  explicit LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
+  explicit LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
 
   Index_ID get_root_idx(Index_ID idx) const {
     if (node_internal[idx].is_root())

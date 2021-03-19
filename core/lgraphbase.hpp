@@ -67,7 +67,7 @@ public:
 
   LGraph_Base(const LGraph_Base &) = delete;
 
-  explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept;
+  explicit LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
   virtual ~LGraph_Base();
 
   virtual void clear();

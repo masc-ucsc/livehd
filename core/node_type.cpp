@@ -7,8 +7,8 @@
 
 static_assert(static_cast<int>(Ntype_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 
-LGraph_Node_Type::LGraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid) noexcept
-    : LGraph_Base(_path, _name, _lgid)
+LGraph_Node_Type::LGraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+    : LGraph_Base(_path, _name, _lgid, _lib)
     , const_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_const"))
     , subid_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_subid"))
     , lut_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_lut")) {}

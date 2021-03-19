@@ -518,7 +518,8 @@ LGraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
 
   Lg_type_id lgid = reset_id_int(name, source);
 
-  lg = new LGraph(path, name, lgid);
+  auto *lib = instance_int(path);
+  lg = new LGraph(path, name, lgid, lib);
 
   global_name2lgraph[path][name] = lg;
   attributes[lgid].lg = lg; // It could be already set if there was a copy

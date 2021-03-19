@@ -12,13 +12,13 @@
 #include "annotate.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph_base_core.hpp"
 
-LGraph::LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid)
-    : LGraph_Base(_path, _name, _lgid)
-    , LGraph_Node_Type(_path, _name, _lgid)
+LGraph::LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
+    : LGraph_Base(_path, _name, _lgid, _lib)
+    , LGraph_Node_Type(_path, _name, _lgid, _lib)
     , htree(this) {
   I(_name.find('/') == std::string::npos);  // No path in name
-
   I(_name == get_name());
 }
 
