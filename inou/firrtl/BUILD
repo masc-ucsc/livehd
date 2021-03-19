@@ -33,15 +33,3 @@ cc_library(
         "//pass/common:pass",
     ],
 )
-
-sh_test(
-    name = "firrtl_test_livehd.sh",
-    srcs = ["tests/firrtl_test_livehd.sh"],
-    data = [
-        "//inou/yosys:verilog_tests",
-        "//main:lgshell",
-    ],
-    deps = [
-        "//inou/yosys:scripts"
-    ]
-)
