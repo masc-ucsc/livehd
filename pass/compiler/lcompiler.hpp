@@ -32,11 +32,14 @@ private:
   const std::string_view top;
   const bool             gviz;
 
-  // FIXME->sh: centralized bwmap won't work in the multi-threaded compilation, mimic the new
-  //            firbits/map design
+  // FIXME->sh: centralized bwmap won't work in the multi-threaded compilation, mimic the new firbits/map design
   BWMap_flat global_flat_bwmap;
   BWMap_hier global_hier_bwmap;
-  absl::node_hash_map<uint32_t, FBMap> fbmaps; //Lg_type_id -> fbmap
+
+  // firrtl only tables
+  absl::node_hash_map<uint32_t, FBMap>    fbmaps;        // Lg_type_id -> fbmap
+  absl::node_hash_map<uint32_t, PinMap>   pinmaps;       // Lg_type_id -> pinmap
+  absl::node_hash_map<uint32_t, XorrMap>  spinmaps_xorr; // Lg_type_id -> spinmaps
 
   Graphviz gv;
 

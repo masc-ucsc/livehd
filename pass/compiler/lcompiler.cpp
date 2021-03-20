@@ -216,7 +216,7 @@ void Lcompiler::do_firmap_bitwidth() {
 }
 
 void Lcompiler::fir_thread_firmap_bw(LGraph *lg, Bitwidth &bw, std::vector<LGraph*> &mapped_lgs) {
-    Firmap fm(fbmaps);
+    Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
     fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
     auto new_lg = fm.do_firrtl_mapping(lg);
     gviz ? gv.do_from_lgraph(new_lg, "gioc.firmap-ed") : void(); 
@@ -243,7 +243,7 @@ void Lcompiler::do_firbits() {
       hit = true;
 
       lg->each_sub_hierarchical_unique([this](Node &node, Lg_type_id lgid) {
-        Firmap fm(fbmaps);
+        Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
         fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
         LGraph *lg_sub = LGraph::open(path, lgid);
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
@@ -254,7 +254,7 @@ void Lcompiler::do_firbits() {
       });
 
       // for top lgraph
-      Firmap fm(fbmaps);
+      Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());

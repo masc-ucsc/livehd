@@ -14,7 +14,7 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
   Lbench b("pass.firbits");
 
   {
-    std::lock_guard<std::mutex> guard(fbmaps_mutex); 
+    std::lock_guard<std::mutex> guard(firrtl_maps_mutex); 
     fbmaps.insert_or_assign(lg->get_lgid(), FBMap());
   }
 
@@ -28,9 +28,9 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
     #endif
     auto op = node.get_type_op();
 
-    I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror && op != Ntype_op::And && op != Ntype_op::Sum
-          && op != Ntype_op::Mult && op != Ntype_op::SRA && op != Ntype_op::SHL && op != Ntype_op::Not && op != Ntype_op::GT
-          && op != Ntype_op::LT && op != Ntype_op::EQ && op != Ntype_op::Div,
+    I( op != Ntype_op::Or   && op != Ntype_op::Xor && op != Ntype_op::Ror && op != Ntype_op::And && op != Ntype_op::Sum &&
+       op != Ntype_op::Mult && op != Ntype_op::SRA && op != Ntype_op::SHL && op != Ntype_op::Not && op != Ntype_op::GT &&
+       op != Ntype_op::LT   && op != Ntype_op::EQ  && op != Ntype_op::Div,
       "basic op should be a fir_op_subnode before the firmap pass!");
 
     if (op == Ntype_op::Sub) {
