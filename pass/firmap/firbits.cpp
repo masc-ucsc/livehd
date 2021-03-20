@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <bits/stdint-uintn.h>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -11,10 +12,17 @@
 
 void Firmap::do_firbits_analysis(LGraph *lg) {
   Lbench b("pass.firbits");
-  lgid = lg->get_lgid();
+
+  {
+    std::lock_guard<std::mutex> guard(fbmaps_mutex); 
+    fbmaps.insert_or_assign(lg->get_lgid(), FBMap());
+  }
+
 
   lg->regenerate_htree(); // called bottom up, and the hierarchy may have been unfinished before
   for (auto node : lg->forward()) {
+    auto &fbmap = fbmaps.find(lg->get_lgid())->second;
+
     #ifndef NDEBUG
       fmt::print("{}\n", node.debug_name());
     #endif
@@ -28,23 +36,23 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
     if (op == Ntype_op::Sub) {
       auto subname = node.get_type_sub_node().get_name();
       if (subname.substr(0, 6) == "__fir_")
-        analysis_fir_ops(node, subname);
+        analysis_fir_ops(node, subname, fbmap);
       else
         continue;
     } else if (op == Ntype_op::Const) {
-      analysis_lg_const(node);
+      analysis_lg_const(node, fbmap);
     } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
       continue;  // Nothing to do for this
     } else if (op == Ntype_op::AttrSet) {
-      analysis_lg_attr_set(node);
+      analysis_lg_attr_set(node, fbmap);
       if (node.is_invalid())
         continue;
     } else if (op == Ntype_op::AttrGet) {
       I(false, "firrtl ir should not have any attr_get node, it's achieved by firrtl bits op");
     } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
-      analysis_lg_flop(node);
+      analysis_lg_flop(node, fbmap);
     } else if (op == Ntype_op::Mux) {
-      analysis_lg_mux(node);
+      analysis_lg_mux(node, fbmap);
     } else {
       fmt::print("FIXME: node:{} still not handled by firrtl bits analysis\n", node.debug_name());
     }
@@ -64,7 +72,7 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
   /* } */
 }
 
-void Firmap::analysis_lg_flop(Node &node) {
+void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
   I(node.is_sink_connected("din"));
   auto qpin    = node.get_driver_pin();
   auto it_qpin = fbmap.find(qpin.get_compact_flat());
@@ -93,7 +101,7 @@ void Firmap::analysis_lg_flop(Node &node) {
   }
 }
 
-void Firmap::analysis_lg_mux(Node &node) {
+void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
   auto inp_edges = node.inp_edges();
   I(inp_edges.size());  // Dangling???
 
@@ -128,23 +136,23 @@ void Firmap::analysis_lg_mux(Node &node) {
   fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(max_bits, sign));
 }
 
-void Firmap::analysis_lg_const(Node &node) {
+void Firmap::analysis_lg_const(Node &node, FBMap &fbmap) {
   auto dpin = node.get_driver_pin();
   auto bits = node.get_type_const().get_bits() - 1;  // -1 for turn sbits to ubits
   fbmap.insert_or_assign(dpin.get_compact_flat(), Firrtl_bits(bits, false));
 }
 
-void Firmap::analysis_lg_attr_set(Node &node) {
+void Firmap::analysis_lg_attr_set(Node &node, FBMap &fbmap) {
   if (node.is_sink_connected("field")) {
-    analysis_lg_attr_set_new_attr(node);
+    analysis_lg_attr_set_new_attr(node, fbmap);
   } else {
-    analysis_lg_attr_set_propagate(node);
+    analysis_lg_attr_set_propagate(node, fbmap);
   }
 }
 
 // from firrtl front-end, the only possible attr_set_propagate will happen is the variable pre-declaration before mux, so the
 // attr_propagate could just follow the chain fbits
-void Firmap::analysis_lg_attr_set_propagate(Node &node_attr) {
+void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("name"));
   I(node_attr.is_sink_connected("chain"));
   auto parent_attr_dpin = node_attr.get_sink_pin("chain").get_driver_pin();
@@ -162,7 +170,7 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr) {
   for (auto out_dpin : node_attr.out_connected_pins()) fbmap.insert_or_assign(out_dpin.get_compact_flat(), parent_attr_bw);
 }
 
-void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
+void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_name();
@@ -172,7 +180,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
   }
 
   if (attr == Attr::Set_dp_assign) {
-    analysis_lg_attr_set_dp_assign(node_attr);
+    analysis_lg_attr_set_dp_assign(node_attr, fbmap);
     return;
   }
 
@@ -243,7 +251,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr) {
   }
 }
 
-void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp) {
+void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
   auto dpin_lhs = node_dp.get_sink_pin("value").get_driver_pin();
   auto dpin_rhs = node_dp.get_sink_pin("name").get_driver_pin();
 
@@ -301,87 +309,93 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
   return Attr::Set_other;
 }
 
-void Firmap::analysis_fir_ops(Node &node, std::string_view op) {
+void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
   //TODO: Create a map that indexed by op and returns a std::function (faster)
 
   auto inp_edges = node.inp_edges();
 	if (op == "__fir_const") {
-		analysis_fir_const(node);
+		analysis_fir_const(node, fbmap);
 	} else if (op == "__fir_add" || op == "__fir_sub") {
-    analysis_fir_add_sub(node, inp_edges);
+    analysis_fir_add_sub(node, inp_edges, fbmap);
   } else if (op == "__fir_mul") {
-    analysis_fir_mul(node, inp_edges);
+    analysis_fir_mul(node, inp_edges, fbmap);
   } else if (op == "__fir_div") {
-    analysis_fir_div(node, inp_edges);
+    analysis_fir_div(node, inp_edges, fbmap);
   } else if (op == "__fir_rem") {
-    analysis_fir_rem(node, inp_edges);
+    analysis_fir_rem(node, inp_edges, fbmap);
   } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || op == "__fir_geq" || op == "__fir_eq" || op == "__fir_neq") {
-    analysis_fir_comp(node, inp_edges);
+    analysis_fir_comp(node, inp_edges, fbmap);
   } else if (op == "__fir_pad") {
-    analysis_fir_pad(node, inp_edges);
+    analysis_fir_pad(node, inp_edges, fbmap);
   } else if (op == "__fir_as_uint") {
-    analysis_fir_as_uint(node, inp_edges);
+    analysis_fir_as_uint(node, inp_edges, fbmap);
   } else if (op == "__fir_as_sint") {
-    analysis_fir_as_sint(node, inp_edges);
+    analysis_fir_as_sint(node, inp_edges, fbmap);
   } else if (op == "__fir_as_clock") {
     I(false); // TODO
   } else if (op == "__fir_as_async") {
     I(false); // TODO
   } else if (op == "__fir_shl") {
-    analysis_fir_shl(node, inp_edges);
+    analysis_fir_shl(node, inp_edges, fbmap);
   } else if (op == "__fir_shr") {
-    analysis_fir_shr(node, inp_edges);
+    analysis_fir_shr(node, inp_edges, fbmap);
   } else if (op == "__fir_dshl") {
-    analysis_fir_dshl(node, inp_edges);
+    analysis_fir_dshl(node, inp_edges, fbmap);
   } else if (op == "__fir_dshr") {
-    analysis_fir_dshr(node, inp_edges);
+    analysis_fir_dshr(node, inp_edges, fbmap);
   } else if (op == "__fir_cvt") {
-    analysis_fir_cvt(node, inp_edges);
+    analysis_fir_cvt(node, inp_edges, fbmap);
   } else if (op == "__fir_neg") {
-    analysis_fir_neg(node, inp_edges);
+    analysis_fir_neg(node, inp_edges, fbmap);
   } else if (op == "__fir_not") {
-    analysis_fir_not(node, inp_edges);
+    analysis_fir_not(node, inp_edges, fbmap);
   } else if (op == "__fir_and" || op == "__fir_or" || op == "__fir_xor") {
-    analysis_fir_bitwise(node, inp_edges);
+    analysis_fir_bitwise(node, inp_edges, fbmap);
   } else if (op == "__fir_andr" || op == "__fir_orr" || op == "__fir_xorr") {
-    analysis_fir_bitwire_reduction(node, inp_edges);
+    analysis_fir_bitwire_reduction(node, inp_edges, fbmap);
   } else if (op == "__fir_bits") {
-    analysis_fir_bits_extract(node, inp_edges);
+    analysis_fir_bits_extract(node, inp_edges, fbmap);
   } else if (op == "__fir_cat") {
-    analysis_fir_cat(node, inp_edges);
+    analysis_fir_cat(node, inp_edges, fbmap);
   } else if (op == "__fir_head") {
-    analysis_fir_head(node, inp_edges);
+    analysis_fir_head(node, inp_edges, fbmap);
   } else if (op == "__fir_tail") {
-    analysis_fir_tail(node, inp_edges);
+    analysis_fir_tail(node, inp_edges, fbmap);
   } else {
     I(false, "typo?");
   }
 }
 
-void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
+FBMap::iterator Firmap::get_fbitr_from_hierarchy(XEdge &e) {
+  auto h_spin = e.sink.get_hierarchical();
+  auto driver_list = h_spin.inp_driver();
+  I(driver_list.size()==1);
+  auto h_dpin = driver_list[0];
+
+  I(!h_dpin.is_invalid()); // connected
+  I(h_dpin != e.driver);
+  auto hier_lgid = h_dpin.get_node().get_class_lgraph()->get_lgid();
+  // auto &hier_fbmap = fbmaps.find(hier_lgid)->second;
+  auto &hier_fbmap = fbmaps[hier_lgid];
+
+  auto it = hier_fbmap.find(h_dpin.get_compact_flat());
+  if (it == hier_fbmap.end()) {
+    #ifndef NDEBUG
+      Pass::error("{} input driver {} not ready\n", e.sink.get_node().debug_name(), e.driver.debug_name());
+    #endif
+    firbits_issues = true;
+  }
+  return it;
+}
+
+void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
-  for (auto e : inp_edges) {
+  for (auto &e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -392,30 +406,14 @@ void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1 - bits2, false));
 }
 
-void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits2 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       continue;
@@ -426,7 +424,7 @@ void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits2, false));
 }
 
-void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 3);
   Bits_t hi = 0, lo = 0;
   bool   sign = false;
@@ -434,24 +432,8 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       sign = it->second.get_sign();
@@ -464,31 +446,15 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(hi - lo + 1, false));
 }
 
-void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -501,56 +467,20 @@ void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1 + bits2, false));
 }
 
-void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_bitwire_reduction(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
-  for (auto e : inp_edges) {
-    auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
-  }
+  // a single bit wire, need no firbits propagation
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(1, false));
 }
-void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -563,30 +493,14 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2), sign));
 }
 
-void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -596,30 +510,14 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, false));
 }
 
-void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -629,31 +527,15 @@ void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1 + 1, true));
 }
 
-void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -668,7 +550,7 @@ void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
   Bits_t bits1 = 0, bits2 = 0;
   (void)bits2;
@@ -676,24 +558,8 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -705,31 +571,15 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, sign));
 }
 
-void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -740,31 +590,15 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges) {
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1 + std::pow(2, bits2) - 1, sign));
 }
-void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -781,31 +615,15 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -817,30 +635,14 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1 + bits2, sign));
 }
 
-void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -849,30 +651,14 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, true));
 }
 
-void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -881,31 +667,15 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, false));
 }
 
-void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -917,30 +687,14 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::max(bits1, bits2), sign));
 }
 
-void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size());
   bool sign;
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       sign = it->second.get_sign();
@@ -951,31 +705,15 @@ void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(1, false));
 }
 
-void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size());
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -988,7 +726,7 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(std::min(bits1, bits2), sign));
 }
 
-void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size());
 
   Bits_t bits1 = 0;
@@ -996,24 +734,8 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -1029,7 +751,7 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges) {
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, sign));
 }
 
-void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
@@ -1037,25 +759,8 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();
@@ -1069,7 +774,7 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges) {
 }
 
 
-void Firmap::analysis_fir_const(Node &node) {
+void Firmap::analysis_fir_const(Node &node, FBMap &fbmap) {
 	Bits_t bits;
 	bool   sign;
 	std::string const_str = (std::string)node.setup_driver_pin("Y").get_name();
@@ -1086,31 +791,15 @@ void Firmap::analysis_fir_const(Node &node) {
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits, sign));
 }
 
-void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges) {
+void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);
 
   Bits_t bits1 = 0, bits2 = 0;
   bool   sign = false;
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_flat());
-    if (it == fbmap.end()) {
-      auto h_spin = e.sink.get_hierarchical();
-      auto driver_list = h_spin.inp_driver();
-      I(driver_list.size()==1);
-      auto h_dpin = driver_list[0];
-
-      I(!h_dpin.is_invalid()); // connected
-      I(h_dpin != e.driver);
-
-      it = fbmap.find(h_dpin.get_compact_flat());
-      if (it == fbmap.end()) {
-        #ifndef NDEBUG
-          fmt::print("    {} input driver {} not ready\n", node.debug_name(), e.driver.debug_name());
-        #endif
-        firbits_issues = true;
-        return;
-      }
-    }
+    if (it == fbmap.end()) 
+      it = get_fbitr_from_hierarchy(e);
 
     if (e.sink.get_pin_name() == "e1") {
       bits1 = it->second.get_bits();

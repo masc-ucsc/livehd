@@ -4,7 +4,7 @@
 #include "lcompiler.hpp"
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz) 
-  : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir), fm() {
+  : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {
   }
 
 void Lcompiler::do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) {
@@ -139,11 +139,13 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   // "__firrtl_" prefix for the firrtl_op_lgs
   fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-1)\n", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   auto module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
-  Lnast_tolg ln2lg(module_name, path);
 
-  const auto lnidx_top = ln->get_root();
-  const auto top_stmts = ln->get_first_child(lnidx_top);
+  Lnast_tolg ln2lg(module_name, path);
+  auto lnidx_top = ln->get_root();
+  auto top_stmts = ln->get_first_child(lnidx_top);
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
+
+
   if (gviz) {
     for (const auto &lg : local_lgs) 
       gv.do_from_lgraph(lg, "local.raw"); 
@@ -214,6 +216,7 @@ void Lcompiler::do_firmap_bitwidth() {
 }
 
 void Lcompiler::fir_thread_firmap_bw(LGraph *lg, Bitwidth &bw, std::vector<LGraph*> &mapped_lgs) {
+    Firmap fm(fbmaps);
     fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
     auto new_lg = fm.do_firrtl_mapping(lg);
     gviz ? gv.do_from_lgraph(new_lg, "gioc.firmap-ed") : void(); 
@@ -240,21 +243,23 @@ void Lcompiler::do_firbits() {
       hit = true;
 
       lg->each_sub_hierarchical_unique([this](Node &node, Lg_type_id lgid) {
+        Firmap fm(fbmaps);
         fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
         LGraph *lg_sub = LGraph::open(path, lgid);
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
-        gviz ? gv.do_from_lgraph(lg_sub, "gioc.firbits-ed") : void(); 
+        gviz ? gv.do_from_lgraph(lg_sub, "firbits-ed") : void(); 
       });
 
       // for top lgraph
+      Firmap fm(fbmaps);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
       fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg->get_name());
       fm.do_firbits_analysis(lg);
-      gviz ? gv.do_from_lgraph(lg, "gioc.firbits-ed") : void(); 
+      gviz ? gv.do_from_lgraph(lg, "firbits-ed") : void(); 
     }
   }
   if (lgcnt > 1 && hit == false) 
