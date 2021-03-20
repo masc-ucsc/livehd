@@ -43,6 +43,7 @@ cc_test(
         ":core",
         "@com_google_googletest//:gtest_main",
         ],
+    tags = ["fixme", "timeout"],
     )
 
 cc_test(
@@ -51,6 +52,7 @@ cc_test(
     deps = [
         ":tree_lgdb_test",
         ],
+    tags = ["fixme", "flaky"],
     )
 
 cc_test(
@@ -59,6 +61,7 @@ cc_test(
     deps = [
         ":tree_lgdb_test",
         ],
+    tags = ["fixme", "timeout"],
     )
 
 cc_test(
@@ -112,6 +115,7 @@ cc_test(
     deps = [
         ":core",
         ],
+    tags = ["fixme"],
     )
 
 cc_test(
@@ -122,6 +126,7 @@ cc_test(
          "@fmt//:fmt",
 	 ":tree_lgdb_test",
         ],
+    tags = ["fixme"],
     )
 
 cc_test(

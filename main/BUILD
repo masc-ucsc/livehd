@@ -77,7 +77,8 @@ sh_test(
     size = "medium", # give some extra time to the slow machines
     deps = [
         "//inou/yosys:scripts",
-    ]
+    ],
+    tags = ["fixme"],
 )
 
 sh_test(
@@ -87,7 +88,7 @@ sh_test(
         "//inou/yosys:verilog_tests",
         ":lgshell",
         ],
-    tags = ["long1"],
+    tags = ["fixme", "long1"],
     size = "large",
     args = ["long"],
     deps = [

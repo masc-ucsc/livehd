@@ -25,6 +25,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         ":pass_lec",
     ],
+    tags = ["fixme", "flaky"],
 )
 
 cc_test(

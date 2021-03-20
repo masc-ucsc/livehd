@@ -27,7 +27,8 @@ sh_test(
     ],
     deps = [
         "//inou/yosys:scripts",
-    ]
+    ],
+    tags = ["fixme"],
 )
 
 

@@ -70,6 +70,7 @@ cc_test(
         ":elab",
         "@com_google_googletest//:gtest_main",
         ],
+    tags = ["fixme"],
     )
 
 cc_test(

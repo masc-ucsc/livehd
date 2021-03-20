@@ -24,7 +24,8 @@ sh_test(
     ],
     deps = [
         "//inou/yosys:scripts",
-    ]
+    ],
+    tags = ["fixme"],
 )
 
 sh_test(
@@ -36,5 +37,6 @@ sh_test(
     ],
     deps = [
         "//inou/yosys:scripts",
-    ]
+    ],
+    tags = ["fixme"],
 )

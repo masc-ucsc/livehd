@@ -40,4 +40,5 @@ cc_test(
     deps = [
         ":semantic_check",
         ],
+    tags = ["fixme"],
     )

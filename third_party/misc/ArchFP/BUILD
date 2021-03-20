@@ -22,6 +22,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         ":archfp",
         ],
+    tags = ["fixme", "flaky"],
     )
 
 # makefile and other non-source files are kept but not used.

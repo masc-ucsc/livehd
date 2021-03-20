@@ -28,6 +28,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         "//simlib:headers",
         ],
+    tags = ["fixme"],
     )
 
 cc_binary(

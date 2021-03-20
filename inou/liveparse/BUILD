@@ -23,6 +23,7 @@ cc_test(
         "@com_google_googletest//:gtest_main",
         ":inou_liveparse",
     ],
+    tags = ["fixme", "flaky"],
 )
 
 sh_test(
@@ -32,7 +33,5 @@ sh_test(
     data = [
         "//main:lgshell",
         "//inou/yosys:verilog_tests",
-        "//projects/boom:firesim_boom",
-        "//tests/benchmarks/boom:boombase",
         ],
 )
