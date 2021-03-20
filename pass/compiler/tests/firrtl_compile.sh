@@ -33,7 +33,7 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='EnableShiftRegister'
+  # pts='Adder4'
 
 else
   file=$(basename $1)

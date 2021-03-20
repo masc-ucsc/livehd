@@ -4,6 +4,7 @@
 #include <mutex>
 #include <vector>
 
+#include "absl/container/node_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "bitwidth_range.hpp"
 #include "lgraph.hpp"
@@ -18,8 +19,11 @@
 #include "bitwidth.hpp"
 #include "firmap.hpp"
 
+// FIXME->sh: centralized bwmap won't work in the multi-threaded compilation, mimic the new
+//            firbits/map design
 using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
 using BWMap_hier = absl::flat_hash_map<Node_pin::Compact,      Bitwidth_range>;
+
 
 class Lcompiler {
 private:
@@ -27,11 +31,14 @@ private:
   const std::string      odir; // FIXME->sh: why not use string_view?
   const std::string_view top;
   const bool             gviz;
+
+  // FIXME->sh: centralized bwmap won't work in the multi-threaded compilation, mimic the new
+  //            firbits/map design
   BWMap_flat global_flat_bwmap;
   BWMap_hier global_hier_bwmap;
+  absl::node_hash_map<uint32_t, FBMap> fbmaps; //Lg_type_id -> fbmap
 
   Graphviz gv;
-  Firmap   fm;
 
 protected:
   std::mutex lgs_mutex;

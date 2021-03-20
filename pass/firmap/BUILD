@@ -12,5 +12,6 @@ cc_library(
     copts = COPTS,
     deps = [
         "//pass/common:pass",
+        "@com_google_absl//absl/container:node_hash_map",
     ]
 )

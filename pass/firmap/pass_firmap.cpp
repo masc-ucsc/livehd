@@ -27,8 +27,9 @@ Pass_firmap::Pass_firmap(const Eprp_var &var) : Pass("pass.firmap", var) {
 
 void Pass_firmap::trans(Eprp_var &var) {
   Pass_firmap p(var);
-  Firmap fm;
-
+  absl::node_hash_map<uint32_t, FBMap> fbmaps; //Lg_type_id -> fbmap
+ 
+  Firmap fm(fbmaps);
   std::vector<const LGraph *> lgs;
   for (const auto &lg : var.lgs) {
     fm.do_firbits_analysis(lg);
