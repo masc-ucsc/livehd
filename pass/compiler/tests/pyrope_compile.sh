@@ -104,7 +104,7 @@ Pyrope_compile () {
       if [ $? -eq 0 ]; then
         echo "Successfully pass LEC!"
       else
-          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+          echo "FAIL: ${pt}.v !== ${pt}.gld.v"
           exit 1
       fi
   done
@@ -195,11 +195,10 @@ Pyrope_compile_hier () {
   if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
   else
-      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+      echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
       exit 1
   fi
 }
-
 
 rm -rf ./lgdb
 Pyrope_compile_hier "$pts_hier1"
@@ -208,8 +207,9 @@ Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 
+# Do not remove verilog, I tend to have tests cases in homedirectory
+#rm -f *.v
+rm -f ./*.dot
+rm -f ./lgcheck*
+rm -f ./*.tcl
 
-rm -f *.dot
-rm -f *.v
-rm -f lgcheck*
-rm -f *.tcl

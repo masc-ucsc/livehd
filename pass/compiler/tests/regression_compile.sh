@@ -20,7 +20,7 @@ VecShiftRegister Counter VecSearch ResetShiftRegister Parity
 EnableShiftRegister GCD_3bits Flop Accumulator LFSR16 BundleConnect SubModule
 Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
 Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
-VecShiftRegisterParam VecShiftRegisterSimple ' 
+VecShiftRegisterParam VecShiftRegisterSimple '
 
 
 pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
@@ -28,7 +28,7 @@ Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
 Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
 Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
 Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
-LFSR16 VendingMachine VendingMachineSwitch'  
+LFSR16 VendingMachine VendingMachineSwitch'
 
 
 LGSHELL=./bazel-bin/main/lgshell
@@ -99,7 +99,7 @@ firrtl_test() {
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
-    
+
     if [ "${FIRRTL_LEVEL}" == "hi" ]; then
         python3 ${POST_IO_RENAME} "${pt}.v"
     fi
@@ -109,7 +109,7 @@ firrtl_test() {
     if [ $? -eq 0 ]; then
       echo "Successfully pass LEC!"
     else
-        echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+        echo "FAIL: ${pt}.v !== ${pt}.gld.v"
         exit 1
     fi
   done
@@ -228,7 +228,7 @@ Pyrope_compile () {
       if [ $? -eq 0 ]; then
         echo "Successfully pass LEC!"
       else
-          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+          echo "FAIL: ${pt}.v !== ${pt}.gld.v"
           exit 1
       fi
   done
@@ -318,11 +318,10 @@ Pyrope_compile_hier () {
   if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
   else
-      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+      echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
       exit 1
   fi
 }
-
 
 rm -rf ./lgdb
 Pyrope_compile_hier "$pts_hier1"
@@ -331,14 +330,8 @@ Pyrope_compile_hier "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile "$pts"
 
-
-rm -f *.dot
-rm -f *.v
-rm -f lgcheck*
-
-
-
-
-
+#rm -f *.v
+rm -f ./*.dot
+rm -f ./lgcheck*
 
 

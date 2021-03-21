@@ -151,7 +151,7 @@ firrtl_test() {
     if [ $? -eq 0 ]; then
       echo "Successfully pass LEC!"
     else
-        echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+        echo "FAIL: ${pt}.v !== ${pt}.gld.v"
         exit 1
     fi
   done
