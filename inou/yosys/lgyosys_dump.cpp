@@ -590,9 +590,12 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         module->addNot(next_id(g), wire, cell_output_map[node.get_driver_pin().get_compact()]);
       }
       break;
-      case Ntype_op::Tposs: {
-        auto *in_wire  = get_wire(node.get_sink_pin().get_driver_pin());
+      case Ntype_op::Get_mask: {
+        auto *in_wire  = get_wire(node.get_sink_pin("a").get_driver_pin());
         auto *out_wire = cell_output_map[node.get_driver_pin().get_compact()];
+
+        I(node.get_sink_pin("mask").get_driver_node().is_type_const());
+        I(node.get_sink_pin("mask").get_driver_node().get_type_const() == Lconst(-1)); // FIXME: implement the other options
 
         unsigned_wire.insert(out_wire);
 

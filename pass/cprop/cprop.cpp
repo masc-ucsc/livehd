@@ -185,8 +185,9 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
     }
-    if (prev_op == Ntype_op::Tposs) {
-      if (op == Ntype_op::Tposs) {
+    if (prev_op == Ntype_op::Get_mask) {
+      if (op == Ntype_op::Get_mask) {
+        // Since this node get_mask has 1 input, value is not set
         collapse_forward_always_pin0(node, inp_edges_ordered);
         return;
       } else if (op == Ntype_op::Ror) {
@@ -320,9 +321,27 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     TRACE(fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope()));
 
     replace_node(node, result);
-  } else if (op == Ntype_op::Tposs) {
+  } else if (op == Ntype_op::Get_mask) {
     Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
-    replace_node(node, val.tposs_op());
+    auto mask_spin = node.get_sink_pin("mask");
+    if (mask_spin.is_connected()) {
+      auto mask = mask_spin.get_driver_node().get_type_const();
+      replace_node(node, val.get_mask_op(mask));
+    }else{
+      replace_node(node, val.get_mask_op()); // old tposs
+    }
+  } else if (op == Ntype_op::Set_mask) {
+    Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
+    auto mask_spin  = node.get_sink_pin("mask");
+    auto value_spin = node.get_sink_pin("value");
+
+    if (mask_spin.is_connected() && value_spin.is_connected()) {
+      auto mask  = mask_spin.get_driver_node().get_type_const();
+      auto value = value_spin.get_driver_node().get_type_const();
+      replace_node(node, val.set_mask_op(mask, value));
+    }else{
+      replace_node(node, val);
+    }
   } else if (op == Ntype_op::Sum) {
     Lconst result;
     for (auto &i : inp_edges_ordered) {
@@ -338,25 +357,15 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
-    Bits_t max_bits = 0;
+    Lconst result;
     for (auto &e : inp_edges_ordered) {
       auto c = e.driver.get_node().get_type_const();
-      if (c.get_bits() > max_bits)
-        max_bits = c.get_bits();
-    }
-    Lconst result(0);
-    for (auto &e : inp_edges_ordered) {
-      auto c = e.driver.get_node().get_type_const();
-      result = result.or_op(c.adjust_bits(max_bits));
+      result = result.or_op(c);
     }
 
     TRACE(fmt::print("cprop: and node:{} to {}\n", node.debug_name(), result.to_pyrope()));
 
-    Lconst result_reduced = result == 0 ? 0 : 1;
-    #ifndef NDEBUG
-      fmt::print("node {}, result {}, result_reduced {}\n", node.debug_name(), result.to_i(), result_reduced.to_i());
-    #endif
-    replace_logic_node(node, result, result_reduced);
+    replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
 #if 0
@@ -458,10 +467,8 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
   node.del_node();
 }
 
-// FIXME: not sure
-void Cprop::replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced) {
+void Cprop::replace_logic_node(Node &node, const Lconst &result) {
   Node_pin dpin_0;
-  (void)result_reduced;  // no useage for now
 
   for (auto &out : node.out_edges()) {
     if (dpin_0.is_invalid()) {
@@ -627,7 +634,7 @@ void Cprop::process_flop(Node &node) {
 	}
 }
 
-std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) {
+std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) const {
   std::string_view tup_name;
   std::string_view key_name;
   int              key_pos = -1;
@@ -661,6 +668,19 @@ std::tuple<std::string_view, std::string> Cprop::get_tuple_name_key(Node &node) 
         return std::make_tuple(tup_name, v.to_string());
       }
       key_pos = v.to_i();
+    }else{
+      const auto node2_it = node2tuple.find(node2.get_compact());
+      if (node2_it != node2tuple.end() && node2_it->second->is_scalar()) {
+        const auto &d2 = node2_it->second->get_dpin();
+        if (!d2.is_invalid() && d2.is_type_const()) {
+          auto v = d2.get_node().get_type_const();
+          if (!v.is_i()) {
+            I(key_name.empty() || key_name == v.to_string()); // FIXME: we should get rid of field (position can be a string too)
+            return std::make_tuple(tup_name, v.to_string());
+          }
+          key_pos = v.to_i();
+        }
+      }
     }
   }
 

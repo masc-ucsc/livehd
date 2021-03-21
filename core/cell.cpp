@@ -90,7 +90,6 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       return "invalid";
       break;
     case Ntype_op::Not:
-    case Ntype_op::Tposs:
       if (pid == 0)
         return "a";
       return "invalid";
@@ -153,8 +152,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         case 2: return "clock";
         case 3: return "din";
         case 4: return "enable";
-        case 5: return "posclk";
-        case 6: return "negreset";
+        case 5: return "negreset";
+        case 6: return "posclk";
         case 7: return "reset";
         default: return "invalid";
       }
@@ -180,12 +179,26 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         default: return "invalid";
       }
       break;
+    case Ntype_op::Get_mask:
+      switch (pid) {
+        case 0: return "a";    // pass through wire
+        case 2: return "mask"; // bit position
+        default: return "invalid";
+      }
+      break;
+    case Ntype_op::Set_mask:
+      switch (pid) {
+        case 0: return "a";       // pass through wire
+        case 2: return "mask";    // bit position
+        case 4: return "value";
+        default: return "invalid";
+      }
+      break;
     case Ntype_op::TupAdd:
       switch (pid) {
         case 0: return "tuple_name";  // tuple name
         case 2: return "position";    // position of tuple field
-        case 3: return "value";
-          // no 4 to keep f 5
+        case 4: return "value";
         case 5: return "field";  // tuple field
         default: return "invalid";
       }

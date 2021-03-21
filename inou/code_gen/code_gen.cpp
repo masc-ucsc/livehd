@@ -118,7 +118,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_for(curr_index);
     } else if (curr_node_type.is_while()) {
       do_while(curr_index);
-    } else if (curr_node_type.is_tposs()) {
+    } else if (curr_node_type.is_get_mask() || curr_node_type.is_set_mask()) {
       do_tposs(curr_index);
     } else if (curr_node_type.is_primitive_op()) {
       do_op(curr_index);

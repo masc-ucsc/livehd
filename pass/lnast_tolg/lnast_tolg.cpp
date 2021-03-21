@@ -1839,7 +1839,6 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
   auto cur_node  = cur_node_spin.get_node();
   auto cur_ntype = cur_node.get_type_op();
   bool is_leaf   = false;
-  std::string new_hier_name;
 
   if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("position")) {
     auto pos_spin = cur_node.setup_sink_pin("position");
@@ -1855,11 +1854,15 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
     }
 
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
-    auto [tup_name, field_name] = Cprop::get_tuple_name_key(cur_node);
-    if (field_name.empty()) {
-      new_hier_name = hier_name;
-    }else{
-      new_hier_name = absl::StrCat(hier_name, ".", field_name);
+
+    //auto [tup_name, field_name] = Cprop::get_tuple_name_key(cur_node);
+    std::string new_hier_name{hier_name};
+    if (cur_node.is_sink_connected("field")) {
+      auto field_node = cur_node.get_sink_pin("field").get_driver_node();
+      if (field_node.get_type_op() == Ntype_op::TupKey) {
+        auto field_name = field_node.get_driver_pin().get_name();
+        new_hier_name = absl::StrCat(hier_name, ".", field_name);
+      }
     }
     for (auto &e : cur_node.out_edges()) {
       dfs_try_create_flattened_inp(lg, e.sink, new_hier_name, chain_head);

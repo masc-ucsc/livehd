@@ -268,8 +268,10 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std
     new_node = Lnast_node::create_sra();
   } else if (orig_node_type.is_sext()) {
     new_node = Lnast_node::create_sext();
-  } else if (orig_node_type.is_tposs()) {
-    new_node = Lnast_node::create_tposs();
+  } else if (orig_node_type.is_get_mask()) {
+    new_node = Lnast_node::create_get_mask();
+  } else if (orig_node_type.is_set_mask()) {
+    new_node = Lnast_node::create_set_mask();
   } else if (orig_node_type.is_is()) {
     new_node = Lnast_node::create_is();
   } else if (orig_node_type.is_ne()) {

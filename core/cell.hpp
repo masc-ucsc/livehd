@@ -20,7 +20,8 @@ enum class Ntype_op : uint8_t {
   Ror,  // Reduce OR
 
   Not,    // bitwise not
-  Tposs,  // To positive signed
+  Get_mask,  // To positive signed 
+  Set_mask,  // To positive signed 
   Sext,   // Sign extend from a given bit (b) position
 
   LT,  // Less Than   , also GE = !LT
@@ -64,7 +65,7 @@ enum class Ntype_op : uint8_t {
 class Ntype {
 protected:
   inline static constexpr std::string_view cell_name[]
-      = {"Invalid", "Sum", "Mult",  "Div",    "And",    "Or",     "Xor",    "Ror",     "Not",     "Tposs",      "Sext",
+      = {"Invalid", "Sum", "Mult",  "Div",    "And",    "Or",     "Xor",    "Ror",     "Not",     "Get_mask",   "Set_mask", "Sext",
          "LT",      "GT",  "EQ",    "SHL",    "SRA",    "Mux",    "LUT",    "IO",      "Memory",  "Flop",       "Latch",
          "Fflop",   "Sub", "Const", "TupAdd", "TupGet", "TupRef", "TupKey", "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
 
@@ -89,7 +90,7 @@ public:
 
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult && op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror
-           && op != Ntype_op::Not && op != Ntype_op::Tposs;
+           && op != Ntype_op::Not;
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {

@@ -1380,8 +1380,6 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
       next = false;
     } else {
       if (CHECK_RULE(&Prp::rule_tuple_notation)) {
-      }else if (SCAN_IS_TOKEN(Token_id_num, Prp_rule_numerical_constant)) {
-      }else if (SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_identifier)) {
       }else{
         PSEUDO_FAIL();
         next = false;
@@ -1897,9 +1895,7 @@ void Prp::elaborate() {
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
-    fmt::print("Parsing error line {}. Unexpected token [{}].\n",
-               get_token(term_token + base_token).line + 1,
-               scan_text(term_token + base_token + 1));
+    fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   } else {
     fmt::print("\nParsing SUCCESSFUL!\n");

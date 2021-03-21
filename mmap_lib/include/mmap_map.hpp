@@ -812,7 +812,7 @@ private:
         new_mmap_size = calc_mmap_size(n_entries);
       } else {
         assert(new_mmap_size); // preserve last size
-        n_entries = calc_num_entries(new_mmap_size);
+        n_entries = InitialNumElements;
         assert(n_entries>=InitialNumElements);
       }
     }

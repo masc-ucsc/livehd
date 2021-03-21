@@ -104,10 +104,11 @@ void Pass_lec::check_lec(LGraph *g) {
 
     graphIOs.insert( std::pair( input_pin.get_name(), input_pin.get_pid() ) );
 
-    //Works to find matches
-    /*if( graphIOs.count( (std::string)input_pin.get_name() ) ){
-      //fmt::print("Match found at: {}\n",input_pin.get_name() );
-      graphIOs.insert( std::pair( input_pin.get_name(), input_pin.get_pid() ) );
+    if (node.get_type_op() == Ntype_op::Get_mask){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    }
+    if (node.get_type_op() == Ntype_op::Set_mask){
+        fmt::print(" {} Node type  found.\n", node.get_type_name());
     }
     else
     {

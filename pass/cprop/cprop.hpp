@@ -32,7 +32,7 @@ protected:
   void replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered);
   void replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_ordered);
   void replace_node(Node &node, const Lconst &result);
-  void replace_logic_node(Node &node, const Lconst &result, const Lconst &result_reduced);
+  void replace_logic_node(Node &node, const Lconst &result);
 
   void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(Node &node);
@@ -61,10 +61,10 @@ protected:
 
   void process_flop(Node &node);
 
+  std::tuple<std::string_view, std::string> get_tuple_name_key(Node &node) const;
+
 public:
   Cprop(bool _hier, bool _gioc);
-
-  static std::tuple<std::string_view, std::string> get_tuple_name_key(Node &node);
 
   void dump_node2tuples() const;
 

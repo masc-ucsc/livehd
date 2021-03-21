@@ -310,7 +310,7 @@ bool Lgtuple::match_either_partial(std::string_view a, std::string_view b) {
 
 void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup) {
   if (tup->is_scalar()) {
-		I(has_dpin(key)); // It was deleted before
+		I(!has_dpin(key)); // It was deleted before
     key_map.emplace_back(key, tup->get_dpin());
     return;
   }
@@ -621,6 +621,16 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
 bool Lgtuple::append_tuple(const Node_pin &dpin) {
 
 	if (key_map.size() == 1 && key_map[0].first.empty()) {
+    if (key_map[0].second.is_type_const() && dpin.is_type_const()) {
+      auto v1 = key_map[0].second.get_node().get_type_const();
+      auto v2 = dpin.get_node().get_type_const();
+
+      auto res = v2.concat_op(v1);
+
+      auto new_dpin = dpin.get_lg()->create_node_const(res).setup_driver_pin();
+      key_map[0].second = new_dpin;
+      return true;
+    }
 		key_map[0].first = "0";
 		key_map.emplace_back("1", dpin);
 		return true;

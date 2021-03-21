@@ -2,6 +2,6 @@
 
 a.c.foo = 1
 
-index = "c" + ".foo"
+index = "c" ++ ".foo"
 %out = a[index] + 2
 

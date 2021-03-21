@@ -152,12 +152,18 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
     final_expr = absl::StrCat("~", lhs);
 
-  }else if (op == Ntype_op::Tposs) {
+  }else if (op == Ntype_op::Get_mask) {
 #if 0
     const std::string src = get_expression(node.get_sink_pin("a").get_driver_pin());
     final_expr = absl::StrCat("{1'b0,", src, "}");
 #else
-    final_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto a = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
+    if (mask_dpin.is_type_const() && mask_dpin.get_type_const() == Lconst(-1)) {
+      final_expr = a;
+    }else{
+      I(false); // FIXME: implement the more complicated cases (check lconst::get_mask_op)
+    }
 #endif
   }else if (op == Ntype_op::Sext) {
     auto lhs = get_expression(node.get_sink_pin("a").get_driver_pin());
@@ -514,14 +520,14 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
       if (!b_dpin.is_invalid() && b_dpin.is_type_const()) {
         auto dpin2 = node.get_sink_pin("a").get_driver_pin();
         std::string name2 = get_scaped_name(dpin2.get_wire_name());
-        bool out_unsigned2 = dpin2.get_type_op() == Ntype_op::Tposs;
+        bool out_unsigned2 = dpin2.get_type_op() == Ntype_op::Get_mask;
         add_to_pin2var(buffer, dpin2, name2, out_unsigned2);
       }
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
-    }else if (op == Ntype_op::Tposs) {
+    }else if (op == Ntype_op::Get_mask) {
       name = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
-      out_unsigned = true; // Tposs needs a variable because converts/removes sign
+      out_unsigned = true; // Get_mask uses a variable to converts/removes sign in a cleaner way
     }else if (!node.is_type_flop()) {
       if (node.has_name() && node.get_name()[0] != '_')
         continue;

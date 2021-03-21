@@ -56,7 +56,8 @@ public:
 
     // zero/sign extend (becomes Cell:And, Cell:sext, Cell:tposs)
     Lnast_ntype_sext,  // sext(wire, bit) == chop wire/tuple to have sbits == bit, and bit pos is the sign
-    Lnast_ntype_tposs,  // tposs(wire, bit) == wire & ((1<<bit)-1) (but wire can be a tuple) tposs(xx) == tposs(xx)
+    Lnast_ntype_set_mask,
+    Lnast_ntype_get_mask,
 
     // Comparators
     Lnast_ntype_is,
@@ -134,7 +135,8 @@ protected:
     "sra",
 
     "sext",
-    "tposs",
+    "set_mask",
+    "get_mask",
 
     "is",
     "ne",
@@ -215,7 +217,8 @@ public:
   static constexpr Lnast_ntype create_sra()          { return Lnast_ntype(Lnast_ntype_sra); }
 
   static constexpr Lnast_ntype create_sext()         { return Lnast_ntype(Lnast_ntype_sext); }
-  static constexpr Lnast_ntype create_tposs()         { return Lnast_ntype(Lnast_ntype_tposs); }
+  static constexpr Lnast_ntype create_set_mask()     { return Lnast_ntype(Lnast_ntype_set_mask); }
+  static constexpr Lnast_ntype create_get_mask()     { return Lnast_ntype(Lnast_ntype_get_mask); }
 
   static constexpr Lnast_ntype create_is()           { return Lnast_ntype(Lnast_ntype_is); }
   static constexpr Lnast_ntype create_ne()           { return Lnast_ntype(Lnast_ntype_ne); }
@@ -281,7 +284,8 @@ public:
   bool constexpr is_sra()          const { return val == Lnast_ntype_sra; }
 
   bool constexpr is_sext()         const { return val == Lnast_ntype_sext; }
-  bool constexpr is_tposs()         const { return val == Lnast_ntype_tposs; }
+  bool constexpr is_set_mask()     const { return val == Lnast_ntype_set_mask; }
+  bool constexpr is_get_mask()     const { return val == Lnast_ntype_get_mask; }
 
   bool constexpr is_is()           const { return val == Lnast_ntype_is; }
   bool constexpr is_ne()           const { return val == Lnast_ntype_ne; }
@@ -326,7 +330,8 @@ public:
                                                   (val == Lnast_ntype_shr) ||
                                                   (val == Lnast_ntype_sra) ||
                                                   (val == Lnast_ntype_sext) ||
-                                                  (val == Lnast_ntype_tposs); }
+                                                  (val == Lnast_ntype_get_mask) ||
+                                                  (val == Lnast_ntype_set_mask); }
 
   bool constexpr is_nary_op()      const { return (val == Lnast_ntype_bit_and) ||
                                                   (val == Lnast_ntype_bit_or) ||
@@ -352,7 +357,6 @@ public:
       && val != Lnast_ntype_reduce_xor
       && val != Lnast_ntype_mod
       // && val != Lnast_ntype_shr
-      && val != Lnast_ntype_tposs
       && val != Lnast_ntype_is
       && val != Lnast_ntype_ne
       && val != Lnast_ntype_le;

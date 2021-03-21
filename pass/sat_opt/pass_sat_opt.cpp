@@ -190,7 +190,8 @@ void Pass_sat_opt::check_sat_opt(LGraph *g) {
 			  #endif
 	  }
 	  
-	  	  else if (node.get_type_op() == Ntype_op::Tposs) {
+	  	  else if (node.get_type_op() == Ntype_op::Get_mask || node.get_type_op() == Ntype_op::Set_mask) {
+          I(false); // FIX to be a get_bits or set_bits (tposs is gone)
 			  auto inp = node.inp_edges(); // will return one input edge
 			  auto tposs_result = sat.vec_cast(dpin2sat_var[inp[0].driver.get_compact()], inp[0].driver.get_bits()+1, false);
 			  dpin2sat_var[node.setup_driver_pin().get_compact()] = tposs_result;

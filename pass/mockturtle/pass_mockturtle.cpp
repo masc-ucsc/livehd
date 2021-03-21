@@ -622,10 +622,17 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
 
 void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
   for (const auto& node : g->forward()) {
+#if 1
     if (node2gid.find(node.get_compact()) == node2gid.end())
       continue;
 
     unsigned int group_id = node2gid[node.get_compact()];
+#else
+    unsigned int group_id = node.get_label();
+    if (groud_ip==0)
+      continue;
+#endif
+
     if (gid2mt.find(group_id) == gid2mt.end())
       gid2mt[group_id] = mockturtle_network();
 

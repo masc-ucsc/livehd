@@ -31,7 +31,7 @@ struct Lnast_node {
   Etoken      token;
   int16_t     subs; //ssa subscript
 
-  Lnast_node(): subs(0) { }
+  constexpr Lnast_node(): type(Lnast_ntype::create_invalid()), subs(0) { }
 
   Lnast_node(Lnast_ntype _type)
     :type(_type), subs(0) { I(!type.is_invalid());}
@@ -42,6 +42,7 @@ struct Lnast_node {
   Lnast_node(Lnast_ntype _type, const Etoken &_token, int16_t _subs)
     :type(_type), token(_token), subs(_subs) { I(!type.is_invalid());}
 
+  constexpr bool is_invalid() const { return type.is_invalid(); }
   void dump() const;
 
   CREATE_LNAST_NODE(_invalid)
@@ -84,7 +85,8 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_sra)
 
   CREATE_LNAST_NODE(_sext)
-  CREATE_LNAST_NODE(_tposs)
+  CREATE_LNAST_NODE(_set_mask)
+  CREATE_LNAST_NODE(_get_mask)
 
   CREATE_LNAST_NODE(_is)
   CREATE_LNAST_NODE(_ne)

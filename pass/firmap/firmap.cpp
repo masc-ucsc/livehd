@@ -111,7 +111,7 @@ void Firmap::clone_edges(Node &node, PinMap &pinmap) {
 void Firmap::clone_edges_fir_xorr(Node &node, PinMap &pinmap, XorrMap &spinmap_xorr) {
   for (auto &old_spin : node.inp_connected_pins()) {
     auto old_dpin = old_spin.get_driver_pin();
-    for (auto &new_spin : spinmap_xorr[old_spin]) 
+    for (auto &new_spin : spinmap_xorr[old_spin])
       pinmap[old_dpin].connect_sink(new_spin);
   }
 }
@@ -189,7 +189,6 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, LGraph *new_lg, F
 // e1 tail n = e1 & (pow(2, (e1.fbits - n) - 1))
 void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
-  auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
 
   Lconst e1_bits;
   Lconst n;
@@ -214,7 +213,10 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 
   auto new_node_const = new_lg->create_node_const(mask_const);
   new_node_const.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A")); // mask_val -> mask
+
+  auto new_node_tp   = new_lg->create_node(Ntype_op::Get_mask);
   new_node_tp.setup_sink_pin("a").connect_driver(new_node_mask.setup_driver_pin());  // mask -> tp
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
@@ -225,7 +227,6 @@ void Firmap::map_node_fir_tail(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 // FIXME->sh: put a mask to constrain the bits in lgraph? -> yes
 void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
-  auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
   Lconst e1_bits;
   Lconst n;
@@ -243,7 +244,6 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
     }
   }
 
-
   auto shamt = e1_bits - n;
   auto new_node_const_sra = new_lg->create_node_const(shamt);
 
@@ -254,7 +254,9 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
   new_node_sra.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));        // sra -> mask
   new_node_const_mask.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A")); // mask_const-> mask
 
+  auto new_node_tp   = new_lg->create_node(Ntype_op::Get_mask);
   new_node_tp.setup_sink_pin("a").connect_driver(new_node_mask.setup_driver_pin());  // mask -> tp
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
@@ -265,13 +267,12 @@ void Firmap::map_node_fir_head(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node_sra  = new_lg->create_node(Ntype_op::SRA);
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
-  auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
   Node new_node_mask_const;
   Node new_node_lo_const;
   uint32_t hi = 0, lo = 0;
   for (auto old_spin : old_node.inp_connected_pins()) {
     if (old_spin == old_node.setup_sink_pin("e1")) {
-      pinmap.insert_or_assign(old_spin, new_node_sra.setup_sink_pin("a")); 
+      pinmap.insert_or_assign(old_spin, new_node_sra.setup_sink_pin("a"));
     } else if (old_spin == old_node.setup_sink_pin("e2")){
       hi = old_spin.get_driver_node().get_type_const().to_i();
     } else {
@@ -286,6 +287,9 @@ void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   new_node_lo_const.setup_driver_pin().connect_sink(new_node_sra.setup_sink_pin("b"));
   new_node_sra.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));
   new_node_mask_const.setup_driver_pin().connect_sink(new_node_mask.setup_sink_pin("A"));
+
+  auto new_node_tp   = new_lg->create_node(Ntype_op::Get_mask);
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
   new_node_mask.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -297,9 +301,7 @@ void Firmap::map_node_fir_bits(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 // e1 cat e2 = tposs (e1 << e2.fbits || e2)
 void Firmap::map_node_fir_cat(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_shl = new_lg->create_node(Ntype_op::SHL);
-  auto new_node_tp  = new_lg->create_node(Ntype_op::Tposs);
   auto new_node_or  = new_lg->create_node(Ntype_op::Or);
-
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink == old_node.setup_sink_pin("e1")) {
@@ -317,36 +319,35 @@ void Firmap::map_node_fir_cat(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinM
   }
 
   new_node_or.setup_sink_pin("A").connect_driver(new_node_shl.setup_driver_pin()); // (e1 << e2.fbits) -> or
+
+  auto new_node_tp  = new_lg->create_node(Ntype_op::Get_mask);
   new_node_tp.setup_sink_pin("a").connect_driver(new_node_or.setup_driver_pin());  // or -> tp
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
   }
 }
-
-
 
 void Firmap::map_node_fir_orr(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
-  auto new_node_tp = new_lg->create_node(Ntype_op::Tposs);
   Node new_node_logic = new_lg->create_node(Ntype_op::Ror);
 
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node_logic.setup_sink_pin("A"));
-  
+
+  auto new_node_tp = new_lg->create_node(Ntype_op::Get_mask);
   new_node_logic.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_tp.setup_driver_pin());
   }
 }
 
-
 void Firmap::map_node_fir_xorr(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinMap &pinmap, XorrMap &spinmap_xorr) {
-  auto new_node_tp    = new_lg->create_node(Ntype_op::Tposs);
   auto new_node_and   = new_lg->create_node(Ntype_op::And);
   auto new_node_xor   = new_lg->create_node(Ntype_op::Xor);
   auto new_node_const = new_lg->create_node_const(1);
-
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
@@ -355,11 +356,11 @@ void Firmap::map_node_fir_xorr(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
         it = get_fbitr_from_hierarchy(e);
 
       std::vector<Node_pin> new_spins;
-      new_spins.emplace_back(new_node_xor.setup_sink_pin("A"));  
+      new_spins.emplace_back(new_node_xor.setup_sink_pin("A"));
       auto e1_bits = it->second.get_bits();
       for (uint32_t i = 1; i < e1_bits; i++) {
         auto new_node_sra = new_lg->create_node(Ntype_op::SRA);
-        new_spins.emplace_back(new_node_sra.setup_sink_pin("a")); 
+        new_spins.emplace_back(new_node_sra.setup_sink_pin("a"));
         new_node_sra.setup_sink_pin("b").connect_driver(new_lg->create_node_const(i));
         new_node_xor.setup_sink_pin("A").connect_driver(new_node_sra.setup_driver_pin());
       }
@@ -369,6 +370,9 @@ void Firmap::map_node_fir_xorr(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 
   new_node_const.setup_driver_pin().connect_sink(new_node_and.setup_sink_pin("A"));
   new_node_xor.setup_driver_pin().connect_sink(new_node_and.setup_sink_pin("A"));
+
+  auto new_node_tp    = new_lg->create_node(Ntype_op::Get_mask);
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
   new_node_and.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -381,7 +385,6 @@ void Firmap::map_node_fir_andr(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
   auto new_node_not1 = new_lg->create_node(Ntype_op::Not);
   auto new_node_not2 = new_lg->create_node(Ntype_op::Not);
   auto new_node_ror  = new_lg->create_node(Ntype_op::Ror);
-  auto new_node_tp   = new_lg->create_node(Ntype_op::Tposs);
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
@@ -413,6 +416,9 @@ void Firmap::map_node_fir_andr(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 
   new_node_not1.setup_driver_pin().connect_sink(new_node_ror.setup_sink_pin("A"));
   new_node_ror.setup_driver_pin().connect_sink(new_node_not2.setup_sink_pin("a"));
+
+  auto new_node_tp   = new_lg->create_node(Ntype_op::Get_mask);
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
   new_node_not2.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -422,7 +428,6 @@ void Firmap::map_node_fir_andr(Node &old_node, LGraph *new_lg, FBMap &fbmap, Pin
 
 
 void Firmap::map_node_fir_and_or_xor(Node &old_node, LGraph *new_lg, std::string_view op, PinMap &pinmap) {
-  auto new_node_tp = new_lg->create_node(Ntype_op::Tposs);
   Node new_node_logic;
   if (op == "__fir_and") {
     new_node_logic = new_lg->create_node(Ntype_op::And);
@@ -432,9 +437,11 @@ void Firmap::map_node_fir_and_or_xor(Node &old_node, LGraph *new_lg, std::string
     new_node_logic = new_lg->create_node(Ntype_op::Xor);
   }
 
-  for (auto &old_spin : old_node.inp_connected_pins()) 
+  for (auto &old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node_logic.setup_sink_pin("A"));
-  
+
+  auto new_node_tp = new_lg->create_node(Ntype_op::Get_mask);
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
   new_node_logic.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -444,7 +451,6 @@ void Firmap::map_node_fir_and_or_xor(Node &old_node, LGraph *new_lg, std::string
 
 void Firmap::map_node_fir_not(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_not = new_lg->create_node(Ntype_op::Not);
-  auto new_node_tp = new_lg->create_node(Ntype_op::Tposs);
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
@@ -473,7 +479,8 @@ void Firmap::map_node_fir_not(Node &old_node, LGraph *new_lg, FBMap &fbmap, PinM
     }
   }
 
-
+  auto new_node_tp = new_lg->create_node(Ntype_op::Get_mask);
+  new_node_tp.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
   new_node_not.setup_driver_pin().connect_sink(new_node_tp.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -576,8 +583,10 @@ void Firmap::map_node_fir_shr(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 
 
 void Firmap::map_node_fir_as_uint(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
-  auto new_node = new_lg->create_node(Ntype_op::Tposs);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  auto new_node = new_lg->create_node(Ntype_op::Get_mask);
+  new_node.setup_sink_pin("mask").connect_driver(new_lg->create_node_const(-1));
+
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("a"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -625,9 +634,9 @@ void Firmap::map_node_fir_pad(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 void Firmap::map_node_fir_neq(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node_eq = new_lg->create_node(Ntype_op::EQ);
   auto new_node_not = new_lg->create_node(Ntype_op::Not);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node_eq.setup_sink_pin("A"));
-  
+
   new_node_eq.setup_driver_pin().connect_sink(new_node_not.setup_sink_pin("a"));
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node_not.setup_driver_pin());
@@ -636,7 +645,7 @@ void Firmap::map_node_fir_neq(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 
 void Firmap::map_node_fir_eq(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node = new_lg->create_node(Ntype_op::EQ);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("A"));
 
   for (auto old_dpin : old_node.out_connected_pins()) {
@@ -711,9 +720,9 @@ void Firmap::map_node_fir_div(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 
 void Firmap::map_node_fir_mul(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node = new_lg->create_node(Ntype_op::Mult);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("A"));
-  
+
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
@@ -733,9 +742,9 @@ void Firmap::map_node_fir_const(Node &old_node, LGraph *new_lg, PinMap &pinmap) 
 
 void Firmap::map_node_fir_add(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node = new_lg->create_node(Ntype_op::Sum);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("A"));
-  
+
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
@@ -762,9 +771,9 @@ void Firmap::map_node_fir_sub(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
 
 void Firmap::clone_lg_ops_node(Node &old_node, LGraph *new_lg, PinMap &pinmap) {
   auto new_node = new_lg->create_node(old_node);
-  for (auto old_spin : old_node.inp_connected_pins()) 
+  for (auto old_spin : old_node.inp_connected_pins())
     pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin_raw(old_spin.get_pid()));
-  
+
 
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin_raw(old_dpin.get_pid()));
@@ -816,7 +825,7 @@ void Firmap::clone_subgraph_node(Node &old_node_subg, LGraph *new_lg, PinMap &pi
       } else {
         new_spin = new_node_subg.setup_sink_pin(old_io_name);
       }
-      
+
       // map the old_sub sink_pins
       auto old_spin = old_node_subg.setup_sink_pin(old_io_name);
       pinmap.insert_or_assign(old_spin, new_spin);

@@ -33,7 +33,8 @@ protected:
   void process_shl(Node &node, XEdge_iterator &inp_edges);
   void process_sum(Node &node, XEdge_iterator &inp_edges);
   void process_mult(Node &node, XEdge_iterator &inp_edges);
-  void process_tposs(Node &node, XEdge_iterator &inp_edges);
+  void process_get_mask(Node &node);
+  void process_set_mask(Node &node);
   void process_sext(Node &node, XEdge_iterator &inp_edges);
   void process_comparator(Node &node);
   void process_logic_or_xor(Node &node, XEdge_iterator &inp_edges);

@@ -1143,10 +1143,10 @@ TEST_F(Lconst_test, binary) {
   EXPECT_EQ(c.to_verilog(), "'b01?10?1");
 
   Lconst d("___0b1_1x1_");
-  EXPECT_EQ(d.to_string(), "11?1");
-  EXPECT_EQ(d.to_pyrope(), "0b11?1");
-  EXPECT_EQ(d.to_verilog(), "'b11?1");
-  EXPECT_EQ(d.to_yosys(),   "11?1");
+  EXPECT_EQ(d.to_string(), "011?1");
+  EXPECT_EQ(d.to_pyrope(), "0b011?1");
+  EXPECT_EQ(d.to_verilog(), "'b011?1");
+  EXPECT_EQ(d.to_yosys(),   "011?1");
 
   Lconst e("_-__0b1_");
   EXPECT_EQ(e.to_string(), "_-__0b1_");
@@ -1155,20 +1155,21 @@ TEST_F(Lconst_test, binary) {
 
   Lconst f("0b1_0100");
   EXPECT_EQ(f.to_pyrope(), "20");
-  EXPECT_EQ(f.to_verilog(), "6'h14");
+  EXPECT_EQ(f.to_verilog(), "6'sh14"); // 5'h14 would be fine too
   EXPECT_EQ(f.to_yosys(), "010100");
 
   Lconst g("0bxxxx_xxxx_");
-  EXPECT_EQ(g.to_pyrope(),   "0b????????");
-  EXPECT_EQ(g.to_verilog(), "'b????????");
-  EXPECT_EQ(g.to_yosys()    , "????????");
+  EXPECT_EQ(g.to_pyrope(),   "0b0????????");
+  EXPECT_EQ(g.to_verilog(), "'b0????????");
+  EXPECT_EQ(g.to_yosys()    , "0????????");
   Lconst h("0b0??___???_??___?");
   EXPECT_EQ(h,g);
 
   Lconst g2("0bxxxx_xxxx_");
-  EXPECT_EQ(g2.to_pyrope(),   "0b????????");
-  EXPECT_EQ(g2.to_verilog(), "'b????????");
-  EXPECT_EQ(g2.to_yosys()    , "????????");
+  EXPECT_EQ(g2               ,Lconst("0b0000000????????")); // positive, add zeroes at will
+  EXPECT_EQ(g2.to_pyrope(),   "0b0????????");
+  EXPECT_EQ(g2.to_verilog(), "'b0????????");
+  EXPECT_EQ(g2.to_yosys()    , "0????????"); // 0 as MSB because it is a positive number
 
 
   Lconst j("-17");
@@ -1178,7 +1179,7 @@ TEST_F(Lconst_test, binary) {
 
   Lconst k("17");
   EXPECT_EQ(k.to_pyrope(),   "17");
-  EXPECT_EQ(k.to_verilog(), "6'h11"); // hex positives
+  EXPECT_EQ(k.to_verilog(), "6'sh11"); // hex positives
   EXPECT_EQ(k.to_yosys()    ,"010001");
 }
 
@@ -1253,8 +1254,8 @@ TEST_F(Lconst_test, serialize2a) {
 
 TEST_F(Lconst_test, zerocase) {
 
-  Lconst zero;
-  EXPECT_EQ(zero.get_bits(), 1);
+  Lconst nothing;
+  EXPECT_EQ(nothing.get_bits(), 0);
   EXPECT_EQ(Lconst(0).get_bits(), 1);
 
   EXPECT_EQ(Lconst("0x0").get_bits(), 1);
@@ -1356,8 +1357,59 @@ TEST_F(Lconst_test, lconst_add) {
   {
     auto a = Lconst("0b0?") + Lconst("1");
     EXPECT_FALSE(a.is_i());
-    EXPECT_EQ(a.to_pyrope(), "0b??");
+    EXPECT_EQ(a, Lconst("0b??"));
+    EXPECT_EQ(a.to_pyrope(), "0b0??");
     EXPECT_EQ(a.get_bits(), 3);
   }
 
+}
+
+TEST_F(Lconst_test, lconst_get_bits) {
+
+  Lconst cadena ("cadena"); // c=0x63, a=0x61, d=0x64, e=0x65, n=0x6E
+
+  EXPECT_EQ(cadena.get_mask_op(),                         Lconst("0x616E65646163"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF)),             Lconst("0x63"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00)),           Lconst("0x61"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000)),         Lconst("0x64"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000)),       Lconst("0x65"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00000000)),     Lconst("0x6e"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000000000)),   Lconst("0x61"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000000000)), Lconst("0"));
+
+  EXPECT_EQ(Lconst("0xFFF").get_mask_op(Lconst("-1")), Lconst("0xFFF"));
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-1")), Lconst("0xfeef"));
+
+  auto v1 = Lconst("-23").get_mask_op(Lconst("-1"));
+  auto v2 = Lconst("-23").get_mask_op();
+  auto v3 = Lconst("41");
+  EXPECT_EQ(v1, v2);
+  EXPECT_EQ(v2, v3);
+
+  EXPECT_EQ(Lconst("0b0?0").get_mask_op(Lconst("1")), Lconst("0"));
+
+  EXPECT_EQ(Lconst("0b0?0").get_mask_op(Lconst("2")), Lconst("0b?"));
+  EXPECT_EQ(Lconst("0b0?0").get_mask_op(Lconst("4")), Lconst("0"));
+  EXPECT_EQ(Lconst("0b?0?0").get_mask_op(Lconst("0x7")), Lconst("0b0?0"));
+  EXPECT_EQ(Lconst("0b?0?0").get_mask_op(Lconst("0xFF")), Lconst("0b0?0?0"));
+
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("1")), Lconst("1"));
+  EXPECT_EQ(Lconst("-1").get_mask_op(Lconst("0x3")), Lconst("0b11"));
+  EXPECT_EQ(Lconst("-1").get_mask_op(Lconst("0")), Lconst("0"));
+  EXPECT_EQ(Lconst("-123123").get_mask_op(Lconst("1")), Lconst("1")); // 0b....1 & 0x1 == 1
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("0xFF")), Lconst("0xEF"));
+}
+
+TEST_F(Lconst_test, lconst_set_bits) {
+
+  auto src = Lconst("0xFFF");
+
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0xabc)) , Lconst("0xfbf"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0x3abc)), Lconst("0xfbf"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0xbc))  , Lconst("0xfbf"));
+
+  EXPECT_EQ(src.set_mask_op(Lconst("-1"), Lconst(0x3abc)), Lconst("0x3abc"));
+  EXPECT_EQ(src.set_mask_op(Lconst("-1"), Lconst(0xa)), Lconst("0xa"));
+
+  EXPECT_EQ(src.set_mask_op(Lconst("-16"), Lconst(0xabcd)), Lconst("0xabcF"));
 }

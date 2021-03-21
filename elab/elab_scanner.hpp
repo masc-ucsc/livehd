@@ -81,12 +81,8 @@ class Etoken {
 protected:
   std::string_view text;
 public:
-  Etoken() {
-    tok   = Token_id_nop;
-    pos1  = 0;
-    pos2  = 0;
-    line  = 0;
-    text  = std::string_view{""};
+  constexpr Etoken()
+    : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {
   }
   Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
     tok   = _tok;

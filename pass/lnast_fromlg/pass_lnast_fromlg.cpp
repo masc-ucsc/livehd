@@ -218,7 +218,8 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     case Ntype_op::Or:
     case Ntype_op::Xor: attach_binaryop_node(lnast, parent_node, pin); break;
     case Ntype_op::Not: attach_not_node(lnast, parent_node, pin); break;
-    case Ntype_op::Tposs: attach_tposs_node(lnast, parent_node, pin); break;
+    case Ntype_op::Get_mask: attach_ordered_node(lnast, parent_node, pin); break;
+    case Ntype_op::Set_mask: attach_ordered_node(lnast, parent_node, pin); break;
     case Ntype_op::Sum: attach_sum_node(lnast, parent_node, pin); break;
     case Ntype_op::LT:
     case Ntype_op::GT: attach_compar_node(lnast, parent_node, pin); break;
@@ -512,11 +513,13 @@ void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, co
   attach_children_to_node(lnast, not_node, pin);
 }
 
-void Pass_lnast_fromlg::attach_tposs_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  auto tposs_node = lnast.add_child(parent_node, Lnast_node::create_tposs());
-  lnast.add_child(tposs_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
+void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
+  auto node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
+  lnast.add_child(node_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin)))); // Dest
 
-  attach_children_to_node(lnast, tposs_node, pin);
+  for (const auto &e: pin.get_node().inp_edges_ordered()) {
+    attach_child(lnast, node_idx, e.driver);
+  }
 }
 
 void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {

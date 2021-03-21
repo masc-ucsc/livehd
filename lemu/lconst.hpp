@@ -92,6 +92,7 @@ protected:
   Bits_t calc_num_bits() const {
     return calc_num_bits(num);
   }
+  static std::string to_string(Number num);
 
   Number get_num() const { return num; }
   Lconst adjust(const Number &res_num, const Lconst &o) const;
@@ -112,10 +113,12 @@ public:
 
   void dump() const;
 
-  [[nodiscard]] static Lconst get_mask(Bits_t bits);
-  [[nodiscard]] Lconst get_mask() const;
+  [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
+  [[nodiscard]] Lconst get_mask_value() const;
 
-  [[nodiscard]] Lconst tposs_op() const;
+  [[nodiscard]] Lconst get_mask_op() const;
+  [[nodiscard]] Lconst get_mask_op(const Lconst &pos) const;
+  [[nodiscard]] Lconst set_mask_op(const Lconst &pos, const Lconst &val) const;
   [[nodiscard]] Lconst add_op(const Lconst &o) const;
   [[nodiscard]] Lconst mult_op(const Lconst &o) const;
   [[nodiscard]] Lconst div_op(const Lconst &o) const;
@@ -124,14 +127,16 @@ public:
   [[nodiscard]] Lconst rsh_op(Bits_t amount) const;
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
+  [[nodiscard]] Lconst not_op() const;
+  [[nodiscard]] Lconst concat_op(const Lconst &o) const;
 
   [[nodiscard]] int   eq_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
-  // WARNING: unsigned can still be negative. It is a way to indicate as many 1s are needed
+  bool     has_unknowns() const { return explicit_str && bits < calc_num_bits(num); }
   bool     is_negative() const { return num < 0; }
-  bool     is_string() const { return explicit_str; }
+  bool     is_string() const { return explicit_str && (bits&0x7)==0 && bits >= calc_num_bits(num); }
   bool     is_mask() const { return ((num+1)&(num))==0; }
   bool     is_power2() const { return ((num-1)&(num))==0; }
 

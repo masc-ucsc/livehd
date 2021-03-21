@@ -176,18 +176,22 @@ Lconst::Lconst(std::string_view orig_txt) {
           continue;
 
         // handle binary with special characters ?xZ...
-        std::string bin;
+        std::string bin = "0"; // any binary number is always positive
         for(auto i=2u;i<txt.size();++i) {
           const auto ch2 = txt[i];
           if (ch2=='_')
             continue;
-          if (ch2 == '?' || ch2 == 'x' || ch2 == 'X')
+
+          if (ch2 == '?' || ch2 == 'x' || ch2 == 'X') {
             bin.append(1, '?');
-          else if (ch2 == 'Z' || ch2 == 'z')
+          }else if (ch2 == 'Z' || ch2 == 'z') {
             bin.append(1, 'z');
-          else if (ch2 == '0' || ch2 == '1')
-            bin.append(1, ch2);
-          else {
+          }else if (ch2 == '0') {
+            if (bin != "0")
+              bin.append(1, ch2); // remove too many leading zeroes
+          }else if (ch2 == '1') {
+            bin.append(1, ch2); // remove too many leading zeroes
+          }else {
             throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", orig_txt, ch2));
           }
         }
@@ -299,15 +303,23 @@ Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
   return Lconst(res_explicit_str, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::get_mask(Bits_t bits) {
+Lconst Lconst::get_mask_value(Bits_t bits) {
   return Lconst((Number(1)<<bits)-1);
 }
 
-Lconst Lconst::get_mask() const {
-  return get_mask(get_bits());
+Lconst Lconst::get_mask_value() const {
+  return get_mask_value(get_bits());
 }
 
-Lconst Lconst::tposs_op() const {
+Lconst Lconst::get_mask_op() const {
+
+  if (unlikely(is_string())) {
+    return Lconst(false, calc_num_bits(num), num); // convert to ascii
+  }
+
+  if (has_unknowns()) {
+    return Lconst(explicit_str, bits, num); // 0b0?????? format style (always positive)
+  }
 
   Number res_num;
   if (num<0) {
@@ -316,21 +328,206 @@ Lconst Lconst::tposs_op() const {
     res_num = num;
   }
 
-  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
+  return Lconst(false, calc_num_bits(res_num), res_num);
+}
+
+Lconst Lconst::get_mask_op(const Lconst &mask) const {
+
+  if (mask == Lconst(-1)) {
+    return get_mask_op(); // faster logic for common case
+  }
+
+  if (unlikely(mask.is_string())) {
+    throw std::runtime_error(fmt::format("ERROR: can not get_bits for strings {} + {}", to_pyrope(), mask.to_pyrope()));
+  }
+
+  Number res_num;
+  auto mask_num  = mask.get_num();
+  auto mask_bits = mask.get_bits();
+  if (mask<0) {
+    auto m = std::max(get_bits(), mask.get_bits());
+    mask_num = (Number(1)<<m) + ((Lconst(1)-mask).not_op()).get_num();
+  }
+
+  if (has_unknowns()) {
+    // Each bit has 8 bits when has_unknowns(). Expand mask
+    Number new_mask;
+    Number pos(1);
+    pos <<= mask.get_bits();
+    Number pos_mask(0xFF);
+    while(pos) {
+      new_mask <<= 8;
+      if (mask_num & pos) {
+        new_mask = new_mask | pos_mask;
+      }
+      pos >>= 1;
+    }
+    mask_num = new_mask;
+    mask_bits *= 8;
+  }
+
+  auto max_bits = std::max(get_bits(), mask_bits);
+  Number src_num;
+  if (num<0) {
+    I(!explicit_str);
+    src_num = (Number(1)<<max_bits)+num;  // mask+num+1
+  }else{
+    src_num = num;
+  }
+
+  Number pos(1);
+  pos = pos<<max_bits;
+  while(pos) {
+    if (mask_num & pos) {
+      auto v = src_num & pos;
+      res_num = (res_num<<1) | (v?1:0);
+    }
+    pos >>= 1;
+  }
+
+  if (!has_unknowns())
+    return Lconst(false, calc_num_bits(res_num), res_num);
+
+  auto str = absl::StrCat("0b", to_string(res_num)); // Use the string to remove leading zeroes
+  return Lconst(str);
+}
+
+// set_bits(0xFFF, 0xF, 0xa) -> 0xFFa
+// set_bits(0xFFF, -16, 0xa) -> 0x0aF
+// set_bits(0xFFF, -16, -1)  -> -1
+// set_bits(0xFF0, 0xF, -1)  -> -16 == 0b11111...111_0000
+// set_bits(foo, -1, bar)  -> bar
+// set_bits(foo, -2, bar)  -> (bar& (~1)) | (foo&1)
+// set_bits(foo,  0, bar)  -> foo
+// set_bits(foo,  1, bar)  -> (bar&1) | (bar&(-1))
+// set_bits(foo, a, bar)  -> set_bits(bar, 1-a, foo)
+
+Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
+
+  if (unlikely(mask.is_string())) {
+    throw std::runtime_error(fmt::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
+  }
+
+  I(!mask.has_unknowns() && !has_unknowns()); // FIXME: this should work (just someone else could do it?)
+
+  Lconst mask_pos;
+
+  Number mask_pos_num;
+
+  auto max_bits   = std::max(value.get_bits(), get_bits());
+  Number i_mask_num = Number(1)<<(max_bits-1);
+
+  auto a    = value.get_num();
+  auto b    = get_num();
+  if (mask<0) {
+    mask_pos = mask.not_op();
+
+    mask_pos_num = mask_pos.get_num();
+    for(auto i=mask_pos.get_bits();i<max_bits;++i) {
+      mask_pos_num = mask_pos_num | (Number(1)<<i);
+    }
+  }else{
+    mask_pos = mask;
+
+    mask_pos_num = mask_pos.get_num();
+  }
+
+  Number res_num;
+
+  while(i_mask_num) {
+    if (i_mask_num & mask_pos_num) {
+      res_num = res_num | (i_mask_num & a);
+    }else{
+      res_num = res_num | (i_mask_num & b);
+    }
+    i_mask_num >>= 1;
+  }
+
+  return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::add_op(const Lconst &o) const {
 
-  if (unlikely(explicit_str || o.explicit_str)) {
-    if (explicit_str && o.explicit_str) {
-      return Lconst(absl::StrCat(to_string(), o.to_string()));
+  if (unlikely(is_string() || o.is_string())) {
+    throw std::runtime_error(fmt::format("ERROR: can not add strings {} + {}", to_pyrope(), o.to_pyrope()));
+  }
+
+  if (has_unknowns() || o.has_unknowns()) {
+    std::string s_txt = to_yosys();
+    std::string o_txt = o.to_yosys();
+
+    auto max_size = std::max(s_txt.size(), o_txt.size());
+    std::string result;
+    result.resize(max_size+1);  // +1 for carry
+
+    char carry = '0';
+    for(auto i=0u;i<max_size;++i) {
+      auto n_ones     = 0;
+      auto n_zeroes   = 0;
+      auto n_unknowns = 0;
+      if (i>=s_txt.size() || s_txt[i]=='0')
+        ++n_zeroes;
+      else if (s_txt[i]=='1')
+        ++n_ones;
+      else
+        ++n_unknowns;
+
+      if (i>=o_txt.size() || o_txt[i]=='0')
+        ++n_zeroes;
+      else if (o_txt[i]=='1')
+        ++n_ones;
+      else
+        ++n_unknowns;
+
+      if (carry=='1')
+        ++n_ones;
+      else if (carry=='0')
+        ++n_zeroes;
+      else
+        ++n_unknowns;
+
+      if (n_unknowns==0 && n_ones==0) {
+        result[i] = '0';
+        carry     = '0';
+      }else if (n_unknowns==0 && n_ones==1) {
+        result[i] = '1';
+        carry     = '0';
+      }else if (n_unknowns==0 && n_ones==2) {
+        result[i] = '0';
+        carry     = '1';
+      }else if (n_unknowns==0 && n_ones==3) {
+        result[i] = '1';
+        carry     = '1';
+      }else if (n_unknowns==1 && n_ones==0) {
+        result[i] = '?';
+        carry     = '0';
+      }else if (n_unknowns==1 && n_ones==2) {
+        result[i] = '?';
+        carry     = '1';
+      }else{
+        result[i] = '?';
+        carry     = '?';
+      }
     }
+    result[max_size] = carry;
+
+    return Lconst(absl::StrCat("0b", result));
+  }
+
+  Number res_num = get_num() + o.get_num();
+
+  return adjust(res_num, o);
+}
+
+Lconst Lconst::concat_op(const Lconst &o) const {
+
+  if (unlikely(is_string() || o.is_string())) {
     std::string str;
     std::string o_str;
     if (bits==0)
       // str == "";
       str = "";
-    else if (explicit_str)
+    else if (is_string())
       str = to_string();
     else if (is_i())
       str = std::to_string(to_i());
@@ -339,7 +536,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
 
     if (o.bits==0)
       o_str = "";
-    else if (o.explicit_str)
+    else if (o.is_string())
       o_str = o.to_string();
     else if (o.is_i())
       o_str = std::to_string(o.to_i());
@@ -349,14 +546,14 @@ Lconst Lconst::add_op(const Lconst &o) const {
     return Lconst(absl::StrCat(str, o_str));
   }
 
-  Number res_num = get_num() + o.get_num();
+  Number res_num = get_num()<< o.get_bits() | o.get_num();
 
-  return adjust(res_num, o);
+  return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::mult_op(const Lconst &o) const {
 
-  if (explicit_str || o.explicit_str) {
+  if (is_string() || o.is_string()) {
     auto max_bits = bits*o.bits;
 
     std::string qmarks("0b");
@@ -371,7 +568,7 @@ Lconst Lconst::mult_op(const Lconst &o) const {
 
 Lconst Lconst::div_op(const Lconst &o) const {
 
-  if (explicit_str || o.explicit_str) {
+  if (is_string() || o.is_string()) {
     auto max_bits = bits*o.bits;
 
     std::string qmarks("0b");
@@ -386,7 +583,7 @@ Lconst Lconst::div_op(const Lconst &o) const {
 
 Lconst Lconst::sub_op(const Lconst &o) const {
 
-  if (explicit_str || o.explicit_str) {
+  if (is_string() || o.is_string()) {
     auto max_bits = std::max(bits, o.bits);
 
     std::string qmarks("0b");
@@ -401,7 +598,7 @@ Lconst Lconst::sub_op(const Lconst &o) const {
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
 
-  if (explicit_str) {
+  if (is_string()) {
     auto qmarks = to_string();
     qmarks.append(amount, '0');
     return Lconst(qmarks);
@@ -409,11 +606,11 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   auto res_num  = num << amount;
 
-  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
+  return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
-  if (explicit_str) {
+  if (is_string()) {
     auto qmarks = to_string();
     auto s = qmarks.substr(amount);
     return Lconst(s);
@@ -421,20 +618,25 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 
   auto res_num  = num >> amount;
 
-  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
+  return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
 
-  if (unlikely(explicit_str || o.explicit_str)) {
+  if (bits==0)
+    return o;
+  if (o.bits==0)
+    return *this;
+
+  if (unlikely(is_string() || o.is_string())) {
     auto   res_bits = std::max(bits, o.bits);
     std::string str;
     std::string o_str;
-    if (explicit_str)
+    if (is_string())
       str = to_string();
-    if (o.explicit_str)
+    if (o.is_string())
       o_str = o.to_string();
-    if (explicit_str && o.explicit_str) {
+    if (is_string() && o.is_string()) {
       std::string max_str;
       std::string_view min_str;
       if (str.size()>o_str.size()) {
@@ -463,17 +665,28 @@ Lconst Lconst::or_op(const Lconst &o) const {
   return adjust(res_num, o);
 }
 
+Lconst Lconst::not_op() const {
+
+  if (unlikely(is_string())) {
+    throw std::runtime_error(fmt::format("ERROR: can not not strings {}", to_pyrope()));
+  }
+
+  auto res_num = -get_num()-Number(1);
+
+  return Lconst(false, calc_num_bits(res_num), res_num);
+}
+
 Lconst Lconst::and_op(const Lconst &o) const {
 
-  if (unlikely(explicit_str || o.explicit_str)) {
+  if (unlikely(is_string() || o.is_string())) {
     auto   res_bits = std::max(bits, o.bits);
     std::string str;
     std::string o_str;
-    if (explicit_str)
+    if (is_string())
       str = to_string();
-    if (o.explicit_str)
+    if (o.is_string())
       o_str = o.to_string();
-    if (explicit_str && o.explicit_str) {
+    if (is_string() && o.is_string()) {
       std::string max_str;
       std::string_view min_str;
       if (str.size()>o_str.size()) {
@@ -502,7 +715,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
 }
 
 int Lconst::eq_op(const Lconst &o) const {
-  if (unlikely(explicit_str || o.explicit_str)) {
+  if (unlikely(is_string() || o.is_string())) {
     I(false); // if any of them has ??, it can not be computed at compile time. Runtime random answer
   }
 
@@ -525,11 +738,10 @@ Lconst Lconst::adjust_bits(Bits_t amount) const {
   Number r(1);
   Number res_num = num & ((r<<amount)-1);
 
-  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
+  return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
-std::string Lconst::to_string() const {
-  I(explicit_str);
+std::string Lconst::to_string(Number num) {
 
   std::string str;
   Number tmp = num;
@@ -542,8 +754,13 @@ std::string Lconst::to_string() const {
   return str;
 }
 
+std::string Lconst::to_string() const {
+  I(explicit_str); // either has_unknowns() or is_string()
+  return to_string(num);
+}
+
 std::string Lconst::to_string_no_xz() const {
-  I(explicit_str);
+  I(is_string());
 
   std::string str;
   Number tmp = num;
@@ -564,7 +781,7 @@ std::string Lconst::to_pyrope() const {
   if (explicit_str) {
     // Either string or 0b with special characters like ?xz
     auto str = to_string();
-    if (str.size()*8 == bits)
+    if (is_string())
       return absl::StrCat("'", str, "'");
 
     I(str[0] != '-');
@@ -604,7 +821,7 @@ std::string Lconst::to_firrtl() const {
   if (explicit_str) {
     // Either string or 0b with special characters like ?xz
     auto str = to_string_no_xz();
-    if (str.size()*8 == bits)
+    if (is_string())
       return str;
 
     I(str[0] != '-');
@@ -641,7 +858,6 @@ std::string Lconst::to_yosys(bool do_unsign) const {
     // Either string or 0b with special characters like ?xz
     return to_string();
   }
-
 
   auto v = get_num();
   GI(do_unsign, v>=0);
