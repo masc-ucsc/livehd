@@ -10,6 +10,8 @@ eval set -- "$TEMP"
 
 if [ -x "bazel-bin/inou/yosys/yosys2" ]; then
   YOSYS="./bazel-bin/inou/yosys/yosys2"
+elif [ -x "inou/yosys/yosys2" ]; then
+  YOSYS="inou/yosys/yosys2"
 elif [ -x "lgshell.runfiles/livehd/inou/yosys/yosys2" ]; then
   YOSYS="lgshell.runfiles/livehd/inou/yosys/yosys2"
 else
@@ -169,7 +171,7 @@ if [ "${OPT_TOP}" != "" ]; then
   TOP_STR="-top $OPT_TOP"
 fi
 
-echo "checking GATE:$GATE vs GOLD:$GOLD with top:$OPT_TOP"
+echo "checking GATE:$GATE vs GOLD:$GOLD with top:$OPT_TOP directory:$PWD"
 
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then

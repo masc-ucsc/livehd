@@ -22,17 +22,32 @@ cc_library(
     ],
 )
 
-
 sh_test(
-    name = "pyrope_compile.sh",
+    name = "pyrope_compile",
     srcs = ["tests/pyrope_compile.sh"],
     # tags = ["manual"],
     data = [
         "//main:lgshell",
-        "//inou/pyrope:pyrope_tests"
+        "//inou/pyrope:pyrope_tests",
         ],
     deps = [
         "//inou/yosys:scripts",
     ],
-    tags = ["fixme"],
+    # tags = ["fixme"],
+)
+
+sh_test(
+    name = "regression_compile",
+    srcs = ["tests/regression_compile.sh"],
+    # tags = ["manual"],
+    # tags = ["fixme"],
+    data = [
+        "//main:lgshell",
+        "//inou/pyrope:pyrope_tests",
+        "//inou/firrtl:firrtl_tests",
+        ],
+    deps = [
+        "//inou/yosys:scripts",
+    ]
+    # tags = ["fixme"],
 )

@@ -33,3 +33,14 @@ cc_library(
         "//pass/common:pass",
     ],
 )
+
+filegroup(
+    name = "firrtl_tests",
+    srcs = glob([
+        "tests/proto/*.pb",       # Protobuf tests
+        "tests/verilog_gld/*.v",  # Verilog golden models
+        "post_io_renaming.py",    # Script to match livehd to firrtl names
+    ]),
+    visibility = ["//visibility:public"],
+)
+
