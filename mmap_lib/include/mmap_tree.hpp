@@ -317,12 +317,14 @@ public:
   public:
     class CTree_depth_preorder_iterator {
     public:
-      CTree_depth_preorder_iterator(const Tree_index &_ti, const tree<X> *_t) : ti(_ti), t(_t) {}
+      CTree_depth_preorder_iterator(const Tree_index &_ti, const tree<X> *_t) : ti(_ti), t(_t) { start_ti = _ti;}
       CTree_depth_preorder_iterator operator++() {
         CTree_depth_preorder_iterator i(ti, t);
 
         ti = t->get_depth_preorder_next(ti);
-
+        if(ti.level==start_ti.level && ti.pos>start_ti.pos) {
+          ti = invalid_index();
+        }
         return i;
       };
       bool operator!=(const CTree_depth_preorder_iterator &other) {
@@ -333,6 +335,7 @@ public:
 
     private:
       Tree_index     ti;
+      Tree_index start_ti;
       const tree<X> *t;
     };
 
