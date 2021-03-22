@@ -3,7 +3,7 @@ rm -rf ./lgdb
 rm -rf ./lgdb2
 rm -rf ./prp_v_LEC_test_dir
 rm -f ./*dot*
-rm -f *.v
+rm -f ./*.v
 rm -f lnast.dot.gld
 rm -f lnast.nodes
 rm -f lnast.nodes.gld
@@ -278,7 +278,7 @@ Pyrope_lec_test () {
       if [ $? -eq 0 ]; then
         echo "Successfully passed logic equivalence check!"
       else
-        echo "FAIL: "${pt}"_1.v !== "${pt}"_2.v"
+        echo "FAIL: ${pt}_1.v !== ${pt}_2.v"
         exit 1
       fi
     done
