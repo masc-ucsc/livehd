@@ -1,5 +1,5 @@
-$c1.__bits = 1
-$c2.__bits = 1
+$c1.__sbits = 1
+$c2.__sbits = 1
 
 x = 0
 if ($c1 == 1) {
