@@ -8,6 +8,7 @@ jobs:
   gcc:
     runs-on: ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         action: ["build", "test"]
 
@@ -23,6 +24,7 @@ jobs:
   clang:
     runs-on: ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         action: ["build", "test"]
 
