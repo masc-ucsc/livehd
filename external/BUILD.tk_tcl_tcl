@@ -34,7 +34,7 @@ TCL_COPTS = [
     "-DTCL_THREADS=1",
     "-DPEEK_XCLOSEIM=1",
     "-D_LARGEFILE64_SOURCE=1",
-    "-DTCL_WIDE_INT_TYPE=long\ long",
+    "-DTCL_WIDE_INT_TYPE=long\\ long",
     "-DHAVE_STRUCT_STAT64=1",
     "-DHAVE_OPEN64=1",
     "-DHAVE_LSEEK64=1",
@@ -86,9 +86,12 @@ cc_library(
         "generic/*.h",
         "unix/*.h",
     ]),
-    includes = ["generic", "unix"],
     copts = TCL_COPTS + [
         "-DUSE_TCLALLOC=0",
+    ],
+    includes = [
+        "generic",
+        "unix",
     ],
 )
 
@@ -112,7 +115,10 @@ cc_library(
         "-DTCL_LIBRARY=\\\"dependency_support/tcl_tk/library\\\"",
         "-DTCL_PACKAGE_PATH=\\\"dependency_support/tcl_tk/tcl8.6.4\\\"",
     ],
-    includes = ["generic", "unix"],
+    includes = [
+        "generic",
+        "unix",
+    ],
 )
 
 # pkg-config
@@ -191,7 +197,7 @@ cc_library(
         "generic/reg*.c",
         "libtommath/*.h",
     ]),
-    copts = TCL_COPTS  + [
+    copts = TCL_COPTS + [
         "-w",
         "$(STACK_FRAME_UNLIMITED)",  # regexec.c
     ],
@@ -201,19 +207,22 @@ cc_library(
         "unix/",
         "xlib/",
     ],
-    linkopts = ["-ldl", "-lpthread"],
+    linkopts = [
+        "-ldl",
+        "-lpthread",
+    ],
     textual_hdrs = glob([
         "generic/*.decls",
     ]) + [
         "generic/tclUniData.c",
     ],
+    visibility = ["//visibility:public"],
     deps = [
         ":tclAlloc",
         ":tclPkgConfig",
         ":tclUnixInit",
-        "@zlib//:zlib",
+        "@zlib",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # tcl shell
@@ -223,12 +232,15 @@ cc_binary(
     copts = TCL_COPTS + [
         "-w",
     ],
-    includes = ["generic", "unix"],
+    includes = [
+        "generic",
+        "unix",
+    ],
+    visibility = ["//visibility:public"],
     deps = [
         ":tcl",
         ":tclAlloc",
         ":tclPkgConfig",
         ":tclUnixInit",
     ],
-    visibility = ["//visibility:public"],
 )

@@ -1,9 +1,13 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 cc_library(
-   name = "headers",
-   hdrs = glob(["*.h"]),
-   copts = ["-w", "-O2"],
-   visibility = ["//visibility:public"],
-   #defines = [ "BMAVX2OPT" ],  # AVX2
-   #defines = [ "BMSSE42OPT" ], # SSE 4.2
+    name = "headers",
+    hdrs = glob(["*.h"]),
+    copts = [
+        "-w",
+        "-O2",
+    ],
+    visibility = ["//visibility:public"],
+    #defines = [ "BMAVX2OPT" ],  # AVX2
+    #defines = [ "BMSSE42OPT" ], # SSE 4.2
 )

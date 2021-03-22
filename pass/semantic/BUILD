@@ -1,44 +1,53 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "pass_semantic",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
-    alwayslink=True,
     copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
     deps = [
-        "//pass/common:pass",
-        "//elab:elab",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "//elab",
         "//inou/pyrope:inou_pyrope",
         "//lbench:headers",
-    ]
+        "//pass/common:pass",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
+    alwayslink = True,
 )
 
 cc_library(
     name = "semantic_check",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp", "pass*"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "pass*",
+        ],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
     copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
     deps = [
-        "//pass/common:pass",
-        "//elab:elab",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "//elab",
         "//inou/pyrope:inou_pyrope",
-    ]
+        "//pass/common:pass",
+        "@com_google_absl//absl/container:flat_hash_set",
+    ],
 )
 
 cc_test(
     name = "lnast_semantic_test",
-    srcs = ["tests/lnast_semantic_test.cpp",],
+    srcs = ["tests/lnast_semantic_test.cpp"],
+    tags = ["fixme"],
     deps = [
         ":semantic_check",
-        ],
-    tags = ["fixme"],
-    )
+    ],
+)

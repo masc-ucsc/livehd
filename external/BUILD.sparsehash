@@ -1,8 +1,15 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 cc_library(
-   name = "headers",
-   hdrs = glob(["sparsehash/**","sparsehash/internal/*.h"]),
-   includes = [ "." ], # Needed because some includes use <foo.h>
-   copts = ["-w", "-O2"],
-   visibility = ["//visibility:public"],
+    name = "headers",
+    hdrs = glob([
+        "sparsehash/**",
+        "sparsehash/internal/*.h",
+    ]),
+    copts = [
+        "-w",
+        "-O2",
+    ],
+    includes = ["."],  # Needed because some includes use <foo.h>
+    visibility = ["//visibility:public"],
 )

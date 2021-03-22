@@ -1,37 +1,42 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "inou_pyrope",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
-    alwayslink=True,
     copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
     ],
+    alwayslink = True,
 )
 
 filegroup(
     name = "pyrope_tests",
     srcs = glob([
-        "tests/*.prp", "tests/compiler/*.prp", "tests/compiler/verilog_gld/*.v"
+        "tests/*.prp",
+        "tests/compiler/*.prp",
+        "tests/compiler/verilog_gld/*.v",
     ]),
     visibility = ["//visibility:public"],
 )
 
 sh_test(
     name = "pyrope_test.sh",
-    tags = ["fixme"],
     srcs = ["tests/pyrope_test.sh"],
     data = [
-        "//main:lgshell",
         ":pyrope_tests",
         "//inou/yosys:verilog_tests",
-        ],
+        "//main:lgshell",
+    ],
+    tags = ["fixme"],
 )
 
 cc_binary(
@@ -39,8 +44,8 @@ cc_binary(
     srcs = ["tests/prp_test.cpp"],
     copts = COPTS,
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":inou_pyrope",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -49,17 +54,20 @@ cc_binary(
     srcs = ["tests/prp_lnast_test.cpp"],
     copts = COPTS,
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":inou_pyrope",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
 cc_test(
     name = "prp_unit_test",
     srcs = ["tests/prp_unit_test.cpp"],
-    deps = [
-        "@com_google_googletest//:gtest_main",
-        ":inou_pyrope",
+    tags = [
+        "fixme",
+        "flaky",
     ],
-    tags = ["fixme", "flaky"],
+    deps = [
+        ":inou_pyrope",
+        "@com_google_googletest//:gtest_main",
+    ],
 )

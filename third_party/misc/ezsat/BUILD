@@ -1,28 +1,36 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-licenses(["notice"]) # ISC
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+licenses(["notice"])  # ISC
 
 cc_library(
     name = "ezsat",
-    srcs = glob(["*.cpp"],
-                exclude=["demo*",
-                         "test*",
-                         "sat_lima*",
-                         "puzzle*",
-                         ]
-                ),
-    includes = ["."],
+    srcs = glob(
+        ["*.cpp"],
+        exclude = [
+            "demo*",
+            "test*",
+            "sat_lima*",
+            "puzzle*",
+        ],
+    ),
     hdrs = glob(["*.hpp"]),
-    copts = ["-w", "-O2"], # Always fast, no warnings to avoid spurious messages
+    copts = [
+        "-w",
+        "-O2",
+    ],  # Always fast, no warnings to avoid spurious messages
+    includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "@cryptominisat//:cryptominisat",
-        ],
+        "@cryptominisat",
+    ],
 )
 
 cc_test(
     name = "testbench",
     srcs = ["testbench.cpp"],
-    copts = ["-w", "-O2"],
+    copts = [
+        "-w",
+        "-O2",
+    ],
     deps = [
         ":ezsat",
     ],

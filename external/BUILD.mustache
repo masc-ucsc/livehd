@@ -1,7 +1,11 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 cc_library(
-   name = "headers",
-   hdrs = ["mustache.hpp"],
-   copts = ["-w", "-O2"],
-   visibility = ["//visibility:public"],
+    name = "headers",
+    hdrs = ["mustache.hpp"],
+    copts = [
+        "-w",
+        "-O2",
+    ],
+    visibility = ["//visibility:public"],
 )
