@@ -1,13 +1,18 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "lgyosys",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp", "yosys_driver.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "yosys_driver.cpp",
+        ],
+    ),
     hdrs = glob(["*.hpp"]),
-    #alwayslink=1,
-    alwayslink=True,
+    copts = COPTS,
     defines = [
         "_YOSYS_",
         # "YOSYS_ENABLE_PLUGINS",
@@ -20,13 +25,14 @@ cc_library(
     ],
     features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
-    copts = COPTS,
     deps = [
         "//pass/common:pass",
         "@mustache//:headers",
         "@yosys//:kernel",
         "@yosys//:version",
     ],
+    #alwayslink=1,
+    alwayslink = True,
 )
 
 sh_library(
@@ -59,13 +65,13 @@ cc_binary(
     srcs = [
         "yosys_driver.cpp",
     ],
-    features = ["-use_header_modules"],
-    visibility = ["//visibility:public"],
-    linkstatic=True,
     copts = COPTS,
+    features = ["-use_header_modules"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
     deps = [
         ":lgyosys",
-        "//core:core",
+        "//core",
         #"@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
     ],
 )

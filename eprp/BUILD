@@ -1,28 +1,34 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "eprp",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
     copts = COPTS,
-    deps = ["//elab:elab",
-            "@com_google_absl//absl/container:flat_hash_map",
-            "//task:task",
-    ]
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//elab",
+        "//task",
+        "@com_google_absl//absl/container:flat_hash_map",
+    ],
 )
 
 cc_test(
     name = "eprp_test",
     srcs = ["tests/eprp_test.cpp"],
-    deps = [
-        "@com_google_googletest//:gtest_main",
-        "@com_google_absl//absl/strings",
-        ":eprp",
+    tags = [
+        "fixme",
+        "flaky",
     ],
-    tags = ["fixme", "flaky"],
+    deps = [
+        ":eprp",
+        "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
-

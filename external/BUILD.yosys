@@ -52,7 +52,7 @@ genrule(
 
 genrule(
     name = "verilog_lexer_cpp",
-    srcs  = ["frontends/verilog/verilog_lexer.l"],
+    srcs = ["frontends/verilog/verilog_lexer.l"],
     outs = ["verilog_lexer.cpp"],
     cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
     toolchains = [
@@ -64,11 +64,12 @@ genrule(
 genrule(
     name = "verilog_parser",
     srcs = ["frontends/verilog/verilog_parser.y"],
-    outs = ["frontends/verilog/verilog_parser.tab.cc",
-            "frontends/verilog/verilog_parser.tab.hh",
-           ],
+    outs = [
+        "frontends/verilog/verilog_parser.tab.cc",
+        "frontends/verilog/verilog_parser.tab.hh",
+    ],
     cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/verilog/verilog_parser.tab.hh) --output-file=$(location frontends/verilog/verilog_parser.tab.cc) $<",
-        # "--name-prefix=xxx",
+    # "--name-prefix=xxx",
     toolchains = [
         "@rules_bison//bison:current_bison_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
@@ -77,7 +78,7 @@ genrule(
 
 genrule(
     name = "rtlil_lexer_cpp",
-    srcs  = ["frontends/rtlil/rtlil_lexer.l"],
+    srcs = ["frontends/rtlil/rtlil_lexer.l"],
     outs = ["rtlil_lexer.cpp"],
     cmd = "M4=$(M4) $(FLEX) --outfile=$@ $<",
     toolchains = [
@@ -89,11 +90,12 @@ genrule(
 genrule(
     name = "rtlil_parser",
     srcs = ["frontends/rtlil/rtlil_parser.y"],
-    outs = ["frontends/rtlil/rtlil_parser.tab.cc",
-            "frontends/rtlil/rtlil_parser.tab.hh",
-           ],
+    outs = [
+        "frontends/rtlil/rtlil_parser.tab.cc",
+        "frontends/rtlil/rtlil_parser.tab.hh",
+    ],
     cmd = "M4=$(M4) $(BISON) --defines=$(location frontends/rtlil/rtlil_parser.tab.hh) --output-file=$(location frontends/rtlil/rtlil_parser.tab.cc) $<",
-        # "--name-prefix=xxx",
+    # "--name-prefix=xxx",
     toolchains = [
         "@rules_bison//bison:current_bison_toolchain",
         "@rules_m4//m4:current_m4_toolchain",
@@ -146,13 +148,13 @@ GENERATED_HEADERS = [
 ]
 
 YOSYS_COPTS = [
-  "-DYOSYS_SRC='\"third_party/yosys\"'",
-  "-DYOSYS_DATDIR='\"third_party/yosys\"'",
-  "-fexceptions",
-  "-w",
-  "-Wno-implicit-fallthrough",
-  "-Wno-vla",
-  "-std=c++11",
+    "-DYOSYS_SRC='\"third_party/yosys\"'",
+    "-DYOSYS_DATDIR='\"third_party/yosys\"'",
+    "-fexceptions",
+    "-w",
+    "-Wno-implicit-fallthrough",
+    "-Wno-vla",
+    "-std=c++11",
 ]
 
 cc_library(
@@ -195,7 +197,6 @@ cc_library(
             "backends/protobuf/*.h",
         ],
     ) + GENERATED_HEADERS,
-    alwayslink=True,
     copts = YOSYS_COPTS,
     defines = [
         "_YOSYS_",
@@ -212,11 +213,12 @@ cc_library(
         ".",
         "backends/ilang",
         "frontends/ilang",
-        "frontends/verilog",
         "frontends/rtlil",
+        "frontends/verilog",
         "passes/techmap",
         "techlibs/common",
     ],
+    visibility = ["//visibility:public"],
     deps = [
         ":bigint",
         ":ezsat",
@@ -226,11 +228,11 @@ cc_library(
         ":subcircuit",
         # "@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
         # "@edu_berkeley_abc//:abc-lib",
-        "@abc//:abc",
+        "@abc",
         # "@org_sourceware_libffi//:libffi",
         #"@tk_tcl_tcl//:tcl",
     ],
-    visibility = ["//visibility:public"],
+    alwayslink = True,
 )
 
 cc_test(
@@ -243,8 +245,8 @@ cc_test(
         "-w",
     ],
     features = ["-use_header_modules"],
-    deps = [":bigint"],
     licenses = ["notice"],
+    deps = [":bigint"],
 )
 
 cc_library(
@@ -273,14 +275,13 @@ cc_library(
     licenses = ["notice"],
 )
 
-
 cc_test(
     name = "ezsat_demo_vec",
     srcs = [
         "libs/ezsat/demo_vec.cc",
     ],
-    deps = [":ezsat"],
     licenses = ["notice"],
+    deps = [":ezsat"],
 )
 
 cc_test(
@@ -288,8 +289,8 @@ cc_test(
     srcs = [
         "libs/ezsat/demo_bit.cc",
     ],
-    deps = [":ezsat"],
     licenses = ["notice"],
+    deps = [":ezsat"],
 )
 
 cc_test(
@@ -297,8 +298,8 @@ cc_test(
     srcs = [
         "libs/ezsat/demo_cmp.cc",
     ],
-    deps = [":ezsat"],
     licenses = ["notice"],
+    deps = [":ezsat"],
 )
 
 cc_test(
@@ -307,8 +308,8 @@ cc_test(
     srcs = [
         "libs/ezsat/puzzle3d.cc",
     ],
-    deps = [":ezsat"],
     licenses = ["notice"],
+    deps = [":ezsat"],
 )
 
 cc_library(
@@ -326,10 +327,10 @@ cc_library(
         "-w",
     ],
     features = ["-use_header_modules"],
+    licenses = ["notice"],
     deps = [
         ":minisat",
     ],
-    licenses = ["notice"],
 )
 
 cc_library(
@@ -395,8 +396,8 @@ cc_binary(
     srcs = [
         "libs/subcircuit/scshell.cc",
     ],
-    deps = [":subcircuit"],
     licenses = ["notice"],
+    deps = [":subcircuit"],
 )
 
 cc_library(
@@ -419,15 +420,15 @@ py_binary(
 genrule(
     name = "peepopt_pm_h",
     srcs = [
-      "passes/pmgen/ice40_dsp.pmg",
-      "passes/pmgen/ice40_wrapcarry.pmg",
-      "passes/pmgen/peepopt_muldiv.pmg",
-      "passes/pmgen/peepopt_shiftmul.pmg",
-      "passes/pmgen/xilinx_dsp48a.pmg",
-      "passes/pmgen/xilinx_dsp_cascade.pmg",
-      "passes/pmgen/xilinx_dsp_CREG.pmg",
-      "passes/pmgen/xilinx_dsp.pmg",
-      "passes/pmgen/xilinx_srl.pmg",
+        "passes/pmgen/ice40_dsp.pmg",
+        "passes/pmgen/ice40_wrapcarry.pmg",
+        "passes/pmgen/peepopt_muldiv.pmg",
+        "passes/pmgen/peepopt_shiftmul.pmg",
+        "passes/pmgen/xilinx_dsp48a.pmg",
+        "passes/pmgen/xilinx_dsp_cascade.pmg",
+        "passes/pmgen/xilinx_dsp_CREG.pmg",
+        "passes/pmgen/xilinx_dsp.pmg",
+        "passes/pmgen/xilinx_srl.pmg",
     ],
     outs = ["passes/pmgen/peepopt_pm.h"],
     cmd = "python3 $(location :pmgen) -o $(OUTS) -p peepopt $(SRCS)",

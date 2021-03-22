@@ -40,7 +40,7 @@ class <My_pass> : public Pass {
 Finally, in the pass/<my\_pass>/BUILD
 
 ```cpp
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_library(
     name = "<my_pass>",

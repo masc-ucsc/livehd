@@ -1,24 +1,24 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "headers",
     hdrs = glob(["include/*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["include"],
     copts = COPTS,
+    includes = ["include"],
+    visibility = ["//visibility:public"],
     deps = [
-        "@iassert//:iassert",
         "@com_google_absl//absl/container:flat_hash_map",
+        "@iassert",
     ],
 )
 
 cc_library(
     name = "mmap_lib_test_lib",
     hdrs = glob(["tests/*.hpp"]),
-    visibility = ["//visibility:public"],
     copts = COPTS,
+    visibility = ["//visibility:public"],
     deps = [
         ":headers",
     ],
@@ -30,7 +30,7 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "@com_google_googletest//:gtest_main",
-        "@fmt//:fmt",
+        "@fmt",
     ],
 )
 
@@ -41,7 +41,7 @@ cc_test(
         ":mmap_lib_test_lib",
         "//lbench:headers",
         "@com_google_googletest//:gtest_main",
-        "@fmt//:fmt",
+        "@fmt",
     ],
 )
 
@@ -51,7 +51,7 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@fmt//:fmt",
+        "@fmt",
     ],
 )
 
@@ -61,9 +61,9 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@fmt//:fmt",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:node_hash_map",
+        "@fmt",
     ],
 )
 
@@ -83,42 +83,45 @@ cc_test(
 cc_test(
     name = "bench_vector_use",
     srcs = ["tests/bench_vector_use.cpp"],
+    tags = ["fixme"],
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_googletest//:gtest_main",
-        "@fmt//:fmt",
+        "@fmt",
     ],
-    tags = ["fixme"],
 )
 
 cc_test(
     name = "bench_vset_use",
-		srcs = ["tests/bench_vset_use.cpp"],
-		deps = [
-		    "mmap_lib_test_lib",
-				"//lbench:headers",
+    srcs = ["tests/bench_vset_use.cpp"],
+    deps = [
+        "mmap_lib_test_lib",
+        "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/container:node_hash_set",
-				"@com_google_googletest//:gtest_main",
-				"@fmt//:fmt"
-		],
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
+    ],
 )
 
 cc_test(
     name = "mmap_map_test",
     srcs = ["tests/mmap_map_test.cpp"],
+    tags = [
+        "fixme",
+        "timeout",
+    ],
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_googletest//:gtest_main",
-        "@fmt//:fmt",
+        "@fmt",
     ],
-    tags = ["fixme", "timeout"],
 )
 
 cc_test(
@@ -126,8 +129,8 @@ cc_test(
     srcs = ["tests/mmap_gc_test.cpp"],
     deps = [
         ":headers",
-        "@com_google_googletest//:gtest_main",
         "//lbench:headers",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -137,9 +140,9 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 
@@ -149,10 +152,9 @@ cc_test(
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",
-        "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
-        "@fmt//:fmt",
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
     ],
 )
-

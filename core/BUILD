@@ -1,140 +1,151 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "core",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
-    alwayslink=True,
-    linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     copts = COPTS,
+    includes = ["."],
+    linkopts = ["-lstdc++fs"],  # for gcc-8 or older
+    visibility = ["//visibility:public"],
     deps = [
-        "@rapidjson//:headers",
-        "@iassert//:iassert",
-        "@com_google_absl//absl/container:btree",
-        "@boost//:multiprecision",
-        "//eprp:eprp",
-        "//mmap_lib:headers",
+        "//eprp",
         "//lbench:headers",
-        "//lemu:lemu",
-        ],
-    )
+        "//lemu",
+        "//mmap_lib:headers",
+        "@boost//:multiprecision",
+        "@com_google_absl//absl/container:btree",
+        "@iassert",
+        "@rapidjson//:headers",
+    ],
+    alwayslink = True,
+)
 
 cc_library(
     name = "tree_lgdb_test",
     hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
-    includes = ["."],
     copts = COPTS,
+    includes = ["."],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
-        ],
-    )
+    ],
+)
 
 cc_test(
     name = "lgtuple_test",
     srcs = ["tests/lgtuple_test.cpp"],
-    includes = ["."],
     copts = COPTS,
+    includes = ["."],
+    tags = [
+        "fixme",
+        "timeout",
+    ],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
-        ],
-    tags = ["fixme", "timeout"],
-    )
+    ],
+)
 
 cc_test(
     name = "traversal_hierarchy_test",
     srcs = ["tests/traversal_hierarchy_test.cpp"],
+    tags = [
+        "fixme",
+        "flaky",
+    ],
     deps = [
         ":tree_lgdb_test",
-        ],
-    tags = ["fixme", "flaky"],
-    )
+    ],
+)
 
 cc_test(
     name = "traverse_test",
     srcs = ["tests/traverse_test.cpp"],
+    tags = [
+        "fixme",
+        "timeout",
+    ],
     deps = [
         ":tree_lgdb_test",
-        ],
-    tags = ["fixme", "timeout"],
-    )
+    ],
+)
 
 cc_test(
     name = "graph_core_test",
     srcs = ["tests/graph_core_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
+        "@com_google_googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "lgraph_test",
     srcs = ["tests/lgraph_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
+        "@com_google_googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "attribute_test",
     srcs = ["tests/attribute_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
+        "@com_google_googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "lgraph_each",
     srcs = ["tests/lgraph_each_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
+        "@com_google_googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "node_test",
     srcs = ["tests/node_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
+        "@com_google_googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "iter_test",
     srcs = ["tests/iter_test.cpp"],
+    tags = ["fixme"],
     deps = [
         ":core",
-        ],
-    tags = ["fixme"],
-    )
+    ],
+)
 
 cc_test(
     name = "graph_bench",
     srcs = ["tests/graph_bench.cpp"],
+    tags = ["fixme"],
     deps = [
         ":core",
-         "@fmt//:fmt",
-	 ":tree_lgdb_test",
-        ],
-    tags = ["fixme"],
-    )
+        ":tree_lgdb_test",
+        "@fmt",
+    ],
+)
 
 cc_test(
     name = "edge_test",
     srcs = ["tests/edge_test.cpp"],
     deps = [
-        "@com_google_googletest//:gtest_main",
         ":core",
-        ],
-    )
-
+        "@com_google_googletest//:gtest_main",
+    ],
+)

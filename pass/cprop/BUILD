@@ -1,19 +1,21 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "pass_cprop",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
-    alwayslink=True,
     copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
     deps = [
-        "//pass/common:pass",
-        "//lemu:lemu",
+        "//lemu",
         "//lgcpp/common:lgcpp",
-    ]
+        "//pass/common:pass",
+    ],
+    alwayslink = True,
 )
-

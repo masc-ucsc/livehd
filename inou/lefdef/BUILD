@@ -1,19 +1,26 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "inou_lefdef",
-    srcs = glob(["*.cpp"], exclude=["lglefdef.cpp", "defrw.cpp", "lefrw.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = [
+            "lglefdef.cpp",
+            "defrw.cpp",
+            "lefrw.cpp",
+        ],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    alwayslink=True,
     copts = COPTS,
+    visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "//third_party/misc/lef/lef:lef",
-        "//third_party/misc/def/def:def",
+        "//third_party/misc/def/def",
+        "//third_party/misc/lef/lef",
     ],
+    alwayslink = True,
 )
 
 #cc_binary(

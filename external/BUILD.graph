@@ -1,13 +1,18 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_library(
     name = "graph",
-    hdrs = glob(["include/graph/*","include/graph/impl/*"]),
-    visibility = ["//visibility:public"],
-    includes = ["include/graph"],
-    copts = ["-w", "-O2"],
-    deps = [
-      "@range-v3//:range-v3",
+    hdrs = glob([
+        "include/graph/*",
+        "include/graph/impl/*",
+    ]),
+    copts = [
+        "-w",
+        "-O2",
     ],
-    )
-
+    includes = ["include/graph"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@range-v3//:range-v3",
+    ],
+)

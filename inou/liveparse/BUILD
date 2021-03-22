@@ -1,37 +1,43 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "inou_liveparse",
-    srcs = glob(["*.cpp"],exclude=["*test*.cpp"]),
+    srcs = glob(
+        ["*.cpp"],
+        exclude = ["*test*.cpp"],
+    ),
     hdrs = glob(["*.hpp"]),
-    visibility = ["//visibility:public"],
-    includes = ["."],
-    alwayslink=True,
     copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
     deps = [
-        "//elab:elab",
+        "//elab",
         "//pass/common:pass",
-    ]
+    ],
+    alwayslink = True,
 )
 
 cc_test(
     name = "chunkify_verilog_test",
     srcs = ["chunkify_verilog_test.cpp"],
-    deps = [
-        "@com_google_googletest//:gtest_main",
-        ":inou_liveparse",
+    tags = [
+        "fixme",
+        "flaky",
     ],
-    tags = ["fixme", "flaky"],
+    deps = [
+        ":inou_liveparse",
+        "@com_google_googletest//:gtest_main",
+    ],
 )
 
 sh_test(
     name = "chunkify_test.sh",
-    tags = ["fixme"],
     srcs = ["tests/chunkify_test.sh"],
     data = [
-        "//main:lgshell",
         "//inou/yosys:verilog_tests",
-        ],
+        "//main:lgshell",
+    ],
+    tags = ["fixme"],
 )

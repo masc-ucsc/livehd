@@ -1,9 +1,12 @@
-cc_library (
-	name = "range-v3",
-	hdrs = glob([
-		"include/**/*.hpp",
-	]),
-	copts = ["-w", "-O2"],
-	visibility = ["//visibility:public"],
-	includes = ["include"],
+cc_library(
+    name = "range-v3",
+    hdrs = glob([
+        "include/**/*.hpp",
+    ]),
+    copts = [
+        "-w",
+        "-O2",
+    ],
+    includes = ["include"],
+    visibility = ["//visibility:public"],
 )

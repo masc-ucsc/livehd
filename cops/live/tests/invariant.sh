@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 OPT_LGRAPH_DIR=./
 OPT_ANUBIS=external/anubis/

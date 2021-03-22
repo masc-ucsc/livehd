@@ -1,13 +1,17 @@
-#  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+# This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 cc_library(
-  name = "opentimer",
-  copts = ["-w","-O2"],
-  srcs = glob(["ot/**/*.cpp"])
-       ,
-  hdrs = glob(["ot/**/*.hpp", "ot/*.hpp"])
-       ,
-   linkopts = ["-lstdc++fs"],
-  includes = ["."],
-  visibility = ["//visibility:public"],
+    name = "opentimer",
+    srcs = glob(["ot/**/*.cpp"]),
+    hdrs = glob([
+        "ot/**/*.hpp",
+        "ot/*.hpp",
+    ]),
+    copts = [
+        "-w",
+        "-O2",
+    ],
+    includes = ["."],
+    linkopts = ["-lstdc++fs"],
+    visibility = ["//visibility:public"],
 )
