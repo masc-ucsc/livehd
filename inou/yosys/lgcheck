@@ -126,7 +126,7 @@ if [ "${fm_top}" == "" ]; then
 fi
 
 if [ -z $FM_SHELL ]; then
-  FM_SHELL=`which fm_shell`
+  FM_SHELL=$(which fm_shell)
 fi
 
 if [ -x "${FM_SHELL}" ]; then
