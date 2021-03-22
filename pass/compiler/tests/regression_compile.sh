@@ -1,7 +1,7 @@
+#!/bin/bash
 
 #----------------------------------------- Firrtl start --------------------------------
 
-#!/bin/bash
 rm -rf ./lgdb
 # FIRRTL_LEVEL='lo'
 FIRRTL_LEVEL='hi'
@@ -114,11 +114,11 @@ firrtl_test() {
     fi
   done
 
-  rm -f *.v
-  rm -f *.dot
+  rm -f ./*.v
+  rm -f ./*.dot
   rm -f lgcheck*
   rm -rf lgdb
-  rm -f *.tcl
+  rm -f ./*.tcl
 }
 
 firrtl_test "$pts"
