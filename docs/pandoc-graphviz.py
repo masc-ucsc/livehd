@@ -17,16 +17,16 @@ from pandocfilters import get_caption, get_extension, get_value
 def document_name():
     if "PANDOC_INPUT_FILE" in os.environ:
         return os.environ["PANDOC_INPUT_FILE"]
-    else:
-        return "graph"
+    
+    return "graph"
 
-def graphviz(key, value, format, _):
+def graphviz(key, value, fmt, _):
     if key == 'CodeBlock':
         [[ident, classes, keyvals], code] = value
         if "graph" in classes:
             caption, typef, keyvals = get_caption(keyvals)
             prog, keyvals = get_value(keyvals, u"prog", u"dot")
-            filetype = get_extension(format, "svg", html="svg", latex="pdf")
+            filetype = get_extension(fmt, "svg", html="svg", latex="pdf")
             dest = get_filename4code(document_name(), code, filetype)
 
             if not os.path.isfile(dest):

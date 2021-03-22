@@ -22,7 +22,7 @@ TEST_LIST='inou/liveparse inou/firrtl lemu mmap_lib pass/compiler pass/mockturtl
 for TEST in $TEST_LIST
 do
   echo $TEST
-  for SUB_TEST in `bazel query "tests(//$TEST:all)" 2>/dev/null`
+  for SUB_TEST in $(bazel query "tests(//$TEST:all)" 2>/dev/null)
   do
     echo $SUB_TEST
     bazel run --nocache_test_results -c $LIVEHD_BUILD_MODE $SUB_TEST

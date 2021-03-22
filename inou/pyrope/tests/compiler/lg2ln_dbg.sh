@@ -32,7 +32,7 @@ Pyrope_compile () {
   do
     if [ ! -f inou/cfg/tests/${pt}.prp ]; then
       echo "ERROR: could not find ${pt}.prp in /inou/cfg/tests"
-      exit !
+      exit 1
     fi
   
     # ln -s inou/cfg/tests/${pt}.prp;

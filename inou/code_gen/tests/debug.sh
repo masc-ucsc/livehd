@@ -1,10 +1,10 @@
 #!/bin/bash
 rm -rf ./lgdb
-rm -f *.v
+rm -f ./*.v
 rm -f lnast.dot.gld
 rm -f lnast.nodes
 rm -f lnast.nodes.gld
-rm -f *.dot
+rm -f ./*.dot
 
 pts_to_do='lhs_wire3 tuple funcall_unnamed2'
 pts='firrtl_gcd hier_tuple_io logic
@@ -203,9 +203,9 @@ Pyrope_compile () {
         ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
 
         if [ $? -eq 0 ]; then
-            echo "Successfully pass logic equivilence check!"
+            echo "Successfully pass logic equivalence check!"
         else
-            echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+            echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
             exit 1
         fi
     else
@@ -221,9 +221,9 @@ Pyrope_compile () {
             ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
 
             if [ $? -eq 0 ]; then
-                echo "Successfully pass logic equivilence check!"
+                echo "Successfully pass logic equivalence check!"
             else
-                echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+                echo "FAIL: ${pt}.v !== ${pt}.gld.v"
                 exit 1
             fi
         done

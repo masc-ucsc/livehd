@@ -92,7 +92,7 @@ do
     echo "=========================================="
     echo ""
   else
-    echo "FAIL: "$pt".v !== "$pt"_gld.v"
+    echo "FAIL: $pt.v !== $pt""_gld.v"
     exit 1
   fi
 

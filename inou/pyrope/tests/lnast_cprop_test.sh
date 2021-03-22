@@ -34,7 +34,7 @@ for pt in $pts
 do
     if [ ! -f inou/cfg/tests/${pt}.prp ]; then
       echo "ERROR: could not find ${pt}.prp in /inou/cfg/tests"
-      exit !
+      exit 1
     fi
 
     ln -s inou/cfg/tests/${pt}.prp;
@@ -236,7 +236,7 @@ do
         if [ $? -eq 0 ]; then
           echo "Successfully pass logic equivilence check!"
         else
-          echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+          echo "FAIL: ${pt}.v !== ${pt}.gld.v"
           exit 1
         fi
     fi

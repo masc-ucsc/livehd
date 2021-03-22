@@ -18,24 +18,24 @@ if [ $? -ne 0 ]; then
   exit 3
 fi
 
-N1=$(grep ^[[:blank:]]*module inou/yosys/tests/*.v  | grep -v long | grep -v nocheck| grep -v endmodule | wc -l)
-N2=$(grep ^[[:blank:]]*module lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule | wc -l)
+N1=$(grep "^[[:blank:]]*module" inou/yosys/tests/*.v  | grep -v long | grep -v nocheck| grep -v endmodule | wc -l)
+N2=$(grep "^[[:blank:]]*module" lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
   echo "tests"
-  grep ^[[:blank:]]*module inou/yosys/tests/*.v | grep -v endmodule
+  grep "^[[:blank:]]*module" inou/yosys/tests/*.v | grep -v endmodule
   echo "chunk"
-  grep ^[[:blank:]]*module lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule
+  grep "^[[:blank:]]*module" lgdb_tmp1/parse/chunk*/*.v | grep -v endmodule
   echo "FAILED: yosys/tests inconsistent number of modules detected by inou.liveparse orig:${N1} vs live:${N2}"
   exit 3
 else
-  echo "PASS: yosys/tests inou.liveparse orig:"$N1" vs live:"$N2
+  echo "PASS: yosys/tests inou.liveparse orig:$N1 vs live:$N2"
 fi
 
 N1=$(ls -al lgdb_tmp1/parse/file* | wc -l)
 N2=$(ls -al inou/yosys/tests/*.v  | grep -v long | grep -v nocheck | wc -l)
 if [ $N1 -ne $N2 ]; then
-  echo "FAILED: yosys/tests inconsistent number of files. It should be "$N2", not "$N1
+  echo "FAILED: yosys/tests inconsistent number of files. It should be $N2, not $N1"
   exit 3
 fi
 
@@ -45,8 +45,8 @@ if [ $? -ne 0 ]; then
   exit 3
 fi
 
-N1=$(grep ^[[:blank:]]*module projects/boom/boom.system.TestHarness.BoomConfig.v | grep -v endmodule | wc -l)
-N2=$(grep ^[[:blank:]]*module tmp2/parse/chunk*/*.v | grep -v endmodule | wc -l)
+N1=$(grep "^[[:blank:]]*module" projects/boom/boom.system.TestHarness.BoomConfig.v | grep -v endmodule | wc -l)
+N2=$(grep "^[[:blank:]]*module" tmp2/parse/chunk*/*.v | grep -v endmodule | wc -l)
 
 if [ $N1 -ne $N2 ]; then
   echo "FAILED: boom inconsistent number of modules detected by inou.liveparse orig:${N1} vs live:${N2}"

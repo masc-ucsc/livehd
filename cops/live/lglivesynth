@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEMP=`getopt -o l::y::b::I::d --long logdir::,basename::,inou::,binary::,incdir::,debug,os_lgdb::,oe_lgdb::,me_lgdb::,de_lgdb::,ds_lgdb::,f_lgdb::,bounds::,lib::,constr::,freq::,define:: -n 'lglivesynth' -- "$@"`
+TEMP=$(getopt -o l::y::b::I::d --long logdir::,basename::,inou::,binary::,incdir::,debug,os_lgdb::,oe_lgdb::,me_lgdb::,de_lgdb::,ds_lgdb::,f_lgdb::,bounds::,lib::,constr::,freq::,define:: -n 'lglivesynth' -- "$@")
 eval set -- "$TEMP"
 
 OPT_YOSYS="./misc/yosys/bin/yosys"
@@ -140,9 +140,9 @@ cp -r ${synt_dir}  ${final_dir}
 cp ${orig_dir}/* ${modi_dir}/
 cp ${orig_dir}/graph_library ${delt_dir}
 
-BASE=`echo ${OPT_FILES} | awk '{print $1}' | awk -F . '{print $1}'`
-FILE_LIST=`echo $OPT_FILES | tr ' ' '\n' | awk '{print "read_verilog -sv -nomeminit "$1";"}'`
-DEFINE=`echo $OPT_DEFINE | awk '{print "verilog_defaults -add -D"$1";"}';`
+BASE=$(echo ${OPT_FILES} | awk '{print $1}' | awk -F . '{print $1}')
+FILE_LIST=$(echo $OPT_FILES | tr ' ' '\n' | awk '{print "read_verilog -sv -nomeminit "$1";"}')
+DEFINE=$(echo $OPT_DEFINE | awk '{print "verilog_defaults -add -D"$1";"}';)
 
 if [ "$OPT_BASENAME" == "" ]; then
   OPT_BASENAME=$BASE

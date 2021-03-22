@@ -1,5 +1,7 @@
 import prometheus_client as prom
-import os, time, re
+import os
+import time
+import re
 from os import path
 
 file_path = os.getcwd() + "/../bazel-out/k8-opt/bin"

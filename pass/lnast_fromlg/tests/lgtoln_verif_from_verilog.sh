@@ -124,7 +124,7 @@ do
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else
-      echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+      echo "FAIL: ${pt}.v !== ${pt}.gld.v"
       exit 1
     fi
     ${LGSHELL} "lgraph.match path:lgdb2 |> inou.graphviz.from verbose:false"

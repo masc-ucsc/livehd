@@ -136,12 +136,12 @@ lgtoln_verif() {
       if [ $? -eq 0 ]; then
         echo "Successfully pass logic equivilence check!"
       else
-        echo "FAIL: "${pt}".v !== "${pt}".gld.v"
+        echo "FAIL: ${pt}.v !== ${pt}.gld.v"
         exit 1
       fi
 
-      rm -f *.v
-      rm -f *.dot
+      rm -f ./*.v
+      rm -f ./*.dot
     fi
   done
 
@@ -167,12 +167,12 @@ lgtoln_verif() {
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else
-      echo "FAIL: "${top_module}".v !== "${top_module}".gld.v"
+      echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
       exit 1
     fi
 
-    rm -f *.v
-    rm -f *.dot
+    rm -f ./*.v
+    rm -f ./*.dot
   fi
 
   rm -rf ./lgdb
