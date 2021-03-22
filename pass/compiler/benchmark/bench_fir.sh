@@ -130,7 +130,7 @@ fucntion() {
 
   # rm -f *.dot
   # rm -f *.v
-  rm -f *.tcl
+  rm -f ./*.tcl
   rm -f pp*
 }
 

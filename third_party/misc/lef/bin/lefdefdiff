@@ -2,10 +2,10 @@
 
 set -f
 
-OS_TYPE=`uname -s`
+OS_TYPE=$(uname -s)
 
 # Add path to lefdefdiff so lefdiff and defdiff are found if not already on $PATH
-PATH=$PATH:`dirname $0`
+PATH=$PATH:$(dirname $0)
 
 lef=0
 def=0
@@ -110,9 +110,9 @@ if [ $# -lt 3 ] ; then
    exit 1
 fi
 
-if [ "$1" = "-def" -o "$1" = "-DEF" ] ; then
+if [ "$1" = "-def" ] || [ "$1" = "-DEF" ] ; then
    def=1
-elif [ "$1" = "-lef" -o "$1" = "-LEF" ] ; then
+elif [ "$1" = "-lef" ] || [ "$1" = "-LEF" ] ; then
    lef=1
 else
    output_usage_msg
@@ -124,9 +124,9 @@ file2=$3
 
 if [ $# -gt 3 ] ; then
    argCount=1
-   while [ $# -a "$argCount" -lt 4 ]
+   while [ $# ] && [ "$argCount" -lt 4 ]
    do
-      argCount=`expr $argCount + 1`
+      argCount=$(($argCount + 1))
       shift
    done
    while [ "$#" -gt 0 ]
