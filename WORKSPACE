@@ -143,7 +143,7 @@ new_git_repository(
     commit = "7bdf0628b1276379886c7f6dda2cef2b3b374f0b",  # 7.1.3 Nov 2020, "cd4af11efc9c622896a3e4cb599fa28668ca3d05", # 7.0.3 August 20 f19b1a521ee8b606dedcadfda69fd10ddf882753", # 7.0.1 June 23, 2020
     remote = "https://github.com/fmtlib/fmt.git",
     #strip_prefix = "include",
-    shallow_since = "1596729061 -0700",
+    shallow_since = "1606266902 -0800",
 )
 
 new_git_repository(
