@@ -77,7 +77,7 @@ do
   mkdir -p tmp_yosys
 
   #echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  echo "inou.verilog path:lgdb_yosys top:${base} files:"${full_input}" |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  echo "inou.verilog path:lgdb_yosys top:${base} files:${full_input} |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
@@ -88,14 +88,14 @@ do
   fi
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
+    echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
     ((fail++))
     fail_list+=" "$base
     continue
   fi
   LC=$(grep -i signal tmp_yosys/${input}.log | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty "$LC" log verilog file tmp_yosys/${input}.log"
+    echo "FAIL: Faulty $LC log verilog file tmp_yosys/${input}.log"
     ((fail++))
     fail_list+=" "$base
     continue
@@ -105,7 +105,7 @@ do
   #echo "lgraph.match path:lgdb_yosys |> pass.cprop |> inou.yosys.fromlg odir:tmp_yosys" | ${LGSHELL} -q 2>tmp_yosys/${input}.err
   LC=$(grep -iv Warning tmp_yosys/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
   if [[ $LC -gt 0 ]]; then
-    echo "FAIL: Faulty "$LC" err verilog file tmp_yosys/${input}.err"
+    echo "FAIL: Faulty $LC err verilog file tmp_yosys/${input}.err"
     ((fail++))
     fail_list+=" "$base
     continue
@@ -123,7 +123,7 @@ do
 
   if [[ $input =~ "nocheck_" ]]; then
     LC=$(wc -l tmp_yosys_mix/all_${base}.v | cut -d" " -f1)
-    echo "Skipping check for "$base" LC:"$LC
+    echo "Skipping check for $base LC:"$LC
     if [[ $LC -lt 2 ]]; then
       echo "FAIL: Generated verilog file tmp_yosys_mix/all_${base}.v is too small"
       ((fail++))
@@ -149,7 +149,7 @@ do
 done
 
 FAIL=$fail
-for job in `jobs -p`
+for job in $(jobs -p)
 do
   echo $job
   wait $job || let "FAIL+=1"
