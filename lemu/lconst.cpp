@@ -755,6 +755,9 @@ std::string Lconst::to_string(Number num) {
 }
 
 std::string Lconst::to_string() const {
+  if (is_i()) {
+    return std::to_string(to_i());
+  }
   I(explicit_str); // either has_unknowns() or is_string()
   return to_string(num);
 }

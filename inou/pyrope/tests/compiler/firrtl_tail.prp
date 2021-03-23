@@ -1,5 +1,5 @@
 a = 5
 b = 9
-tmp = a + b       //14, 4bits
-%out = tmp >> 1   //7, 3bits
-%out := tmp       //6, 3bits
+tmp = a + b       //14 or 0b01110 , (5bits signed)
+%out = tmp >> 1   // 7 or  0b0111 , (4bits signed)
+%out := tmp       //-2 or 0b1110  , (4bits signed)

@@ -1,5 +1,5 @@
-$inp.__ubits = 1
-%out.__ubits = 3
+$inp.__sbits = 1   // 0 or -1
+%out.__ubits = 3   // 0 to 7
 
 x = 3    // 3bits sign
 if ($inp == 0) {

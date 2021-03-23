@@ -62,10 +62,10 @@ class Thread_pool {
     }
 
     while(!finishing) {
-      while(!queue.empty()) {
+      //while(!queue.empty()) {
         next_job()();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
-      }
+      //}
     }
   }
 

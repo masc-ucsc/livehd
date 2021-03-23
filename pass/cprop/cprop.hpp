@@ -42,6 +42,8 @@ protected:
 
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin);
+  void process_attr_get(Node &node);
+  void process_attr_set(Node &node);
   void process_tuple_add(Node &node);
   bool process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered);
   void process_mux(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -61,7 +63,7 @@ protected:
 
   void process_flop(Node &node);
 
-  std::tuple<std::string_view, std::string> get_tuple_name_key(Node &node) const;
+  std::tuple<std::string, std::string> get_tuple_name_key(Node &node) const;
 
 public:
   Cprop(bool _hier, bool _gioc);

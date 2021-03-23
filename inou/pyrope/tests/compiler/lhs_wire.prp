@@ -1,3 +1,6 @@
+
+foo = (1,2)
+
 %out  = foo.__last_value
 foo = 2
 %out2 = foo.__last_value

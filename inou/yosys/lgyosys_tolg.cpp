@@ -391,7 +391,6 @@ static Node_pin get_unsigned_dpin(LGraph *g, const RTLIL::Cell *cell, const RTLI
   auto a_tposs = g->create_node(Ntype_op::Get_mask, dpin.get_bits() + 1);
   a_tposs.setup_sink_pin("a").connect_driver(dpin);
   a_tposs.setup_sink_pin("mask").connect_driver(g->create_node_const(-1));
-  a_tposs.connect_sink(dpin);
 
   return a_tposs.setup_driver_pin();
 }

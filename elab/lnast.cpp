@@ -76,6 +76,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   opr_lhs_merge(top_sts_nid);
 
   /* fmt::print("LNAST SSA Transformation Finished!\n"); */
+  //dump();
 }
 
 void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
@@ -140,14 +141,16 @@ bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, cons
 }
 
 bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
-  // FIXME->sh: change to is_select universally
-  if (get_type(opr_nid).is_select()) {
-    auto c0_sel  = get_first_child(opr_nid);
-    auto c1_sel  = get_sibling_next(c0_sel);
-    auto c2_sel  = get_sibling_next(c1_sel);
-    auto c2_name = get_name(c2_sel);
-    return (c2_name.substr(0, 2) == "__" && c2_name.substr(0, 3) != "___");
+  if (!get_type(opr_nid).is_select())
+    return false;
+
+  for(auto &child:children(opr_nid)) {
+    auto name = get_name(child);
+    auto attr = (name.substr(0, 2) == "__" && name.substr(0, 3) != "___");
+    if (attr)
+      return true;
   }
+
   return false;
 }
 
@@ -167,7 +170,7 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
     / | \               /  \
    /  |  \             /    \
   /   |   \           /      \
- $a __bits 0d4      ___t     0d4
+ $a __bits 0d4     ___t     0d4
 */
 
 void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
@@ -176,7 +179,7 @@ void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
 
   auto c0_sel = get_first_child(selc_nid);
   auto c1_sel = get_sibling_next(c0_sel);
-  auto c2_sel = get_sibling_next(c1_sel);
+  //auto c2_sel = get_sibling_next(c1_sel);
   if (get_name(c1_sel).substr(0, 3) == "___") {
     merge_hierarchical_attr_set(selc_nid);
     return;
@@ -188,9 +191,20 @@ void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
     auto c1_assign                    = get_sibling_next(c0_assign);
     ref_data(selc_nid)->type           = Lnast_ntype::create_attr_set();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-    set_data(c0_sel, get_data(c1_sel));
-    set_data(c1_sel, get_data(c2_sel));
-    set_data(c2_sel, get_data(c1_assign));
+    auto it1_ast = c0_sel;
+    auto it2_ast = get_sibling_next(it1_ast);
+
+    while(!it2_ast.is_invalid()) {
+      set_data(it1_ast, get_data(it2_ast));
+      it1_ast = it2_ast;
+      it2_ast = get_sibling_next(it2_ast);
+    }
+    set_data(it1_ast, get_data(c1_assign));
+
+    //set_data(c0_sel, get_data(c1_sel));
+    //set_data(c1_sel, get_data(c2_sel));
+    //set_data(c2_sel, get_data(c1_assign));
+    //set_data(c0_sel, get_data(c1_assign));
 
   } else {
     // is rhs, change node semantic from sel->attr_get

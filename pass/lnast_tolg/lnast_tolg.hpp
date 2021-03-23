@@ -121,5 +121,6 @@ protected:
   // firrtl related
   void process_firrtl_op_connection(LGraph *lg, const Lnast_nid &lnidx_fc);
 
+  void dump() const; // debug debugging
 };
 

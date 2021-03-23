@@ -1,6 +1,6 @@
-a.c = 2
+a = (c = 2)
 if $run {
   a = (b=5)
 }
 // a.0 == a.b
-%out = a.0 + a.c
+%out = a.0 // mux if $run, 2 or 5

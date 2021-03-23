@@ -26,7 +26,6 @@ cc_library(
 cc_test(
     name = "lconst_test",
     srcs = ["tests/lconst_test.cpp"],
-    tags = ["fixme"],
     deps = [
         ":lemu",
         "//simlib:headers",

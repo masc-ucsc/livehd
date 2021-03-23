@@ -1,0 +1,8 @@
+foo.a.b.__ubits = 30
+foo.a.b.__ubits = 40
+
+%out  = foo.a.b.__ubits // 0 because there is no variable set/read
+
+foo.a.b = 5
+
+%out2 = foo.a.b.__ubits // 3 bits needed 

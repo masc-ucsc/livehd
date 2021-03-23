@@ -42,12 +42,12 @@ protected:
 
   void add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
 
+public:
+  Lgtuple(std::string_view _name) : name(_name) { }
+
   static std::string_view get_last_level(std::string_view key);
   static std::string_view get_all_but_last_level(std::string_view key);
 	static std::string_view get_all_but_first_level(std::string_view key);
-
-public:
-  Lgtuple(std::string_view _name) : name(_name) { }
 
   std::string_view get_name() const { return name; }
 
@@ -118,6 +118,8 @@ public:
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;
 
   const Key_map_type &get_map() const { return key_map; }
+
+  bool is_empty() const { return (key_map.empty()); }
 
   bool is_scalar() const {
     if (key_map.empty())

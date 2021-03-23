@@ -293,6 +293,13 @@ void Bitwidth::process_set_mask(Node &node) {
 void Bitwidth::process_get_mask(Node &node) {
 
   auto a_dpin    = node.get_sink_pin("a").get_driver_pin();
+  if (a_dpin.is_invalid()) {
+    if (!not_finished) {
+      node.del_node();
+    }
+    return;
+  }
+
   auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
 
   auto it = flat_bwmap.find(a_dpin.get_compact_flat());
@@ -303,25 +310,47 @@ void Bitwidth::process_get_mask(Node &node) {
   }
 
   auto it2 = flat_bwmap.find(mask_dpin.get_compact_flat());
+  Lconst mask_max;
+  Lconst mask_min;
   if (it2 == flat_bwmap.end()) {
-    debug_unconstrained_msg(node, mask_dpin);
-    not_finished = true;
-    return;
+    if (!mask_dpin.is_type_const()) {
+      debug_unconstrained_msg(node, mask_dpin);
+      not_finished = true;
+      return;
+    }
+    mask_max = mask_dpin.get_type_const();
+    mask_min = mask_max;
+  }else{
+    mask_max = it2->second.get_max();
+    mask_min = it2->second.get_min();
   }
 
-  Lconst max_val = it->second.get_max().get_mask_op(it2->second.get_min());
-  Lconst max_val2 = it->second.get_max().get_mask_op(it2->second.get_max());
-  Lconst max_val3 = it->second.get_min().get_mask_op(it2->second.get_min());
-  Lconst max_val4 = it->second.get_min().get_mask_op(it2->second.get_max());
+  const Lconst val = it->second.get_max().get_mask_op(mask_min);
+  Lconst min_val = val;
+  Lconst max_val = val;
 
-  if (max_val2>max_val)
-    max_val = max_val2;
-  if (max_val3>max_val)
-    max_val = max_val3;
-  if (max_val4>max_val)
-    max_val = max_val4;
+  Lconst val2 = it->second.get_max().get_mask_op(mask_max);
+  Lconst val3 = it->second.get_min().get_mask_op(mask_min);
+  Lconst val4 = it->second.get_min().get_mask_op(mask_max);
 
-  flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(0, max_val));
+  if (val2>max_val)
+    max_val = val2;
+  if (val2<min_val)
+    min_val = val2;
+
+  if (val3>max_val)
+    max_val = val3;
+  if (val3<min_val)
+    min_val = val3;
+
+  if (val4>max_val)
+    max_val = val4;
+  if (val4<min_val)
+    min_val = val4;
+
+  // FIXME: this is the correct ONE
+  // flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
+  flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(0, (Lconst(1)<<(max_val.get_bits()-1))-Lconst(1) ));
 }
 
 void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
@@ -560,19 +589,22 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
 }
 
 Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
-  if (key.substr(0, 7) == "__ubits")
+
+  auto sz = key.size();
+
+  if (key.substr(sz-7, sz) == "__ubits")
     return Attr::Set_ubits;
 
-  if (key.substr(0, 7) == "__sbits")
+  if (key.substr(sz-7, sz) == "__sbits")
     return Attr::Set_sbits;
 
-  if (key.substr(0, 5) == "__max")
+  if (key.substr(sz-5, sz) == "__max")
     return Attr::Set_max;
 
-  if (key.substr(0, 5) == "__min")
+  if (key.substr(sz-5, sz) == "__min")
     return Attr::Set_min;
 
-  if (key.substr(0, 11) == "__dp_assign")
+  if (key.substr(sz-11, sz) == "__dp_assign")
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
@@ -696,9 +728,11 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
 
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
   I(node_attr.is_sink_connected("field"));
+
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_name();
   auto attr     = get_key_attr(key);
+
   if (attr == Attr::Set_other) {
     not_finished = true;
     return;
@@ -744,7 +778,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
     auto val = dpin_val.get_node().get_type_const();
 
     if (attr == Attr::Set_ubits) {
-      if (bw.get_sbits() && (bw.get_sbits() - 1) > (val.to_i()))
+      if ((bw.get_sbits() - 1) > (val.to_i()))
         Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}ubits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
 
       bw.set_sbits_range(val.to_i()); //note: still set sbits range and rely on the Tposs to turn max/min to positive
@@ -760,7 +794,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
         insert_tposs_nodes(node_attr, fwd_it);
 
     } else { // Attr::Set_sbits
-      if (bw.get_sbits() && bw.get_sbits() > (val.to_i()))
+      if (bw.get_sbits() > (val.to_i()))
         Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}sbits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
 
       bw.set_sbits_range(val.to_i());
@@ -790,7 +824,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
-  I(node_attr.get_sink_pin("field").get_driver_pin().get_name() == "__ubits") ;
+  I(node_attr.get_sink_pin("field").get_driver_pin().get_name().find("__ubits") != std::string::npos);
 
   std::vector<Node_pin> attr_dpins;
   attr_dpins.emplace_back(node_attr.setup_driver_pin("Y"));

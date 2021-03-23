@@ -543,19 +543,16 @@ void Lgtuple::del(std::string_view key) {
 }
 
 void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
-  bool only_attr_add = true;
+  I(!key.empty());
+
   for (const auto &it : tup->key_map) {
-		if (is_root_attribute(it.first))
-			continue;
-    only_attr_add = false;
-    break;
+    if (it.first.empty()) {
+      add(key, it.second);
+    }else{
+      std::string new_key = absl::StrCat(key, ".", it.first);
+      add(new_key, it.second);
+    }
   }
-  if (!only_attr_add)
-    del(key);
-
-	auto fixed_key = learn_fix(key);
-
-  add_int(fixed_key, tup);
 }
 
 void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
@@ -621,6 +618,8 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
 bool Lgtuple::append_tuple(const Node_pin &dpin) {
 
 	if (key_map.size() == 1 && key_map[0].first.empty()) {
+#if 0
+    // Not right to concat
     if (key_map[0].second.is_type_const() && dpin.is_type_const()) {
       auto v1 = key_map[0].second.get_node().get_type_const();
       auto v2 = dpin.get_node().get_type_const();
@@ -631,6 +630,7 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
       key_map[0].second = new_dpin;
       return true;
     }
+#endif
 		key_map[0].first = "0";
 		key_map.emplace_back("1", dpin);
 		return true;
@@ -734,9 +734,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 	else
 		flop_name = name;
 
-  auto ret_tup = std::make_shared<Lgtuple>(flop_name);
+  std::shared_ptr<Lgtuple> ret_tup;
 
-	bool first_flop=false;
+	bool first_flop=true;
 	for(auto &e:key_map) {
 		if (e.second.get_node() == flop)
 			continue; // no loop to itself
@@ -750,8 +750,16 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 			first_flop = false;
 		}else{
 			node = flop.get_class_lgraph()->create_node(Ntype_op::Flop);
-		}
-		node.setup_sink_pin("din").connect_driver(e.second);
+      for(auto &e2:flop.inp_edges()) {
+        if (e2.sink.get_pin_name() == "din")
+          continue;
+        node.setup_sink_pin(e2.sink.get_pin_name()).connect_driver(e2.driver);
+      }
+      node.setup_sink_pin("din").connect_driver(e.second);
+    }
+    if (!ret_tup) {
+      ret_tup = std::make_shared<Lgtuple>(flop_name);
+    }
 		ret_tup->key_map.emplace_back(e.first, node.setup_driver_pin());
 	}
 
