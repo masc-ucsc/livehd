@@ -14,7 +14,6 @@ protected:
 
     "top",
     "sts",
-    "csts",
     "if",
     "uif",
     "for",
@@ -52,7 +51,7 @@ protected:
     ">>>",
 
     "sext",
-    "zext",
+    "tposs",
 
     "is",
     "!=",
@@ -83,7 +82,6 @@ protected:
     "invalid",
     "top",
     "sts",
-    "csts",
     "if",
     "uif",
     "for",
@@ -121,7 +119,7 @@ protected:
     ">>>",
 
     "sext",
-    "zext",
+    "tposs",
 
     "is",
     "!=",
@@ -153,7 +151,6 @@ protected:
 
     "top",
     "sts",
-    "csts",
     "if",
     "uif",
     "for",
@@ -191,7 +188,7 @@ protected:
     ">>>",
 
     "sext",
-    "zext",
+    "tposs",
 
     "is",
     "!=",
