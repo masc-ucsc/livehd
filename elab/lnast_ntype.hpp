@@ -12,7 +12,6 @@ public:
     //group: tree structure
     Lnast_ntype_top,
     Lnast_ntype_stmts,   // stmts
-    Lnast_ntype_cstmts,
     Lnast_ntype_if,
     Lnast_ntype_uif,
     Lnast_ntype_for,
@@ -57,7 +56,7 @@ public:
 
     // zero/sign extend (becomes Cell:And, Cell:sext, Cell:tposs)
     Lnast_ntype_sext,  // sext(wire, bit) == chop wire/tuple to have sbits == bit, and bit pos is the sign
-    Lnast_ntype_zext,  // zext(wire, bit) == wire & ((1<<bit)-1) (but wire can be a tuple) zext(xx) == tposs(xx)
+    Lnast_ntype_tposs,  // tposs(wire, bit) == wire & ((1<<bit)-1) (but wire can be a tuple) tposs(xx) == tposs(xx)
 
     // Comparators
     Lnast_ntype_is,
@@ -99,7 +98,6 @@ protected:
     //group: tree structure
     "top",
     "stmts",
-    "cstmts",
     "if",
     "uif",
     "for",
@@ -136,7 +134,7 @@ protected:
     "sra",
 
     "sext",
-    "zext",
+    "tposs",
 
     "is",
     "ne",
@@ -217,7 +215,7 @@ public:
   static constexpr Lnast_ntype create_sra()          { return Lnast_ntype(Lnast_ntype_sra); }
 
   static constexpr Lnast_ntype create_sext()         { return Lnast_ntype(Lnast_ntype_sext); }
-  static constexpr Lnast_ntype create_zext()         { return Lnast_ntype(Lnast_ntype_zext); }
+  static constexpr Lnast_ntype create_tposs()         { return Lnast_ntype(Lnast_ntype_tposs); }
 
   static constexpr Lnast_ntype create_is()           { return Lnast_ntype(Lnast_ntype_is); }
   static constexpr Lnast_ntype create_ne()           { return Lnast_ntype(Lnast_ntype_ne); }
@@ -283,7 +281,7 @@ public:
   bool constexpr is_sra()          const { return val == Lnast_ntype_sra; }
 
   bool constexpr is_sext()         const { return val == Lnast_ntype_sext; }
-  bool constexpr is_zext()         const { return val == Lnast_ntype_zext; }
+  bool constexpr is_tposs()         const { return val == Lnast_ntype_tposs; }
 
   bool constexpr is_is()           const { return val == Lnast_ntype_is; }
   bool constexpr is_ne()           const { return val == Lnast_ntype_ne; }
@@ -328,7 +326,7 @@ public:
                                                   (val == Lnast_ntype_shr) ||
                                                   (val == Lnast_ntype_sra) ||
                                                   (val == Lnast_ntype_sext) ||
-                                                  (val == Lnast_ntype_zext); }
+                                                  (val == Lnast_ntype_tposs); }
 
   bool constexpr is_nary_op()      const { return (val == Lnast_ntype_bit_and) ||
                                                   (val == Lnast_ntype_bit_or) ||
@@ -354,7 +352,7 @@ public:
       && val != Lnast_ntype_reduce_xor
       && val != Lnast_ntype_mod
       // && val != Lnast_ntype_shr
-      && val != Lnast_ntype_zext
+      && val != Lnast_ntype_tposs
       && val != Lnast_ntype_is
       && val != Lnast_ntype_ne
       && val != Lnast_ntype_le;
