@@ -2,15 +2,27 @@
 #pragma once
 
 #include "pass.hpp"
+#include "boolector.h"
 
 class Pass_lec : public Pass {
 protected:
+
+  std::multimap <std::string, int> graphIOs;
+
+  std::vector <std::string> graphInNames;
+  //std::vector < std::vector < std::string > > allInNames;
+
+  //std::vector <std::string > graph1, graph2;
+  //std::multimap <std::string, std::multimap <std::string, int> > graphsToCheck;
+
   void check_lec(LGraph *g);
 
   void do_work(LGraph *g);
 
+
 public:
   static void work(Eprp_var &var);
+
 
   Pass_lec(const Eprp_var &var);
 

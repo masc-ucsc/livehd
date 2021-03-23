@@ -10,7 +10,8 @@
 #include <iostream>
 #include <map>
 #include <string>
-
+#include <set>
+#include "boolector.h"
 #include "annotate.hpp"
 #include "boolector.h"
 #include "cell.hpp"
@@ -21,6 +22,8 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
+#include "sub_node.hpp"
+
 
 static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
@@ -33,129 +36,183 @@ void Pass_lec::setup() {
 Pass_lec::Pass_lec(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Pass_lec::do_work(LGraph *g) {
+  fmt::print("\n--- DO WORK\n");
+  //input_compare(g);
   check_lec(g);
+  //call_sat(g);
+  //find_matches(g);
 }
-// do work: call function to get lgraph1, call function to get lgraph2, or get all lgraphs
-// call function to check equivalence
 
 void Pass_lec::work(Eprp_var &var) {
   Pass_lec p(var);
 
+  fmt::print("\nStarting pass lec.....{}\n", var.lgs.size() );
+
+ // for (const auto &g : var.lgs) {
+  // / p.input_compare(g);
+ // };
+
   for (const auto &g : var.lgs) {
     p.do_work(g);
-    //fmt::print("Lgraph Size: {}\n", var.lgs.size());
-    //fmt::print("name: {}\n", g->get_name());
-  }
+  };
+
+  fmt::print("Done with work.\n");
+
 }
 
+//void Pass_lec::match_inputs(Eprp_var &var){
+
+
+//}
+
 void Pass_lec::check_lec(LGraph *g) {
-  fmt::print("\n**********BEGIN LEC for lgraphs.\n\n");
-  //std::multimap<std::string, std::string> nodeMap;
 
-  // fmt::print("TODO: implement LEC\n");
-  //-------------------------------------------------
+  fmt::print("\n---Test CHECK LEC \nLGraph name: {}\n", g->get_name());
 
-  fmt::print("LGraph name: {}\n", g->get_name());
-  /*
-  Btor *btor;
-  BoolectorNode *input1, *input2, *formula1;
+  /*Btor *btorInputs;     //creates boolector instance
+  BoolectorNode *x1, *bool_in_var; // *x2, *y1, *y2;
   BoolectorSort s;
-  int result;
 
-  btor = boolector_new();
-  s = boolector_bitvec_sort( btor, 8);
-  input1 = boolector_var( btor, s, NULL);
-  input2 = boolector_var( btor, s, NULL);
-  */
-  // determine no of inputs
-  int i_num  = 0;
-  int i_bits = 0;
+  boolector_set_opt(btorInputs, BTOR_OPT_MODEL_GEN, 2);     //allows model generation
 
-  g->each_graph_input([&i_num, &i_bits](const Node_pin &pin) {
-    i_num++;
-    i_bits += pin.get_bits();
+  btorInputs = boolector_new();
+  
+  s = boolector_bitvec_sort(btorInputs, 1);
+
+  //x1 = boolector_var(btorInputs, s, NULL );
+ // x2 = boolector_var(btorInputs, s, NULL );
+  //x3 = boolector_var(btorInputs, s, input_pin.get_name() );
+ // y1 = boolector_var(btorInputs, s, NULL);
+ // y2 = boolector_var(btorInputs, s, NULL );
+ // y3 = boolector_var(btorInputs, s, input_pin.get_name() );*/
+
+  //int i_num  = 0;   //counts inputs
+
+  //Store and match inputs
+  //finds dupliucates while looking at all inputs for given graph
+  g->each_graph_input([&](const Node_pin &input_pin) {
+
+    //i_num++;
+
+    //fmt::print("Lgraph input: {} {}\n", input_pin.get_name(), input_pin.get_pid() );
+
+    /*auto name = input_pin.get_name();
+
+    bool_in_var = boolector_var(btorInputs, s,std::string(name).c_str() );
+
+    graphInNames.insert(bool_in_var);*/
+
+    graphIOs.insert( std::pair( input_pin.get_name(), input_pin.get_pid() ) );
+
+    //Works to find matches
+    /*if( graphIOs.count( (std::string)input_pin.get_name() ) ){
+      //fmt::print("Match found at: {}\n",input_pin.get_name() );
+      graphIOs.insert( std::pair( input_pin.get_name(), input_pin.get_pid() ) );
+    }
+    else
+    {
+      fmt::print("No matches found!\n");
+      graphIOs.insert( std::pair( input_pin.get_name(), input_pin.get_pid() ) );
+    };*/
   });
 
-  //fmt::print("num of inputs: {},  no of Bits: {}\n", i_num, i_bits);
 
-  // determine no of outputs
-  int o_num  = 0;
-  int o_bits = 0;
+  //Alternative way to find matches
+  std::map <std::string, int> countInpups;
 
-  g->each_graph_output([&o_num, &o_bits](const Node_pin &pin) {
-    o_num++;
-    o_bits += pin.get_bits();
-  });
+  std::set s(graphIOs.begin(), graphIOs.end());
 
-  //fmt::print("num of outputs: {},  no of Bits: {}\n", o_num, o_bits);
+  int matchingInputs = graphIOs.size() - s.size();
+
+  if (matchingInputs >0){
+    fmt::print(" {} matches found!\n", matchingInputs);
+  }
+  else{
+    fmt::print("no matching inputs found\n");
+  };
+
+  //prints graphInputs (for now)
+  for ( auto const& in : graphIOs ){
+    fmt::print("Input: {}, place: {}\n", in.first, in.second);
+  };
+
+
+ // Btor *btor;
+  //BoolectorNode *bool_xor_node; // *c, *bool_and, *bool_nand;//  *not_a, *not_ab_or, *or_notab, *and_ab, *c;
+
+  /*btor = boolector_new();
+
+  not_a = boolector_not(btor, in_a);
+  or_notab = boolector_or(btor, not_a, in_b);
+  not_ab_or = boolector_not(btor, or_notab);
+
+  and_ab = boolector_and(btor, in_a, in_b); 
+
+  bool_and = boolector_and(btor, in_a, in_b);
+  boolector_assert(btor, bool_and);
+ 
+  bool_nand = boolector_nand(btor, in_a, in_b);
+  boolector_assert(btor, bool_nand);
+
+
+  c = boolector_xor(btor, bool_and, bool_nand);
+  boolector_assert(btor, c);*/
+
+  //int result = boolector_sat(btor);
+
+  // still need: Sum, Mult, Div, Ror, LT, GT, EQ, SHL, SRA, Mux
 
   for (const auto &node : g->forward()) {
-    fmt::print("Node type: {}\n", node.get_type_name());
-    //nodeMap.insert(std::make_pair(node.get_type_name(), g->get_name()));
-
-    // fmt::print("No of edges: {}, input edges: {}, output edges: {}\n", node.get_num_edges(), node.get_num_inp_edges(),
-    // node.get_num_out_edges() );
-    /*
-      for (const auto &edge : node.inp_edges()){
-        auto indpin     = edge.driver;
-        auto indpin_pid = indpin.get_pid();
-        //auto inspin_pid = edge.sink.get_pid();
-
-        fmt::print("input edge driver pin id: {}\n", indpin_pid);
-        //fmt::print("input edge sink pin id: {}\n", inspin_pid);
-
-      };
-
-      for (const auto &edge : node.out_edges()){
-        //auto outdpin     = edge.driver;
-        //auto outdpin_pid = outdpin.get_pid();
-        auto outspin     = edge.sink;
-        auto outspin_pid = outspin.get_pid();
-
-        //fmt::print("output edge driver pid: {}\n", outdpin_pid);
-        fmt::print("output edge sink pid: {}\n", outspin_pid);
-      };
-
-      fmt::print("\n");*/
-
-    if (node.get_type_op() == Ntype_op::Tposs){
-        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    //fmt::print("Node type: {}, place: {}\n", node.get_type_name(), node.get_nid());
+  
+    if (node.get_type_op() == Ntype_op::And ){
+      //fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
     }
+    else if (node.get_type_op() == Ntype_op::Or ){
+      //fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+     }
 
-    else if (node.get_type_op() == Ntype_op::Xor){
-        fmt::print(" {} Node type  found.\n", node.get_type_name());
-    }
+    else if (node.get_type_op() == Ntype_op::Xor ){
+      //fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+     // bool_xor_node = boolector_xor(btor, 
+     // boolector_assert(btor, bool_xor_node);
 
-    else if (node.get_type_op() == Ntype_op::And){
-        fmt::print(" {} Node type  found.\n", node.get_type_name());
-    }
+     }
 
-    else if (node.get_type_op() == Ntype_op::Or){
-        fmt::print(" {} Node type  found.\n", node.get_type_name());
+    else if (node.get_type_op() == Ntype_op::Tposs){
+      //fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+
+      //This still needs work determining how to express in boolector
+      //bool_tposs_node = boolector
     }
 
     else if (node.get_type_op() == Ntype_op::Not){
-        fmt::print(" {} Node type  found.\n", node.get_type_name());
+     //fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
     };
-
-
-
   };
 
-  /*for (auto &p : nodeMap) {
-    fmt::print("{}->{}\n", p.first, p.second);
-  }
+  //int result = boolector_sat(btor);
 
-  fmt::print("No of Graphs for XOR: {}\n", nodeMap.count("XOR"));*/
-  fmt::print("*************END check LEC\n");
 
-  /*
-  //c = a ^ b
+    //print out map
+  /*for ( auto const& elements : graphMap1 ){
+    fmt::print("Node type: {}, place: {}\n", elements.first, elements.second);
+  };*/
 
-  formula1 =
-  boolector_assert(btor, formula1);
-  result = boolector_sat(btor);
-  fmt::print("Expect: unsat\n");
+  
+}
+
+/*
+  BoolectorNode *in_a = boolector_var(btor, s, "x");
+  BoolectorNode *in_b = boolector_var(btor, s, "b");
+
+
+  c = boolector_xor(btor, bool_and, bool_nand);
+  boolector_assert(btor, c);
+
+  int result = boolector_sat(btor);
+
+  //fmt::print("Expect: unsat\n");
   fmt::print("Boolector: {}\n",result == BOOLECTOR_SAT ? "sat" : (result == BOOLECTOR_UNSAT ? "unsat":"unknown"));
 
   if(result != BOOLECTOR_UNSAT)
@@ -163,12 +220,28 @@ void Pass_lec::check_lec(LGraph *g) {
     abort();
   };
 
+  fmt::print("Boolector model:\n");
+  std::string type = "btor";
+  char* btype = const_cast<char*>(type.c_str());
 
+  boolector_print_model(btor, btype, stdout);
+  
   //clean up
-  boolector_release( btor, input1);
-  boolector_release( btor, input2);
-  boolector_release( btor, formula1);
+  boolector_release( btor, in_a);
+  boolector_release( btor, in_b);
+  boolector_release( btor, not_a);
+  boolector_release( btor, or_notab);
+  boolector_release( btor, not_ab_or);
+  boolector_release( btor, and_ab);
+  boolector_release( btor, bool_and);
+  boolector_release( btor, bool_nand); 
+
+  boolector_release( btor, c);
   boolector_release_sort( btor, s);
+  
+
   assert (boolector_get_refs (btor) == 0);
-  boolector_delete(btor);*/
-}
+  boolector_delete(btor);
+
+  }*/
+
