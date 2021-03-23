@@ -7,9 +7,7 @@
 #include "lgraph.hpp"
 
 Node_tree::Node_tree(LGraph* root_arg)
-    : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree"))
-    , root(root_arg)
-    , last_free() {
+    : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
   absl::flat_hash_set<Hierarchy_index> hidx_used;
@@ -92,11 +90,15 @@ void Node_tree::dump() const {
     std::string indent(index.level, ' ');
     const auto& id = get_data(index);
 
-    std::string_view name;
+    std::string name;
     if (id.is_invalid()) {
       name = "root module";
     } else {
-      name = id.get_name();
+      if (id.has_name()) {
+        name = id.get_name();
+      } else {
+        name = id.default_instance_name();
+      }
     }
 
     fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n",

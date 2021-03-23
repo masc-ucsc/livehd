@@ -74,7 +74,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     return correct;
   }
 
-  // Start by pealing off the first componet cluster.
+  // Start by peeling off the first componet cluster.
   // And getting the standard information about it.
   FPObject*     comp     = removeComponent(0);
   GeographyHint compHint = comp->getHint();
