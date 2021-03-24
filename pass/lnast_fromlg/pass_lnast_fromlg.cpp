@@ -53,7 +53,7 @@ void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view mod
 
   handle_io(lg, idx_stmts, *lnast);
   fmt::print("PRINTING the from_lg_bw_table:");
-  lnast->print_bitwidth_table();
+  //lnast->print_bitwidth_table();
   initial_tree_coloring(lg, *lnast);
 
   begin_transformation(lg, *lnast, idx_stmts);
