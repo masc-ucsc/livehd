@@ -1893,10 +1893,12 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
       return;
     }
   } else if (cur_ntype == Ntype_op::AttrSet) {
-    auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_name();
-    if (!Lgtuple::is_root_attribute(field_txt)) {
-      auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
-      absl::StrAppend(&hier_name , ".", non_attr_field);
+    if (cur_node.is_sink_connected("field")) {
+      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_name();
+      if (!Lgtuple::is_root_attribute(field_txt)) {
+        auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
+        absl::StrAppend(&hier_name , ".", non_attr_field);
+      }
     }
     is_leaf = true;
   } else if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("tuple_name")) {

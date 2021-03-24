@@ -348,9 +348,8 @@ void Bitwidth::process_get_mask(Node &node) {
   if (val4<min_val)
     min_val = val4;
 
-  // FIXME: this is the correct ONE
-  // flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
-  flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(0, (Lconst(1)<<(max_val.get_bits()-1))-Lconst(1) ));
+  flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
+  //flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(0, (Lconst(1)<<(max_val.get_bits()-1))-Lconst(1) ));
 }
 
 void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
