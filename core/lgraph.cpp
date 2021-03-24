@@ -1150,7 +1150,7 @@ Sub_node *LGraph::ref_self_sub_node() { return library->ref_sub(get_lgid()); }
 void LGraph::trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) {
   I(dpin.is_hierarchical());
   I(dpin.is_driver());
-  I(dpin.get_top_lgraph() == spin.get_top_lgraph());
+  I(spin.is_invalid() || dpin.get_top_lgraph() == spin.get_top_lgraph());
 
   if (dpin.is_graph_input() && dpin.is_down_node()) {
     auto up_pin = dpin.get_up_pin();

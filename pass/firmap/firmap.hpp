@@ -20,6 +20,8 @@ protected:
   bool     firbits_issues = false;
   bool     firmap_issues  = false;
 
+  std::string lg_path;
+
   absl::node_hash_map<uint32_t, FBMap>    &fbmaps;       // firbits maps center
   absl::node_hash_map<uint32_t, PinMap>   &pinmaps;      // pin maps center
   absl::node_hash_map<uint32_t, XorrMap>  &spinmaps_xorr;
@@ -136,4 +138,6 @@ public:
   Firmap (absl::node_hash_map<uint32_t, FBMap> &_fbmaps, absl::node_hash_map<uint32_t, PinMap> &_pinmaps, absl::node_hash_map<uint32_t, XorrMap> &_spinmaps_xorr);
   void    do_firbits_analysis(LGraph *orig);
   LGraph* do_firrtl_mapping  (LGraph *orig);
+
+  void dump() const;
 };

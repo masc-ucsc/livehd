@@ -159,10 +159,18 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 #else
     auto a = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
-    if (mask_dpin.is_type_const() && mask_dpin.get_type_const() == Lconst(-1)) {
-      final_expr = a;
+    if (mask_dpin.is_type_const()) {
+      auto v = mask_dpin.get_type_const();
+      if (v == Lconst(-1)) {
+        final_expr = a;
+      }else if (v.is_mask()) {
+        auto ubits = v.get_bits()-1; // -1 because it is a positive
+        final_expr = absl::StrCat(a, "[", ubits-1 ,":0]");
+      }else{
+        I(false); // FIXME: implement the more complicated cases (check lconst::get_mask_op)
+      }
     }else{
-      I(false); // FIXME: implement the more complicated cases (check lconst::get_mask_op)
+      I(false); // FIXME: implement this
     }
 #endif
   }else if (op == Ntype_op::Sext) {

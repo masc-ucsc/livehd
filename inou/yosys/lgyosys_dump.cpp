@@ -595,7 +595,8 @@ void Lgyosys_dump::to_yosys(LGraph *g) {
         auto *out_wire = cell_output_map[node.get_driver_pin().get_compact()];
 
         I(node.get_sink_pin("mask").get_driver_node().is_type_const());
-        I(node.get_sink_pin("mask").get_driver_node().get_type_const() == Lconst(-1)); // FIXME: implement the other options
+        auto v = node.get_sink_pin("mask").get_driver_node().get_type_const();
+        I(v.get_bits() == out_wire->width);
 
         unsigned_wire.insert(out_wire);
 

@@ -1819,8 +1819,10 @@ void Lnast_tolg::try_create_flattened_inp(LGraph *lg) {
     auto tg = e.sink.get_node();
     I(tg.get_type_op() == Ntype_op::TupGet);
 
-    inp_artifacts[tg.get_compact()].insert(tg);                              // insert the head of the chain
-    auto hier_name = (std::string)tg.get_driver_pin().get_name().substr(1);  // get rid of "$" in "$foo"
+    inp_artifacts[tg.get_compact()].insert(tg);                        // insert the head of the chain
+
+    I(tg.get_driver_pin().get_name().substr(0,1)=="$");
+    std::string hier_name{tg.get_driver_pin().get_name().substr(1)};  // get rid of "$" in "$foo"
 
     for (auto &tg_out : tg.out_edges()) {
       dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);
@@ -1890,6 +1892,13 @@ void Lnast_tolg::dfs_try_create_flattened_inp(LGraph *lg, Node_pin &cur_node_spi
       create_ginp_as_runtime_idx(lg, hier_name, chain_head, cur_node);
       return;
     }
+  } else if (cur_ntype == Ntype_op::AttrSet) {
+    auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_name();
+    if (!Lgtuple::is_root_attribute(field_txt)) {
+      auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
+      absl::StrAppend(&hier_name , ".", non_attr_field);
+    }
+    is_leaf = true;
   } else if (cur_ntype == Ntype_op::TupGet && cur_node_spin == cur_node.setup_sink_pin("tuple_name")) {
     auto pos_spin = cur_node.setup_sink_pin("position");
     if (pos_spin.is_connected() && pos_spin.get_driver_node().get_type_op() != Ntype_op::Const) {

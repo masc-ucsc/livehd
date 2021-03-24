@@ -687,16 +687,22 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
     return;
   }
 
-  auto lhs_node = dpin_lhs.get_node();
   bool lhs_is_attr_bit_set = false;
+#if 0
+  auto lhs_node = dpin_lhs.get_node();
   // note: if lhs is attr_bit_set, the dp should respect it and create a mask to guarantee the will reflect the lhs bits
   if (lhs_node.get_type_op() == Ntype_op::Get_mask) {
     auto attr_node  = lhs_node.setup_sink_pin("a").get_driver_node();
     auto attr_field = attr_node.setup_sink_pin("field").get_driver_pin().get_name();
     lhs_is_attr_bit_set = attr_field == "__ubits" || attr_field == "__sbits";
   }
+#endif
 
   if (bw_rhs.get_sbits() >= bw_lhs.get_sbits() || lhs_is_attr_bit_set) {
+
+#if 0
+    auto sext_node  = node_dp.get_class_lgraph()->create_node(Ntype_op::Sext);
+#else
     auto mask_node  = node_dp.get_class_lgraph()->create_node(Ntype_op::And);
     auto mask_dpin  = mask_node.get_driver_pin();
 
@@ -715,12 +721,12 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
 
     fwd_it.add_node(mask_node);
     fwd_it.add_node(all_one_node);
+#endif
 
   } else { // bw_rhs.bits < bw_lhs.bits, already match
     for (auto e : node_dp.out_edges())
       dpin_rhs.connect_sink(e.sink);
   }
-
 
   if (!hier) // FIXME: once hier del works
     node_dp.del_node();
@@ -781,18 +787,8 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
       if ((bw.get_sbits() - 1) > (val.to_i()))
         Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}ubits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
 
-      bw.set_sbits_range(val.to_i()); //note: still set sbits range and rely on the Tposs to turn max/min to positive
-      bool tposs_existed = false;
-      for (auto e : node_attr.out_edges()) {
-        if (e.sink.get_node().get_type_op() == Ntype_op::Get_mask) {
-          tposs_existed = true;
-          break;
-        }
-      }
-      //FIXME: This looks quite nasty. I would say that if the output (clock/reset) are 1 bit, there is no need to get_bits (tposs)
-      if (!tposs_existed && dpin_name != "$clock_0" && dpin_name != "$reset_0")
-        insert_tposs_nodes(node_attr, fwd_it);
-
+      bw.set_ubits_range(val.to_i());
+      insert_tposs_nodes(node_attr, val.to_i(), fwd_it);
     } else { // Attr::Set_sbits
       if (bw.get_sbits() > (val.to_i()))
         Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}sbits\n", node_attr.debug_name(), dpin_name, bw.get_sbits(), val.to_i());
@@ -821,33 +817,44 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   }
 }
 
-
 // insert tposs after attr node when ubits
-void Bitwidth::insert_tposs_nodes(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
-  I(node_attr.get_sink_pin("field").get_driver_pin().get_name().find("__ubits") != std::string::npos);
+void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it)  {
 
-  std::vector<Node_pin> attr_dpins;
-  attr_dpins.emplace_back(node_attr.setup_driver_pin("Y"));
-  if (node_attr.setup_driver_pin("chain").is_connected())
-    attr_dpins.emplace_back(node_attr.setup_driver_pin("chain"));
+  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_name().find("__ubits") != std::string::npos);
 
-  for (auto attr_dpin : attr_dpins) {
-    if (hier) {
-      attr_dpin = attr_dpin.get_non_hierarchical(); // insert locally not through hierarchy
-    }
-    auto ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Get_mask);
-    ntposs.setup_sink_pin("mask").connect_driver(node_attr.get_class_lgraph()->create_node_const(-1));
-
-    auto ntposs_dpin = ntposs.setup_driver_pin();
-    attr_dpin.connect_sink(ntposs.setup_sink_pin("a"));
-    for (auto &e : attr_dpin.out_edges()) {
-      if (e.sink.get_node() != ntposs) {
-        ntposs_dpin.connect_sink(e.sink);
-        e.del_edge();
-      }
-    }
-    fwd_it.add_node(ntposs); // add once the edges are added
+  auto node_attr = node_attr_hier.get_non_hierarchical(); // insert locally not through hierarchy
+  auto name_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+  if (name_dpin.is_invalid()) {
+    return;
   }
+
+  auto mask   = (Lconst(1)<<Lconst(ubits))-Lconst(1);
+
+  Node ntposs;
+
+  for (auto &e : node_attr.out_edges()) {
+    if (e.driver.get_pin_name() == "chain")
+      continue;
+
+    I(e.driver.get_pid()==0); // chain has pid 1
+
+    if (e.sink.get_type_op() == Ntype_op::Get_mask) {
+      auto m = e.sink.get_node().get_sink_pin("mask").get_driver_pin().get_type_const();
+      if (m == mask)
+        continue;
+    }
+    if (ntposs.is_invalid()) {
+      ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Get_mask);
+      ntposs.setup_sink_pin("mask").connect_driver(node_attr.get_class_lgraph()->create_node_const(mask));
+      ntposs.setup_sink_pin("a").connect_driver(name_dpin);
+    }
+
+    ntposs.setup_driver_pin().connect_sink(e.sink);
+    e.del_edge();
+  }
+
+  if (!ntposs.is_invalid())
+    fwd_it.add_node(ntposs); // add once the edges are added
 }
 
 void Bitwidth::process_attr_set_propagate(Node &node_attr) {
@@ -1075,18 +1082,22 @@ void Bitwidth::bw_pass(LGraph *lg) {
 
     // set bits for graph input and output
     lg->each_graph_input([this](Node_pin &dpin) {
-        if (dpin.get_name() == "$")
+      if (dpin.get_name() == "$")
         return;
-        auto it = flat_bwmap.find(dpin.get_compact_flat());
-        if (it != flat_bwmap.end()) {
+      auto it = flat_bwmap.find(dpin.get_compact_flat());
+      if (it != flat_bwmap.end()) {
         auto &bw = it->second;
         auto bw_bits = bw.get_sbits();
-        if (bw.is_always_positive())
-        dpin.set_bits(bw_bits - 1);
-        else
+#if 1
         dpin.set_bits(bw_bits);
-        }
-        }, hier);
+#else
+        if (bw.is_always_positive())
+          dpin.set_bits(bw_bits - 1);
+        else
+          dpin.set_bits(bw_bits);
+#endif
+      }
+    }, hier);
 
     lg->each_graph_output([this](Node_pin &dpin) {
         if (dpin.get_name() == "%")

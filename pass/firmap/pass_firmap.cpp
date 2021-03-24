@@ -32,9 +32,19 @@ void Pass_firmap::trans(Eprp_var &var) {
   absl::node_hash_map<uint32_t, XorrMap> spinmaps_xorr; //Lg_type_id -> spinmap
  
   Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
-  std::vector<const LGraph *> lgs;
+  std::vector<LGraph *> lgs;
   for (const auto &lg : var.lgs) {
+    auto name{lg->get_name()};
+    if (name.substr(0,11) != "__firrtl_") {
+      fmt::print("firmap skipping {}\n", name);
+    }
+    fmt::print("firmap {}\n", name);
     fm.do_firbits_analysis(lg);
+    auto new_lg = fm.do_firrtl_mapping(lg);
+    lgs.emplace_back(new_lg);
   }
+  var.clear();
+  for(auto *lg:lgs)
+    var.add(lg);
 }
 

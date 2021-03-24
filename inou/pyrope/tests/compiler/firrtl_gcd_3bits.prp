@@ -1,6 +1,6 @@
 // firrtl_gcd.prp
-$clock.__ubits = 1
-$reset.__ubits = 1
+//$clock.__ubits = 1
+//$reset.__ubits = 1
 
 $io_value1.__ubits = 3
 $io_value2.__ubits = 3

@@ -271,12 +271,12 @@ public:
 
   constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
-  Node_pin(LGraph *_g, Compact comp);
-  Node_pin(std::string_view path, Compact_flat comp);
-  Node_pin(LGraph *_g, Compact_driver comp);
-  Node_pin(LGraph *_g, Compact_class comp);
-  Node_pin(LGraph *_g, const Hierarchy_index &hidx, Compact_class comp);
-  Node_pin(LGraph *_g, Compact_class_driver comp);
+  Node_pin(LGraph *_g, const Compact &comp);
+  Node_pin(std::string_view path, const Compact_flat &comp);
+  Node_pin(LGraph *_g, const Compact_driver &comp);
+  Node_pin(LGraph *_g, const Compact_class &comp);
+  Node_pin(LGraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
+  Node_pin(LGraph *_g, const Compact_class_driver &comp);
 
   // No constexpr (get_root_idx)
 

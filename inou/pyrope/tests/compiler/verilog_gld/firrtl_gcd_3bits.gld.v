@@ -1,6 +1,5 @@
 module firrtl_gcd(
   input        clock,
-  input        reset,
   input  [2:0] io_value1,
   input  [2:0] io_value2,
   input        io_loading_values,

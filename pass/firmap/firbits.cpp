@@ -10,8 +10,24 @@
 #include "lgraph.hpp"
 #include "struct_firbits.hpp"
 
+void Firmap::dump() const {
+  for(const auto &maps_it:fbmaps) {
+    fmt::print("processing lgid:{}\n", maps_it.first);
+
+    fmt::print("  fbmap:\n");
+    for(const auto &it:maps_it.second) {
+      Node_pin dpin(lg_path, it.first);
+
+      fmt::print("    pin:{} ", dpin.debug_name());
+      it.second.dump();
+    }
+  }
+}
+
 void Firmap::do_firbits_analysis(LGraph *lg) {
   Lbench b("pass.firbits");
+
+  lg_path = lg->get_path(); // common for all the libs
 
   {
     std::lock_guard<std::mutex> guard(firrtl_maps_mutex); 
@@ -56,16 +72,9 @@ void Firmap::do_firbits_analysis(LGraph *lg) {
     } else {
       fmt::print("FIXME: node:{} still not handled by firrtl bits analysis\n", node.debug_name());
     }
-
-    // debug
-    #ifndef NDEBUG
-      auto it = fbmap.find(node.get_driver_pin("Y").get_compact_flat());
-      if (it != fbmap.end()) {
-        fmt::print("    ");
-        it->second.dump();
-      }
-    #endif
   }  // end of lg->forward()
+
+  //dump();
 
   /* if (firbits_issues) { */
   /*   Pass::error("firbits cannot be propagated, something wrong in firbits analysis!"); */
@@ -167,7 +176,9 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
   }
 
   const auto parent_attr_bw = parent_attr_it->second;
-  for (auto out_dpin : node_attr.out_connected_pins()) fbmap.insert_or_assign(out_dpin.get_compact_flat(), parent_attr_bw);
+  for (auto out_dpin : node_attr.out_connected_pins()) {
+    fbmap.insert_or_assign(out_dpin.get_compact_flat(), parent_attr_bw);
+  }
 }
 
 void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
@@ -191,10 +202,6 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(dpin_key.has_name());
 
   auto attr_dpin = node_attr.get_driver_pin("Y");
-
-  std::string_view dpin_name;
-  if (attr_dpin.has_name())
-    dpin_name = attr_dpin.get_name();
 
   // copy parent's bw for some judgement and then update to attr_set value
   Firrtl_bits fb(0);
@@ -222,7 +229,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
       if (fb.get_bits() && (fb.get_bits()) > (val.to_i())) {
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", dpin_name, fb.get_bits(), val.to_i());
+        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
 			}
 
       fb.set_bits_sign(val.to_i(), false);
@@ -232,7 +239,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
         I(false, "cannot set sbits to an unsigned parent node in firrtl!");
 
       if (fb.get_bits() && fb.get_bits() > (val.to_i()))
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", dpin_name, fb.get_bits(), val.to_i());
+        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
 
       fb.set_bits_sign(val.to_i(), true);
     }
@@ -291,19 +298,21 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
 }
 
 Firmap::Attr Firmap::get_key_attr(std::string_view key) {
-  if (key.substr(0, 7) == "__ubits")
+  auto sz = key.size();
+
+  if (key.substr(sz-7, sz) == "__ubits")
     return Attr::Set_ubits;
 
-  if (key.substr(0, 7) == "__sbits")
+  if (key.substr(sz-7, sz) == "__sbits")
     return Attr::Set_sbits;
 
-  if (key.substr(0, 5) == "__max")
+  if (key.substr(sz-5, sz) == "__max")
     return Attr::Set_max;
 
-  if (key.substr(0, 5) == "__min")
+  if (key.substr(sz-5, sz) == "__min")
     return Attr::Set_min;
 
-  if (key.substr(0, 11) == "__dp_assign")
+  if (key.substr(sz-11, sz) == "__dp_assign")
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;

@@ -1,14 +1,14 @@
-a = 2              // a0 =
+a = 2               // a0 = 2bits
 a.__ubits = 3       // a1 =
-b = a.__ubits + 1   // = a1
+b = a.__ubits + 1   // = a1 2+1
 c = 0
 if (1 == 1) {
-  a = 4            // a2
+  a = 4            // a2    4
   a.__ubits = 11    // a3
 } else {
   a.__ubits = 22    // a4
   c = a.__ubits + 5 // = a4
   a = 6            // a5 = 
 }
-                   // a6 = (c, a3, a5) 
-%out = a + b + c + a.__ubits  // 4 + 4 + 0 + 11 = 19 = 0x13
+                   // a6 = (c, a3, a5)
+%out = a + b + c + a.__ubits  // 4 + 3 + 0 + 3 (4 is 0b0100) = 10

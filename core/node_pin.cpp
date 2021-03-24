@@ -6,7 +6,7 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 
-Node_pin::Node_pin(LGraph *_g, Compact comp)
+Node_pin::Node_pin(LGraph *_g, const Compact &comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!comp.hidx.is_invalid()); // Why to Compact. Use Compact_class
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -14,7 +14,7 @@ Node_pin::Node_pin(LGraph *_g, Compact comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(std::string_view path, Compact_flat comp) {
+Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   current_g = LGraph::open(path, comp.lgid);
   top_g = current_g;
 
@@ -26,7 +26,7 @@ Node_pin::Node_pin(std::string_view path, Compact_flat comp) {
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
+Node_pin::Node_pin(LGraph *_g, const Compact_driver &comp)
     : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -34,7 +34,7 @@ Node_pin::Node_pin(LGraph *_g, Compact_driver comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
+Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), hidx(_hidx), idx(comp.idx), sink(comp.sink) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -42,13 +42,13 @@ Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, Compact_class comp)
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, Compact_class comp)
+Node_pin::Node_pin(LGraph *_g, const Compact_class &comp)
     : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, Compact_class_driver comp)
+Node_pin::Node_pin(LGraph *_g, const Compact_class_driver &comp)
     : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(get_root_idx()));
