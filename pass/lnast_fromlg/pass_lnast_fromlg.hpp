@@ -44,7 +44,7 @@ protected:
 
   void handle_io(LGraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
   //void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
-  void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin, const std::string_view& pin_name, const uint32_t& bits);
+  void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin, bool is_pos, const std::string_view& pin_name, const uint32_t& bits);
 
   std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
   bool has_prefix(std::string_view test_string);

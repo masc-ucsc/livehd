@@ -229,6 +229,7 @@ public:
   bool      is_in_bw_table                     (const std::string_view name);
   uint32_t  get_bitwidth                       (const std::string_view name);
   void      set_bitwidth                       (const std::string_view name, const uint32_t bitwidth);
+  void print_bitwidth_table();
 
   void dump() const;
 };

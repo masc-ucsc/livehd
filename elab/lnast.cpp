@@ -1253,6 +1253,13 @@ void Lnast::set_bitwidth(const std::string_view name, const uint32_t bitwidth) {
   from_lgraph_bw_table[(std::string)name] = bitwidth;
 }
 
+void Lnast::print_bitwidth_table() {
+  fmt::print("Elements in table: ", from_lgraph_bw_table.size(), "\n");
+  for (auto iter = from_lgraph_bw_table.begin(); iter!= from_lgraph_bw_table.end(); iter++) {
+    fmt::print("for key: ", iter->first, ", we have: ", iter->second, "\n");
+  }
+}
+
 void Lnast::dump() const {
   for (const auto &it : depth_preorder(get_root())) {
     const auto &node = get_data(it);
