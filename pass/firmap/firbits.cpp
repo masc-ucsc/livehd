@@ -201,7 +201,6 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(dpin_key.get_node().is_type(Ntype_op::TupKey));
   I(dpin_key.has_name());
 
-  auto attr_dpin = node_attr.get_driver_pin("Y");
 
   // copy parent's bw for some judgement and then update to attr_set value
   Firrtl_bits fb(0);
@@ -223,23 +222,33 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
     I(dpin_val.get_node().is_type_const());
     auto val = dpin_val.get_node().get_type_const();
+    //auto attr_dpin = node_attr.get_driver_pin("Y");
 
     if (attr == Attr::Set_ubits) {
+#if 0
+      // NO checks. The lgtuple is not built and compares things like foo.bar.__ubits with foo.xxx.__ubits
       if (fb.get_sign() == true && has_through_dpin && !is_set_graph_inp)
         I(false, "cannot set ubits to a signed parent node in firrtl!");
 
       if (fb.get_bits() && (fb.get_bits()) > (val.to_i())) {
         Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
 			}
+#else
+    (void)has_through_dpin;
+    (void)is_set_graph_inp;
+#endif
 
       fb.set_bits_sign(val.to_i(), false);
 
     } else {  // Attr::Set_sbits
+#if 0
+      // NO checks. The lgtuple is not built and compares things like foo.bar.__ubits with foo.xxx.__ubits
       if (fb.get_sign() == false && has_through_dpin && !is_set_graph_inp)
         I(false, "cannot set sbits to an unsigned parent node in firrtl!");
 
       if (fb.get_bits() && fb.get_bits() > (val.to_i()))
         Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
+#endif
 
       fb.set_bits_sign(val.to_i(), true);
     }

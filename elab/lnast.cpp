@@ -146,6 +146,12 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
 
   for(auto &child:children(opr_nid)) {
     auto name = get_name(child);
+#if 0
+    // FIXME: DO NOT CREATE ANY ATTR, Just TupleAdd/Get which cprop can convert to Attr on use
+    // __dp_assign can be created directly
+    if (name == "__ubits" || name == "__sbits" || name == "__q_pin")
+      continue;
+#endif
     auto attr = (name.substr(0, 2) == "__" && name.substr(0, 3) != "___");
     if (attr)
       return true;

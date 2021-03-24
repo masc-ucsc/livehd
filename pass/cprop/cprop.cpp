@@ -686,29 +686,38 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tgq
   std::string hier_reg_name;
   while (true) {
 
-    auto [tup_name, key_name] = get_tuple_name_key(cur_node);
-    if (hier_reg_name.empty()) {
-      hier_reg_name = key_name;
-    } else {
-      hier_reg_name = absl::StrCat(key_name, ".", hier_reg_name);
-    }
+    Node_pin parent_dpin;
+    if (cur_node.is_type_tup()) {
+      auto [tup_name, key_name] = get_tuple_name_key(cur_node);
+      if (hier_reg_name.empty()) {
+        hier_reg_name = key_name;
+      } else {
+        hier_reg_name = absl::StrCat(key_name, ".", hier_reg_name);
+      }
 
-    auto parent_dpin = cur_node.get_sink_pin("tuple_name").get_driver_pin();
-    auto parent_node = parent_dpin.get_node();
-    auto ptype       = parent_node.get_type_op();
-    if (ptype == Ntype_op::TupGet) {
-      cur_node = parent_node;
-      continue;
-    }
+      parent_dpin = cur_node.get_sink_pin("tuple_name").get_driver_pin();
+      auto parent_node = parent_dpin.get_node();
+      auto ptype       = parent_node.get_type_op();
+      if (ptype == Ntype_op::TupGet) {
+        cur_node = parent_node;
+        continue;
+      }
 
-    if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux)
-      return false;
+      if (ptype != Ntype_op::TupAdd && ptype != Ntype_op::Mux && ptype != Ntype_op::AttrSet)
+        return false;
+    }else{
+      parent_dpin = cur_node.get_driver_pin();
+    }
 
     I(parent_dpin.has_name());
     auto reg_root_ssa_name = parent_dpin.get_name();
     auto pos = reg_root_ssa_name.find_last_of("_");
     auto reg_root_name = reg_root_ssa_name.substr(0, pos);
-    hier_reg_name = absl::StrCat(reg_root_name, ".", hier_reg_name);
+    if (hier_reg_name.empty())
+      hier_reg_name = reg_root_name;
+    else
+      hier_reg_name = absl::StrCat(reg_root_name, ".", hier_reg_name);
+
     // hier_reg_name collection finished!
     for (auto &e : ori_tgq_dpin.out_edges()) {
       auto sink_node = e.sink.get_node();

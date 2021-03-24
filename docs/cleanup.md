@@ -17,6 +17,20 @@ Increase the token position to 64 bits
 
 mmap_lib::tree should support move operators like doCreate in mmap_lib::map. Implement it.
 
+### Attr/Tup
+
+* Do not chain tuples without need (lnast.cpp). TupAdd/Get can handle position like foo.bar.xxx
+
+* Parser to directly generate Tupple_get, Tuple_set. This removes from LNAST the select field.
+Quite a bit of code from lnast.cpp like the set2attr_set_get could be removed
+
+* No attr_get/set from lnast_tolg. Also, no need to chain Attr like now. When cprop does the lgtuples,
+the attr fields gets generated as AttrSet/Get only when TupAdd/Get uses that attribute or the parent.
+
+### Deprecate the q_pin and use create_flop
+
+* Less code (few lines shared with last_value). No need for cprop to progate/fix flops
+
 ### pass.compile
 
 * In FIRRTL no need to set firrtl:true. If input is a proto, it is firrtl
