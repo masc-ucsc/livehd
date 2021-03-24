@@ -36,7 +36,6 @@ protected:
     "or",
     "!",
 
-    "rand",
     "ror",
     "rxor",
 
@@ -104,7 +103,6 @@ protected:
     "or",
     "not",
 
-    "rand",
     "ror",
     "rxor",
 
@@ -173,7 +171,6 @@ protected:
     "||", // logical_or
     "!",  // logical_not
 
-    "rand",
     "ror",
     "rxor",
 
