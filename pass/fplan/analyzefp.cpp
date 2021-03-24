@@ -5,6 +5,8 @@
 #include <limits>
 
 #include "ann_place.hpp"
+#include "floorplan.hpp"
+#include "mmap_map.hpp"
 
 void Pass_fplan_analyzefp::setup() {
   auto a = Eprp_method("pass.fplan.analyzefp",
@@ -14,9 +16,11 @@ void Pass_fplan_analyzefp::setup() {
   a.add_label_required("top", "top level module in floorplan");
   a.add_label_required("nodes", "modules to analyze, or \"dump\" to dump node names");
 
-  a.add_label_optional("regularity", "determine the amount of regularity in a module", "false");
-  a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
-  a.add_label_optional("all", "run all available kinds of analysis on a module", "false");
+  a.add_label_optional("hint", "set a geographical hint for the specified node", "");
+  a.add_label_optional(
+      "report",
+      "return information about the most recent floorplan, valid options are \"regularity\", \"hpwl\", and \"all\".",
+      "");
 
   a.add_label_optional("path",
                        "lgdb directory to analyze",
@@ -128,7 +132,23 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
       if ((n.has_instance_name() && n.get_instance_name() == name) || (n.default_instance_name() == name)) {
         found = true;
 
+        mmap_lib::map<Node::Compact, GeographyHint> hint_map(path, "node_hints");
+
+        std::string_view hint = var.get("hint");
+        if (hint != "") {
+          GeographyHint hint_enum = nameToHint(hint);
+          if (hint_enum == InvalidHint) {
+            error("invalid hint type!");
+          }
+
+          hint_map.set(n.get_compact(), hint_enum);
+        }
+
         fmt::print("module {}\t", safe_name(n));
+
+        if (hint_map.has(n.get_compact())) {
+          fmt::print("hint: {}, ", hintToName(hint_map.get(n.get_compact())));
+        }
 
         print_area(nt, index);
 
@@ -145,13 +165,14 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
         fmt::print("\n");
 
-        if (var.get("hpwl") == "true" || var.get("all") == "true") {
-          // TODO
+        std::string_view action = var.get("report");
+        if (action == "hpwl" || action == "all") {
+          // TODO: write hpwl pass
         }
 
         // computing the "regularity" of a hierarchical design using a method presented in the HiReg paper:
         // regularity = 1 - (area only counting instances of a given LGraph once) / (area counting all instances of an LGraph)
-        if (var.get("regularity") == "true" || var.get("all") == "true") {
+        if (action == "regularity" || action == "all") {
           // come up with some metric for regularity - HiReg has one, but it requires a hierarchy DAG which is annoying to generate.
         }
 

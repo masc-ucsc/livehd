@@ -1,8 +1,8 @@
 #include "floorplan.hpp"
-#include "helpers.hpp"
 
 #include "absl/container/flat_hash_map.h"
 #include "core/lgedgeiter.hpp"
+#include "helpers.hpp"
 
 bool   xReflect = false;
 double xLeft[maxMirrorDepth];
@@ -35,3 +35,32 @@ std::ostream& outputHotSpotHeader(const char* filename) {
 }
 
 void outputHotSpotFooter(std::ostream& o) { delete (&o); }
+
+constexpr std::string_view GeographyName[] = {
+    "Center",
+    "Left",
+    "Right",
+    "Top",
+    "Bottom",
+    "LeftRight",
+    "LeftRightMirror",
+    "LeftRight180",
+    "TopBottom",
+    "TopBottomMirror",
+    "TopBottom180",
+    "Periphery",
+    "UnknownHint",
+    "InvalidHint",
+};
+
+GeographyHint nameToHint(std::string_view name) {
+  for (size_t i = 0; i < (size_t)InvalidHint; i++) {
+    if (GeographyName[i] == name) {
+      return (GeographyHint)i;
+    }
+  }
+
+  return InvalidHint;
+}
+
+std::string_view hintToName(GeographyHint hint) { return GeographyName[(size_t)hint]; }

@@ -28,5 +28,8 @@ enum GeographyHint {
   InvalidHint,  // not supported
 };
 
+GeographyHint nameToHint(std::string_view name);
+std::string_view hintToName(GeographyHint hint);
+
 // This will be used to keep track of user's request for more output during layout.
 constexpr bool verbose = false;

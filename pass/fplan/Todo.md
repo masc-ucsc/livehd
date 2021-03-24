@@ -2,10 +2,9 @@ Plan:
 1. Do SA floorplanner pass
 
 a. make it so that geogLayout isn't the default
-b. store a node->hint map
-c. make analyzefp usable before FP run
+b. adjust classes to take hints
 
-
+remove node hint class in core if not used?
 
 2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
 
