@@ -7,6 +7,7 @@
 
 class Pass_fplan_analyzefp : public Pass {
 private:
+  std::string safe_name(const Node& n) const;
   void print_area(const Node_tree& nt, const Tree_index& tidx) const;
   void print_children(const Node_tree& nt, const Tree_index& tidx) const;
 public:

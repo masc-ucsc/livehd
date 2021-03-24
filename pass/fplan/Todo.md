@@ -1,8 +1,12 @@
 Plan:
-1. Re-implement DeFer
-    1. Write floorplan dumper so I can run a test through both DeFer and my version of DeFer
-    2. Implement min-cut using a different library
-    3. Implement rest of Defer
+1. Do SA floorplanner pass
+
+a. make it so that geogLayout isn't the default
+b. store a node->hint map
+c. make analyzefp usable before FP run
+
+
+
 2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
 
 

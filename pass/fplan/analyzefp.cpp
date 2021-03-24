@@ -12,7 +12,7 @@ void Pass_fplan_analyzefp::setup() {
                        &Pass_fplan_analyzefp::pass);
 
   a.add_label_required("top", "top level module in floorplan");
-  a.add_label_required("nodes", "modules to analyze");
+  a.add_label_required("nodes", "modules to analyze, or \"dump\" to dump node names");
 
   a.add_label_optional("regularity", "determine the amount of regularity in a module", "false");
   a.add_label_optional("hpwl", "determine the half-perimeter wire length of a module", "false");
@@ -25,8 +25,18 @@ void Pass_fplan_analyzefp::setup() {
   register_pass(a);
 }
 
+std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
+  return n.has_instance_name() ? std::string(n.get_instance_name()) : std::string(n.default_instance_name());
+}
+
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
-  const Ann_place& p = nt.get_data(tidx).get_place();
+  const auto& n = nt.get_data(tidx);
+  if (!n.has_place()) {
+    fmt::print("(no area information)");
+    return;
+  }
+
+  const Ann_place& p = n.get_place();
   fmt::print("x: {:.3f} mm, y: {:.3f} mm, width: {:.3f} mm, height: {:.3f} mm, area: {:.3f} mm², ar {:.3f}",
              p.get_x(),
              p.get_y(),
@@ -46,7 +56,8 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
       fmt::print(" └─ ");
     }
 
-    fmt::print("{} {}\t", (child.get_type_op() == Ntype_op::Sub) ? "mod" : "node", child.get_instance_name());
+    const std::string type = child.get_type_op() == Ntype_op::Sub ? "mod" : "node";
+    fmt::print("{} {}\t", type, safe_name(child));
 
     print_area(nt, child_idx);
     fmt::print("\n");
@@ -88,6 +99,11 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
   Node_tree nt(root);
 
+  if (names.size() == 1 && names[0] == "dump") {
+    nt.dump();
+    return;
+  }
+
   for (auto name : names) {
     if (name == var.get("top")) {
       // TODO: fix this!
@@ -109,33 +125,25 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
       I(!n.is_invalid());
 
-      if (!n.has_instance_name()) {
-        error("floorplanner has not been run!");
-      }
-
-      if (n.get_instance_name() == name) {
+      if ((n.has_instance_name() && n.get_instance_name() == name) || (n.default_instance_name() == name)) {
         found = true;
 
-        fmt::print("module {}\t", n.get_instance_name());
+        fmt::print("module {}\t", safe_name(n));
 
-        if (!n.has_place()) {
-          fmt::print("(no area information)\n");
-          break;
-        } else {
-          print_area(nt, index);
-          if (n.is_type_sub_present()) {
-            unsigned int counter = 0;
-            for (auto child_idx : nt.children(index)) {
-              (void)child_idx;
-              counter++;
-            }
+        print_area(nt, index);
 
-            fmt::print(", {} components\n", counter);
-            print_children(nt, index);
+        if (n.is_type_sub_present()) {
+          unsigned int counter = 0;
+          for (auto child_idx : nt.children(index)) {
+            (void)child_idx;
+            counter++;
           }
 
-          fmt::print("\n");
+          fmt::print(", {} components\n", counter);
+          print_children(nt, index);
         }
+
+        fmt::print("\n");
 
         if (var.get("hpwl") == "true" || var.get("all") == "true") {
           // TODO

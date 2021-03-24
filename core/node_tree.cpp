@@ -92,10 +92,10 @@ void Node_tree::dump() const {
 
     std::string name;
     if (id.is_invalid()) {
-      name = "root module";
+      name = "(root module)";
     } else {
-      if (id.has_name()) {
-        name = id.get_name();
+      if (id.has_instance_name()) {
+        name = id.get_instance_name();
       } else {
         name = id.default_instance_name();
       }
