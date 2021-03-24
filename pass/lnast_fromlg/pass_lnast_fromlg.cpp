@@ -52,6 +52,8 @@ void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view mod
   auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts());
 
   handle_io(lg, idx_stmts, *lnast);
+  fmt::print("PRINTING the from_lg_bw_table:");
+  lnast->print_bitwidth_table();
   initial_tree_coloring(lg, *lnast);
 
   begin_transformation(lg, *lnast, idx_stmts);
@@ -158,7 +160,7 @@ void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lna
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
     I(!inp.driver.get_node().is_hierarchical());
-    // if (editable_pin.get_node().get_color() == WHITE || editable_pin.get_node().get_color() == GREY) {
+
     if (editable_pin.get_node().get_color() == WHITE) {
       handle_source_node(lg, editable_pin, lnast, ln_node);
     }
@@ -263,7 +265,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
    *   /  |  \         /     \
    *  T0 $x __bits    T0    0d7    (note that the $ would be % if it was an output)*/
 
-  auto                                  inp_io_node = lg->get_graph_input_node();
+  auto inp_io_node = lg->get_graph_input_node();
   absl::flat_hash_set<std::string_view> inps_visited;
   for (const auto& edge : inp_io_node.out_edges()) {
     I(edge.driver.has_name());
@@ -511,7 +513,7 @@ void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, co
 }
 
 void Pass_lnast_fromlg::attach_tposs_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  auto tposs_node = lnast.add_child(parent_node, Lnast_node::create_zext());
+  auto tposs_node = lnast.add_child(parent_node, Lnast_node::create_tposs());
   lnast.add_child(tposs_node, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));
 
   attach_children_to_node(lnast, tposs_node, pin);
@@ -607,7 +609,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
 
   // Set up each cond value
   std::vector<std::string_view> temp_vars;
-  for (long unsigned int i = 0; i < mux_vals.size() - 1; i++) {
+  for (long unsigned int i = 1; i < mux_vals.size(); i++) {
     auto temp_var = create_temp_var(lnast);
     temp_vars.emplace_back(temp_var);
 
