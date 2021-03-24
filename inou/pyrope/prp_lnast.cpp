@@ -1603,7 +1603,7 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   }
   fmt::print("FIXME to parse foo@(ddd)\n");
   // create bit select node
-  auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_zext());
+  auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tposs());
 
   // create the LHS temporary variable
   auto lnast_temp = lnast->add_string(current_temp_var);

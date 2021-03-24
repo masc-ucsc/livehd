@@ -84,7 +84,7 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_sra)
 
   CREATE_LNAST_NODE(_sext)
-  CREATE_LNAST_NODE(_zext)
+  CREATE_LNAST_NODE(_tposs)
 
   CREATE_LNAST_NODE(_is)
   CREATE_LNAST_NODE(_ne)
