@@ -71,6 +71,8 @@ public:
   void add_edge();
   void add_edge(uint32_t bits);
 
+  static void del_edge(Node_pin &dpin, Node_pin &spin);
+
   // BEGIN ATTRIBUTE ACCESSORS
 
   uint32_t get_bits() const { return driver.get_bits(); }

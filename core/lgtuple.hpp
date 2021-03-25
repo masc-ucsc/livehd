@@ -41,6 +41,7 @@ protected:
 	static bool   match_either_partial(std::string_view a, std::string_view b);
 
   void add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
+  static void reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin);
 
 public:
   Lgtuple(std::string_view _name) : name(_name) { }
@@ -51,7 +52,7 @@ public:
 
   std::string_view get_name() const { return name; }
 
-  static std::shared_ptr<Lgtuple> make_mux(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  static std::shared_ptr<Lgtuple> make_mux(Node &mux_node, Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
   std::shared_ptr<Lgtuple> make_flop(Node &flop);
 
   bool has_dpin(std::string_view key)          const;

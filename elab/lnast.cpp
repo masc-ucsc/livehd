@@ -914,22 +914,28 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
   const auto c0_assign      = get_first_child(assign_nid);
   const auto c1_assign_name = get_name(get_sibling_next(c0_assign));
 
-  if (c1_assign_name.substr(0, 3) == "___") {
-    auto opr_nid  = get_sibling_prev(assign_nid);
-    auto opr_type = get_type(opr_nid);
-    if (opr_type.is_tuple())
-      return;
+  if (c1_assign_name.substr(0, 3) != "___")
+		return;
 
-    // note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
-    if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())
-      return;  // FIXME->sh: special case for firrtl, might need expand to more cases as needed
+	auto opr_nid  = get_sibling_prev(assign_nid);
+	auto opr_type = get_type(opr_nid);
+	if (opr_type.is_tuple())
+		return;
+#if 1
+	// This whole function should go once select is gone
+	if (opr_type.is_tuple_attr())
+		return;
+#endif
 
-    auto c0_opr = get_first_child(opr_nid);
+	// note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
+	if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())
+		return;  // FIXME->sh: special case for firrtl, might need expand to more cases as needed
 
-    I(get_name(c0_opr) == c1_assign_name);
-    set_data(c0_opr, get_data(c0_assign));
-    ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
-  }
+	auto c0_opr = get_first_child(opr_nid);
+
+	I(get_name(c0_opr) == c1_assign_name);
+	set_data(c0_opr, get_data(c0_assign));
+	ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
 }
 
 // note: handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;

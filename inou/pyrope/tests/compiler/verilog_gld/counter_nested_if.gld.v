@@ -1,5 +1,6 @@
 module counter_nested_if (
   input clock,
+  input reset,
   input c1,
   input c2,
   output reg [3:0] cnt_o
@@ -20,7 +21,11 @@ always @ (*) begin
 end
 
 always @ (posedge clock) begin
+  if (reset) begin
+    cnt_o <= 'h0;
+  end else begin
   cnt_o <= cnt_o_next[3:0];
+  end
 end
 
 endmodule

@@ -1,11 +1,13 @@
 $inp.__ubits = 1
 
-#x = 0
+x = x.__create_flop
+%out = x
+
+x = 0
 if ($inp) {
   tmp = 4
-  #x = tmp + 1
+  x = tmp + 1
 } else {
-  #x = 4
+  x = 4
 }
 
-%out = #x.__q_pin

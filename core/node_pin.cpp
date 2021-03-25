@@ -253,6 +253,20 @@ void Node_pin::set_name(std::string_view wname) {
   Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
 }
 
+void Node_pin::reset_name(std::string_view wname) {
+  auto *ref = Ann_node_pin_name::ref(current_g);
+
+  auto it = ref->find(get_compact_class_driver());
+  if (it != ref->end()) {
+    if (ref->get_val(it) == wname)
+      return;
+
+    ref->erase(it);
+  }
+
+  ref->set(get_compact_class_driver(), wname);
+}
+
 void Node_pin::del() {
   if (is_graph_output() && sink) {
     auto dpin = change_to_driver_from_graph_out_sink();

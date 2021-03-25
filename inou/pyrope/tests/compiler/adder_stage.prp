@@ -1,7 +1,10 @@
+
+adder = adder.__create_flop
+adder_q = adder
 $a.__ubits = 3
 $b.__ubits = 3
-#adder.__ubits = 4
+adder.__ubits = 4
 
-#adder = $a + $b
-tmp = #adder.__q_pin
+adder = $a + $b
+tmp = adder_q
 %out = tmp

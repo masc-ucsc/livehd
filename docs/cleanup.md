@@ -27,6 +27,10 @@ Quite a bit of code from lnast.cpp like the set2attr_set_get could be removed
 * No attr_get/set from lnast_tolg. Also, no need to chain Attr like now. When cprop does the lgtuples,
 the attr fields gets generated as AttrSet/Get only when TupAdd/Get uses that attribute or the parent.
 
+* Remove all the `#` and `__q_pin` reg from cprop/bitwidth/lnast_tolg/lnast code. Use `__create_flop`
+
+* Once all the `#` is gone, the prp_lnast should create the `__create_flop` automatically out of `#`
+
 ### Deprecate the q_pin and use create_flop
 
 * Less code (few lines shared with last_value). No need for cprop to progate/fix flops

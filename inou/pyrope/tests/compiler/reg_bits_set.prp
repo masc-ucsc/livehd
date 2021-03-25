@@ -1,10 +1,14 @@
 $a.__ubits = 8
-foo = #reg == 0
-#reg.__ubits = 8
+
+reg = reg.__create_flop
+reg_q = reg
+
+foo = reg == 0
+reg.__ubits = 8
 if (foo) {
-  #reg := $a
+  reg := $a
 } else {
-  #reg := #reg - 1
+  reg := reg - 1
 }
 
-%out = #reg.__q_pin
+%out = reg_q

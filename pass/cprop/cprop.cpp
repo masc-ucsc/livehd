@@ -614,7 +614,7 @@ void Cprop::process_flop(Node &node) {
 		if (din_node.is_type_tup() || op == Ntype_op::Mux || op == Ntype_op::Flop) { // TODO: Any node that could generate a LGTUPLE
 			// Not done. 2nd pass needed
 			if (flop_needs_2nd_iteration && !tuple_issues) {
-				Pass::info("2nd iteration flop:{} still did not have tuple (this may be OK)",node.debug_name().c_str());
+				fmt::print("2nd iteration flop:{} still did not have tuple (this may be OK)\n",node.debug_name().c_str());
 				return;
 			}
 			if (!tuple_issues) {
@@ -789,6 +789,17 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
       return true;
     }
 
+		auto wname = absl::StrCat(tup_name, ".", key_name);
+
+		auto dpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
+		if (!dpin.is_invalid()) {
+			auto flop_node = dpin.get_node();
+			if (flop_node.is_type_flop()) {
+				collapse_forward_for_pin(node, dpin);
+				return true;
+			}
+		}
+
     Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
     return false;
   }
@@ -813,6 +824,7 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
         }
       }
     }
+
     Pass::info("tuple_get {} for tuple {} has no way to find field",node.debug_name(), tup_name);
     return false;
   }
@@ -898,11 +910,12 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 			I(tuple_issues);
       tup = std::make_shared<Lgtuple>(*tup_list[0]);
 		}else{
-			tup = Lgtuple::make_mux(sel_dpin, tup_list);
+			tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
 			if (!tup) {
-				tuple_issues = true;  // could not merge
-				return;
+				return; // It was a scalar entry, no need to create tuple
 			}
+			// WARNING: new flops are not added to the iterator. Call them now, but
+			// not much besides code OPT (they have no tuples for sure)
 		}
     node2tuple[node.get_compact()] = tup;
     // tup->dump();
@@ -1279,7 +1292,8 @@ void Cprop::do_trans(LGraph *lg) {
 			} else if (op == Ntype_op::TupGet) {
 				auto ok = process_tuple_get(node, inp_edges_ordered);
 				if (!ok) {
-					Pass::info("cprop could not simplify node:{}", node.debug_name());
+					if (!flop_needs_2nd_iteration && !tuple_issues)
+						Pass::info("cprop could not simplify node:{}", node.debug_name());
 					tuple_issues = true;
 				}
 				continue;
@@ -1338,23 +1352,55 @@ void Cprop::do_trans(LGraph *lg) {
     }
   }
 
+	Node_pin clock_pin;
+	Node_pin reset_pin;
 
   // tuple chain clean up
   for (auto node : lg->fast()) {
-    if (!tuple_issues && node.is_type_tup()) {
-      if (hier) {
-        auto it = node2tuple.find(node.get_compact());
-        if (it != node2tuple.end()) {
-          node2tuple.erase(it);
-        }
-      }
-      node.del_node();
-      continue;
+    if (!tuple_issues) {
+			if (node.is_type_tup()) {
+				if (hier) {
+					auto it = node2tuple.find(node.get_compact());
+					if (it != node2tuple.end()) {
+						node2tuple.erase(it);
+					}
+				}
+				node.del_node();
+				continue;
+			}else if (node.is_type_flop()) {
+				{
+					auto spin_clock = node.setup_sink_pin("clock");
+					if (!spin_clock.is_connected()) {
+						if (clock_pin.is_invalid()) {
+							if (lg->has_graph_input("clock")) {
+								clock_pin = lg->get_graph_input("clock");
+							}else{
+								clock_pin = lg->add_graph_input("clock",Port_invalid, 1);
+							}
+						}
+						spin_clock.connect_driver(clock_pin);
+					}
+				}
+				{
+					auto spin_reset = node.setup_sink_pin("reset");
+					if (!spin_reset.is_connected()) {
+						if (reset_pin.is_invalid()) {
+							if (lg->has_graph_input("reset")) {
+								reset_pin = lg->get_graph_input("reset");
+							}else{
+								reset_pin = lg->add_graph_input("reset",Port_invalid, 1);
+							}
+						}
+						spin_reset.connect_driver(reset_pin);
+					}
+				}
+				continue;
+			}
     }
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
+			if (op!=Ntype_op::Flop && op != Ntype_op::Latch && op!=Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
           //&& op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some

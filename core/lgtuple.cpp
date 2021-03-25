@@ -320,6 +320,23 @@ void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup
   }
 }
 
+void Lgtuple::reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin) {
+
+  flop.setup_driver_pin().reset_name(flop_name);
+
+  auto s_din = flop.setup_sink_pin("din");
+
+  if (s_din.is_connected()) {
+    auto d_din = s_din.get_driver_pin();
+    if (d_din == dpin)
+      return; // already connected
+    XEdge::del_edge(d_din, s_din);
+  }
+
+  s_din.connect_driver(dpin);
+}
+
+
 #if 0
 int Lgtuple::get_next_free_pos(const std::string &match) const {
   int next_tup_pos = 0;
@@ -435,9 +452,7 @@ const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
 		if (match(e.first, key))
 			return e.second;
 	}
-  #ifndef NDEBUG
-	  LGraph::info("key:{} does not exist in tuple:{}", key, name); // may be OK if dead code eliminated
-  #endif
+
 	return invalid_dpin;
 }
 
@@ -662,61 +677,125 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
   return true;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
-  (void)sel_dpin;
+std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
   I(tup_list.size() > 1);  // nothing to merge?
 
-  auto fixing_tup = std::make_shared<Lgtuple>(tup_list.back()->get_name());
 
-	std::vector<size_t> keymap_counter;
 
-	for(const auto &tup:tup_list) {
-		for(const auto &e:tup->get_map()) {
-			auto fixed_key = fixing_tup->learn_fix(e.first);
-			bool found     = false;
+  // 1st
+  //
+  //  -Create a fixing_tup with all the entries in tup_list
+  //
+  //  -If all the tup_list keys point to the same dpin, do not create mux
+  //
+  //  -Each tuples may have diff name (:0:a, a, 0) which sould be unified/fixed
 
-			if (keymap_counter.size() < fixing_tup->key_map.size()) {
-				keymap_counter.resize(fixing_tup->key_map.size());
-			}
 
-			for(auto i=0u;i<fixing_tup->key_map.size();++i) {
-				if (fixing_tup->key_map[i].first != fixed_key) { // for fixed, a direct strcmp works
-					continue;
-				}
-				if (fixing_tup->key_map[i].second != e.second) { // Diff dpin will need a mux
-					fixing_tup->key_map[i].second = invalid_dpin;
-				}
+  // find all the possible keys
+  std::set<std::string> key_entries;
+  for(auto tup:tup_list) {
+    for(const auto &e:tup->get_map()) {
+      key_entries.insert(e.first); // There can be replicates like :0:a, a, 0
+    }
+  }
 
-				keymap_counter[i]++;
+  // Put the keys after learning (may collapse entries)
+  auto fixing_tup = std::make_shared<Lgtuple>(*tup_list[0]);
+  for(auto key:key_entries) {
+    bool found = false;
+    for(auto &e:fixing_tup->key_map) {
+      learn_fix_int(key, e.first);
+      if (key == e.first) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      fixing_tup->key_map.emplace_back(key, invalid_dpin);
+    }
+  }
 
-				found = true;
-				break;
-			}
-			if (!found) {
-				fixing_tup->key_map.emplace_back(fixed_key, e.second);
-			}
-		}
-	}
+  // If an entry is not in all the tuples, mark as invalid
+  for(auto &e:fixing_tup->key_map) {
+    if (e.second.is_invalid())
+      continue; // already marked as pending
 
+    for(auto tup_pos=1u;tup_pos<tup_list.size();++tup_pos) {
+      auto tup  = tup_list[tup_pos];
+
+      auto tup_dpin = tup->get_dpin(e.first);
+      if (tup_dpin == e.second)
+        continue;
+
+      e.second.invalidate();
+      break;
+    }
+  }
+
+  if (fixing_tup->is_scalar()) {
+    return nullptr;
+  }
+
+  // 2nd
+  //
+  //  Create mux if needed, not needed when:
+  //
+  //  Same dpin in both sizes (e.second.invalid()
+  //
+  //  Reuse the original mux_node (must reconnect edges)
+
+  auto *lg = mux_node.get_class_lgraph();
+
+  std::vector<Node_pin> mux_input_dpins;
+  mux_input_dpins.resize(tup_list.size()+1); // +1 for sel
+  for(auto &e:mux_node.inp_edges()) {
+    auto pid = e.sink.get_pid();
+    I(pid<mux_input_dpins.size());
+    mux_input_dpins[pid] = e.driver;
+
+    if (pid) // keep sel
+      e.del_edge();
+  }
+
+  Node_pin error_dpin;
+  for(auto &e:mux_input_dpins) {
+    if (!e.is_invalid())
+      continue;
+
+    if (error_dpin.is_invalid()) {
+      error_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin();
+    }
+    e = error_dpin;
+  }
+
+  bool mux_node_reused = false;
 	for(auto e_index = 0u;e_index < fixing_tup->key_map.size(); ++e_index) {
 		auto &e = fixing_tup->key_map[e_index];
-		if (!e.second.is_invalid() && keymap_counter[e_index] == (tup_list.size()-1))
+		if (!e.second.is_invalid()) { // No need to create mux
 			continue;
+    }
 
-		auto mux_node = sel_dpin.get_class_lgraph()->create_node(Ntype_op::Mux);
-		mux_node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
+    Node node;
+    if (mux_node_reused) {
+      node = lg->create_node(Ntype_op::Mux);
+      node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
+    }else{
+      node = mux_node;
+      mux_node_reused = true;
+    }
 
 		for (auto i = 0u; i < tup_list.size(); ++i) {
-			const auto &dpin = tup_list[i]->get_dpin(e.first);
-			if (dpin.is_invalid()) {
-				auto cerr = sel_dpin.get_class_lgraph()->create_node(Ntype_op::CompileErr);
-				mux_node.setup_sink_pin_raw(i+1).connect_driver(cerr.setup_driver_pin());
-			}else{
-				mux_node.setup_sink_pin_raw(i+1).connect_driver(dpin);
+      Node_pin dpin;
+			if (tup_list[i]->has_dpin(e.first)) {
+        dpin = tup_list[i]->get_dpin(e.first);
+        I(!dpin.is_invalid());
+      }else{
+        dpin = mux_input_dpins[i+1];
 			}
+      node.setup_sink_pin_raw(i+1).connect_driver(dpin);
 		}
 
-		e.second = mux_node.setup_driver_pin();
+		e.second = node.setup_driver_pin();
 	}
 
 	return fixing_tup;
@@ -734,9 +813,20 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 	else
 		flop_name = name;
 
+	bool first_flop=true;
+  std::string flop_root_name;
+
+  if (is_single_level(flop_name)) {
+    flop_root_name = flop_name;
+
+  }else{
+    flop_root_name = get_first_level_name(flop_name);
+    if (has_dpin(flop_name))
+      first_flop = false;
+  }
+
   std::shared_ptr<Lgtuple> ret_tup;
 
-	bool first_flop=true;
 	for(auto &e:key_map) {
 		if (e.second.get_node() == flop)
 			continue; // no loop to itself
@@ -745,20 +835,35 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 			continue;
 		}
 		Node node;
-		if (first_flop) {
-			node = flop;
+    auto new_flop_name = absl::StrCat(flop_root_name, ".", e.first);
+
+    if (flop_name == new_flop_name) {
+      I(!first_flop);
+      node = flop;
+    }else if (first_flop) {
+      node = flop;
 			first_flop = false;
 		}else{
-			node = flop.get_class_lgraph()->create_node(Ntype_op::Flop);
-      for(auto &e2:flop.inp_edges()) {
-        if (e2.sink.get_pin_name() == "din")
-          continue;
-        node.setup_sink_pin(e2.sink.get_pin_name()).connect_driver(e2.driver);
+      auto *lg = flop.get_class_lgraph();
+      auto dpin = Node_pin::find_driver_pin(lg, new_flop_name);
+      if (dpin.is_invalid()) {
+        node = lg->create_node(Ntype_op::Flop);
+        // Just clone the Flop fields/attributes
+        for(const auto &e2:flop.inp_edges()) {
+          if (e2.sink.get_pin_name() == "din")
+            continue;
+          auto spin = node.setup_sink_pin(e2.sink.get_pin_name());
+          spin.connect_driver(e2.driver);
+        }
+      }else{
+        node = dpin.get_node();
       }
-      node.setup_sink_pin("din").connect_driver(e.second);
     }
+
+    reconnect_flop_if_needed(node, new_flop_name, e.second);
+
     if (!ret_tup) {
-      ret_tup = std::make_shared<Lgtuple>(flop_name);
+      ret_tup = std::make_shared<Lgtuple>(flop_root_name);
     }
 		ret_tup->key_map.emplace_back(e.first, node.setup_driver_pin());
 	}

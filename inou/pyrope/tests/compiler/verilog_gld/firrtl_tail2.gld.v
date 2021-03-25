@@ -1,5 +1,6 @@
 module firrtl_tail2 (
   input        clock,
+  input        reset,
   input        en,
   input  [3:0] inp,
   output [3:0] out
@@ -16,7 +17,11 @@ always @ (*) begin
 end
 
 always @ (posedge clock) begin
+  if (reset) begin
+    x <= 'h0;
+  end else begin
   x <= x_next;
+  end
 end
 assign out = x;
 endmodule

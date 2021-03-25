@@ -30,6 +30,15 @@ void XEdge::del_edge() {
   driver.get_class_lgraph()->del_edge(driver, sink);
 }
 
+void XEdge::del_edge(Node_pin &dpin, Node_pin &spin) {
+  I(dpin.get_class_lgraph() == spin.get_class_lgraph());
+
+  I(dpin.is_driver());
+  I(spin.is_sink());
+
+  dpin.get_class_lgraph()->del_edge(dpin, spin);
+}
+
 void XEdge::add_edge() { driver.get_class_lgraph()->add_edge(driver, sink); }
 
 void XEdge::add_edge(uint32_t bits) { driver.get_class_lgraph()->add_edge(driver, sink, bits); }

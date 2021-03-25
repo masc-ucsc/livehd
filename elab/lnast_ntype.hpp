@@ -311,6 +311,11 @@ public:
   bool constexpr is_attr_set()     const { return val == Lnast_ntype_attr_set; }
   bool constexpr is_attr_get()     const { return val == Lnast_ntype_attr_get; }
 
+  bool constexpr is_tuple_attr()   const { return val == Lnast_ntype_tuple_add
+                                               || val == Lnast_ntype_tuple_get
+                                               || val == Lnast_ntype_attr_set
+                                               || val == Lnast_ntype_attr_get; }
+
   // Super types
   bool constexpr is_primitive_op() const { return (val>=Lnast_ntype_assign && val <= Lnast_ntype_attr_get); }
   bool constexpr is_logical_op()   const { return (val == Lnast_ntype_logical_and) ||

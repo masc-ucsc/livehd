@@ -1,17 +1,21 @@
 $en.__ubits   = 1
 $src1.__ubits = 16
 $src2.__ubits = 16
-#reg.cnt.__ubits = 4            // #reg_0
+
+reg = reg.__create_flop
+reg_q = reg
+
+reg.cnt.__ubits = 4            // #reg_0
 
 prev = $src1 + $src2
-#reg = (cnt = 0, sum = prev) // #reg_1
+reg = (cnt = 0, sum = prev) // #reg_1
 
 if ($en) {
                                     // #reg_2 = #reg_1
-  #reg.cnt := #reg.cnt.__q_pin + 1  // #reg_3 = #reg_2 
+  reg.cnt := reg_q.cnt + 1  // #reg_3 = #reg_2 
 }
                                     // #reg_4 = phi(#reg_3, #reg_1)      
 
-%out.cnt = #reg.cnt.__q_pin         // = #reg_4
-%out.sum = #reg.sum.__q_pin
+%out.cnt = reg_q.cnt         // = #reg_4
+%out.sum = reg_q.sum
 

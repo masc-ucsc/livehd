@@ -13,7 +13,7 @@ if [ -x "bazel-bin/inou/yosys/yosys2" ]; then
 elif [ -x "inou/yosys/yosys2" ]; then
   YOSYS="inou/yosys/yosys2"
 elif [ -x "lgshell.runfiles/livehd/inou/yosys/yosys2" ]; then
-  YOSYS="lgshell.runfiles/livehd/inou/yosys/yosys2"
+  YOSYS="lgshell.runfiles/livehd/inou/yosys/"
 else
   YOSYS=$(which yosys)
 fi
@@ -220,6 +220,13 @@ fi
 #  exit 0
 #fi
 
+if grep -q reset ${GOLD}
+then
+  RESET_STMT="-set in_reset 1 -set-at 2 in_reset 0"
+else
+  RESET_STMT=""
+fi
+
 ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
               read_verilog -sv ${GATE}; hierarchy ${TOP_STR}; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
@@ -228,7 +235,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt; flatten ; ren
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
               write_verilog trace2.v
-              sat -tempinduct -prove trigger 0 -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
+              sat -tempinduct -prove trigger 0 ${RESET_STMT} -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
               " \
     2> /dev/null | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then

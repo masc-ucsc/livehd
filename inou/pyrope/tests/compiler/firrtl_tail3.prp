@@ -1,17 +1,18 @@
 $inp.__ubits = 4
 %out.__ubits = 4
 
-x_q = #x.__q_pin
+x = x.__create_flop
+x_q = x
 
 cond = x_q == 0
-#x = 0
+x = 0
 if (cond) {
-  #x = $inp        //#x->4b
+  x = $inp        //x->4b
 } else {
   foo = x_q - 1    //foo->5b
   bar = foo >> 1   //bar->4b
   bar := foo       //bar only cares foo lsb 4b, which means the generated foo verilog only need 4b to capture the result of x_q - 1
-  #x = bar         //#x -> 4b
+  x = bar         //x -> 4b
 }
 
-%out := x_q       
+%out := x_q

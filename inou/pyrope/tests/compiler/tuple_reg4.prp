@@ -1,6 +1,8 @@
 foo = 1
+reg = reg.__create_flop
+reg_q = reg
 if (foo == 1) {
-  #reg.a = 2
+  reg.a = 2
 }
 
-%out = #reg.a.__q_pin
+%out = reg_q.a

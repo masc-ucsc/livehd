@@ -396,6 +396,7 @@ public:
   std::string get_wire_name() const;
 
   void             set_name(std::string_view wname);
+  void             reset_name(std::string_view wname);
   void             del_name();
   std::string_view get_name() const;
   bool             has_name() const;

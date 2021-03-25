@@ -15,12 +15,12 @@ reg [4:0] y;
 always @ (*) begin
   x = a;
   y = 5;
-  if ($signed({1'b0, a}) > $signed({2'd1})) begin
+  if ($signed({1'b0, a}) > $signed({4'd1})) begin
     x = e;
-    if ($signed({1'b0, a}) > $signed({3'd2})) begin
+    if ($signed({1'b0, a}) > $signed({4'd2})) begin
       x = b;
     end
-    else if (($signed({1'b0, a}) + $signed({2'd1})) > $signed({3'd3})) begin
+    else if (($signed({1'b0, a}) + $signed({4'd1})) > $signed({4'd3})) begin
       x = c;
     end
     else begin

@@ -2,14 +2,16 @@
 $en.__ubits  = 1
 $inp.__ubits = 4
 
-#x = 0 
+x = x.__create_flop
+x_q = x
+x = 0 
 if ($en) {
-  #x = $inp
+  x = $inp
 } else {
-  foo = #x.__q_pin - 1
-  bar = #x.__q_pin
+  foo = x_q - 1
+  bar = x_q
   bar := foo
-  #x = bar
+  x = bar
 }
 
-%out := #x.__q_pin
+%out := x_q

@@ -1,10 +1,13 @@
 foo = 1
 
+reg = reg.__create_flop
+reg_q = reg
+
 if (foo == 1) {
-  #reg = (a = 4, b = 5) 
+  reg = (a = 4, b = 5) 
 }
  // else {
- //  #reg = (a = 6, b = 7)  
+ //  reg = (a = 6, b = 7)  
 // }
 
-%out = #reg.a.__q_pin + #reg.b.__q_pin
+%out = reg_q.a + reg_q.b
