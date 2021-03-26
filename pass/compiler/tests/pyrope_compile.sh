@@ -17,9 +17,8 @@ counter lhs_wire adder_stage capricious_bits4 capricious_bits
 logic capricious_bits2 scalar_reg_out_pre_declare firrtl_tail2
 hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
 hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
-firrtl_gcd_3bits firrtl_tail3 counter_nested_if tuple_nested1 tuple_empty_attr'
+firrtl_gcd_3bits nested_if firrtl_tail3 counter_nested_if tuple_nested1 tuple_empty_attr'
 
-#pts_reset='nested_if firrtl_gcd_3bits'
 #pts='tuple_reg tuple_nested2'
 #pts='tuple_reg tuple_reg2'
 
@@ -205,8 +204,8 @@ Pyrope_compile_hier () {
   fi
 }
 
-#rm -rf ./lgdb
-#Pyrope_compile "$pts"
+rm -rf ./lgdb
+Pyrope_compile "$pts"
 rm -rf ./lgdb
 Pyrope_compile_hier "$pts_hier1"
 rm -rf ./lgdb

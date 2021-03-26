@@ -597,6 +597,9 @@ void Cprop::process_flop(Node &node) {
 	if (tuple_issues)
 		return;
 
+  if (!node.has_outputs())
+    return;
+
 	auto din_spin = node.get_sink_pin("din");
 	if (!din_spin.is_connected()) {
 		//node.del_node();
@@ -902,14 +905,39 @@ void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   }
 
   std::shared_ptr<Lgtuple> tup;
-  if (!tup_list.empty()) {
-		if ((tup_list.size()+1) != inp_edges_ordered.size()) {
-			tuple_issues = true;
-		}
-		if (tup_list.size()==1) {
-			I(tuple_issues);
-      tup = std::make_shared<Lgtuple>(*tup_list[0]);
-		}else{
+  if (!tuple_issues && !tup_list.empty()) {
+    if (tup_list.size()==1) {
+      std::string non_attr_key;
+      Node_pin    non_attr_dpin;
+      if ((tup_list.size()+1) != inp_edges_ordered.size()) {
+        for(auto tup2:tup_list) {
+          // OK not to have all the inputs as tuples if each input is a scalar
+          if (!tup2->is_scalar()) {
+            tuple_issues = true;
+            break;
+          }
+          for(const auto &e:tup2->get_map()) {
+            if (Lgtuple::is_attribute(e.first))
+              continue;
+
+            if (non_attr_dpin.is_invalid()) {
+              non_attr_key  = e.first;
+              non_attr_dpin = e.second;
+            }else{
+              if (non_attr_key != e.first) {
+                tuple_issues = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (non_attr_dpin.is_invalid())
+        return; // no tuple to create
+
+      tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
+      tup->add(non_attr_key, non_attr_dpin);
+    }else{
 			tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
 			if (!tup) {
 				return; // It was a scalar entry, no need to create tuple
@@ -1037,6 +1065,14 @@ void Cprop::process_attr_set(Node &node) {
     return;
   }
 
+  I(field_spin.is_connected() && field_spin.get_driver_node().is_type(Ntype_op::TupKey));
+  auto field_txt = field_spin.get_driver_pin().get_name();
+
+  if (Lgtuple::is_root_attribute(field_txt)) {
+    if (field_txt != "__dp_assign")
+      return; // following stages will have to deal with this
+  }
+
   std::shared_ptr<Lgtuple>       node_tup;
 
   auto name_spin  = node.get_sink_pin("name");
@@ -1054,8 +1090,6 @@ void Cprop::process_attr_set(Node &node) {
       node_tup = std::make_shared<Lgtuple>("unknown");
   }
 
-  I(field_spin.is_connected() && field_spin.get_driver_node().is_type(Ntype_op::TupKey));
-  auto field_txt = field_spin.get_driver_pin().get_name();
 
   auto attr_field = Lgtuple::get_last_level(field_txt);
   if (attr_field == "__dp_assign") {
@@ -1260,7 +1294,22 @@ void Cprop::do_trans(LGraph *lg) {
 	flop_needs_2nd_iteration = false;
 	do {
 		tuple_issues = false;
+#if 0
+    bool last_tuple_issues = false;
+    Node last_node;
+#endif
 		for (auto node : lg->forward()) {
+#if 0
+      if (tuple_issues && !last_tuple_issues) {
+        if (last_node.is_invalid())
+          last_node = node;
+        fmt::print("node:{} changed tuple issues\n",last_node.debug_name());
+        last_node.dump();
+      }
+      last_node = node;
+      last_tuple_issues = tuple_issues;
+#endif
+
 			auto op = node.get_type_op();
 
 			auto inp_edges_ordered = node.inp_edges_ordered();
