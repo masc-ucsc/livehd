@@ -244,19 +244,19 @@ void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const
    *          dot                    assign
    *     /     |     \               /    \
    * tmp_var pin_name __bits     tmp_var  const(bits)  */
-  auto tmp_var = create_temp_var(lnast);
-  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_select());
-  lnast.add_child(idx_dot, Lnast_node::create_ref(tmp_var));
+  /*26March2021: updated LN type:
+   *                 attr_set
+   *         /          |         \  
+   *  ref:pin_name const: __sbits  const(bits)*/
+
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_attr_set());
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(pin_name)));
   if (!pin.is_io_sign()) {
     lnast.add_child(idx_dot, Lnast_node::create_const("__ubits"));
   } else {
     lnast.add_child(idx_dot, Lnast_node::create_const("__sbits"));
   }
-
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var));
-  lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
+  lnast.add_child(idx_dot, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
 }
 
 void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
