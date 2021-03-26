@@ -314,8 +314,14 @@ public:
   int vec_gt_signed_wrapper(std::vector<int> vec1, std::vector<int> vec2); 
    /* New wrapper functions to handle vectors of different sizes over */
    
-   
-
+   /* New functions for shift */
+   std::vector<int> vec_shl_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
+   std::vector<int> vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
+   std::vector<int> vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
+   /* New functions for shift */
+	
+	
+	
   // helpers for generating lezSATbit and lezSATvec objects
 
   struct lezSATbit bit(_V a);

@@ -1263,6 +1263,62 @@ std::vector<int> lezSAT::vec_shift_left(const std::vector<int> &vec1, const std:
   return buffer;
 }
 
+
+   /* New functions for shift */
+   
+   std::vector<int> vec_shl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   {
+	   uint32_t shift = 0; // get integer shift from vector
+	   for (int i =0; i < vec2.size(); i++)
+		   shift += vec2[i] * pow(2, i);
+	   
+	   // Now shift has the shift amount in integer format
+	   // Original bit i's new position is - bit i - shift
+	   int vec1_size = vec1.size();
+	   if (shift <= vec1_size)
+	   {
+		   for (int i = vec1_size-1; i >= vec1_size-shift; i--)
+			   vec1[i-shift] = vec1[i];
+		   for (int i = vec1_size-shift-1; i >= 0; i--)
+			   vec1[i] = 0;
+	   }
+	   else // entire vector shifted out
+	   {
+		   vec1.assign(vec1_size,0);
+	   }
+	   return vec1;
+   }
+   
+   std::vector<int> vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   {
+	   uint32_t shift = 0; // get integer shift from vector
+	   for (int i = 0; i < vec2.size(); i++)
+		   shift += vec2[i] * pow(2, i);	   
+	   // Now shift has the shift amount in integer format
+	   
+	   // Original bit i's new position is - bit i + shift
+	   int vec1_size = vec1.size();
+	   if (shift <= vec1_size)
+	   {
+		   for (int i = 0; i < vec1_size-shift; i++)
+			   vec1[i+shift] = vec1[i];
+		   for (int i = vec1_size-shift-1; i >= 0; i++)
+			   vec1[i] = 0;
+	   }
+	   else // entire vector shifted out
+	   {
+		   vec1.assign(vec1_size,0);
+	   }
+	   return vec1;
+   }
+   
+   std::vector<int> vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   {
+	   return vec1;
+   }
+   
+   /* New functions for shift */
+
 void lezSAT::vec_join_multiarg(std::vector<int> &vec, const std::vector<std::vector<int>> &vec1) {
   for (size_t i = 0; i < vec1.size(); i++) {
     for (size_t j = 0; j < vec1[i].size(); j++) {
