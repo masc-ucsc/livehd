@@ -1266,7 +1266,7 @@ std::vector<int> lezSAT::vec_shift_left(const std::vector<int> &vec1, const std:
 
    /* New functions for shift */
    
-   std::vector<int> vec_shl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   std::vector<int> lezSAT::vec_shl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
    {
 	   uint32_t shift = 0; // get integer shift from vector
 	   for (int i =0; i < vec2.size(); i++)
@@ -1289,7 +1289,7 @@ std::vector<int> lezSAT::vec_shift_left(const std::vector<int> &vec1, const std:
 	   return vec1;
    }
    
-   std::vector<int> vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   std::vector<int> lezSAT::vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
    {
 	   uint32_t shift = 0; // get integer shift from vector
 	   for (int i = 0; i < vec2.size(); i++)
@@ -1312,8 +1312,9 @@ std::vector<int> lezSAT::vec_shift_left(const std::vector<int> &vec1, const std:
 	   return vec1;
    }
    
-   std::vector<int> vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
+   std::vector<int> lezSAT::vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2)
    {
+	   // May not be required, will be added if required
 	   return vec1;
    }
    
