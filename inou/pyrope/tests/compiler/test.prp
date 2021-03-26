@@ -1,5 +1,5 @@
-$a.foo.__bits = 2
-$a.bar.__bits = 3
+$a.foo.__ubits = 2
+$a.bar.__ubits = 3
 
 // c = $a
 // d = c 
