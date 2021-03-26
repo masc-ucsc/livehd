@@ -553,9 +553,9 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
   auto sec_child         = lnast->get_name(lnast->get_sibling_next(first_child_index));
 
   auto map_it            = ref_map.find(sec_child);
-  bool sec_child_is_temp = false;
+  //bool sec_child_is_temp = false;
   if (map_it != ref_map.end()) {
-    sec_child_is_temp = true;
+    //sec_child_is_temp = true;
     sec_child         = map_it->second;
   }
   if (is_temp_var(first_child)) {
@@ -564,13 +564,14 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
     I(false, "Error: expected temp str as first child of Tposs.\n\tMight need to check this issue!\n");
   }
 
-  /*need not print anything due to the tposs node (data in __sbits or __ubits)*/
+  /*need not print anything due to the tposs node (data in __sbits or __ubits)
   auto sec_child_is_const = lnast->get_type(lnast->get_sibling_next(first_child_index)).is_const();
   if (!sec_child_is_const && !sec_child_is_temp) {
     // if(!sec_child_is_const) {
     // fmt::print("\nThis is not const, first child:{}\n", first_child);
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->set_make_unsigned(std::string(sec_child)));
   }
+  */
 }
 
 //-------------------------------------------------------------------------------------
