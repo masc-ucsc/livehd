@@ -40,7 +40,7 @@ sh_test(
     name = "regression_compile",
     srcs = ["tests/regression_compile.sh"],
     # tags = ["manual"],
-    # tags = ["fixme"],
+    tags = ["fixme"],
     data = [
         "//inou/firrtl:firrtl_tests",
         "//inou/pyrope:pyrope_tests",

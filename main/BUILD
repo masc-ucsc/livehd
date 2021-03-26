@@ -62,6 +62,7 @@ sh_test(
         ":lgshell",
         "//inou/yosys:verilog_tests",
     ],
+    tags = ["fixme"],
     deps = [
         "//inou/yosys:scripts",
     ],
