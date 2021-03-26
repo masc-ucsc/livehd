@@ -576,7 +576,8 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
   if (!node.is_type_sub_present()) {
     // Still a blackbox, not much to do
     for (const auto &e : inp_edges_ordered) {
-      if (node2tuple.contains(e.driver.get_node().get_compact())) {
+      auto parent_node = e.driver.get_node();
+      if (parent_node.is_type_tup() && !node2tuple.contains(e.driver.get_node().get_compact())) {
         tuple_issues = true;
         return;
       }
