@@ -1,15 +1,15 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "pass.hpp"
 #include "graphviz.hpp"
+#include "pass.hpp"
 
 class Inou_graphviz : public Pass {
 private:
   bool bits;
   bool verbose;
-protected:
 
+protected:
   static void from(Eprp_var &var);
   static void hierarchy(Eprp_var &var);
 

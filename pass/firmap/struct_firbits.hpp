@@ -35,29 +35,18 @@ public:
     return *this;
   }
 
+  void set_bits(Bits_t _bits) { bits = _bits; }
 
-  void set_bits(Bits_t _bits) { 
-    bits = _bits;
-  }
-  
-  Bits_t get_bits() const { 
-    return bits; 
-  };
+  Bits_t get_bits() const { return bits; };
 
-  void set_sign(bool _sign) {
-    sign = _sign;
-  };
+  void set_sign(bool _sign) { sign = _sign; };
 
   void set_bits_sign(Bits_t _bits, bool _sign) {
     bits = _bits;
     sign = _sign;
   }
 
-  bool get_sign() const {
-    return sign;
-  };
+  bool get_sign() const { return sign; };
 
-  void dump() const {
-    fmt::print("{}{}b\n", sign ? "S" : "U", bits);
-  }
+  void dump() const { fmt::print("{}{}b\n", sign ? "S" : "U", bits); }
 };

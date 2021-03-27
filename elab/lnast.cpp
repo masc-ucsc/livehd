@@ -1,11 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "lnast.hpp"
+
 #include <string>
 
-#include "lnast.hpp"
 #include "elab_scanner.hpp"
-#include "mmap_vector.hpp"
 #include "lbench.hpp"
+#include "mmap_vector.hpp"
 
 void Lnast_node::dump() const {
   fmt::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
@@ -40,7 +41,7 @@ std::string_view Lnast::add_string(const std::string &str) {
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
-  Lbench b("pass.lnast_ssa");
+  Lbench    b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
     /* fmt::print("Step-0: Handle Inline Function Definition\n"); */
@@ -76,7 +77,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   opr_lhs_merge(top_sts_nid);
 
   /* fmt::print("LNAST SSA Transformation Finished!\n"); */
-  //dump();
+  // dump();
 }
 
 void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
@@ -144,7 +145,7 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
   if (!get_type(opr_nid).is_select())
     return false;
 
-  for(auto &child:children(opr_nid)) {
+  for (auto &child : children(opr_nid)) {
     auto name = get_name(child);
 #if 0
     // FIXME: DO NOT CREATE ANY ATTR, Just TupleAdd/Get which cprop can convert to Attr on use
@@ -180,12 +181,12 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
 */
 
 void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
-  auto &selc_lrhs_table    = selc_lrhs_tables[psts_nid];
+  auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  paired_assign_nid = selc_lrhs_table[selc_nid].second;
 
   auto c0_sel = get_first_child(selc_nid);
   auto c1_sel = get_sibling_next(c0_sel);
-  //auto c2_sel = get_sibling_next(c1_sel);
+  // auto c2_sel = get_sibling_next(c1_sel);
   if (get_name(c1_sel).substr(0, 3) == "___") {
     merge_hierarchical_attr_set(selc_nid);
     return;
@@ -195,22 +196,22 @@ void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
     // change node semantic from sel->attr_set ; assign->invalid
     auto c0_assign                    = get_first_child(paired_assign_nid);
     auto c1_assign                    = get_sibling_next(c0_assign);
-    ref_data(selc_nid)->type           = Lnast_ntype::create_attr_set();
+    ref_data(selc_nid)->type          = Lnast_ntype::create_attr_set();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-    auto it1_ast = c0_sel;
-    auto it2_ast = get_sibling_next(it1_ast);
+    auto it1_ast                      = c0_sel;
+    auto it2_ast                      = get_sibling_next(it1_ast);
 
-    while(!it2_ast.is_invalid()) {
+    while (!it2_ast.is_invalid()) {
       set_data(it1_ast, get_data(it2_ast));
       it1_ast = it2_ast;
       it2_ast = get_sibling_next(it2_ast);
     }
     set_data(it1_ast, get_data(c1_assign));
 
-    //set_data(c0_sel, get_data(c1_sel));
-    //set_data(c1_sel, get_data(c2_sel));
-    //set_data(c2_sel, get_data(c1_assign));
-    //set_data(c0_sel, get_data(c1_assign));
+    // set_data(c0_sel, get_data(c1_sel));
+    // set_data(c1_sel, get_data(c2_sel));
+    // set_data(c2_sel, get_data(c1_assign));
+    // set_data(c0_sel, get_data(c1_assign));
 
   } else {
     // is rhs, change node semantic from sel->attr_get
@@ -240,7 +241,7 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
   collect_hier_tuple_nids(sel_sibling, stk_tuple_fields);
 
   // transform the asg into a hierarchical ta to set the hierarchical attribute
-  ref_data(selc_nid)->type         = Lnast_ntype::create_invalid();
+  ref_data(selc_nid)->type        = Lnast_ntype::create_invalid();
   ref_data(sibling_asg_nid)->type = Lnast_ntype::create_tuple_add();
 
   auto leaves_size = 1 + stk_tuple_fields.size();
@@ -289,7 +290,7 @@ void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_selc_nid, std::stack<Lnast_n
 }
 
 void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
-  auto &selc_lrhs_table    = selc_lrhs_tables[psts_nid];
+  auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  c0_concat         = get_first_child(concat_nid);
   auto  paired_assign_nid = selc_lrhs_table[concat_nid].second;
   auto  c0_assign         = get_first_child(paired_assign_nid);
@@ -298,7 +299,7 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
 }
 
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &old_tup_nid) {
-  auto &selc_lrhs_table    = selc_lrhs_tables[psts_nid];
+  auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  paired_assign_nid = selc_lrhs_table[old_tup_nid].second;
   if (paired_assign_nid == Lnast_nid(-1, -1))
     return;
@@ -363,8 +364,8 @@ void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const 
 }
 
 void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
-  auto       &selc_lrhs_table = selc_lrhs_tables[psts_nid];
-  auto        paired_nid     = selc_lrhs_table[selc_nid].second;
+  auto &      selc_lrhs_table = selc_lrhs_tables[psts_nid];
+  auto        paired_nid      = selc_lrhs_table[selc_nid].second;
   Lnast_ntype paired_type;
   if (!paired_nid.is_invalid())
     paired_type = get_type(paired_nid);
@@ -379,7 +380,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // case-I
   if (sel_is_lhs && paired_type.is_assign() && is_attr_set) {
     // merge the tuple_add at the original assign node
-    ref_data(selc_nid)->type    = Lnast_ntype::create_invalid();
+    ref_data(selc_nid)->type   = Lnast_ntype::create_invalid();
     ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
     auto c0_assign             = get_first_child(paired_nid);
     auto c1_assign             = get_sibling_next(c0_assign);
@@ -403,16 +404,17 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     add_child(ta_nid, c1_assign_data);
 
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(ta_nid));
-    // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across different hierarchy scopes
+    // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
+    // different hierarchy scopes
     if (get_parent(psts_nid) == get_root())
       return;
 
     if (is_1st_scope_ssa_tuple_var) {
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
-      auto asg_nid            = selc_nid;  // better code reading
-      auto c0_asg             = get_first_child(asg_nid);
-      auto c1_asg             = get_sibling_next(c0_asg);
-      auto c2_asg             = get_sibling_next(c1_asg);
+      auto asg_nid             = selc_nid;  // better code reading
+      auto c0_asg              = get_first_child(asg_nid);
+      auto c1_asg              = get_sibling_next(c0_asg);
+      auto c2_asg              = get_sibling_next(c1_asg);
       set_data(c0_asg, get_data(c1_asg));
 
       ref_data(c2_asg)->token = Etoken();
@@ -449,7 +451,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
       i++;
     }
     add_child(ta_nid, c1_paired_asg_data_bk);
-    auto ta_lhs_name = get_name(c0_paired_asg);
+    auto ta_lhs_name                = get_name(c0_paired_asg);
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(ta_nid));
     // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
     // different hierarchy scopes
@@ -459,11 +461,11 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     if (is_1st_scope_ssa_tuple_var
         && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
-      auto asg_nid            = selc_nid;  // better code reading
+      auto asg_nid             = selc_nid;  // better code reading
       ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
-      auto c0_asg             = get_first_child(asg_nid);
-      auto c1_asg             = get_sibling_next(c0_asg);
-      auto c2_asg             = get_sibling_next(c1_asg);
+      auto c0_asg              = get_first_child(asg_nid);
+      auto c1_asg              = get_sibling_next(c0_asg);
+      auto c2_asg              = get_sibling_next(c1_asg);
       set_data(c0_asg, get_data(c1_asg));
 
       ref_data(c2_asg)->token = Etoken();
@@ -477,7 +479,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto c0_sel      = get_first_child(selc_nid);
     auto c1_sel      = get_sibling_next(c0_sel);
     auto c1_sel_name = get_name(c1_sel);
-    auto dp_asg_nid = paired_nid; // for code reading
+    auto dp_asg_nid  = paired_nid;  // for code reading
 
     // insert new TA on the right hand side of the dp
     auto new_ta = insert_next_sibling(dp_asg_nid, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
@@ -489,7 +491,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto c0_dp_asg = get_first_child(dp_asg_nid);
     add_child(new_ta, get_data(c0_dp_asg));
 
-
     ref_data(selc_nid)->type = Lnast_ntype::create_tuple_get();
     if (is_input(c1_sel_name))
       return;
@@ -498,24 +499,25 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     if (get_parent(psts_nid) == get_root())
       return;
 
-    if (is_1st_scope_ssa_tuple_var && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, c1_sel_name, get_parent(psts_nid))) {
+    if (is_1st_scope_ssa_tuple_var
+        && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, c1_sel_name, get_parent(psts_nid))) {
       // insert new TG on the right hand side of selc_nid and move old-tg data there
       auto new_tg = insert_next_sibling(selc_nid, get_data(selc_nid));
       for (auto old_child : children(selc_nid)) {
         add_child(new_tg, get_data(old_child));
       }
-      if (is_register(c1_sel_name)){
+      if (is_register(c1_sel_name)) {
         std::string qpin_str = "__q_pin";
         add_child(new_tg, Lnast_node::create_const(add_string(qpin_str)));
       }
 
       ref_data(selc_nid)->type = Lnast_ntype::create_assign();
-      auto asg_nid           = selc_nid;  // better code reading
-      ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str)); //trick for LN->LG
+      auto asg_nid             = selc_nid;                                    // better code reading
+      ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));  // trick for LN->LG
 
-      auto c0_asg            = get_first_child(asg_nid);
-      auto c1_asg            = get_sibling_next(c0_asg);
-      auto c2_asg            = get_sibling_next(c1_asg);
+      auto c0_asg = get_first_child(asg_nid);
+      auto c1_asg = get_sibling_next(c0_asg);
+      auto c2_asg = get_sibling_next(c1_asg);
       set_data(c0_asg, get_data(c1_asg));
       ref_data(c2_asg)->token = Etoken();
       ref_data(c2_asg)->type  = Lnast_ntype::create_invalid();
@@ -526,7 +528,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // case-IV
   if (sel_is_lhs && !paired_type.is_assign() && !paired_type.is_dp_assign()) {
     ref_data(selc_nid)->type = Lnast_ntype::create_tuple_add();
-    auto c0_paired          = get_first_child(paired_nid);
+    auto c0_paired           = get_first_child(paired_nid);
 
     auto new_tup_add = insert_next_sibling(paired_nid, get_data(selc_nid));
     for (auto sel_child : children(selc_nid)) {
@@ -539,10 +541,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     add_child(new_tup_add, get_data(c0_paired));  // add final child of the new tup_add
     ref_data(selc_nid)->type = Lnast_ntype::create_invalid();
 
-
-
-    // FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should we also insert an TA assignment
-    // node here?
+    // FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should we also insert an TA
+    // assignment node here?
     update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(selc_nid));
     return;
   }
@@ -555,7 +555,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   auto c1_tg_name = get_name(c1_tg);
   if (paired_type.is_assign()) {
     ref_data(selc_nid)->type = Lnast_ntype::create_tuple_get();
-    auto c0_assign          = get_first_child(paired_nid);
+    auto c0_assign           = get_first_child(paired_nid);
     set_data(c0_tg, get_data(c0_assign));
     ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
     return;
@@ -583,10 +583,10 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     ref_data(old_tg)->type  = Lnast_ntype::create_assign();
     ref_data(old_tg)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
     /* auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI")); */
-    auto asg_nid           = selc_nid;  // better code reading
-    auto c0_asg            = get_first_child(asg_nid);
-    auto c1_asg            = get_sibling_next(c0_asg);
-    auto c2_asg            = get_sibling_next(c1_asg);
+    auto asg_nid = selc_nid;  // better code reading
+    auto c0_asg  = get_first_child(asg_nid);
+    auto c1_asg  = get_sibling_next(c0_asg);
+    auto c2_asg  = get_sibling_next(c1_asg);
     set_data(c0_asg, get_data(c1_asg));
     ref_data(c2_asg)->token = Etoken();
     ref_data(c2_asg)->type  = Lnast_ntype::create_invalid();
@@ -640,10 +640,10 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
   auto type = get_type(selc_nid);
   I(type.is_select() || type.is_tuple_concat() || type.is_tuple());
   auto &selc_lrhs_table = selc_lrhs_tables[psts_nid];
-  auto  c0_sel         = get_first_child(selc_nid);  // c0 = intermediate target
-  auto  c0_sel_name    = get_name(c0_sel);
-  bool  hit            = false;
-  auto  sib_nid        = selc_nid;
+  auto  c0_sel          = get_first_child(selc_nid);  // c0 = intermediate target
+  auto  c0_sel_name     = get_name(c0_sel);
+  bool  hit             = false;
+  auto  sib_nid         = selc_nid;
   while (!hit) {
     if (sib_nid == get_last_child(psts_nid))
       return;
@@ -663,7 +663,7 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
         auto c0_assign = get_first_child(sib_child);
         auto c1_assign = get_sibling_next(c0_assign);
         if (get_name(c1_assign) == c0_sel_name) {
-          hit                            = true;
+          hit                              = true;
           selc_lrhs_table[selc_nid].first  = false;
           selc_lrhs_table[selc_nid].second = Lnast_nid(-1, -1);
         }
@@ -676,12 +676,12 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
     // normal case
     for (auto sib_child : children(sib_nid)) {
       if (sib_child == get_first_child(sib_nid) && get_name(sib_child) == c0_sel_name && !get_type(sib_nid).is_if()) {
-        hit                            = true;
+        hit                              = true;
         selc_lrhs_table[selc_nid].first  = true;  // is lhs
         selc_lrhs_table[selc_nid].second = sib_nid;
         break;
       } else if (get_name(sib_child) == c0_sel_name) {
-        hit                            = true;
+        hit                              = true;
         selc_lrhs_table[selc_nid].first  = false;
         selc_lrhs_table[selc_nid].second = sib_nid;
         break;
@@ -698,7 +698,7 @@ void Lnast::insert_implicit_dp_parent(const Lnast_nid &dp_nid) {
 void Lnast::analyze_selc_lrhs_if_subtree(const Lnast_nid &if_nid) {
   for (const auto &itr_nid : children(if_nid)) {
     if (get_type(itr_nid).is_stmts()) {
-      Cnt_rtable     if_sts_ssa_rhs_cnt_table;
+      Cnt_rtable      if_sts_ssa_rhs_cnt_table;
       Selc_lrhs_table if_sts_selc_lrhs_table;
       selc_lrhs_tables[itr_nid] = if_sts_selc_lrhs_table;
 
@@ -823,14 +823,13 @@ void Lnast::insert_tg_q_pin_fetch(const Lnast_nid &tg_nid) {
     if (child_name == "__q_pin")
       return;
 
-
     if (hier_tuple_reg_name.empty())
       hier_tuple_reg_name = (std::string)child_name;
     else
       hier_tuple_reg_name = absl::StrCat(hier_tuple_reg_name, ".", child_name);
   }
 
-  //TG behaves like rhs and is fetching #reg_k.foo_0, which means it actually fetchs q_pin of the register #reg.foo
+  // TG behaves like rhs and is fetching #reg_k.foo_0, which means it actually fetchs q_pin of the register #reg.foo
 
   auto it = collected_hier_tuple_reg_name.find(hier_tuple_reg_name);
   if (it == collected_hier_tuple_reg_name.end()) {
@@ -839,14 +838,10 @@ void Lnast::insert_tg_q_pin_fetch(const Lnast_nid &tg_nid) {
   }
 }
 
-
-void Lnast::collect_reg_hier_name_tup(const Lnast_nid &tup_nid) {
-  (void)tup_nid;
-}
-
+void Lnast::collect_reg_hier_name_tup(const Lnast_nid &tup_nid) { (void)tup_nid; }
 
 void Lnast::collect_reg_hier_name_ta(const Lnast_nid &ta_nid) {
-  auto c0 = get_first_child(ta_nid);
+  auto c0      = get_first_child(ta_nid);
   auto c0_name = get_name(c0);
   if (!is_register(c0_name))
     return;
@@ -860,7 +855,6 @@ void Lnast::collect_reg_hier_name_ta(const Lnast_nid &ta_nid) {
 
   collected_hier_tuple_reg_name.insert(hier_tuple_reg_name);
 }
-
 
 void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
   for (const auto &opr_nid : children(psts_nid)) {
@@ -894,9 +888,9 @@ void Lnast::opr_lhs_merge_if_subtree(const Lnast_nid &if_nid) {
         if (opr_type.is_if()) {
           opr_lhs_merge_if_subtree(opr_nid);
         } else if (opr_type.is_assign() || opr_type.is_dp_assign()) {
-        /*else if (opr_type.is_assign()) */
-        // FIXME->sh: if we also merge dp_assign here, then the original purpose of introducing dp_assign is missign
-        //            are you sure it is be a generic solution???
+          /*else if (opr_type.is_assign()) */
+          // FIXME->sh: if we also merge dp_assign here, then the original purpose of introducing dp_assign is missign
+          //            are you sure it is be a generic solution???
           opr_lhs_merge_handle_a_statement(opr_nid);
         } else if (opr_type.is_tuple_add()) {
           collect_reg_hier_name_ta(opr_nid);
@@ -915,27 +909,27 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
   const auto c1_assign_name = get_name(get_sibling_next(c0_assign));
 
   if (c1_assign_name.substr(0, 3) != "___")
-		return;
+    return;
 
-	auto opr_nid  = get_sibling_prev(assign_nid);
-	auto opr_type = get_type(opr_nid);
-	if (opr_type.is_tuple())
-		return;
+  auto opr_nid  = get_sibling_prev(assign_nid);
+  auto opr_type = get_type(opr_nid);
+  if (opr_type.is_tuple())
+    return;
 #if 1
-	// This whole function should go once select is gone
-	if (opr_type.is_tuple_attr())
-		return;
+  // This whole function should go once select is gone
+  if (opr_type.is_tuple_attr())
+    return;
 #endif
 
-	// note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
-	if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())
-		return;  // FIXME->sh: special case for firrtl, might need expand to more cases as needed
+  // note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
+  if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())
+    return;  // FIXME->sh: special case for firrtl, might need expand to more cases as needed
 
-	auto c0_opr = get_first_child(opr_nid);
+  auto c0_opr = get_first_child(opr_nid);
 
-	I(get_name(c0_opr) == c1_assign_name);
-	set_data(c0_opr, get_data(c0_assign));
-	ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
+  I(get_name(c0_opr) == c1_assign_name);
+  set_data(c0_opr, get_data(c0_assign));
+  ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
 }
 
 // note: handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
@@ -1052,14 +1046,11 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-
-
 std::string_view Lnast::create_tmp_var() {
   auto tmp_var_name = add_string(absl::StrCat("___T", tmp_var_cnt));
   tmp_var_cnt++;
   return tmp_var_name;
 }
-
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   auto if_nid   = get_parent(cond_nid);
@@ -1074,10 +1065,10 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
         true_table.erase(vname);
       } else if (is_register(vname)) {
         // create attr_get_q node and feed to phi node
-        auto new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
-        auto tmp_var   = create_tmp_var();
-        std::string qpin_str = "__q_pin";
-        auto tg_lhs = add_child(new_attget, Lnast_node::create_ref(tmp_var));
+        auto        new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
+        auto        tmp_var    = create_tmp_var();
+        std::string qpin_str   = "__q_pin";
+        auto        tg_lhs     = add_child(new_attget, Lnast_node::create_ref(tmp_var));
         add_child(new_attget, Lnast_node(get_type(f_nid), get_token(f_nid), get_subs(f_nid)));
         add_child(new_attget, Lnast_node::create_const(add_string(qpin_str)));
         add_phi_node(cond_nid, tg_lhs, false_table[vname]);
@@ -1109,10 +1100,10 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
         var_list.push_back(vname);
       } else if (is_register(vname)) {
         // create tgq node and feed to phi node
-        auto new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
-        auto tmp_var   = create_tmp_var();
-        std::string qpin_str = "__q_pin";
-        auto tg_lhs = add_child(new_attget, Lnast_node::create_ref(tmp_var));
+        auto        new_attget = add_child(if_nid, Lnast_node(Lnast_ntype::create_attr_get(), Etoken()));
+        auto        tmp_var    = create_tmp_var();
+        std::string qpin_str   = "__q_pin";
+        auto        tg_lhs     = add_child(new_attget, Lnast_node::create_ref(tmp_var));
         add_child(new_attget, Lnast_node(get_type(t_nid), get_token(t_nid), get_subs(t_nid)));
         add_child(new_attget, Lnast_node::create_const(add_string(qpin_str)));
         add_phi_node(cond_nid, true_table[vname], tg_lhs);
@@ -1171,13 +1162,15 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
   auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Etoken()));
   Lnast_nid   lhs_phi_nid;
 
-  lhs_phi_nid = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));  // ssa update later
+  lhs_phi_nid
+      = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));  // ssa update later
 
   update_global_lhs_ssa_cnt_table(lhs_phi_nid);
   add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(cond_nid), get_subs(cond_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(t_nid), get_token(t_nid), get_subs(t_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(f_nid), get_token(f_nid), get_subs(f_nid)));
-  new_added_phi_node_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);  // FIXME->sh: might need do the same for the new_tg_nid
+  new_added_phi_node_table.insert_or_assign(get_name(lhs_phi_nid),
+                                            lhs_phi_nid);  // FIXME->sh: might need do the same for the new_tg_nid
 
   candidates_update_phi_resolve_table.insert_or_assign(get_name(lhs_phi_nid), lhs_phi_nid);
 }

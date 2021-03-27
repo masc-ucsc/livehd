@@ -59,8 +59,8 @@ public:
     Port_ID get_io_pos() const { return graph_io_pos; }
 
     void clear() {
-      dir = Direction::Invalid;
-      name = "INVALID_PID";
+      dir          = Direction::Invalid;
+      name         = "INVALID_PID";
       graph_io_pos = Port_invalid;
       phys.clear();
     }
@@ -98,7 +98,7 @@ public:
   }
   // Sub_node(const Sub_node &s) = delete;
   Sub_node &operator=(const Sub_node &) = delete;
-  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
+  void      copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);
@@ -166,11 +166,11 @@ public:
     if (deleted.empty()) {
       instance_pid = io_pins.size();
       io_pins.emplace_back(io_name, dir, graph_pos);
-    }else{
+    } else {
       instance_pid = deleted.back();
       deleted.pop_back();
-      if (io_pins.size()<=instance_pid) {
-        io_pins.resize(instance_pid+1);
+      if (io_pins.size() <= instance_pid) {
+        io_pins.resize(instance_pid + 1);
       }
       io_pins[instance_pid].name         = io_name;
       io_pins[instance_pid].dir          = dir;
@@ -195,7 +195,7 @@ public:
     io_pins[instance_pid].dir = dir;
 
     if (io_pins[instance_pid].graph_io_pos != Port_invalid) {
-      I(graph_pos2instance_pid.size()> io_pins[instance_pid].graph_io_pos);
+      I(graph_pos2instance_pid.size() > io_pins[instance_pid].graph_io_pos);
       graph_pos2instance_pid[io_pins[instance_pid].graph_io_pos] = Port_invalid;
     }
 
@@ -243,8 +243,8 @@ public:
   }
 
   const IO_pin &get_io_pin_from_instance_pid(Port_ID instance_pid) const {
-    if (instance_pid>=io_pins.size()) {
-      return io_pins[0]; // invalid PID
+    if (instance_pid >= io_pins.size()) {
+      return io_pins[0];  // invalid PID
     }
     return io_pins[instance_pid];
   }
@@ -354,7 +354,7 @@ public:
   const std::vector<const IO_pin *> get_io_pins() const {
     I(io_pins.size() >= 1);
     std::vector<const IO_pin *> v;
-    for(const auto &e:io_pins) {
+    for (const auto &e : io_pins) {
       if (e.is_invalid())
         continue;
       v.emplace_back(&e);
@@ -365,7 +365,7 @@ public:
   const std::vector<const IO_pin *> get_output_pins() const {
     I(io_pins.size() >= 1);
     std::vector<const IO_pin *> v;
-    for(const auto &e:io_pins) {
+    for (const auto &e : io_pins) {
       if (e.is_invalid())
         continue;
       if (e.is_output())
@@ -377,7 +377,7 @@ public:
   const std::vector<const IO_pin *> get_input_pins() const {
     I(io_pins.size() >= 1);
     std::vector<const IO_pin *> v;
-    for(const auto &e:io_pins) {
+    for (const auto &e : io_pins) {
       if (e.is_invalid())
         continue;
       if (e.is_input())

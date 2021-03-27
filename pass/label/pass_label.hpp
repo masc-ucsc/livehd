@@ -6,7 +6,6 @@
 class Pass_label : public Pass {
 private:
 protected:
-
   bool verbose;
   bool hier;
 

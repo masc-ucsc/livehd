@@ -31,6 +31,7 @@
 #define lefiArray_h
 
 #include <stdio.h>
+
 #include "lefiKRDefs.hpp"
 #include "lefiMisc.hpp"
 
@@ -42,17 +43,17 @@ public:
   void Destroy();
   void addSitePattern(const char* typ, lefiSitePattern* s);
 
-  int numPatterns() const;
+  int              numPatterns() const;
   lefiSitePattern* pattern(int index) const;
-  char* typ(int index) const;
-  const char* name() const;
+  char*            typ(int index) const;
+  const char*      name() const;
 
 protected:
-  int numPatterns_;
-  int patternsAllocated_;
+  int               numPatterns_;
+  int               patternsAllocated_;
   lefiSitePattern** patterns_;
-  char** types_;
-  char* name_;
+  char**            types_;
+  char*             name_;
 };
 
 class lefiArray {
@@ -83,60 +84,60 @@ public:
   int numGcell() const;
   int hasDefaultCap() const;
 
-  const char* name() const;
-  lefiSitePattern* sitePattern(int index) const;
-  lefiSitePattern* canPlace(int index) const;
-  lefiSitePattern* cannotOccupy(int index) const;
+  const char*       name() const;
+  lefiSitePattern*  sitePattern(int index) const;
+  lefiSitePattern*  canPlace(int index) const;
+  lefiSitePattern*  cannotOccupy(int index) const;
   lefiTrackPattern* track(int index) const;
   lefiGcellPattern* gcell(int index) const;
 
-  int tableSize() const;
-  int numDefaultCaps() const;
-  int defaultCapMinPins(int index) const;
+  int    tableSize() const;
+  int    numDefaultCaps() const;
+  int    defaultCapMinPins(int index) const;
   double defaultCap(int index) const;
 
-  int numFloorPlans() const;
-  const char* floorPlanName(int index) const;
-  int numSites(int index) const;
-  const char* siteType(int floorIndex, int siteIndex) const;
+  int              numFloorPlans() const;
+  const char*      floorPlanName(int index) const;
+  int              numSites(int index) const;
+  const char*      siteType(int floorIndex, int siteIndex) const;
   lefiSitePattern* site(int floorIndex, int siteIndex) const;
 
   // Debug print
   void print(FILE* f) const;
 
 protected:
-  int nameSize_;
+  int   nameSize_;
   char* name_;
 
-  int patternsAllocated_;
-  int numPatterns_;
+  int               patternsAllocated_;
+  int               numPatterns_;
   lefiSitePattern** pattern_;
 
-  int canAllocated_;
-  int numCan_;
+  int               canAllocated_;
+  int               numCan_;
   lefiSitePattern** canPlace_;
 
-  int cannotAllocated_;
-  int numCannot_;
+  int               cannotAllocated_;
+  int               numCannot_;
   lefiSitePattern** cannotOccupy_;
 
-  int tracksAllocated_;
-  int numTracks_;
+  int                tracksAllocated_;
+  int                numTracks_;
   lefiTrackPattern** track_;
 
-  int gAllocated_;
-  int numG_;
+  int                gAllocated_;
+  int                numG_;
   lefiGcellPattern** gcell_;
 
-  int hasDefault_;
-  int tableSize_;
-  int numDefault_;
-  int defaultAllocated_;
-  int* minPins_;
+  int     hasDefault_;
+  int     tableSize_;
+  int     numDefault_;
+  int     defaultAllocated_;
+  int*    minPins_;
   double* caps_;
 
-  int numFloorPlans_;
-  int floorPlansAllocated_;
+  int                  numFloorPlans_;
+  int                  floorPlansAllocated_;
   lefiArrayFloorPlan** floors_;
 };
 

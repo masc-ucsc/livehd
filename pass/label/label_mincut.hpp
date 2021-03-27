@@ -9,8 +9,8 @@
 
 class Label_mincut {
 private:
-  const bool        verbose;
-  const bool        hier;
+  const bool verbose;
+  const bool hier;
 
 public:
   void label(LGraph *g);

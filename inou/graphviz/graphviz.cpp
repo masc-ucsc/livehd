@@ -1,13 +1,14 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "graphviz.hpp"
+
 #include <fstream>
 #include <regex>
 
-#include "graphviz.hpp"
-#include "pass.hpp"
 #include "cell.hpp"
+#include "pass.hpp"
 
-Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir): verbose(_verbose), odir(_odir) {
+Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
   // NOTE: since 'bits' is removed as a private member (unused), '_bits' is unused but might be used in the future
   (void)_bits;
 }
@@ -25,14 +26,14 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
   std::string dn_name;
   if (out.driver.is_graph_io()) {
     dn_name = graphviz_legalize_name(out.driver.get_pin_name());
-  }else{
+  } else {
     dn_name = graphviz_legalize_name(out.driver.get_node().debug_name());
   }
 
   std::string sn_name;
   if (out.sink.is_graph_io()) {
     sn_name = graphviz_legalize_name(out.sink.get_pin_name());
-  }else{
+  } else {
     sn_name = graphviz_legalize_name(out.sink.get_node().debug_name());
   }
 
@@ -59,7 +60,7 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   std::string legal;
   for (auto c : name) {
     if (std::isalnum(c)) {
-      legal.append(1,c);
+      legal.append(1, c);
     } else if (c == 32) {
       legal += " ";
     } else if (c == 35) {
@@ -80,60 +81,64 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   return legal;
 }
 
-
-
 void Graphviz::do_hierarchy(LGraph *g) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
   const auto &root_tree = g->get_htree();
 
-  absl::flat_hash_set<std::pair<Hierarchy_index,Hierarchy_index>> added;
+  absl::flat_hash_set<std::pair<Hierarchy_index, Hierarchy_index>> added;
 
   for (auto hidx : root_tree.depth_preorder()) {
     auto *lg = root_tree.ref_lgraph(hidx);
-    fmt::print("visiting node:{} level:{} pos:{}\n"
-        ,lg->get_name()
-        ,(int)hidx.level, (int)hidx.pos);
+    fmt::print("visiting node:{} level:{} pos:{}\n", lg->get_name(), (int)hidx.level, (int)hidx.pos);
 
     Node h_inp(g, hidx, Hardcoded_input_nid);
-    for(auto e:h_inp.inp_edges()) {
-      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
-          ,e.driver.get_class_lgraph()->get_name()
-          ,e.sink.get_class_lgraph()->get_name()
-          ,(int)hidx.level, (int)hidx.pos);
+    for (auto e : h_inp.inp_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n",
+                 e.driver.get_class_lgraph()->get_name(),
+                 e.sink.get_class_lgraph()->get_name(),
+                 (int)hidx.level,
+                 (int)hidx.pos);
 
       auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
-      if (p.first==p.second)
-        continue; // no itself edges
+      if (p.first == p.second)
+        continue;  // no itself edges
       if (added.contains(p))
         continue;
       added.insert(p);
 
-      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n"
-          , graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()), (int)e.driver.get_hidx().level, (int)e.driver.get_hidx().pos
-          , graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()), (int)e.sink.get_hidx().level, (int)e.sink.get_hidx().pos
-          );
+      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
+                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
+                          (int)e.driver.get_hidx().level,
+                          (int)e.driver.get_hidx().pos,
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
+                          (int)e.sink.get_hidx().level,
+                          (int)e.sink.get_hidx().pos);
     }
 
     Node h_out(g, hidx, Hardcoded_output_nid);
-    for(auto e:h_out.out_edges()) {
-      fmt::print("edge from:{} to:{} level:{} pos:{}\n"
-          ,e.driver.get_class_lgraph()->get_name()
-          ,e.sink.get_class_lgraph()->get_name()
-          ,(int)hidx.level, (int)hidx.pos);
+    for (auto e : h_out.out_edges()) {
+      fmt::print("edge from:{} to:{} level:{} pos:{}\n",
+                 e.driver.get_class_lgraph()->get_name(),
+                 e.sink.get_class_lgraph()->get_name(),
+                 (int)hidx.level,
+                 (int)hidx.pos);
 
       auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
-      if (p.first==p.second)
-        continue; // no itself edges
+      if (p.first == p.second)
+        continue;  // no itself edges
       if (added.contains(p))
         continue;
       added.insert(p);
 
-      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n"
-          , graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()), (int)e.driver.get_hidx().level, (int)e.driver.get_hidx().pos
-          , graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()), (int)e.sink.get_hidx().level, (int)e.sink.get_hidx().pos
-          );
+      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
+                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
+                          (int)e.driver.get_hidx().level,
+                          (int)e.driver.get_hidx().pos,
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
+                          (int)e.sink.get_hidx().level,
+                          (int)e.sink.get_hidx().pos);
     }
   }
 
@@ -158,7 +163,7 @@ void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
 
   lg_parent->each_sub_fast([&, this](Node &node, Lg_type_id lgid) {
     // no need to populate firrtl_op_subgraph, it's just tmap cells.
-    if (node.get_type_sub_node().get_name().substr(0,5) == "__fir")
+    if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir")
       return;
 
     (void)node;
@@ -171,7 +176,7 @@ void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
 void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
-  for(auto node:g->fast(false)) {
+  for (auto node : g->fast(false)) {
     if (!node.has_inputs() && !node.has_outputs())
       continue;
     std::string node_info;
@@ -221,7 +226,7 @@ void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
   else
     file = absl::StrCat(odir, "/", g->get_name(), ".", dot_postfix, ".dot");
 
-  int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz unable to create {}", file);
     return;
@@ -269,7 +274,7 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_
 
   data += "}\n";
 
-  auto f2   = lnast->get_top_module_name();
+  auto f2 = lnast->get_top_module_name();
 
   std::string file;
   if (dot_postfix == "")
@@ -277,8 +282,7 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_
   else
     file = absl::StrCat(odir, "/", f2, ".lnast", ".", dot_postfix, ".dot");
 
-
-  int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz_lnast unable to create {}", file);
     return;

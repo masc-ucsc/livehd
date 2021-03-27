@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "lgraph_base_core.hpp"
 #include "cell.hpp"
+#include "lgraph_base_core.hpp"
 
 class Node_pin;
 
@@ -123,7 +123,7 @@ public:
   friend struct LEdge;
   friend struct SEdge;
 
-  int  next_node_inc() const { return is_snode() ? 1 : 2; }
+  int next_node_inc() const { return is_snode() ? 1 : 2; }
 
   bool is_input() const { return input; }
 
@@ -316,9 +316,7 @@ public:
     return n;
   }
 
-  uint8_t get_num_local_edges() const {
-    return get_num_local_inputs() + get_num_local_outputs();
-  }
+  uint8_t get_num_local_edges() const { return get_num_local_inputs() + get_num_local_outputs(); }
 
   Ntype_op get_type() const {
     I(is_master_root());
@@ -330,16 +328,16 @@ public:
   }
 
   void reset() {
-    state        = Last_node_state;
-    root         = 1;
-    bits         = 0;
-    dst_pid      = 0;
-    inp_pos      = 0;  // SEdge uses 1, LEdge uses 2
-    out_pos      = 0;  // SEdge uses 1, LEdge uses 2
-    inp_long     = 0;
-    out_long     = 0;
-    nid          = 0;
-    type         = 0;
+    state    = Last_node_state;
+    root     = 1;
+    bits     = 0;
+    dst_pid  = 0;
+    inp_pos  = 0;  // SEdge uses 1, LEdge uses 2
+    out_pos  = 0;  // SEdge uses 1, LEdge uses 2
+    inp_long = 0;
+    out_long = 0;
+    nid      = 0;
+    type     = 0;
   }
 
   bool is_deleted() const {
@@ -360,15 +358,13 @@ public:
     return root;
   }
   constexpr bool is_graph_output() const {
-    return nid == 2; // Hardcoded_output_nid
+    return nid == 2;  // Hardcoded_output_nid
   }
   constexpr bool is_graph_input() const {
-    return nid == 1; // Hardcoded_input_nid
+    return nid == 1;  // Hardcoded_input_nid
   }
-  constexpr bool is_graph_io() const {
-    return is_graph_input() || is_graph_output();
-  }
-  bool is_master_root() const {
+  constexpr bool is_graph_io() const { return is_graph_input() || is_graph_output(); }
+  bool           is_master_root() const {
     I(is_node_state());
     bool ms = nid == get_self_idx().value;
     if (ms)
@@ -496,7 +492,7 @@ public:
       inp_pos++;
     }
   }
-  bool has_local_edges() const { return inp_pos>0 || out_pos>0; }
+  bool has_local_edges() const { return inp_pos > 0 || out_pos > 0; }
   bool has_local_inputs() const { return inp_pos > 0; }
   bool has_local_outputs() const { return out_pos > 0; }
   int  get_space_available() const {

@@ -29,8 +29,8 @@ FPObject* geogLayout::addComponentCluster(std::string name, int count, double ar
   return comp;
 }
 
-bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, double curY, FPObject** layoutStack,
-                                    int curDepth, FPObject** centerItems, int centerItemsCount) {
+bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, double curY, FPObject** layoutStack, int curDepth,
+                              FPObject** centerItems, int centerItemsCount) {
   int itemCount = getComponentCount();
   // Check for the end of the recursion.
   if (itemCount == 0 && centerItemsCount == 0)

@@ -349,8 +349,8 @@ bool Node::is_type_loop_breaker() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
     const auto sub_name = get_type_sub_node().get_name();
-    if (sub_name.substr(0, 6) == "__fir_") 
-      return false; 
+    if (sub_name.substr(0, 6) == "__fir_")
+      return false;
     return true;
   }
   return Ntype::is_loop_breaker(op);

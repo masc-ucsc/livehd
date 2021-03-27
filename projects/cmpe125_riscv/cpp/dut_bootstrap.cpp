@@ -3,8 +3,7 @@
 
 void dut_main();
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
   Verilated::commandArgs(argc, argv);
 
   dut_main();

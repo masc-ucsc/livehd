@@ -158,7 +158,7 @@ void check(const char *expr1_str, bool expr1, const char *expr2_str, bool expr2)
 }
 
 lezMiniSAT sat;
-void      test_signed(int8_t a, int8_t b, int8_t c) {
+void       test_signed(int8_t a, int8_t b, int8_t c) {
   sat.clear();
 
   std::vector<int> av = sat.vec_const_signed(a, 8);

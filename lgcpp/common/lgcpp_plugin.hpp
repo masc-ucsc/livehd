@@ -4,9 +4,9 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
+#include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "pass.hpp"
-#include "lgraph.hpp"
 
 class Lgcpp_plugin {
 public:

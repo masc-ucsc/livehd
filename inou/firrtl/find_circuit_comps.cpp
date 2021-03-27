@@ -70,7 +70,7 @@ void Inou_firrtl::CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::Firrt
       first = false;
     } else {
       // Check each key-val assign node.
-      I(ntype.is_assign()); //Maybe this should also include dp_assign?
+      I(ntype.is_assign());  // Maybe this should also include dp_assign?
       auto asg_lhs = ln.get_first_child(node);
       auto asg_rhs = ln.get_sibling_next(asg_lhs);
       if (ln.get_data(asg_rhs).type.is_ref()) {
@@ -80,7 +80,7 @@ void Inou_firrtl::CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::Firrt
     }
   }
 
-  if (ln.get_name(tup_node).substr(0,6) == "memory") {
+  if (ln.get_name(tup_node).substr(0, 6) == "memory") {
     HandleMemTup(ln, tup_node, umod);
   }
 }
@@ -98,24 +98,24 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
   auto tup_node_name = ln.get_name(tup_node);
   if (tup_node_name == "memory1") {
     // memory1 tuples store port attr (but not port name)
-    auto lhs_name = ln.get_name(ln.get_first_child(tup_node));
+    auto lhs_name              = ln.get_name(ln.get_first_child(tup_node));
     pname_to_tup_map[lhs_name] = tup_node;
 
   } else if (tup_node_name == "memory2") {
     // memory2 tuple helps map memory1 temp names to port names
-    auto first = true;
+    auto             first = true;
     std::string_view tup_name;
-    for (const auto& child : ln.children(tup_node)) {
+    for (const auto &child : ln.children(tup_node)) {
       if (first) {
         tup_name = ln.get_name(child);
-        first = false;
+        first    = false;
       } else {
         auto lhs_node  = ln.get_first_child(child);
         auto port_name = ln.get_name(lhs_node);
         auto temp_name = ln.get_name(ln.get_sibling_next(lhs_node));
 
         // Change from temp name to actual port name in map.
-        auto tup_attr_node  = pname_to_tup_map[temp_name];
+        auto tup_attr_node = pname_to_tup_map[temp_name];
         pname_to_tup_map.erase(temp_name);
         pname_to_tup_map[port_name] = tup_attr_node;
 
@@ -123,12 +123,12 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
       }
     }
 
-  } else { // should be memory3
+  } else {  // should be memory3
     // memory3 tuple is the actual memory + attrs (.__port, .__size, ...)
     std::string_view mem_name;
-    Lnast_nid ports_rhs, size_rhs;
-    auto first = true;
-    for (const auto& child : ln.children(tup_node)) {
+    Lnast_nid        ports_rhs, size_rhs;
+    auto             first = true;
+    for (const auto &child : ln.children(tup_node)) {
       if (first) {
         first = false;
       } else {
@@ -142,15 +142,15 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           I(ln.get_type(rhs_asg).is_const());
           size_rhs = rhs_asg;
         } else {
-          I(false); // FIXME: Something came up in tuple that shouldn't be there?
+          I(false);  // FIXME: Something came up in tuple that shouldn't be there?
         }
       }
     }
-    auto size_str = Lconst(ln.get_name(size_rhs)).to_firrtl();
-    uint32_t size_val = std::stoul(size_str); //FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
+    auto     size_str = Lconst(ln.get_name(size_rhs)).to_firrtl();
+    uint32_t size_val = std::stoul(size_str);  // FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
 
     // Actually create Memory statement + subexpressions
-    auto type = CreateTypeObject(0); // leave bw as implicit for now
+    auto type = CreateTypeObject(0);  // leave bw as implicit for now
 
     auto mem_stmt = new firrtl::FirrtlPB_Statement_Memory();
     mem_stmt->set_id((std::string)mem_name.substr(1));
@@ -160,13 +160,13 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_memory(mem_stmt);
 
-    for (const auto& tup_str : mem_to_ports_lists[ln.get_name(ports_rhs)]) {
-      auto port_tup_node = pname_to_tup_map[tup_str];
-      uint8_t port_type = 0; // 0 = read, 1 = write, 2 = read-write
-      for (const auto& child : ln.children(port_tup_node)) {
+    for (const auto &tup_str : mem_to_ports_lists[ln.get_name(ports_rhs)]) {
+      auto    port_tup_node = pname_to_tup_map[tup_str];
+      uint8_t port_type     = 0;  // 0 = read, 1 = write, 2 = read-write
+      for (const auto &child : ln.children(port_tup_node)) {
         // Do an initial pass over to see if this is a read/write/read-write port.
-        auto lhs_asg  = ln.get_first_child(child);
-        auto rhs_asg  = ln.get_sibling_next(lhs_asg);
+        auto lhs_asg = ln.get_first_child(child);
+        auto rhs_asg = ln.get_sibling_next(lhs_asg);
         (void)rhs_asg;
         auto attr_str = ln.get_name(lhs_asg);
         (void)attr_str;
@@ -179,7 +179,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
       // use variable "port_type" as condition
 
       // Create many assignments where all the attributes are specified for a port.
-      for (const auto& child : ln.children(port_tup_node)) {
+      for (const auto &child : ln.children(port_tup_node)) {
         // Iterate over each of the assign statements that set a port's attributes.
         auto lhs_asg  = ln.get_first_child(child);
         auto rhs_asg  = ln.get_sibling_next(lhs_asg);
@@ -190,8 +190,8 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           // based on port_type, help determine read_lat and write_lat
         } else if (attr_str == "__fwd") {
           // help determine memory statement's read_under_write policy
-        } else if (attr_str.substr(0,2) == "__") {
-          auto mem_id_ref  = new firrtl::FirrtlPB_Expression_Reference();
+        } else if (attr_str.substr(0, 2) == "__") {
+          auto mem_id_ref = new firrtl::FirrtlPB_Expression_Reference();
           mem_id_ref->set_id((std::string)mem_name.substr(1));
           auto mem_id_expr = new firrtl::FirrtlPB_Expression();
           mem_id_expr->set_allocated_reference(mem_id_ref);
@@ -210,9 +210,9 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           } else if (attr_str == "__enable") {
             subfield_expr->set_field("en");
           } else if (attr_str == "__wrmask") {
-            if (port_type == 2) { // read-writer
+            if (port_type == 2) {  // read-writer
               subfield_expr->set_field("wmask");
-            } else if (port_type == 1) { // writer
+            } else if (port_type == 1) {  // writer
               subfield_expr->set_field("mask");
             }
           } else {
@@ -228,12 +228,12 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           conn->set_allocated_expression(rhs_expr);
           fstmt2->set_allocated_connect(conn);
         } else {
-          I(false); // Should this be valid in the LNAST??
+          I(false);  // Should this be valid in the LNAST??
         }
       }
     }
-    //mem_stmt->set_read_latency(read_lat);
-    //mem_stmt->set_write_latency(write_lat);
+    // mem_stmt->set_read_latency(read_lat);
+    // mem_stmt->set_write_latency(write_lat);
 
     // Clear maps for this memory (since two mems can have same port names)
     pname_to_tup_map.clear();
@@ -256,13 +256,13 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
       return;
     auto port = umod->add_port();
     port->set_id((std::string)name.substr(1));
-    //auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
+    // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name.substr(1))) {
       type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     } else {
       fmt::print("{}\n", name);
-      I(!(name.substr(0,1) == "$")); // Inputs HAVE to have bw
+      I(!(name.substr(0, 1) == "$"));  // Inputs HAVE to have bw
       type = CreateTypeObject(0);
     }
     port->set_allocated_type(type);
@@ -281,7 +281,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     auto reg = new firrtl::FirrtlPB_Statement_Register();
     reg->set_id((std::string)name.substr(1));
 
-    //auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
+    // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name.substr(1))) {
       type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
@@ -312,7 +312,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id(new_name);
 
-    //auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name)) {
       type = CreateTypeObject(ln.get_bitwidth(name));
@@ -329,12 +329,12 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     // otherwise = wire
     if (reg_wire_map.contains(name))
       return;
-    //if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
+    // if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
     //  return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id((std::string)name);  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
-    //auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
+    // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name)) {
       type = CreateTypeObject(ln.get_bitwidth(name));
@@ -396,7 +396,8 @@ std::string_view Inou_firrtl::ConvergeFCallName(const std::string_view func_out,
     // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo
     wire_rename_map[(std::string)func_inp] = func_inp.substr(4);
     wire_rename_map[(std::string)func_out] = func_out.substr(4);
-    return func_out.substr(4);;
+    return func_out.substr(4);
+    ;
   } else {
     // Change the map (which alters some wire names)
     wire_rename_map[(std::string)func_inp] = (std::string)func_out;

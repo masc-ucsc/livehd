@@ -11,7 +11,6 @@
 #include <string>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "elab_scanner.hpp"
 
 // control
@@ -106,13 +105,13 @@ int main(int argc, char **argv) {
   Xlanguage_scanner scanner;
   if (argc == 2) {
     scanner.parse_file(argv[1]);
-  }else{
-    const char *txt =
-      "a = 3\n"
-      "if a==3 {\n"
-      "  I(3)\n"
-      "}\n"
-      "call(a)";
+  } else {
+    const char *txt
+        = "a = 3\n"
+          "if a==3 {\n"
+          "  I(3)\n"
+          "}\n"
+          "call(a)";
 
     scanner.parse_inline(txt);
 
@@ -120,4 +119,3 @@ int main(int argc, char **argv) {
     I(scanner.total == 17);
   }
 }
-

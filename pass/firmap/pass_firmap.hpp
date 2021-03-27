@@ -8,12 +8,9 @@
 #include "node_pin.hpp"
 #include "pass.hpp"
 
-
-
-
 class Pass_firmap : public Pass {
 protected:
-  bool hier;
+  bool        hier;
   static void trans(Eprp_var &var);
 
 public:

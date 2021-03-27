@@ -12,7 +12,7 @@ public:
     float area;
   };
 
-  Ntype_area() = delete; // don't want to create new area maps all the time
+  Ntype_area() = delete;  // don't want to create new area maps all the time
   Ntype_area(const std::string_view path) : type_area_map(path, "node_type_areas") {}
 
   void       set_dim(Ntype_op op, const dim& d) { type_area_map.set(op, d); }

@@ -27,11 +27,13 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <string.h>
-#include <stdlib.h>
-#include "lex.h"
 #include "lefiUnits.hpp"
+
+#include <stdlib.h>
+#include <string.h>
+
 #include "lefiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -40,244 +42,141 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // *****************************************************************************
 
 lefiUnits::lefiUnits()
-: hasDatabase_(0),
-  hasCapacitance_(0),
-  hasResistance_(0),
-  hasTime_(0),
-  hasPower_(0),
-  hasCurrent_(0),
-  hasVoltage_(0),
-  hasFrequency_(0),
-  databaseName_(NULL),
-  databaseNumber_(0.0),
-  capacitance_(0.0),
-  resistance_(0.0),
-  power_(0.0),
-  time_(0.0),
-  current_(0.0),
-  voltage_(0.0),
-  frequency_(0.0)
-{
-    Init();
+    : hasDatabase_(0)
+    , hasCapacitance_(0)
+    , hasResistance_(0)
+    , hasTime_(0)
+    , hasPower_(0)
+    , hasCurrent_(0)
+    , hasVoltage_(0)
+    , hasFrequency_(0)
+    , databaseName_(NULL)
+    , databaseNumber_(0.0)
+    , capacitance_(0.0)
+    , resistance_(0.0)
+    , power_(0.0)
+    , time_(0.0)
+    , current_(0.0)
+    , voltage_(0.0)
+    , frequency_(0.0) {
+  Init();
 }
 
-void
-lefiUnits::Init()
-{
-    clear();
+void lefiUnits::Init() { clear(); }
+
+void lefiUnits::Destroy() { clear(); }
+
+lefiUnits::~lefiUnits() { Destroy(); }
+
+void lefiUnits::setDatabase(const char *name, double num) {
+  int len       = strlen(name) + 1;
+  databaseName_ = (char *)lefMalloc(len);
+  strcpy(databaseName_, CASE(name));
+  databaseNumber_ = num;
+  hasDatabase_    = 1;
 }
 
-void
-lefiUnits::Destroy()
-{
-    clear();
+void lefiUnits::clear() {
+  if (databaseName_)
+    lefFree(databaseName_);
+  hasTime_        = 0;
+  hasCapacitance_ = 0;
+  hasResistance_  = 0;
+  hasPower_       = 0;
+  hasCurrent_     = 0;
+  hasVoltage_     = 0;
+  hasDatabase_    = 0;
+  hasFrequency_   = 0;
+  databaseName_   = 0;
 }
 
-lefiUnits::~lefiUnits()
-{
-    Destroy();
+void lefiUnits::setTime(double num) {
+  hasTime_ = 1;
+  time_    = num;
 }
 
-void
-lefiUnits::setDatabase(const char   *name,
-                       double       num)
-{
-    int len = strlen(name) + 1;
-    databaseName_ = (char*) lefMalloc(len);
-    strcpy(databaseName_, CASE(name));
-    databaseNumber_ = num;
-    hasDatabase_ = 1;
+void lefiUnits::setCapacitance(double num) {
+  hasCapacitance_ = 1;
+  capacitance_    = num;
 }
 
-void
-lefiUnits::clear()
-{
-    if (databaseName_)
-        lefFree(databaseName_);
-    hasTime_ = 0;
-    hasCapacitance_ = 0;
-    hasResistance_ = 0;
-    hasPower_ = 0;
-    hasCurrent_ = 0;
-    hasVoltage_ = 0;
-    hasDatabase_ = 0;
-    hasFrequency_ = 0;
-    databaseName_ = 0;
+void lefiUnits::setResistance(double num) {
+  hasResistance_ = 1;
+  resistance_    = num;
 }
 
-void
-lefiUnits::setTime(double num)
-{
-    hasTime_ = 1;
-    time_ = num;
+void lefiUnits::setPower(double num) {
+  hasPower_ = 1;
+  power_    = num;
 }
 
-void
-lefiUnits::setCapacitance(double num)
-{
-    hasCapacitance_ = 1;
-    capacitance_ = num;
+void lefiUnits::setCurrent(double num) {
+  hasCurrent_ = 1;
+  current_    = num;
 }
 
-void
-lefiUnits::setResistance(double num)
-{
-    hasResistance_ = 1;
-    resistance_ = num;
+void lefiUnits::setVoltage(double num) {
+  hasVoltage_ = 1;
+  voltage_    = num;
 }
 
-void
-lefiUnits::setPower(double num)
-{
-    hasPower_ = 1;
-    power_ = num;
+void lefiUnits::setFrequency(double num) {
+  hasFrequency_ = 1;
+  frequency_    = num;
 }
 
-void
-lefiUnits::setCurrent(double num)
-{
-    hasCurrent_ = 1;
-    current_ = num;
-}
+int lefiUnits::hasDatabase() const { return hasDatabase_; }
 
-void
-lefiUnits::setVoltage(double num)
-{
-    hasVoltage_ = 1;
-    voltage_ = num;
-}
+int lefiUnits::hasCapacitance() const { return hasCapacitance_; }
 
-void
-lefiUnits::setFrequency(double num)
-{
-    hasFrequency_ = 1;
-    frequency_ = num;
-}
+int lefiUnits::hasResistance() const { return hasResistance_; }
 
-int
-lefiUnits::hasDatabase() const
-{
-    return hasDatabase_;
-}
+int lefiUnits::hasPower() const { return hasPower_; }
 
-int
-lefiUnits::hasCapacitance() const
-{
-    return hasCapacitance_;
-}
+int lefiUnits::hasCurrent() const { return hasCurrent_; }
 
-int
-lefiUnits::hasResistance() const
-{
-    return hasResistance_;
-}
+int lefiUnits::hasVoltage() const { return hasVoltage_; }
 
-int
-lefiUnits::hasPower() const
-{
-    return hasPower_;
-}
+int lefiUnits::hasFrequency() const { return hasFrequency_; }
 
-int
-lefiUnits::hasCurrent() const
-{
-    return hasCurrent_;
-}
+int lefiUnits::hasTime() const { return hasTime_; }
 
-int
-lefiUnits::hasVoltage() const
-{
-    return hasVoltage_;
-}
+const char *lefiUnits::databaseName() const { return databaseName_; }
 
-int
-lefiUnits::hasFrequency() const
-{
-    return hasFrequency_;
-}
+double lefiUnits::databaseNumber() const { return databaseNumber_; }
 
-int
-lefiUnits::hasTime() const
-{
-    return hasTime_;
-}
+double lefiUnits::capacitance() const { return capacitance_; }
 
-const char *
-lefiUnits::databaseName() const
-{
-    return databaseName_;
-}
+double lefiUnits::resistance() const { return resistance_; }
 
-double
-lefiUnits::databaseNumber() const
-{
-    return databaseNumber_;
-}
+double lefiUnits::power() const { return power_; }
 
-double
-lefiUnits::capacitance() const
-{
-    return capacitance_;
-}
+double lefiUnits::current() const { return current_; }
 
-double
-lefiUnits::resistance() const
-{
-    return resistance_;
-}
+double lefiUnits::time() const { return time_; }
 
-double
-lefiUnits::power() const
-{
-    return power_;
-}
+double lefiUnits::voltage() const { return voltage_; }
 
-double
-lefiUnits::current() const
-{
-    return current_;
-}
+double lefiUnits::frequency() const { return frequency_; }
 
-double
-lefiUnits::time() const
-{
-    return time_;
-}
-
-double
-lefiUnits::voltage() const
-{
-    return voltage_;
-}
-
-double
-lefiUnits::frequency() const
-{
-    return frequency_;
-}
-
-void
-lefiUnits::print(FILE *f) const
-{
-    fprintf(f, "Units:\n");
-    if (hasTime())
-        fprintf(f, "  %g nanoseconds\n", time());
-    if (hasCapacitance())
-        fprintf(f, "  %g picofarads\n", capacitance());
-    if (hasResistance())
-        fprintf(f, "  %g ohms\n", resistance());
-    if (hasPower())
-        fprintf(f, "  %g milliwatts\n", power());
-    if (hasCurrent())
-        fprintf(f, "  %g milliamps\n", current());
-    if (hasVoltage())
-        fprintf(f, "  %g volts\n", voltage());
-    if (hasFrequency())
-        fprintf(f, "  %g frequency\n", frequency());
-    if (hasDatabase())
-        fprintf(f, "  %s %g\n", databaseName(),
-                databaseNumber());
+void lefiUnits::print(FILE *f) const {
+  fprintf(f, "Units:\n");
+  if (hasTime())
+    fprintf(f, "  %g nanoseconds\n", time());
+  if (hasCapacitance())
+    fprintf(f, "  %g picofarads\n", capacitance());
+  if (hasResistance())
+    fprintf(f, "  %g ohms\n", resistance());
+  if (hasPower())
+    fprintf(f, "  %g milliwatts\n", power());
+  if (hasCurrent())
+    fprintf(f, "  %g milliamps\n", current());
+  if (hasVoltage())
+    fprintf(f, "  %g volts\n", voltage());
+  if (hasFrequency())
+    fprintf(f, "  %g frequency\n", frequency());
+  if (hasDatabase())
+    fprintf(f, "  %s %g\n", databaseName(), databaseNumber());
 }
 
 END_LEFDEF_PARSER_NAMESPACE
-

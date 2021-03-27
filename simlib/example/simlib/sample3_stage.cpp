@@ -1,4 +1,3 @@
-#include "livesim_types.hpp"
 #include "sample3_stage.hpp"
 
 #include <stdio.h>
@@ -6,16 +5,14 @@
 #include <bitset>
 #include <chrono>
 
+#include "livesim_types.hpp"
 
 #ifdef SIMLIB_VCD
 
-Sample3_stage::Sample3_stage(uint64_t _hidx,const std::string &parent_name, vcd::VCDWriter* writer)
-  : hidx(_hidx)
-  , scope_name(parent_name+".s3")
-  , vcd_writer(writer) {
-  }
+Sample3_stage::Sample3_stage(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter *writer)
+    : hidx(_hidx), scope_name(parent_name + ".s3"), vcd_writer(writer) {}
 void Sample3_stage::vcd_reset_cycle() {
-//  vcd_writer->change(vcd_reset, "1");
+  //  vcd_writer->change(vcd_reset, "1");
   tmp  = 0;
   tmp2 = 0;
   vcd_writer->change(vcd_tmp, "0");
@@ -25,11 +22,11 @@ void Sample3_stage::vcd_reset_cycle() {
   memory[reset_iterator] = 0;
 }
 void Sample3_stage::vcd_posedge() {
-//  vcd_writer->change(vcd_clk, "1");
-//  vcd_writer->change(vcd_reset, "0");
+  //  vcd_writer->change(vcd_clk, "1");
+  //  vcd_writer->change(vcd_reset, "0");
 }
 void Sample3_stage::vcd_negedge() {
-//  vcd_writer->change(vcd_clk, "0");
+  //  vcd_writer->change(vcd_clk, "0");
 }
 void Sample3_stage::vcd_comb(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_to3_dValid, UInt<32> s2_to3_d) {
   if (__builtin_expect(((tmp & UInt<32>(0xFFFF)) == UInt<32>(45339)), 0)) {
@@ -38,10 +35,10 @@ void Sample3_stage::vcd_comb(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s
       // mem part//    vcd_writer->change(vcd_memory_127,t,memory[127].to_string_binary());
     }
     tmp2 = tmp2.addw(UInt<32>(1));
-    vcd_writer->change(vcd_tmp2,tmp2.to_string_binary());
+    vcd_writer->change(vcd_tmp2, tmp2.to_string_binary());
   }
 
-  to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
+  to1_b = memory[(tmp & UInt<32>(0xff)).as_single_word()];
   vcd_writer->change(vcd_to1_b, to1_b.to_string_binary());
 
   if (s1_to3_cValid && s2_to3_dValid) {
@@ -51,7 +48,7 @@ void Sample3_stage::vcd_comb(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s
   }
 
   tmp = tmp.addw(UInt<32>(7));
-  vcd_writer->change(vcd_tmp,tmp.to_string_binary());
+  vcd_writer->change(vcd_tmp, tmp.to_string_binary());
 }
 #else
 Sample3_stage::Sample3_stage(uint64_t _hidx) : hidx(_hidx) {}
@@ -72,7 +69,7 @@ void Sample3_stage::cycle(UInt<1> s1_to3_cValid, UInt<32> s1_to3_c, UInt<1> s2_t
     tmp2 = tmp2.addw(UInt<32>(1));
   }
 
-  to1_b = memory[(tmp&UInt<32>(0xff)).as_single_word()];
+  to1_b = memory[(tmp & UInt<32>(0xff)).as_single_word()];
 
   if (s1_to3_cValid && s2_to3_dValid) {
     UInt<32> tmp3                                    = s1_to3_c.addw(tmp);

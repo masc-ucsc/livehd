@@ -13,10 +13,8 @@ namespace mmap_lib {
 
 // end() for now returns the Actual last element, need it to return AFTER last
 
-
 template <typename Key, typename T>
 class vset {
-
 private:
   T max = 0;
   T min = 0;
@@ -24,22 +22,20 @@ private:
 public:
   using VisitorSet = typename mmap_lib::map<Key, T>;
   VisitorSet   visitor_set;
-  const size_t bucket_len   = sizeof(T) * 8;
+  const size_t bucket_len = sizeof(T) * 8;
 
   using bucket_iterator       = typename VisitorSet::iterator;
   using const_bucket_iterator = typename VisitorSet::const_iterator;
-
- 
 
   // What does explicit do?
   explicit vset(std::string_view _set_name) : visitor_set(std::string(_set_name) + "_vs") {}
   explicit vset(std::string_view _path, std::string_view _set_name) : visitor_set(_path, std::string(_set_name) + "_vs") {}
 
   // Clears the whole data structures
-  void clear() { 
+  void clear() {
     visitor_set.clear();
     max = 0;
-    min = 0; 
+    min = 0;
   }
 
   //====
@@ -98,11 +94,11 @@ public:
     return visitor_set.get(it);
   }
 
-  [[nodiscard]] bucket_iterator bucket_find(const Key &key) { return visitor_set.find(key); }
+  [[nodiscard]] bucket_iterator       bucket_find(const Key &key) { return visitor_set.find(key); }
   [[nodiscard]] const_bucket_iterator bucket_find(const Key &key) const { return visitor_set.find(key); }
 
   // Functions used for iterating, begin() and end()
-  [[nodiscard]] bucket_iterator bucket_begin() { return visitor_set.begin(); }
+  [[nodiscard]] bucket_iterator       bucket_begin() { return visitor_set.begin(); }
   [[nodiscard]] const_bucket_iterator bucket_begin() const { return visitor_set.cbegin(); }
   [[nodiscard]] const_bucket_iterator bucket_cbegin() const { return visitor_set.cbegin(); }
 
@@ -156,8 +152,7 @@ public:
    * All the erase() functions are void too
    * The funcs intake a number you wish to remove from the set
    */
-  
-  
+
   [[nodiscard]] void insert(T &&ele) {
     // find correct index the pos is at
     const auto p    = ele / (sizeof(T) * 8);  // p will be the key that points to the correct bitmap
@@ -169,8 +164,9 @@ public:
     hold = hold | (1 << i);            // modify the bit at pos
     visitor_set.set((Key)p, (T)hold);  // put it back in the bitmap
 
-    if (ele > max) { max = ele; }
-
+    if (ele > max) {
+      max = ele;
+    }
   }
 
   [[nodiscard]] void insert(const T &&ele) {
@@ -183,10 +179,12 @@ public:
     }                                  // is there a bitmap at key p
     hold = hold | (1 << i);            // modify the bit at pos
     visitor_set.set((Key)p, (T)hold);  // put it back in the bitmap
-    
-    if (ele > max) { max = ele; }
+
+    if (ele > max) {
+      max = ele;
+    }
   }
-  
+
   //================================
 
   [[nodiscard]] void erase(T &&ele) {
@@ -197,19 +195,21 @@ public:
 
     if (visitor_set.has((Key)p)) {
       hold = visitor_set.get((Key)p);
-      hold = hold & ~(1 << i);           // modify the bit at i
-      if (hold == 0) { 
-        visitor_set.erase((Key)p); 
-      } else { 
-        visitor_set.set((Key)p, (T)hold); 
-      } // put it back in the bitmap
+      hold = hold & ~(1 << i);  // modify the bit at i
+      if (hold == 0) {
+        visitor_set.erase((Key)p);
+      } else {
+        visitor_set.set((Key)p, (T)hold);
+      }  // put it back in the bitmap
     }
 
-    // Need to  add logic to update max    
+    // Need to  add logic to update max
     if (ele == max) {
       while (hold == 0) {
-        if (p == 0) { max = 0; return; }
-        else {
+        if (p == 0) {
+          max = 0;
+          return;
+        } else {
           --p;
           if (visitor_set.has((Key)p)) {
             hold = visitor_set.get((Key)p);
@@ -217,12 +217,17 @@ public:
         }
       }
 
-      i = (sizeof(T) * 8) - 1;
+      i   = (sizeof(T) * 8) - 1;
       ele = (p + 1) * (sizeof(T) * 8) - 1;
 
       while (i != 0) {
-        if ((hold >> i) & 1) { max = ele; return; }
-        else { --i; --ele; }
+        if ((hold >> i) & 1) {
+          max = ele;
+          return;
+        } else {
+          --i;
+          --ele;
+        }
       }
     }
   }
@@ -235,19 +240,21 @@ public:
 
     if (visitor_set.has((Key)p)) {
       hold = visitor_set.get((Key)p);
-      hold = hold & ~(1 << i);           // modify the bit at i
-      if (hold == 0) { 
-        visitor_set.erase((Key)p); 
-      } else { 
-        visitor_set.set((Key)p, (T)hold); 
-      } // put it back in the bitmap
+      hold = hold & ~(1 << i);  // modify the bit at i
+      if (hold == 0) {
+        visitor_set.erase((Key)p);
+      } else {
+        visitor_set.set((Key)p, (T)hold);
+      }  // put it back in the bitmap
     }
-    
-    // Need to  add logic to update max    
+
+    // Need to  add logic to update max
     if (ele == max) {
       while (hold == 0) {
-        if (p == 0) { max = 0; return; }
-        else {
+        if (p == 0) {
+          max = 0;
+          return;
+        } else {
           --p;
           if (visitor_set.has((Key)p)) {
             hold = visitor_set.get((Key)p);
@@ -255,16 +262,20 @@ public:
         }
       }
 
-      i = (sizeof(T) * 8) - 1;
+      i   = (sizeof(T) * 8) - 1;
       ele = (p + 1) * (sizeof(T) * 8) - 1;
 
       while (i != 0) {
-        if ((hold >> i) & 1) { max = ele; return; }
-        else { --i; --ele; }
+        if ((hold >> i) & 1) {
+          max = ele;
+          return;
+        } else {
+          --i;
+          --ele;
+        }
       }
     }
   }
-
 
   // Not the 'real' find function
   // Need a wrapper to call this func and put it in a vIter
@@ -291,7 +302,6 @@ public:
       return false;
     }
   }
-  
 
   // Functions used for iterating, begin() and end()
   [[nodiscard]] bool is_start(T &&ele) {
@@ -308,46 +318,45 @@ public:
     return false;
   }
 
-  [[nodiscard]] T get_max() const { return max; } 
-  
+  [[nodiscard]] T get_max() const { return max; }
+
   /*
    * Iterator class for vset
    */
   class vIter {
   private:
-    T test = 0;
-    vset &owner; // a reference to the vset this vIter is a part of
-                 // this reference included in order to access vset members
+    T     test = 0;
+    vset &owner;  // a reference to the vset this vIter is a part of
+                  // this reference included in order to access vset members
     T iData = 0;
-  
-  public:
 
-    vIter(vset &tmp): iData(0) , owner(tmp){ }
+  public:
+    vIter(vset &tmp) : iData(0), owner(tmp) {}
     ~vIter() { ; }
 
     void cont_test() { std::cout << "made it" << std::endl; }
     void iter_change(T ele) { iData = ele; }
-    T iter_val() { return iData; }
-     
+    T    iter_val() { return iData; }
+
     T get_set_max() { return owner.max; }
-    
-    vIter& operator ++() {
+
+    vIter &operator++() {
       int flg = 0;
       if (iData == owner.get_max()) {
         ;
-        //return *this;
+        // return *this;
         //++iData // --> need to find out how to return AFTER end
-        //std::cout << "already max" << std::endl;
+        // std::cout << "already max" << std::endl;
       } else if (iData > owner.get_max()) {
         return *this;
-        //std::cout << "more than max" << std::endl;
+        // std::cout << "more than max" << std::endl;
       } else if (iData < owner.get_max()) {
-        //std::cout << "should increment" << std::endl;
-        while (owner.efind(iData+1) == false) { //<--- issue is in efind() xD
+        // std::cout << "should increment" << std::endl;
+        while (owner.efind(iData + 1) == false) {  //<--- issue is in efind() xD
           ++iData;
           if (iData == owner.get_max()) {
             flg = 1;
-            //std::cout << "got to max in the while()" << std::endl;
+            // std::cout << "got to max in the while()" << std::endl;
             break;
           }
         }
@@ -358,15 +367,15 @@ public:
         }
       }
       return *this;
-    } //prefix ++i
+    }  // prefix ++i
 
-    vIter operator ++(int other) { 
+    vIter operator++(int other) {
       vIter temp = *this;
       ++*this;
       return temp;
-    } //postfix i++
+    }  // postfix i++
 
-    vIter& operator --() { 
+    vIter &operator--() {
       T _iData = iData;
 
       while (true) {
@@ -375,7 +384,7 @@ public:
         } else {
           if (owner.efind(_iData - 1)) {
             _iData = _iData - 1;
-            iData = _iData;
+            iData  = _iData;
             break;
           } else {
             _iData = _iData - 1;
@@ -383,30 +392,33 @@ public:
         }
       }
       return *this;
-    } //prefix --i
-    
-    vIter operator --(int other) {
+    }  // prefix --i
+
+    vIter operator--(int other) {
       vIter temp = *this;
       --*this;
       return temp;
-    } //postfix i--
-    
-    bool operator !=(vIter other) const {
-      if (iData != other.iter_val()) { return true; }
-      return false;
-    }
-    
-    bool operator ==(vIter other) const {
-      if (iData == other.iter_val()) { return true; }
-      return false;
-    }
-    
-    //Fix this to make the auto for loop work
-    T operator *() const { return iData; }
+    }  // postfix i--
 
+    bool operator!=(vIter other) const {
+      if (iData != other.iter_val()) {
+        return true;
+      }
+      return false;
+    }
+
+    bool operator==(vIter other) const {
+      if (iData == other.iter_val()) {
+        return true;
+      }
+      return false;
+    }
+
+    // Fix this to make the auto for loop work
+    T operator*() const { return iData; }
   };
-  
-  void test_begin() { 
+
+  void test_begin() {
     vIter alpha;
     alpha.cont_test();
   }
@@ -417,67 +429,61 @@ public:
   }
 
   // trying to change vIter member vars using vset
-  T set_and_ret (T ele) {
+  T set_and_ret(T ele) {
     vIter::test = ele;
     return vIter::test;
   }
 
-
   [[nodiscard]] vIter begin() {
     vIter tmp(*this);
     if (visitor_set.empty() == true) {
-      //Exception?
-      //Assertion?
+      // Exception?
+      // Assertion?
       return tmp;
     }
-    
+
     for (auto i = 0; i <= max; ++i) {
       if (vset::efind(i) == true) {
         tmp.iter_change(i);
         return tmp;
       }
     }
-    //Exception?
-    //Assertion?
+    // Exception?
+    // Assertion?
     return tmp;
   }
-  
+
   [[nodiscard]] vIter end() {
     vIter tmp(*this);
     if (visitor_set.empty() == true) {
-      //Exception?
-      //Assertion?
+      // Exception?
+      // Assertion?
       return tmp;
     }
-    
+
     // includes last element of set
-    //tmp.iter_change(vset::get_max()+1);
-    
+    // tmp.iter_change(vset::get_max()+1);
+
     // does not include last element of set
-    tmp.iter_change(vset::get_max()); 
+    tmp.iter_change(vset::get_max());
     return tmp;
   }
-  
 
   [[nodiscard]] vIter find(T ele) {
     vIter tmp(*this);
-    if (vset::efind(ele+0)) { 
+    if (vset::efind(ele + 0)) {
       tmp.iter_change(ele);
       return tmp;
     } else {
-      //Exception?
-      //Assertion?
+      // Exception?
+      // Assertion?
       return tmp;
     }
   }
 
-  [[nodiscard]] vIter contains(T &&ele) {
-    return vset::find(ele);
-  }
+  [[nodiscard]] vIter contains(T &&ele) { return vset::find(ele); }
 
-  [[nodiscard]] vIter contains(const T &&ele) {
-    return vset::find(ele);
-  }
+  [[nodiscard]] vIter contains(const T &&ele) { return vset::find(ele); }
 };
 
 }  // namespace mmap_lib

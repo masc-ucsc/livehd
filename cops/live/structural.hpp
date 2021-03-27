@@ -3,6 +3,7 @@
 #define LIVE_STRUCTURAL_H_
 
 #include <set>
+
 #include "invariant.hpp"
 #include "stitch_options.hpp"
 
@@ -25,9 +26,11 @@ private:
   const Invariant_boundaries *boundaries;
 
   Index_ID get_candidate(Index_ID newid, LGraph *nsynth) {
-    if (nsynth->get_wid(newid) == 0) return 0;
+    if (nsynth->get_wid(newid) == 0)
+      return 0;
     auto name = nsynth->get_node_wirename(newid);
-    if (!original->has_wirename(name)) return 0;
+    if (!original->has_wirename(name))
+      return 0;
 
     return original->get_node_id(name);
   }

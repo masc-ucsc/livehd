@@ -1,12 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "structural.hpp"
+
 #include <fstream>
 #include <functional>
 #include <queue>
 
 #include "lgedgeiter.hpp"
-
-#include "structural.hpp"
 
 Live_structural::Live_structural(Stitch_pass_options &pack) {
   std::ifstream invariant_file(pack.boundaries_name);
@@ -53,7 +53,7 @@ void Live_structural::replace(LGraph *nsynth) {
       discovered.push(queue_element(idx, 0));
       if (Index_ID oid = get_candidate(idx, nsynth)) {
         candidate_equiv[idx] = oid;
-      }else{
+      } else {
         I(false);
       }
     }
@@ -97,7 +97,8 @@ void Live_structural::replace(LGraph *nsynth) {
   int                count = 0;
   std::set<Index_ID> match;
   for (auto &equivs : candidate_equiv) {
-    if (no_match.find(equivs.first) != no_match.end()) continue;
+    if (no_match.find(equivs.first) != no_match.end())
+      continue;
 
     count++;
   }

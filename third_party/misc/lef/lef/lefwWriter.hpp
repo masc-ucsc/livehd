@@ -32,8 +32,8 @@
 
 #include <stdio.h>
 
-#include "lefiKRDefs.hpp"
 #include "lefiDefs.hpp"
+#include "lefiKRDefs.hpp"
 #include "lefiUser.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -92,46 +92,46 @@ extern int lefwNewLine();
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
-extern int lefwVersion (int vers1, int vers2);
+extern int lefwVersion(int vers1, int vers2);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
 // The caseSensitive can be ON or OFF.
-extern int lefwCaseSensitive (const char* caseSensitive);
+extern int lefwCaseSensitive(const char* caseSensitive);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
 // The noWireExtensionAtPin can be ON or OFF.
-extern int lefwNoWireExtensionAtPin (const char* noWireExt);
+extern int lefwNoWireExtensionAtPin(const char* noWireExt);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
 //     already have one
-extern int lefwMinfeature (double minFeatureX, double minFeatureY);
+extern int lefwMinfeature(double minFeatureX, double minFeatureY);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
-extern int lefwDielectric (double dielectric);
+extern int lefwDielectric(double dielectric);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
-extern int lefwBusBitChars (const char* busBitChars);
+extern int lefwBusBitChars(const char* busBitChars);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // Returns 0 if successful.
-extern int lefwDividerChar (const char* dividerChar);
+extern int lefwDividerChar(const char* dividerChar);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwManufacturingGrid (double grid);
+extern int lefwManufacturingGrid(double grid);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
@@ -143,31 +143,31 @@ extern int lefwFixedMask();
 // This routine can be called multiple times.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwUseMinSpacing (const char* type, const char* onOff);
+extern int lefwUseMinSpacing(const char* type, const char* onOff);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwClearanceMeasure (const char* type);
+extern int lefwClearanceMeasure(const char* type);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwAntennaInputGateArea (double inputGateArea);
+extern int lefwAntennaInputGateArea(double inputGateArea);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwAntennaInOutDiffArea (double inOutDiffArea);
+extern int lefwAntennaInOutDiffArea(double inOutDiffArea);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
 // This is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwAntennaOutputDiffArea (double outputDiffArea);
+extern int lefwAntennaOutputDiffArea(double outputDiffArea);
 
 // This routine is called after lefwInit.
 // This routine can be called only once.
@@ -180,13 +180,13 @@ extern int lefwStartUnits();
 // be preceeded by a call to lefwStartUnits and must be
 // terminated by a call to lefwEndUnits.
 // Returns 0 if successful.
-extern int lefwUnits(double time,    // optional(0) - TIME NANOSECONDS
-               double capacitance,   // optional(0) - CAPACITANCE PICOFARADS
-               double resistance,    // optional(0) - RESISTANCE OHMS
-               double power,         // optional(0) - POWER MILLIWATTS
-               double current,       // optional(0) - CURRENT MILLIAMPS
-               double voltage,       // optional(0) - VOLTAGE VOLTS
-               double database);     // optional(0) - DATABASE MICRONS
+extern int lefwUnits(double time,         // optional(0) - TIME NANOSECONDS
+                     double capacitance,  // optional(0) - CAPACITANCE PICOFARADS
+                     double resistance,   // optional(0) - RESISTANCE OHMS
+                     double power,        // optional(0) - POWER MILLIWATTS
+                     double current,      // optional(0) - CURRENT MILLIAMPS
+                     double voltage,      // optional(0) - VOLTAGE VOLTS
+                     double database);    // optional(0) - DATABASE MICRONS
 
 // This routine is called once for each unit.  It is separated from
 // lefwUnits due to backwards compatible for pre 5.3.
@@ -237,7 +237,7 @@ extern int lefwLayerWidth(double minWidth);
 // Returns 0 if successful.
 // The routing lefwLayerCutSpacingEnd has to call at the end of each spacing.
 // This is a 5.7 syntax.
-extern int lefwLayerCutSpacing(double spacing) ;
+extern int lefwLayerCutSpacing(double spacing);
 
 // This routine must be called after lefwLayerSpacing
 // This routine is optional.
@@ -258,7 +258,7 @@ extern int lefwLayerCutSpacingSameNet();
 // Returns 0 if successful.
 // This is a 5.7 syntax.
 extern int lefwLayerCutSpacingLayer(const char* name2,
-                                   int stack);         // optional(0)
+                                    int         stack);  // optional(0)
 
 // This routine must be called after lefwLayerSpacing
 // This routine is optional.
@@ -266,9 +266,9 @@ extern int lefwLayerCutSpacingLayer(const char* name2,
 // lefwLayerCutSpacingParallel or lefwLayerCutSpacingArea is called per Spacing.
 // Returns 0 if successful.
 // This is a 5.7 syntax.
-extern int lefwLayerCutSpacingAdjacent(int viaCuts, // either 2, 3, or 4, opt
-                                      double distance,
-                                      int stack);  // optional(0)
+extern int lefwLayerCutSpacingAdjacent(int    viaCuts,  // either 2, 3, or 4, opt
+                                       double distance,
+                                       int    stack);  // optional(0)
 
 // This routine must be called after lefwLayerSpacing
 // This routine is optional.
@@ -299,9 +299,7 @@ extern int lefwLayerCutSpacingEnd();
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerCutSpacingTableOrtho(int numSpacing,
-                                         double* cutWithins,
-                                         double* orthoSpacings);
+extern int lefwLayerCutSpacingTableOrtho(int numSpacing, double* cutWithins, double* orthoSpacings);
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called only once.
@@ -310,11 +308,9 @@ extern int lefwLayerCutSpacingTableOrtho(int numSpacing,
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerArraySpacing(int longArray,    // optional (0)
-                                 double viaWidth,  // optional (0)
-                                 double cutSpacing,
-                                 int numArrayCut,
-                                 int* arrayCuts, double* arraySpacings);
+extern int lefwLayerArraySpacing(int    longArray,  // optional (0)
+                                 double viaWidth,   // optional (0)
+                                 double cutSpacing, int numArrayCut, int* arrayCuts, double* arraySpacings);
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called multiple times.
@@ -323,10 +319,9 @@ extern int lefwLayerArraySpacing(int longArray,    // optional (0)
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerEnclosure(const char* location, //ABOVE|BELOW, optional ""
-                              double overhang1,
-                              double overhang2,
-                              double width);    // optional (0)
+extern int lefwLayerEnclosure(const char* location,  // ABOVE|BELOW, optional ""
+                              double overhang1, double overhang2,
+                              double width);  // optional (0)
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called multiple times.
@@ -337,12 +332,10 @@ extern int lefwLayerEnclosure(const char* location, //ABOVE|BELOW, optional ""
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerEnclosureWidth(
-                              const char* location, //ABOVE|BELOW, optional ""
-                              double overhang1,
-                              double overhang2,
-                              double width,         // optional (0)
-                              double cutWithin);    // optional (0)
+extern int lefwLayerEnclosureWidth(const char* location,  // ABOVE|BELOW, optional ""
+                                   double overhang1, double overhang2,
+                                   double width,       // optional (0)
+                                   double cutWithin);  // optional (0)
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called multiple times.
@@ -353,11 +346,9 @@ extern int lefwLayerEnclosureWidth(
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerEnclosureLength(
-                              const char* location, //ABOVE|BELOW, optional ""
-                              double overhang1,
-                              double overhang2,
-                              double minLength);    // optional (0)
+extern int lefwLayerEnclosureLength(const char* location,  // ABOVE|BELOW, optional ""
+                                    double overhang1, double overhang2,
+                                    double minLength);  // optional (0)
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called multiple times.
@@ -366,11 +357,9 @@ extern int lefwLayerEnclosureLength(
 // Returns 0 if successful.
 // This routine is called if the layer type is CUT when
 // lefwStartLayer is called.
-extern int lefwLayerPreferEnclosure(
-                              const char* location, //ABOVE|BELOW, optional ""
-                              double overhang1,
-                              double overhang2,
-                              double width);    // optional (0)
+extern int lefwLayerPreferEnclosure(const char* location,  // ABOVE|BELOW, optional ""
+                                    double overhang1, double overhang2,
+                                    double width);  // optional (0)
 
 // This routine must be called after lefwStartLayer.
 // This routine can be called only once per Layer.
@@ -398,8 +387,8 @@ extern int lefwStartLayerRouting(const char* layerName);
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is required for LayerRouting.
 // Returns 0 if successful.
-extern int lefwLayerRouting(const char* direction, // HORIZONTAL | VERTICAL |
-                                                   // DIAG45 | DIAG135
+extern int lefwLayerRouting(const char* direction,  // HORIZONTAL | VERTICAL |
+                                                    // DIAG45 | DIAG135
                             double width);
 
 // This routine must be called only once after lefwStartLayerRouting.
@@ -427,8 +416,7 @@ extern int lefwLayerRoutingDiagPitch(double distance);
 // but not both
 // This is a 5.6 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingDiagPitchXYDistance(double diag45Distance,
-                                               double diag135Distance);
+extern int lefwLayerRoutingDiagPitchXYDistance(double diag45Distance, double diag135Distance);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This is a 5.6 syntax.
@@ -467,8 +455,7 @@ extern int lefwLayerRoutingArea(double area);
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinsize(int numRect, double* minWidth,
-                                   double* minLength);
+extern int lefwLayerRoutingMinsize(int numRect, double* minWidth, double* minLength);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional
@@ -481,8 +468,7 @@ extern int lefwLayerRoutingMinimumcut(double numCuts, double minWidth);
 // This is a 5.7 syntax.
 // This routine is optional
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinimumcutWithin(double numCuts, double minWidth,
-                                            double cutDistance);
+extern int lefwLayerRoutingMinimumcutWithin(double numCuts, double minWidth, double cutDistance);
 
 // This routine must be called only once after lefwLayerRoutingMinimumcut.
 // This routine is optional.
@@ -495,8 +481,7 @@ extern int lefwLayerRoutingMinimumcutConnections(const char* direction);
 // This routine is optional.
 // This is a 5.5 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinimumcutLengthWithin(double length,
-               double distance);
+extern int lefwLayerRoutingMinimumcutLengthWithin(double length, double distance);
 
 // This routine must be called multiple time after lefwStartLayerRouting.
 // This routine is optional
@@ -523,8 +508,7 @@ extern int lefwLayerRoutingSpacingRangeUseLengthThreshold();
 // lefwLayerRoutingSpacingRange.
 // subMinWidth & subMaxWidth are optional.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingRangeInfluence(double infValue,
-              double subMinWidth, double subMaxWidth);
+extern int lefwLayerRoutingSpacingRangeInfluence(double infValue, double subMinWidth, double subMaxWidth);
 
 // Either this routine or lefwLayerRoutingSpacingRangeUseLengthThreshold or
 // lefwLayerRoutingSpacingRangeInfluence can be called once after
@@ -537,15 +521,14 @@ extern int lefwLayerRoutingSpacingRangeRange(double minWidth, double maxWidth);
 // be called once after lefwLayerRoutingSpacing.
 // minWidth & maxWidth are optional.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingLengthThreshold(double lengthValue,
-              double minWidth, double maxWidth);
+extern int lefwLayerRoutingSpacingLengthThreshold(double lengthValue, double minWidth, double maxWidth);
 
 // Either this routine, lefwLayerRoutingSpacingRange or
 // lefwLayerRoutingSpacingRange can be
 // be called once after lefwLayerRoutingSpacing.
 // This is a 5.7 routine.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingSameNet(int PGOnly) ; // optional (0)
+extern int lefwLayerRoutingSpacingSameNet(int PGOnly);  // optional (0)
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional
@@ -558,7 +541,7 @@ extern int lefwLayerRoutingSpacingEndOfLine(double eolWidth, double eolWithin);
 // This is a 5.7 syntax.
 // Returns 0 if successful.
 extern int lefwLayerRoutingSpacingEOLParallel(double parSpace, double parWithin,
-                                              int twoEdges); // optional(0)
+                                              int twoEdges);  // optional(0)
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional
@@ -570,8 +553,7 @@ extern int lefwLayerRoutingSpacingNotchLength(double minNLength);
 // This routine is optional
 // This is a 5.7 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingEndOfNotchWidth(double eonWidth,
-                  double minNSpacing, double minNLength);
+extern int lefwLayerRoutingSpacingEndOfNotchWidth(double eonWidth, double minNSpacing, double minNLength);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional
@@ -646,8 +628,7 @@ extern int lefwLayerRoutingMinwidth(double width);
 // routine lefwLayerRoutineMinenclosedarea.  If width is optional, a "0"
 // value is assigned for that index slot of the array.
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinenclosedarea(int numMinenclosed, double* area,
-                                           double* width);
+extern int lefwLayerRoutingMinenclosedarea(int numMinenclosed, double* area, double* width);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional and can be called once.
@@ -661,9 +642,9 @@ extern int lefwLayerRoutingMinstep(double distance);
 // takes the options for type & Lengthsum.
 // This is a 5.5 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinstepWithOptions(double distance,
-                       const char* rule, // INSIDECORNER|OUTSIDECORNER|STEP
-                       double maxLength);
+extern int lefwLayerRoutingMinstepWithOptions(double      distance,
+                                              const char* rule,  // INSIDECORNER|OUTSIDECORNER|STEP
+                                              double      maxLength);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional and can be called once.
@@ -671,15 +652,13 @@ extern int lefwLayerRoutingMinstepWithOptions(double distance,
 // takes the option for MaxEdges.
 // This is a 5.7 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingMinstepMaxEdges(double distance,
-                                           double maxEdges);
+extern int lefwLayerRoutingMinstepMaxEdges(double distance, double maxEdges);
 
 // This routine must be called only once after lefwStartLayerRouting.
 // This routine is optional and can be called once.
 // This is a 5.5 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingProtrusion(double width1, double length,
-                                      double width2);
+extern int lefwLayerRoutingProtrusion(double width1, double length, double width2);
 
 // This routine must be called only after lefwStartLayerRouting.
 // This routine is optional and can be called multiple times.
@@ -687,8 +666,7 @@ extern int lefwLayerRoutingProtrusion(double width1, double length,
 // numLength has the size of the array length.
 // length is an array of length values.
 // Returns 0 if successful.
-extern int lefwLayerRoutingStartSpacingtableParallel(int numLength,
-                                                     double* length);
+extern int lefwLayerRoutingStartSpacingtableParallel(int numLength, double* length);
 
 // This routine must be called only after
 // lefwLayerRoutingStartSpacingtableParallel.
@@ -696,8 +674,7 @@ extern int lefwLayerRoutingStartSpacingtableParallel(int numLength,
 // This routine can be called multiple times.
 // This is a 5.5 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingtableParallelWidth(double width,
-                                     int numSpacing, double* spacing);
+extern int lefwLayerRoutingSpacingtableParallelWidth(double width, int numSpacing, double* spacing);
 
 // This routine must be called only after lefwStartLayerRouting.
 // This routine is optional and can be called multiple times.
@@ -711,8 +688,7 @@ extern int lefwLayerRoutingStartSpacingtableInfluence();
 // This routine can be called multiple times.
 // This is a 5.5 syntax.
 // Returns 0 if successful.
-extern int lefwLayerRoutingSpacingInfluenceWidth(double width, double distance,
-                                     double spacing);
+extern int lefwLayerRoutingSpacingInfluenceWidth(double width, double distance, double spacing);
 
 // This routine must be called only after lefwStartLayerRouting.
 // This routine is optional and can be called multiple times.
@@ -727,9 +703,8 @@ extern int lefwLayerRoutingStartSpacingtableTwoWidths();
 // This is a 5.7 syntax.
 // Returns 0 if successful.
 extern int lefwLayerRoutingSpacingtableTwoWidthsWidth(double width,
-                                     double runLength, // PRL, optional (0)
-                                     int numSpacing,
-                                     double* spacing);
+                                                      double runLength,  // PRL, optional (0)
+                                                      int numSpacing, double* spacing);
 
 // This routine can be called after lefwLayerRoutingStartSpacingtableParallel
 // or lefwLayerRoutingStartSpacingtableInfluence.
@@ -843,8 +818,7 @@ extern int lefwLayerAntennaDiffAreaRatio(double value);
 // This is a 5.4 syntax.
 // Either this routine or lefwLayerRoutingAntennaLength is allowed, not both.
 // Returns 0 if successful.
-extern int lefwLayerAntennaDiffAreaRatioPwl(int numPwls,
-               double* diffusions, double* ratios);
+extern int lefwLayerAntennaDiffAreaRatioPwl(int numPwls, double* diffusions, double* ratios);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -875,8 +849,7 @@ extern int lefwLayerAntennaCumDiffAreaRatio(double value);
 // This is a 5.4 syntax.
 // Either this routine or lefwLayerRoutingAntennaLength is allowed, not both.
 // Returns 0 if successful.
-extern int lefwLayerAntennaCumDiffAreaRatioPwl(int numPwls,
-               double* diffusions, double* ratios);
+extern int lefwLayerAntennaCumDiffAreaRatioPwl(int numPwls, double* diffusions, double* ratios);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -887,8 +860,8 @@ extern int lefwLayerAntennaCumDiffAreaRatioPwl(int numPwls,
 // This function is similar to lefwLayerRoutingAntennaArea
 // diffUseOnly has to be DIFFUSEONLY.
 // Returns 0 if successful.
-extern int lefwLayerAntennaAreaFactor(double value,
-               const char* diffUseOnly);    // optional(NULL)
+extern int lefwLayerAntennaAreaFactor(double      value,
+                                      const char* diffUseOnly);  // optional(NULL)
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -919,8 +892,7 @@ extern int lefwLayerAntennaDiffSideAreaRatio(double value);
 // This is a 5.4 syntax.
 // Either this routine or lefwLayerRoutingAntennaLength is allowed, not both.
 // Returns 0 if successful.
-extern int lefwLayerAntennaDiffSideAreaRatioPwl(int numPwls,
-               double* diffusions, double* ratios);
+extern int lefwLayerAntennaDiffSideAreaRatioPwl(int numPwls, double* diffusions, double* ratios);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -951,8 +923,7 @@ extern int lefwLayerAntennaCumDiffSideAreaRatio(double value);
 // This is a 5.4 syntax.
 // Either this routine or lefwLayerRoutingAntennaLength is allowed, not both.
 // Returns 0 if successful.
-extern int lefwLayerAntennaCumDiffSideAreaRatioPwl(int numPwls,
-               double* diffusions, double* ratios);
+extern int lefwLayerAntennaCumDiffSideAreaRatioPwl(int numPwls, double* diffusions, double* ratios);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -961,8 +932,8 @@ extern int lefwLayerAntennaCumDiffSideAreaRatioPwl(int numPwls,
 // The option DIFFUSEONLY is a 5.4 syntax.
 // diffUseOnly has to be DIFFUSEONLY.
 // Returns 0 if successful.
-extern int lefwLayerAntennaSideAreaFactor(double value,
-               const char* diffUseOnly);    // optional(NULL)
+extern int lefwLayerAntennaSideAreaFactor(double      value,
+                                          const char* diffUseOnly);  // optional(NULL)
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -970,7 +941,7 @@ extern int lefwLayerAntennaSideAreaFactor(double value,
 // This routine is valid only if the layer type is either ROUTING or CUT.
 // This is a 5.7 routine.
 // Returns 0 if successful.
-extern int lefwLayerAntennaCumRoutingPlusCut() ;
+extern int lefwLayerAntennaCumRoutingPlusCut();
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -978,7 +949,7 @@ extern int lefwLayerAntennaCumRoutingPlusCut() ;
 // This routine is valid only if the layer type is either ROUTING or CUT.
 // This is a 5.7 routine.
 // Returns 0 if successful.
-extern int lefwLayerAntennaGatePlusDiff(double plusDiffFactor) ;
+extern int lefwLayerAntennaGatePlusDiff(double plusDiffFactor);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -986,7 +957,7 @@ extern int lefwLayerAntennaGatePlusDiff(double plusDiffFactor) ;
 // This routine is valid only if the layer type is either ROUTING or CUT.
 // This is a 5.7 routine.
 // Returns 0 if successful.
-extern int lefwLayerAntennaAreaMinusDiff(double minusDiffFactor) ;
+extern int lefwLayerAntennaAreaMinusDiff(double minusDiffFactor);
 
 // This routine must be called after lefwStartLayerRouting or lefwStartLayer.
 // This routine is optional and can be called only once within a layer
@@ -994,8 +965,7 @@ extern int lefwLayerAntennaAreaMinusDiff(double minusDiffFactor) ;
 // This routine is valid only if the layer type is either ROUTING or CUT.
 // This is a 5.7 routine.
 // Returns 0 if successful.
-extern int lefwLayerAntennaAreaDiffReducePwl(int numPwls,
-               double* diffAreas, double* metalDiffFactors);
+extern int lefwLayerAntennaAreaDiffReducePwl(int numPwls, double* diffAreas, double* metalDiffFactors);
 
 // This routine must be called only once after lefwStartLayer.
 // The option MINIMUMDENSITY is a 5.4 syntax.
@@ -1010,8 +980,7 @@ extern int lefwMaximumDensity(double maxDensity);
 // This routine must be called only once after lefwStartLayer.
 // The option DENSITYCHECKWINDOW is a 5.4 syntax.
 // Returns 0 if successful.
-extern int lefwDensityCheckWindow(double checkWindowLength,
-                                  double checkWindowWidth);
+extern int lefwDensityCheckWindow(double checkWindowLength, double checkWindowWidth);
 
 // This routine must be called only once after lefwStartLayer.
 // The option DENSITYCHECKSTEP is a 5.4 syntax.
@@ -1027,9 +996,9 @@ extern int lefwFillActiveSpacing(double fillToActiveSpacing);
 // This routine is optional.
 // This is a 5.5 syntax.
 // Returns 0 if succesful.
-extern int lefwMaxviastack(int value,
-                           const char* bottomLayer, // optional (NULL)
-                           const char* topLayer);   // optional (NULL)
+extern int lefwMaxviastack(int         value,
+                           const char* bottomLayer,  // optional (NULL)
+                           const char* topLayer);    // optional (NULL)
 
 // This routine is called after lefwInit.
 // This section of routines is optional.
@@ -1043,39 +1012,36 @@ extern int lefwStartPropDef();
 // It adds integer property definition to the statement.
 // Returns 0 if successful.
 // The objType can be LIBRARY or VIA or MACRO or PIN.
-extern int lefwIntPropDef(
-               const char* objType,   // LIBRARY | LAYER | VIA | VIARULE |
-                                      // NONDEFAULTRULE | MACRO | PIN
-               const char* propName,
-               double leftRange,      // optional(0) - RANGE
-               double rightRange,     // optional(0)
-               int    propValue);     // optional(NULL)
+extern int lefwIntPropDef(const char* objType,  // LIBRARY | LAYER | VIA | VIARULE |
+                                                // NONDEFAULTRULE | MACRO | PIN
+                          const char* propName,
+                          double      leftRange,   // optional(0) - RANGE
+                          double      rightRange,  // optional(0)
+                          int         propValue);          // optional(NULL)
 
 // This routine must be called after lefwStartPropDef.
 // This routine can be called multiple times.
 // It adds real property definition to the statement.
 // Returns 0 if successful.
 // The objType can be LIBRARY or VIA or MACRO or PIN.
-extern int lefwRealPropDef(
-               const char* objType,   // LIBRARY | LAYER | VIA | VIARULE |
-                                      // NONDEFAULTRULE | MACRO | PIN
-               const char* propName,
-               double leftRange,      // optional(0) - RANGE
-               double rightRange,     // optional(0)
-               double propValue);     // optional(NULL)
+extern int lefwRealPropDef(const char* objType,  // LIBRARY | LAYER | VIA | VIARULE |
+                                                 // NONDEFAULTRULE | MACRO | PIN
+                           const char* propName,
+                           double      leftRange,   // optional(0) - RANGE
+                           double      rightRange,  // optional(0)
+                           double      propValue);       // optional(NULL)
 
 // This routine must be called after lefwStartPropDef.
 // This routine can be called multiple times.
 // It adds string property definition to the statement.
 // Returns 0 if successful.
 // The objType can be LIBRARY or VIA or MACRO or PIN.
-extern int lefwStringPropDef(
-               const char* objType,    // LIBRARY | LAYER | VIA | VIARULE |
-                                       //  NONDEFAULTRULE | MACRO | PIN
-               const char* propName,
-               double leftRange,       // optional(0) - RANGE
-               double rightRange,      // optional(0)
-               const char* propValue); // optional(NULL)
+extern int lefwStringPropDef(const char* objType,  // LIBRARY | LAYER | VIA | VIARULE |
+                                                   //  NONDEFAULTRULE | MACRO | PIN
+                             const char* propName,
+                             double      leftRange,   // optional(0) - RANGE
+                             double      rightRange,  // optional(0)
+                             const char* propValue);  // optional(NULL)
 
 // This routine must be called after the lefwStartPropDef call (if any).
 // The routine can be called only once.
@@ -1087,35 +1053,35 @@ extern int lefwEndPropDef();
 // Returns 0 if successful.
 // The routine starts the via section. All of the vias must follow.
 extern int lefwStartVia(const char* viaName,
-               const char* isDefault);    // optional(NULL) - DEFAULT
+                        const char* isDefault);  // optional(NULL) - DEFAULT
 
 // This routine is optional, it call only be called after lefwStartVia.
 // It can only be called once.
 // Returns 0 if successful.
-extern int lefwViaTopofstackonly();       // TOPOFSTACKONLY
+extern int lefwViaTopofstackonly();  // TOPOFSTACKONLY
 
 // This routine is optional, it call only be called after lefwStartVia.
 // It can only be called once.
 // Returns 0 if successful.
 extern int lefwViaForeign(const char* foreignName,
-               double xl,            // optional(0) - pt(x)
-               double yl,            // optional(0) - pt(y)
-               int orient);          // optional(-1)
+                          double      xl,  // optional(0) - pt(x)
+                          double      yl,  // optional(0) - pt(y)
+                          int         orient);     // optional(-1)
 
 // This routine is optional, it call only be called after lefwStartVia.
 // It can only be called once.
 // Returns 0 if successful.
 // This routine is the same as lefwViaForeign, except orient is a char*
 extern int lefwViaForeignStr(const char* foreignName,
-               double xl,            // optional(0) - pt(x)
-               double yl,            // optional(0) - pt(y)
-               const char* orient);  // optional("")
+                             double      xl,       // optional(0) - pt(x)
+                             double      yl,       // optional(0) - pt(y)
+                             const char* orient);  // optional("")
 
 // This routine is optional, it call only be called after lefwStartVia.
 // Either this routine or lefwViaViarule can be called within a via.
 // It can only be called once in a via.
 // Returns 0 if successful.
-extern int lefwViaResistance(double resistance); // RESISTANCE
+extern int lefwViaResistance(double resistance);  // RESISTANCE
 
 // This routine must be called after lefwStartVia.
 // It can be called multiple times.
@@ -1127,11 +1093,11 @@ extern int lefwViaLayer(const char* layerName);  // LAYER
 // It can be called multiple times.
 // Returns 0 if successful.
 // mask is 5.8 syntax
-extern int lefwViaLayerRect(double x1l,   // RECT pt1(x)
-                            double y1l,   // RECT pt1(y)
-                            double x2l,   // RECT pt2(x)
-                            double y2l,   // RECT pt2(y)
-                int mask = 0);
+extern int lefwViaLayerRect(double x1l,  // RECT pt1(x)
+                            double y1l,  // RECT pt1(y)
+                            double x2l,  // RECT pt2(x)
+                            double y2l,  // RECT pt2(y)
+                            int    mask = 0);
 
 // This routine can call only after lefwViaLayer.
 // Either this routine or lefwViaLayerRect can be called within a layer
@@ -1139,21 +1105,16 @@ extern int lefwViaLayerRect(double x1l,   // RECT pt1(x)
 // This is a 5.6 syntax.
 // Returns 0 if successful.
 // mask is 5.8 syntax
-extern int lefwViaLayerPolygon(int num_polys, double* xl, double* yl,
-                   int mask = 0);
+extern int lefwViaLayerPolygon(int num_polys, double* xl, double* yl, int mask = 0);
 
 // This routine can call only after lefwStartVia.
 // Either this routine or lefwViaResistance can be called within a via.
 // It can only be called once in a via.
 // This is a 5.6 syntax.
 // Returns 0 if successful.
-extern int lefwViaViarule(const char* viaRuleName,
-                          double xCutSize, double yCutSize,
-                          const char* botMetalLayer, const char* cutLayer,
-                          const char* topMetalLayer,
-                          double xCutSpacing, double yCutSpacing,
-                          double xBotEnc, double yBotEnc,
-                          double xTopEnc, double yTopEnc);
+extern int lefwViaViarule(const char* viaRuleName, double xCutSize, double yCutSize, const char* botMetalLayer,
+                          const char* cutLayer, const char* topMetalLayer, double xCutSpacing, double yCutSpacing, double xBotEnc,
+                          double yBotEnc, double xTopEnc, double yTopEnc);
 
 // This routine can call only after lefwViaViarule.
 // It can only be called once.
@@ -1171,8 +1132,7 @@ extern int lefwViaViaruleOrigin(double xOffset, double yOffset);
 // It can only be called once.
 // This is a 5.6 syntax.
 // Returns 0 if successful.
-extern int lefwViaViaruleOffset(double xBotOffset, double yBotOffset,
-                                double xTopOffset, double yTopOffset);
+extern int lefwViaViaruleOffset(double xBotOffset, double yBotOffset, double xTopOffset, double yTopOffset);
 
 // This routine can call only after lefwViaViarule.
 // It can only be called once.
@@ -1216,20 +1176,18 @@ extern int lefwStartViaRule(const char* viaRuleName);
 // This routine has to be called 2 times exact.
 // Returns 0 if successful.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
-extern int lefwViaRuleLayer(
-               const char* layerName,
-               const char* direction,    // HORIZONTAL | VERTICAL
-               double minWidth,          // optional(0) - WIDTH
-               double maxWidth,          // optional(0) - WIDTH
-               double overhang,          // optional(0) - OVERHANG
-               double metalOverhang);    // optional(0) - METALOVERHANG
+extern int lefwViaRuleLayer(const char* layerName,
+                            const char* direction,  // HORIZONTAL | VERTICAL
+                            double      minWidth,   // optional(0) - WIDTH
+                            double      maxWidth,   // optional(0) - WIDTH
+                            double      overhang,   // optional(0) - OVERHANG
+                            double      metalOverhang);  // optional(0) - METALOVERHANG
 
 // This routine is called after lefwViaRuleLayer is called twice.
 // This routine is required in a viarule and can be called more than once.
 // Returns 0 if successful.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
-extern int lefwViaRuleVia(
-               const char* viaName);
+extern int lefwViaRuleVia(const char* viaName);
 
 // This routine must be called after the lefwStartViaRule call (if any).
 // The routine can be called only once per lefwStartViaRule.
@@ -1254,42 +1212,35 @@ extern int lefwViaRuleGenDefault();
 // Returns 0 if successful.
 // Either this routine or lefwViaRuleGenLayerEnclosure, not both.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
-extern int lefwViaRuleGenLayer(
-               const char* layerName,
-               const char* direction,    // HORIZONTAL | VERTICAL
-               double minWidth,          // optional(0) - WIDTH
-               double maxWidth,          // optional(0) - WIDTH
-               double overhang,          // optional(0) - OVERHANG
-               double metalOverhang);    // optional(0) - METALOVERHANG
+extern int lefwViaRuleGenLayer(const char* layerName,
+                               const char* direction,  // HORIZONTAL | VERTICAL
+                               double      minWidth,   // optional(0) - WIDTH
+                               double      maxWidth,   // optional(0) - WIDTH
+                               double      overhang,   // optional(0) - OVERHANG
+                               double      metalOverhang);  // optional(0) - METALOVERHANG
 
 // This routine is called after lefwStartViaRuleGen.
 // This routine has to be called 2 times exact.
 // This is 5.5 syntax
 // Returns 0 if successful.
 // Either this routine or lefwViaRuleGenLayer, not both.
-extern int lefwViaRuleGenLayerEnclosure(
-               const char* layerName,
-               double overhang1,
-               double overhang2,
-               double minWidth,          // optional(0) - WIDTH
-               double maxWidth);         // optional(0) - WIDTH
+extern int lefwViaRuleGenLayerEnclosure(const char* layerName, double overhang1, double overhang2,
+                                        double minWidth,   // optional(0) - WIDTH
+                                        double maxWidth);  // optional(0) - WIDTH
 
 // This routine is called after lefwViaRuleLayerGen is called twice.
 // This routine is optional in a viarule generate and can be called once.
 // Returns 0 if successful.
 // The direction1 or direction2 can be HORIZONTAL or VERTICAL.
-extern int lefwViaRuleGenLayer3(
-               const char* layerName,
-               double xl, double yl,      // RECT pt1(x), pt1(y)
-               double xh, double yh,      // RECT pt2(x), pt2(y)
-               double xSpacing, double ySpacing, // SPACING x and y
-               double resistance);        // optional(0) - RESISTANCE
+extern int lefwViaRuleGenLayer3(const char* layerName, double xl, double yl,  // RECT pt1(x), pt1(y)
+                                double xh, double yh,                         // RECT pt2(x), pt2(y)
+                                double xSpacing, double ySpacing,             // SPACING x and y
+                                double resistance);                           // optional(0) - RESISTANCE
 
 // This routine must be called after the lefwStartViaRuleGen call (if any).
 // The routine can be called only once per lefwStartViaRuleGen.
 // Returns 0 if successful.
 extern int lefwEndViaRuleGen(const char* viaRuleName);
-
 
 // This routine is called after lefwInit.
 // This routine must be called only once.
@@ -1303,12 +1254,12 @@ extern int lefwStartNonDefaultRule(const char* ruleName);
 // This routine can be called multiple times.
 // Returns 0 if successful.
 extern int lefwNonDefaultRuleLayer(const char* routingLayerName,
-               double width,           // WIDTH
-               double minSpacing,      // MINSPACING
-               double wireExtension,   // optinal(0) - WIREEXTENSION
-               double resistance,      // optinal(0) - RESISTANCE RPERQ
-               double capacitance,     // optinal(0) - CAPACITANCE CPERSQDIST
-               double edgeCap);        // optinal(0) - EDGECAPACITANCE
+                                   double      width,          // WIDTH
+                                   double      minSpacing,     // MINSPACING
+                                   double      wireExtension,  // optinal(0) - WIREEXTENSION
+                                   double      resistance,     // optinal(0) - RESISTANCE RPERQ
+                                   double      capacitance,    // optinal(0) - CAPACITANCE CPERSQDIST
+                                   double      edgeCap);            // optinal(0) - EDGECAPACITANCE
 
 // This routine is called after lefwInit.
 // This routine must be called after lefwStartNonDefaultRule
@@ -1329,7 +1280,7 @@ extern int lefwNonDefaultRuleHardspacing();
 //   lefwViaLayerRect
 //   lefwNonDefaultRuleEndVia
 extern int lefwNonDefaultRuleStartVia(const char* viaName,
-               const char* isDefault);    // optional(NULL) - DEFAULT
+                                      const char* isDefault);  // optional(NULL) - DEFAULT
 
 // This routine must be called after the lefwNonDefaultRuleStartVia call.
 // The routine can be called only once per via section.
@@ -1367,10 +1318,8 @@ extern int lefwStartSpacing();
 // It can be called multiple times.
 // Returns 0 if successful.
 // The stack has to be STACK.
-extern int lefwSpacing(const char* layerName1,
-               const char* layerName2,
-               double minSpace,
-               const char* stack);        // optional(NULL)
+extern int lefwSpacing(const char* layerName1, const char* layerName2, double minSpace,
+                       const char* stack);  // optional(NULL)
 
 // This routine must be called after the lefwStartSpacing call (if any).
 // The routine can be called only once.
@@ -1381,25 +1330,25 @@ extern int lefwEndSpacing();
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
 // This api is obsolete in 5.4.
-extern int lefwUniversalNoiseMargin (double high, double low);
+extern int lefwUniversalNoiseMargin(double high, double low);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
 // This api is obsolete in 5.4.
-extern int lefwEdgeRateThreshold1 (double num);
+extern int lefwEdgeRateThreshold1(double num);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
 // This api is obsolete in 5.4.
-extern int lefwEdgeRateThreshold2 (double num);
+extern int lefwEdgeRateThreshold2(double num);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
 // This api is obsolete in 5.4.
-extern int lefwEdgeRateScaleFactor (double num);
+extern int lefwEdgeRateScaleFactor(double num);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
@@ -1412,7 +1361,7 @@ extern int lefwStartNoiseTable(int num);
 // This routine is optional and it can be called multiple times
 // Returns 0 if successful.
 // This api is obsolete in 5.4.
-extern int lefwEdgeRate(double num) ;
+extern int lefwEdgeRate(double num);
 
 // This routine is called after lefwEdgeRate.
 // This routine is optional and it can be called only once inside lefwEdgeRate.
@@ -1449,7 +1398,7 @@ extern int lefwEndCorrectTable();
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
-extern int lefwMinFeature (double x, double y);
+extern int lefwMinFeature(double x, double y);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
@@ -1482,8 +1431,7 @@ extern int lefwEndIrdrop();
 // Returns 0 if successful.
 // The classType can be PAD or CORE.
 // The symmetry can be a list of X or Y or R90.
-extern int lefwSite(const char* siteName, const char* classType,
-              const char* symmetry, double width, double height);
+extern int lefwSite(const char* siteName, const char* classType, const char* symmetry, double width, double height);
 
 // This routine is must be called after lefwSite.
 // It can be called multiple times.
@@ -1496,7 +1444,7 @@ extern int lefwSiteRowPattern(const char* siteName, int orient);
 // This is a 5.6 syntax.
 // Returns 0 if successful.
 // This routine is the same as lefwSiteRowPattern, except orient is a char*
-extern int lefwSiteRowPatternStr(const char* siteName, const char *orient);
+extern int lefwSiteRowPatternStr(const char* siteName, const char* orient);
 
 // This routine must be called after the lefwSite call (if any).
 // The routine can be called only once after lefwSite.
@@ -1515,9 +1463,8 @@ extern int lefwStartArray(const char* arrayName);
 // lefwArrayTracks, or lefwStartArrayFloorplan must be called at least once.
 // It can be call multiple times.
 // Returns 0 if successful.
-extern int lefwArraySite(const char* name, double origX, double origY,
-               int orient, double numX, double numY, double spaceX,
-               double spaceY);
+extern int lefwArraySite(const char* name, double origX, double origY, int orient, double numX, double numY, double spaceX,
+                         double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArrayCanplace, lefwArrayCannotoccupy,
@@ -1525,18 +1472,16 @@ extern int lefwArraySite(const char* name, double origX, double origY,
 // It can be call multiple times.
 // Returns 0 if successful.
 // This routine is the same as lefwArraySite, except orient is a char*
-extern int lefwArraySiteStr(const char* name, double origX, double origY,
-               const char *orient, double numX, double numY, double spaceX,
-               double spaceY);
+extern int lefwArraySiteStr(const char* name, double origX, double origY, const char* orient, double numX, double numY,
+                            double spaceX, double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCannotoccupy,
 // lefwArrayTracks, or lefwStartArrayFloorplan must be called at least once.
 // It can be call multiple times.
 // Returns 0 if successful.
-extern int lefwArrayCanplace(const char* name, double origX, double origY,
-               int orient, double numX, double numY, double spaceX,
-               double spaceY);
+extern int lefwArrayCanplace(const char* name, double origX, double origY, int orient, double numX, double numY, double spaceX,
+                             double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCannotoccupy,
@@ -1544,18 +1489,16 @@ extern int lefwArrayCanplace(const char* name, double origX, double origY,
 // It can be call multiple times.
 // Returns 0 if successful.
 // This routine is the same as lefwArrayCanplace, except orient is a char*
-extern int lefwArrayCanplaceStr(const char* name, double origX, double origY,
-               const char *orient, double numX, double numY, double spaceX,
-               double spaceY);
+extern int lefwArrayCanplaceStr(const char* name, double origX, double origY, const char* orient, double numX, double numY,
+                                double spaceX, double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCanplace,
 // lefwArrayTracks, or lefwStartArrayFloorplan must be called at least once.
 // It can be call multiple times.
 // Returns 0 if successful.
-extern int lefwArrayCannotoccupy(const char* name, double origX, double origY,
-               int orient, double numX, double numY, double spaceX,
-               double spaceY);
+extern int lefwArrayCannotoccupy(const char* name, double origX, double origY, int orient, double numX, double numY, double spaceX,
+                                 double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCanplace,
@@ -1563,17 +1506,15 @@ extern int lefwArrayCannotoccupy(const char* name, double origX, double origY,
 // It can be call multiple times.
 // Returns 0 if successful.
 // This routine is the same as lefwArrayTracks, except orient is a char*
-extern int lefwArrayCannotoccupyStr(const char* name, double origX,
-               double origY, const char *orient, double numX, double numY,
-               double spaceX, double spaceY);
+extern int lefwArrayCannotoccupyStr(const char* name, double origX, double origY, const char* orient, double numX, double numY,
+                                    double spaceX, double spaceY);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCanplace, lefwArrayCannotoccupy,
 // or lefwStartArrayFloorplan must be called at least once.
 // It can be call multiple times.
 // Returns 0 if successful.
-extern int lefwArrayTracks(const char* xy, double start, int numTracks,
-               double space, const char* layers);
+extern int lefwArrayTracks(const char* xy, double start, int numTracks, double space, const char* layers);
 
 // This routine is called after lefwStartArray.
 // Either this routine, lefwArraySite, lefwArrayCanplace, lefwArrayCannotoccupy,
@@ -1587,18 +1528,16 @@ extern int lefwStartArrayFloorplan(const char* name);
 // It can be called multiple times.
 // Returns 0 if successful.
 // The site can be CANPLACE or CANNOTOCCUPY
-extern int lefwArrayFloorplan(const char* site, const char* name,
-                              double origX, double origY, int orient,
-                              int numX, int numY, double spaceX, double spaceY);
+extern int lefwArrayFloorplan(const char* site, const char* name, double origX, double origY, int orient, int numX, int numY,
+                              double spaceX, double spaceY);
 
 // This routine must be called after lefwStartArrayFloorplan.
 // It can be called multiple times.
 // Returns 0 if successful.
 // The site can be CANPLACE or CANNOTOCCUPY
 // This routine is the same as lefwArrayFloorplan, except orient is a char*
-extern int lefwArrayFloorplanStr(const char* site, const char* name,
-                              double origX, double origY, const char *orient,
-                              int numX, int numY, double spaceX, double spaceY);
+extern int lefwArrayFloorplanStr(const char* site, const char* name, double origX, double origY, const char* orient, int numX,
+                                 int numY, double spaceX, double spaceY);
 
 // This routine must be called after the lefwStartArrayFloorplan call (if any).
 // The routine can be called only once per section.
@@ -1610,8 +1549,7 @@ extern int lefwEndArrayFloorplan(const char* name);
 // It can be called multiple times.
 // Returns 0 if successful.
 // The xy can be X or Y.
-extern int lefwArrayGcellgrid(const char* xy, double startXY, int colRows,
-               double spaceXY);
+extern int lefwArrayGcellgrid(const char* xy, double startXY, int colRows, double spaceXY);
 
 // This routine is called after lefwStartArray.
 // This section of routines is optional and can be call only once.
@@ -1652,7 +1590,7 @@ extern int lefwStartMacro(const char* macroName);
 // or PRE, POST, TOPLEFT, TOPRIGHT, BOOTOMLEFT, or BOTTOMRIGHT if value1 is
 // ENCAP.
 extern int lefwMacroClass(const char* value1,
-                          const char* value2);     // optional(NULL)
+                          const char* value2);  // optional(NULL)
 
 // This routine is must be called after lefwInit.
 // This routine can be called multiple times.
@@ -1670,18 +1608,18 @@ extern int lefwMacroSource(const char* value1);
 // This routine is optional and can be called multiple times per macro section.
 // Returns 0 if successful.
 extern int lefwMacroForeign(const char* name,
-               double xl,          // optional(0) - pt(x)
-               double yl,          // optional(0) - pt(y)
-               int orient);        // optional(-1) - 0 to 7
+                            double      xl,  // optional(0) - pt(x)
+                            double      yl,  // optional(0) - pt(y)
+                            int         orient);     // optional(-1) - 0 to 7
 
 // This routine is called after lefwStartMacro.
 // This routine is optional and can be called multiple times per macro section.
 // Returns 0 if successful.
 // This routine is the same as lefwMacroForeign, except orient is a char*
 extern int lefwMacroForeignStr(const char* name,
-               double xl,             // optional(0) - pt(x)
-               double yl,             // optional(0) - pt(y)
-               const char *orient);   // optional("")
+                               double      xl,       // optional(0) - pt(x)
+                               double      yl,       // optional(0) - pt(y)
+                               const char* orient);  // optional("")
 
 // This routine is called after lefwStartMacro.
 // This routine is optional and can be called only once per macro section.
@@ -1718,21 +1656,19 @@ extern int lefwMacroSite(const char* siteName);
 // This routine is called after lefwStartMacro.
 // This routine must be called at least once per macro section.
 // Returns 0 if successful.
-extern int lefwMacroSitePattern(const char* name,
-                                double origX, double origY,  // optional(0)
-                                int orient,                  // optional(-1)
-                                int numX, int numY,          // optional(0)
-                                double spaceX, double spaceY); // optional(0)
+extern int lefwMacroSitePattern(const char* name, double origX, double origY,  // optional(0)
+                                int orient,                                    // optional(-1)
+                                int numX, int numY,                            // optional(0)
+                                double spaceX, double spaceY);                 // optional(0)
 
 // This routine is called after lefwStartMacro.
 // This routine must be called at least once per macro section.
 // Returns 0 if successful.
 // This routine is the same as lefwMacroSitePattern, except orient is a char*
-extern int lefwMacroSitePatternStr(const char* name,
-                                double origX, double origY,    // optional(0)
-                                const char *orient,          // optional (-1)
-                                int numX, int numY,            // optional(0)
-                                double spaceX, double spaceY); // optional(0)
+extern int lefwMacroSitePatternStr(const char* name, double origX, double origY,  // optional(0)
+                                   const char* orient,                            // optional (-1)
+                                   int numX, int numY,                            // optional(0)
+                                   double spaceX, double spaceY);                 // optional(0)
 
 // This routine is called after lefwStartMacro.
 // This routine is optional and can be called only once per macro section.
@@ -1755,9 +1691,7 @@ extern int lefwStartMacroDensity(const char* layerName);
 // This routine can be called multiple times.
 // This is a 5.6 syntax.
 // Returns 0 if successful.
-extern int lefwMacroDensityLayerRect(double x1, double y1,
-                                     double x2, double y2,
-                                     double densityValue);
+extern int lefwMacroDensityLayerRect(double x1, double y1, double x2, double y2, double densityValue);
 
 // This routine must be called after the lefwStartMacroPin call (if any).
 // The routine can be called only once per macro section.
@@ -1780,18 +1714,18 @@ extern int lefwMacroPinTaperRule(const char* ruleName);
 // This routine is optional and can be called only once.
 // Returns 0 if successful.
 extern int lefwMacroPinForeign(const char* name,
-               double xl,       // optional(0)
-               double yl,       // optional(0)
-               int orient);     // optional(-1) - 0 to 7
+                               double      xl,  // optional(0)
+                               double      yl,  // optional(0)
+                               int         orient);     // optional(-1) - 0 to 7
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
 // Returns 0 if successful.
 // Ths routine is the same as lefwMacroPinForeign, except orient is a char*
 extern int lefwMacroPinForeignStr(const char* name,
-               double xl,             // optional(0)
-               double yl,             // optional(0)
-               const char* orient);   // optional("")
+                                  double      xl,       // optional(0)
+                                  double      yl,       // optional(0)
+                                  const char* orient);  // optional("")
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
@@ -1958,54 +1892,54 @@ extern int lefwMacroPinIV_Tables(const char* lowName, const char* highName);
 // This routine is optional and can be called multiple times.
 // Either this routine or 5.4 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennasize(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennasize(double      value,
+                                   const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // Either this routine or 5.4 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaMetalArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaMetalArea(double      value,
+                                        const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // Either this routine or 5.4 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaMetalLength(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaMetalLength(double      value,
+                                          const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaPartialMetalArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaPartialMetalArea(double      value,
+                                               const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaPartialMetalSideArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaPartialMetalSideArea(double      value,
+                                                   const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaPartialCutArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaPartialCutArea(double      value,
+                                             const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called multiple times.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaDiffArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaDiffArea(double      value,
+                                       const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // The oxide value, can be either OXIDE1, OXIDE2, OXIDE3, or OXIDE4.
@@ -2020,32 +1954,32 @@ extern int lefwMacroPinAntennaModel(const char* oxide);
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaGateArea(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaGateArea(double      value,
+                                       const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaMaxAreaCar(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaMaxAreaCar(double      value,
+                                         const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaMaxSideAreaCar(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaMaxSideAreaCar(double      value,
+                                             const char* layerName);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPin.
 // This routine is optional and can be called only once.
 // This is a 5.4 syntax.
 // Either this routine or 5.3 Antenna syntax, cannot be both
 // Returns 0 if successful.
-extern int lefwMacroPinAntennaMaxCutCar(double value,
-               const char* layerName); // optional(NULL)
+extern int lefwMacroPinAntennaMaxCutCar(double      value,
+                                        const char* layerName);  // optional(NULL)
 
 // This routine must be called after the lefwStartMacroPin call (if any).
 // The routine can be called only once per macro section.
@@ -2057,7 +1991,7 @@ extern int lefwEndMacroPin(const char* pinName);
 // Returns 0 if successful.
 // It starts the macro pin port section within macro pin.
 // The classType can be NONE or CORE.
-extern int lefwStartMacroPinPort(const char* classType); // optional(NULL)
+extern int lefwStartMacroPinPort(const char* classType);  // optional(NULL)
 
 // This routine is called after lefwStartMacroPinPort.
 // Either this routine or lefwMacroPinPortDesignRuleWidth must be called,
@@ -2065,7 +1999,7 @@ extern int lefwStartMacroPinPort(const char* classType); // optional(NULL)
 // Spacing is optional for minimum spacing.
 // Returns 0 if successful.
 extern int lefwMacroPinPortLayer(const char* layerName,
-                                 double spacing);       // optional(0)
+                                 double      spacing);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPort.
 // Either this routine or lefwMacroPinPortLayer must be called, but can't
@@ -2074,7 +2008,7 @@ extern int lefwMacroPinPortLayer(const char* layerName,
 // This is a 5.4 syntax.
 // Returns 0 if successful.
 extern int lefwMacroPinPortDesignRuleWidth(const char* layerName,
-                                           double width);     // optional(0)
+                                           double      width);  // optional(0)
 
 // This routine is called after lefwMacroPinPortLayer.
 // Returns 0 if successful.
@@ -2085,45 +2019,43 @@ extern int lefwMacroPinPortLayerWidth(double width);
 // lefwStartMacroPinPortLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortLayerPath(int num_paths, double* xl, double* yl,
-               int numX,               // optional(0)
-               int numY,               // optional(0)
-               double spaceX,          // optional(0)
-               double spaceY,          // optional(0)
-           int    mask = 0);       // optional(0)
+                                     int    numX,    // optional(0)
+                                     int    numY,    // optional(0)
+                                     double spaceX,  // optional(0)
+                                     double spaceY,  // optional(0)
+                                     int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPortLayer.
 // Either this routine, lefwStartMacroPinPortLayerPath, or
 // lefwStartMacroPinPortLayerPolygon must be called.
 // Returns 0 if successful.
-extern int lefwMacroPinPortLayerRect(double xl1, double yl1,
-               double xl2, double yl2,
-               int numX,               // optional(0)
-               int numY,               // optional(0)
-               double spaceX,          // optional(0)
-               double spaceY,          // optional(0)
-           int mask = 0);          // optional(0)
+extern int lefwMacroPinPortLayerRect(double xl1, double yl1, double xl2, double yl2,
+                                     int    numX,    // optional(0)
+                                     int    numY,    // optional(0)
+                                     double spaceX,  // optional(0)
+                                     double spaceY,  // optional(0)
+                                     int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPortLayer.
 // Either this routine, lefwStartMacroPinPortLayerPath, or
 // lefwStartMacroPinPortLayerRect must be called.
 // Returns 0 if successful.
-extern int lefwMacroPinPortLayerPolygon(int num_polys,
-               double* xl, double* yl,
-               int numX,               // optional(0)
-               int numY,               // optional(0)
-               double spaceX,          // optional(0)
-               double spaceY,          // optional(0)
-           int mask = 0);          // optional(0)
+extern int lefwMacroPinPortLayerPolygon(int num_polys, double* xl, double* yl,
+                                        int    numX,    // optional(0)
+                                        int    numY,    // optional(0)
+                                        double spaceX,  // optional(0)
+                                        double spaceY,  // optional(0)
+                                        int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroPinPort.
 // Either this routine or lefwStartMacroPinPortLayer must be called.
 // Returns 0 if successful.
 extern int lefwMacroPinPortVia(double xl, double yl, const char* viaName,
-               int numX,               // optional(0)
-               int numY,               // optional(0)
-               double spaceX,          // optional(0)
-               double spaceY,          // optional(0)
-           int mask = 0);          // optional(0)
+                               int    numX,    // optional(0)
+                               int    numY,    // optional(0)
+                               double spaceX,  // optional(0)
+                               double spaceY,  // optional(0)
+                               int    mask = 0);  // optional(0)
 
 // This routine must be called after the lefwStartMacroPinPort call (if any).
 // The routine can be called only once per macro section.
@@ -2142,7 +2074,7 @@ extern int lefwStartMacroObs();
 // Spacing is optional for minimum spacing.
 // Returns 0 if successful.
 extern int lefwMacroObsLayer(const char* layerName,
-                             double spacing);       // optional(0)
+                             double      spacing);  // optional(0)
 
 // This routine is called after lefwStartMacroObs.
 // Either this routine, lefwMacroObsLayer, lefwMacroObsVia or
@@ -2151,7 +2083,7 @@ extern int lefwMacroObsLayer(const char* layerName,
 // This is a 5.4 syntax.
 // Returns 0 if successful.
 extern int lefwMacroObsDesignRuleWidth(const char* layerName,
-                                       double width);       // optional(0)
+                                       double      width);  // optional(0)
 
 // This routine is called after lefwStartMacroObs.
 // Either this routine, lefwMacroObsLayer, lefwMacroObsVia or
@@ -2170,45 +2102,44 @@ extern int lefwMacroObsLayerWidth(double width);
 // lefwStartMacroObsLayerPolygon must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsLayerPath(int num_paths, double* xl, double* yl,
-               int numX,                  // optional(0)
-               int numY,                  // optional(0)
-               double spaceX,             // optional(0)
-               double spaceY,             // optional(0)
-           int mask = 0);             // optional(0)
+                                 int    numX,    // optional(0)
+                                 int    numY,    // optional(0)
+                                 double spaceX,  // optional(0)
+                                 double spaceY,  // optional(0)
+                                 int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObsLayer.
 // Either this routine, lefwMacroObsLayerPath, or
 // lefwStartMacroObsLayerPolygon must be called.
 // Returns 0 if successful.
-extern int lefwMacroObsLayerRect(double xl1, double yl1,
-               double xl2, double yl2,
-               int numX,                  // optional(0)
-               int numY,                  // optional(0)
-               double spaceX,             // optional(0)
-               double spaceY,             // optional(0)
-           int mask = 0);             // optional(0)
+extern int lefwMacroObsLayerRect(double xl1, double yl1, double xl2, double yl2,
+                                 int    numX,    // optional(0)
+                                 int    numY,    // optional(0)
+                                 double spaceX,  // optional(0)
+                                 double spaceY,  // optional(0)
+                                 int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObsLayer.
 // Either this routine, lefwMacroObsLayerPath, or
 // lefwStartMacroObsLayerPath must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsLayerPolygon(int num_polys, double* xl, double* yl,
-               int numX,                  // optional(0)
-               int numY,                  // optional(0)
-               double spaceX,             // optional(0)
-               double spaceY,             // optional(0)
-           int mask = 0);             // optional(0)
+                                    int    numX,    // optional(0)
+                                    int    numY,    // optional(0)
+                                    double spaceX,  // optional(0)
+                                    double spaceY,  // optional(0)
+                                    int    mask = 0);  // optional(0)
 
 // This routine is called after lefwStartMacroObs.
 // Either this routine or lefwMacroObsLayer|lefwMacroObsDesignRuleWidth
 // must be called.
 // Returns 0 if successful.
 extern int lefwMacroObsVia(double xl, double yl, const char* viaName,
-               int numX,                  // optional(0)
-               int numY,                  // optional(0)
-               double spaceX,             // optional(0)
-               double spaceY,             // optional(0)
-           int mask = 0);             // optional(0)
+                           int    numX,    // optional(0)
+                           int    numY,    // optional(0)
+                           double spaceX,  // optional(0)
+                           double spaceY,  // optional(0)
+                           int    mask = 0);  // optional(0)
 
 // This routine must be called after the lefwStartMacroObs call (if any).
 // The routine can be called only once per macro section.
@@ -2237,16 +2168,15 @@ extern int lefwMacroTimingPin(const char* fromPin, const char* toPin);
 // Returns 0 if successful.
 // The riseFall can be RISE or FALL.
 // This api is obsolete in 5.4.
-extern int lefwMacroTimingIntrinsic(const char* riseFall, double min,
-               double max,
-               double slewT1,          // optional(0)
-               double slewT1Min,       // optional(0)
-               double slewT1Max,       // optional(0)
-               double slewT2,          // optional(0)
-               double slewT2Min,       // optional(0)
-               double slewT2Max,       // optional(0)
-               double slewT3,          // optional(0)
-               double varMin, double varMax);
+extern int lefwMacroTimingIntrinsic(const char* riseFall, double min, double max,
+                                    double slewT1,     // optional(0)
+                                    double slewT1Min,  // optional(0)
+                                    double slewT1Max,  // optional(0)
+                                    double slewT2,     // optional(0)
+                                    double slewT2Min,  // optional(0)
+                                    double slewT2Max,  // optional(0)
+                                    double slewT3,     // optional(0)
+                                    double varMin, double varMax);
 
 // This routine must be called after the lefwStartMacroTiming.
 // It can be called multiple times.
@@ -2312,9 +2242,9 @@ extern int lefwEndMacroTiming();
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.
 // Returns 0 if successful.
-extern int lefwAntenna(const char* type,   // INPUTPINANTENNASIZE |
-                                           // OUTPUTPINANTENNASIZE |
-                                           // INOUTPINANTENNASIZE
+extern int lefwAntenna(const char* type,  // INPUTPINANTENNASIZE |
+                                          // OUTPUTPINANTENNASIZE |
+                                          // INOUTPINANTENNASIZE
                        double value);
 
 // This routine is called after lefwInit.
@@ -2325,24 +2255,24 @@ extern int lefwStartBeginext(const char* name);
 // This routine is called after lefwBeginext.
 // This routine is optional, it can be called only once.
 // Returns 0 if successful.
-extern int lefwBeginextCreator (const char* creatorName);
+extern int lefwBeginextCreator(const char* creatorName);
 
 // This routine is called after lefwBeginext.
 // This routine is optional, it can be called only once.
 // It gets the current system time and date.
 // Returns 0 if successful.
-extern int lefwBeginextDate ();
+extern int lefwBeginextDate();
 
 // This routine is called after lefwBeginext.
 // This routine is optional, it can be called only once.
 // Returns 0 if successful.
-extern int lefwBeginextRevision (int vers1, int vers2);   // vers1.vers2
+extern int lefwBeginextRevision(int vers1, int vers2);  // vers1.vers2
 
 // This routine is called after lefwBeginext.
 // This routine is optional, it can be called many times.
 // It allows user to customize their own syntax.
 // Returns 0 if successful.
-extern int lefwBeginextSyntax (const char* title, const char* string);
+extern int lefwBeginextSyntax(const char* title, const char* string);
 
 // This routine is called after lefwInit.
 // This routine is optional and it can be called only once.

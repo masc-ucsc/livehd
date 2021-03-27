@@ -11,7 +11,6 @@ using FlatHashSet = absl::flat_hash_set<std::string_view>;
 class Semantic_check {
 private:
 protected:
-
   // Dynamic Hash Maps - change when entering a new scope
   // To be used with in_scope_stack and out_of_scope_stack
   FlatHashMap write_dict;
@@ -34,7 +33,7 @@ protected:
   FlatHashSet functions;
 
   // Array of LNAST nodes that hold lhs nodes and Array of Arrays of LNAST nodes that hold rhs nodes
-  std::vector<Lnast_nid> lhs_list;
+  std::vector<Lnast_nid>              lhs_list;
   std::vector<std::vector<Lnast_nid>> rhs_list;
 
   // Array of LNAST nodes that are not defined in their scopes
@@ -51,14 +50,14 @@ protected:
   bool is_a_number(std::string_view node_name);
 
   // Existence Check Functions
-  bool in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
-  bool in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
-  bool in_lhs_list(Lnast_nid node_name);
-  bool in_inefficient_LNAST(std::string_view node_name);
-  bool in_output_vars(std::string_view node_name);
+  bool             in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
+  bool             in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
+  bool             in_lhs_list(Lnast_nid node_name);
+  bool             in_inefficient_LNAST(std::string_view node_name);
+  bool             in_output_vars(std::string_view node_name);
   std::string_view in_lhs_list(Lnast* lnast, int index);
-  int in_rhs_list(Lnast* lnast, std::string_view node_name, int op_start_index);
-  bool in_in_scope_stack(std::string_view node_name);
+  int              in_rhs_list(Lnast* lnast, std::string_view node_name, int op_start_index);
+  bool             in_in_scope_stack(std::string_view node_name);
 
   // Insert Functions
   void add_to_write_list(Lnast* lnast, std::string_view node_name, std::string_view stmt_name);
@@ -78,10 +77,8 @@ protected:
   void resolve_out_of_scope_func_def();
 
   // Semantic Check Functions
-  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view
-                           stmt_name);
-  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view
-                             stmt_name);
+  void check_primitive_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
+  void check_tree_struct_ops(Lnast* lnast, const Lnast_nid& lnidx_opr, const Lnast_ntype node_type, std::string_view stmt_name);
   void check_if_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_for_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);
   void check_while_op(Lnast* lnast, const Lnast_nid& lnidx_opr, std::string_view stmt_name);

@@ -1,28 +1,28 @@
-#include "verilated.h"
-#include "verilated_vcd_c.h"
-#include "Vpipe.h"
-#include "Vpipe_pipe.h"
-#include "Vpipe_pyrm_write_back_block.h"
-#include "Vpipe_write_back_block_dcache.h"
-#include "Vpipe_pyrm_fetch_block.h"
-#include "Vpipe_fetch_block_icache.h"
 #include <cstdio>
 
+#include "Vpipe.h"
+#include "Vpipe_fetch_block_icache.h"
+#include "Vpipe_pipe.h"
+#include "Vpipe_pyrm_fetch_block.h"
+#include "Vpipe_pyrm_write_back_block.h"
+#include "Vpipe_write_back_block_dcache.h"
 #include "riscv_verify.h"
+#include "verilated.h"
+#include "verilated_vcd_c.h"
 using RISCV_Verify::Emulator;
-using RISCV_Verify::word_t;
 using RISCV_Verify::inst_t;
+using RISCV_Verify::word_t;
 
 #ifndef BINFILE
-#define BINFILE           "tests/dhry.bin"
+#define BINFILE "tests/dhry.bin"
 #endif
 
 #ifndef MAX_CYCLES
-#define MAX_CYCLES        4000
+#define MAX_CYCLES 4000
 #endif
 
-vluint64_t global_time   = 0;
-VerilatedVcdC     *tfp   = 0;
+vluint64_t     global_time = 0;
+VerilatedVcdC *tfp         = 0;
 
 void do_terminate() {
 #ifdef TRACE
@@ -30,7 +30,7 @@ void do_terminate() {
   tfp->close();
 #endif
 
-  printf("simulation finished at cycle %lld\n",(long long)global_time);
+  printf("simulation finished at cycle %lld\n", (long long)global_time);
 
   exit(0);
 }
@@ -41,11 +41,10 @@ bool advance_and_verify(Emulator *, Vpipe *);
 void advance_clock(Vpipe *);
 bool verify_cycle(Emulator *emulator, Vpipe *pipe);
 
-int cycles = 0;
+int cycles   = 0;
 int inst_ctr = 0;
 
-void dut_main()
-{
+void dut_main() {
   Vpipe *cliff = new Vpipe;
 #ifdef TRACE
   // init trace dump
@@ -60,7 +59,7 @@ void dut_main()
 
   initialize(&emu, cliff);
 
-  for ( ; cycles < MAX_CYCLES; cycles++) {
+  for (; cycles < MAX_CYCLES; cycles++) {
     if (!advance_and_verify(&emu, cliff))
       break;
   }
@@ -71,11 +70,10 @@ void dut_main()
   delete cliff;
 }
 
-bool verify_cycle(Emulator *emulator, Vpipe *pipe)
-{
+bool verify_cycle(Emulator *emulator, Vpipe *pipe) {
   static word_t last_pc = 0;
 
-  static vluint64_t last_wb_time   = global_time;
+  static vluint64_t last_wb_time = global_time;
 
   if (global_time > last_wb_time + 100) {
     printf("ERROR: Too many cycles without retiring instructions\n");
@@ -84,8 +82,8 @@ bool verify_cycle(Emulator *emulator, Vpipe *pipe)
 
   if (pipe->debug_committed_pc_valid_pyro) {
     last_wb_time = global_time;
-//  if (pipe->output("debug_committed_pc").get_valid() &&
-//      !pipe->output("debug_committed_pc").get_retry()) {
+    //  if (pipe->output("debug_committed_pc").get_valid() &&
+    //      !pipe->output("debug_committed_pc").get_retry()) {
     inst_ctr++;
     word_t last_committed_pc = pipe->debug_committed_pc_pyro;
 
@@ -93,12 +91,15 @@ bool verify_cycle(Emulator *emulator, Vpipe *pipe)
       printf("TB jumped to same PC: %016lX\n", last_pc);
     }
 
-    last_pc = last_committed_pc;
+    last_pc       = last_committed_pc;
     word_t emu_pc = emulator->get_pc();
 
     if (last_pc != emu_pc) {
-      printf("PC mismatch.  UUT: %016lX\n"
-             "              EMU: %016lX\n", last_pc, emu_pc);
+      printf(
+          "PC mismatch.  UUT: %016lX\n"
+          "              EMU: %016lX\n",
+          last_pc,
+          emu_pc);
       return false;
     }
 
@@ -111,10 +112,13 @@ bool verify_cycle(Emulator *emulator, Vpipe *pipe)
       if (raddr != 0) {
         word_t emu_rdata = emulator->get_reg(raddr);
         if (emu_rdata != rdata) {
-          printf("Regfile mismatch for reg[%s]\n"
-                 "                  UUT: %016lX\n"
-                 "                  EMU: %016lX\n",
-                 emulator->reg_name(raddr), rdata, emu_rdata);
+          printf(
+              "Regfile mismatch for reg[%s]\n"
+              "                  UUT: %016lX\n"
+              "                  EMU: %016lX\n",
+              emulator->reg_name(raddr),
+              rdata,
+              emu_rdata);
           return false;
         }
       }
@@ -127,8 +131,7 @@ bool verify_cycle(Emulator *emulator, Vpipe *pipe)
   return true;
 }
 
-void initialize(Emulator *emu, Vpipe *pipe)
-{
+void initialize(Emulator *emu, Vpipe *pipe) {
   int ic_index = 0;
   int dc_index = 0;
 
@@ -146,7 +149,7 @@ void initialize(Emulator *emu, Vpipe *pipe)
 
     ic_index += 4;
 
-    addr = dc_index | 0x80000000U;
+    addr                                                                = dc_index | 0x80000000U;
     pipe->pipe->wb->write_back_block_dcache_inst->dcache[dc_index >> 3] = emu->get_mem64(addr);
 
     dc_index += 8;
@@ -159,15 +162,14 @@ void initialize(Emulator *emu, Vpipe *pipe)
     do_terminate();
   }
 
-  pipe->clk = 0;
+  pipe->clk   = 0;
   pipe->reset = 1;
   advance_clock(pipe);
   pipe->reset = 0;
   advance_clock(pipe);
 }
 
-bool compare_memory(Emulator *emu, Vpipe *pipe)
-{
+bool compare_memory(Emulator *emu, Vpipe *pipe) {
   int eaddr = 0;
   int paddr = 0;
 
@@ -175,7 +177,7 @@ bool compare_memory(Emulator *emu, Vpipe *pipe)
 
   while (eaddr < 0x4000 && paddr < 0x4000) {
     word_t full_addr = eaddr | 0x80000000U;
-    word_t emem = emu->get_mem64(full_addr);
+    word_t emem      = emu->get_mem64(full_addr);
     eaddr += 8;
 
     word_t pmem = pipe->pipe->wb->write_back_block_dcache_inst->dcache[paddr >> 3];
@@ -190,14 +192,12 @@ bool compare_memory(Emulator *emu, Vpipe *pipe)
   return !had_mismatch;
 }
 
-bool advance_and_verify(Emulator *emu, Vpipe *uut)
-{
+bool advance_and_verify(Emulator *emu, Vpipe *uut) {
   advance_clock(uut);
   return verify_cycle(emu, uut);
 }
 
-void advance_clock(Vpipe *uut)
-{
+void advance_clock(Vpipe *uut) {
   uut->clk ^= 1;
   uut->eval();
 #ifdef TRACE
@@ -211,4 +211,3 @@ void advance_clock(Vpipe *uut)
 
   global_time++;
 }
-

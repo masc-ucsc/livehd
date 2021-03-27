@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_bitwidth.hpp"
 
-#include "lgraph.hpp"
 #include "bitwidth.hpp"
+#include "lgraph.hpp"
 
 // Useful for debug
 //#define PRESERVE_ATTR_NODE
@@ -19,7 +19,7 @@ void Pass_bitwidth::setup() {
 }
 
 Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
-  auto miters = var.get("max_iterations");
+  auto miters   = var.get("max_iterations");
   auto hier_txt = var.get("hier");
 
   if (hier_txt != "false" && hier_txt != "0")
@@ -44,4 +44,3 @@ void Pass_bitwidth::trans(Eprp_var &var) {
     bw.do_trans(lg);
   }
 }
-

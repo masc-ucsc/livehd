@@ -8,16 +8,16 @@
 
 // This class is meant to be a standin for a real component from M5 or whatever this eventually merge into.
 class dummyComponent {
-  Ntype_op type;
-  std::string   name;
+  Ntype_op    type;
+  std::string name;
 
 public:
   dummyComponent(Ntype_op typeArg);
   dummyComponent(std::string name);
 
-  std::string   getName() const { return name; }
-  Ntype_op getType() const { return type; }
-  void     myPrint();
+  std::string getName() const { return name; }
+  Ntype_op    getType() const { return type; }
+  void        myPrint();
 };
 
 extern std::ostream& operator<<(std::ostream& s, dummyComponent& c);

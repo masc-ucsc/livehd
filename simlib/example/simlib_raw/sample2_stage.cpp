@@ -1,11 +1,10 @@
-#include "livesim_types.hpp"
-
 #include "sample2_stage.hpp"
 
+#include "livesim_types.hpp"
+
 void Sample2_stage::reset_cycle() {
-  tmp = 1;
+  tmp        = 1;
   to3_dValid = false;
   to2_eValid = false;
   to1_aValid = false;
 }
-

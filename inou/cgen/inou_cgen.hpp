@@ -7,8 +7,8 @@ class Inou_cgen : public Pass {
 private:
   bool        verbose;
   std::string odir;
-protected:
 
+protected:
   static void to_cgen_verilog(Eprp_var &var);
 
 public:

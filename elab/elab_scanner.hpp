@@ -8,7 +8,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
@@ -29,108 +28,107 @@ using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
 // constexpr Token_id Pyrope_id_else = 129;
 // constexpr Token_id Pyrope_id_for  = 130;
 //
-constexpr Token_id Token_id_nop           = 0;   // invalid token
-constexpr Token_id Token_id_comment       = 1;   // c-like comments
+constexpr Token_id Token_id_nop           = 0;    // invalid token
+constexpr Token_id Token_id_comment       = 1;    // c-like comments
 constexpr Token_id Token_id_register      = 16;   // #asd #_asd
-constexpr Token_id Token_id_pipe          = 2;   // |>
-constexpr Token_id Token_id_alnum         = 3;   // a..z..0..9.._
-constexpr Token_id Token_id_ob            = 123;   // {
-constexpr Token_id Token_id_cb            = 125;   // }
+constexpr Token_id Token_id_pipe          = 2;    // |>
+constexpr Token_id Token_id_alnum         = 3;    // a..z..0..9.._
+constexpr Token_id Token_id_ob            = 123;  // {
+constexpr Token_id Token_id_cb            = 125;  // }
 constexpr Token_id Token_id_colon         = 58;   // :
 constexpr Token_id Token_id_gt            = 62;   // >
-constexpr Token_id Token_id_or            = 124;   // |
-constexpr Token_id Token_id_at            = 64;  // @
+constexpr Token_id Token_id_or            = 124;  // |
+constexpr Token_id Token_id_at            = 64;   // @
 constexpr Token_id Token_id_tilde         = 126;  // ~
-constexpr Token_id Token_id_output        = 4;  // %outasd
-constexpr Token_id Token_id_input         = 5;  // $asd
-constexpr Token_id Token_id_dollar        = 36;  // $
-constexpr Token_id Token_id_percent       = 37;  // %
-constexpr Token_id Token_id_dot           = 46;  // .
-constexpr Token_id Token_id_div           = 47;  // /
-constexpr Token_id Token_id_string        = 34;  // "asd23*.v" string (double quote)
-constexpr Token_id Token_id_semicolon     = 59;  // ;
-constexpr Token_id Token_id_comma         = 44;  // ,
-constexpr Token_id Token_id_op            = 40;  // (
-constexpr Token_id Token_id_cp            = 41;  // )
-constexpr Token_id Token_id_pound         = 35;  // #
-constexpr Token_id Token_id_mult          = 42;  // *
-constexpr Token_id Token_id_num           = 6;  // 0123123 or 123123 or 0123ubits
-constexpr Token_id Token_id_backtick      = 96;  // `ifdef
-constexpr Token_id Token_id_synopsys      = 7;  // synopsys... directive in comment
-constexpr Token_id Token_id_plus          = 43;  // +
-constexpr Token_id Token_id_minus         = 45;  // -
-constexpr Token_id Token_id_bang          = 33;  // !
-constexpr Token_id Token_id_lt            = 60;  // <
-constexpr Token_id Token_id_eq            = 61;  // =
-constexpr Token_id Token_id_same          = 8;  // ==
-constexpr Token_id Token_id_diff          = 9;  // !=
-constexpr Token_id Token_id_coloneq       = 10;  // :=
-constexpr Token_id Token_id_ge            = 11;  // >=
-constexpr Token_id Token_id_le            = 12;  // <=
-constexpr Token_id Token_id_and           = 38;  // &
-constexpr Token_id Token_id_xor           = 94;  // ^
-constexpr Token_id Token_id_qmark         = 63;  // ?
-constexpr Token_id Token_id_tick          = 39;  // '
-constexpr Token_id Token_id_obr           = 91;  // [
-constexpr Token_id Token_id_cbr           = 93;  // ]
-constexpr Token_id Token_id_backslash     = 92;  // \ back slash
+constexpr Token_id Token_id_output        = 4;    // %outasd
+constexpr Token_id Token_id_input         = 5;    // $asd
+constexpr Token_id Token_id_dollar        = 36;   // $
+constexpr Token_id Token_id_percent       = 37;   // %
+constexpr Token_id Token_id_dot           = 46;   // .
+constexpr Token_id Token_id_div           = 47;   // /
+constexpr Token_id Token_id_string        = 34;   // "asd23*.v" string (double quote)
+constexpr Token_id Token_id_semicolon     = 59;   // ;
+constexpr Token_id Token_id_comma         = 44;   // ,
+constexpr Token_id Token_id_op            = 40;   // (
+constexpr Token_id Token_id_cp            = 41;   // )
+constexpr Token_id Token_id_pound         = 35;   // #
+constexpr Token_id Token_id_mult          = 42;   // *
+constexpr Token_id Token_id_num           = 6;    // 0123123 or 123123 or 0123ubits
+constexpr Token_id Token_id_backtick      = 96;   // `ifdef
+constexpr Token_id Token_id_synopsys      = 7;    // synopsys... directive in comment
+constexpr Token_id Token_id_plus          = 43;   // +
+constexpr Token_id Token_id_minus         = 45;   // -
+constexpr Token_id Token_id_bang          = 33;   // !
+constexpr Token_id Token_id_lt            = 60;   // <
+constexpr Token_id Token_id_eq            = 61;   // =
+constexpr Token_id Token_id_same          = 8;    // ==
+constexpr Token_id Token_id_diff          = 9;    // !=
+constexpr Token_id Token_id_coloneq       = 10;   // :=
+constexpr Token_id Token_id_ge            = 11;   // >=
+constexpr Token_id Token_id_le            = 12;   // <=
+constexpr Token_id Token_id_and           = 38;   // &
+constexpr Token_id Token_id_xor           = 94;   // ^
+constexpr Token_id Token_id_qmark         = 63;   // ?
+constexpr Token_id Token_id_tick          = 39;   // '
+constexpr Token_id Token_id_obr           = 91;   // [
+constexpr Token_id Token_id_cbr           = 93;   // ]
+constexpr Token_id Token_id_backslash     = 92;   // \ back slash
 constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
 class Etoken {
 protected:
   std::string_view text;
+
 public:
-  constexpr Etoken()
-    : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {
-  }
+  constexpr Etoken() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
   Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
-    tok   = _tok;
-    pos1  = _pos1;
-    pos2  = _pos2;
-    line  = _line;
-    text  = _text;
+    tok  = _tok;
+    pos1 = _pos1;
+    pos2 = _pos2;
+    line = _line;
+    text = _text;
   }
   void reset(Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text) {
-    tok   = _tok;
-    pos1  = _pos1;
-    pos2  = _pos1; //FIXME->sh: you reset the token so the length of the token should be 0, pos2 follows pos1
-    line  = _line;
-    text  = _text;
+    tok  = _tok;
+    pos1 = _pos1;
+    pos2 = _pos1;  // FIXME->sh: you reset the token so the length of the token should be 0, pos2 follows pos1
+    line = _line;
+    text = _text;
   }
   void clear(uint64_t _pos1, uint32_t _line, std::string_view _text) {
-    tok   = Token_id_nop;
-    pos1  = _pos1;
-    pos2  = _pos1; //FIXME->sh: you clear the token so the length of the token should be 0, pos2 follows pos1
-    line  = _line;
-    text  = _text;
+    tok  = Token_id_nop;
+    pos1 = _pos1;
+    pos2 = _pos1;  // FIXME->sh: you clear the token so the length of the token should be 0, pos2 follows pos1
+    line = _line;
+    text = _text;
   }
 
   void fuse_token(Token_id new_tok, const Etoken &t2) {
-    I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+    I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
     tok = new_tok;
 
     auto new_len = text.size() + t2.text.size();
-    text = std::string_view{text.data(), new_len};
+    text         = std::string_view{text.data(), new_len};
   }
 
   void append_token(const Etoken &t2) {
-    I(text.data() + text.size() == t2.text.data()); // t2 must be continuous (otherwise, create new token)
+    I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
 
     auto new_len = text.size() + t2.text.size();
-    text = std::string_view{text.data(), new_len};
+    text         = std::string_view{text.data(), new_len};
   }
 
   void adjust_token_size(uint64_t end_pos) {
-    GI(tok != Token_id_nop, end_pos >= pos2); //FIXME->sh: check correctness of pos2
+    GI(tok != Token_id_nop, end_pos >= pos2);  // FIXME->sh: check correctness of pos2
     auto new_len = end_pos - pos2;
-    text = std::string_view{text.data(), new_len};
+    text         = std::string_view{text.data(), new_len};
   }
 
-  Token_id tok;  // Token (identifier, if, while...)
-  uint64_t pos1; // start position in original memblock for debugging
-  uint64_t pos2; // end position in original memblock for debugging
-  uint32_t line; // line of code
+  Token_id tok;   // Token (identifier, if, while...)
+  uint64_t pos1;  // start position in original memblock for debugging
+  uint64_t pos2;  // end position in original memblock for debugging
+  uint32_t line;  // line of code
 
   std::string_view get_text() const { return text; }
 };
@@ -138,16 +136,16 @@ public:
 class Elab_scanner {
 public:
   typedef std::vector<Etoken> Token_list;
-protected:
 
-  Token_list       token_list;
+protected:
+  Token_list token_list;
 
 private:
-  std::string      buffer_name;
+  std::string buffer_name;
 
   std::string_view memblock;
   int              memblock_fd;
-  void unregister_memblock();
+  void             unregister_memblock();
 
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) {}
@@ -200,7 +198,10 @@ protected:
     return p;
   }
   std::string_view get_memblock() const { return memblock; }
-  std::string_view get_filename() const { I(memblock_fd != -1); return buffer_name; }
+  std::string_view get_filename() const {
+    I(memblock_fd != -1);
+    return buffer_name;
+  }
   bool is_parse_inline() const { return memblock_fd == -1; }
 
   void parser_error_int(std::string_view text) const;
@@ -214,24 +215,24 @@ public:
   virtual ~Elab_scanner();
 
   template <typename S, typename... Args>
-  void scan_error(const S& format, Args&&... args) const {
+  void scan_error(const S &format, Args &&...args) const {
     scan_error_int(fmt::format(format, args...));
   }
   template <typename S, typename... Args>
-  void scan_warn(const S& format, Args&&... args) const {
+  void scan_warn(const S &format, Args &&...args) const {
     scan_warn_int(fmt::format(format, args...));
   }
 
   template <typename S, typename... Args>
-  void parser_error(const S& format, Args&&... args) const {
+  void parser_error(const S &format, Args &&...args) const {
     parser_error_int(fmt::format(format, args...));
   }
   template <typename S, typename... Args>
-  void parser_warn(const S& format, Args&&... args) const {
+  void parser_warn(const S &format, Args &&...args) const {
     parser_warn_int(fmt::format(format, args...));
   }
   template <typename S, typename... Args>
-  void parser_info(const S& format, Args&&... args) const {
+  void parser_info(const S &format, Args &&...args) const {
     parser_info_int(fmt::format(format, args...));
   }
 
@@ -244,7 +245,8 @@ public:
   bool scan_is_end() const { return scanner_pos >= token_list.size(); }
 
   bool scan_is_token(Token_id tok) const {
-    if (scanner_pos < token_list.size()) return token_list[scanner_pos].tok == tok;
+    if (scanner_pos < token_list.size())
+      return token_list[scanner_pos].tok == tok;
     return false;
   }
 
@@ -256,14 +258,15 @@ public:
 
   std::string_view scan_prev_text() const {
     size_t p = scanner_pos - 1;
-    if (scanner_pos <= 0) p = 0;
+    if (scanner_pos <= 0)
+      p = 0;
     return token_list[p].get_text();
   }
 
   std::string_view scan_next_text() const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
-      p = token_list.size()-1;
+      p = token_list.size() - 1;
     return token_list[p].get_text();
   }
 
@@ -278,9 +281,9 @@ public:
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
-      p = token_list.size()-1;
+      p = token_list.size() - 1;
     else if (offset > static_cast<int>(scanner_pos))
-      p = 0 ;
+      p = 0;
     return token_list[p].get_text();
   }
 
@@ -291,20 +294,20 @@ public:
     return token_list[te].get_text();
   }
 
-  std::string_view scan_text() const {
-    return token_list[scanner_pos].get_text();
-  }
-  uint32_t    scan_line() const;
+  std::string_view scan_text() const { return token_list[scanner_pos].get_text(); }
+  uint32_t         scan_line() const;
 
   size_t get_token_pos() const { return token_list[scan_token()].pos1; }
 
   bool scan_is_prev_token(Token_id tok) const {
-    if (scanner_pos == 0) return false;
+    if (scanner_pos == 0)
+      return false;
     I(scanner_pos < token_list.size());
     return token_list[scanner_pos - 1].tok == tok;
   }
   bool scan_is_next_token(int pos, Token_id tok) const {
-    if ((scanner_pos + pos) >= token_list.size()) return false;
+    if ((scanner_pos + pos) >= token_list.size())
+      return false;
     return token_list[scanner_pos + pos].tok == tok;
   }
 
@@ -314,15 +317,16 @@ public:
     if (p >= token_list.size())
       p = token_list.size() - 1;
     else if (offset > static_cast<int>(scanner_pos))
-      p = 0 ;
-    return token_list[p].tok == tok;;
+      p = 0;
+    return token_list[p].tok == tok;
+    ;
   }
 
   void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
   void patch_pass() {
-      absl::flat_hash_map<std::string, Token_id> no_keywords;
-      patch_pass(no_keywords);
+    absl::flat_hash_map<std::string, Token_id> no_keywords;
+    patch_pass(no_keywords);
   }
 
   void parse_file(std::string_view filename) {
@@ -347,13 +351,11 @@ public:
     if (p >= token_list.size())
       p = token_list.size() - 1;
 
-    //comment out by Sheng
-    //else if (offset > static_cast<int>(scanner_pos))
+    // comment out by Sheng
+    // else if (offset > static_cast<int>(scanner_pos))
     //  p = 0 ;
     return token_list[p];
   }
-  
-  const Etoken &get_token(Token_entry entry){
-    return token_list[entry];
-  }
+
+  const Etoken &get_token(Token_entry entry) { return token_list[entry]; }
 };

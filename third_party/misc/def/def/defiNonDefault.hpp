@@ -31,6 +31,7 @@
 #define defiNonDefault_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 #include "defiMisc.hpp"
 
@@ -38,7 +39,7 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 class defiNonDefault {
 public:
-  defiNonDefault(defrData *data);
+  defiNonDefault(defrData* data);
   void Init();
 
   void Destroy();
@@ -56,12 +57,11 @@ public:
   void addViaRule(const char* name);
   void addMinCuts(const char* name, int numCuts);
   void addProperty(const char* name, const char* value, const char type);
-  void addNumProperty(const char* name, const double d,
-                      const char* value, const char type);
+  void addNumProperty(const char* name, const double d, const char* value, const char type);
   void end();
 
   const char* name() const;
-  int   hasHardspacing() const;
+  int         hasHardspacing() const;
 
   int         numProps() const;
   const char* propName(int index) const;
@@ -73,23 +73,23 @@ public:
 
   // A non default rule can have one or more layers.
   // The layer information is kept in an array.
-  int         numLayers() const ;
-  const char* layerName(int index) const ;
-  double      layerWidth(int index) const ;       // Will be obsoleted in 5.7
-  int         layerWidthVal(int index) const ;
+  int         numLayers() const;
+  const char* layerName(int index) const;
+  double      layerWidth(int index) const;  // Will be obsoleted in 5.7
+  int         layerWidthVal(int index) const;
   int         hasLayerDiagWidth(int index) const;
-  double      layerDiagWidth(int index) const;    // Will be obsoleted in 5.7
+  double      layerDiagWidth(int index) const;  // Will be obsoleted in 5.7
   int         layerDiagWidthVal(int index) const;
-  int         hasLayerSpacing(int index) const ;
-  double      layerSpacing(int index) const ;     // Will be obsoleted in 5.7
-  int         layerSpacingVal(int index) const ;
-  int         hasLayerWireExt(int index) const ;
-  double      layerWireExt(int index) const ;     // Will be obsoleted in 5.7
-  int         layerWireExtVal(int index) const ;
-  int         numVias() const ;
-  const char* viaName(int index) const ;
-  int         numViaRules() const ;
-  const char* viaRuleName(int index) const ;
+  int         hasLayerSpacing(int index) const;
+  double      layerSpacing(int index) const;  // Will be obsoleted in 5.7
+  int         layerSpacingVal(int index) const;
+  int         hasLayerWireExt(int index) const;
+  double      layerWireExt(int index) const;  // Will be obsoleted in 5.7
+  int         layerWireExtVal(int index) const;
+  int         numVias() const;
+  const char* viaName(int index) const;
+  int         numViaRules() const;
+  const char* viaRuleName(int index) const;
   int         numMinCuts() const;
   const char* cutLayerName(int index) const;
   int         numCuts(int index) const;
@@ -98,8 +98,8 @@ public:
   void print(FILE* f) const;
 
 protected:
-  char*   name_;
-  char    hardSpacing_;
+  char* name_;
+  char  hardSpacing_;
 
   // Layer information
   int     numLayers_;
@@ -113,16 +113,16 @@ protected:
   char*   hasWireExt_;
   double* wireExt_;
 
-  int     numVias_;
-  int     viasAllocated_;
-  char**  viaNames_;
-  int     numViaRules_;
-  int     viaRulesAllocated_;
-  char**  viaRuleNames_;
-  int     numMinCuts_;
-  int     minCutsAllocated_;
-  char**  cutLayerName_;
-  int*    numCuts_;
+  int    numVias_;
+  int    viasAllocated_;
+  char** viaNames_;
+  int    numViaRules_;
+  int    viaRulesAllocated_;
+  char** viaRuleNames_;
+  int    numMinCuts_;
+  int    minCutsAllocated_;
+  char** cutLayerName_;
+  int*   numCuts_;
 
   int     numProps_;
   int     propsAllocated_;
@@ -131,7 +131,7 @@ protected:
   double* dvalues_;
   char*   types_;
 
-  defrData *defData;
+  defrData* defData;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

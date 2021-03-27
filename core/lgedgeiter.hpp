@@ -28,12 +28,7 @@ public:
     constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) {}
 
     constexpr Fast_iter(const Fast_iter &it)
-      :top_g     (it.top_g)
-      ,current_g (it.current_g)
-      ,hidx      (it.hidx)
-      ,nid       (it.nid)
-      ,visit_sub(it.visit_sub) {
-    }
+        : top_g(it.top_g), current_g(it.current_g), hidx(it.hidx), nid(it.nid), visit_sub(it.visit_sub) {}
 
     constexpr Fast_iter &operator=(const Fast_iter &it) {
       // TO allow rewind/recover the iterator
@@ -89,8 +84,8 @@ public:
   const Node &operator*() const { return current_node; }
 
   void add_node(const Node &node) {
-    bool all_inputs_visited=true;
-    for(const auto &e:node.inp_edges()) {
+    bool all_inputs_visited = true;
+    for (const auto &e : node.inp_edges()) {
       if (unvisited.contains(e.driver.get_node().get_compact())) {
         all_inputs_visited = false;
         break;
@@ -101,13 +96,9 @@ public:
     }
     unvisited.insert(node.get_compact());
   }
-  void del_node(const Node::Compact &node) {
-    unvisited.erase(node);
-  }
+  void del_node(const Node::Compact &node) { unvisited.erase(node); }
 
-  void del_node(const Node &node) {
-    del_node(node.get_compact());
-  }
+  void del_node(const Node &node) { del_node(node.get_compact()); }
 };
 
 class Fwd_edge_iterator {

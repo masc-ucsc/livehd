@@ -5,10 +5,10 @@
 #include <string>
 
 #include "eprp_utils.hpp"
-#include "lezminisat.hpp"
-#include "lezsat.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "lezminisat.hpp"
+#include "lezsat.hpp"
 #include "lgraph.hpp"
 #include "pass_lec.hpp"
 

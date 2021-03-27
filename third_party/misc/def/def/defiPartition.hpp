@@ -31,6 +31,7 @@
 #define defiPartition_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -39,7 +40,7 @@ class defrData;
 
 class defiPartition {
 public:
-  defiPartition(defrData *data);
+  defiPartition(defrData* data);
   void Init();
 
   void Destroy();
@@ -69,12 +70,12 @@ public:
   void addFallMaxRange(double l, double h);
 
   const char* name() const;
-  char direction() const;
+  char        direction() const;
   const char* itemType() const;  // "CLOCK" or "IO" or "COMP"
   const char* pinName() const;
   const char* instName() const;
 
-  int numPins() const;
+  int         numPins() const;
   const char* pin(int index) const;
 
   int isSetupRise() const;
@@ -113,32 +114,32 @@ public:
   void print(FILE* f) const;
 
 protected:
-  char* name_;
-  int nameLength_;
-  char setup_;
-  char hold_;
-  char hasMin_;
-  char hasMax_;
-  char direction_;   // 'F' or 'T'
-  char type_;        // 'L'-clock   'I'-IO  'C'-comp
-  char* inst_;
-  int instLength_;
-  char* pin_;
-  int pinLength_;
+  char*  name_;
+  int    nameLength_;
+  char   setup_;
+  char   hold_;
+  char   hasMin_;
+  char   hasMax_;
+  char   direction_;  // 'F' or 'T'
+  char   type_;       // 'L'-clock   'I'-IO  'C'-comp
+  char*  inst_;
+  int    instLength_;
+  char*  pin_;
+  int    pinLength_;
   double min_, max_;
 
-  int numPins_;
-  int pinsAllocated_;
+  int    numPins_;
+  int    pinsAllocated_;
   char** pins_;
 
-  char hasRiseMin_;
-  char hasFallMin_;
-  char hasRiseMax_;
-  char hasFallMax_;
-  char hasRiseMinRange_;
-  char hasFallMinRange_;
-  char hasRiseMaxRange_;
-  char hasFallMaxRange_;
+  char   hasRiseMin_;
+  char   hasFallMin_;
+  char   hasRiseMax_;
+  char   hasFallMax_;
+  char   hasRiseMinRange_;
+  char   hasFallMinRange_;
+  char   hasRiseMaxRange_;
+  char   hasFallMaxRange_;
   double riseMin_;
   double fallMin_;
   double riseMax_;
@@ -152,9 +153,8 @@ protected:
   double riseMaxRight_;
   double fallMaxRight_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

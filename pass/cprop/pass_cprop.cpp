@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_cprop.hpp"
+
 #include "cprop.hpp"
 #include "lgraph.hpp"
 
@@ -22,7 +23,6 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
   else
     hier = false;
 
-
   if (gioc_txt != "false" && gioc_txt != "0")
     gioc = true;
   else
@@ -31,7 +31,7 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
 
 void Pass_cprop::optimize(Eprp_var &var) {
   Pass_cprop pcp(var);
-  Cprop cp(pcp.hier, pcp.gioc);
+  Cprop      cp(pcp.hier, pcp.gioc);
 
   for (auto &lg : var.lgs) {
     if (lg->is_empty())
@@ -39,5 +39,3 @@ void Pass_cprop::optimize(Eprp_var &var) {
     cp.do_trans(lg);
   }
 }
-
-

@@ -19,7 +19,7 @@ void Fast_edge_iterator::Fast_iter::go_next() {
 
   nid = current_g->fast_next(nid);
   if (visit_sub) {
-    while(!nid.is_invalid()) { // Skip SubGraph present
+    while (!nid.is_invalid()) {  // Skip SubGraph present
       Node node(current_g, current_g, Hierarchy_tree::root_index(), nid);
       if (!node.is_type_sub_present())
         break;
@@ -49,7 +49,7 @@ void Fast_edge_iterator::Fast_iter::go_next() {
       hidx.invalidate();
     } else {
       I(nid == 0);
-      I(hidx.is_invalid()); // no hierarhical, it should be already invalid
+      I(hidx.is_invalid());  // no hierarhical, it should be already invalid
     }
   }
 }
@@ -64,8 +64,8 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
   if (nid) {
-    Fast_iter it(top_g, top_g, visit_sub?Hierarchy_tree::root_index():Hierarchy_tree::invalid_index(), nid, visit_sub);
-    if (visit_sub) { // && top_g->is_type_sub(nid)) {
+    Fast_iter it(top_g, top_g, visit_sub ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index(), nid, visit_sub);
+    if (visit_sub) {  // && top_g->is_type_sub(nid)) {
       Node node(top_g, top_g, Hierarchy_tree::root_index(), nid);
       if (node.is_type_sub_present())
         ++it;

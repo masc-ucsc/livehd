@@ -77,14 +77,16 @@ void checkType(defrCallbackType_e c) {
 
 int done(defrCallbackType_e c, void *, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "END DESIGN\n");
   return 0;
 }
 
 int endfunc(defrCallbackType_e c, void *, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   return 0;
 }
 
@@ -106,7 +108,8 @@ int compMSL(defrCallbackType_e c, defiComponentMaskShiftLayer *co, defiUserData 
   int i;
 
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
 
   if (co->numMaskShiftLayers()) {
     fprintf(fout, "\nCOMPONENTMASKSHIFT ");
@@ -127,7 +130,8 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
     int i;
 
     checkType(c);
-    if (ud != userData) dataError();
+    if (ud != userData)
+      dataError();
     //  missing GENERATE, FOREIGN
     fprintf(fout, "- %s %s ", co->id(), co->name());
     //    co->changeIdAndName("idName", "modelName");
@@ -137,24 +141,34 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
       for (i = 0; i < co->numNets(); i++) fprintf(fout, "%s ", co->net(i));
     }
     if (co->isFixed())
-      fprintf(fout, "+ FIXED %d %d %s ", co->placementX(), co->placementY(),
+      fprintf(fout,
+              "+ FIXED %d %d %s ",
+              co->placementX(),
+              co->placementY(),
               // orientStr(co->placementOrient()));
               co->placementOrientStr());
-    if (co->isCover()) fprintf(fout, "+ COVER %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
-    if (co->isPlaced()) fprintf(fout, "+ PLACED %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
+    if (co->isCover())
+      fprintf(fout, "+ COVER %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
+    if (co->isPlaced())
+      fprintf(fout, "+ PLACED %d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
     if (co->isUnplaced()) {
       fprintf(fout, "+ UNPLACED ");
       if ((co->placementX() != -1) || (co->placementY() != -1))
         fprintf(fout, "%d %d %s ", co->placementX(), co->placementY(), orientStr(co->placementOrient()));
     }
-    if (co->hasSource()) fprintf(fout, "+ SOURCE %s ", co->source());
+    if (co->hasSource())
+      fprintf(fout, "+ SOURCE %s ", co->source());
     if (co->hasGenerate()) {
       fprintf(fout, "+ GENERATE %s ", co->generateName());
-      if (co->macroName() && *(co->macroName())) fprintf(fout, "%s ", co->macroName());
+      if (co->macroName() && *(co->macroName()))
+        fprintf(fout, "%s ", co->macroName());
     }
-    if (co->hasWeight()) fprintf(fout, "+ WEIGHT %d ", co->weight());
-    if (co->hasEEQ()) fprintf(fout, "+ EEQMASTER %s ", co->EEQ());
-    if (co->hasRegionName()) fprintf(fout, "+ REGION %s ", co->regionName());
+    if (co->hasWeight())
+      fprintf(fout, "+ WEIGHT %d ", co->weight());
+    if (co->hasEEQ())
+      fprintf(fout, "+ EEQMASTER %s ", co->EEQ());
+    if (co->hasRegionName())
+      fprintf(fout, "+ REGION %s ", co->regionName());
     if (co->hasRegionBounds()) {
       int *xl, *yl, *xh, *yh;
       int  size;
@@ -175,14 +189,20 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
       int left, bottom, right, top;
       (void)co->haloEdges(&left, &bottom, &right, &top);
       fprintf(fout, "+ HALO ");
-      if (co->hasHaloSoft()) fprintf(fout, "SOFT ");
+      if (co->hasHaloSoft())
+        fprintf(fout, "SOFT ");
       fprintf(fout, "%d %d %d %d\n", left, bottom, right, top);
     }
     if (co->hasRouteHalo()) {
       fprintf(fout, "+ ROUTEHALO %d %s %s\n", co->haloDist(), co->minLayer(), co->maxLayer());
     }
     if (co->hasForeignName()) {
-      fprintf(fout, "+ FOREIGN %s %d %d %s %d ", co->foreignName(), co->foreignX(), co->foreignY(), co->foreignOri(),
+      fprintf(fout,
+              "+ FOREIGN %s %d %d %s %d ",
+              co->foreignName(),
+              co->foreignX(),
+              co->foreignY(),
+              co->foreignOri(),
               co->foreignOrient());
     }
     if (co->numProps()) {
@@ -199,7 +219,8 @@ int compf(defrCallbackType_e c, defiComponent *co, defiUserData ud) {
     }
     fprintf(fout, ";\n");
     --numObjs;
-    if (numObjs <= 0) fprintf(fout, "END COMPONENTS\n");
+    if (numObjs <= 0)
+      fprintf(fout, "END COMPONENTS\n");
   }
 
   return 0;
@@ -215,22 +236,27 @@ int netpath(defrCallbackType_e, defiNet *, defiUserData) {
 
 int netNamef(defrCallbackType_e c, const char *netName, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "- %s ", netName);
   return 0;
 }
 
 int subnetNamef(defrCallbackType_e c, const char *subnetName, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
-  if (curVer >= 5.6) fprintf(fout, "   + SUBNET CBK %s ", subnetName);
+  if (ud != userData)
+    dataError();
+  if (curVer >= 5.6)
+    fprintf(fout, "   + SUBNET CBK %s ", subnetName);
   return 0;
 }
 
 int nondefRulef(defrCallbackType_e c, const char *ruleName, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
-  if (curVer >= 5.6) fprintf(fout, "   + NONDEFAULTRULE CBK %s ", ruleName);
+  if (ud != userData)
+    dataError();
+  if (curVer >= 5.6)
+    fprintf(fout, "   + NONDEFAULTRULE CBK %s ", ruleName);
   return 0;
 }
 
@@ -245,9 +271,12 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   defiWire *wire;
 
   checkType(c);
-  if (ud != userData) dataError();
-  if (c != defrNetCbkType) fprintf(fout, "BOGUS NET TYPE  ");
-  if (net->pinIsMustJoin(0)) fprintf(fout, "- MUSTJOIN ");
+  if (ud != userData)
+    dataError();
+  if (c != defrNetCbkType)
+    fprintf(fout, "BOGUS NET TYPE  ");
+  if (net->pinIsMustJoin(0))
+    fprintf(fout, "- MUSTJOIN ");
   // 5/6/2004 - don't need since I have a callback for the name
   //  else
   //      fprintf(fout, "- %s ", net->name());
@@ -268,20 +297,24 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
     //      net->changePin("newPin", i);
     //      fprintf(fout, "( %s %s ) ", net->instance(i),
     //              net->pin(i));
-    if (net->pinIsSynthesized(i)) fprintf(fout, "+ SYNTHESIZED ");
+    if (net->pinIsSynthesized(i))
+      fprintf(fout, "+ SYNTHESIZED ");
   }
 
-  if (net->hasNonDefaultRule()) fprintf(fout, "+ NONDEFAULTRULE %s\n", net->nonDefaultRule());
+  if (net->hasNonDefaultRule())
+    fprintf(fout, "+ NONDEFAULTRULE %s\n", net->nonDefaultRule());
 
   for (i = 0; i < net->numVpins(); i++) {
     vpin = net->vpin(i);
     fprintf(fout, "  + %s", vpin->name());
-    if (vpin->layer()) fprintf(fout, " %s", vpin->layer());
+    if (vpin->layer())
+      fprintf(fout, " %s", vpin->layer());
     fprintf(fout, " %d %d %d %d", vpin->xl(), vpin->yl(), vpin->xh(), vpin->yh());
     if (vpin->status() != ' ') {
       fprintf(fout, " %c", vpin->status());
       fprintf(fout, " %d %d", vpin->xLoc(), vpin->yLoc());
-      if (vpin->orient() != -1) fprintf(fout, " %s", orientStr(vpin->orient()));
+      if (vpin->orient() != -1)
+        fprintf(fout, " %s", orientStr(vpin->orient()));
     }
     fprintf(fout, "\n");
   }
@@ -479,18 +512,27 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
     }
   }
 
-  if (net->hasWeight()) fprintf(fout, "+ WEIGHT %d ", net->weight());
-  if (net->hasCap()) fprintf(fout, "+ ESTCAP %g ", net->cap());
-  if (net->hasSource()) fprintf(fout, "+ SOURCE %s ", net->source());
-  if (net->hasFixedbump()) fprintf(fout, "+ FIXEDBUMP ");
-  if (net->hasFrequency()) fprintf(fout, "+ FREQUENCY %g ", net->frequency());
-  if (net->hasPattern()) fprintf(fout, "+ PATTERN %s ", net->pattern());
-  if (net->hasOriginal()) fprintf(fout, "+ ORIGINAL %s ", net->original());
-  if (net->hasUse()) fprintf(fout, "+ USE %s ", net->use());
+  if (net->hasWeight())
+    fprintf(fout, "+ WEIGHT %d ", net->weight());
+  if (net->hasCap())
+    fprintf(fout, "+ ESTCAP %g ", net->cap());
+  if (net->hasSource())
+    fprintf(fout, "+ SOURCE %s ", net->source());
+  if (net->hasFixedbump())
+    fprintf(fout, "+ FIXEDBUMP ");
+  if (net->hasFrequency())
+    fprintf(fout, "+ FREQUENCY %g ", net->frequency());
+  if (net->hasPattern())
+    fprintf(fout, "+ PATTERN %s ", net->pattern());
+  if (net->hasOriginal())
+    fprintf(fout, "+ ORIGINAL %s ", net->original());
+  if (net->hasUse())
+    fprintf(fout, "+ USE %s ", net->use());
 
   fprintf(fout, ";\n");
   --numObjs;
-  if (numObjs <= 0) fprintf(fout, "END NETS\n");
+  if (numObjs <= 0)
+    fprintf(fout, "END NETS\n");
   return 0;
 }
 
@@ -505,8 +547,10 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   defiWire *  wire;
   int         numX, numY, stepX, stepY;
 
-  if (c != defrSNetPartialPathCbkType) return 1;
-  if (ud != userData) dataError();
+  if (c != defrSNetPartialPathCbkType)
+    return 1;
+  if (ud != userData)
+    dataError();
 
   fprintf(fout, "SPECIALNET partial data\n");
 
@@ -522,7 +566,8 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
       count = 0;
     }
     fprintf(fout, "( %s %s ) ", ppath->instance(i), ppath->pin(i));
-    if (ppath->pinIsSynthesized(i)) fprintf(fout, "+ SYNTHESIZED ");
+    if (ppath->pinIsSynthesized(i))
+      fprintf(fout, "+ SYNTHESIZED ");
   }
 
   // specialWiring
@@ -549,7 +594,8 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
       newLayer = 0;
       wire     = ppath->wire(i);
       fprintf(fout, "\n  + %s ", wire->wireType());
-      if (strcmp(wire->wireType(), "SHIELD") == 0) fprintf(fout, "%s ", wire->wireShieldNetName());
+      if (strcmp(wire->wireType(), "SHIELD") == 0)
+        fprintf(fout, "%s ", wire->wireShieldNetName());
       for (j = 0; j < wire->numPaths(); j++) {
         p = wire->path(j);
         p->initTraverse();
@@ -627,8 +673,10 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
 
   if (ppath->numProps()) {
     for (i = 0; i < ppath->numProps(); i++) {
-      if (ppath->propIsString(i)) fprintf(fout, "  + PROPERTY %s %s ", ppath->propName(i), ppath->propValue(i));
-      if (ppath->propIsNumber(i)) fprintf(fout, "  + PROPERTY %s %g ", ppath->propName(i), ppath->propNumber(i));
+      if (ppath->propIsString(i))
+        fprintf(fout, "  + PROPERTY %s %s ", ppath->propName(i), ppath->propValue(i));
+      if (ppath->propIsNumber(i))
+        fprintf(fout, "  + PROPERTY %s %g ", ppath->propName(i), ppath->propNumber(i));
       switch (ppath->propType(i)) {
         case 'R': fprintf(fout, "REAL "); break;
         case 'I': fprintf(fout, "INTEGER "); break;
@@ -714,15 +762,24 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
     }
   }
 
-  if (ppath->hasFixedbump()) fprintf(fout, "\n  + FIXEDBUMP ");
-  if (ppath->hasFrequency()) fprintf(fout, "\n  + FREQUENCY %g ", ppath->frequency());
-  if (ppath->hasVoltage()) fprintf(fout, "\n  + VOLTAGE %g ", ppath->voltage());
-  if (ppath->hasWeight()) fprintf(fout, "\n  + WEIGHT %d ", ppath->weight());
-  if (ppath->hasCap()) fprintf(fout, "\n  + ESTCAP %g ", ppath->cap());
-  if (ppath->hasSource()) fprintf(fout, "\n  + SOURCE %s ", ppath->source());
-  if (ppath->hasPattern()) fprintf(fout, "\n  + PATTERN %s ", ppath->pattern());
-  if (ppath->hasOriginal()) fprintf(fout, "\n  + ORIGINAL %s ", ppath->original());
-  if (ppath->hasUse()) fprintf(fout, "\n  + USE %s ", ppath->use());
+  if (ppath->hasFixedbump())
+    fprintf(fout, "\n  + FIXEDBUMP ");
+  if (ppath->hasFrequency())
+    fprintf(fout, "\n  + FREQUENCY %g ", ppath->frequency());
+  if (ppath->hasVoltage())
+    fprintf(fout, "\n  + VOLTAGE %g ", ppath->voltage());
+  if (ppath->hasWeight())
+    fprintf(fout, "\n  + WEIGHT %d ", ppath->weight());
+  if (ppath->hasCap())
+    fprintf(fout, "\n  + ESTCAP %g ", ppath->cap());
+  if (ppath->hasSource())
+    fprintf(fout, "\n  + SOURCE %s ", ppath->source());
+  if (ppath->hasPattern())
+    fprintf(fout, "\n  + PATTERN %s ", ppath->pattern());
+  if (ppath->hasOriginal())
+    fprintf(fout, "\n  + ORIGINAL %s ", ppath->original());
+  if (ppath->hasUse())
+    fprintf(fout, "\n  + USE %s ", ppath->use());
 
   fprintf(fout, "\n");
 
@@ -737,8 +794,10 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   defiShield *shield;
   int         numX, numY, stepX, stepY;
 
-  if (c != defrSNetWireCbkType) return 1;
-  if (ud != userData) dataError();
+  if (c != defrSNetWireCbkType)
+    return 1;
+  if (ud != userData)
+    dataError();
 
   fprintf(fout, "SPECIALNET wire data\n");
 
@@ -783,7 +842,8 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
       newLayer = 0;
       wire     = ppath->wire(i);
       fprintf(fout, "\n  + %s ", wire->wireType());
-      if (strcmp(wire->wireType(), "SHIELD") == 0) fprintf(fout, "%s ", wire->wireShieldNetName());
+      if (strcmp(wire->wireType(), "SHIELD") == 0)
+        fprintf(fout, "%s ", wire->wireShieldNetName());
       for (j = 0; j < wire->numPaths(); j++) {
         p = wire->path(j);
         p->initTraverse();
@@ -895,8 +955,10 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   int         numX, numY, stepX, stepY;
 
   checkType(c);
-  if (ud != userData) dataError();
-  if (c != defrSNetCbkType) fprintf(fout, "BOGUS NET TYPE  ");
+  if (ud != userData)
+    dataError();
+  if (c != defrSNetCbkType)
+    fprintf(fout, "BOGUS NET TYPE  ");
 
   // 5/6/2004 - don't need since I have a callback for the name
   //  fprintf(fout, "- %s ", net->name());
@@ -911,7 +973,8 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
       count = 0;
     }
     fprintf(fout, "( %s %s ) ", net->instance(i), net->pin(i));
-    if (net->pinIsSynthesized(i)) fprintf(fout, "+ SYNTHESIZED ");
+    if (net->pinIsSynthesized(i))
+      fprintf(fout, "+ SYNTHESIZED ");
   }
 
   // specialWiring
@@ -921,7 +984,8 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
       newLayer = 0;
       wire     = net->wire(i);
       fprintf(fout, "\n  + %s ", wire->wireType());
-      if (strcmp(wire->wireType(), "SHIELD") == 0) fprintf(fout, "%s ", wire->wireShieldNetName());
+      if (strcmp(wire->wireType(), "SHIELD") == 0)
+        fprintf(fout, "%s ", wire->wireShieldNetName());
       for (j = 0; j < wire->numPaths(); j++) {
         p = wire->path(j);
         p->initTraverse();
@@ -1014,7 +1078,13 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         }
       }
       if (net->rectMask(i)) {
-        fprintf(fout, "\n  + MASK %d + RECT %s %d %d %d %d", net->rectMask(i), net->rectName(i), net->xl(i), net->yl(i), net->xh(i),
+        fprintf(fout,
+                "\n  + MASK %d + RECT %s %d %d %d %d",
+                net->rectMask(i),
+                net->rectName(i),
+                net->xl(i),
+                net->yl(i),
+                net->xh(i),
                 net->yh(i));
       } else {
         fprintf(fout, "\n  + RECT %s %d %d %d %d", net->rectName(i), net->xl(i), net->yl(i), net->xh(i), net->yh(i));
@@ -1034,7 +1104,11 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
         fprintf(fout, "\n  + SHAPE %s ", net->viaShapeType(i));
       }
       if (net->topMaskNum(i) || net->cutMaskNum(i) || net->bottomMaskNum(i)) {
-        fprintf(fout, "\n  + MASK %d%d%d + VIA %s ", net->topMaskNum(i), net->cutMaskNum(i), net->bottomMaskNum(i),
+        fprintf(fout,
+                "\n  + MASK %d%d%d + VIA %s ",
+                net->topMaskNum(i),
+                net->cutMaskNum(i),
+                net->bottomMaskNum(i),
                 net->viaName(i));
       } else {
         fprintf(fout, "\n  + VIA %s ", net->viaName(i));
@@ -1079,8 +1153,10 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
 
   if (net->numProps()) {
     for (i = 0; i < net->numProps(); i++) {
-      if (net->propIsString(i)) fprintf(fout, "  + PROPERTY %s %s ", net->propName(i), net->propValue(i));
-      if (net->propIsNumber(i)) fprintf(fout, "  + PROPERTY %s %g ", net->propName(i), net->propNumber(i));
+      if (net->propIsString(i))
+        fprintf(fout, "  + PROPERTY %s %s ", net->propName(i), net->propValue(i));
+      if (net->propIsNumber(i))
+        fprintf(fout, "  + PROPERTY %s %g ", net->propName(i), net->propNumber(i));
       switch (net->propType(i)) {
         case 'R': fprintf(fout, "REAL "); break;
         case 'I': fprintf(fout, "INTEGER "); break;
@@ -1161,19 +1237,29 @@ int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
     }
   }
 
-  if (net->hasFixedbump()) fprintf(fout, "\n  + FIXEDBUMP ");
-  if (net->hasFrequency()) fprintf(fout, "\n  + FREQUENCY %g ", net->frequency());
-  if (net->hasVoltage()) fprintf(fout, "\n  + VOLTAGE %g ", net->voltage());
-  if (net->hasWeight()) fprintf(fout, "\n  + WEIGHT %d ", net->weight());
-  if (net->hasCap()) fprintf(fout, "\n  + ESTCAP %g ", net->cap());
-  if (net->hasSource()) fprintf(fout, "\n  + SOURCE %s ", net->source());
-  if (net->hasPattern()) fprintf(fout, "\n  + PATTERN %s ", net->pattern());
-  if (net->hasOriginal()) fprintf(fout, "\n  + ORIGINAL %s ", net->original());
-  if (net->hasUse()) fprintf(fout, "\n  + USE %s ", net->use());
+  if (net->hasFixedbump())
+    fprintf(fout, "\n  + FIXEDBUMP ");
+  if (net->hasFrequency())
+    fprintf(fout, "\n  + FREQUENCY %g ", net->frequency());
+  if (net->hasVoltage())
+    fprintf(fout, "\n  + VOLTAGE %g ", net->voltage());
+  if (net->hasWeight())
+    fprintf(fout, "\n  + WEIGHT %d ", net->weight());
+  if (net->hasCap())
+    fprintf(fout, "\n  + ESTCAP %g ", net->cap());
+  if (net->hasSource())
+    fprintf(fout, "\n  + SOURCE %s ", net->source());
+  if (net->hasPattern())
+    fprintf(fout, "\n  + PATTERN %s ", net->pattern());
+  if (net->hasOriginal())
+    fprintf(fout, "\n  + ORIGINAL %s ", net->original());
+  if (net->hasUse())
+    fprintf(fout, "\n  + USE %s ", net->use());
 
   fprintf(fout, ";\n");
   --numObjs;
-  if (numObjs <= 0) fprintf(fout, "END SPECIALNETS\n");
+  if (numObjs <= 0)
+    fprintf(fout, "END SPECIALNETS\n");
   return 0;
 }
 
@@ -1182,16 +1268,22 @@ int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
   int i;
 
   checkType(c);
-  if (ud != userData) dataError();
-  if (c != defrNonDefaultCbkType) fprintf(fout, "BOGUS NONDEFAULTRULE TYPE  ");
+  if (ud != userData)
+    dataError();
+  if (c != defrNonDefaultCbkType)
+    fprintf(fout, "BOGUS NONDEFAULTRULE TYPE  ");
   fprintf(fout, "- %s\n", nd->name());
-  if (nd->hasHardspacing()) fprintf(fout, "   + HARDSPACING\n");
+  if (nd->hasHardspacing())
+    fprintf(fout, "   + HARDSPACING\n");
   for (i = 0; i < nd->numLayers(); i++) {
     fprintf(fout, "   + LAYER %s", nd->layerName(i));
     fprintf(fout, " WIDTH %d", nd->layerWidthVal(i));
-    if (nd->hasLayerDiagWidth(i)) fprintf(fout, " DIAGWIDTH %d", nd->layerDiagWidthVal(i));
-    if (nd->hasLayerSpacing(i)) fprintf(fout, " SPACING %d", nd->layerSpacingVal(i));
-    if (nd->hasLayerWireExt(i)) fprintf(fout, " WIREEXT %d", nd->layerWireExtVal(i));
+    if (nd->hasLayerDiagWidth(i))
+      fprintf(fout, " DIAGWIDTH %d", nd->layerDiagWidthVal(i));
+    if (nd->hasLayerSpacing(i))
+      fprintf(fout, " SPACING %d", nd->layerSpacingVal(i));
+    if (nd->hasLayerWireExt(i))
+      fprintf(fout, " WIREEXT %d", nd->layerWireExtVal(i));
     fprintf(fout, "\n");
   }
   for (i = 0; i < nd->numVias(); i++) fprintf(fout, "   + VIA %s\n", nd->viaName(i));
@@ -1208,20 +1300,23 @@ int ndr(defrCallbackType_e c, defiNonDefault *nd, defiUserData ud) {
     }
   }
   --numObjs;
-  if (numObjs <= 0) fprintf(fout, "END NONDEFAULTRULES\n");
+  if (numObjs <= 0)
+    fprintf(fout, "END NONDEFAULTRULES\n");
   return 0;
 }
 
 int tname(defrCallbackType_e c, const char *string, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "TECHNOLOGY %s ;\n", string);
   return 0;
 }
 
 int dname(defrCallbackType_e c, const char *string, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "DESIGN %s ;\n", string);
 
   return 0;
@@ -1234,7 +1329,8 @@ int cs(defrCallbackType_e c, int num, defiUserData ud) {
 
   checkType(c);
 
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
 
   switch (c) {
     case defrComponentStartCbkType: name = address("COMPONENTS"); break;
@@ -1265,7 +1361,8 @@ int cs(defrCallbackType_e c, int num, defiUserData ud) {
 int constraintst(defrCallbackType_e c, int num, defiUserData ud) {
   // Handles both constraints and assertions
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   if (c == defrConstraintsStartCbkType)
     fprintf(fout, "\nCONSTRAINTS %d ;\n\n", num);
   else
@@ -1300,11 +1397,13 @@ void operand(defrCallbackType_e c, defiAssertion *a, int ind) {
     for (i = ind; i < a->numItems(); i++) {
       if (a->isNet(i)) {
         a->net(i, &netName);
-        if (!first) fprintf(fout, ", ");  // print , as separator
+        if (!first)
+          fprintf(fout, ", ");  // print , as separator
         fprintf(fout, "NET %s ", netName);
       } else if (a->isPath(i)) {
         a->path(i, &fromInst, &fromPin, &toInst, &toPin);
-        if (!first) fprintf(fout, ", ");
+        if (!first)
+          fprintf(fout, ", ");
         fprintf(fout, "PATH %s %s %s %s ", fromInst, fromPin, toInst, toPin);
       } else if (isSumSet) {
         // SUM within SUM, reset the flag
@@ -1320,23 +1419,30 @@ int constraint(defrCallbackType_e c, defiAssertion *a, defiUserData ud) {
   // Handles both constraints and assertions
 
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   if (a->isWiredlogic())
     // Wirelogic
-    fprintf(fout, "- WIREDLOGIC %s + MAXDIST %g ;\n",
+    fprintf(fout,
+            "- WIREDLOGIC %s + MAXDIST %g ;\n",
             // Wiredlogic dist is also store in fallMax
             //              a->netName(), a->distance());
-            a->netName(), a->fallMax());
+            a->netName(),
+            a->fallMax());
   else {
     // Call the operand function
     isSumSet   = 0;  // reset the global variable
     begOperand = 1;
     operand(c, a, 0);
     // Get the Rise and Fall
-    if (a->hasRiseMax()) fprintf(fout, "+ RISEMAX %g ", a->riseMax());
-    if (a->hasFallMax()) fprintf(fout, "+ FALLMAX %g ", a->fallMax());
-    if (a->hasRiseMin()) fprintf(fout, "+ RISEMIN %g ", a->riseMin());
-    if (a->hasFallMin()) fprintf(fout, "+ FALLMIN %g ", a->fallMin());
+    if (a->hasRiseMax())
+      fprintf(fout, "+ RISEMAX %g ", a->riseMax());
+    if (a->hasFallMax())
+      fprintf(fout, "+ FALLMAX %g ", a->fallMax());
+    if (a->hasRiseMin())
+      fprintf(fout, "+ RISEMIN %g ", a->riseMin());
+    if (a->hasFallMin())
+      fprintf(fout, "+ FALLMIN %g ", a->fallMin());
     fprintf(fout, ";\n");
   }
   --numObjs;
@@ -1359,7 +1465,8 @@ int propstart(defrCallbackType_e c, void *, defiUserData) {
 
 int prop(defrCallbackType_e c, defiProp *p, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   if (strcmp(p->propType(), "design") == 0)
     fprintf(fout, "DESIGN %s ", p->propName());
   else if (strcmp(p->propType(), "net") == 0)
@@ -1378,15 +1485,21 @@ int prop(defrCallbackType_e c, defiProp *p, defiUserData ud) {
     fprintf(fout, "REGION %s ", p->propName());
   else if (strcmp(p->propType(), "nondefaultrule") == 0)
     fprintf(fout, "NONDEFAULTRULE %s ", p->propName());
-  if (p->dataType() == 'I') fprintf(fout, "INTEGER ");
-  if (p->dataType() == 'R') fprintf(fout, "REAL ");
-  if (p->dataType() == 'S') fprintf(fout, "STRING ");
-  if (p->dataType() == 'Q') fprintf(fout, "STRING ");
+  if (p->dataType() == 'I')
+    fprintf(fout, "INTEGER ");
+  if (p->dataType() == 'R')
+    fprintf(fout, "REAL ");
+  if (p->dataType() == 'S')
+    fprintf(fout, "STRING ");
+  if (p->dataType() == 'Q')
+    fprintf(fout, "STRING ");
   if (p->hasRange()) {
     fprintf(fout, "RANGE %g %g ", p->left(), p->right());
   }
-  if (p->hasNumber()) fprintf(fout, "%g ", p->number());
-  if (p->hasString()) fprintf(fout, "\"%s\" ", p->string());
+  if (p->hasNumber())
+    fprintf(fout, "%g ", p->number());
+  if (p->hasString())
+    fprintf(fout, "\"%s\" ", p->string());
   fprintf(fout, ";\n");
 
   return 0;
@@ -1405,7 +1518,8 @@ int propend(defrCallbackType_e c, void *, defiUserData) {
 int hist(defrCallbackType_e c, const char *h, defiUserData ud) {
   checkType(c);
   defrSetCaseSensitivity(0);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "HISTORY %s ;\n", h);
   defrSetCaseSensitivity(1);
   return 0;
@@ -1413,28 +1527,32 @@ int hist(defrCallbackType_e c, const char *h, defiUserData ud) {
 
 int an(defrCallbackType_e c, const char *h, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "ARRAY %s ;\n", h);
   return 0;
 }
 
 int fn(defrCallbackType_e c, const char *h, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "FLOORPLAN %s ;\n", h);
   return 0;
 }
 
 int bbn(defrCallbackType_e c, const char *h, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "BUSBITCHARS \"%s\" ;\n", h);
   return 0;
 }
 
 int vers(defrCallbackType_e c, double d, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "VERSION %g ;\n", d);
   curVer = d;
 
@@ -1446,21 +1564,24 @@ int vers(defrCallbackType_e c, double d, defiUserData ud) {
 
 int versStr(defrCallbackType_e c, const char *versionName, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "VERSION %s ;\n", versionName);
   return 0;
 }
 
 int units(defrCallbackType_e c, double d, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "UNITS DISTANCE MICRONS %g ;\n", d);
   return 0;
 }
 
 int casesens(defrCallbackType_e c, int d, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   if (d == 1)
     fprintf(fout, "NAMESCASESENSITIVE ON %d;\n", d);
   else
@@ -1503,7 +1624,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
   struct defiPoints            points;
 
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   switch (c) {
     case defrSiteCbkType:
       site = (defiSite *)cl;
@@ -1535,7 +1657,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       } else {
         fprintf(fout, "MINPINS %d WIRECAP %g ;\n", pc->pin(), pc->cap());
         --numObjs;
-        if (numObjs <= 0) fprintf(fout, "END DEFAULTCAP\n");
+        if (numObjs <= 0)
+          fprintf(fout, "END DEFAULTCAP\n");
       }
       break;
     case defrPinCbkType:
@@ -1546,33 +1669,50 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         fprintf(fout, "- %s + NET %s ", pin->pinName(), pin->netName());
         //         pin->changePinName("pinName");
         //         fprintf(fout, "%s ", pin->pinName());
-        if (pin->hasDirection()) fprintf(fout, "+ DIRECTION %s ", pin->direction());
-        if (pin->hasUse()) fprintf(fout, "+ USE %s ", pin->use());
-        if (pin->hasNetExpr()) fprintf(fout, "+ NETEXPR \"%s\" ", pin->netExpr());
-        if (pin->hasSupplySensitivity()) fprintf(fout, "+ SUPPLYSENSITIVITY %s ", pin->supplySensitivity());
-        if (pin->hasGroundSensitivity()) fprintf(fout, "+ GROUNDSENSITIVITY %s ", pin->groundSensitivity());
+        if (pin->hasDirection())
+          fprintf(fout, "+ DIRECTION %s ", pin->direction());
+        if (pin->hasUse())
+          fprintf(fout, "+ USE %s ", pin->use());
+        if (pin->hasNetExpr())
+          fprintf(fout, "+ NETEXPR \"%s\" ", pin->netExpr());
+        if (pin->hasSupplySensitivity())
+          fprintf(fout, "+ SUPPLYSENSITIVITY %s ", pin->supplySensitivity());
+        if (pin->hasGroundSensitivity())
+          fprintf(fout, "+ GROUNDSENSITIVITY %s ", pin->groundSensitivity());
         if (pin->hasLayer()) {
           struct defiPoints points;
           for (i = 0; i < pin->numLayer(); i++) {
             fprintf(fout, "\n  + LAYER %s ", pin->layer(i));
-            if (pin->layerMask(i)) fprintf(fout, "MASK %d ", pin->layerMask(i));
-            if (pin->hasLayerSpacing(i)) fprintf(fout, "SPACING %d ", pin->layerSpacing(i));
-            if (pin->hasLayerDesignRuleWidth(i)) fprintf(fout, "DESIGNRULEWIDTH %d ", pin->layerDesignRuleWidth(i));
+            if (pin->layerMask(i))
+              fprintf(fout, "MASK %d ", pin->layerMask(i));
+            if (pin->hasLayerSpacing(i))
+              fprintf(fout, "SPACING %d ", pin->layerSpacing(i));
+            if (pin->hasLayerDesignRuleWidth(i))
+              fprintf(fout, "DESIGNRULEWIDTH %d ", pin->layerDesignRuleWidth(i));
             pin->bounds(i, &xl, &yl, &xh, &yh);
             fprintf(fout, "%d %d %d %d ", xl, yl, xh, yh);
           }
           for (i = 0; i < pin->numPolygons(); i++) {
             fprintf(fout, "\n  + POLYGON %s ", pin->polygonName(i));
-            if (pin->polygonMask(i)) fprintf(fout, "MASK %d ", pin->polygonMask(i));
-            if (pin->hasPolygonSpacing(i)) fprintf(fout, "SPACING %d ", pin->polygonSpacing(i));
-            if (pin->hasPolygonDesignRuleWidth(i)) fprintf(fout, "DESIGNRULEWIDTH %d ", pin->polygonDesignRuleWidth(i));
+            if (pin->polygonMask(i))
+              fprintf(fout, "MASK %d ", pin->polygonMask(i));
+            if (pin->hasPolygonSpacing(i))
+              fprintf(fout, "SPACING %d ", pin->polygonSpacing(i));
+            if (pin->hasPolygonDesignRuleWidth(i))
+              fprintf(fout, "DESIGNRULEWIDTH %d ", pin->polygonDesignRuleWidth(i));
             points = pin->getPolygon(i);
             for (j = 0; j < points.numPoints; j++) fprintf(fout, "%d %d ", points.x[j], points.y[j]);
           }
           for (i = 0; i < pin->numVias(); i++) {
             if (pin->viaTopMask(i) || pin->viaCutMask(i) || pin->viaBottomMask(i)) {
-              fprintf(fout, "\n  + VIA %s MASK %d%d%d %d %d ", pin->viaName(i), pin->viaTopMask(i), pin->viaCutMask(i),
-                      pin->viaBottomMask(i), pin->viaPtX(i), pin->viaPtY(i));
+              fprintf(fout,
+                      "\n  + VIA %s MASK %d%d%d %d %d ",
+                      pin->viaName(i),
+                      pin->viaTopMask(i),
+                      pin->viaCutMask(i),
+                      pin->viaBottomMask(i),
+                      pin->viaPtX(i),
+                      pin->viaPtY(i));
             } else {
               fprintf(fout, "\n  + VIA %s %d %d ", pin->viaName(i), pin->viaPtX(i), pin->viaPtY(i));
             }
@@ -1586,24 +1726,36 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
             fprintf(fout, "\n  + PORT");
             for (i = 0; i < port->numLayer(); i++) {
               fprintf(fout, "\n     + LAYER %s ", port->layer(i));
-              if (port->layerMask(i)) fprintf(fout, "MASK %d ", port->layerMask(i));
-              if (port->hasLayerSpacing(i)) fprintf(fout, "SPACING %d ", port->layerSpacing(i));
-              if (port->hasLayerDesignRuleWidth(i)) fprintf(fout, "DESIGNRULEWIDTH %d ", port->layerDesignRuleWidth(i));
+              if (port->layerMask(i))
+                fprintf(fout, "MASK %d ", port->layerMask(i));
+              if (port->hasLayerSpacing(i))
+                fprintf(fout, "SPACING %d ", port->layerSpacing(i));
+              if (port->hasLayerDesignRuleWidth(i))
+                fprintf(fout, "DESIGNRULEWIDTH %d ", port->layerDesignRuleWidth(i));
               port->bounds(i, &xl, &yl, &xh, &yh);
               fprintf(fout, "%d %d %d %d ", xl, yl, xh, yh);
             }
             for (i = 0; i < port->numPolygons(); i++) {
               fprintf(fout, "\n     + POLYGON %s ", port->polygonName(i));
-              if (port->polygonMask(i)) fprintf(fout, "MASK %d ", port->polygonMask(i));
-              if (port->hasPolygonSpacing(i)) fprintf(fout, "SPACING %d ", port->polygonSpacing(i));
-              if (port->hasPolygonDesignRuleWidth(i)) fprintf(fout, "DESIGNRULEWIDTH %d ", port->polygonDesignRuleWidth(i));
+              if (port->polygonMask(i))
+                fprintf(fout, "MASK %d ", port->polygonMask(i));
+              if (port->hasPolygonSpacing(i))
+                fprintf(fout, "SPACING %d ", port->polygonSpacing(i));
+              if (port->hasPolygonDesignRuleWidth(i))
+                fprintf(fout, "DESIGNRULEWIDTH %d ", port->polygonDesignRuleWidth(i));
               points = port->getPolygon(i);
               for (k = 0; k < points.numPoints; k++) fprintf(fout, "( %d %d ) ", points.x[k], points.y[k]);
             }
             for (i = 0; i < port->numVias(); i++) {
               if (port->viaTopMask(i) || port->viaCutMask(i) || port->viaBottomMask(i)) {
-                fprintf(fout, "\n     + VIA %s MASK %d%d%d ( %d %d ) ", port->viaName(i), port->viaTopMask(i), port->viaCutMask(i),
-                        port->viaBottomMask(i), port->viaPtX(i), port->viaPtY(i));
+                fprintf(fout,
+                        "\n     + VIA %s MASK %d%d%d ( %d %d ) ",
+                        port->viaName(i),
+                        port->viaTopMask(i),
+                        port->viaCutMask(i),
+                        port->viaBottomMask(i),
+                        port->viaPtX(i),
+                        port->viaPtY(i));
               } else {
                 fprintf(fout, "\n     + VIA %s ( %d %d ) ", port->viaName(i), port->viaPtX(i), port->viaPtY(i));
               }
@@ -1637,7 +1789,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
             fprintf(fout, "+ FIXED ");
             fprintf(fout, "( %d %d ) %s ", pin->placementX(), pin->placementY(), orientStr(pin->orient()));
           }
-          if (pin->isUnplaced()) fprintf(fout, "+ UNPLACED ");
+          if (pin->isUnplaced())
+            fprintf(fout, "+ UNPLACED ");
         }
         if (pin->hasSpecial()) {
           fprintf(fout, "+ SPECIAL ");
@@ -1645,28 +1798,32 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         if (pin->hasAPinPartialMetalArea()) {
           for (i = 0; i < pin->numAPinPartialMetalArea(); i++) {
             fprintf(fout, "ANTENNAPINPARTIALMETALAREA %d", pin->APinPartialMetalArea(i));
-            if (*(pin->APinPartialMetalAreaLayer(i))) fprintf(fout, " LAYER %s", pin->APinPartialMetalAreaLayer(i));
+            if (*(pin->APinPartialMetalAreaLayer(i)))
+              fprintf(fout, " LAYER %s", pin->APinPartialMetalAreaLayer(i));
             fprintf(fout, "\n");
           }
         }
         if (pin->hasAPinPartialMetalSideArea()) {
           for (i = 0; i < pin->numAPinPartialMetalSideArea(); i++) {
             fprintf(fout, "ANTENNAPINPARTIALMETALSIDEAREA %d", pin->APinPartialMetalSideArea(i));
-            if (*(pin->APinPartialMetalSideAreaLayer(i))) fprintf(fout, " LAYER %s", pin->APinPartialMetalSideAreaLayer(i));
+            if (*(pin->APinPartialMetalSideAreaLayer(i)))
+              fprintf(fout, " LAYER %s", pin->APinPartialMetalSideAreaLayer(i));
             fprintf(fout, "\n");
           }
         }
         if (pin->hasAPinDiffArea()) {
           for (i = 0; i < pin->numAPinDiffArea(); i++) {
             fprintf(fout, "ANTENNAPINDIFFAREA %d", pin->APinDiffArea(i));
-            if (*(pin->APinDiffAreaLayer(i))) fprintf(fout, " LAYER %s", pin->APinDiffAreaLayer(i));
+            if (*(pin->APinDiffAreaLayer(i)))
+              fprintf(fout, " LAYER %s", pin->APinDiffAreaLayer(i));
             fprintf(fout, "\n");
           }
         }
         if (pin->hasAPinPartialCutArea()) {
           for (i = 0; i < pin->numAPinPartialCutArea(); i++) {
             fprintf(fout, "ANTENNAPINPARTIALCUTAREA %d", pin->APinPartialCutArea(i));
-            if (*(pin->APinPartialCutAreaLayer(i))) fprintf(fout, " LAYER %s", pin->APinPartialCutAreaLayer(i));
+            if (*(pin->APinPartialCutAreaLayer(i)))
+              fprintf(fout, " LAYER %s", pin->APinPartialCutAreaLayer(i));
             fprintf(fout, "\n");
           }
         }
@@ -1679,35 +1836,40 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           if (aModel->hasAPinGateArea()) {
             for (i = 0; i < aModel->numAPinGateArea(); i++) {
               fprintf(fout, "ANTENNAPINGATEAREA %d", aModel->APinGateArea(i));
-              if (aModel->hasAPinGateAreaLayer(i)) fprintf(fout, " LAYER %s", aModel->APinGateAreaLayer(i));
+              if (aModel->hasAPinGateAreaLayer(i))
+                fprintf(fout, " LAYER %s", aModel->APinGateAreaLayer(i));
               fprintf(fout, "\n");
             }
           }
           if (aModel->hasAPinMaxAreaCar()) {
             for (i = 0; i < aModel->numAPinMaxAreaCar(); i++) {
               fprintf(fout, "ANTENNAPINMAXAREACAR %d", aModel->APinMaxAreaCar(i));
-              if (aModel->hasAPinMaxAreaCarLayer(i)) fprintf(fout, " LAYER %s", aModel->APinMaxAreaCarLayer(i));
+              if (aModel->hasAPinMaxAreaCarLayer(i))
+                fprintf(fout, " LAYER %s", aModel->APinMaxAreaCarLayer(i));
               fprintf(fout, "\n");
             }
           }
           if (aModel->hasAPinMaxSideAreaCar()) {
             for (i = 0; i < aModel->numAPinMaxSideAreaCar(); i++) {
               fprintf(fout, "ANTENNAPINMAXSIDEAREACAR %d", aModel->APinMaxSideAreaCar(i));
-              if (aModel->hasAPinMaxSideAreaCarLayer(i)) fprintf(fout, " LAYER %s", aModel->APinMaxSideAreaCarLayer(i));
+              if (aModel->hasAPinMaxSideAreaCarLayer(i))
+                fprintf(fout, " LAYER %s", aModel->APinMaxSideAreaCarLayer(i));
               fprintf(fout, "\n");
             }
           }
           if (aModel->hasAPinMaxCutCar()) {
             for (i = 0; i < aModel->numAPinMaxCutCar(); i++) {
               fprintf(fout, "ANTENNAPINMAXCUTCAR %d", aModel->APinMaxCutCar(i));
-              if (aModel->hasAPinMaxCutCarLayer(i)) fprintf(fout, " LAYER %s", aModel->APinMaxCutCarLayer(i));
+              if (aModel->hasAPinMaxCutCarLayer(i))
+                fprintf(fout, " LAYER %s", aModel->APinMaxCutCarLayer(i));
               fprintf(fout, "\n");
             }
           }
         }
         fprintf(fout, ";\n");
         --numObjs;
-        if (numObjs <= 0) fprintf(fout, "END PINS\n");
+        if (numObjs <= 0)
+          fprintf(fout, "END PINS\n");
       }
       break;
     case defrDefaultCapCbkType:
@@ -1717,7 +1879,12 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       break;
     case defrRowCbkType:
       row = (defiRow *)cl;
-      fprintf(fout, "ROW %s %s %g %g %s ", ignoreRowNames ? "XXX" : row->name(), row->macro(), row->x(), row->y(),
+      fprintf(fout,
+              "ROW %s %s %g %g %s ",
+              ignoreRowNames ? "XXX" : row->name(),
+              row->macro(),
+              row->x(),
+              row->y(),
               orientStr(row->orient()));
       if (row->hasDo()) {
         fprintf(fout, "DO %g BY %g ", row->xNum(), row->yNum());
@@ -1745,10 +1912,20 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       track = (defiTrack *)cl;
       if (track->firstTrackMask()) {
         if (track->sameMask()) {
-          fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d SAMEMASK LAYER ", track->macro(), track->x(), track->xNum(),
-                  track->xStep(), track->firstTrackMask());
+          fprintf(fout,
+                  "TRACKS %s %g DO %g STEP %g MASK %d SAMEMASK LAYER ",
+                  track->macro(),
+                  track->x(),
+                  track->xNum(),
+                  track->xStep(),
+                  track->firstTrackMask());
         } else {
-          fprintf(fout, "TRACKS %s %g DO %g STEP %g MASK %d LAYER ", track->macro(), track->x(), track->xNum(), track->xStep(),
+          fprintf(fout,
+                  "TRACKS %s %g DO %g STEP %g MASK %d LAYER ",
+                  track->macro(),
+                  track->x(),
+                  track->xNum(),
+                  track->xStep(),
                   track->firstTrackMask());
         }
       } else {
@@ -1767,7 +1944,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         via->print(fout);
       } else {
         fprintf(fout, "- %s ", via->name());
-        if (via->hasPattern()) fprintf(fout, "+ PATTERNNAME %s ", via->pattern());
+        if (via->hasPattern())
+          fprintf(fout, "+ PATTERNNAME %s ", via->pattern());
         for (i = 0; i < via->numLayers(); i++) {
           via->layer(i, &name, &xl, &yl, &xh, &yh);
           int rectMask = via->rectMask(i);
@@ -1816,17 +1994,20 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
             (void)via->offset(&xbo, &ybo, &xto, &yto);
             fprintf(fout, "  + OFFSET %d %d %d %d\n", xbo, ybo, xto, yto);
           }
-          if (via->hasCutPattern()) fprintf(fout, "  + PATTERN '%s'\n", via->cutPattern());
+          if (via->hasCutPattern())
+            fprintf(fout, "  + PATTERN '%s'\n", via->cutPattern());
         }
         --numObjs;
-        if (numObjs <= 0) fprintf(fout, "END VIAS\n");
+        if (numObjs <= 0)
+          fprintf(fout, "END VIAS\n");
       }
       break;
     case defrRegionCbkType:
       re = (defiRegion *)cl;
       fprintf(fout, "- %s ", re->name());
       for (i = 0; i < re->numRectangles(); i++) fprintf(fout, "%d %d %d %d \n", re->xl(i), re->yl(i), re->xh(i), re->yh(i));
-      if (re->hasType()) fprintf(fout, "+ TYPE %s\n", re->type());
+      if (re->hasType())
+        fprintf(fout, "+ TYPE %s\n", re->type());
       if (re->numProps()) {
         for (i = 0; i < re->numProps(); i++) {
           fprintf(fout, "+ PROPERTY %s %s ", re->propName(i), re->propValue(i));
@@ -1867,11 +2048,15 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       group = (defiGroup *)cl;
       if (group->hasMaxX() | group->hasMaxY() | group->hasPerim()) {
         fprintf(fout, "\n  + SOFT ");
-        if (group->hasPerim()) fprintf(fout, "MAXHALFPERIMETER %d ", group->perim());
-        if (group->hasMaxX()) fprintf(fout, "MAXX %d ", group->maxX());
-        if (group->hasMaxY()) fprintf(fout, "MAXY %d ", group->maxY());
+        if (group->hasPerim())
+          fprintf(fout, "MAXHALFPERIMETER %d ", group->perim());
+        if (group->hasMaxX())
+          fprintf(fout, "MAXX %d ", group->maxX());
+        if (group->hasMaxY())
+          fprintf(fout, "MAXY %d ", group->maxY());
       }
-      if (group->hasRegionName()) fprintf(fout, "\n  + REGION %s ", group->regionName());
+      if (group->hasRegionName())
+        fprintf(fout, "\n  + REGION %s ", group->regionName());
       if (group->hasRegionBox()) {
         int *gxl, *gyl, *gxh, *gyh;
         int  size;
@@ -1892,7 +2077,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       fprintf(fout, " ;\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END GROUPS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END GROUPS\n");
       break;
     case defrScanchainCbkType:
       sc = (defiScanchain *)cl;
@@ -1907,18 +2093,24 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       if (sc->hasCommonInPin() || sc->hasCommonOutPin()) {
         fprintf(fout, "  + COMMONSCANPINS ");
-        if (sc->hasCommonInPin()) fprintf(fout, " ( IN %s ) ", sc->commonInPin());
-        if (sc->hasCommonOutPin()) fprintf(fout, " ( OUT %s ) ", sc->commonOutPin());
+        if (sc->hasCommonInPin())
+          fprintf(fout, " ( IN %s ) ", sc->commonInPin());
+        if (sc->hasCommonOutPin())
+          fprintf(fout, " ( OUT %s ) ", sc->commonOutPin());
         fprintf(fout, "\n");
       }
       if (sc->hasFloating()) {
         sc->floating(&size, &inst, &inPin, &outPin, &bits);
-        if (size > 0) fprintf(fout, "  + FLOATING\n");
+        if (size > 0)
+          fprintf(fout, "  + FLOATING\n");
         for (i = 0; i < size; i++) {
           fprintf(fout, "    %s ", inst[i]);
-          if (inPin[i]) fprintf(fout, "( IN %s ) ", inPin[i]);
-          if (outPin[i]) fprintf(fout, "( OUT %s ) ", outPin[i]);
-          if (bits[i] != -1) fprintf(fout, "( BITS %d ) ", bits[i]);
+          if (inPin[i])
+            fprintf(fout, "( IN %s ) ", inPin[i]);
+          if (outPin[i])
+            fprintf(fout, "( OUT %s ) ", outPin[i]);
+          if (bits[i] != -1)
+            fprintf(fout, "( BITS %d ) ", bits[i]);
           fprintf(fout, "\n");
         }
       }
@@ -1926,12 +2118,16 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if (sc->hasOrdered()) {
         for (i = 0; i < sc->numOrderedLists(); i++) {
           sc->ordered(i, &size, &inst, &inPin, &outPin, &bits);
-          if (size > 0) fprintf(fout, "  + ORDERED\n");
+          if (size > 0)
+            fprintf(fout, "  + ORDERED\n");
           for (j = 0; j < size; j++) {
             fprintf(fout, "    %s ", inst[j]);
-            if (inPin[j]) fprintf(fout, "( IN %s ) ", inPin[j]);
-            if (outPin[j]) fprintf(fout, "( OUT %s ) ", outPin[j]);
-            if (bits[j] != -1) fprintf(fout, "( BITS %d ) ", bits[j]);
+            if (inPin[j])
+              fprintf(fout, "( IN %s ) ", inPin[j]);
+            if (outPin[j])
+              fprintf(fout, "( OUT %s ) ", outPin[j]);
+            if (bits[j] != -1)
+              fprintf(fout, "( BITS %d ) ", bits[j]);
             fprintf(fout, "\n");
           }
         }
@@ -1939,40 +2135,57 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
 
       if (sc->hasPartition()) {
         fprintf(fout, "  + PARTITION %s ", sc->partitionName());
-        if (sc->hasPartitionMaxBits()) fprintf(fout, "MAXBITS %d ", sc->partitionMaxBits());
+        if (sc->hasPartitionMaxBits())
+          fprintf(fout, "MAXBITS %d ", sc->partitionMaxBits());
       }
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END SCANCHAINS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END SCANCHAINS\n");
       break;
     case defrIOTimingCbkType:
       iot = (defiIOTiming *)cl;
       fprintf(fout, "- ( %s %s )\n", iot->inst(), iot->pin());
-      if (iot->hasSlewRise()) fprintf(fout, "  + RISE SLEWRATE %g %g\n", iot->slewRiseMin(), iot->slewRiseMax());
-      if (iot->hasSlewFall()) fprintf(fout, "  + FALL SLEWRATE %g %g\n", iot->slewFallMin(), iot->slewFallMax());
-      if (iot->hasVariableRise()) fprintf(fout, "  + RISE VARIABLE %g %g\n", iot->variableRiseMin(), iot->variableRiseMax());
-      if (iot->hasVariableFall()) fprintf(fout, "  + FALL VARIABLE %g %g\n", iot->variableFallMin(), iot->variableFallMax());
-      if (iot->hasCapacitance()) fprintf(fout, "  + CAPACITANCE %g\n", iot->capacitance());
+      if (iot->hasSlewRise())
+        fprintf(fout, "  + RISE SLEWRATE %g %g\n", iot->slewRiseMin(), iot->slewRiseMax());
+      if (iot->hasSlewFall())
+        fprintf(fout, "  + FALL SLEWRATE %g %g\n", iot->slewFallMin(), iot->slewFallMax());
+      if (iot->hasVariableRise())
+        fprintf(fout, "  + RISE VARIABLE %g %g\n", iot->variableRiseMin(), iot->variableRiseMax());
+      if (iot->hasVariableFall())
+        fprintf(fout, "  + FALL VARIABLE %g %g\n", iot->variableFallMin(), iot->variableFallMax());
+      if (iot->hasCapacitance())
+        fprintf(fout, "  + CAPACITANCE %g\n", iot->capacitance());
       if (iot->hasDriveCell()) {
         fprintf(fout, "  + DRIVECELL %s ", iot->driveCell());
-        if (iot->hasFrom()) fprintf(fout, "  FROMPIN %s ", iot->from());
-        if (iot->hasTo()) fprintf(fout, "  TOPIN %s ", iot->to());
-        if (iot->hasParallel()) fprintf(fout, "PARALLEL %g", iot->parallel());
+        if (iot->hasFrom())
+          fprintf(fout, "  FROMPIN %s ", iot->from());
+        if (iot->hasTo())
+          fprintf(fout, "  TOPIN %s ", iot->to());
+        if (iot->hasParallel())
+          fprintf(fout, "PARALLEL %g", iot->parallel());
         fprintf(fout, "\n");
       }
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END IOTIMINGS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END IOTIMINGS\n");
       break;
     case defrFPCCbkType:
       fpc = (defiFPC *)cl;
       fprintf(fout, "- %s ", fpc->name());
-      if (fpc->isVertical()) fprintf(fout, "VERTICAL ");
-      if (fpc->isHorizontal()) fprintf(fout, "HORIZONTAL ");
-      if (fpc->hasAlign()) fprintf(fout, "ALIGN ");
-      if (fpc->hasMax()) fprintf(fout, "%g ", fpc->alignMax());
-      if (fpc->hasMin()) fprintf(fout, "%g ", fpc->alignMin());
-      if (fpc->hasEqual()) fprintf(fout, "%g ", fpc->equal());
+      if (fpc->isVertical())
+        fprintf(fout, "VERTICAL ");
+      if (fpc->isHorizontal())
+        fprintf(fout, "HORIZONTAL ");
+      if (fpc->hasAlign())
+        fprintf(fout, "ALIGN ");
+      if (fpc->hasMax())
+        fprintf(fout, "%g ", fpc->alignMax());
+      if (fpc->hasMin())
+        fprintf(fout, "%g ", fpc->alignMin());
+      if (fpc->hasEqual())
+        fprintf(fout, "%g ", fpc->equal());
       for (i = 0; i < fpc->numParts(); i++) {
         fpc->getPart(i, &corner, &typ, &name);
         if (corner == 'B')
@@ -1986,14 +2199,19 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END FLOORPLANCONSTRAINTS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END FLOORPLANCONSTRAINTS\n");
       break;
     case defrTimingDisableCbkType:
       td = (defiTimingDisable *)cl;
-      if (td->hasFromTo()) fprintf(fout, "- FROMPIN %s %s %s %s", td->fromInst(), td->fromPin(), td->toInst(), td->toPin());
-      if (td->hasThru()) fprintf(fout, "- THRUPIN %s %s ", td->thruInst(), td->thruPin());
-      if (td->hasMacroFromTo()) fprintf(fout, "- MACRO %s FROMPIN %s %s ", td->macroName(), td->fromPin(), td->toPin());
-      if (td->hasMacroThru()) fprintf(fout, "- MACRO %s THRUPIN %s ", td->macroName(), td->fromPin());
+      if (td->hasFromTo())
+        fprintf(fout, "- FROMPIN %s %s %s %s", td->fromInst(), td->fromPin(), td->toInst(), td->toPin());
+      if (td->hasThru())
+        fprintf(fout, "- THRUPIN %s %s ", td->thruInst(), td->thruPin());
+      if (td->hasMacroFromTo())
+        fprintf(fout, "- MACRO %s FROMPIN %s %s ", td->macroName(), td->fromPin(), td->toPin());
+      if (td->hasMacroThru())
+        fprintf(fout, "- MACRO %s THRUPIN %s ", td->macroName(), td->fromPin());
       fprintf(fout, ";\n");
       break;
     case defrPartitionCbkType:
@@ -2002,10 +2220,14 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       if (part->isSetupRise() | part->isSetupFall() | part->isHoldRise() | part->isHoldFall()) {
         // has turnoff
         fprintf(fout, "TURNOFF ");
-        if (part->isSetupRise()) fprintf(fout, "SETUPRISE ");
-        if (part->isSetupFall()) fprintf(fout, "SETUPFALL ");
-        if (part->isHoldRise()) fprintf(fout, "HOLDRISE ");
-        if (part->isHoldFall()) fprintf(fout, "HOLDFALL ");
+        if (part->isSetupRise())
+          fprintf(fout, "SETUPRISE ");
+        if (part->isSetupFall())
+          fprintf(fout, "SETUPFALL ");
+        if (part->isHoldRise())
+          fprintf(fout, "HOLDRISE ");
+        if (part->isHoldFall())
+          fprintf(fout, "HOLDFALL ");
       }
       itemT = part->itemType();
       dir   = part->direction();
@@ -2014,8 +2236,10 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           fprintf(fout, "+ TOCLOCKPIN %s %s ", part->instName(), part->pinName());
         if (dir == 'F')  // fromclockpin
           fprintf(fout, "+ FROMCLOCKPIN %s %s ", part->instName(), part->pinName());
-        if (part->hasMin()) fprintf(fout, "MIN %g %g ", part->partitionMin(), part->partitionMax());
-        if (part->hasMax()) fprintf(fout, "MAX %g %g ", part->partitionMin(), part->partitionMax());
+        if (part->hasMin())
+          fprintf(fout, "MIN %g %g ", part->partitionMin(), part->partitionMax());
+        if (part->hasMax())
+          fprintf(fout, "MAX %g %g ", part->partitionMin(), part->partitionMax());
         fprintf(fout, "PINS ");
         for (i = 0; i < part->numPins(); i++) fprintf(fout, "%s ", part->pin(i));
       } else if (strcmp(itemT, "IO") == 0) {
@@ -2031,7 +2255,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END PARTITIONS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END PARTITIONS\n");
       break;
 
     case defrPinPropCbkType:
@@ -2055,7 +2280,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         fprintf(fout, ";\n");
       }
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END PINPROPERTIES\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END PINPROPERTIES\n");
       break;
     case defrBlockageCbkType:
       block = (defiBlockage *)cl;
@@ -2064,20 +2290,32 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       } else {
         if (block->hasLayer()) {
           fprintf(fout, "- LAYER %s\n", block->layerName());
-          if (block->hasComponent()) fprintf(fout, "   + COMPONENT %s\n", block->layerComponentName());
-          if (block->hasSlots()) fprintf(fout, "   + SLOTS\n");
-          if (block->hasFills()) fprintf(fout, "   + FILLS\n");
-          if (block->hasPushdown()) fprintf(fout, "   + PUSHDOWN\n");
-          if (block->hasExceptpgnet()) fprintf(fout, "   + EXCEPTPGNET\n");
-          if (block->hasMask()) fprintf(fout, "   + MASK %d\n", block->mask());
-          if (block->hasSpacing()) fprintf(fout, "   + SPACING %d\n", block->minSpacing());
-          if (block->hasDesignRuleWidth()) fprintf(fout, "   + DESIGNRULEWIDTH %d\n", block->designRuleWidth());
+          if (block->hasComponent())
+            fprintf(fout, "   + COMPONENT %s\n", block->layerComponentName());
+          if (block->hasSlots())
+            fprintf(fout, "   + SLOTS\n");
+          if (block->hasFills())
+            fprintf(fout, "   + FILLS\n");
+          if (block->hasPushdown())
+            fprintf(fout, "   + PUSHDOWN\n");
+          if (block->hasExceptpgnet())
+            fprintf(fout, "   + EXCEPTPGNET\n");
+          if (block->hasMask())
+            fprintf(fout, "   + MASK %d\n", block->mask());
+          if (block->hasSpacing())
+            fprintf(fout, "   + SPACING %d\n", block->minSpacing());
+          if (block->hasDesignRuleWidth())
+            fprintf(fout, "   + DESIGNRULEWIDTH %d\n", block->designRuleWidth());
         } else if (block->hasPlacement()) {
           fprintf(fout, "- PLACEMENT\n");
-          if (block->hasSoft()) fprintf(fout, "   + SOFT\n");
-          if (block->hasPartial()) fprintf(fout, "   + PARTIAL %g\n", block->placementMaxDensity());
-          if (block->hasComponent()) fprintf(fout, "   + COMPONENT %s\n", block->placementComponentName());
-          if (block->hasPushdown()) fprintf(fout, "   + PUSHDOWN\n");
+          if (block->hasSoft())
+            fprintf(fout, "   + SOFT\n");
+          if (block->hasPartial())
+            fprintf(fout, "   + PARTIAL %g\n", block->placementMaxDensity());
+          if (block->hasComponent())
+            fprintf(fout, "   + COMPONENT %s\n", block->placementComponentName());
+          if (block->hasPushdown())
+            fprintf(fout, "   + PUSHDOWN\n");
         }
 
         for (i = 0; i < block->numRectangles(); i++) {
@@ -2092,12 +2330,14 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         }
         fprintf(fout, ";\n");
         --numObjs;
-        if (numObjs <= 0) fprintf(fout, "END BLOCKAGES\n");
+        if (numObjs <= 0)
+          fprintf(fout, "END BLOCKAGES\n");
       }
       break;
     case defrSlotCbkType:
       slots = (defiSlot *)cl;
-      if (slots->hasLayer()) fprintf(fout, "- LAYER %s\n", slots->layerName());
+      if (slots->hasLayer())
+        fprintf(fout, "- LAYER %s\n", slots->layerName());
 
       for (i = 0; i < slots->numRectangles(); i++) {
         fprintf(fout, "   RECT %d %d %d %d\n", slots->xl(i), slots->yl(i), slots->xh(i), slots->yh(i));
@@ -2110,7 +2350,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       }
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END SLOTS\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END SLOTS\n");
       break;
     case defrFillCbkType:
       fills = (defiFill *)cl;
@@ -2122,7 +2363,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           if (fills->layerMask()) {
             fprintf(fout, " + MASK %d", fills->layerMask());
           }
-          if (fills->hasLayerOpc()) fprintf(fout, " + OPC");
+          if (fills->hasLayerOpc())
+            fprintf(fout, " + OPC");
           fprintf(fout, "\n");
 
           for (i = 0; i < fills->numRectangles(); i++) {
@@ -2142,7 +2384,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           if (fills->viaTopMask() || fills->viaCutMask() || fills->viaBottomMask()) {
             fprintf(fout, " + MASK %d%d%d", fills->viaTopMask(), fills->viaCutMask(), fills->viaBottomMask());
           }
-          if (fills->hasViaOpc()) fprintf(fout, " + OPC");
+          if (fills->hasViaOpc())
+            fprintf(fout, " + OPC");
           fprintf(fout, "\n");
 
           for (i = 0; i < fills->numViaPts(); i++) {
@@ -2152,7 +2395,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
           }
           fprintf(fout, ";\n");
         }
-        if (numObjs <= 0) fprintf(fout, "END FILLS\n");
+        if (numObjs <= 0)
+          fprintf(fout, "END FILLS\n");
       }
       break;
     case defrStylesCbkType:
@@ -2163,7 +2407,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
       for (j = 0; j < points.numPoints; j++) fprintf(fout, "%d %d ", points.x[j], points.y[j]);
       fprintf(fout, ";\n");
       --numObjs;
-      if (numObjs <= 0) fprintf(fout, "END STYLES\n");
+      if (numObjs <= 0)
+        fprintf(fout, "END STYLES\n");
       break;
 
     default: fprintf(fout, "BOGUS callback to cls.\n"); return 1;
@@ -2173,7 +2418,8 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
 
 int dn(defrCallbackType_e c, const char *h, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "DIVIDERCHAR \"%s\" ;\n", h);
   return 0;
 }
@@ -2182,7 +2428,8 @@ int ext(defrCallbackType_e t, const char *c, defiUserData ud) {
   char *name;
 
   checkType(t);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
 
   switch (t) {
     case defrNetExtCbkType: name = address("net"); break;
@@ -2202,7 +2449,8 @@ int ext(defrCallbackType_e t, const char *c, defiUserData ud) {
 
 int extension(defrCallbackType_e c, const char *extsn, defiUserData ud) {
   checkType(c);
-  if (ud != userData) dataError();
+  if (ud != userData)
+    dataError();
   fprintf(fout, "BEGINEXT %s\n", extsn);
   return 0;
 }
@@ -2377,14 +2625,16 @@ int main(int argc, char **argv) {
     defrSetPropCbk(prop);
     defrSetPropDefEndCbk(propend);
     /* Test for CCR 766289*/
-    if (!noNetCb) defrSetNetCbk(netf);
+    if (!noNetCb)
+      defrSetNetCbk(netf);
     defrSetNetNameCbk(netNamef);
     defrSetNetNonDefaultRuleCbk(nondefRulef);
     defrSetNetSubnetNameCbk(subnetNamef);
     defrSetNetPartialPathCbk(netpath);
     defrSetSNetCbk(snetf);
     defrSetSNetPartialPathCbk(snetpath);
-    if (setSNetWireCbk) defrSetSNetWireCbk(snetwire);
+    if (setSNetWireCbk)
+      defrSetSNetWireCbk(snetwire);
     defrSetComponentMaskShiftLayerCbk(compMSL);
     defrSetComponentCbk(compf);
     defrSetAddPathToNet();

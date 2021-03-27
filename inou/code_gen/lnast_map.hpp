@@ -8,216 +8,178 @@
 
 class Lnast_map {
 protected:
+  constexpr static std::array namemap_pyrope{"invalid",
 
-  constexpr static std::array namemap_pyrope{
-    "invalid",
+                                             "top",       "sts",        "if",       "uif",     "for", "while", "phi",
+                                             "hotphi",    "func_call",  "func_def",
 
-    "top",
-    "sts",
-    "if",
-    "uif",
-    "for",
-    "while",
-    "phi",
-    "hotphi",
-    "func_call",
-    "func_def",
+                                             "=",         ":=",         "mut",
 
-    "=",
-    ":=",
-    "mut",
+                                             "&",         "|",          "~",        "^",
 
-    "&",
-    "|",
-    "~",
-    "^",
+                                             "and",       "or",         "!",
 
-    "and",
-    "or",
-    "!",
+                                             "ror",       "rxor",
 
-    "ror",
-    "rxor",
+                                             "+",         "-",          "*",        "/",       "mod",
 
-    "+",
-    "-",
-    "*",
-    "/",
-    "mod",
+                                             ">>",        "<<",         ">>>",
 
-    ">>",
-    "<<",
-    ">>>",
+                                             "sext",      "tposs",
 
-    "sext",
-    "tposs",
+                                             "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 
-    "is",
-    "!=",
-    "==",
-    "<",
-    "<=",
-    ">",
-    ">=",
+                                             "()",
+                                             "++",      //"tuple_concat", // ++
+                                             "--",      //"tuple_delete", // --
+                                             "select",  // []
 
-    "()",
-    "++", //"tuple_concat", // ++
-    "--", //"tuple_delete", // --
-    "select",  // []
+                                             "ref",       "const",
 
-    "ref",
-    "const",
+                                             "assert",    "error_flag",
 
-    "assert",
-    "error_flag",
-
-    "tuple_add",
-    "tuple_get",
-    "attr_set",
-    "attr_get"
-  };
+                                             "tuple_add", "tuple_get",  "attr_set", "attr_get"};
 
   constexpr static std::array namemap_verilog{
-    "invalid",
-    "top",
-    "sts",
-    "if",
-    "uif",
-    "for",
-    "while",
-    "phi",
-    "hotphi",
-    "func_call",
-    "func_def",
+      "invalid",
+      "top",
+      "sts",
+      "if",
+      "uif",
+      "for",
+      "while",
+      "phi",
+      "hotphi",
+      "func_call",
+      "func_def",
 
-    "=",
-    "=",//dp_assign
-    "mut",
+      "=",
+      "=",  // dp_assign
+      "mut",
 
-    "&",
-    "|",
-    "~",
-    "^",
+      "&",
+      "|",
+      "~",
+      "^",
 
-    "and",
-    "or",
-    "not",
+      "and",
+      "or",
+      "not",
 
-    "ror",
-    "rxor",
+      "ror",
+      "rxor",
 
-    "+",
-    "-",
-    "*",
-    "/",
-    "%",
+      "+",
+      "-",
+      "*",
+      "/",
+      "%",
 
-    ">>",
-    "<<",
-    ">>>",
+      ">>",
+      "<<",
+      ">>>",
 
-    "sext",
-    "tposs",
+      "sext",
+      "tposs",
 
-    "is",
-    "!=",
-    "==",
-    "<",
-    "<=",
-    ">",
-    ">=",
+      "is",
+      "!=",
+      "==",
+      "<",
+      "<=",
+      ">",
+      ">=",
 
-    "()",
-    "tuple_concat",
-    "tuple_delete",
-    "select", // []
+      "()",
+      "tuple_concat",
+      "tuple_delete",
+      "select",  // []
 
-    "ref",
-    "const",
+      "ref",
+      "const",
 
-    "assert",
-    "error_flag",
+      "assert",
+      "error_flag",
 
-    "tuple_add",
-    "tuple_get",
-    "attr_set",
-    "attr_get",
+      "tuple_add",
+      "tuple_get",
+      "attr_set",
+      "attr_get",
   };
 
   constexpr static std::array namemap_cpp{
-    "invalid",
+      "invalid",
 
-    "top",
-    "sts",
-    "if",
-    "uif",
-    "for",
-    "while",
-    "phi",
-    "hotphi",
-    "func_call",
-    "func_def",
+      "top",
+      "sts",
+      "if",
+      "uif",
+      "for",
+      "while",
+      "phi",
+      "hotphi",
+      "func_call",
+      "func_def",
 
-    "=", // assign
-    "=", //dp_assign
-    "mut",
+      "=",  // assign
+      "=",  // dp_assign
+      "mut",
 
-    "&", // and
-    "|", // or
-    "~", // not
-    "^", // not
+      "&",  // and
+      "|",  // or
+      "~",  // not
+      "^",  // not
 
-    "&&", // logical_and
-    "||", // logical_or
-    "!",  // logical_not
+      "&&",  // logical_and
+      "||",  // logical_or
+      "!",   // logical_not
 
-    "ror",
-    "rxor",
+      "ror",
+      "rxor",
 
-    "+",
-    "-",
-    "*",
-    "/",
-    "%",
+      "+",
+      "-",
+      "*",
+      "/",
+      "%",
 
-    ">>",
-    "<<",
-    ">>>",
+      ">>",
+      "<<",
+      ">>>",
 
-    "sext",
-    "tposs",
+      "sext",
+      "tposs",
 
-    "is",
-    "!=",
-    "==",
-    "<",
-    "<=",
-    ">",
-    ">=",
+      "is",
+      "!=",
+      "==",
+      "<",
+      "<=",
+      ">",
+      ">=",
 
-    "()",
-    "tuple_concat", // ++
-    "tuple_delete", // --
-    "selc", // []
+      "()",
+      "tuple_concat",  // ++
+      "tuple_delete",  // --
+      "selc",          // []
 
-    "ref",
-    "const",
+      "ref",
+      "const",
 
-    "assert",
-    "error_flag",
+      "assert",
+      "error_flag",
 
-    "tuple_add",
-    "tuple_get",
-    "attr_set",
-    "attr_get",
+      "tuple_add",
+      "tuple_get",
+      "attr_set",
+      "attr_get",
   };
 
 public:
-
   static std::string_view debug_name_pyrope(Lnast_ntype val) { return namemap_pyrope[val.get_raw_ntype()]; }
   static std::string_view debug_name_verilog(Lnast_ntype val) { return namemap_verilog[val.get_raw_ntype()]; }
   static std::string_view debug_name_cpp(Lnast_ntype val) { return namemap_cpp[val.get_raw_ntype()]; }
 
-  static_assert(namemap_cpp.size()==namemap_pyrope.size());
-  static_assert(namemap_cpp.size()==namemap_verilog.size());
+  static_assert(namemap_cpp.size() == namemap_pyrope.size());
+  static_assert(namemap_cpp.size() == namemap_verilog.size());
 };

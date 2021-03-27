@@ -31,6 +31,7 @@
 #define defiIOTiming_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -39,7 +40,7 @@ class defrData;
 
 class defiIOTiming {
 public:
-  defiIOTiming(defrData *data);
+  defiIOTiming(defrData* data);
   void Init();
 
   void Destroy();
@@ -56,7 +57,6 @@ public:
   void setTo(const char* name);
   void setParallel(double num);
 
-
   int hasVariableRise() const;
   int hasVariableFall() const;
   int hasSlewRise() const;
@@ -69,43 +69,43 @@ public:
 
   const char* inst() const;
   const char* pin() const;
-  double variableFallMin() const;
-  double variableRiseMin() const;
-  double variableFallMax() const;
-  double variableRiseMax() const;
-  double slewFallMin() const;
-  double slewRiseMin() const;
-  double slewFallMax() const;
-  double slewRiseMax() const;
-  double capacitance() const;
+  double      variableFallMin() const;
+  double      variableRiseMin() const;
+  double      variableFallMax() const;
+  double      variableRiseMax() const;
+  double      slewFallMin() const;
+  double      slewRiseMin() const;
+  double      slewFallMax() const;
+  double      slewRiseMax() const;
+  double      capacitance() const;
   const char* driveCell() const;
   const char* from() const;
   const char* to() const;
-  double parallel() const;
+  double      parallel() const;
 
   // debug print
   void print(FILE* f) const;
 
 protected:
-  char* inst_;
-  int instLength_;
-  char* pin_;
-  int pinLength_;
-  char* from_;
-  int fromLength_;
-  char* to_;
-  int toLength_;
-  char* driveCell_;
-  char driveCellLength_;
-  char hasVariableRise_;
-  char hasVariableFall_;
-  char hasSlewRise_;
-  char hasSlewFall_;
-  char hasCapacitance_;
-  char hasDriveCell_;
-  char hasFrom_;
-  char hasTo_;
-  char hasParallel_;
+  char*  inst_;
+  int    instLength_;
+  char*  pin_;
+  int    pinLength_;
+  char*  from_;
+  int    fromLength_;
+  char*  to_;
+  int    toLength_;
+  char*  driveCell_;
+  char   driveCellLength_;
+  char   hasVariableRise_;
+  char   hasVariableFall_;
+  char   hasSlewRise_;
+  char   hasSlewFall_;
+  char   hasCapacitance_;
+  char   hasDriveCell_;
+  char   hasFrom_;
+  char   hasTo_;
+  char   hasParallel_;
   double variableFallMin_;
   double variableRiseMin_;
   double variableFallMax_;
@@ -117,9 +117,8 @@ protected:
   double capacitance_;
   double parallel_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

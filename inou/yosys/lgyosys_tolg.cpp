@@ -129,7 +129,8 @@ public:
   int      width;
   bool     is_signed;
 
-  constexpr Pick_ID(Node_pin _driver, int _offset, int _width, bool _is_signed) : driver(_driver), offset(_offset), width(_width), is_signed(_is_signed) {}
+  constexpr Pick_ID(Node_pin _driver, int _offset, int _width, bool _is_signed)
+      : driver(_driver), offset(_offset), width(_width), is_signed(_is_signed) {}
 
   template <typename H>
   friend H AbslHashValue(H h, const Pick_ID &s) {
@@ -161,7 +162,7 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
     //   x = a>>offset
     //   y = Sext(x, width)
 
-    auto  sext_node = lg->create_node(Ntype_op::Sext, width);
+    auto sext_node = lg->create_node(Ntype_op::Sext, width);
 
     if (offset) {
       auto shr_node = lg->create_node(Ntype_op::SRA, width);
@@ -175,12 +176,12 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
 
     sext_node.setup_sink_pin("b").connect_driver(lg->create_node_const(Lconst(width)));
     dpin = sext_node.setup_driver_pin();
-  }else{
+  } else {
     // Pick(a,width,offset, false):
     //   x = a>>offset
     //   y = x & ((1<<width)-1)
 
-    auto  and_node = lg->create_node(Ntype_op::And, width);
+    auto and_node = lg->create_node(Ntype_op::And, width);
 
     if (offset) {
       auto shr_node = lg->create_node(Ntype_op::SRA, width);
@@ -1560,7 +1561,6 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
                || std::strncmp(cell->type.c_str(), "$adffe", 6) == 0 || std::strncmp(cell->type.c_str(), "$adffsr", 7) == 0
                || std::strncmp(cell->type.c_str(), "$sdff", 5) == 0 || std::strncmp(cell->type.c_str(), "$sdffe", 6) == 0
                || std::strncmp(cell->type.c_str(), "$sdffsr", 7) == 0) {
-
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       if (cell->hasPort(ID::Q)) {
@@ -1744,14 +1744,14 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
 
           exit_node.set_type(Ntype_op::Not, y_bits);
           exit_node.connect_sink(and_node);
-        }else{
+        } else {
           // out = And(sum(....), y_mask)
           exit_node.set_type(Ntype_op::And, y_bits);
 
           exit_node.connect_sink(sum_node);
           exit_node.connect_sink(g->create_node_const((Lconst(1) << Lconst(y_bits)) - 1));
         }
-      }else{
+      } else {
         exit_node.set_type(Ntype_op::Sum, y_bits);
       }
 
@@ -1853,7 +1853,7 @@ static void process_cells(RTLIL::Module *module, LGraph *g) {
         and_node.connect_sink(g->create_node_const((Lconst(1) << Lconst(y_bits)) - 1));
         and_node.connect_sink(get_unsigned_dpin(g, cell, ID::A));
 
-        exit_node.set_type(Ntype_op::Get_mask, y_bits+1);
+        exit_node.set_type(Ntype_op::Get_mask, y_bits + 1);
         exit_node.setup_sink_pin("a").connect_driver(and_node);
         exit_node.setup_sink_pin("mask").connect_driver(g->create_node_const(-1));
       }

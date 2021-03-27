@@ -13,12 +13,12 @@ private:
 
   using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, std::string>;
 
-  pin2str_type pin2expr;
-  pin2str_type pin2var;
+  pin2str_type                                          pin2expr;
+  pin2str_type                                          pin2var;
   absl::flat_hash_map<Node::Compact_class, std::string> mux2vector;
 
   inline static std::string get_scaped_name(const std::string &name) {
-    for(auto ch:name) {
+    for (auto ch : name) {
       if (!std::isalnum(ch) && ch != '_')
         return std::string("\\") + name + " ";
     }
@@ -32,10 +32,8 @@ private:
 
   std::string get_append_to_name(const std::string &name, std::string_view ext) const;
   std::string get_expression(const Node_pin &dpin) const;
-  std::string get_expression(const Node_pin &&dpin) const {
-    return get_expression(dpin);
-  }
-  void add_expression(std::string &txt_seq, std::string_view txt_op, Node_pin &dpin) const;
+  std::string get_expression(const Node_pin &&dpin) const { return get_expression(dpin); }
+  void        add_expression(std::string &txt_seq, std::string_view txt_op, Node_pin &dpin) const;
 
   void process_flop(std::string &buffer, Node &node);
   void process_mux(std::string &buffer, Node &node);
@@ -51,7 +49,7 @@ private:
   void create_locals(std::string &buffer, LGraph *lg);
 
   std::tuple<std::string, int> setup_file(LGraph *lg) const;
-  void append_to_file(const std::string &filename, int fd, const std::string &buffer) const;
+  void                         append_to_file(const std::string &filename, int fd, const std::string &buffer) const;
 
 public:
   void do_from_lgraph(LGraph *lg_parent);

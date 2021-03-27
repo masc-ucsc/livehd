@@ -14,9 +14,9 @@
 #include "mmap_gc.hpp"
 
 namespace mmap_lib {
-#define MMAPA_MIN_ENTRIES (1ULL << 10)
+#define MMAPA_MIN_ENTRIES  (1ULL << 10)
 #define MMAPA_INCR_ENTRIES (1ULL << 14)
-#define MMAPA_MAX_ENTRIES (1ULL << 31)
+#define MMAPA_MAX_ENTRIES  (1ULL << 31)
 
 template <typename T>
 class vector {
@@ -61,7 +61,8 @@ protected:
   }
 
   void grow_mmap_size(size_t n) const {
-    if (n < MMAPA_MIN_ENTRIES) n = MMAPA_MIN_ENTRIES;
+    if (n < MMAPA_MIN_ENTRIES)
+      n = MMAPA_MIN_ENTRIES;
 
     size_t req_size = sizeof(T) * n + 4096;
     if (mmap_size == 0) {
@@ -77,7 +78,7 @@ protected:
 
   void adjust_mmap(size_t old_mmap_size) const {
     assert(mmap_base != nullptr);
-    assert(mmap_size != old_mmap_size); // waste of time. Who call it?
+    assert(mmap_size != old_mmap_size);  // waste of time. Who call it?
 
     void *base;
     std::tie(base, mmap_size) = mmap_gc::remap(mmap_name, mmap_base, old_mmap_size, mmap_size);
@@ -91,7 +92,9 @@ protected:
     assert(mmap_size >= calc_min_mmap_size());
 
     void *base;
-    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size,
+    std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name,
+                                              mmap_fd,
+                                              mmap_size,
                                               std::bind(&vector<T>::gc_done, this, std::placeholders::_1, std::placeholders::_2));
 
     entries_capacity = (mmap_size - 4096) / sizeof(T);
@@ -154,10 +157,10 @@ protected:
       unlink(mmap_name.c_str());
     }
 
-    mmap_base        = nullptr;
-    entries_size     = nullptr;
-    mmap_fd          = -1;
-    //entries_capacity = 0;
+    mmap_base    = nullptr;
+    entries_size = nullptr;
+    mmap_fd      = -1;
+    // entries_capacity = 0;
 
     return false;
   }
@@ -204,7 +207,7 @@ public:
       struct stat sb;
       if (stat(mmap_name.c_str(), &sb) == 0) {
         assert(S_ISREG(sb.st_mode));
-        entries_capacity          = (sb.st_size - 4096) / sizeof(T);
+        entries_capacity = (sb.st_size - 4096) / sizeof(T);
       }
     }
   }
@@ -230,7 +233,7 @@ public:
   }
 
   template <class... Args>
-  void emplace_back(Args &&... args) {
+  void emplace_back(Args &&...args) {
     auto *base = ref_base();
     assert(entries_size);
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
@@ -258,7 +261,7 @@ public:
 	}
 #endif
   template <class... Args>
-  T *set(const size_t idx, Args &&... args) {
+  T *set(const size_t idx, Args &&...args) {
     auto *base = ref_base();
     assert(base);
     assert(idx < capacity());
@@ -309,7 +312,8 @@ public:
     if (mmap_base == nullptr) {
       assert(mmap_base == nullptr);
       assert(mmap_fd < 0);
-      if (!mmap_name.empty()) unlink(mmap_name.c_str());
+      if (!mmap_name.empty())
+        unlink(mmap_name.c_str());
       return;
     }
     if (*entries_size != 0) {
@@ -342,7 +346,7 @@ public:
     if (entries_size != nullptr) {
       return *entries_size;
     }
-    if (entries_capacity == 0) { // Never mmap_base and files does not exist
+    if (entries_capacity == 0) {  // Never mmap_base and files does not exist
       return 0;
     }
 

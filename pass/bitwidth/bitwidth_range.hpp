@@ -7,7 +7,7 @@
 
 class __attribute__((packed)) Bitwidth_range {
 protected:
-  static Lconst  to_lconst(bool overflow, int64_t val);
+  static Lconst to_lconst(bool overflow, int64_t val);
 
 public:
   int64_t max;
@@ -15,8 +15,7 @@ public:
 
   bool overflow;
 
-  Bitwidth_range() : max(0), min(0), overflow(false) {
-  }
+  Bitwidth_range() : max(0), min(0), overflow(false) {}
 
   Bitwidth_range(const Bitwidth_range &i) {
     max = i.max;

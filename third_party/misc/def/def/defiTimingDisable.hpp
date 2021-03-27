@@ -31,6 +31,7 @@
 #define defiTimingDisable_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -39,10 +40,9 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //   A macro is either a fromto macro or a thru macro.
 class defrData;
 
-
 class defiTimingDisable {
 public:
-  defiTimingDisable(defrData *data);
+  defiTimingDisable(defrData* data);
   void Init();
 
   void Destroy();
@@ -50,8 +50,7 @@ public:
 
   void clear();
 
-  void setFromTo(const char* fromInst, const char* fromPin,
-		 const char* toInst, const char* toPin);
+  void setFromTo(const char* fromInst, const char* fromPin, const char* toInst, const char* toPin);
   void setThru(const char* fromInst, const char* fromPin);
   void setMacro(const char* name);
   void setMacroThru(const char* thru);
@@ -69,7 +68,7 @@ public:
   const char* fromInst() const;
   const char* toInst() const;
   const char* macroName() const;
-  const char* thruPin() const;    // Also macro thru
+  const char* thruPin() const;  // Also macro thru
   const char* thruInst() const;
 
   // debug print
@@ -77,22 +76,21 @@ public:
 
 protected:
   char* fromInst_;  // also macro name and thru inst
-  int fromInstLength_;
+  int   fromInstLength_;
   char* toInst_;
-  int toInstLength_;
+  int   toInstLength_;
   char* fromPin_;  // also macro thru and thru pin
-  int fromPinLength_;
+  int   fromPinLength_;
   char* toPin_;
-  int toPinLength_;
+  int   toPinLength_;
 
   int hasFromTo_;
   int hasThru_;
   int hasMacro_;
   int hasReentrantPathsFlag_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

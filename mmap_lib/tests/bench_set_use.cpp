@@ -540,7 +540,7 @@ void random_mmap_vset(int max, std::string_view name) {
       auto pos = rng.max(max);
       set.insert(pos);
       pos = rng.max(max);
-			set.erase(pos);
+      set.erase(pos);
       pos = rng.max(max);
       if (set.find(pos) != set.end()) {
         set.erase(pos);
@@ -550,19 +550,17 @@ void random_mmap_vset(int max, std::string_view name) {
 
   b.sample("insert/erase dense");
   conta = 0;
-  
-  
+
   // TRAVERSAL SPARSE TEST
   // runs (200) times
   // each run:
   //   --> go through the whole map and increment a variable per map index
   //   --> insert a random number into map
   //   --> generate a random num, if num is not end of map, erase it
- 
-  
+
   for (int i = 0; i < BENCH_INN_SIZE; ++i) {
     for (auto it = set.begin(), end = set.end(); it != end; ++it) {
-      conta++; 
+      conta++;
     }
     set.insert(rng.max(max));
     auto pos = rng.max(max);
@@ -572,7 +570,7 @@ void random_mmap_vset(int max, std::string_view name) {
   }
   b.sample("traversal sparse");
   printf("inserts random %d\n", conta);
-  
+
   conta = 0;
 
   // TRAVERSAL DENSE TEST
@@ -592,9 +590,7 @@ void random_mmap_vset(int max, std::string_view name) {
   }
   b.sample("traversal dense");
   printf("inserts random %d\n", conta);
-  
 }
-
 
 #if 0
 void random_bm_set(int max) {

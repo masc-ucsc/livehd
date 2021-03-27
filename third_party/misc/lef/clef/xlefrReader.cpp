@@ -4,26 +4,26 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the \"License\");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an \"AS IS\" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
-// 
+//
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author: dell $
 //  $Revision: #1 $
 //  $Date: 2017/06/06 $
@@ -37,715 +37,408 @@
 #include "lefrReader.hpp"
 
 // Wrappers definitions.
-int lefrInit () {
-    return LefDefParser::lefrInit();
-}
-
-int lefrInitSession (int  startSession) {
-    return LefDefParser::lefrInitSession(startSession);
-}
+int lefrInit() { return LefDefParser::lefrInit(); }
 
-int lefrReset () {
-    return LefDefParser::lefrReset();
-}
+int lefrInitSession(int startSession) { return LefDefParser::lefrInitSession(startSession); }
 
-int lefrClear () {
-    return LefDefParser::lefrClear();
-}
+int lefrReset() { return LefDefParser::lefrReset(); }
 
-int lefrReleaseNResetMemory () {
-    return LefDefParser::lefrReleaseNResetMemory();
-}
+int lefrClear() { return LefDefParser::lefrClear(); }
 
-void lefrSetCommentChar (char  c) {
-    LefDefParser::lefrSetCommentChar(c);
-}
+int lefrReleaseNResetMemory() { return LefDefParser::lefrReleaseNResetMemory(); }
 
-void lefrSetShiftCase () {
-    LefDefParser::lefrSetShiftCase();
-}
+void lefrSetCommentChar(char c) { LefDefParser::lefrSetCommentChar(c); }
 
-void lefrSetCaseSensitivity (int  caseSense) {
-    LefDefParser::lefrSetCaseSensitivity(caseSense);
-}
+void lefrSetShiftCase() { LefDefParser::lefrSetShiftCase(); }
 
-const char * lefrFName () {
-    return LefDefParser::lefrFName();
-}
+void lefrSetCaseSensitivity(int caseSense) { LefDefParser::lefrSetCaseSensitivity(caseSense); }
 
-int lefrRead (FILE * file, const char * fileName, lefiUserData  userData) {
-    return LefDefParser::lefrRead(file, fileName, userData);
-}
+const char* lefrFName() { return LefDefParser::lefrFName(); }
 
-void lefrSetRegisterUnusedCallbacks () {
-    LefDefParser::lefrSetRegisterUnusedCallbacks();
-}
+int lefrRead(FILE* file, const char* fileName, lefiUserData userData) { return LefDefParser::lefrRead(file, fileName, userData); }
 
-void lefrPrintUnusedCallbacks (FILE*  f) {
-    LefDefParser::lefrPrintUnusedCallbacks(f);
-}
+void lefrSetRegisterUnusedCallbacks() { LefDefParser::lefrSetRegisterUnusedCallbacks(); }
 
-void lefrSetUserData (lefiUserData p0) {
-    LefDefParser::lefrSetUserData(p0);
-}
+void lefrPrintUnusedCallbacks(FILE* f) { LefDefParser::lefrPrintUnusedCallbacks(f); }
 
-lefiUserData lefrGetUserData () {
-    return LefDefParser::lefrGetUserData();
-}
+void lefrSetUserData(lefiUserData p0) { LefDefParser::lefrSetUserData(p0); }
 
-void lefrSetUnitsCbk (::lefrUnitsCbkFnType p0) {
-    LefDefParser::lefrSetUnitsCbk((LefDefParser::lefrUnitsCbkFnType) p0);
-}
+lefiUserData lefrGetUserData() { return LefDefParser::lefrGetUserData(); }
 
-void lefrSetVersionCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetVersionCbk((LefDefParser::lefrDoubleCbkFnType) p0);
-}
+void lefrSetUnitsCbk(::lefrUnitsCbkFnType p0) { LefDefParser::lefrSetUnitsCbk((LefDefParser::lefrUnitsCbkFnType)p0); }
 
-void lefrSetVersionStrCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetVersionStrCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetVersionCbk(::lefrDoubleCbkFnType p0) { LefDefParser::lefrSetVersionCbk((LefDefParser::lefrDoubleCbkFnType)p0); }
 
-void lefrSetDividerCharCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetDividerCharCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetVersionStrCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetVersionStrCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetBusBitCharsCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetBusBitCharsCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetDividerCharCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetDividerCharCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetNoWireExtensionCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetNoWireExtensionCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetBusBitCharsCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetBusBitCharsCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetCaseSensitiveCbk (::lefrIntegerCbkFnType p0) {
-    LefDefParser::lefrSetCaseSensitiveCbk((LefDefParser::lefrIntegerCbkFnType) p0);
+void lefrSetNoWireExtensionCbk(::lefrStringCbkFnType p0) {
+  LefDefParser::lefrSetNoWireExtensionCbk((LefDefParser::lefrStringCbkFnType)p0);
 }
 
-void lefrSetPropBeginCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetPropBeginCbk((LefDefParser::lefrVoidCbkFnType) p0);
+void lefrSetCaseSensitiveCbk(::lefrIntegerCbkFnType p0) {
+  LefDefParser::lefrSetCaseSensitiveCbk((LefDefParser::lefrIntegerCbkFnType)p0);
 }
 
-void lefrSetPropCbk (::lefrPropCbkFnType p0) {
-    LefDefParser::lefrSetPropCbk((LefDefParser::lefrPropCbkFnType) p0);
-}
+void lefrSetPropBeginCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetPropBeginCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetPropEndCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetPropEndCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetPropCbk(::lefrPropCbkFnType p0) { LefDefParser::lefrSetPropCbk((LefDefParser::lefrPropCbkFnType)p0); }
 
-void lefrSetLayerCbk (::lefrLayerCbkFnType p0) {
-    LefDefParser::lefrSetLayerCbk((LefDefParser::lefrLayerCbkFnType) p0);
-}
+void lefrSetPropEndCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetPropEndCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetViaCbk (::lefrViaCbkFnType p0) {
-    LefDefParser::lefrSetViaCbk((LefDefParser::lefrViaCbkFnType) p0);
-}
+void lefrSetLayerCbk(::lefrLayerCbkFnType p0) { LefDefParser::lefrSetLayerCbk((LefDefParser::lefrLayerCbkFnType)p0); }
 
-void lefrSetViaRuleCbk (::lefrViaRuleCbkFnType p0) {
-    LefDefParser::lefrSetViaRuleCbk((LefDefParser::lefrViaRuleCbkFnType) p0);
-}
+void lefrSetViaCbk(::lefrViaCbkFnType p0) { LefDefParser::lefrSetViaCbk((LefDefParser::lefrViaCbkFnType)p0); }
 
-void lefrSetSpacingCbk (::lefrSpacingCbkFnType p0) {
-    LefDefParser::lefrSetSpacingCbk((LefDefParser::lefrSpacingCbkFnType) p0);
-}
+void lefrSetViaRuleCbk(::lefrViaRuleCbkFnType p0) { LefDefParser::lefrSetViaRuleCbk((LefDefParser::lefrViaRuleCbkFnType)p0); }
 
-void lefrSetIRDropCbk (::lefrIRDropCbkFnType p0) {
-    LefDefParser::lefrSetIRDropCbk((LefDefParser::lefrIRDropCbkFnType) p0);
-}
+void lefrSetSpacingCbk(::lefrSpacingCbkFnType p0) { LefDefParser::lefrSetSpacingCbk((LefDefParser::lefrSpacingCbkFnType)p0); }
 
-void lefrSetDielectricCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetDielectricCbk((LefDefParser::lefrDoubleCbkFnType) p0);
-}
+void lefrSetIRDropCbk(::lefrIRDropCbkFnType p0) { LefDefParser::lefrSetIRDropCbk((LefDefParser::lefrIRDropCbkFnType)p0); }
 
-void lefrSetMinFeatureCbk (::lefrMinFeatureCbkFnType p0) {
-    LefDefParser::lefrSetMinFeatureCbk((LefDefParser::lefrMinFeatureCbkFnType) p0);
-}
+void lefrSetDielectricCbk(::lefrDoubleCbkFnType p0) { LefDefParser::lefrSetDielectricCbk((LefDefParser::lefrDoubleCbkFnType)p0); }
 
-void lefrSetNonDefaultCbk (::lefrNonDefaultCbkFnType p0) {
-    LefDefParser::lefrSetNonDefaultCbk((LefDefParser::lefrNonDefaultCbkFnType) p0);
+void lefrSetMinFeatureCbk(::lefrMinFeatureCbkFnType p0) {
+  LefDefParser::lefrSetMinFeatureCbk((LefDefParser::lefrMinFeatureCbkFnType)p0);
 }
 
-void lefrSetSiteCbk (::lefrSiteCbkFnType p0) {
-    LefDefParser::lefrSetSiteCbk((LefDefParser::lefrSiteCbkFnType) p0);
+void lefrSetNonDefaultCbk(::lefrNonDefaultCbkFnType p0) {
+  LefDefParser::lefrSetNonDefaultCbk((LefDefParser::lefrNonDefaultCbkFnType)p0);
 }
 
-void lefrSetMacroBeginCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetMacroBeginCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetSiteCbk(::lefrSiteCbkFnType p0) { LefDefParser::lefrSetSiteCbk((LefDefParser::lefrSiteCbkFnType)p0); }
 
-void lefrSetPinCbk (::lefrPinCbkFnType p0) {
-    LefDefParser::lefrSetPinCbk((LefDefParser::lefrPinCbkFnType) p0);
-}
+void lefrSetMacroBeginCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetMacroBeginCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetObstructionCbk (::lefrObstructionCbkFnType p0) {
-    LefDefParser::lefrSetObstructionCbk((LefDefParser::lefrObstructionCbkFnType) p0);
-}
+void lefrSetPinCbk(::lefrPinCbkFnType p0) { LefDefParser::lefrSetPinCbk((LefDefParser::lefrPinCbkFnType)p0); }
 
-void lefrSetArrayCbk (::lefrArrayCbkFnType p0) {
-    LefDefParser::lefrSetArrayCbk((LefDefParser::lefrArrayCbkFnType) p0);
+void lefrSetObstructionCbk(::lefrObstructionCbkFnType p0) {
+  LefDefParser::lefrSetObstructionCbk((LefDefParser::lefrObstructionCbkFnType)p0);
 }
 
-void lefrSetMacroCbk (::lefrMacroCbkFnType p0) {
-    LefDefParser::lefrSetMacroCbk((LefDefParser::lefrMacroCbkFnType) p0);
-}
+void lefrSetArrayCbk(::lefrArrayCbkFnType p0) { LefDefParser::lefrSetArrayCbk((LefDefParser::lefrArrayCbkFnType)p0); }
 
-void lefrSetLibraryEndCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetLibraryEndCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetMacroCbk(::lefrMacroCbkFnType p0) { LefDefParser::lefrSetMacroCbk((LefDefParser::lefrMacroCbkFnType)p0); }
 
-void lefrSetTimingCbk (::lefrTimingCbkFnType p0) {
-    LefDefParser::lefrSetTimingCbk((LefDefParser::lefrTimingCbkFnType) p0);
-}
+void lefrSetLibraryEndCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetLibraryEndCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetSpacingBeginCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetSpacingBeginCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetTimingCbk(::lefrTimingCbkFnType p0) { LefDefParser::lefrSetTimingCbk((LefDefParser::lefrTimingCbkFnType)p0); }
 
-void lefrSetSpacingEndCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetSpacingEndCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetSpacingBeginCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetSpacingBeginCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetArrayBeginCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetArrayBeginCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetSpacingEndCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetSpacingEndCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetArrayEndCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetArrayEndCbk((LefDefParser::lefrStringCbkFnType) p0);
-}
+void lefrSetArrayBeginCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetArrayBeginCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetIRDropBeginCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetIRDropBeginCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetArrayEndCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetArrayEndCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetIRDropEndCbk (::lefrVoidCbkFnType p0) {
-    LefDefParser::lefrSetIRDropEndCbk((LefDefParser::lefrVoidCbkFnType) p0);
-}
+void lefrSetIRDropBeginCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetIRDropBeginCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetNoiseMarginCbk (::lefrNoiseMarginCbkFnType p0) {
-    LefDefParser::lefrSetNoiseMarginCbk((LefDefParser::lefrNoiseMarginCbkFnType) p0);
-}
+void lefrSetIRDropEndCbk(::lefrVoidCbkFnType p0) { LefDefParser::lefrSetIRDropEndCbk((LefDefParser::lefrVoidCbkFnType)p0); }
 
-void lefrSetEdgeRateThreshold1Cbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetEdgeRateThreshold1Cbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetNoiseMarginCbk(::lefrNoiseMarginCbkFnType p0) {
+  LefDefParser::lefrSetNoiseMarginCbk((LefDefParser::lefrNoiseMarginCbkFnType)p0);
 }
 
-void lefrSetEdgeRateThreshold2Cbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetEdgeRateThreshold2Cbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetEdgeRateThreshold1Cbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetEdgeRateThreshold1Cbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetEdgeRateScaleFactorCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetEdgeRateScaleFactorCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetEdgeRateThreshold2Cbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetEdgeRateThreshold2Cbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetNoiseTableCbk (::lefrNoiseTableCbkFnType p0) {
-    LefDefParser::lefrSetNoiseTableCbk((LefDefParser::lefrNoiseTableCbkFnType) p0);
+void lefrSetEdgeRateScaleFactorCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetEdgeRateScaleFactorCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetCorrectionTableCbk (::lefrCorrectionTableCbkFnType p0) {
-    LefDefParser::lefrSetCorrectionTableCbk((LefDefParser::lefrCorrectionTableCbkFnType) p0);
+void lefrSetNoiseTableCbk(::lefrNoiseTableCbkFnType p0) {
+  LefDefParser::lefrSetNoiseTableCbk((LefDefParser::lefrNoiseTableCbkFnType)p0);
 }
 
-void lefrSetInputAntennaCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetInputAntennaCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetCorrectionTableCbk(::lefrCorrectionTableCbkFnType p0) {
+  LefDefParser::lefrSetCorrectionTableCbk((LefDefParser::lefrCorrectionTableCbkFnType)p0);
 }
 
-void lefrSetOutputAntennaCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetOutputAntennaCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetInputAntennaCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetInputAntennaCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetInoutAntennaCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetInoutAntennaCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetOutputAntennaCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetOutputAntennaCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetAntennaInputCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetAntennaInputCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetInoutAntennaCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetInoutAntennaCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetAntennaInoutCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetAntennaInoutCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetAntennaInputCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetAntennaInputCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetAntennaOutputCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetAntennaOutputCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetAntennaInoutCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetAntennaInoutCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetClearanceMeasureCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetClearanceMeasureCbk((LefDefParser::lefrStringCbkFnType) p0);
+void lefrSetAntennaOutputCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetAntennaOutputCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetManufacturingCbk (::lefrDoubleCbkFnType p0) {
-    LefDefParser::lefrSetManufacturingCbk((LefDefParser::lefrDoubleCbkFnType) p0);
+void lefrSetClearanceMeasureCbk(::lefrStringCbkFnType p0) {
+  LefDefParser::lefrSetClearanceMeasureCbk((LefDefParser::lefrStringCbkFnType)p0);
 }
 
-void lefrSetUseMinSpacingCbk (::lefrUseMinSpacingCbkFnType p0) {
-    LefDefParser::lefrSetUseMinSpacingCbk((LefDefParser::lefrUseMinSpacingCbkFnType) p0);
+void lefrSetManufacturingCbk(::lefrDoubleCbkFnType p0) {
+  LefDefParser::lefrSetManufacturingCbk((LefDefParser::lefrDoubleCbkFnType)p0);
 }
 
-void lefrSetMacroClassTypeCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetMacroClassTypeCbk((LefDefParser::lefrStringCbkFnType) p0);
+void lefrSetUseMinSpacingCbk(::lefrUseMinSpacingCbkFnType p0) {
+  LefDefParser::lefrSetUseMinSpacingCbk((LefDefParser::lefrUseMinSpacingCbkFnType)p0);
 }
 
-void lefrSetMacroOriginCbk (::lefrMacroNumCbkFnType p0) {
-    LefDefParser::lefrSetMacroOriginCbk((LefDefParser::lefrMacroNumCbkFnType) p0);
+void lefrSetMacroClassTypeCbk(::lefrStringCbkFnType p0) {
+  LefDefParser::lefrSetMacroClassTypeCbk((LefDefParser::lefrStringCbkFnType)p0);
 }
 
-void lefrSetMacroSizeCbk (::lefrMacroNumCbkFnType p0) {
-    LefDefParser::lefrSetMacroSizeCbk((LefDefParser::lefrMacroNumCbkFnType) p0);
+void lefrSetMacroOriginCbk(::lefrMacroNumCbkFnType p0) {
+  LefDefParser::lefrSetMacroOriginCbk((LefDefParser::lefrMacroNumCbkFnType)p0);
 }
 
-void lefrSetMacroFixedMaskCbk (::lefrIntegerCbkFnType p0) {
-    LefDefParser::lefrSetMacroFixedMaskCbk((LefDefParser::lefrIntegerCbkFnType) p0);
-}
+void lefrSetMacroSizeCbk(::lefrMacroNumCbkFnType p0) { LefDefParser::lefrSetMacroSizeCbk((LefDefParser::lefrMacroNumCbkFnType)p0); }
 
-void lefrSetMacroEndCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetMacroEndCbk((LefDefParser::lefrStringCbkFnType) p0);
+void lefrSetMacroFixedMaskCbk(::lefrIntegerCbkFnType p0) {
+  LefDefParser::lefrSetMacroFixedMaskCbk((LefDefParser::lefrIntegerCbkFnType)p0);
 }
 
-void lefrSetMaxStackViaCbk (::lefrMaxStackViaCbkFnType p0) {
-    LefDefParser::lefrSetMaxStackViaCbk((LefDefParser::lefrMaxStackViaCbkFnType) p0);
-}
+void lefrSetMacroEndCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetMacroEndCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetExtensionCbk (::lefrStringCbkFnType p0) {
-    LefDefParser::lefrSetExtensionCbk((LefDefParser::lefrStringCbkFnType) p0);
+void lefrSetMaxStackViaCbk(::lefrMaxStackViaCbkFnType p0) {
+  LefDefParser::lefrSetMaxStackViaCbk((LefDefParser::lefrMaxStackViaCbkFnType)p0);
 }
 
-void lefrSetDensityCbk (::lefrDensityCbkFnType p0) {
-    LefDefParser::lefrSetDensityCbk((LefDefParser::lefrDensityCbkFnType) p0);
-}
+void lefrSetExtensionCbk(::lefrStringCbkFnType p0) { LefDefParser::lefrSetExtensionCbk((LefDefParser::lefrStringCbkFnType)p0); }
 
-void lefrSetFixedMaskCbk (::lefrIntegerCbkFnType p0) {
-    LefDefParser::lefrSetFixedMaskCbk((LefDefParser::lefrIntegerCbkFnType) p0);
-}
+void lefrSetDensityCbk(::lefrDensityCbkFnType p0) { LefDefParser::lefrSetDensityCbk((LefDefParser::lefrDensityCbkFnType)p0); }
 
-void lefrSetUnusedCallbacks (::lefrVoidCbkFnType  func) {
-    LefDefParser::lefrSetUnusedCallbacks((LefDefParser::lefrVoidCbkFnType ) func);
-}
+void lefrSetFixedMaskCbk(::lefrIntegerCbkFnType p0) { LefDefParser::lefrSetFixedMaskCbk((LefDefParser::lefrIntegerCbkFnType)p0); }
 
-void lefrUnsetCallbacks () {
-    LefDefParser::lefrUnsetCallbacks();
+void lefrSetUnusedCallbacks(::lefrVoidCbkFnType func) {
+  LefDefParser::lefrSetUnusedCallbacks((LefDefParser::lefrVoidCbkFnType)func);
 }
 
-void lefrUnsetAntennaInputCbk () {
-    LefDefParser::lefrUnsetAntennaInputCbk();
-}
+void lefrUnsetCallbacks() { LefDefParser::lefrUnsetCallbacks(); }
 
-void lefrUnsetAntennaInoutCbk () {
-    LefDefParser::lefrUnsetAntennaInoutCbk();
-}
+void lefrUnsetAntennaInputCbk() { LefDefParser::lefrUnsetAntennaInputCbk(); }
 
-void lefrUnsetAntennaOutputCbk () {
-    LefDefParser::lefrUnsetAntennaOutputCbk();
-}
+void lefrUnsetAntennaInoutCbk() { LefDefParser::lefrUnsetAntennaInoutCbk(); }
 
-void lefrUnsetArrayBeginCbk () {
-    LefDefParser::lefrUnsetArrayBeginCbk();
-}
+void lefrUnsetAntennaOutputCbk() { LefDefParser::lefrUnsetAntennaOutputCbk(); }
 
-void lefrUnsetArrayCbk () {
-    LefDefParser::lefrUnsetArrayCbk();
-}
+void lefrUnsetArrayBeginCbk() { LefDefParser::lefrUnsetArrayBeginCbk(); }
 
-void lefrUnsetArrayEndCbk () {
-    LefDefParser::lefrUnsetArrayEndCbk();
-}
+void lefrUnsetArrayCbk() { LefDefParser::lefrUnsetArrayCbk(); }
 
-void lefrUnsetBusBitCharsCbk () {
-    LefDefParser::lefrUnsetBusBitCharsCbk();
-}
+void lefrUnsetArrayEndCbk() { LefDefParser::lefrUnsetArrayEndCbk(); }
 
-void lefrUnsetCaseSensitiveCbk () {
-    LefDefParser::lefrUnsetCaseSensitiveCbk();
-}
+void lefrUnsetBusBitCharsCbk() { LefDefParser::lefrUnsetBusBitCharsCbk(); }
 
-void lefrUnsetClearanceMeasureCbk () {
-    LefDefParser::lefrUnsetClearanceMeasureCbk();
-}
+void lefrUnsetCaseSensitiveCbk() { LefDefParser::lefrUnsetCaseSensitiveCbk(); }
 
-void lefrUnsetCorrectionTableCbk () {
-    LefDefParser::lefrUnsetCorrectionTableCbk();
-}
+void lefrUnsetClearanceMeasureCbk() { LefDefParser::lefrUnsetClearanceMeasureCbk(); }
 
-void lefrUnsetDensityCbk () {
-    LefDefParser::lefrUnsetDensityCbk();
-}
+void lefrUnsetCorrectionTableCbk() { LefDefParser::lefrUnsetCorrectionTableCbk(); }
 
-void lefrUnsetDielectricCbk () {
-    LefDefParser::lefrUnsetDielectricCbk();
-}
+void lefrUnsetDensityCbk() { LefDefParser::lefrUnsetDensityCbk(); }
 
-void lefrUnsetDividerCharCbk () {
-    LefDefParser::lefrUnsetDividerCharCbk();
-}
+void lefrUnsetDielectricCbk() { LefDefParser::lefrUnsetDielectricCbk(); }
 
-void lefrUnsetEdgeRateScaleFactorCbk () {
-    LefDefParser::lefrUnsetEdgeRateScaleFactorCbk();
-}
+void lefrUnsetDividerCharCbk() { LefDefParser::lefrUnsetDividerCharCbk(); }
 
-void lefrUnsetEdgeRateThreshold1Cbk () {
-    LefDefParser::lefrUnsetEdgeRateThreshold1Cbk();
-}
+void lefrUnsetEdgeRateScaleFactorCbk() { LefDefParser::lefrUnsetEdgeRateScaleFactorCbk(); }
 
-void lefrUnsetEdgeRateThreshold2Cbk () {
-    LefDefParser::lefrUnsetEdgeRateThreshold2Cbk();
-}
+void lefrUnsetEdgeRateThreshold1Cbk() { LefDefParser::lefrUnsetEdgeRateThreshold1Cbk(); }
 
-void lefrUnsetExtensionCbk () {
-    LefDefParser::lefrUnsetExtensionCbk();
-}
+void lefrUnsetEdgeRateThreshold2Cbk() { LefDefParser::lefrUnsetEdgeRateThreshold2Cbk(); }
 
-void lefrUnsetInoutAntennaCbk () {
-    LefDefParser::lefrUnsetInoutAntennaCbk();
-}
+void lefrUnsetExtensionCbk() { LefDefParser::lefrUnsetExtensionCbk(); }
 
-void lefrUnsetInputAntennaCbk () {
-    LefDefParser::lefrUnsetInputAntennaCbk();
-}
+void lefrUnsetInoutAntennaCbk() { LefDefParser::lefrUnsetInoutAntennaCbk(); }
 
-void lefrUnsetIRDropBeginCbk () {
-    LefDefParser::lefrUnsetIRDropBeginCbk();
-}
+void lefrUnsetInputAntennaCbk() { LefDefParser::lefrUnsetInputAntennaCbk(); }
 
-void lefrUnsetIRDropCbk () {
-    LefDefParser::lefrUnsetIRDropCbk();
-}
+void lefrUnsetIRDropBeginCbk() { LefDefParser::lefrUnsetIRDropBeginCbk(); }
 
-void lefrUnsetIRDropEndCbk () {
-    LefDefParser::lefrUnsetIRDropEndCbk();
-}
+void lefrUnsetIRDropCbk() { LefDefParser::lefrUnsetIRDropCbk(); }
 
-void lefrUnsetLayerCbk () {
-    LefDefParser::lefrUnsetLayerCbk();
-}
+void lefrUnsetIRDropEndCbk() { LefDefParser::lefrUnsetIRDropEndCbk(); }
 
-void lefrUnsetLibraryEndCbk () {
-    LefDefParser::lefrUnsetLibraryEndCbk();
-}
+void lefrUnsetLayerCbk() { LefDefParser::lefrUnsetLayerCbk(); }
 
-void lefrUnsetMacroBeginCbk () {
-    LefDefParser::lefrUnsetMacroBeginCbk();
-}
+void lefrUnsetLibraryEndCbk() { LefDefParser::lefrUnsetLibraryEndCbk(); }
 
-void lefrUnsetMacroCbk () {
-    LefDefParser::lefrUnsetMacroCbk();
-}
+void lefrUnsetMacroBeginCbk() { LefDefParser::lefrUnsetMacroBeginCbk(); }
 
-void lefrUnsetMacroClassTypeCbk () {
-    LefDefParser::lefrUnsetMacroClassTypeCbk();
-}
+void lefrUnsetMacroCbk() { LefDefParser::lefrUnsetMacroCbk(); }
 
-void lefrUnsetMacroEndCbk () {
-    LefDefParser::lefrUnsetMacroEndCbk();
-}
+void lefrUnsetMacroClassTypeCbk() { LefDefParser::lefrUnsetMacroClassTypeCbk(); }
 
-void lefrUnsetMacroOriginCbk () {
-    LefDefParser::lefrUnsetMacroOriginCbk();
-}
+void lefrUnsetMacroEndCbk() { LefDefParser::lefrUnsetMacroEndCbk(); }
 
-void lefrUnsetMacroSizeCbk () {
-    LefDefParser::lefrUnsetMacroSizeCbk();
-}
+void lefrUnsetMacroOriginCbk() { LefDefParser::lefrUnsetMacroOriginCbk(); }
 
-void lefrUnsetManufacturingCbk () {
-    LefDefParser::lefrUnsetManufacturingCbk();
-}
+void lefrUnsetMacroSizeCbk() { LefDefParser::lefrUnsetMacroSizeCbk(); }
 
-void lefrUnsetMaxStackViaCbk () {
-    LefDefParser::lefrUnsetMaxStackViaCbk();
-}
+void lefrUnsetManufacturingCbk() { LefDefParser::lefrUnsetManufacturingCbk(); }
 
-void lefrUnsetMinFeatureCbk () {
-    LefDefParser::lefrUnsetMinFeatureCbk();
-}
+void lefrUnsetMaxStackViaCbk() { LefDefParser::lefrUnsetMaxStackViaCbk(); }
 
-void lefrUnsetNoiseMarginCbk () {
-    LefDefParser::lefrUnsetNoiseMarginCbk();
-}
+void lefrUnsetMinFeatureCbk() { LefDefParser::lefrUnsetMinFeatureCbk(); }
 
-void lefrUnsetNoiseTableCbk () {
-    LefDefParser::lefrUnsetNoiseTableCbk();
-}
+void lefrUnsetNoiseMarginCbk() { LefDefParser::lefrUnsetNoiseMarginCbk(); }
 
-void lefrUnsetNonDefaultCbk () {
-    LefDefParser::lefrUnsetNonDefaultCbk();
-}
+void lefrUnsetNoiseTableCbk() { LefDefParser::lefrUnsetNoiseTableCbk(); }
 
-void lefrUnsetNoWireExtensionCbk () {
-    LefDefParser::lefrUnsetNoWireExtensionCbk();
-}
+void lefrUnsetNonDefaultCbk() { LefDefParser::lefrUnsetNonDefaultCbk(); }
 
-void lefrUnsetObstructionCbk () {
-    LefDefParser::lefrUnsetObstructionCbk();
-}
+void lefrUnsetNoWireExtensionCbk() { LefDefParser::lefrUnsetNoWireExtensionCbk(); }
 
-void lefrUnsetOutputAntennaCbk () {
-    LefDefParser::lefrUnsetOutputAntennaCbk();
-}
+void lefrUnsetObstructionCbk() { LefDefParser::lefrUnsetObstructionCbk(); }
 
-void lefrUnsetPinCbk () {
-    LefDefParser::lefrUnsetPinCbk();
-}
+void lefrUnsetOutputAntennaCbk() { LefDefParser::lefrUnsetOutputAntennaCbk(); }
 
-void lefrUnsetPropBeginCbk () {
-    LefDefParser::lefrUnsetPropBeginCbk();
-}
+void lefrUnsetPinCbk() { LefDefParser::lefrUnsetPinCbk(); }
 
-void lefrUnsetPropCbk () {
-    LefDefParser::lefrUnsetPropCbk();
-}
+void lefrUnsetPropBeginCbk() { LefDefParser::lefrUnsetPropBeginCbk(); }
 
-void lefrUnsetPropEndCbk () {
-    LefDefParser::lefrUnsetPropEndCbk();
-}
+void lefrUnsetPropCbk() { LefDefParser::lefrUnsetPropCbk(); }
 
-void lefrUnsetSiteCbk () {
-    LefDefParser::lefrUnsetSiteCbk();
-}
+void lefrUnsetPropEndCbk() { LefDefParser::lefrUnsetPropEndCbk(); }
 
-void lefrUnsetSpacingBeginCbk () {
-    LefDefParser::lefrUnsetSpacingBeginCbk();
-}
+void lefrUnsetSiteCbk() { LefDefParser::lefrUnsetSiteCbk(); }
 
-void lefrUnsetSpacingCbk () {
-    LefDefParser::lefrUnsetSpacingCbk();
-}
+void lefrUnsetSpacingBeginCbk() { LefDefParser::lefrUnsetSpacingBeginCbk(); }
 
-void lefrUnsetSpacingEndCbk () {
-    LefDefParser::lefrUnsetSpacingEndCbk();
-}
+void lefrUnsetSpacingCbk() { LefDefParser::lefrUnsetSpacingCbk(); }
 
-void lefrUnsetTimingCbk () {
-    LefDefParser::lefrUnsetTimingCbk();
-}
+void lefrUnsetSpacingEndCbk() { LefDefParser::lefrUnsetSpacingEndCbk(); }
 
-void lefrUnsetUseMinSpacingCbk () {
-    LefDefParser::lefrUnsetUseMinSpacingCbk();
-}
+void lefrUnsetTimingCbk() { LefDefParser::lefrUnsetTimingCbk(); }
 
-void lefrUnsetUnitsCbk () {
-    LefDefParser::lefrUnsetUnitsCbk();
-}
+void lefrUnsetUseMinSpacingCbk() { LefDefParser::lefrUnsetUseMinSpacingCbk(); }
 
-void lefrUnsetVersionCbk () {
-    LefDefParser::lefrUnsetVersionCbk();
-}
+void lefrUnsetUnitsCbk() { LefDefParser::lefrUnsetUnitsCbk(); }
 
-void lefrUnsetVersionStrCbk () {
-    LefDefParser::lefrUnsetVersionStrCbk();
-}
+void lefrUnsetVersionCbk() { LefDefParser::lefrUnsetVersionCbk(); }
 
-void lefrUnsetViaCbk () {
-    LefDefParser::lefrUnsetViaCbk();
-}
+void lefrUnsetVersionStrCbk() { LefDefParser::lefrUnsetVersionStrCbk(); }
 
-void lefrUnsetViaRuleCbk () {
-    LefDefParser::lefrUnsetViaRuleCbk();
-}
+void lefrUnsetViaCbk() { LefDefParser::lefrUnsetViaCbk(); }
 
-int lefrLineNumber () {
-    return LefDefParser::lefrLineNumber();
-}
+void lefrUnsetViaRuleCbk() { LefDefParser::lefrUnsetViaRuleCbk(); }
 
-void lefrSetLogFunction (::LEFI_LOG_FUNCTION p0) {
-    LefDefParser::lefrSetLogFunction(p0);
-}
+int lefrLineNumber() { return LefDefParser::lefrLineNumber(); }
 
-void lefrSetWarningLogFunction (::LEFI_WARNING_LOG_FUNCTION p0) {
-    LefDefParser::lefrSetWarningLogFunction(p0);
-}
+void lefrSetLogFunction(::LEFI_LOG_FUNCTION p0) { LefDefParser::lefrSetLogFunction(p0); }
 
-void lefrSetMallocFunction (::LEFI_MALLOC_FUNCTION p0) {
-    LefDefParser::lefrSetMallocFunction(p0);
-}
+void lefrSetWarningLogFunction(::LEFI_WARNING_LOG_FUNCTION p0) { LefDefParser::lefrSetWarningLogFunction(p0); }
 
-void lefrSetReallocFunction (::LEFI_REALLOC_FUNCTION p0) {
-    LefDefParser::lefrSetReallocFunction(p0);
-}
+void lefrSetMallocFunction(::LEFI_MALLOC_FUNCTION p0) { LefDefParser::lefrSetMallocFunction(p0); }
 
-void lefrSetFreeFunction (::LEFI_FREE_FUNCTION p0) {
-    LefDefParser::lefrSetFreeFunction(p0);
-}
+void lefrSetReallocFunction(::LEFI_REALLOC_FUNCTION p0) { LefDefParser::lefrSetReallocFunction(p0); }
 
-void lefrSetLineNumberFunction (::LEFI_LINE_NUMBER_FUNCTION p0) {
-    LefDefParser::lefrSetLineNumberFunction(p0);
-}
+void lefrSetFreeFunction(::LEFI_FREE_FUNCTION p0) { LefDefParser::lefrSetFreeFunction(p0); }
 
-void lefrSetDeltaNumberLines (int p0) {
-    LefDefParser::lefrSetDeltaNumberLines(p0);
-}
+void lefrSetLineNumberFunction(::LEFI_LINE_NUMBER_FUNCTION p0) { LefDefParser::lefrSetLineNumberFunction(p0); }
 
-void lefrSetRelaxMode () {
-    LefDefParser::lefrSetRelaxMode();
-}
+void lefrSetDeltaNumberLines(int p0) { LefDefParser::lefrSetDeltaNumberLines(p0); }
 
-void lefrUnsetRelaxMode () {
-    LefDefParser::lefrUnsetRelaxMode();
-}
+void lefrSetRelaxMode() { LefDefParser::lefrSetRelaxMode(); }
 
-void lefrSetVersionValue (const  char*   version) {
-    LefDefParser::lefrSetVersionValue(version);
-}
+void lefrUnsetRelaxMode() { LefDefParser::lefrUnsetRelaxMode(); }
 
-void lefrSetReadFunction (::LEFI_READ_FUNCTION p0) {
-    LefDefParser::lefrSetReadFunction(p0);
-}
+void lefrSetVersionValue(const char* version) { LefDefParser::lefrSetVersionValue(version); }
 
-void lefrUnsetReadFunction () {
-    LefDefParser::lefrUnsetReadFunction();
-}
+void lefrSetReadFunction(::LEFI_READ_FUNCTION p0) { LefDefParser::lefrSetReadFunction(p0); }
 
-void lefrSetOpenLogFileAppend () {
-    LefDefParser::lefrSetOpenLogFileAppend();
-}
+void lefrUnsetReadFunction() { LefDefParser::lefrUnsetReadFunction(); }
 
-void lefrUnsetOpenLogFileAppend () {
-    LefDefParser::lefrUnsetOpenLogFileAppend();
-}
+void lefrSetOpenLogFileAppend() { LefDefParser::lefrSetOpenLogFileAppend(); }
 
-void lefrDisablePropStrProcess () {
-    LefDefParser::lefrDisablePropStrProcess();
-}
+void lefrUnsetOpenLogFileAppend() { LefDefParser::lefrUnsetOpenLogFileAppend(); }
 
-void lefrSetAntennaInoutWarnings (int  warn) {
-    LefDefParser::lefrSetAntennaInoutWarnings(warn);
-}
+void lefrDisablePropStrProcess() { LefDefParser::lefrDisablePropStrProcess(); }
 
-void lefrSetAntennaInputWarnings (int  warn) {
-    LefDefParser::lefrSetAntennaInputWarnings(warn);
-}
+void lefrSetAntennaInoutWarnings(int warn) { LefDefParser::lefrSetAntennaInoutWarnings(warn); }
 
-void lefrSetAntennaOutputWarnings (int  warn) {
-    LefDefParser::lefrSetAntennaOutputWarnings(warn);
-}
+void lefrSetAntennaInputWarnings(int warn) { LefDefParser::lefrSetAntennaInputWarnings(warn); }
 
-void lefrSetArrayWarnings (int  warn) {
-    LefDefParser::lefrSetArrayWarnings(warn);
-}
+void lefrSetAntennaOutputWarnings(int warn) { LefDefParser::lefrSetAntennaOutputWarnings(warn); }
 
-void lefrSetCaseSensitiveWarnings (int  warn) {
-    LefDefParser::lefrSetCaseSensitiveWarnings(warn);
-}
+void lefrSetArrayWarnings(int warn) { LefDefParser::lefrSetArrayWarnings(warn); }
 
-void lefrSetCorrectionTableWarnings (int  warn) {
-    LefDefParser::lefrSetCorrectionTableWarnings(warn);
-}
+void lefrSetCaseSensitiveWarnings(int warn) { LefDefParser::lefrSetCaseSensitiveWarnings(warn); }
 
-void lefrSetDielectricWarnings (int  warn) {
-    LefDefParser::lefrSetDielectricWarnings(warn);
-}
+void lefrSetCorrectionTableWarnings(int warn) { LefDefParser::lefrSetCorrectionTableWarnings(warn); }
 
-void lefrSetEdgeRateThreshold1Warnings (int  warn) {
-    LefDefParser::lefrSetEdgeRateThreshold1Warnings(warn);
-}
+void lefrSetDielectricWarnings(int warn) { LefDefParser::lefrSetDielectricWarnings(warn); }
 
-void lefrSetEdgeRateThreshold2Warnings (int  warn) {
-    LefDefParser::lefrSetEdgeRateThreshold2Warnings(warn);
-}
+void lefrSetEdgeRateThreshold1Warnings(int warn) { LefDefParser::lefrSetEdgeRateThreshold1Warnings(warn); }
 
-void lefrSetEdgeRateScaleFactorWarnings (int  warn) {
-    LefDefParser::lefrSetEdgeRateScaleFactorWarnings(warn);
-}
+void lefrSetEdgeRateThreshold2Warnings(int warn) { LefDefParser::lefrSetEdgeRateThreshold2Warnings(warn); }
 
-void lefrSetInoutAntennaWarnings (int  warn) {
-    LefDefParser::lefrSetInoutAntennaWarnings(warn);
-}
+void lefrSetEdgeRateScaleFactorWarnings(int warn) { LefDefParser::lefrSetEdgeRateScaleFactorWarnings(warn); }
 
-void lefrSetInputAntennaWarnings (int  warn) {
-    LefDefParser::lefrSetInputAntennaWarnings(warn);
-}
+void lefrSetInoutAntennaWarnings(int warn) { LefDefParser::lefrSetInoutAntennaWarnings(warn); }
 
-void lefrSetIRDropWarnings (int  warn) {
-    LefDefParser::lefrSetIRDropWarnings(warn);
-}
+void lefrSetInputAntennaWarnings(int warn) { LefDefParser::lefrSetInputAntennaWarnings(warn); }
 
-void lefrSetLayerWarnings (int  warn) {
-    LefDefParser::lefrSetLayerWarnings(warn);
-}
+void lefrSetIRDropWarnings(int warn) { LefDefParser::lefrSetIRDropWarnings(warn); }
 
-void lefrSetMacroWarnings (int  warn) {
-    LefDefParser::lefrSetMacroWarnings(warn);
-}
+void lefrSetLayerWarnings(int warn) { LefDefParser::lefrSetLayerWarnings(warn); }
 
-void lefrSetMaxStackViaWarnings (int  warn) {
-    LefDefParser::lefrSetMaxStackViaWarnings(warn);
-}
+void lefrSetMacroWarnings(int warn) { LefDefParser::lefrSetMacroWarnings(warn); }
 
-void lefrSetMinFeatureWarnings (int  warn) {
-    LefDefParser::lefrSetMinFeatureWarnings(warn);
-}
+void lefrSetMaxStackViaWarnings(int warn) { LefDefParser::lefrSetMaxStackViaWarnings(warn); }
 
-void lefrSetNoiseMarginWarnings (int  warn) {
-    LefDefParser::lefrSetNoiseMarginWarnings(warn);
-}
+void lefrSetMinFeatureWarnings(int warn) { LefDefParser::lefrSetMinFeatureWarnings(warn); }
 
-void lefrSetNoiseTableWarnings (int  warn) {
-    LefDefParser::lefrSetNoiseTableWarnings(warn);
-}
+void lefrSetNoiseMarginWarnings(int warn) { LefDefParser::lefrSetNoiseMarginWarnings(warn); }
 
-void lefrSetNonDefaultWarnings (int  warn) {
-    LefDefParser::lefrSetNonDefaultWarnings(warn);
-}
+void lefrSetNoiseTableWarnings(int warn) { LefDefParser::lefrSetNoiseTableWarnings(warn); }
 
-void lefrSetNoWireExtensionWarnings (int  warn) {
-    LefDefParser::lefrSetNoWireExtensionWarnings(warn);
-}
+void lefrSetNonDefaultWarnings(int warn) { LefDefParser::lefrSetNonDefaultWarnings(warn); }
 
-void lefrSetOutputAntennaWarnings (int  warn) {
-    LefDefParser::lefrSetOutputAntennaWarnings(warn);
-}
+void lefrSetNoWireExtensionWarnings(int warn) { LefDefParser::lefrSetNoWireExtensionWarnings(warn); }
 
-void lefrSetPinWarnings (int  warn) {
-    LefDefParser::lefrSetPinWarnings(warn);
-}
+void lefrSetOutputAntennaWarnings(int warn) { LefDefParser::lefrSetOutputAntennaWarnings(warn); }
 
-void lefrSetSiteWarnings (int  warn) {
-    LefDefParser::lefrSetSiteWarnings(warn);
-}
+void lefrSetPinWarnings(int warn) { LefDefParser::lefrSetPinWarnings(warn); }
 
-void lefrSetSpacingWarnings (int  warn) {
-    LefDefParser::lefrSetSpacingWarnings(warn);
-}
+void lefrSetSiteWarnings(int warn) { LefDefParser::lefrSetSiteWarnings(warn); }
 
-void lefrSetTimingWarnings (int  warn) {
-    LefDefParser::lefrSetTimingWarnings(warn);
-}
+void lefrSetSpacingWarnings(int warn) { LefDefParser::lefrSetSpacingWarnings(warn); }
 
-void lefrSetUnitsWarnings (int  warn) {
-    LefDefParser::lefrSetUnitsWarnings(warn);
-}
+void lefrSetTimingWarnings(int warn) { LefDefParser::lefrSetTimingWarnings(warn); }
 
-void lefrSetUseMinSpacingWarnings (int  warn) {
-    LefDefParser::lefrSetUseMinSpacingWarnings(warn);
-}
+void lefrSetUnitsWarnings(int warn) { LefDefParser::lefrSetUnitsWarnings(warn); }
 
-void lefrSetViaRuleWarnings (int  warn) {
-    LefDefParser::lefrSetViaRuleWarnings(warn);
-}
+void lefrSetUseMinSpacingWarnings(int warn) { LefDefParser::lefrSetUseMinSpacingWarnings(warn); }
 
-void lefrSetViaWarnings (int  warn) {
-    LefDefParser::lefrSetViaWarnings(warn);
-}
+void lefrSetViaRuleWarnings(int warn) { LefDefParser::lefrSetViaRuleWarnings(warn); }
 
-void lefrDisableParserMsgs (int  nMsg, int*  msgs) {
-    LefDefParser::lefrDisableParserMsgs(nMsg, msgs);
-}
+void lefrSetViaWarnings(int warn) { LefDefParser::lefrSetViaWarnings(warn); }
 
-void lefrEnableParserMsgs (int  nMsg, int*  msgs) {
-    LefDefParser::lefrEnableParserMsgs(nMsg, msgs);
-}
+void lefrDisableParserMsgs(int nMsg, int* msgs) { LefDefParser::lefrDisableParserMsgs(nMsg, msgs); }
 
-void lefrEnableAllMsgs () {
-    LefDefParser::lefrEnableAllMsgs();
-}
+void lefrEnableParserMsgs(int nMsg, int* msgs) { LefDefParser::lefrEnableParserMsgs(nMsg, msgs); }
 
-void lefrDisableAllMsgs () {
-    LefDefParser::lefrDisableAllMsgs();
-}
+void lefrEnableAllMsgs() { LefDefParser::lefrEnableAllMsgs(); }
 
-void lefrSetTotalMsgLimit (int  totNumMsgs) {
-    LefDefParser::lefrSetTotalMsgLimit(totNumMsgs);
-}
+void lefrDisableAllMsgs() { LefDefParser::lefrDisableAllMsgs(); }
 
-void lefrSetLimitPerMsg (int  msgId, int  numMsg) {
-    LefDefParser::lefrSetLimitPerMsg(msgId, numMsg);
-}
+void lefrSetTotalMsgLimit(int totNumMsgs) { LefDefParser::lefrSetTotalMsgLimit(totNumMsgs); }
 
+void lefrSetLimitPerMsg(int msgId, int numMsg) { LefDefParser::lefrSetLimitPerMsg(msgId, numMsg); }

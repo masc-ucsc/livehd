@@ -22,15 +22,15 @@ protected:
 
 public:
   // do not copy node trees if possible, very slow
-  Node_tree(const Node_tree& other) = delete;
-  Node_tree(Node_tree&& other) = default;
+  Node_tree(const Node_tree &other) = delete;
+  Node_tree(Node_tree &&other)      = default;
   Node_tree(LGraph *root);
 
   // return root LGraph used to generate the node tree
   LGraph *get_root_lg() const { return root; }
 
   Tree_index get_last_free(Tree_index tidx, Ntype_op op) { return last_free[tidx][size_t(op) - 1]; }
-  void set_last_free(Tree_index tidx, Ntype_op op, Tree_index new_tidx) { last_free[tidx][size_t(op) - 1] = new_tidx; }
+  void       set_last_free(Tree_index tidx, Ntype_op op, Tree_index new_tidx) { last_free[tidx][size_t(op) - 1] = new_tidx; }
 
   void dump() const;
 };

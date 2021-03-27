@@ -1,16 +1,14 @@
-#include "livesim_types.hpp"
-
 #include "sample_stage.hpp"
 
-void Sample_stage::reset_cycle() {
+#include "livesim_types.hpp"
 
+void Sample_stage::reset_cycle() {
   s1.reset_cycle();
   s2.reset_cycle();
   s3.reset_cycle();
 }
 
 void Sample_stage::cycle() {
-
   auto s1_to2_aValid = s1.to2_aValid;
   auto s1_to2_a      = s1.to2_a;
   auto s1_to2_b      = s1.to2_b;
@@ -23,6 +21,4 @@ void Sample_stage::cycle() {
   s2.cycle(s1_to2_aValid, s1_to2_a, s1_to2_b);
 
   s3.cycle(s1_to3_cValid, s1_to3_c, s2_to3_dValid, s2_to3_d);
-
 }
-

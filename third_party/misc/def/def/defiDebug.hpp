@@ -30,6 +30,8 @@
 #ifndef defiDebug_h
 #define defiDebug_h
 
+#include <cstddef>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -37,17 +39,17 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 class defrData;
 
 /* Set flag */
-extern void defiSetDebug (int num, int value) ;
+extern void defiSetDebug(int num, int value);
 
 /* Read flag */
-extern int defiDebug (int num) ;
+extern int defiDebug(int num);
 
 /* Error loggin function */
-extern void defiError(int check, int msgNum, const char* message, defrData *defData = NULL);
+extern void defiError(int check, int msgNum, const char* message, defrData* defData = NULL);
 
 /* for auto upshifting names in case insensitive files */
-extern const char* upperCase(const char* c, defrData *defData = NULL);
-extern const char* DEFCASE(const char* ch, defrData *defData = NULL);
+extern const char* upperCase(const char* c, defrData* defData = NULL);
+extern const char* DEFCASE(const char* ch, defrData* defData = NULL);
 
 END_LEFDEF_PARSER_NAMESPACE
 

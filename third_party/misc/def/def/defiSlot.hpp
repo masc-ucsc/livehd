@@ -31,6 +31,7 @@
 #define defiSLOT_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 #include "defiMisc.hpp"
 
@@ -40,7 +41,7 @@ class defrData;
 
 class defiSlot {
 public:
-  defiSlot(defrData *data);
+  defiSlot(defrData* data);
   void Init();
 
   void Destroy();
@@ -53,7 +54,7 @@ public:
   void addRect(int xl, int yl, int xh, int yh);
   void addPolygon(defiGeometries* geom);
 
-  int hasLayer() const;
+  int         hasLayer() const;
   const char* layerName() const;
 
   int numRectangles() const;
@@ -62,28 +63,27 @@ public:
   int xh(int index) const;
   int yh(int index) const;
 
-  int numPolygons() const;                        // 5.6
+  int        numPolygons() const;          // 5.6
   defiPoints getPolygon(int index) const;  // 5.6
 
   void print(FILE* f) const;
 
 protected:
-  int   hasLayer_;
-  char* layerName_;
-  int   layerNameLength_;
-  int   numRectangles_;
-  int   rectsAllocated_;
-  int*  xl_;
-  int*  yl_;
-  int*  xh_;
-  int*  yh_;
-  int   numPolys_;                  // 5.6
-  int   polysAllocated_;            // 5.6
-  defiPoints** polygons_;    // 5.6
+  int          hasLayer_;
+  char*        layerName_;
+  int          layerNameLength_;
+  int          numRectangles_;
+  int          rectsAllocated_;
+  int*         xl_;
+  int*         yl_;
+  int*         xh_;
+  int*         yh_;
+  int          numPolys_;        // 5.6
+  int          polysAllocated_;  // 5.6
+  defiPoints** polygons_;        // 5.6
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

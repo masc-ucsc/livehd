@@ -1,4 +1,4 @@
-/* 
+/*
    ESESC: Super ESCalar simulator
    Copyright (C) 2003 University of Illinois.
 
@@ -20,11 +20,11 @@ ESESC; see the file COPYING.  If not, write to the  Free Software Foundation, 59
 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdarg.h>
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 #include "estl.h"
@@ -41,7 +41,7 @@ const char *NanassertID = "";
 
 #include <signal.h>
 
-void nanassertexit(){
+void nanassertexit() {
 #if (defined TLS)
   // Raising SIGUSR2 here helps debugging a lot
   // It is ignored in normal execution, but stops execution in gdb
@@ -53,14 +53,11 @@ void nanassertexit(){
 /* Compile only when there is no GCC compiler */
 #if (defined SUNSTUDIO) || !(defined __GNUC__)
 
-void VoidNoGCCMSG(const char *format, ...) {
-}
+void VoidNoGCCMSG(const char *format, ...) {}
 
-void VoidNoGCCGMSG(int32_t g, const char *format, ...) {
-}
+void VoidNoGCCGMSG(int32_t g, const char *format, ...) {}
 
 void NoGCCMSG(const char *format, ...) {
-
   va_list ap;
 
   va_start(ap, format);
@@ -70,10 +67,9 @@ void NoGCCMSG(const char *format, ...) {
 }
 
 void NoGCCGMSG(int32_t g, const char *format, ...) {
-
   va_list ap;
 
-  if(!g)
+  if (!g)
     return;
 
   va_start(ap, format);
@@ -82,20 +78,17 @@ void NoGCCGMSG(int32_t g, const char *format, ...) {
   fprintf(ASSERTSTREAM, "\n");
 }
 
-#endif   /* __GNUC__ */
+#endif /* __GNUC__ */
 
 #ifndef SAFE
 #ifdef __GNUC__
 
 /* defined in nanassert.h */
 #else
-void nanassertTRACE(const char *envvar,
-                    const char *format,
-                    ...)
-{                               /* Nothing */
+void nanassertTRACE(const char *envvar, const char *format, ...) { /* Nothing */
 }
-#endif   /* __GNUC__ */
-#else    /* SAFE */
+#endif /* __GNUC__ */
+#else  /* SAFE */
 
 #ifdef __cplusplus
 
@@ -103,39 +96,35 @@ typedef HASH_MAP<const char *, bool, HASH<const char *> > NanaHash;
 
 static NanaHash *trace;
 
-bool cachedGetenv(const char *envvar)
-{
-    NanaHash::iterator pos = trace->find(envvar);
+bool cachedGetenv(const char *envvar) {
+  NanaHash::iterator pos = trace->find(envvar);
 
-    if(pos == trace->end()) {
-        if(getenv(envvar)) {
-            (*trace)[envvar] = true;
-            return true;
-        } else
-            (*trace)[envvar] = false;
-    } else {
-        if((*pos).second)
-            return true;
-    }
-    return false;
+  if (pos == trace->end()) {
+    if (getenv(envvar)) {
+      (*trace)[envvar] = true;
+      return true;
+    } else
+      (*trace)[envvar] = false;
+  } else {
+    if ((*pos).second)
+      return true;
+  }
+  return false;
 }
 #endif
 
-void nanassertTRACE(const char *envvar,
-                    const char *format,
-                    ...)
-{
+void nanassertTRACE(const char *envvar, const char *format, ...) {
   static int32_t doTrace = -1;
-  int32_t found;
-  va_list ap;
+  int32_t        found;
+  va_list        ap;
 
-  if(doTrace == -1) {
-    if(getenv("TRACE"))
+  if (doTrace == -1) {
+    if (getenv("TRACE"))
       doTrace = atoi(getenv("TRACE"));
-    if(doTrace < 0)
+    if (doTrace < 0)
       doTrace = 0;
     else {
-      if(doTrace == 1)
+      if (doTrace == 1)
         MSG("nanassert::Activating TRACE selectivelly");
       else
         MSG("nanassert::Activating all the TRACEs");
@@ -144,10 +133,9 @@ void nanassertTRACE(const char *envvar,
     // new allocation because the object never should be destroyed
     trace = new NanaHash;
 #endif
-  } else if(doTrace == 0) {
+  } else if (doTrace == 0) {
     return;
-  } else if(doTrace == 1) {
-
+  } else if (doTrace == 1) {
     I(envvar != 0);
 
 #ifdef __cplusplus
@@ -155,7 +143,7 @@ void nanassertTRACE(const char *envvar,
 #else
     found = getenv(envvar) ? 1 : 0;
 #endif
-    if(!found)
+    if (!found)
       return;
   }
 
@@ -166,4 +154,4 @@ void nanassertTRACE(const char *envvar,
   va_end(ap);
   fprintf(ASSERTSTREAM, "\n");
 }
-#endif   /* TRACE */
+#endif /* TRACE */

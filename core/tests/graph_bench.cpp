@@ -1,5 +1,5 @@
-#include <iostream>
 #include <chrono>
+#include <iostream>
 
 #include "absl/container/flat_hash_map.h"
 #include "lgedgeiter.hpp"
@@ -112,8 +112,8 @@ int main(int argc, char** argv) {
   auto start      = std::chrono::high_resolution_clock::now();
   auto stop       = std::chrono::high_resolution_clock::now();
   auto duration   = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  int  x = 0;
-  int  micros = 1000000;
+  int  x          = 0;
+  int  micros     = 1000000;
 
   fmt::print("--------------------------Nodes--------------------\n");
   start = std::chrono::high_resolution_clock::now();

@@ -2,24 +2,23 @@
 #pragma once
 #ifdef __linux__
 
-#include <asm/unistd.h>       // for __NR_perf_event_open
-#include <linux/perf_event.h> // for perf event constants
-#include <sys/ioctl.h>        // for ioctl
-#include <unistd.h>           // for syscall
+#include <asm/unistd.h>        // for __NR_perf_event_open
+#include <linux/perf_event.h>  // for perf event constants
+#include <sys/ioctl.h>         // for ioctl
+#include <unistd.h>            // for syscall
 
-#include <cerrno>  // for errno
-#include <cstring> // for memset
-#include <stdexcept>
-
+#include <cerrno>   // for errno
+#include <cstring>  // for memset
 #include <iostream>
+#include <stdexcept>
 #include <vector>
 
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
-  static inline int fd=-1; // Shared across calls
-  static inline bool working = true;
-  perf_event_attr attribs{};
-  size_t num_events{};
+  static inline int     fd      = -1;  // Shared across calls
+  static inline bool    working = true;
+  perf_event_attr       attribs{};
+  size_t                num_events{};
   std::vector<uint64_t> temp_result_vec{};
   std::vector<uint64_t> ids{};
 
@@ -29,31 +28,31 @@ public:
   void setup(const std::vector<int> &config_vec) {
     if (!working)
       return;
-    if (fd!=-1)
+    if (fd != -1)
       return;
 
     memset(&attribs, 0, sizeof(attribs));
-    attribs.type = TYPE;
-    attribs.size = sizeof(attribs);
-    attribs.disabled = 1;
+    attribs.type           = TYPE;
+    attribs.size           = sizeof(attribs);
+    attribs.disabled       = 1;
     attribs.exclude_kernel = 1;
-    attribs.exclude_hv = 1;
+    attribs.exclude_hv     = 1;
 
-    attribs.sample_period = 0;
-    attribs.read_format = PERF_FORMAT_GROUP | PERF_FORMAT_ID;
-    const int pid = 0;  // the current process
-    const int cpu = -1; // all CPUs
+    attribs.sample_period     = 0;
+    attribs.read_format       = PERF_FORMAT_GROUP | PERF_FORMAT_ID;
+    const int           pid   = 0;   // the current process
+    const int           cpu   = -1;  // all CPUs
     const unsigned long flags = 0;
 
-    int group = fd; // no group
+    int group  = fd;  // no group
     num_events = config_vec.size();
     ids.resize(config_vec.size());
     uint32_t i = 0;
     for (auto config : config_vec) {
       attribs.config = config;
-      fd = static_cast<int>(syscall(__NR_perf_event_open, &attribs, pid, cpu, group, flags));
+      fd             = static_cast<int>(syscall(__NR_perf_event_open, &attribs, pid, cpu, group, flags));
       if (fd == -1) {
-        working = false; // silent case when perf counters do not exist
+        working = false;  // silent case when perf counters do not exist
         // std::cerr << "perf_event_open failed (no perf counters)\n";
       }
       ioctl(fd, PERF_EVENT_IOC_ID, &ids[i++]);
@@ -67,14 +66,13 @@ public:
   }
 
   void close() {
-    if (fd == -1) return;
+    if (fd == -1)
+      return;
     ::close(fd);
     fd = -1;
   }
 
-  ~LinuxEvents() {
-    close();
-  }
+  ~LinuxEvents() { close(); }
   inline void start() {
     if (fd == -1)
       return;
@@ -120,16 +118,14 @@ public:
     }
   }
 
-  bool is_working() const {
-    return working;
-  }
+  bool is_working() const { return working; }
 
 private:
   void report_error(const std::string &context) {
     if (working)
       std::cerr << (context + ": " + std::string(strerror(errno))) << std::endl;
     working = false;
-    fd = -1; // disable all the APIs
+    fd      = -1;  // disable all the APIs
   }
 };
 #else
@@ -137,12 +133,12 @@ private:
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
 public:
-  void setup(const std::vector<int> &config_vec) {}
-  inline void start() { }
+  void        setup(const std::vector<int> &config_vec) {}
+  inline void start() {}
 
-  inline void sample(std::vector<uint64_t> &results) { }
+  inline void sample(std::vector<uint64_t> &results) {}
 
-  inline void stop(std::vector<uint64_t> &results) { }
+  inline void stop(std::vector<uint64_t> &results) {}
 
   bool is_working() const { return false; }
 

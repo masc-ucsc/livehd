@@ -21,7 +21,7 @@ struct Explicit_type {
   bool is_invalid() const { return value == inv_val; }
   void invalidate() { value = inv_val; }
 
-  //bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
+  // bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
 };
 
 #if 0

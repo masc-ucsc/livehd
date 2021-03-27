@@ -3,7 +3,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "bm.h"
-
 #include "invariant.hpp"
 #include "invariant_options.hpp"
 #include "lgraph.hpp"

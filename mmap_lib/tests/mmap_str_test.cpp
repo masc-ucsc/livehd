@@ -1,23 +1,19 @@
 
 
-#include <vector>
-#include <iostream>
-#include <functional>
-
-#include "gtest/gtest.h"
-#include "fmt/format.h"
-
 #include "mmap_str.hpp"
 
-class Mmap_str_test : public ::testing::Test {
+#include <functional>
+#include <iostream>
+#include <vector>
 
+#include "fmt/format.h"
+#include "gtest/gtest.h"
+
+class Mmap_str_test : public ::testing::Test {
   std::vector<std::vector<std::string>> ast_sorted_verification;
 
 public:
-
-  void SetUp() override {
-  }
-
+  void SetUp() override {}
 };
 
 #if 0

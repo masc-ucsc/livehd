@@ -8,9 +8,9 @@ class Node;
 #include <vector>
 
 #include "ann_ssa.hpp"
+#include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
-#include "hierarchy.hpp"
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
@@ -35,7 +35,7 @@ protected:
   bool            sink;
 
   constexpr Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
-    : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
+      : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
     assert(_g);
     // Could be IDX=0 for invalid
   }
@@ -71,7 +71,9 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
-    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink){ I(!hidx.is_invalid()); };
+    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
+      I(!hidx.is_invalid());
+    };
     Compact() : idx(0), sink(0){};
     Compact &operator=(const Compact &obj) {
       I(this != &obj);
@@ -85,9 +87,7 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact &other) const {
-      return idx == other.idx
-             && sink == other.sink
-             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+      return idx == other.idx && sink == other.sink && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
     }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
@@ -98,9 +98,9 @@ public:
   };
   class Compact_flat {
   protected:
-    Lg_type_id      lgid;
-    uint32_t        idx : Index_bits;
-    uint32_t        sink : 1;
+    Lg_type_id lgid;
+    uint32_t   idx : Index_bits;
+    uint32_t   sink : 1;
 
     friend class LGraph;
     friend class LGraph_Node_Type;
@@ -117,7 +117,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), idx(obj.idx), sink(obj.sink) {}
-    Compact_flat(const Lg_type_id _lgid, Index_ID _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){ };
+    Compact_flat(const Lg_type_id _lgid, Index_ID _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
     Compact_flat() : idx(0), sink(0){};
     Compact_flat &operator=(const Compact_flat &obj) {
       I(this != &obj);
@@ -131,9 +131,7 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact_flat &other) const {
-      return idx == other.idx
-             && sink == other.sink
-             && (lgid == other.lgid || lgid.is_invalid() || other.lgid.is_invalid());
+      return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid.is_invalid() || other.lgid.is_invalid());
     }
     constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
 
@@ -162,7 +160,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
-    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx){ I(!hidx.is_invalid()); };
+    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx) { I(!hidx.is_invalid()); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
@@ -174,9 +172,8 @@ public:
 
     constexpr bool is_invalid() const { return idx == 0; }
 
-    constexpr bool operator==(const Compact_driver &other) const { 
-      return idx == other.idx
-             && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    constexpr bool operator==(const Compact_driver &other) const {
+      return idx == other.idx && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
     }
     constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
@@ -280,8 +277,8 @@ public:
 
   // No constexpr (get_root_idx)
 
-  Compact        get_compact() const {
-    if(hidx.is_invalid())
+  Compact get_compact() const {
+    if (hidx.is_invalid())
       return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
     return Compact(hidx, get_root_idx(), sink);
   }
@@ -313,10 +310,10 @@ public:
   bool is_graph_output() const;
 
   // Some redundant code with node (implemented because frequent)
-  bool             is_type_const() const;
-  bool             is_type_flop() const;
-  bool             is_type_loop_breaker() const;
-  Lconst           get_type_const() const;
+  bool   is_type_const() const;
+  bool   is_type_flop() const;
+  bool   is_type_loop_breaker() const;
+  Lconst get_type_const() const;
 
   Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
@@ -341,9 +338,9 @@ public:
   Node     get_node() const;
   Ntype_op get_type_op() const;
 
-  Node              get_driver_node() const; // common 0 or 1 driver case
-  Node_pin          get_driver_pin() const;  // common 0 or 1 driver case
-  Node_pin_iterator inp_driver() const; // handle 0 to inf driver case
+  Node              get_driver_node() const;  // common 0 or 1 driver case
+  Node_pin          get_driver_pin() const;   // common 0 or 1 driver case
+  Node_pin_iterator inp_driver() const;       // handle 0 to inf driver case
 
   void del_driver(Node_pin &dst);
   void del_sink(Node_pin &dst);
@@ -351,12 +348,12 @@ public:
     if (dst.is_sink()) {
       I(is_driver());
       del_sink(dst);
-    }else{
-      I(dst.is_driver() && is_sink()); // they must be opposite
+    } else {
+      I(dst.is_driver() && is_sink());  // they must be opposite
       del_driver(dst);
     }
   }
-  void del(); // del self and all connections
+  void del();  // del self and all connections
 
   void connect_sink(const Node_pin &dst) const;
   void connect_sink(const Node &dst) const;
@@ -382,9 +379,8 @@ public:
   bool operator==(const Node_pin &other) const {
     GI(idx == 0, hidx.is_invalid());
     GI(other.idx == 0, other.hidx.is_invalid());
-    //GI(idx && other.idx, top_g == other.top_g);
-    return get_root_idx() == other.get_root_idx()
-           && sink == other.sink
+    // GI(idx && other.idx, top_g == other.top_g);
+    return get_root_idx() == other.get_root_idx() && sink == other.sink
            && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
   }
   bool operator!=(const Node_pin &other) const { return !(*this == other); }
@@ -408,18 +404,17 @@ public:
   bool             has_prp_vname() const;
   void             dump_all_prp_vname() const;
 
-
   void  set_delay(float val);
   void  del_delay();
   float get_delay() const;
   bool  has_delay() const;
 
-  Bits_t   get_bits() const;
-  void     set_bits(Bits_t bits);
+  Bits_t get_bits() const;
+  void   set_bits(Bits_t bits);
 
-  void    set_io_sign();
-  void    clear_io_sign();
-  bool    is_io_sign() const;
+  void set_io_sign();
+  void clear_io_sign();
+  bool is_io_sign() const;
 
   std::string_view get_type_sub_pin_name() const;
 
@@ -438,7 +433,6 @@ public:
 
   Node_pin get_down_pin() const;
   Node_pin get_up_pin() const;
-
 };
 
 namespace mmap_lib {

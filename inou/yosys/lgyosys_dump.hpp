@@ -110,4 +110,3 @@ public:
     assert(false);  // No main_api interface for this module as it uses yosys plug-ins
   };
 };
-

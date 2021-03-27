@@ -155,14 +155,14 @@ public:
                       bool               duplicate_names_check = true);                            // speed-up (optimisation)
 
   // Register a VCD variable and return its mark to change value further.
-   // Remember, all VCD variables must be registered prior to any value changes.
-   // Note, *size* may be `0`, some types ("int", "real", "event") have a default size
-   VarPtr register_passed_var(const std::string &scope,                  // Variable belongs within the hierarchical scope
-                              const std::string &name,                   // Human-readable variable idetifier
-                              VariableType type = var_def_type,          // Verilog data type of variable
-                              unsigned size = 0,                         // Size of variable, in bits
-                              const VarValue &init = {VCDValues::ZERO},  // Initial value (optional)
-                              bool duplicate_names_check = true);        // speed-up (optimisation)
+  // Remember, all VCD variables must be registered prior to any value changes.
+  // Note, *size* may be `0`, some types ("int", "real", "event") have a default size
+  VarPtr register_passed_var(const std::string &scope,  // Variable belongs within the hierarchical scope
+                             const std::string &name,   // Human-readable variable idetifier
+                             VariableType       type                  = var_def_type,       // Verilog data type of variable
+                             unsigned           size                  = 0,                  // Size of variable, in bits
+                             const VarValue &   init                  = {VCDValues::ZERO},  // Initial value (optional)
+                             bool               duplicate_names_check = true);                            // speed-up (optimisation)
 
   // Change variable's value in VCD stream.
   // Call this method, for all variables changed on this *timestamp*.
@@ -176,12 +176,14 @@ public:
 
   // Suspend dumping to VCD file
   void dump_off(TimeStamp current) {
-    if (dumping && !registering && vars_prevs.size()) dump_off_int(current);
+    if (dumping && !registering && vars_prevs.size())
+      dump_off_int(current);
     dumping = false;
   }
   // Resume dumping to VCD file
   void dump_on(TimeStamp current) {
-    if (!dumping && !registering && vars_prevs.size()) fprintf(ofile, "#%d", current);
+    if (!dumping && !registering && vars_prevs.size())
+      fprintf(ofile, "#%d", current);
     dump_values("$dumpon");
     dumping = true;
   }
@@ -190,16 +192,20 @@ public:
   // If the VCD header has not already been written, calling `flush()` will force
   // the header to be written thus disallowing any further variable registrations.
   void flush(const TimeStamp *current = NULL) {
-    if (closed) throw VCDPhaseException{"Cannot flush() after close()"};
-    if (registering) finalize_registration();
-    if (current != NULL && *current > timestamp) fprintf(ofile, "#%d", *current);
+    if (closed)
+      throw VCDPhaseException{"Cannot flush() after close()"};
+    if (registering)
+      finalize_registration();
+    if (current != NULL && *current > timestamp)
+      fprintf(ofile, "#%d", *current);
     fflush(ofile);
   }
   // Close VCD writer. Any buffered VCD data is flushed to the output file.
   // After `close()`, NO variable registration or value changes will be accepted.
   // Note, the output file-stream will be closed in destructor of `VCDWriter`
   void close(const TimeStamp *final = NULL) {
-    if (closed) return;
+    if (closed)
+      return;
     flush(final);
     closed = true;
   }
@@ -210,7 +216,8 @@ public:
   void set_scope_default_type(ScopeType new_type) { scope_def_type = new_type; }
 
   void set_scope_sep(const std::string &_scope_sep) {
-    if (scope_sep.size() == 0 || scope_sep == _scope_sep) return;
+    if (scope_sep.size() == 0 || scope_sep == _scope_sep)
+      return;
     scope_sep = _scope_sep;
   }
   //! get VCD Variable (if it is registered var() != NULL)

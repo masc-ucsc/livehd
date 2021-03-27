@@ -6,11 +6,11 @@
 static absl::flat_hash_map<int, Node::Compact_class> json_remap;
 
 void from_json(LGraph *g, rapidjson::Document &document) {
-
   json_remap.clear();
 
   if (document.HasParseError()) {
-    Pass::error("inou_json::from_json Error(offset {}): {}", static_cast<unsigned>(document.GetErrorOffset()),
+    Pass::error("inou_json::from_json Error(offset {}): {}",
+                static_cast<unsigned>(document.GetErrorOffset()),
                 rapidjson::GetParseError_En(document.GetParseError()));
     return;
   }
@@ -30,7 +30,7 @@ void from_json(LGraph *g, rapidjson::Document &document) {
     if (it == json_remap.end()) {
       last_node = g->create_node();
       json_remap.insert({last_nid, last_node.get_compact_class()});
-    }else{
+    } else {
       last_node = Node(g, it->second);
     }
 
@@ -55,7 +55,7 @@ void from_json(LGraph *g, rapidjson::Document &document) {
     if (nodes.HasMember("op")) {
       if (nodes["op"].IsString()) {
         std::string op_txt = nodes["op"].GetString();
-        auto op            = Ntype::get_op(op_txt);
+        auto        op     = Ntype::get_op(op_txt);
 
         if (op != Ntype_op::Invalid) {
           last_node.set_type(op);
@@ -67,8 +67,8 @@ void from_json(LGraph *g, rapidjson::Document &document) {
       } else {
         uint32_t val = nodes["op"].GetUint();
         // FIXME: Ignore: Jose (ditto)
-        (void) val;
-        //g->node_u32type_set(last_nid, val);
+        (void)val;
+        // g->node_u32type_set(last_nid, val);
       }
     }
 
@@ -90,20 +90,20 @@ void from_json(LGraph *g, rapidjson::Document &document) {
         //  src_pid = output_edge["out_out_pid"].GetUint();
         //}
         auto src_pid = output_edge["driver_pid"].GetString();
-        int dst_nid = output_edge["sink_idx"].GetUint64();
+        int  dst_nid = output_edge["sink_idx"].GetUint64();
 
         const auto dit = json_remap.find(dst_nid);
-        Node dst_node;
+        Node       dst_node;
         if (dit == json_remap.end()) {
           dst_node = g->create_node();
           json_remap.insert({dst_nid, dst_node.get_compact_class()});
-        }else{
+        } else {
           dst_node = Node(g, dit->second);
         }
 
-        auto dst_pid = output_edge["sink_pid"].GetString();
-        Node_pin dpin = last_node.setup_driver_pin(dst_pid);
-        Node_pin spin = dst_node.setup_sink_pin(src_pid);
+        auto     dst_pid = output_edge["sink_pid"].GetString();
+        Node_pin dpin    = last_node.setup_driver_pin(dst_pid);
+        Node_pin spin    = dst_node.setup_sink_pin(src_pid);
         if (output_edge.HasMember("bits")) {
           g->add_edge(dpin, spin, output_edge["bits"].GetInt());
         } else {
@@ -111,7 +111,7 @@ void from_json(LGraph *g, rapidjson::Document &document) {
         }
         if (output_edge.HasMember("delay")) {
           double delay = output_edge["delay"].GetDouble();
-          //g->node_delay_set(last_nid, static_cast<float>(delay)); // original
+          // g->node_delay_set(last_nid, static_cast<float>(delay)); // original
           dpin.set_delay(static_cast<float>(delay));
         }
       }

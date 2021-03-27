@@ -1,20 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fstream>
+#include "cops_live.hpp"
 
-#include "lgbench.hpp"
-#include "lgedgeiter.hpp"
-#include "lgraph.hpp"
+#include <fstream>
 
 #include "diff_finder.hpp"
 #include "invariant_finder.hpp"
 #include "invariant_options.hpp"
+#include "lgbench.hpp"
+#include "lgedgeiter.hpp"
+#include "lgraph.hpp"
 #include "live_options.hpp"
 #include "stitch_options.hpp"
 #include "stitcher.hpp"
 #include "structural.hpp"
-
-#include "cops_live.hpp"
 
 void setup_cops_live() {
   Cops_live p;
@@ -105,7 +104,8 @@ void Cops_live::netlist_merge(Eprp_var &var) {
 }
 
 void Cops_live::setup() {
-  Eprp_method inv_find("live.invariant_find", "find invariant boundaries between post-synthesis and post-elaboration lgraphs",
+  Eprp_method inv_find("live.invariant_find",
+                       "find invariant boundaries between post-synthesis and post-elaboration lgraphs",
                        &Cops_live::invariant_finder);
   inv_find.add_label_required("top", "top module");
   inv_find.add_label_required("elab_lgdb", "lgdb path of the elaborated netlist");
@@ -114,7 +114,8 @@ void Cops_live::setup() {
   inv_find.add_label_required("hier_sep", "hierarchical separator used in names by the synthesis tool");
   register_pass(inv_find);
 
-  Eprp_method diff_find("live.diff_finder", "find cones that changed between two post-elaboration lgraphs",
+  Eprp_method diff_find("live.diff_finder",
+                        "find cones that changed between two post-elaboration lgraphs",
                         &Cops_live::diff_finder);
   diff_find.add_label_required("olgdb", "original elaborated lgdb path");
   diff_find.add_label_required("mlgdb", "modified elaborated lgdb path");
@@ -125,7 +126,8 @@ void Cops_live::setup() {
   diff_find.add_label_required("diff_file", "output diff_file (used by the stitch pass)");
   register_pass(diff_find);
 
-  Eprp_method stitch("live.merge_changes", "merge synthesized delta into the original synthesized netlist",
+  Eprp_method stitch("live.merge_changes",
+                     "merge synthesized delta into the original synthesized netlist",
                      &Cops_live::netlist_merge);
   stitch.add_label_required("osynth", "lgdb path for the original synthesized netlist");
   stitch.add_label_required("nsynth", "lgdb path for the delta synthesized netlist");

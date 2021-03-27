@@ -27,116 +27,94 @@
 // *****************************************************************************
 // *****************************************************************************
 
+#include "lefiPropType.hpp"
+
 #include <stdlib.h>
 #include <string.h>
-#include "lex.h"
-#include "lefiPropType.hpp"
+
 #include "lefiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
-lefiPropType::lefiPropType()
-: numProperties_(0),
-  propertiesAllocated_(0),
-  propNames_(NULL),
-  propTypes_(NULL)
-{
-    Init();
+lefiPropType::lefiPropType() : numProperties_(0), propertiesAllocated_(0), propNames_(NULL), propTypes_(NULL) { Init(); }
+
+void lefiPropType::Init() {
+  numProperties_       = 0;
+  propertiesAllocated_ = 0;
+  propNames_           = 0;
+  propTypes_           = 0;
 }
 
-void
-lefiPropType::Init()
-{
-    numProperties_ = 0;
-    propertiesAllocated_ = 0;
-    propNames_ = 0;
-    propTypes_ = 0;
+void lefiPropType::Clear() {
+  int i;
+
+  for (i = 0; i < numProperties_; i++) {
+    free(propNames_[i]);
+  }
+  numProperties_       = 0;
+  propertiesAllocated_ = 0;
 }
 
-void
-lefiPropType::Clear()
-{
+void lefiPropType::Destroy() {
+  Clear();
+  if (propNames_)
+    free(propNames_);
+  if (propTypes_)
+    free(propTypes_);
+}
+
+lefiPropType::~lefiPropType() { Destroy(); }
+
+void lefiPropType::setPropType(const char *name, const char type) {
+  int len;
+
+  if (numProperties_ == propertiesAllocated_)
+    bumpProps();
+  len                        = strlen(name) + 1;
+  propNames_[numProperties_] = (char *)malloc(len);
+  strcpy(propNames_[numProperties_], CASE(name));
+  propTypes_[numProperties_] = type;
+  numProperties_ += 1;
+}
+
+void lefiPropType::bumpProps() {
+  int    lim = propertiesAllocated_;
+  int    news;
+  char **newpn;
+  char * newt;
+
+  news = lim ? lim + lim : 2;
+
+  newpn = (char **)malloc(sizeof(char *) * news);
+  newt  = (char *)malloc(sizeof(char) * news);
+
+  lim = propertiesAllocated_ = news;
+
+  if (lim > 2) {
     int i;
-
     for (i = 0; i < numProperties_; i++) {
-        free(propNames_[i]);
+      newpn[i] = propNames_[i];
+      newt[i]  = propTypes_[i];
     }
-    numProperties_ = 0;
-    propertiesAllocated_ = 0;
+    free((char *)(propNames_));
+    free((char *)(propTypes_));
+  }
+  propNames_ = newpn;
+  propTypes_ = newt;
 }
 
-void
-lefiPropType::Destroy()
-{
-    Clear();
-    if (propNames_)
-        free(propNames_);
-    if (propTypes_)
-        free(propTypes_);
-}
+const char lefiPropType::propType(char *name) const {
+  int i;
 
-lefiPropType::~lefiPropType()
-{
-    Destroy();
-}
+  // Name is NULL, error
+  if (!name)
+    return ('N');
 
-void
-lefiPropType::setPropType(const char    *name,
-                          const char    type)
-{
-    int len;
-
-    if (numProperties_ == propertiesAllocated_)
-        bumpProps();
-    len = strlen(name) + 1;
-    propNames_[numProperties_] = (char*) malloc(len);
-    strcpy(propNames_[numProperties_], CASE(name));
-    propTypes_[numProperties_] = type;
-    numProperties_ += 1;
-}
-
-void
-lefiPropType::bumpProps()
-{
-    int     lim = propertiesAllocated_;
-    int     news;
-    char    **newpn;
-    char    *newt;
-
-    news = lim ? lim + lim : 2;
-
-    newpn = (char**) malloc(sizeof(char*) * news);
-    newt = (char*) malloc(sizeof(char) * news);
-
-    lim = propertiesAllocated_ = news;
-
-    if (lim > 2) {
-        int i;
-        for (i = 0; i < numProperties_; i++) {
-            newpn[i] = propNames_[i];
-            newt[i] = propTypes_[i];
-        }
-        free((char*) (propNames_));
-        free((char*) (propTypes_));
-    }
-    propNames_ = newpn;
-    propTypes_ = newt;
-}
-
-const char
-lefiPropType::propType(char *name) const
-{
-    int i;
-
-    // Name is NULL, error
-    if (!name)
-        return ('N');
-
-    for (i = 0; i < numProperties_; i++) {
-        if (strcmp(name, propNames_[i]) == 0)
-            return (propTypes_[i]);  // found the prop name
-    }
-    return ('N'); // Can't found the name
+  for (i = 0; i < numProperties_; i++) {
+    if (strcmp(name, propNames_[i]) == 0)
+      return (propTypes_[i]);  // found the prop name
+  }
+  return ('N');  // Can't found the name
 }
 END_LEFDEF_PARSER_NAMESPACE
-

@@ -7,6 +7,7 @@ class Pass_cprop : public Pass {
 private:
   bool hier;
   bool gioc;
+
 protected:
   static void optimize(Eprp_var &var);
 
@@ -14,4 +15,3 @@ public:
   Pass_cprop(const Eprp_var &var);
   static void setup();
 };
-

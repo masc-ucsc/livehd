@@ -53,9 +53,9 @@ struct Comparator_input_signal {
   };
 };
 
-template<>
+template <>
 struct Comparator_input_signal<mockturtle::mig_network::signal> {
-  bool             is_signed;
+  bool                                         is_signed;
   std::vector<mockturtle::mig_network::signal> signals;
 };
 

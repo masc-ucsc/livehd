@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "node.hpp"
 #include "node_type.hpp"
+
 #include "annotate.hpp"
 #include "graph_library.hpp"
+#include "node.hpp"
 
 static_assert(static_cast<int>(Ntype_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 

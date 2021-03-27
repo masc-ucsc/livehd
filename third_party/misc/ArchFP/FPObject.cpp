@@ -1,10 +1,9 @@
-#include "ann_place.hpp"
-#include "lgraph.hpp"
-#include "cell.hpp"
-
-#include "helpers.hpp"
-
 #include "FPObject.hpp"
+
+#include "ann_place.hpp"
+#include "cell.hpp"
+#include "helpers.hpp"
+#include "lgraph.hpp"
 
 FPObject::FPObject()
     : refCount(0)
@@ -92,7 +91,7 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
       child->set_instance_name(getUniqueName());
 
       sub_count = outputLGraphLayout(tree, child_idx, cX, cY);
-      found = true;
+      found     = true;
 
       break;
     }

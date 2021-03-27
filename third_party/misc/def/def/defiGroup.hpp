@@ -31,6 +31,7 @@
 #define defiGroup_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -41,7 +42,7 @@ class defrData;
 
 class defiGroup {
 public:
-  defiGroup(defrData *data);
+  defiGroup(defrData* data);
   void Init();
 
   void Destroy();
@@ -51,8 +52,7 @@ public:
 
   void setup(const char* name);
   void addProperty(const char* name, const char* value, const char type);
-  void addNumProperty(const char* name, const double d,
-                      const char* value, const char type);
+  void addNumProperty(const char* name, const double d, const char* value, const char type);
   void addRegionRect(int xl, int yl, int xh, int yh);
   void setRegionName(const char* name);
   void setMaxX(int x);
@@ -61,59 +61,58 @@ public:
 
   const char* name() const;
   const char* regionName() const;
-  int hasRegionBox() const;
-  int hasRegionName() const;
-  int hasMaxX() const;
-  int hasMaxY() const;
-  int hasPerim() const;
-  void regionRects(int* size, int** xl, int**yl, int** xh, int** yh) const;
-  int maxX() const;
-  int maxY() const;
-  int perim() const;
+  int         hasRegionBox() const;
+  int         hasRegionName() const;
+  int         hasMaxX() const;
+  int         hasMaxY() const;
+  int         hasPerim() const;
+  void        regionRects(int* size, int** xl, int** yl, int** xh, int** yh) const;
+  int         maxX() const;
+  int         maxY() const;
+  int         perim() const;
 
-  int numProps() const;
-  const char*  propName(int index) const;
-  const char*  propValue(int index) const;
-  double propNumber(int index) const;
-  const char   propType(int index) const;
-  int    propIsNumber(int index) const;
-  int    propIsString(int index) const;
+  int         numProps() const;
+  const char* propName(int index) const;
+  const char* propValue(int index) const;
+  double      propNumber(int index) const;
+  const char  propType(int index) const;
+  int         propIsNumber(int index) const;
+  int         propIsString(int index) const;
 
   // debug print
   void print(FILE* f) const;
 
 protected:
   char* name_;
-  int nameLength_;
+  int   nameLength_;
   char* region_;
-  int regionLength_;
+  int   regionLength_;
 
-  int rectsAllocated_;
-  int numRects_;
+  int  rectsAllocated_;
+  int  numRects_;
   int* xl_;
   int* yl_;
   int* xh_;
   int* yh_;
 
-  int maxX_;
-  int maxY_;
-  int perim_;
+  int  maxX_;
+  int  maxY_;
+  int  perim_;
   char hasRegionBox_;
   char hasRegionName_;
   char hasPerim_;
   char hasMaxX_;
   char hasMaxY_;
 
-  int numProps_;
-  int propsAllocated_;
+  int     numProps_;
+  int     propsAllocated_;
   char**  propNames_;
   char**  propValues_;
   double* propDValues_;
   char*   propTypes_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

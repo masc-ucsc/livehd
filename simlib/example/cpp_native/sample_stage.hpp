@@ -12,4 +12,3 @@ struct Sample_stage {
   void reset_cycle();
   void cycle();
 };
-

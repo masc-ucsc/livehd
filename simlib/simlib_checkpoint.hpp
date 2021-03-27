@@ -15,7 +15,7 @@
 #include "likely.hpp"
 #include "simlib_signature.hpp"
 #include "vcd_writer.hpp"
-//unsigned t = 0;
+// unsigned t = 0;
 template <typename Top_struct>
 class Simlib_checkpoint {
   uint64_t          ncycles;
@@ -25,8 +25,8 @@ class Simlib_checkpoint {
   uint64_t          reset_ncycles;
   const std::string name;
   std::string       path;  // checkpoint enabled/path
-  Top_struct       top;
-  Simlib_signature signature;
+  Top_struct        top;
+  Simlib_signature  signature;
 
   Lbench perf;
 #ifdef SIMLIB_VCD
@@ -56,9 +56,9 @@ public:
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-//#ifdef SIMLIB_TRACE
-//    top.add_signature(signature);
-//#endif
+    //#ifdef SIMLIB_TRACE
+    //    top.add_signature(signature);
+    //#endif
   };
 #else
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000)
@@ -68,9 +68,9 @@ public:
     next_checkpoint_ncycles = 1000000000;
     last_checkpoint_sec     = 0.0;
     advance_reset(reset_ncycles);
-//#ifdef SIMLIB_TRACE
-//    top.add_signature(signature);
-//#endif
+    //#ifdef SIMLIB_TRACE
+    //    top.add_signature(signature);
+    //#endif
   };
 #endif
 
@@ -90,11 +90,13 @@ public:
   }
 
   void set_checkpoint_cycles(int n) {  // main.cpp:9
-    if (path.empty()) n = 1000000000;
+    if (path.empty())
+      n = 1000000000;
     // n=10000
     n >>= 10;  // n is divided by 2pow10//n=9
     n <<= 10;  // new n is multiplied by 2pow10//n=2916
-    if (n < 1024) n = 1024;
+    if (n < 1024)
+      n = 1024;
     checkpoint_ncycles = n;  // checkpoint_ncycles=-1->9216//2ndRun:2048
     // next_checkpoint_ncycles=1000000000
     next_checkpoint_ncycles = ncycles + checkpoint_ncycles;  // 19216//2ndRun:31264
@@ -224,7 +226,8 @@ public:
   void save_intermediate_checkpoint(uint64_t n = 1) {
     do {
       int step = n;
-      if (step > next_checkpoint_ncycles) step = next_checkpoint_ncycles;
+      if (step > next_checkpoint_ncycles)
+        step = next_checkpoint_ncycles;
 
       n -= step;  // SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
@@ -236,7 +239,7 @@ public:
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        top.vcd_comb(1,0);
+        top.vcd_comb(1, 0);
         //        vcd_writer->advance_to_posedge();
         vcd::advance_to_negedge();
         top.vcd_negedge();
@@ -273,13 +276,18 @@ public:
       exit(3);
     }
     int ret = ::ftruncate(
-        fd, calc_bytes());  // fd is made of size of top size + signature size//Upon successful completion, ftruncate() and
-                            // truncate() return 0. Otherwise a -1 is returned, and errno is set to indicate the error.
+        fd,
+        calc_bytes());  // fd is made of size of top size + signature size//Upon successful completion, ftruncate() and
+                        // truncate() return 0. Otherwise a -1 is returned, and errno is set to indicate the error.
     if (ret < 0) {
       fprintf(stderr, "simlib: ERROR unable to grown checkpoint:%s\n", filename.c_str());
       exit(3);
     }
-    uint8_t* base = (uint8_t*)::mmap(nullptr, calc_bytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+    uint8_t* base = (uint8_t*)::mmap(nullptr,
+                                     calc_bytes(),
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_SHARED,
+                                     fd,
                                      0);  // fd and base are mapped as shared mem locations ; mem mapped size is otained by
                                           // calc_bytes which is top size+signature size
 
@@ -288,10 +296,12 @@ public:
       exit(3);
     }
 
-    ::memcpy(base, signature.get_map_address(),
+    ::memcpy(base,
+             signature.get_map_address(),
              signature.get_map_bytes());  // mem form signature is copied to base for the size of signature
     ::memcpy(
-        &base[signature.get_map_bytes()], &top,
+        &base[signature.get_map_bytes()],
+        &top,
         sizeof(top));  // data from top is copied to base with starting adress as that after signature area copied in last command
     ::munmap(base, calc_bytes());  // memm unmap of base for the calc_bytes i.e size of top + size of signature
     close(fd);
@@ -322,30 +332,31 @@ public:
   void advance_clock(uint64_t n = 1) {
     do {
       int step = n;
-      if (step > next_checkpoint_ncycles) step = next_checkpoint_ncycles;
+      if (step > next_checkpoint_ncycles)
+        step = next_checkpoint_ncycles;
 
       n -= step;  // SG: if step==n then this line will make n=0 thus making the possibility of n>0 unlikely.
       next_checkpoint_ncycles -= step;
       for (auto i = 0; i < step; ++i) {
 #ifdef SIMLIB_VCD
-        //t++;
+        // t++;
         //         top.vcd_cycle();
         vcd::advance_to_posedge();
         top.vcd_posedge();
         vcd::advance_to_comb();
-        if(i<=1000)
-          top.vcd_comb(0001,0001);
-        else if (i<10000)
-          top.vcd_comb(0010,0001);
+        if (i <= 1000)
+          top.vcd_comb(0001, 0001);
+        else if (i < 10000)
+          top.vcd_comb(0010, 0001);
         else
-          top.vcd_comb(0010,0010);
+          top.vcd_comb(0010, 0010);
         vcd::advance_to_negedge();
         top.vcd_negedge();
 #else
-        if(i<10000)
-          top.cycle(1,0);
+        if (i < 10000)
+          top.cycle(1, 0);
         else
-          top.cycle(0,0);
+          top.cycle(0, 0);
 #endif
       }
       ncycles += step;

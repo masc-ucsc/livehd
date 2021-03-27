@@ -27,4 +27,3 @@ protected:
 public:
   static void setup(Eprp &eprp);
 };
-

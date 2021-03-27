@@ -27,11 +27,13 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <string.h>
-#include <stdlib.h>
-#include "lex.h"
 #include "defiGroup.hpp"
+
+#include <stdlib.h>
+#include <string.h>
+
 #include "defiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -43,48 +45,39 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //////////////////////////////////////////////
 //////////////////////////////////////////////
 
-
-defiGroup::defiGroup(defrData *data)
-: defData(data)
-{
-  Init();
-}
-
+defiGroup::defiGroup(defrData* data) : defData(data) { Init(); }
 
 void defiGroup::Init() {
-  name_ = 0;
-  nameLength_ = 0;
-  region_ = 0;
+  name_         = 0;
+  nameLength_   = 0;
+  region_       = 0;
   regionLength_ = 0;
 
-  numRects_ = 0;
+  numRects_       = 0;
   rectsAllocated_ = 2;
-  xl_ = (int*)malloc(sizeof(int)*2);
-  yl_ = (int*)malloc(sizeof(int)*2);
-  xh_ = (int*)malloc(sizeof(int)*2);
-  yh_ = (int*)malloc(sizeof(int)*2);
+  xl_             = (int*)malloc(sizeof(int) * 2);
+  yl_             = (int*)malloc(sizeof(int) * 2);
+  xh_             = (int*)malloc(sizeof(int) * 2);
+  yh_             = (int*)malloc(sizeof(int) * 2);
 
-  numProps_ = 0;
+  numProps_       = 0;
   propsAllocated_ = 2;
-  propNames_   = (char**)malloc(sizeof(char*)*2);
-  propValues_  = (char**)malloc(sizeof(char*)*2);
-  propDValues_ = (double*)malloc(sizeof(double)*2);
-  propTypes_   = (char*)malloc(sizeof(char)*2);
+  propNames_      = (char**)malloc(sizeof(char*) * 2);
+  propValues_     = (char**)malloc(sizeof(char*) * 2);
+  propDValues_    = (double*)malloc(sizeof(double) * 2);
+  propTypes_      = (char*)malloc(sizeof(char) * 2);
 }
 
-
-defiGroup::~defiGroup() {
-  Destroy();
-}
-
+defiGroup::~defiGroup() { Destroy(); }
 
 void defiGroup::Destroy() {
-
-  if (name_) free(name_);
-  if (region_) free(region_);
-  name_ = 0;
-  nameLength_ = 0;
-  region_ = 0;
+  if (name_)
+    free(name_);
+  if (region_)
+    free(region_);
+  name_         = 0;
+  nameLength_   = 0;
+  region_       = 0;
   regionLength_ = 0;
 
   clear();
@@ -98,13 +91,12 @@ void defiGroup::Destroy() {
   free((char*)(yh_));
 }
 
-
 void defiGroup::clear() {
   int i;
   hasRegionName_ = 0;
-  hasPerim_ = 0;
-  hasMaxX_ = 0;
-  hasMaxY_ = 0;
+  hasPerim_      = 0;
+  hasMaxX_       = 0;
+  hasMaxY_       = 0;
   for (i = 0; i < numProps_; i++) {
     free(propNames_[i]);
     free(propValues_[i]);
@@ -114,29 +106,27 @@ void defiGroup::clear() {
   numRects_ = 0;
 }
 
-
 void defiGroup::setup(const char* name) {
   int len = strlen(name) + 1;
   if (len > nameLength_) {
-    if (name_) free(name_);
+    if (name_)
+      free(name_);
     nameLength_ = len;
-    name_ = (char*)malloc(len);
+    name_       = (char*)malloc(len);
   }
   strcpy(name_, defData->DEFCASE(name));
   clear();
-
 }
-
 
 void defiGroup::addRegionRect(int xl, int yl, int xh, int yh) {
   int i;
   if (numRects_ == rectsAllocated_) {
-    int max = numRects_ * 2;
-    int* nxl = (int*)malloc(sizeof(int)*max);
-    int* nyl = (int*)malloc(sizeof(int)*max);
-    int* nxh = (int*)malloc(sizeof(int)*max);
-    int* nyh = (int*)malloc(sizeof(int)*max);
-    max = numRects_;
+    int  max = numRects_ * 2;
+    int* nxl = (int*)malloc(sizeof(int) * max);
+    int* nyl = (int*)malloc(sizeof(int) * max);
+    int* nxh = (int*)malloc(sizeof(int) * max);
+    int* nyh = (int*)malloc(sizeof(int) * max);
+    max      = numRects_;
     for (i = 0; i < max; i++) {
       nxl[i] = xl_[i];
       nyl[i] = yl_[i];
@@ -154,7 +144,7 @@ void defiGroup::addRegionRect(int xl, int yl, int xh, int yh) {
     rectsAllocated_ *= 2;
   }
 
-  i = numRects_;
+  i      = numRects_;
   xl_[i] = xl;
   yl_[i] = yl;
   xh_[i] = xh;
@@ -162,63 +152,55 @@ void defiGroup::addRegionRect(int xl, int yl, int xh, int yh) {
   numRects_ += 1;
 }
 
-
-void defiGroup::regionRects(int* size, int** xl,
-   int**yl, int** xh, int** yh) const {
+void defiGroup::regionRects(int* size, int** xl, int** yl, int** xh, int** yh) const {
   *size = numRects_;
-  *xl = xl_;
-  *yl = yl_;
-  *xh = xh_;
-  *yh = yh_;
+  *xl   = xl_;
+  *yl   = yl_;
+  *xh   = xh_;
+  *yh   = yh_;
 }
-
 
 void defiGroup::setRegionName(const char* region) {
   int len = strlen(region) + 1;
   if (len > regionLength_) {
-    if (region_) free(region_);
+    if (region_)
+      free(region_);
     regionLength_ = len;
-    region_ = (char*)malloc(len);
+    region_       = (char*)malloc(len);
   }
   strcpy(region_, defData->DEFCASE(region));
   hasRegionName_ = 1;
-
 }
-
 
 void defiGroup::setMaxX(int x) {
   hasMaxX_ = 1;
-  maxX_ = x;
+  maxX_    = x;
 }
-
 
 void defiGroup::setMaxY(int y) {
   hasMaxY_ = 1;
-  maxY_ = y;
+  maxY_    = y;
 }
-
 
 void defiGroup::setPerim(int p) {
   hasPerim_ = 1;
-  perim_ = p;
+  perim_    = p;
 }
 
-
-void defiGroup::addProperty(const char* name, const char* value,
-                            const char type) {
+void defiGroup::addProperty(const char* name, const char* value, const char type) {
   int len;
   if (numProps_ == propsAllocated_) {
-    int i;
+    int     i;
     char**  nn;
     char**  nv;
     double* nd;
     char*   nt;
 
     propsAllocated_ *= 2;
-    nn = (char**)malloc(sizeof(char*)*propsAllocated_);
-    nv = (char**)malloc(sizeof(char*)*propsAllocated_);
-    nd = (double*)malloc(sizeof(double)*propsAllocated_);
-    nt = (char*)malloc(sizeof(char)*propsAllocated_);
+    nn = (char**)malloc(sizeof(char*) * propsAllocated_);
+    nv = (char**)malloc(sizeof(char*) * propsAllocated_);
+    nd = (double*)malloc(sizeof(double) * propsAllocated_);
+    nt = (char*)malloc(sizeof(char) * propsAllocated_);
     for (i = 0; i < numProps_; i++) {
       nn[i] = propNames_[i];
       nv[i] = propValues_[i];
@@ -229,38 +211,36 @@ void defiGroup::addProperty(const char* name, const char* value,
     free((char*)(propValues_));
     free((char*)(propDValues_));
     free((char*)(propTypes_));
-    propNames_ = nn;
-    propValues_ = nv;
+    propNames_   = nn;
+    propValues_  = nv;
     propDValues_ = nd;
-    propTypes_ = nt;
+    propTypes_   = nt;
   }
-  len = strlen(name) + 1;
+  len                   = strlen(name) + 1;
   propNames_[numProps_] = (char*)malloc(len);
   strcpy(propNames_[numProps_], defData->DEFCASE(name));
-  len = strlen(value) + 1;
+  len                    = strlen(value) + 1;
   propValues_[numProps_] = (char*)malloc(len);
   strcpy(propValues_[numProps_], defData->DEFCASE(value));
   propDValues_[numProps_] = 0;
-  propTypes_[numProps_] = type;
+  propTypes_[numProps_]   = type;
   numProps_ += 1;
 }
 
-
-void defiGroup::addNumProperty(const char* name, const double d,
-                               const char* value, const char type) {
+void defiGroup::addNumProperty(const char* name, const double d, const char* value, const char type) {
   int len;
   if (numProps_ == propsAllocated_) {
-    int i;
+    int     i;
     char**  nn;
     char**  nv;
     double* nd;
     char*   nt;
 
     propsAllocated_ *= 2;
-    nn = (char**)malloc(sizeof(char*)*propsAllocated_);
-    nv = (char**)malloc(sizeof(char*)*propsAllocated_);
-    nd = (double*)malloc(sizeof(double)*propsAllocated_);
-    nt = (char*)malloc(sizeof(char)*propsAllocated_);
+    nn = (char**)malloc(sizeof(char*) * propsAllocated_);
+    nv = (char**)malloc(sizeof(char*) * propsAllocated_);
+    nd = (double*)malloc(sizeof(double) * propsAllocated_);
+    nt = (char*)malloc(sizeof(char) * propsAllocated_);
     for (i = 0; i < numProps_; i++) {
       nn[i] = propNames_[i];
       nv[i] = propValues_[i];
@@ -271,143 +251,121 @@ void defiGroup::addNumProperty(const char* name, const double d,
     free((char*)(propValues_));
     free((char*)(propDValues_));
     free((char*)(propTypes_));
-    propNames_ = nn;
-    propValues_ = nv;
+    propNames_   = nn;
+    propValues_  = nv;
     propDValues_ = nd;
-    propTypes_ = nt;
+    propTypes_   = nt;
   }
-  len = strlen(name) + 1;
+  len                   = strlen(name) + 1;
   propNames_[numProps_] = (char*)malloc(len);
   strcpy(propNames_[numProps_], defData->DEFCASE(name));
-  len = strlen(value) + 1;
+  len                    = strlen(value) + 1;
   propValues_[numProps_] = (char*)malloc(len);
   strcpy(propValues_[numProps_], defData->DEFCASE(value));
   propDValues_[numProps_] = d;
-  propTypes_[numProps_] = type;
+  propTypes_[numProps_]   = type;
   numProps_ += 1;
 }
 
-
-int defiGroup::numProps() const {
-  return numProps_;
-}
-
+int defiGroup::numProps() const { return numProps_; }
 
 const char* defiGroup::propName(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propNames_[index];
 }
 
-
 const char* defiGroup::propValue(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propValues_[index];
 }
 
-
 double defiGroup::propNumber(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propDValues_[index];
 }
 
-
 const char defiGroup::propType(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propTypes_[index];
 }
 
-
 int defiGroup::propIsNumber(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propDValues_[index] ? 1 : 0;
 }
 
-
 int defiGroup::propIsString(int index) const {
   char msg[160];
   if (index < 0 || index >= numProps_) {
-     sprintf (msg, "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d", index, numProps_);
-     defiError(0, 6050, msg, defData);
-     return 0;
+    sprintf(msg,
+            "ERROR (LEFPARS-6050): The index number %d given for the GROUP PROPERTY is invalid.\nValid index is from 0 to %d",
+            index,
+            numProps_);
+    defiError(0, 6050, msg, defData);
+    return 0;
   }
   return propDValues_[index] ? 0 : 1;
 }
 
+const char* defiGroup::regionName() const { return region_; }
 
-const char* defiGroup::regionName() const {
-  return region_;
-}
+const char* defiGroup::name() const { return name_; }
 
+int defiGroup::perim() const { return perim_; }
 
-const char* defiGroup::name() const {
-  return name_;
-}
+int defiGroup::maxX() const { return maxX_; }
 
+int defiGroup::maxY() const { return maxY_; }
 
-int defiGroup::perim() const {
-  return perim_;
-}
+int defiGroup::hasMaxX() const { return hasMaxX_; }
 
+int defiGroup::hasMaxY() const { return hasMaxY_; }
 
-int defiGroup::maxX() const {
-  return maxX_;
-}
+int defiGroup::hasPerim() const { return hasPerim_; }
 
+int defiGroup::hasRegionBox() const { return numRects_ ? 1 : 0; }
 
-int defiGroup::maxY() const {
-  return maxY_;
-}
-
-
-int defiGroup::hasMaxX() const {
-  return hasMaxX_;
-}
-
-
-int defiGroup::hasMaxY() const {
-  return hasMaxY_;
-}
-
-
-int defiGroup::hasPerim() const {
-  return hasPerim_;
-}
-
-
-int defiGroup::hasRegionBox() const {
-  return numRects_ ? 1 : 0 ;
-}
-
-
-int defiGroup::hasRegionName() const {
-  return hasRegionName_;
-}
-
+int defiGroup::hasRegionName() const { return hasRegionName_; }
 
 void defiGroup::print(FILE* f) const {
   int i;
@@ -419,13 +377,12 @@ void defiGroup::print(FILE* f) const {
   }
 
   if (hasRegionBox()) {
-    int size = numRects_;
-    int* xl = xl_;
-    int* yl = yl_;
-    int* xh = xh_;
-    int* yh = yh_;
-    for (i = 0; i < size; i++)
-      fprintf(f, "  region box %d,%d %d,%d\n", xl[i], yl[i], xh[i], yh[i]);
+    int  size = numRects_;
+    int* xl   = xl_;
+    int* yl   = yl_;
+    int* xh   = xh_;
+    int* yh   = yh_;
+    for (i = 0; i < size; i++) fprintf(f, "  region box %d,%d %d,%d\n", xl[i], yl[i], xh[i], yh[i]);
   }
 
   if (hasMaxX()) {
@@ -439,9 +396,6 @@ void defiGroup::print(FILE* f) const {
   if (hasPerim()) {
     fprintf(f, "  perim %d\n", perim());
   }
-
 }
 
-
 END_LEFDEF_PARSER_NAMESPACE
-

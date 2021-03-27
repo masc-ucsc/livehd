@@ -31,6 +31,7 @@
 #define lefiMisc_h
 
 #include <stdio.h>
+
 #include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -38,11 +39,11 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // The different types of items in a geometry list.
 
 struct lefiGeomRect {
-      double xl;
-      double yl;
-      double xh;
-      double yh;
-      int    colorMask;
+  double xl;
+  double yl;
+  double xh;
+  double yh;
+  int    colorMask;
 };
 
 struct lefiGeomRectIter {
@@ -68,11 +69,11 @@ struct lefiGeomPathIter {
   int     numPoints;
   double* x;
   double* y;
-  double xStart;
-  double yStart;
-  double xStep;
-  double yStep;
-  int    colorMask;
+  double  xStart;
+  double  yStart;
+  double  xStep;
+  double  yStep;
+  int     colorMask;
 };
 
 struct lefiGeomPolygon {
@@ -83,14 +84,14 @@ struct lefiGeomPolygon {
 };
 
 struct lefiGeomPolygonIter {
-  int numPoints;
+  int     numPoints;
   double* x;
   double* y;
-  double xStart;
-  double yStart;
-  double xStep;
-  double yStep;
-  int    colorMask;
+  double  xStart;
+  double  yStart;
+  double  xStep;
+  double  yStep;
+  int     colorMask;
 };
 
 enum lefiGeomEnum {
@@ -146,56 +147,52 @@ public:
   void clearPolyItems();
   void add(void* v, lefiGeomEnum e);
   void addLayer(const char* name);
-  void addLayerExceptPgNet();                     // 5.7
+  void addLayerExceptPgNet();  // 5.7
   void addLayerMinSpacing(double spacing);
   void addLayerRuleWidth(double width);
   void addClass(const char* name);
   void addWidth(double w);
   void addPath(int colorMask);
   void addPathIter(int colorMask);
-/*  pcr 481783 & 560504
-*/
+  /*  pcr 481783 & 560504
+   */
   void addRect(int colorMask, double xl, double yl, double xh, double yh);
   void addRectIter(int colorMask, double xl, double yl, double xh, double yh);
   void addPolygon(int colorMask = 0);
   void addPolygonIter(int colorMask);
-  void addVia(int viaMasks,
-              double x, double y, const char* name);
-  void addViaIter(int viaMasks,
-                  double x, double y, const char* name);
-  void addStepPattern(double xStart, double yStart,
-                      double xStep, double yStep);
+  void addVia(int viaMasks, double x, double y, const char* name);
+  void addViaIter(int viaMasks, double x, double y, const char* name);
+  void addStepPattern(double xStart, double yStart, double xStep, double yStep);
   void startList(double x, double y);
   void addToList(double x, double y);
 
-  int numItems() const;
-  lefiGeomEnum itemType(int index) const;
-  lefiGeomRect* getRect(int index) const;
-  lefiGeomRectIter* getRectIter(int index) const;
-  lefiGeomPath* getPath(int index) const;
-  lefiGeomPathIter* getPathIter(int index) const;
-  int    hasLayerExceptPgNet(int index) const ;     // 5.7
-  char*  getLayer(int index) const;
-  double getLayerMinSpacing(int index) const;
-  double getLayerRuleWidth(int index) const;
-  double getWidth(int index) const;
-  lefiGeomPolygon* getPolygon(int index) const;
+  int                  numItems() const;
+  lefiGeomEnum         itemType(int index) const;
+  lefiGeomRect*        getRect(int index) const;
+  lefiGeomRectIter*    getRectIter(int index) const;
+  lefiGeomPath*        getPath(int index) const;
+  lefiGeomPathIter*    getPathIter(int index) const;
+  int                  hasLayerExceptPgNet(int index) const;  // 5.7
+  char*                getLayer(int index) const;
+  double               getLayerMinSpacing(int index) const;
+  double               getLayerRuleWidth(int index) const;
+  double               getWidth(int index) const;
+  lefiGeomPolygon*     getPolygon(int index) const;
   lefiGeomPolygonIter* getPolygonIter(int index) const;
-  char*  getClass(int index) const;
-  lefiGeomVia* getVia(int index) const;
-  lefiGeomViaIter* getViaIter(int index) const;
+  char*                getClass(int index) const;
+  lefiGeomVia*         getVia(int index) const;
+  lefiGeomViaIter*     getViaIter(int index) const;
 
   void print(FILE* f) const;
 
 protected:
-
-  int numItems_;
-  int itemsAllocated_;
+  int           numItems_;
+  int           itemsAllocated_;
   lefiGeomEnum* itemType_;
-  void** items_;
+  void**        items_;
 
-  int numPoints_;
-  int pointsAllocated_;
+  int     numPoints_;
+  int     pointsAllocated_;
   double* x_;
   double* y_;
 
@@ -221,7 +218,7 @@ public:
 
   const char* name1() const;
   const char* name2() const;
-  double distance() const;
+  double      distance() const;
 
   // Debug print
   void print(FILE* f) const;
@@ -248,8 +245,8 @@ public:
   void setValues(double name1, double name2);
 
   const char* name() const;
-  double value1(int index) const;
-  double value2(int index) const;
+  double      value1(int index) const;
+  double      value2(int index) const;
 
   int numValues() const;
 
@@ -305,19 +302,19 @@ public:
   void addRowPattern(const char* name, int orient);
 
   const char* name() const;
-  int hasClass() const;
+  int         hasClass() const;
   const char* siteClass() const;
-  double sizeX() const;
-  double sizeY() const;
-  int hasSize() const;
-  int hasXSymmetry() const;
-  int hasYSymmetry() const;
-  int has90Symmetry() const;
-  int hasRowPattern() const;                 // 5.6
-  int numSites() const;                      // 5.6
-  char* siteName(int index) const;           // 5.6
-  int   siteOrient(int index) const;         // 5.6
-  char* siteOrientStr(int index) const;      // 5.6
+  double      sizeX() const;
+  double      sizeY() const;
+  int         hasSize() const;
+  int         hasXSymmetry() const;
+  int         hasYSymmetry() const;
+  int         has90Symmetry() const;
+  int         hasRowPattern() const;           // 5.6
+  int         numSites() const;                // 5.6
+  char*       siteName(int index) const;       // 5.6
+  int         siteOrient(int index) const;     // 5.6
+  char*       siteOrientStr(int index) const;  // 5.6
 
   // Debug print
   void print(FILE* f) const;
@@ -330,9 +327,9 @@ protected:
   double sizeX_;
   double sizeY_;
   int    hasSize_;
-  int    symmetry_;   // bit 0-x   bit 1-y   bit 2-90
+  int    symmetry_;  // bit 0-x   bit 1-y   bit 2-90
 
-  int    numRowPattern_;         // 5.6 ROWPATTERN
+  int    numRowPattern_;  // 5.6 ROWPATTERN
   int    rowPatternAllocated_;
   char** siteNames_;
   int*   siteOrients_;
@@ -346,19 +343,18 @@ public:
   void Destroy();
   ~lefiSitePattern();
 
-  void set(const char* name, double x, double y, int orient,
-       double xStart, double yStart, double xStep, double yStep);
+  void set(const char* name, double x, double y, int orient, double xStart, double yStart, double xStep, double yStep);
 
-  const  char* name() const;
-  int    orient() const;
-  const  char* orientStr() const;
-  double x() const;
-  double y() const;
-  int    hasStepPattern() const;    // 5.6
-  double xStart() const;
-  double yStart() const;
-  double xStep() const;
-  double yStep() const;
+  const char* name() const;
+  int         orient() const;
+  const char* orientStr() const;
+  double      x() const;
+  double      y() const;
+  int         hasStepPattern() const;  // 5.6
+  double      xStart() const;
+  double      yStart() const;
+  double      xStep() const;
+  double      yStep() const;
 
   // Debug print
   void print(FILE* f) const;
@@ -388,11 +384,11 @@ public:
   void addLayer(const char* name);
 
   const char* name() const;
-  double start() const;
-  int numTracks() const;
-  double space() const;
+  double      start() const;
+  int         numTracks() const;
+  double      space() const;
 
-  int numLayers() const;
+  int         numLayers() const;
   const char* layerName(int index) const;
 
   // Debug print
@@ -421,9 +417,9 @@ public:
   void set(const char* name, double start, int numCRs, double space);
 
   const char* name() const;
-  double start() const;
-  int numCRs() const;
-  double space() const;
+  double      start() const;
+  int         numCRs() const;
+  double      space() const;
 
   // Debug print
   void print(FILE* f) const;
@@ -447,7 +443,7 @@ public:
   void set(const char* name, int value);
 
   const char* name() const;
-  int   value() const;
+  int         value() const;
 
   // Debug print
   void print(FILE* f) const;
@@ -470,8 +466,8 @@ public:
   void setMaxStackVia(int value);
   void setMaxStackViaRange(const char* bottomLayer, const char* topLayer);
 
-  int maxStackVia() const;
-  int hasMaxStackViaRange() const;
+  int         maxStackVia() const;
+  int         hasMaxStackViaRange() const;
   const char* maxStackViaBottomLayer() const;
   const char* maxStackViaTopLayer() const;
 
@@ -490,4 +486,3 @@ END_LEFDEF_PARSER_NAMESPACE
 USE_LEFDEF_PARSER_NAMESPACE
 
 #endif
-

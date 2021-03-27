@@ -31,6 +31,7 @@
 #define defiPath_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -78,14 +79,13 @@ enum defiPath_e {
   DEFIPATH_VIRTUALPOINT,
   DEFIPATH_MASK,
   DEFIPATH_VIAMASK
-  } ;
-
+};
 
 class defiPath {
 public:
-  defiPath(defrData *data);
+  defiPath(defrData* data);
   // This is 'data ownership transfer' constructor.
-  defiPath(defiPath *defiPathRef);
+  defiPath(defiPath* defiPathRef);
 
   void Init();
 
@@ -96,30 +96,29 @@ public:
   void reverseOrder();
 
   // To traverse the path and get the parts.
-  void initTraverse() const;   // Initialize the traverse.
-  void initTraverseBackwards() const;   // Initialize the traverse in reverse.
-  int next() const;            // Get the next element.
-  int prev() const;            // Get the next element in reverse.
-  const char* getLayer() const;// Get the layer.
-  const char* getTaperRule() const;// Get the rule.
-  const char* getVia() const;  // Get the via.
-  const char* getShape() const;// Get the shape.
-  int  getTaper() const;// Get the taper.
-  int  getStyle() const;// Get the style.
-  int  getViaRotation() const;  // Get the via rotation.
-  void getViaRect(int* deltaX1, int* deltaY1, int* deltaX2, int* deltaY2) const;
-  const char* getViaRotationStr() const;   // Return via rotation in string format
-  void getViaData(int* numX, int* numY, int* stepX, int* stepY) const;  // 5.4.1
-  int  getWidth() const;        // Get the width.
-  void getPoint(int* x, int* y) const;// Get the point.
-  void getFlushPoint(int* x, int* y, int* ext) const;// Get the point.
-  void getVirtualPoint(int* x, int* y) const;
-  int  getMask() const;
-  int  getViaTopMask() const;
-  int  getViaCutMask() const;
-  int  getViaBottomMask() const;
-  int  getRectMask() const;
-
+  void        initTraverse() const;           // Initialize the traverse.
+  void        initTraverseBackwards() const;  // Initialize the traverse in reverse.
+  int         next() const;                   // Get the next element.
+  int         prev() const;                   // Get the next element in reverse.
+  const char* getLayer() const;               // Get the layer.
+  const char* getTaperRule() const;           // Get the rule.
+  const char* getVia() const;                 // Get the via.
+  const char* getShape() const;               // Get the shape.
+  int         getTaper() const;               // Get the taper.
+  int         getStyle() const;               // Get the style.
+  int         getViaRotation() const;         // Get the via rotation.
+  void        getViaRect(int* deltaX1, int* deltaY1, int* deltaX2, int* deltaY2) const;
+  const char* getViaRotationStr() const;                                       // Return via rotation in string format
+  void        getViaData(int* numX, int* numY, int* stepX, int* stepY) const;  // 5.4.1
+  int         getWidth() const;                                                // Get the width.
+  void        getPoint(int* x, int* y) const;                                  // Get the point.
+  void        getFlushPoint(int* x, int* y, int* ext) const;                   // Get the point.
+  void        getVirtualPoint(int* x, int* y) const;
+  int         getMask() const;
+  int         getViaTopMask() const;
+  int         getViaCutMask() const;
+  int         getViaBottomMask() const;
+  int         getRectMask() const;
 
   // These routines are called by the parser to fill the path.
   void addWidth(int w);
@@ -132,7 +131,7 @@ public:
   void addViaRect(int deltaX1, int deltaY1, int deltaX2, int deltaY2);
   void addMask(int colorMask);
   void addViaMask(int colorMask);
-  void addViaData(int numX, int numY, int stepX, int stepY);   // 5.4.1
+  void addViaData(int numX, int numY, int stepX, int stepY);  // 5.4.1
   void setTaper();
   void addTaperRule(const char* rule);
   void addShape(const char* shape);
@@ -146,12 +145,12 @@ public:
 protected:
   int currentType() const;
 
-  int* keys_;           // type of item in path
-  void** data_;         // extra data
-  int numUsed_;         // number of items used in array
-  int numAllocated_;    // allocated size of keys and data
-  int* pointer_;        // traversal pointer, allocated because used
-                        // as iterator in const traversal functions.
+  int*   keys_;          // type of item in path
+  void** data_;          // extra data
+  int    numUsed_;       // number of items used in array
+  int    numAllocated_;  // allocated size of keys and data
+  int*   pointer_;       // traversal pointer, allocated because used
+                         // as iterator in const traversal functions.
   int numX_;
   int numY_;
   int stepX_;
@@ -160,7 +159,7 @@ protected:
   int deltaY_;
   int mask_;
 
-  defrData *defData;
+  defrData* defData;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

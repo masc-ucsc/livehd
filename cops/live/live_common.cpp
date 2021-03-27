@@ -6,7 +6,8 @@ namespace Live {
 int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
     I(graph->get_bits(graph->get_node(idx).get_driver_pin()) >= current_bit);
-    if (pin != 0) return -1;  // do not propagate through this pid
+    if (pin != 0)
+      return -1;  // do not propagate through this pid
     Node_pin picked;
     Node_pin offset;
     for (auto &c : graph->inp_edges(idx)) {
@@ -33,7 +34,8 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       I(last + 1 == (int)ps.first);  // need to traverse in order
       last = ps.first;
       if (offset + ps.second > current_bit) {
-        if (ps.first != pin) return -1;  // do not propagate through this pid
+        if (ps.first != pin)
+          return -1;  // do not propagate through this pid
         I(current_bit >= offset);
         bits.insert(current_bit - offset);
         return 0;
@@ -107,9 +109,9 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
       }
     }
     return 0;
-  } else if (graph->node_type_get(idx).op == Equals_Op || graph->node_type_get(idx).op == GreaterThan_Op ||
-             graph->node_type_get(idx).op == GreaterEqualThan_Op || graph->node_type_get(idx).op == LessEqualThan_Op ||
-             graph->node_type_get(idx).op == LessThan_Op || graph->node_type_get(idx).op == TechMap_Op) {
+  } else if (graph->node_type_get(idx).op == Equals_Op || graph->node_type_get(idx).op == GreaterThan_Op
+             || graph->node_type_get(idx).op == GreaterEqualThan_Op || graph->node_type_get(idx).op == LessEqualThan_Op
+             || graph->node_type_get(idx).op == LessThan_Op || graph->node_type_get(idx).op == TechMap_Op) {
     Index_ID relevant_port = 0;
 
     for (auto &c : graph->inp_edges(idx)) {
@@ -131,7 +133,8 @@ int resolve_bit(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, 
 // when propagating backwards
 int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID pin, absl::flat_hash_set<uint32_t> &bits) {
   if (graph->node_type_get(idx).op == Pick_Op) {
-    if (pin != 0) return -1;  // do not propagate through this pid
+    if (pin != 0)
+      return -1;  // do not propagate through this pid
     Index_ID picked = 0, offset = 0;
     for (auto &c : graph->inp_edges(idx)) {
       if (c.get_inp_pin().get_pid() == 0) {
@@ -153,7 +156,8 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
   } else if (graph->node_type_get(idx).op == Join_Op) {
     std::map<Index_ID, uint32_t> port_size;
     for (auto &c : graph->inp_edges(idx)) {
-      if (c.get_inp_pin().get_pid() >= pin) continue;
+      if (c.get_inp_pin().get_pid() >= pin)
+        continue;
       port_size[c.get_inp_pin().get_pid()] = graph->get_bits(c.get_out_pin());
     }
     uint32_t offset = 0;
@@ -197,7 +201,8 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
     if (const_shift >= 0 && (!sign || static_cast<int>(current_bit) != graph->get_bits(idx) - 1)) {
       // if there is sign extension, MSB affects all bits
       // bits lower than shift amount do no affect any bit
-      if (current_bit >= static_cast<uint32_t>(const_shift)) bits.insert(current_bit - const_shift);
+      if (current_bit >= static_cast<uint32_t>(const_shift))
+        bits.insert(current_bit - const_shift);
     } else {
       for (int bit = graph->get_bits(idx) - 1; bit >= 0; bit--) {
         // each bit can only affect lower bits
@@ -222,7 +227,8 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
       }
     }
     if (const_shift >= 0) {
-      if (current_bit + const_shift < graph->get_bits(idx)) bits.insert(current_bit + const_shift);
+      if (current_bit + const_shift < graph->get_bits(idx))
+        bits.insert(current_bit + const_shift);
       return 0;
     } else {
       for (int bit = current_bit; bit < graph->get_bits(idx); bit++) {
@@ -230,9 +236,9 @@ int resolve_bit_fwd(LGraph *graph, Index_ID idx, uint32_t current_bit, Port_ID p
       }
     }
     return 0;
-  } else if (graph->node_type_get(idx).op == Equals_Op || graph->node_type_get(idx).op == GreaterThan_Op ||
-             graph->node_type_get(idx).op == GreaterEqualThan_Op || graph->node_type_get(idx).op == LessEqualThan_Op ||
-             graph->node_type_get(idx).op == LessThan_Op) {
+  } else if (graph->node_type_get(idx).op == Equals_Op || graph->node_type_get(idx).op == GreaterThan_Op
+             || graph->node_type_get(idx).op == GreaterEqualThan_Op || graph->node_type_get(idx).op == LessEqualThan_Op
+             || graph->node_type_get(idx).op == LessThan_Op) {
     bits.insert(1);
   } else {
     bits.insert(current_bit);

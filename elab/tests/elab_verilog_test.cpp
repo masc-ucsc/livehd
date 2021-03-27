@@ -16,6 +16,7 @@
 
 class Verilog_scanner : public Elab_scanner {
   std::set<std::string> verilog_keyword;
+
 public:
   Verilog_scanner() {
     // Verilog preproc
@@ -123,18 +124,19 @@ public:
     verilog_keyword.insert("xor");
   }
   void elaborate() {
+    // printf("%s sz=%d pos=%d line=%d\n", buffer_name, buffer_sz, buffer_start_pos, buffer_start_line);
 
-    //printf("%s sz=%d pos=%d line=%d\n", buffer_name, buffer_sz, buffer_start_pos, buffer_start_line);
-
-    bool last_input = false;
+    bool last_input  = false;
     bool last_output = false;
 
     std::string_view module;
-    while(!scan_is_end()) {
+    while (!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
         std::string token{scan_text()};
 
-        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c){ return std::tolower(c); }); // verilog is can insensitive
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
+          return std::tolower(c);
+        });  // verilog is can insensitive
 
         if (token == "module") {
           if (!module.empty()) {
@@ -142,29 +144,29 @@ public:
           }
           scan_next();
           module = scan_text();
-        }else if (token == "input") {
+        } else if (token == "input") {
           last_input = true;
-        }else if (token == "output") {
+        } else if (token == "output") {
           last_output = true;
-        }else if (token == "endmodule") {
+        } else if (token == "endmodule") {
           if (module.size()) {
             fmt::print("{}={}\n", token, module);
             module = std::string_view("");
-          }else{
+          } else {
             scan_error(fmt::format("found endmodule without corresponding module"));
           }
         }
-      }else if (scan_is_token(Token_id_comma) ||scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
+      } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
         if (last_input || last_output) {
           if (scan_is_prev_token(Token_id_alnum)) {
             auto label = scan_prev_text();
 
             if (last_input)
-              fmt::print("  inp {}\n",label);
+              fmt::print("  inp {}\n", label);
             else
-              fmt::print("  out {}\n",label);
+              fmt::print("  out {}\n", label);
           }
-          last_input = false;
+          last_input  = false;
           last_output = false;
         }
       }
@@ -175,8 +177,7 @@ public:
 };
 
 int main(int argc, char **argv) {
-
-  if(argc != 2) {
+  if (argc != 2) {
     fprintf(stderr, "Usage:\n\t%s file\n", argv[0]);
     exit(-3);
   }

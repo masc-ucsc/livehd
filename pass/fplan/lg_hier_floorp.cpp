@@ -42,7 +42,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
     l->setArea(area);
     return l;
   }
-  
+
   l->setType(Ntype_op::Sub);
 
   for (auto pair : sub_lg_count) {
@@ -64,12 +64,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
 
     unsigned int count = sub_lg_count[sub_lg];
     if (subl->getType() == Ntype_op::Const) {
-      l->addComponentCluster(subl->getName(),
-                             count,
-                             subl->getArea(),
-                             8.0,
-                             1.0,
-                             randomHint(count));
+      l->addComponentCluster(subl->getName(), count, subl->getArea(), 8.0, 1.0, randomHint(count));
     } else {
       l->addComponent(subl, count, randomHint(count));
     }
@@ -78,6 +73,4 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
   return l;
 }
 
-void Lg_hier_floorp::load() {
-  root_layout = load_lg_modules(root_lg);
-}
+void Lg_hier_floorp::load() { root_layout = load_lg_modules(root_lg); }

@@ -6,4 +6,3 @@ void to_json(LGraph *lg, const std::string &filename) {
   (void)lg;
   (void)filename;
 }
-

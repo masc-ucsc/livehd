@@ -1,13 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <array>
 #include <cstdint>
 #include <string_view>
-#include <stdio.h>
-#include <stdlib.h>
-#include "mmap_map.hpp"
 
+#include "mmap_map.hpp"
 
 namespace mmap_lib {
 
@@ -44,35 +45,34 @@ protected:
   uint32_t             ptr_or_start;  // 4 chars if _size < 14, ptr to mmap otherwise
   std::array<char, 10> e;             // last 10 "special <128" characters ending the string
   uint16_t             _size;         // 2 bytes
-  //int                  map_key;
-  //using Map = typename mmap_lib::map<uint32_t, uint32_t>;
+  // int                  map_key;
+  // using Map = typename mmap_lib::map<uint32_t, uint32_t>;
 
   constexpr bool is_digit(char c) const { return c >= '0' && c <= '9'; }
 
-
 public:
-  static mmap_lib::map<uint32_t, uint32_t> string_map; //LUT  <our class str, position in vector>
+  static mmap_lib::map<uint32_t, uint32_t> string_map;  // LUT  <our class str, position in vector>
 #if 0
   inline static mmap_lib::map<std::string_view, bool> string_map;
 #endif
 
   inline static std::vector<int> string_vector;
-  
+
   // FIXME: This type of constructor is needed to be a constexpr
-   /*"================================= "
-    "============constructor 1========= "
-    "================================== "*/
-  template<std::size_t N, typename = std::enable_if_t<(N-1)<14>>
-  constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) {
-    auto stop    = _size<4?_size:4;
-    //isptr =  _size<14?false:true;
-    for(auto i=0;i<stop;++i) {
+  /*"================================= "
+   "============constructor 1========= "
+   "================================== "*/
+  template <std::size_t N, typename = std::enable_if_t<(N - 1) < 14>>
+  constexpr str(const char (&s)[N]) : ptr_or_start(0), e{0}, _size(N - 1) {
+    auto stop = _size < 4 ? _size : 4;
+    // isptr =  _size<14?false:true;
+    for (auto i = 0; i < stop; ++i) {
       ptr_or_start <<= 8;
       ptr_or_start |= s[i];
     }
-    auto e_pos   = 0u;
-    for(auto i=stop ;i<N-1;++i) { // 8 (not 10 to allow to grow a bit) last positions
-       e[e_pos] = s[i];
+    auto e_pos = 0u;
+    for (auto i = stop; i < N - 1; ++i) {  // 8 (not 10 to allow to grow a bit) last positions
+      e[e_pos] = s[i];
       ++e_pos;
     }
   }
@@ -89,9 +89,9 @@ public:
 #endif
 
     bool vector_flag = true;
-    
+
     // the line below should be constant time
-    
+
     for (auto i = string_map.begin(), end = string_map.end(); i != end; ++i) {
       uint32_t key   = string_map.get_key(i);
       uint16_t value = string_map.get(i);
@@ -110,26 +110,26 @@ public:
     return std::make_pair(0, 0);
   }
 
-   /*"================================= "
-    "============constructor 2========= "
-    "================================== "*/
- 
-  template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
+  /*"================================= "
+   "============constructor 2========= "
+   "================================== "*/
+
+  template <std::size_t N, typename = std::enable_if_t<(N - 1) >= 14>, typename = void>
   str(const char (&s)[N]) : ptr_or_start(0), e{0}, _size(N - 1) {
     // the first two charactors
     e[0] = s[0];
     e[1] = s[1];
     // the last eight  charactors
     for (int i = 0; i < 8; i++) {
-      e[9-i] = s[_size - 1 -i];
+      e[9 - i] = s[_size - 1 - i];
     }
     // checking if it exists
-    
-    char long_str[_size-10];
+
+    char long_str[_size - 10];
     for (int i = 0; i < _size - 8; i++) {
       long_str[i] = s[i + 2];
     }
-    
+
     std::pair<int, int> pair = str_exists(long_str, _size - 10);
     if (pair.second) {
       ptr_or_start = pair.first;
@@ -137,103 +137,101 @@ public:
       for (int i = 0; i < _size - 10; i++) {
         string_vector.push_back(long_str[i]);
       }
-      ptr_or_start = string_vector.size()-(_size-10);
+      ptr_or_start = string_vector.size() - (_size - 10);
       str::string_map.set(ptr_or_start, _size - 10);
     }
-
   }
-  
-  
 
-   /*"================================= "
-    "============constructor 3========= "
-    "================================== "
-    sv might not have null terminator
-    don't copy one beyond what you need
-    keep copying till we find a \0
-    */
+  /*"================================= "
+   "============constructor 3========= "
+   "================================== "
+   sv might not have null terminator
+   don't copy one beyond what you need
+   keep copying till we find a \0
+   */
   str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
-    //claim is to treat it as a normal string 
-  	if (_size < 14 ){
-		auto stop    = _size<4?_size:4;
-	    for(auto i=0;i<stop;++i) {
-	      ptr_or_start <<= 8;
-	      ptr_or_start |= sv.at(i);
-	    }
-	    auto e_pos   = 0u;
-	    for(auto i=stop;i<_size;++i) { // 8 (not 10 to allow to grow a bit) last positions
-	       e[e_pos] = sv.at(i);
-	       ++e_pos;
-	  	}
+    // claim is to treat it as a normal string
+    if (_size < 14) {
+      auto stop = _size < 4 ? _size : 4;
+      for (auto i = 0; i < stop; ++i) {
+        ptr_or_start <<= 8;
+        ptr_or_start |= sv.at(i);
+      }
+      auto e_pos = 0u;
+      for (auto i = stop; i < _size; ++i) {  // 8 (not 10 to allow to grow a bit) last positions
+        e[e_pos] = sv.at(i);
+        ++e_pos;
+      }
 
-  	} else {
+    } else {
+      e[0] = sv.at(0);
+      e[1] = sv.at(1);
+      // the last eight  characters
+      for (int i = 0; i < 8; i++) {
+        e[9 - i] = sv.at(_size - 1 - i);  // there is no null terminator in sv
+      }
+      // checking if it exists
+      char long_str[_size - 10];
+      for (int i = 0; i < _size - 8; i++) {
+        long_str[i] = sv.at(i + 2);
+      }
+      std::pair<int, int> pair = str_exists(long_str, _size - 10);
+      if (pair.second) {
+        ptr_or_start = pair.first;
+      } else {
+        for (int i = 0; i < _size - 10; i++) {
+          string_vector.push_back(long_str[i]);
+        }
+        ptr_or_start = string_vector.size() - (_size - 10);
+        str::string_map.set(ptr_or_start, _size - 10);
+      }
+    }
+  }
 
-  		e[0] = sv.at(0);
-	    e[1] = sv.at(1);
-	    // the last eight  characters
-	    for (int i = 0; i < 8; i++) {
-	      e[9-i] = sv.at(_size -1- i); //there is no null terminator in sv
-	    }
-	    // checking if it exists
-	    char long_str[_size-10];
-	    for (int i = 0; i < _size - 8; i++) {
-	      long_str[i] = sv.at(i + 2);
-	    }
-	    std::pair<int, int> pair = str_exists(long_str, _size - 10);
-	    if (pair.second) {
-	      ptr_or_start = pair.first;
-	    } else {
-	      for (int i = 0; i < _size - 10; i++) {
-	        string_vector.push_back(long_str[i]);
-	      }
-        ptr_or_start = string_vector.size() - (_size-10);
-	      str::string_map.set(ptr_or_start, _size - 10);
-	    }
-      
-  	}
- }
-
-  void print_PoS () { 
+  void print_PoS() {
     std::cout << "This is ptr_or_start: " << std::endl;
     if (_size >= 14) {
       std::cout << "Pointer: " << ptr_or_start << std::endl;
     } else if (_size < 14) {
       std::cout << "Start: ";
-      // [first] [sec] [thr] [fourth] 
+      // [first] [sec] [thr] [fourth]
       for (int i = 3; i >= 0; --i) {
         std::cout << char(ptr_or_start >> (i * 8));
       }
       std::cout << std::endl;
-    } 
+    }
   }
 
-  void print_e () {
+  void print_e() {
     std::cout << "this is e: ";
-    for (int i = 0; i < 10; ++i) { std::cout << e[i] << " "; }
+    for (int i = 0; i < 10; ++i) {
+      std::cout << e[i] << " ";
+    }
     std::cout << std::endl;
   }
 
-  void print_StrVec () {
+  void print_StrVec() {
     std::cout << "this is string_vector: ";
     /*
     for (std::vector<int>::const_iterator i : string_vector) {
       std::cout << i << std::endl;
     }
     */
-    for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) 
-    {
+    for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) {
       std::cout << char(*i) << " ";
     }
     std::cout << std::endl;
   }
 
-  void print_key_val_str () {
-    std::cout << "Key:  " << "Val:  " << "String:  " << std::endl;
+  void print_key_val_str() {
+    std::cout << "Key:  "
+              << "Val:  "
+              << "String:  " << std::endl;
     for (auto it = string_map.begin(), end = string_map.end(); it != end; ++it) {
       uint32_t key   = string_map.get_key(it);
       uint32_t value = string_map.get(it);
       std::cout << key << "   " << value << "   ";
-      for (int i = key; i < (key+value); ++i) {
+      for (int i = key; i < (key + value); ++i) {
         std::cout << static_cast<char>(string_vector.at(i));
       }
       std::cout << std::endl;
@@ -318,36 +316,33 @@ public:
   std::size_t rfind(const char *s, std::size_t pos, std::size_t n) const;
   std::size_t rfind(const char *s, std::size_t pos = 0) const;
 
-  //returns a pstr from two objects (pstr)
+  // returns a pstr from two objects (pstr)
   static str concat(const str &a, const str &b);
   static str concat(std::string_view a, const str &b);
   static str concat(const str &a, std::string_view b);
-  static str concat(const str &a, int v); // just puts two things together concat(x, b); -> x.append(b)
-                                          //                               concat(b, x); -> b.append(x)
-
+  static str concat(const str &a, int v);  // just puts two things together concat(x, b); -> x.append(b)
+                                           //                               concat(b, x); -> b.append(x)
 
   str append(const str &b) const;
   str append(std::string_view b) const;
   str append(int b) const;
 
-
-  std::vector<str> split(const char chr); // used as a tokenizing func, return vector of pstr's
-
+  std::vector<str> split(const char chr);  // used as a tokenizing func, return vector of pstr's
 
   /*
   bool is_i() const{ // starts with digit -> is integer
-    //this fun works when str size is <14   
+    //this fun works when str size is <14
     //if(!isptr){
       char chars[5];
       std::cout << "chars[] inside is_i(): ";
       for (int i =3, j=0;i>=0;i--,j++){
          chars[j] = (ptr_or_start >> (i*sizeof(char)*8)) & 0x000000ff;
          std::cout << chars[j];
-      } 
+      }
       std::cout << std::endl;
       if (chars[0]!='-' and( chars[0]<'0' or chars[0]> '9')) {
         std::cout << "Non-number char detected in ptr_or_start[0]\n";
-        return false; 
+        return false;
       }
       for (int i= 1; i<(_size>4?4:_size);i++){
         switch (chars[i]){
@@ -370,22 +365,22 @@ public:
         }
       }
     //}
-    return true;  
-  } 
-  
+    return true;
+  }
+
 
   // How to handle if it's not an int?
   // what to return/exceptions?
   int64_t to_i() const { // only works if _size < 14
-    
-    if (this.is_i()) {  
+
+    if (this.is_i()) {
       int64_t hold = 0;
       // convert ptr_or_start first
       // convert e next
     } else {
       return;
-    } 
-    
+    }
+
   } // convert to integer
 */
   bool        is_i() const;  // starts with digit -> is integer
@@ -402,7 +397,7 @@ public:
   str substr(size_t start, size_t end) const;
 };
 
-//For static string_map
+// For static string_map
 mmap_lib::map<uint32_t, uint32_t> str::string_map;
 
 }  // namespace mmap_lib

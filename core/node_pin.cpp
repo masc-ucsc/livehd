@@ -6,17 +6,16 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 
-Node_pin::Node_pin(LGraph *_g, const Compact &comp)
-    : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
-  I(!comp.hidx.is_invalid()); // Why to Compact. Use Compact_class
+Node_pin::Node_pin(LGraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
+  I(!comp.hidx.is_invalid());  // Why to Compact. Use Compact_class
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
-  pid = current_g->get_dst_pid(idx);
+  pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   current_g = LGraph::open(path, comp.lgid);
-  top_g = current_g;
+  top_g     = current_g;
 
   hidx = Hierarchy_tree::invalid_index();
   idx  = comp.idx;
@@ -26,11 +25,10 @@ Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Compact_driver &comp)
-    : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
+Node_pin::Node_pin(LGraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
-  pid = current_g->get_dst_pid(idx);
+  pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
 }
 
@@ -38,7 +36,7 @@ Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class
     : top_g(_g), hidx(_hidx), idx(comp.idx), sink(comp.sink) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
-  pid = current_g->get_dst_pid(idx);
+  pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
 }
 
@@ -55,7 +53,7 @@ Node_pin::Node_pin(LGraph *_g, const Compact_class_driver &comp)
 }
 
 const Index_ID Node_pin::get_root_idx() const {
-  if (unlikely(current_g==nullptr))
+  if (unlikely(current_g == nullptr))
     return 0;
   return current_g->get_root_idx(idx);
 }
@@ -67,7 +65,7 @@ Node_pin::Compact_flat Node_pin::get_compact_flat() const {
 
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {
   I(!sink);
-  if(hidx.is_invalid())
+  if (hidx.is_invalid())
     return Compact_driver(Hierarchy_tree::root_index(), get_root_idx());
   return Compact_driver(hidx, get_root_idx());
 }
@@ -89,13 +87,13 @@ bool Node_pin::is_type_const() const {
 
 bool Node_pin::is_type_flop() const {
   auto nid = current_g->get_node_nid(idx);
-  auto op = current_g->get_type_op(nid);
+  auto op  = current_g->get_type_op(nid);
   return op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop;
 }
 
 bool Node_pin::is_type_loop_breaker() const {
   auto nid = current_g->get_node_nid(idx);
-  auto op = current_g->get_type_op(nid);
+  auto op  = current_g->get_type_op(nid);
   return Ntype::is_loop_breaker(op);
 }
 
@@ -115,7 +113,7 @@ Node_pin Node_pin::get_hierarchical() const {
 }
 
 Node_pin Node_pin::switch_to_sink() const {
-  if(is_sink())
+  if (is_sink())
     return *this;
 
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
@@ -149,8 +147,8 @@ Node_pin Node_pin::get_driver_pin() const {
   I(is_sink() || is_graph_output());
   auto piter = current_g->inp_driver(*this);
   if (piter.empty())
-    return Node_pin(); // disconnected driver
-  I(piter.size()==1); // If there can be many drivers, use the inp_driver iterator
+    return Node_pin();   // disconnected driver
+  I(piter.size() == 1);  // If there can be many drivers, use the inp_driver iterator
   return piter.back();
 }
 
@@ -180,9 +178,7 @@ void Node_pin::connect_sink(const Node_pin &spin) const {
   current_g->add_edge(*this, spin);
 }
 
-void Node_pin::connect_sink(const Node &node) const {
-  connect_sink(node.setup_sink_pin());
-}
+void Node_pin::connect_sink(const Node &node) const { connect_sink(node.setup_sink_pin()); }
 
 void Node_pin::connect_driver(const Node_pin &dpin) const {
   I(dpin.is_driver());
@@ -191,9 +187,7 @@ void Node_pin::connect_driver(const Node_pin &dpin) const {
   current_g->add_edge(dpin, *this);
 }
 
-void Node_pin::connect_driver(const Node &node) const {
-  connect_driver(node.setup_driver_pin());
-}
+void Node_pin::connect_driver(const Node &node) const { connect_driver(node.setup_driver_pin()); }
 
 int Node_pin::get_num_edges() const {
   if (is_sink())
@@ -225,7 +219,7 @@ void Node_pin::clear_io_sign() {
 
 bool Node_pin::is_io_sign() const {
   I(is_graph_io());
-  return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver())?false:true;
+  return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver()) ? false : true;
 }
 
 std::string_view Node_pin::get_type_sub_pin_name() const {
@@ -234,22 +228,20 @@ std::string_view Node_pin::get_type_sub_pin_name() const {
   const auto &sub    = node.get_type_sub_node();
   const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
 
-  GI(is_driver(), !io_pin.is_input()); // it can be invalid
-  GI(is_sink(),   !io_pin.is_output());// it can be invalid
+  GI(is_driver(), !io_pin.is_input());  // it can be invalid
+  GI(is_sink(), !io_pin.is_output());   // it can be invalid
 
   return io_pin.name;
 }
 
-void Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
-bool Node_pin::has_delay()  const { return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver()); }
+void  Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
+bool  Node_pin::has_delay() const { return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver()); }
 float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
 
-void Node_pin::del_delay() {
-  Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver());
-}
+void Node_pin::del_delay() { Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver()); }
 
 void Node_pin::set_name(std::string_view wname) {
-  I(wname.size()); //empty names not allowed
+  I(wname.size());  // empty names not allowed
   Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
 }
 
@@ -275,7 +267,7 @@ void Node_pin::del() {
   }
 
   if (!sink) {
-    if (has_name()) { // works for sink/driver if needed
+    if (has_name()) {  // works for sink/driver if needed
       del_name();
     }
     if (has_delay()) {
@@ -296,7 +288,7 @@ void Node_pin::del_name() {
     // sure that you do not need a not hierarchical node?
     //
     // pin.get_non_hierarchical().del() will work if you got a hierarchical pin for some reason
-  }else{
+  } else {
     Ann_node_pin_name::ref(current_g)->erase_key(get_compact_class_driver());
   }
 }
@@ -342,20 +334,16 @@ std::string Node_pin::debug_name() const {
   if (name.empty()) {
     if (node.is_type_sub()) {
       name = node.get_type_sub_node().get_name_from_instance_pid(pid);
-		}else if (node.is_type_const()) {
-			name = node.get_type_const().to_pyrope();
-			return absl::StrCat("pin_",
-					"n",
-					std::to_string(node.nid),
-					"_",
-					name);
+    } else if (node.is_type_const()) {
+      name = node.get_type_const().to_pyrope();
+      return absl::StrCat("pin_", "n", std::to_string(node.nid), "_", name);
     } else if (node.has_name()) {
       name = node.get_name();
     } else {
       if (is_sink()) {
-        name = Ntype::get_sink_name(node.get_type_op(),pid);
-      }else{
-        name = Ntype::get_driver_name(node.get_type_op(),pid);
+        name = Ntype::get_sink_name(node.get_type_op(), pid);
+      } else {
+        name = Ntype::get_driver_name(node.get_type_op(), pid);
       }
     }
   }
@@ -386,7 +374,7 @@ std::string Node_pin::get_wire_name() const {
   std::string name;
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "lg", current_g->get_name(), "_hidx" ,std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    absl::StrAppend(&name, "lg", current_g->get_name(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
   }
 
   if (has_name()) {
@@ -397,9 +385,9 @@ std::string Node_pin::get_wire_name() const {
   if (name.empty())
     name = "t";
 
-  absl::StrAppend(&name, "_pin" , std::to_string(get_root_idx()));
-  if (pid!=0) {
-    absl::StrAppend(&name, "_" , get_pin_name());
+  absl::StrAppend(&name, "_pin", std::to_string(get_root_idx()));
+  if (pid != 0) {
+    absl::StrAppend(&name, "_", get_pin_name());
   }
 
   return name;
@@ -443,7 +431,7 @@ Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
 
 std::string_view Node_pin::get_pin_name() const {
   if (is_graph_io()) {
-		const auto &sub    = current_g->get_self_sub_node();
+    const auto &sub    = current_g->get_self_sub_node();
     const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
     return io_pin.name;
 #if 0
@@ -453,7 +441,7 @@ std::string_view Node_pin::get_pin_name() const {
 
 		return std::to_string(pid);
 #endif
-	}
+  }
 
   auto op = get_type_op();
   if (op == Ntype_op::Sub)
@@ -520,7 +508,7 @@ bool Node_pin::is_connected(const Node_pin &pin) const {
     }
     return false;
   }
-  if (likely(is_driver())) { // sink can not be connected to another sink
+  if (likely(is_driver())) {  // sink can not be connected to another sink
     for (auto &other : pin.inp_driver()) {
       if (other == *this)
         return true;
@@ -539,14 +527,14 @@ Node_pin Node_pin::get_down_pin() const {
   I(tree_pos);
   auto tree_it = tree_pos->find(node.get_compact_class());
   if (tree_it == tree_pos->end()) {
-    top_g->regenerate_htree(); // force regenerate
+    top_g->regenerate_htree();  // force regenerate
     tree_it = tree_pos->find(node.get_compact_class());
     I(tree_it != tree_pos->end());
   }
 
   auto delta_pos = tree_pos->get(tree_it);
 
-  const auto &htree= top_g->get_htree();
+  const auto &htree = top_g->get_htree();
   I(!htree.is_leaf(hidx));
   auto first_child = htree.get_first_child(hidx);
 
@@ -563,8 +551,7 @@ Node_pin Node_pin::get_down_pin() const {
   auto *down_current_g = htree.ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx
-      = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);
+  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);
   I(down_idx);
 
   bool down_sink = is_driver();  // top driver goes to an down output which should be a sink

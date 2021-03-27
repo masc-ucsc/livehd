@@ -33,8 +33,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "lefiKRDefs.hpp"
 #include "lefiDefs.hpp"
+#include "lefiKRDefs.hpp"
 #include "lefiUser.hpp"
 #include "lefiUtil.hpp"
 
@@ -43,38 +43,37 @@
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 // The reader initialization.  Must be called before lefrRead().
-extern int lefrInit ();
-extern int lefrInitSession (int startSession = 1);
+extern int lefrInit();
+extern int lefrInitSession(int startSession = 1);
 
 // obsolted
-extern int lefrReset ();
+extern int lefrReset();
 
 // Clears parser configuration and return it in inial state.
-extern int lefrClear ();
+extern int lefrClear();
 
 // obsoleted
-extern int lefrReleaseNResetMemory ();
+extern int lefrReleaseNResetMemory();
 
 // Change the comment character in LEF.  The normal character is
 // '#'.   You can change it to anything you want, but be careful.
-extern void lefrSetCommentChar (char c);
+extern void lefrSetCommentChar(char c);
 
 // Allow the parser to upshift all names if the LEF
 // file is case insensitive.  The default is no shift, so the user
 // must do case insensitive matching.
-extern void lefrSetShiftCase ();
+extern void lefrSetShiftCase();
 
 // Allow the user to change the casesensitivity anytime during
 // parsing.
 // caseSen = 0, will turn off the casesensitivity
 // caseSen != 0, will turn on the casesensitivity
 
-extern void lefrSetCaseSensitivity (int caseSense);
+extern void lefrSetCaseSensitivity(int caseSense);
 
 // The reader request the file name they are parsing
 
-extern const char * lefrFName ();
-
+extern const char* lefrFName();
 
 //  The main reader function.
 //  The file should already be opened.  This requirement allows
@@ -83,13 +82,13 @@ extern const char * lefrFName ();
 //  a colon-delimited list of directories in which to find
 //  include files.
 
-extern int lefrRead (FILE *file, const char *fileName, lefiUserData userData);
+extern int lefrRead(FILE* file, const char* fileName, lefiUserData userData);
 
 //  Set all of the callbacks that have not yet been set to a function
 //  that will add up how many times a given lef data type was ignored
 //  (ie no callback was done).  The statistics can later be printed out.
-extern void lefrSetRegisterUnusedCallbacks ();
-extern void lefrPrintUnusedCallbacks (FILE* f);
+extern void lefrSetRegisterUnusedCallbacks();
+extern void lefrPrintUnusedCallbacks(FILE* f);
 
 // Set/get the client-provided user data.  lefi doesn't look at
 // this data at all, it simply passes the opaque lefiUserData pointer
@@ -97,8 +96,8 @@ extern void lefrPrintUnusedCallbacks (FILE* f);
 // change the data at any time, and it will take effect on the
 // next callback.  The lefi reader and writer maintain separate
 // user data pointers.
-extern void lefrSetUserData (lefiUserData);
-extern lefiUserData lefrGetUserData ();
+extern void         lefrSetUserData(lefiUserData);
+extern lefiUserData lefrGetUserData();
 
 // An enum describing all of the types of reader callbacks.
 typedef enum {
@@ -200,147 +199,90 @@ typedef enum {
 // switch based on the callback type to handle the appropriate type of
 // data.
 
-
 // A declaration of the signature of all callbacks that return nothing.
-typedef int (*lefrVoidCbkFnType) (lefrCallbackType_e,
-                                  void* num,
-                                  lefiUserData);
+typedef int (*lefrVoidCbkFnType)(lefrCallbackType_e, void* num, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a string.
-typedef int (*lefrStringCbkFnType) (lefrCallbackType_e,
-                                    const char *string,
-                                    lefiUserData);
+typedef int (*lefrStringCbkFnType)(lefrCallbackType_e, const char* string, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a integer.
-typedef int (*lefrIntegerCbkFnType) (lefrCallbackType_e,
-                                     int number,
-                                     lefiUserData);
+typedef int (*lefrIntegerCbkFnType)(lefrCallbackType_e, int number, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a double.
-typedef int (*lefrDoubleCbkFnType) (lefrCallbackType_e,
-                                    double number,
-                                    lefiUserData);
+typedef int (*lefrDoubleCbkFnType)(lefrCallbackType_e, double number, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiUnits.
-typedef int (*lefrUnitsCbkFnType) (lefrCallbackType_e,
-                                   lefiUnits* units,
-                                   lefiUserData);
+typedef int (*lefrUnitsCbkFnType)(lefrCallbackType_e, lefiUnits* units, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiLayer.
-typedef int (*lefrLayerCbkFnType) (lefrCallbackType_e,
-                                   lefiLayer* l,
-                                   lefiUserData);
+typedef int (*lefrLayerCbkFnType)(lefrCallbackType_e, lefiLayer* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiVia.
-typedef int (*lefrViaCbkFnType) (lefrCallbackType_e,
-                                 lefiVia* l,
-                                 lefiUserData);
+typedef int (*lefrViaCbkFnType)(lefrCallbackType_e, lefiVia* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiViaRule.
-typedef int (*lefrViaRuleCbkFnType) (lefrCallbackType_e,
-                                     lefiViaRule* l,
-                                     lefiUserData);
+typedef int (*lefrViaRuleCbkFnType)(lefrCallbackType_e, lefiViaRule* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiSpacing.
-typedef int (*lefrSpacingCbkFnType) (lefrCallbackType_e,
-                                     lefiSpacing* l,
-                                     lefiUserData);
+typedef int (*lefrSpacingCbkFnType)(lefrCallbackType_e, lefiSpacing* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiIRDrop.
-typedef int (*lefrIRDropCbkFnType) (lefrCallbackType_e,
-                                    lefiIRDrop* l,
-                                    lefiUserData);
+typedef int (*lefrIRDropCbkFnType)(lefrCallbackType_e, lefiIRDrop* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiMinFeature.
-typedef int (*lefrMinFeatureCbkFnType) (lefrCallbackType_e,
-                                        lefiMinFeature* l,
-                                        lefiUserData);
+typedef int (*lefrMinFeatureCbkFnType)(lefrCallbackType_e, lefiMinFeature* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiNonDefault.
-typedef int (*lefrNonDefaultCbkFnType) (lefrCallbackType_e,
-                                        lefiNonDefault* l,
-                                        lefiUserData);
+typedef int (*lefrNonDefaultCbkFnType)(lefrCallbackType_e, lefiNonDefault* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiSite.
-typedef int (*lefrSiteCbkFnType) (lefrCallbackType_e,
-                                  lefiSite* l,
-                                  lefiUserData);
+typedef int (*lefrSiteCbkFnType)(lefrCallbackType_e, lefiSite* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiMacro.
-typedef int (*lefrMacroCbkFnType) (lefrCallbackType_e,
-                                   lefiMacro* l,
-                                   lefiUserData);
+typedef int (*lefrMacroCbkFnType)(lefrCallbackType_e, lefiMacro* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiPin.
-typedef int (*lefrPinCbkFnType) (lefrCallbackType_e,
-                                 lefiPin* l,
-                                 lefiUserData);
+typedef int (*lefrPinCbkFnType)(lefrCallbackType_e, lefiPin* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiObstruction.
-typedef int (*lefrObstructionCbkFnType) (lefrCallbackType_e,
-                                         lefiObstruction* l,
-                                         lefiUserData);
+typedef int (*lefrObstructionCbkFnType)(lefrCallbackType_e, lefiObstruction* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiArray.
-typedef int (*lefrArrayCbkFnType) (lefrCallbackType_e,
-                                   lefiArray* l,
-                                   lefiUserData);
+typedef int (*lefrArrayCbkFnType)(lefrCallbackType_e, lefiArray* l, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiProp.
-typedef int (*lefrPropCbkFnType) (lefrCallbackType_e,
-                                  lefiProp* p,
-                                  lefiUserData);
+typedef int (*lefrPropCbkFnType)(lefrCallbackType_e, lefiProp* p, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiNoiseMargin.
-typedef int (*lefrNoiseMarginCbkFnType) (lefrCallbackType_e,
-                                         struct lefiNoiseMargin* p,
-                                         lefiUserData);
+typedef int (*lefrNoiseMarginCbkFnType)(lefrCallbackType_e, struct lefiNoiseMargin* p, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiNoiseTable.
-typedef int (*lefrNoiseTableCbkFnType) (lefrCallbackType_e,
-                                        lefiNoiseTable* p,
-                                        lefiUserData);
+typedef int (*lefrNoiseTableCbkFnType)(lefrCallbackType_e, lefiNoiseTable* p, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiCorrectionTable.
-typedef int (*lefrCorrectionTableCbkFnType) (lefrCallbackType_e,
-                                             lefiCorrectionTable* p,
-                                             lefiUserData);
+typedef int (*lefrCorrectionTableCbkFnType)(lefrCallbackType_e, lefiCorrectionTable* p, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiTiming.
-typedef int (*lefrTimingCbkFnType) (lefrCallbackType_e,
-                                    lefiTiming* p,
-                                    lefiUserData);
+typedef int (*lefrTimingCbkFnType)(lefrCallbackType_e, lefiTiming* p, lefiUserData);
 
 // A declaration of the signature of all callbacks that return a lefiUseMinSpacing.
-typedef int (*lefrUseMinSpacingCbkFnType) (lefrCallbackType_e,
-                                           lefiUseMinSpacing* l,
-                                           lefiUserData);
+typedef int (*lefrUseMinSpacingCbkFnType)(lefrCallbackType_e, lefiUseMinSpacing* l, lefiUserData);
 
-  // NEW CALLBACK - If your callback returns a pointer to a new class then
-  // you must add a type function here.
+// NEW CALLBACK - If your callback returns a pointer to a new class then
+// you must add a type function here.
 
 // A declaration of the signature of all callbacks that return a lefiMaxStackVia.
-typedef int (*lefrMaxStackViaCbkFnType) (lefrCallbackType_e,
-                                         lefiMaxStackVia* l,
-                                         lefiUserData);
+typedef int (*lefrMaxStackViaCbkFnType)(lefrCallbackType_e, lefiMaxStackVia* l, lefiUserData);
 
-typedef int (*lefrMacroNumCbkFnType) (lefrCallbackType_e,
-                                      lefiNum l,
-                                      lefiUserData);
+typedef int (*lefrMacroNumCbkFnType)(lefrCallbackType_e, lefiNum l, lefiUserData);
 
-typedef int (*lefrMacroSiteCbkFnType) (lefrCallbackType_e,
-                                      const lefiMacroSite *site,
-                                      lefiUserData);
+typedef int (*lefrMacroSiteCbkFnType)(lefrCallbackType_e, const lefiMacroSite* site, lefiUserData);
 
-typedef int (*lefrMacroForeignCbkFnType) (lefrCallbackType_e,
-                                          const lefiMacroForeign *foreign,
-                                          lefiUserData);
+typedef int (*lefrMacroForeignCbkFnType)(lefrCallbackType_e, const lefiMacroForeign* foreign, lefiUserData);
 
 // 5.6
 // A declaration of the signature of all callbacks that return a lefiDensity.
-typedef int (*lefrDensityCbkFnType) (lefrCallbackType_e,
-                                     lefiDensity* l,
-                                     lefiUserData);
+typedef int (*lefrDensityCbkFnType)(lefrCallbackType_e, lefiDensity* l, lefiUserData);
 
 // Functions to call to register a callback function.
 extern void lefrSetUnitsCbk(lefrUnitsCbkFnType);
@@ -409,7 +351,7 @@ extern void lefrSetFixedMaskCbk(lefrIntegerCbkFnType);
 // Set all of the callbacks that have not yet been set to the following
 // function.  This is especially useful if you want to check to see
 // if you forgot anything.
-extern void lefrSetUnusedCallbacks (lefrVoidCbkFnType func);
+extern void lefrSetUnusedCallbacks(lefrVoidCbkFnType func);
 
 // Reset all the callback functions to nil
 extern void lefrUnsetCallbacks();
@@ -473,49 +415,49 @@ extern void lefrUnsetViaCbk();
 extern void lefrUnsetViaRuleCbk();
 
 // Return the current line number in the parser.
-extern int lefrLineNumber ();
+extern int lefrLineNumber();
 
 // Routine to set the message logging routine for errors
-typedef void (*LEFI_LOG_FUNCTION) (const char*);
+typedef void (*LEFI_LOG_FUNCTION)(const char*);
 extern void lefrSetLogFunction(LEFI_LOG_FUNCTION);
 
 // Routine to set the message logging routine for warnings
-typedef void (*LEFI_WARNING_LOG_FUNCTION) (const char*);
+typedef void (*LEFI_WARNING_LOG_FUNCTION)(const char*);
 extern void lefrSetWarningLogFunction(LEFI_WARNING_LOG_FUNCTION);
 
 // Routine to set the user defined malloc routine
-typedef void* (*LEFI_MALLOC_FUNCTION) (int);
+typedef void* (*LEFI_MALLOC_FUNCTION)(int);
 extern void lefrSetMallocFunction(LEFI_MALLOC_FUNCTION);
 
 // Routine to set the user defined realloc routine
-typedef void* (*LEFI_REALLOC_FUNCTION) (void *, int);
+typedef void* (*LEFI_REALLOC_FUNCTION)(void*, int);
 extern void lefrSetReallocFunction(LEFI_REALLOC_FUNCTION);
 
 // Routine to set the user defined free routine
-typedef void (*LEFI_FREE_FUNCTION) (void *);
+typedef void (*LEFI_FREE_FUNCTION)(void*);
 extern void lefrSetFreeFunction(LEFI_FREE_FUNCTION);
 
 // Routine to set the line number callback routine
-typedef void (*LEFI_LINE_NUMBER_FUNCTION) (int);
-extern void lefrSetLineNumberFunction( LEFI_LINE_NUMBER_FUNCTION);
+typedef void (*LEFI_LINE_NUMBER_FUNCTION)(int);
+extern void lefrSetLineNumberFunction(LEFI_LINE_NUMBER_FUNCTION);
 
 // Set the number of lines before calling the line function callback routine
 // Default is 10000
-extern void lefrSetDeltaNumberLines  (int);
+extern void lefrSetDeltaNumberLines(int);
 
 // PCR 551229 - Set the parser to be more relax
 // This api is specific for PKS.
 // When in relax mode, the parser will not require width, pitch, & direction
 // in routing layers. Also vias in nondefault rules
-extern void lefrSetRelaxMode ();
-extern void lefrUnsetRelaxMode ();
+extern void lefrSetRelaxMode();
+extern void lefrUnsetRelaxMode();
 
 // PCR 565274 - LEF/DEF API should have the API call to overwrite default
 //              version
-extern void lefrSetVersionValue(const  char*  version);
+extern void lefrSetVersionValue(const char* version);
 
 // Routine to set the read function
-typedef size_t (*LEFI_READ_FUNCTION) (FILE*, char*, size_t);
+typedef size_t (*LEFI_READ_FUNCTION)(FILE*, char*, size_t);
 extern void lefrSetReadFunction(LEFI_READ_FUNCTION);
 extern void lefrUnsetReadFunction();
 
@@ -570,14 +512,13 @@ extern void lefrSetTotalMsgLimit(int totNumMsgs);
 extern void lefrSetLimitPerMsg(int msgId, int numMsg);
 
 // Register lef58Type-layerType pair.
-extern void lefrRegisterLef58Type(const char *lef58Type,
-                                  const char *layerType);
+extern void lefrRegisterLef58Type(const char* lef58Type, const char* layerType);
 
 // Return codes for the user callbacks.
 // The user should return one of these values.
-#define PARSE_OK 0      // continue parsing
-#define STOP_PARSE 1    // stop parsing with no error message
-#define PARSE_ERROR 2   // stop parsing, print an error message
+#define PARSE_OK    0  // continue parsing
+#define STOP_PARSE  1  // stop parsing with no error message
+#define PARSE_ERROR 2  // stop parsing, print an error message
 
 END_LEFDEF_PARSER_NAMESPACE
 

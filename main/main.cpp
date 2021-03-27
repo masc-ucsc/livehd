@@ -458,7 +458,7 @@ int main(int argc, char** argv) {
           help("clear", "clear the screen");
           help("history", "display the current history");
           help("prompt <str>", "change the current prompt");
-          help("cool_mode", "become the fonz"); // https://en.wikipedia.org/wiki/Fonzie
+          help("cool_mode", "become the fonz");  // https://en.wikipedia.org/wiki/Fonzie
 
           Main_api::get_commands(help);
         } else {
@@ -519,7 +519,7 @@ int main(int argc, char** argv) {
         // could throw an exception
         rx.history_add(input);
         Main_api::parse_inline(input);
-        //Graph_library::sync_all();
+        // Graph_library::sync_all();
 
         continue;
       }

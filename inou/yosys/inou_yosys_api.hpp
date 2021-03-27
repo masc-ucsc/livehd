@@ -10,9 +10,9 @@ using namespace kainjow;
 
 #pragma GCC diagnostic pop
 
+#include "eprp.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
-#include "eprp.hpp"
 
 class Inou_yosys_api : public Pass {
 protected:

@@ -8,8 +8,8 @@
 #include "absl/strings/str_split.h"
 #include "eprp.hpp"
 #include "fmt/format.h"
-#include "iassert.hpp"
 #include "graph_library.hpp"
+#include "iassert.hpp"
 
 class Pass {
 protected:
@@ -21,8 +21,8 @@ protected:
   const std::string odir;
 
   const std::string get_files(const Eprp_var &var) const;
-  const std::string get_path(const Eprp_var &var)  const;
-  const std::string get_odir(const Eprp_var &var)  const;
+  const std::string get_path(const Eprp_var &var) const;
+  const std::string get_odir(const Eprp_var &var) const;
 
   static void register_pass(Eprp_method &method);
   static void register_inou(std::string_view pname, Eprp_method &method);
@@ -48,19 +48,19 @@ public:
   }
 
   template <typename... Args>
-  static void error(const char *format, const Args &... args) {
+  static void error(const char *format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
     error(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
-  static void warn(std::string_view format, const Args &... args) {
+  static void warn(std::string_view format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
     eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
-  static void info(std::string_view format, const Args &... args) {
+  static void info(std::string_view format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }

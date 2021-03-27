@@ -36,18 +36,17 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 
 extern FILE* encOpenFileForRead(char* filename);
 extern FILE* encOpenFileForWrite(char* filename, int encrypt_f);
-extern int encCloseFile(FILE* fp);
-extern void encClearBuf(FILE* fp);
-extern void encReadingEncrypted();
-extern void encWritingEncrypted();
-extern int encIsEncrypted(unsigned char* buf);
-extern int encFgetc(FILE* fp);
-extern int encFputc(char c, FILE* fp);
-extern void encPrint(FILE*fp, char* format,...);
+extern int   encCloseFile(FILE* fp);
+extern void  encClearBuf(FILE* fp);
+extern void  encReadingEncrypted();
+extern void  encWritingEncrypted();
+extern int   encIsEncrypted(unsigned char* buf);
+extern int   encFgetc(FILE* fp);
+extern int   encFputc(char c, FILE* fp);
+extern void  encPrint(FILE* fp, char* format, ...);
 
 END_LEFDEF_PARSER_NAMESPACE
 
 USE_LEFDEF_PARSER_NAMESPACE
 
 #endif
-

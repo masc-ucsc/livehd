@@ -1,4 +1,6 @@
 
+#include "eprp_utils.hpp"
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -11,9 +13,8 @@
 #include <cstring>
 #include <iostream>
 
-#include "eprp_utils.hpp"
-#include "thread_pool.hpp"
 #include "iassert.hpp"
+#include "thread_pool.hpp"
 
 #ifdef __APPLE__
 #include <libproc.h>
@@ -25,8 +26,8 @@ std::string Eprp_utils::get_exe_path() {
   };
 #ifdef __APPLE__
   pid_t pid = getpid();
-  int ret   = proc_pidpath(pid, exePath, PATH_MAX);
-  I(ret>0);
+  int   ret = proc_pidpath(pid, exePath, PATH_MAX);
+  I(ret > 0);
   int len = strlen(exePath);
 #else
   int len = readlink("/proc/self/exe", exePath, PATH_MAX);
@@ -57,7 +58,8 @@ static void clean_dir_thread(char *path) {
 }
 
 void Eprp_utils::clean_dir(std::string_view dir) {
-  if (dir == "") return;
+  if (dir == "")
+    return;
 
   const std::string path(dir.data(), dir.size());  // null terminated
 

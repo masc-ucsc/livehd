@@ -31,6 +31,7 @@
 #define lefiMacro_h
 
 #include <stdio.h>
+
 #include "lefiKRDefs.hpp"
 #include "lefiMisc.hpp"
 
@@ -52,7 +53,6 @@ public:
   void print(FILE* f) const;
 
 protected:
-
   lefiGeometries* geometries_;
 };
 
@@ -80,20 +80,20 @@ public:
 
   char* antennaOxide() const;
 
-  int numAntennaGateArea() const;
-  double antennaGateArea(int index) const;
+  int         numAntennaGateArea() const;
+  double      antennaGateArea(int index) const;
   const char* antennaGateAreaLayer(int index) const;
 
-  int numAntennaMaxAreaCar() const;
-  double antennaMaxAreaCar(int index) const;
+  int         numAntennaMaxAreaCar() const;
+  double      antennaMaxAreaCar(int index) const;
   const char* antennaMaxAreaCarLayer(int index) const;
 
-  int numAntennaMaxSideAreaCar() const;
-  double antennaMaxSideAreaCar(int index) const;
+  int         numAntennaMaxSideAreaCar() const;
+  double      antennaMaxSideAreaCar(int index) const;
   const char* antennaMaxSideAreaCarLayer(int index) const;
 
-  int numAntennaMaxCutCar() const;
-  double antennaMaxCutCar(int index) const;
+  int         numAntennaMaxCutCar() const;
+  double      antennaMaxCutCar(int index) const;
   const char* antennaMaxCutCarLayer(int index) const;
 
   int hasReturn() const;
@@ -102,25 +102,25 @@ protected:
   char* oxide_;
   int   hasReturn_;
 
-  int numAntennaGateArea_;
-  int antennaGateAreaAllocated_;
+  int     numAntennaGateArea_;
+  int     antennaGateAreaAllocated_;
   double* antennaGateArea_;
-  char** antennaGateAreaLayer_;
+  char**  antennaGateAreaLayer_;
 
-  int numAntennaMaxAreaCar_;
-  int antennaMaxAreaCarAllocated_;
+  int     numAntennaMaxAreaCar_;
+  int     antennaMaxAreaCarAllocated_;
   double* antennaMaxAreaCar_;
-  char** antennaMaxAreaCarLayer_;
+  char**  antennaMaxAreaCarLayer_;
 
-  int numAntennaMaxSideAreaCar_;
-  int antennaMaxSideAreaCarAllocated_;
+  int     numAntennaMaxSideAreaCar_;
+  int     antennaMaxSideAreaCarAllocated_;
   double* antennaMaxSideAreaCar_;
-  char** antennaMaxSideAreaCarLayer_;
+  char**  antennaMaxSideAreaCarLayer_;
 
-  int numAntennaMaxCutCar_;
-  int antennaMaxCutCarAllocated_;
+  int     numAntennaMaxCutCar_;
+  int     antennaMaxCutCarAllocated_;
   double* antennaMaxCutCar_;
-  char** antennaMaxCutCarLayer_;
+  char**  antennaMaxCutCarLayer_;
 };
 
 class lefiPin {
@@ -163,9 +163,8 @@ public:
   void setCurrentSource(const char* name);
   void setTables(const char* highName, const char* lowName);
   void setProperty(const char* name, const char* value, const char type);
-  void setNumProperty(const char* name, double d, const char* value,
-                      const char type);
-  void addAntennaModel(int oxide);       // 5.5
+  void setNumProperty(const char* name, double d, const char* value, const char type);
+  void addAntennaModel(int oxide);  // 5.5
   void addAntennaSize(double value, const char* layer);
   void addAntennaMetalArea(double value, const char* layer);
   void addAntennaMetalLength(double value, const char* layer);
@@ -180,9 +179,9 @@ public:
   void setRiseSlewLimit(double value);
   void setFallSlewLimit(double value);
   void setTaperRule(const char* name);
-  void setNetExpr(const char* name);                    // 5.6
-  void setSupplySensitivity(const char* pinName);       // 5.6
-  void setGroundSensitivity(const char* pinName);       // 5.6
+  void setNetExpr(const char* name);               // 5.6
+  void setSupplySensitivity(const char* pinName);  // 5.6
+  void setGroundSensitivity(const char* pinName);  // 5.6
   void bumpProps();
 
   int hasForeign() const;
@@ -221,85 +220,85 @@ public:
   int hasAntennaPartialMetalSideArea() const;
   int hasAntennaPartialCutArea() const;
   int hasAntennaDiffArea() const;
-  int hasAntennaModel() const;         // 5.5
+  int hasAntennaModel() const;  // 5.5
   int hasTaperRule() const;
   int hasRiseSlewLimit() const;
   int hasFallSlewLimit() const;
-  int hasNetExpr() const;              // 5.6
-  int hasSupplySensitivity() const;    // 5.6
-  int hasGroundSensitivity() const;    // 5.6
+  int hasNetExpr() const;            // 5.6
+  int hasSupplySensitivity() const;  // 5.6
+  int hasGroundSensitivity() const;  // 5.6
 
   const char* name() const;
 
-  int numPorts() const;
+  int             numPorts() const;
   lefiGeometries* port(int index) const;
 
-  int numForeigns() const;
+  int         numForeigns() const;
   const char* foreignName(int index = 0) const;
   const char* taperRule() const;
-  int foreignOrient(int index = 0) const;
+  int         foreignOrient(int index = 0) const;
   const char* foreignOrientStr(int index = 0) const;
-  double foreignX(int index = 0) const;
-  double foreignY(int index = 0) const;
+  double      foreignX(int index = 0) const;
+  double      foreignY(int index = 0) const;
   const char* LEQ() const;
   const char* direction() const;
   const char* use() const;
   const char* shape() const;
   const char* mustjoin() const;
-  double outMarginHigh() const;
-  double outMarginLow() const;
-  double outResistanceHigh() const;
-  double outResistanceLow() const;
-  double inMarginHigh() const;
-  double inMarginLow() const;
-  double power() const;
-  double leakage() const;
-  double maxload() const;
-  double maxdelay() const;
-  double capacitance() const;
-  double resistance() const;
-  double pulldownres() const;
-  double tieoffr() const;
-  double VHI() const;
-  double VLO() const;
-  double riseVoltage() const;
-  double fallVoltage() const;
-  double riseThresh() const;
-  double fallThresh() const;
-  double riseSatcur() const;
-  double fallSatcur() const;
-  double riseSlewLimit() const;
-  double fallSlewLimit() const;
+  double      outMarginHigh() const;
+  double      outMarginLow() const;
+  double      outResistanceHigh() const;
+  double      outResistanceLow() const;
+  double      inMarginHigh() const;
+  double      inMarginLow() const;
+  double      power() const;
+  double      leakage() const;
+  double      maxload() const;
+  double      maxdelay() const;
+  double      capacitance() const;
+  double      resistance() const;
+  double      pulldownres() const;
+  double      tieoffr() const;
+  double      VHI() const;
+  double      VLO() const;
+  double      riseVoltage() const;
+  double      fallVoltage() const;
+  double      riseThresh() const;
+  double      fallThresh() const;
+  double      riseSatcur() const;
+  double      fallSatcur() const;
+  double      riseSlewLimit() const;
+  double      fallSlewLimit() const;
   const char* currentSource() const;
   const char* tableHighName() const;
   const char* tableLowName() const;
 
-  int numAntennaSize() const;
-  double antennaSize(int index) const;
+  int         numAntennaSize() const;
+  double      antennaSize(int index) const;
   const char* antennaSizeLayer(int index) const;
 
-  int numAntennaMetalArea() const;
-  double antennaMetalArea(int index) const;
+  int         numAntennaMetalArea() const;
+  double      antennaMetalArea(int index) const;
   const char* antennaMetalAreaLayer(int index) const;
 
-  int numAntennaMetalLength() const;
-  double antennaMetalLength(int index) const;
+  int         numAntennaMetalLength() const;
+  double      antennaMetalLength(int index) const;
   const char* antennaMetalLengthLayer(int index) const;
 
-  int numAntennaPartialMetalArea() const;
-  double antennaPartialMetalArea(int index) const;
+  int         numAntennaPartialMetalArea() const;
+  double      antennaPartialMetalArea(int index) const;
   const char* antennaPartialMetalAreaLayer(int index) const;
 
-  int numAntennaPartialMetalSideArea() const;
-  double antennaPartialMetalSideArea(int index) const;
+  int         numAntennaPartialMetalSideArea() const;
+  double      antennaPartialMetalSideArea(int index) const;
   const char* antennaPartialMetalSideAreaLayer(int index) const;
 
-  int numAntennaPartialCutArea() const;
-  double antennaPartialCutArea(int index) const;
+  int         numAntennaPartialCutArea() const;
+  double      antennaPartialCutArea(int index) const;
   const char* antennaPartialCutAreaLayer(int index) const;
 
-  int numAntennaDiffArea() const;
-  double antennaDiffArea(int index) const;
+  int         numAntennaDiffArea() const;
+  double      antennaDiffArea(int index) const;
   const char* antennaDiffAreaLayer(int index) const;
 
   // 5.6
@@ -308,18 +307,18 @@ public:
   const char* groundSensitivity() const;
 
   // 5.5
-  int numAntennaModel() const;
+  int                  numAntennaModel() const;
   lefiPinAntennaModel* antennaModel(int index) const;
 
-  int    numProperties() const;
-  const  char* propName(int index) const;
-  const  char* propValue(int index) const;
-  double propNum(int index) const;
-  const  char  propType(int index) const;
-  int    propIsNumber(int index) const;
-  int    propIsString(int index) const;
+  int         numProperties() const;
+  const char* propName(int index) const;
+  const char* propValue(int index) const;
+  double      propNum(int index) const;
+  const char  propType(int index) const;
+  int         propIsNumber(int index) const;
+  int         propIsString(int index) const;
 
-  void print(FILE* f) const ;
+  void print(FILE* f) const;
 
 protected:
   int   nameSize_;
@@ -390,53 +389,53 @@ protected:
   double fallThresh_;
   double riseSatcur_;
   double fallSatcur_;
-  int lowTableSize_;
-  char* lowTable_;
-  int highTableSize_;
-  char* highTable_;
+  int    lowTableSize_;
+  char*  lowTable_;
+  int    highTableSize_;
+  char*  highTable_;
   double riseSlewLimit_;
   double fallSlewLimit_;
 
   // 5.5 AntennaModel
-  int numAntennaModel_;
-  int antennaModelAllocated_;
-  int curAntennaModelIndex_;     // save the current index of the antenna
+  int                   numAntennaModel_;
+  int                   antennaModelAllocated_;
+  int                   curAntennaModelIndex_;  // save the current index of the antenna
   lefiPinAntennaModel** antennaModel_;
 
-  int numAntennaSize_;
-  int antennaSizeAllocated_;
+  int     numAntennaSize_;
+  int     antennaSizeAllocated_;
   double* antennaSize_;
-  char** antennaSizeLayer_;
+  char**  antennaSizeLayer_;
 
-  int numAntennaMetalArea_;
-  int antennaMetalAreaAllocated_;
+  int     numAntennaMetalArea_;
+  int     antennaMetalAreaAllocated_;
   double* antennaMetalArea_;
-  char** antennaMetalAreaLayer_;
+  char**  antennaMetalAreaLayer_;
 
-  int numAntennaMetalLength_;
-  int antennaMetalLengthAllocated_;
+  int     numAntennaMetalLength_;
+  int     antennaMetalLengthAllocated_;
   double* antennaMetalLength_;
-  char** antennaMetalLengthLayer_;
+  char**  antennaMetalLengthLayer_;
 
-  int numAntennaPartialMetalArea_;
-  int antennaPartialMetalAreaAllocated_;
+  int     numAntennaPartialMetalArea_;
+  int     antennaPartialMetalAreaAllocated_;
   double* antennaPartialMetalArea_;
-  char** antennaPartialMetalAreaLayer_;
+  char**  antennaPartialMetalAreaLayer_;
 
-  int numAntennaPartialMetalSideArea_;
-  int antennaPartialMetalSideAreaAllocated_;
+  int     numAntennaPartialMetalSideArea_;
+  int     antennaPartialMetalSideAreaAllocated_;
   double* antennaPartialMetalSideArea_;
-  char** antennaPartialMetalSideAreaLayer_;
+  char**  antennaPartialMetalSideAreaLayer_;
 
-  int numAntennaPartialCutArea_;
-  int antennaPartialCutAreaAllocated_;
+  int     numAntennaPartialCutArea_;
+  int     antennaPartialCutAreaAllocated_;
   double* antennaPartialCutArea_;
-  char** antennaPartialCutAreaLayer_;
+  char**  antennaPartialCutAreaLayer_;
 
-  int numAntennaDiffArea_;
-  int antennaDiffAreaAllocated_;
+  int     numAntennaDiffArea_;
+  int     antennaDiffAreaAllocated_;
   double* antennaDiffArea_;
-  char** antennaDiffAreaLayer_;
+  char**  antennaDiffAreaLayer_;
 
   char* taperRule_;
 
@@ -449,15 +448,15 @@ protected:
   char shape_[12];
   char currentSource_[12];
 
-  int numProperties_;
-  int propertiesAllocated_;
-  char** propNames_;
-  char** propValues_;
+  int     numProperties_;
+  int     propertiesAllocated_;
+  char**  propNames_;
+  char**  propValues_;
   double* propNums_;
-  char*  propTypes_;
+  char*   propTypes_;
 
-  int numPorts_;
-  int portsAllocated_;
+  int              numPorts_;
+  int              portsAllocated_;
   lefiGeometries** ports_;
 };
 
@@ -474,22 +473,22 @@ public:
   void addLayer(const char* name);
   void addRect(double x1, double y1, double x2, double y2, double value);
 
-  int numLayer() const;
-  char* layerName(int index) const;
-  int numRects(int index) const;
+  int          numLayer() const;
+  char*        layerName(int index) const;
+  int          numRects(int index) const;
   lefiGeomRect getRect(int index, int rectIndex) const;
-  double densityValue(int index, int rectIndex) const;
+  double       densityValue(int index, int rectIndex) const;
 
   void print(FILE* f) const;
 
 protected:
-  int    numLayers_;
-  int    layersAllocated_;
-  char** layerName_;
-  int*   numRects_;
-  int*   rectsAllocated_;
+  int                   numLayers_;
+  int                   layersAllocated_;
+  char**                layerName_;
+  int*                  numRects_;
+  int*                  rectsAllocated_;
   struct lefiGeomRect** rects_;
-  double**       densityValue_;
+  double**              densityValue_;
 };
 
 class lefiMacro {
@@ -513,13 +512,11 @@ public:
   void setLEQ(const char* name);
   void setClockType(const char* name);
   void setProperty(const char* name, const char* value, const char type);
-  void setNumProperty(const char* name, double d, const char* value,
-                      const char type);
+  void setNumProperty(const char* name, double d, const char* value, const char type);
   void bumpProps();
 
   // orient=-1 means no orient was specified.
-  void addForeign(const char* name, int hasPnt,
-           double x, double y, int orient);
+  void addForeign(const char* name, int hasPnt, double x, double y, int orient);
 
   void setXSymmetry();
   void setYSymmetry();
@@ -554,47 +551,47 @@ public:
   int isInverter() const;
   int isFixedMask() const;
 
-  int numSitePattern() const;
-  int numProperties() const;
+  int         numSitePattern() const;
+  int         numProperties() const;
   const char* propName(int index) const;
   const char* propValue(int index) const;
-  double propNum(int index) const;
-  const char propType(int index) const;
-  int  propIsNumber(int index) const;
-  int  propIsString(int index) const;
+  double      propNum(int index) const;
+  const char  propType(int index) const;
+  int         propIsNumber(int index) const;
+  int         propIsString(int index) const;
 
-  const char* name() const;
-  const char* macroClass() const;
-  const char* generator() const;
-  const char* EEQ() const;
-  const char* LEQ() const;
-  const char* source() const;
-  const char* clockType() const;
-  double originX() const;
-  double originY() const;
-  double power() const;
-  void generate(char** name1, char** name2) const;
+  const char*      name() const;
+  const char*      macroClass() const;
+  const char*      generator() const;
+  const char*      EEQ() const;
+  const char*      LEQ() const;
+  const char*      source() const;
+  const char*      clockType() const;
+  double           originX() const;
+  double           originY() const;
+  double           power() const;
+  void             generate(char** name1, char** name2) const;
   lefiSitePattern* sitePattern(int index) const;
-  const char* siteName() const;
-  double sizeX() const;
-  double sizeY() const;
-  int numForeigns() const;
-  int foreignOrient(int index = 0) const;
-  const char*  foreignOrientStr(int index = 0) const;
-  double foreignX(int index = 0) const;
-  double foreignY(int index = 0) const;
-  const char* foreignName(int index = 0) const;
+  const char*      siteName() const;
+  double           sizeX() const;
+  double           sizeY() const;
+  int              numForeigns() const;
+  int              foreignOrient(int index = 0) const;
+  const char*      foreignOrientStr(int index = 0) const;
+  double           foreignX(int index = 0) const;
+  double           foreignY(int index = 0) const;
+  const char*      foreignName(int index = 0) const;
 
   // Debug print
   void print(FILE* f) const;
 
 protected:
-  int nameSize_;
+  int   nameSize_;
   char* name_;
-  char macroClass_[32];
-  char source_[12];
+  char  macroClass_[32];
+  char  source_[12];
 
-  int generatorSize_;
+  int   generatorSize_;
   char* generator_;
 
   char hasClass_;
@@ -612,45 +609,45 @@ protected:
   char isBuffer_;
   char isInverter_;
 
-  char* EEQ_;
-  int EEQSize_;
-  char* LEQ_;
-  int LEQSize_;
-  char* gen1_;
-  int gen1Size_;
-  char* gen2_;
-  int gen2Size_;
+  char*  EEQ_;
+  int    EEQSize_;
+  char*  LEQ_;
+  int    LEQSize_;
+  char*  gen1_;
+  int    gen1Size_;
+  char*  gen2_;
+  int    gen2Size_;
   double power_;
   double originX_;
   double originY_;
   double sizeX_;
   double sizeY_;
 
-  int numSites_;
-  int sitesAllocated_;
+  int               numSites_;
+  int               sitesAllocated_;
   lefiSitePattern** pattern_;
 
-  int numForeigns_;
-  int foreignAllocated_;
-  int*  hasForeignOrigin_;
-  int*  hasForeignPoint_;
-  int*  foreignOrient_;
+  int     numForeigns_;
+  int     foreignAllocated_;
+  int*    hasForeignOrigin_;
+  int*    hasForeignPoint_;
+  int*    foreignOrient_;
   double* foreignX_;
   double* foreignY_;
-  char** foreign_;
+  char**  foreign_;
 
-  int siteNameSize_;
+  int   siteNameSize_;
   char* siteName_;
 
   char* clockType_;
-  int clockTypeSize_;
+  int   clockTypeSize_;
 
-  int numProperties_;
-  int propertiesAllocated_;
-  char** propNames_;
-  char** propValues_;
+  int     numProperties_;
+  int     propertiesAllocated_;
+  char**  propNames_;
+  char**  propValues_;
   double* propNums_;
-  char*  propTypes_;
+  char*   propTypes_;
 
   int isFixedMask_;
 };
@@ -681,122 +678,119 @@ public:
   void addTableAxisNumber(double one);
   void addFromPin(const char* name);
   void addToPin(const char* name);
-  void addDelay(const char* risefall, const char* unateness, double one,
-         double two, double three);
-  void addTransition(const char* risefall, const char* unateness, double one,
-         double two, double three);
+  void addDelay(const char* risefall, const char* unateness, double one, double two, double three);
+  void addTransition(const char* risefall, const char* unateness, double one, double two, double three);
   // addSDF2Pins & addSDF1Pin are for 5.1
-  void addSDF2Pins(const char* trigType, const char* fromTrig,
-         const char* toTrig, double one, double two, double three);
+  void addSDF2Pins(const char* trigType, const char* fromTrig, const char* toTrig, double one, double two, double three);
   void addSDF1Pin(const char* trigType, double one, double two, double three);
   void setSDFcondStart(const char* condStart);
   void setSDFcondEnd(const char* condEnd);
   void setSDFcond(const char* cond);
-  int hasData();
+  int  hasData();
   void clear();
 
-  int numFromPins();
+  int         numFromPins();
   const char* fromPin(int index);
-  int numToPins();
+  int         numToPins();
   const char* toPin(int index);
-  int hasTransition();
-  int hasDelay();
-  int hasRiseSlew();
-  int hasRiseSlew2();
-  int hasFallSlew();
-  int hasFallSlew2();
-  int hasRiseIntrinsic();
-  int hasFallIntrinsic();
-  int numOfAxisNumbers();
-  double* axisNumbers();
-  int numOfTableEntries();
-  void tableEntry(int num, double* one, double* two, double* three);
+  int         hasTransition();
+  int         hasDelay();
+  int         hasRiseSlew();
+  int         hasRiseSlew2();
+  int         hasFallSlew();
+  int         hasFallSlew2();
+  int         hasRiseIntrinsic();
+  int         hasFallIntrinsic();
+  int         numOfAxisNumbers();
+  double*     axisNumbers();
+  int         numOfTableEntries();
+  void        tableEntry(int num, double* one, double* two, double* three);
   const char* delayRiseOrFall();
   const char* delayUnateness();
-  double delayTableOne();
-  double delayTableTwo();
-  double delayTableThree();
+  double      delayTableOne();
+  double      delayTableTwo();
+  double      delayTableThree();
   const char* transitionRiseOrFall();
   const char* transitionUnateness();
-  double transitionTableOne();
-  double transitionTableTwo();
-  double transitionTableThree();
-  double fallIntrinsicOne();
-  double fallIntrinsicTwo();
-  double fallIntrinsicThree();
-  double fallIntrinsicFour();
-  double riseIntrinsicOne();
-  double riseIntrinsicTwo();
-  double riseIntrinsicThree();
-  double riseIntrinsicFour();
-  double fallSlewOne();
-  double fallSlewTwo();
-  double fallSlewThree();
-  double fallSlewFour();
-  double fallSlewFive();
-  double fallSlewSix();
-  double fallSlewSeven();
-  double riseSlewOne();
-  double riseSlewTwo();
-  double riseSlewThree();
-  double riseSlewFour();
-  double riseSlewFive();
-  double riseSlewSix();
-  double riseSlewSeven();
-  int hasRiseRS();
-  double riseRSOne();
-  double riseRSTwo();
-  int hasRiseCS();
-  double riseCSOne();
-  double riseCSTwo();
-  int hasFallRS();
-  double fallRSOne();
-  double fallRSTwo();
-  int hasFallCS();
-  double fallCSOne();
-  double fallCSTwo();
-  int hasUnateness();
+  double      transitionTableOne();
+  double      transitionTableTwo();
+  double      transitionTableThree();
+  double      fallIntrinsicOne();
+  double      fallIntrinsicTwo();
+  double      fallIntrinsicThree();
+  double      fallIntrinsicFour();
+  double      riseIntrinsicOne();
+  double      riseIntrinsicTwo();
+  double      riseIntrinsicThree();
+  double      riseIntrinsicFour();
+  double      fallSlewOne();
+  double      fallSlewTwo();
+  double      fallSlewThree();
+  double      fallSlewFour();
+  double      fallSlewFive();
+  double      fallSlewSix();
+  double      fallSlewSeven();
+  double      riseSlewOne();
+  double      riseSlewTwo();
+  double      riseSlewThree();
+  double      riseSlewFour();
+  double      riseSlewFive();
+  double      riseSlewSix();
+  double      riseSlewSeven();
+  int         hasRiseRS();
+  double      riseRSOne();
+  double      riseRSTwo();
+  int         hasRiseCS();
+  double      riseCSOne();
+  double      riseCSTwo();
+  int         hasFallRS();
+  double      fallRSOne();
+  double      fallRSTwo();
+  int         hasFallCS();
+  double      fallCSOne();
+  double      fallCSTwo();
+  int         hasUnateness();
   const char* unateness();
-  int hasRiseAtt1();
-  double riseAtt1One();
-  double riseAtt1Two();
-  int hasFallAtt1();
-  double fallAtt1One();
-  double fallAtt1Two();
-  int hasFallTo();
-  double fallToOne();
-  double fallToTwo();
-  int hasRiseTo();
-  double riseToOne();
-  double riseToTwo();
-  int hasStableTiming();
-  double stableSetup();
-  double stableHold();
+  int         hasRiseAtt1();
+  double      riseAtt1One();
+  double      riseAtt1Two();
+  int         hasFallAtt1();
+  double      fallAtt1One();
+  double      fallAtt1Two();
+  int         hasFallTo();
+  double      fallToOne();
+  double      fallToTwo();
+  int         hasRiseTo();
+  double      riseToOne();
+  double      riseToTwo();
+  int         hasStableTiming();
+  double      stableSetup();
+  double      stableHold();
   const char* stableRiseFall();
   // The following are for 5.1
-  int hasSDFonePinTrigger();
-  int hasSDFtwoPinTrigger();
-  int hasSDFcondStart();
-  int hasSDFcondEnd();
-  int hasSDFcond();
+  int         hasSDFonePinTrigger();
+  int         hasSDFtwoPinTrigger();
+  int         hasSDFcondStart();
+  int         hasSDFcondEnd();
+  int         hasSDFcond();
   const char* SDFonePinTriggerType();
   const char* SDFtwoPinTriggerType();
   const char* SDFfromTrigger();
   const char* SDFtoTrigger();
-  double SDFtriggerOne();
-  double SDFtriggerTwo();
-  double SDFtriggerThree();
+  double      SDFtriggerOne();
+  double      SDFtriggerTwo();
+  double      SDFtriggerThree();
   const char* SDFcondStart();
   const char* SDFcondEnd();
   const char* SDFcond();
 
 protected:
-  int numFrom_;
+  int    numFrom_;
   char** from_;
-  int fromAllocated_;
-  int numTo_;
+  int    fromAllocated_;
+  int    numTo_;
   char** to_;
-  int toAllocated_;
+  int    toAllocated_;
 
   int hasTransition_;
   int hasDelay_;
@@ -823,21 +817,21 @@ protected:
   int hasSDFcond_;
   int nowRise_;
 
-  int numOfAxisNumbers_;
+  int     numOfAxisNumbers_;
   double* axisNumbers_;
-  int axisNumbersAllocated_;
+  int     axisNumbersAllocated_;
 
-  int numOfTableEntries_;
-  int tableEntriesAllocated_;
+  int     numOfTableEntries_;
+  int     tableEntriesAllocated_;
   double* table_;  // three numbers per entry
 
-  char* delayRiseOrFall_;
-  char* delayUnateness_;
+  char*  delayRiseOrFall_;
+  char*  delayUnateness_;
   double delayTableOne_;
   double delayTableTwo_;
   double delayTableThree_;
-  char* transitionRiseOrFall_;
-  char* transitionUnateness_;
+  char*  transitionRiseOrFall_;
+  char*  transitionUnateness_;
   double transitionTableOne_;
   double transitionTableTwo_;
   double transitionTableThree_;
@@ -871,7 +865,7 @@ protected:
   double fallRSTwo_;
   double fallCSOne_;
   double fallCSTwo_;
-  char* unateness_;
+  char*  unateness_;
   double riseAtt1One_;
   double riseAtt1Two_;
   double fallAtt1One_;
@@ -882,54 +876,49 @@ protected:
   double riseToTwo_;
   double stableSetup_;
   double stableHold_;
-  char* stableRiseFall_;
-  char* SDFtriggerType_;
-  char* SDFfromTrigger_;
-  char* SDFtoTrigger_;
+  char*  stableRiseFall_;
+  char*  SDFtriggerType_;
+  char*  SDFfromTrigger_;
+  char*  SDFtoTrigger_;
   double SDFtriggerTableOne_;
   double SDFtriggerTableTwo_;
   double SDFtriggerTableThree_;
-  char* SDFcondStart_;
-  char* SDFcondEnd_;
-  char* SDFcond_;
+  char*  SDFcondStart_;
+  char*  SDFcondEnd_;
+  char*  SDFcond_;
 };
 
 // 5.8
 class lefiMacroSite {
 public:
-                        lefiMacroSite(const char *name, const lefiSitePattern* pattern);
+  lefiMacroSite(const char* name, const lefiSitePattern* pattern);
 
-  const char            *siteName() const;
-  const lefiSitePattern *sitePattern() const;
+  const char*            siteName() const;
+  const lefiSitePattern* sitePattern() const;
 
 protected:
-  const char            *siteName_;
-  const lefiSitePattern *sitePattern_;
+  const char*            siteName_;
+  const lefiSitePattern* sitePattern_;
 };
 
 class lefiMacroForeign {
 public:
-             lefiMacroForeign(const char *name,
-                              int        hasPts,
-                              double     x,
-                              double     y,
-                              int        hasOrient,
-                              int        orient);
+  lefiMacroForeign(const char* name, int hasPts, double x, double y, int hasOrient, int orient);
 
-  const char *cellName() const;
-  int        cellHasPts() const;
-  double     px() const;
-  double     py() const;
-  int        cellHasOrient() const;
-  int        cellOrient() const;
+  const char* cellName() const;
+  int         cellHasPts() const;
+  double      px() const;
+  double      py() const;
+  int         cellHasOrient() const;
+  int         cellOrient() const;
 
 protected:
-  const char *cellName_;
-  int        cellHasPts_;
-  double     px_;
-  double     py_;
-  int        cellHasOrient_;
-  int        cellOrient_;
+  const char* cellName_;
+  int         cellHasPts_;
+  double      px_;
+  double      py_;
+  int         cellHasOrient_;
+  int         cellOrient_;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

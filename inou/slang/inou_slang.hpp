@@ -16,4 +16,3 @@ public:
 
   static void setup();
 };
-

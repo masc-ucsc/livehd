@@ -1,14 +1,14 @@
 
 
+#include "thread_pool.hpp"
+
 #include <iostream>
 
-#include "gtest/gtest.h"
-
-#include "lbench.hpp"
-#include "spmc.hpp"
-#include "mpmc.hpp"
-#include "thread_pool.hpp"
 #include "concurrentqueue.hpp"
+#include "gtest/gtest.h"
+#include "lbench.hpp"
+#include "mpmc.hpp"
+#include "spmc.hpp"
 
 int control = 1023;
 
@@ -21,31 +21,27 @@ struct Test1 {
 };
 
 std::atomic<int> total;
-void mywork(int a) {
-  total.fetch_add(a, std::memory_order_relaxed);
-}
+void             mywork(int a) { total.fetch_add(a, std::memory_order_relaxed); }
 
 class GTest1 : public ::testing::Test {
 protected:
-  void SetUp() override {
-  }
+  void SetUp() override {}
 };
 
 TEST_F(GTest1, interface) {
-
-  for(int n=1;n<5;n=n+2) {
+  for (int n = 1; n < 5; n = n + 2) {
     total = 0;
 
-    Lbench bb("task.THREAD_POOL_pool" + std::to_string(n));
+    Lbench      bb("task.THREAD_POOL_pool" + std::to_string(n));
     Thread_pool pool(n);
-    const int JOB_COUNT = 2000000;
+    const int   JOB_COUNT = 2000000;
 
     Test1 t1;
     t1.a = 0;
 
     pool.add(&Test1::inc_a, t1, 3);
 
-    for(int i = 0; i < JOB_COUNT; ++i) {
+    for (int i = 0; i < JOB_COUNT; ++i) {
       pool.add(mywork, 1);
     }
 
@@ -84,7 +80,7 @@ TEST_F(GTest1, bench) {
     }
   }
   {
-    Lbench bb("task.THREAD_POOL_concurrentqueue");
+    Lbench                           bb("task.THREAD_POOL_concurrentqueue");
     moodycamel::ConcurrentQueue<int> queue(256);
 
     for (int i = 0; i < 10000000; ++i) {
@@ -95,4 +91,3 @@ TEST_F(GTest1, bench) {
     }
   }
 }
-

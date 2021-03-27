@@ -39,18 +39,18 @@
 #ifndef LEFI_USER_H
 #define LEFI_USER_H
 
-#include "lefiDebug.hpp"
-#include "lefiUnits.hpp"
-#include "lefiLayer.hpp"
-#include "lefiVia.hpp"
-#include "lefiViaRule.hpp"
-#include "lefiMisc.hpp"
-#include "lefiNonDefault.hpp"
-#include "lefiMacro.hpp"
 #include "lefiArray.hpp"
 #include "lefiCrossTalk.hpp"
+#include "lefiDebug.hpp"
+#include "lefiLayer.hpp"
+#include "lefiMacro.hpp"
+#include "lefiMisc.hpp"
+#include "lefiNonDefault.hpp"
 #include "lefiProp.hpp"
 #include "lefiPropType.hpp"
+#include "lefiUnits.hpp"
+#include "lefiVia.hpp"
+#include "lefiViaRule.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 

@@ -15,20 +15,20 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   firrtl::FirrtlPB          fir_design;
   firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();
   auto                      top_msg = circuit->add_top();
-  
+
   bool first = true;
   (void)first;
 
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    //if (first) {
-      top_msg->set_name(
-          (std::string)lnast->get_name(lnast->get_root()));  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
-      first = false;
+    // if (first) {
+    top_msg->set_name(
+        (std::string)lnast->get_name(lnast->get_root()));  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
+    first = false;
     //}
   }
 
-  //fir_design.PrintDebugString();
+  // fir_design.PrintDebugString();
   std::fstream output(absl::StrCat(top_msg->name(), ".pb"), std::ios::out | std::ios::trunc | std::ios::binary);
   if (!fir_design.SerializeToOstream(&output)) {
     fmt::print("Failed to write firrtl design\n");
@@ -98,14 +98,14 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
       }
     }
   } else if (ntype.is_func_call()) {
-    return; // Nothing to do, submod_inst already made in FindCircuitComps
+    return;  // Nothing to do, submod_inst already made in FindCircuitComps
   } else if (ntype.is_tuple()) {
     std::string_view tup_name;
-    bool first = true;
-    for (const auto& child : ln.children(lnidx)) {
+    bool             first = true;
+    for (const auto &child : ln.children(lnidx)) {
       if (first) {
         tup_name = ln.get_name(child);
-        first = false;
+        first    = false;
       } else {
         auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
         process_tup_asg(ln, child, tup_name, fstmt);
@@ -161,14 +161,14 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
       umod->mutable_statement()->RemoveLast();
     }
   } else if (ntype.is_func_call()) {
-    return; // Nothing to do, submod_inst already made in FindCircuitComps
+    return;  // Nothing to do, submod_inst already made in FindCircuitComps
   } else if (ntype.is_tuple()) {
     std::string_view tup_name;
-    bool first = true;
-    for (const auto& child : ln.children(lnidx)) {
+    bool             first = true;
+    for (const auto &child : ln.children(lnidx)) {
       if (first) {
         tup_name = ln.get_name(child);
-        first = false;
+        first    = false;
       } else {
         auto fstmt = umod->add_statement();
         process_tup_asg(ln, child, tup_name, fstmt);
@@ -218,7 +218,8 @@ bool Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
 /* When a tuple node is encountered, get the name (lhs).
  * Then look at each assign node and their LHS (L) and RHS (R).
  * Form a bunch of connect statements that do lhs.L <= R */
-void Inou_firrtl::process_tup_asg(Lnast& ln, const Lnast_nid& lnidx_asg, const std::string_view &lhs, firrtl::FirrtlPB_Statement* fstmt) {
+void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, const std::string_view &lhs,
+                                  firrtl::FirrtlPB_Statement *fstmt) {
   auto c0       = ln.get_first_child(lnidx_asg);
   auto c1       = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
@@ -229,7 +230,7 @@ void Inou_firrtl::process_tup_asg(Lnast& ln, const Lnast_nid& lnidx_asg, const s
   firrtl::FirrtlPB_Expression_SubField *subfield_expr;
   if (wire_rename_map.contains(lhs)) {
     auto rename_str = wire_rename_map[lhs];
-    subfield_expr = make_subfield_expr(absl::StrCat(rename_str, ".", ln.get_name(c0)));
+    subfield_expr   = make_subfield_expr(absl::StrCat(rename_str, ".", ln.get_name(c0)));
   } else {
     subfield_expr = make_subfield_expr(absl::StrCat(lhs, ".", ln.get_name(c0)));
   }
@@ -248,12 +249,12 @@ void Inou_firrtl::process_tup_asg(Lnast& ln, const Lnast_nid& lnidx_asg, const s
 
 /* Take in a string, separate by "." symbol,
  * then create subfield expression out of it. */
-//FIXME: See if I can't make this more general (SubInd, SubAcc, SubF)
-firrtl::FirrtlPB_Expression_SubField* Inou_firrtl::make_subfield_expr(std::string name) {
+// FIXME: See if I can't make this more general (SubInd, SubAcc, SubF)
+firrtl::FirrtlPB_Expression_SubField *Inou_firrtl::make_subfield_expr(std::string name) {
   fmt::print("make subfield: {}\n", name);
   std::vector<std::string> subnames;
-  size_t pos = 0;
-  while((pos = name.find(".")) != std::string::npos) {
+  size_t                   pos = 0;
+  while ((pos = name.find(".")) != std::string::npos) {
     subnames.push_back(name.substr(0, pos));
     name.erase(0, pos + 1);
   }
@@ -272,7 +273,7 @@ firrtl::FirrtlPB_Expression_SubField* Inou_firrtl::make_subfield_expr(std::strin
   // Set field
   subfield_expr->set_field(subnames[1]);
 
-  //subfield_expr->PrintDebugString();
+  // subfield_expr->PrintDebugString();
   return subfield_expr;
 }
 
@@ -461,19 +462,19 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
 
   dot_map[ln.get_name(lhs)] = {tup, field};
 
-  if (!(ln.get_name(field).substr(0,2) == "__")) {
+  if (!(ln.get_name(field).substr(0, 2) == "__")) {
     /* If this is not a dot for an attribute, then create an
      * assign statement to hold value. */
-    //NOTE/FIXME: Doing it this way means we can have no nested bundles or
-    //vecs in the LNAST. If there's a dot, it's either an attribute or accessing
-    //an element of a bundle/vec. That element cannot be another bundle/vec.
+    // NOTE/FIXME: Doing it this way means we can have no nested bundles or
+    // vecs in the LNAST. If there's a dot, it's either an attribute or accessing
+    // an element of a bundle/vec. That element cannot be another bundle/vec.
     auto tup_name = ln.get_name(tup);
     if (wire_rename_map.contains(tup_name)) {
       tup_name = wire_rename_map[tup_name];
     }
-    auto field_name = ln.get_name(field);
+    auto field_name    = ln.get_name(field);
     auto subfield_expr = make_subfield_expr(absl::StrCat(tup_name, ".", field_name));
-    auto expr = new firrtl::FirrtlPB_Expression();
+    auto expr          = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_sub_field(subfield_expr);
 
     make_assignment(ln, lhs, expr, fstmt);
@@ -481,7 +482,7 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
   } else if (ln.get_name(field) == "__q_pin") {
     // For FIRRTL, this is just the same lhs = tup
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id((std::string)ln.get_name(tup).substr(1)); // Remove 1st char since it's a '#'
+    rhs_ref->set_id((std::string)ln.get_name(tup).substr(1));  // Remove 1st char since it's a '#'
     auto expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_reference(rhs_ref);
     make_assignment(ln, lhs, expr, fstmt);
@@ -511,7 +512,8 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     // Can be ignored.
   } else if (attr_name == "__posedge") {
     if (ln.get_name(rhs) == "false") {
-      Pass::warn("Attribute __posedge was set to false, but currently FIRRTL does not support negedge-triggered registers. Will ignore.");
+      Pass::warn(
+          "Attribute __posedge was set to false, but currently FIRRTL does not support negedge-triggered registers. Will ignore.");
     }
   } else if (attr_name == "__bits") {
     // Ignore. Should have only been specified in bw_table attribute of LNAST.
@@ -531,7 +533,7 @@ void Inou_firrtl::handle_sign_attr(Lnast &ln, const std::string_view &var_name, 
   }
 
   if (io_map.contains(var_name.substr(1))) {
-    auto port_ptr  = io_map[var_name.substr(1)];
+    auto port_ptr = io_map[var_name.substr(1)];
     if (port_ptr->type().has_sint_type()) {
       return;
     } else if (port_ptr->type().has_uint_type()) {
@@ -539,7 +541,7 @@ void Inou_firrtl::handle_sign_attr(Lnast &ln, const std::string_view &var_name, 
       auto width     = new firrtl::FirrtlPB_Width();
       width->set_value(port_ptr->type().uint_type().width().value());
       sint_type->set_allocated_width(width);
-      auto type      = new firrtl::FirrtlPB_Type();
+      auto type = new firrtl::FirrtlPB_Type();
       type->set_allocated_sint_type(sint_type);
       port_ptr->set_allocated_type(type);
     } else {
@@ -556,7 +558,7 @@ void Inou_firrtl::handle_sign_attr(Lnast &ln, const std::string_view &var_name, 
       auto width     = new firrtl::FirrtlPB_Width();
       width->set_value(reg_ptr->type().uint_type().width().value());
       sint_type->set_allocated_width(width);
-      auto type      = new firrtl::FirrtlPB_Type();
+      auto type = new firrtl::FirrtlPB_Type();
       type->set_allocated_sint_type(sint_type);
       reg_ptr->set_allocated_type(type);
     } else {
@@ -573,7 +575,7 @@ void Inou_firrtl::handle_sign_attr(Lnast &ln, const std::string_view &var_name, 
       auto width     = new firrtl::FirrtlPB_Width();
       width->set_value(wire_ptr->type().uint_type().width().value());
       sint_type->set_allocated_width(width);
-      auto type      = new firrtl::FirrtlPB_Type();
+      auto type = new firrtl::FirrtlPB_Type();
       type->set_allocated_sint_type(sint_type);
       wire_ptr->set_allocated_type(type);
     } else {
@@ -841,7 +843,7 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
     if (lconst_holder.is_negative()) {
       firrtl::FirrtlPB_Expression_UIntLiteral *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
       ulit->set_allocated_value(num);
-      ulit->set_allocated_width(width-1);
+      ulit->set_allocated_width(width - 1);
       expr->set_allocated_uint_literal(ulit);
     } else {
       firrtl::FirrtlPB_Expression_SIntLiteral *slit = new firrtl::FirrtlPB_Expression_SIntLiteral();

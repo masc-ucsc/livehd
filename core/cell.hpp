@@ -19,10 +19,10 @@ enum class Ntype_op : uint8_t {
   Xor,
   Ror,  // Reduce OR
 
-  Not,    // bitwise not
-  Get_mask,  // To positive signed 
-  Set_mask,  // To positive signed 
-  Sext,   // Sign extend from a given bit (b) position
+  Not,       // bitwise not
+  Get_mask,  // To positive signed
+  Set_mask,  // To positive signed
+  Sext,      // Sign extend from a given bit (b) position
 
   LT,  // Less Than   , also GE = !LT
   GT,  // Greater Than, also LE = !GT
@@ -65,9 +65,10 @@ enum class Ntype_op : uint8_t {
 class Ntype {
 protected:
   inline static constexpr std::string_view cell_name[]
-      = {"Invalid", "Sum", "Mult",  "Div",    "And",    "Or",     "Xor",    "Ror",     "Not",     "Get_mask",   "Set_mask", "Sext",
-         "LT",      "GT",  "EQ",    "SHL",    "SRA",    "Mux",    "LUT",    "IO",      "Memory",  "Flop",       "Latch",
-         "Fflop",   "Sub", "Const", "TupAdd", "TupGet", "TupRef", "TupKey", "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
+      = {"Invalid",  "Sum",      "Mult",   "Div",     "And",     "Or",         "Xor",         "Ror",   "Not",
+         "Get_mask", "Set_mask", "Sext",   "LT",      "GT",      "EQ",         "SHL",         "SRA",   "Mux",
+         "LUT",      "IO",       "Memory", "Flop",    "Latch",   "Fflop",      "Sub",         "Const", "TupAdd",
+         "TupGet",   "TupRef",   "TupKey", "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 
@@ -94,17 +95,15 @@ public:
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
-    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet
-           && op != Ntype_op::TupRef && op != Ntype_op::TupKey && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet
-           && op != Ntype_op::CompileErr && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
+    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet && op != Ntype_op::TupRef
+           && op != Ntype_op::TupKey && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr
+           && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
     return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Mux || op == Ntype_op::CompileErr;
   }
-  static inline constexpr bool is_unlimited_driver(Ntype_op op) {
-    return op == Ntype_op::Sub || op == Ntype_op::IO;
-  }
+  static inline constexpr bool is_unlimited_driver(Ntype_op op) { return op == Ntype_op::Sub || op == Ntype_op::IO; }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return op == Ntype_op::AttrSet || is_unlimited_driver(op); }
   static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {
     if (is_unlimited_sink(op))

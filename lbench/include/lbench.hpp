@@ -2,27 +2,26 @@
 #ifndef LGBENCH_H
 #define LGBENCH_H
 
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
-#include <signal.h>
 
 #include <chrono>
-#include <iostream>
-#include <vector>
-#include <sstream>
 #include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <vector>
 #ifndef __linux__
 #include <mach/mach.h>
 #endif
 
 #include "likely.hpp"
-
 #include "linux-perf-events.hpp"
 
 class Lbench {
@@ -33,24 +32,23 @@ private:
     // This assumes that a digit will be found and the line ends in " Kb".
     int         i = strlen(line);
     const char *p = line;
-    while(*p < '0' || *p > '9')
-      p++;
+    while (*p < '0' || *p > '9') p++;
     line[i - 3] = '\0';
     i           = atoi(p);
     return i;
   }
 
-  int getValue() const { // Note: this value is in KB!
+  int getValue() const {  // Note: this value is in KB!
 #ifdef __linux__
     FILE *file   = fopen("/proc/self/status", "r");
-    int result = -1;
-    char line[128];
+    int   result = -1;
+    char  line[128];
 
-    if (file==nullptr)
+    if (file == nullptr)
       return 0;
 
-    while(fgets(line, 128, file) != nullptr) {
-      if(strncmp(line, "VmRSS:", 6) == 0) {
+    while (fgets(line, 128, file) != nullptr) {
+      if (strncmp(line, "VmRSS:", 6) == 0) {
         result = parseLine(line);
         break;
       }
@@ -58,11 +56,11 @@ private:
     fclose(file);
     return result;
 #else
-    task_vm_info_data_t vmInfo;
-    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
-    kern_return_t kernelReturn = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t) &vmInfo, &count);
-    if(kernelReturn == KERN_SUCCESS) {
-      return (int) vmInfo.phys_footprint / (1024 * 1024);
+    task_vm_info_data_t    vmInfo;
+    mach_msg_type_number_t count        = TASK_VM_INFO_COUNT;
+    kern_return_t          kernelReturn = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vmInfo, &count);
+    if (kernelReturn == KERN_SUCCESS) {
+      return (int)vmInfo.phys_footprint / (1024 * 1024);
     }
     return 0;
 #endif
@@ -70,7 +68,7 @@ private:
 
   static inline bool perf_setup   = false;
   static inline bool perf_enabled = false;
-  pid_t perf_pid=0;
+  pid_t              perf_pid     = 0;
 
 protected:
   typedef std::chrono::time_point<std::chrono::system_clock> Time_Point;
@@ -89,14 +87,14 @@ protected:
   int                      start_mem;
   bool                     end_called;
 
-  void perf_start(const std::string& name) {
+  void perf_start(const std::string &name) {
     if (unlikely(!perf_setup)) {
       const char *do_perf = getenv("LGBENCH_PERF");
-      if (do_perf==nullptr) {
+      if (do_perf == nullptr) {
         perf_enabled = false;
-      }else if (do_perf[0]=='0') {
+      } else if (do_perf[0] == '0') {
         perf_enabled = false;
-      }else{
+      } else {
         perf_enabled = true;
       }
       if (perf_enabled && access("/usr/bin/perf", X_OK) == -1) {
@@ -104,7 +102,7 @@ protected:
         exit(-3);
       }
 
-      perf_setup=true;
+      perf_setup = true;
     }
     if (!perf_enabled)
       return;
@@ -115,10 +113,10 @@ protected:
     s << getpid();
     perf_pid = fork();
     if (perf_pid == 0) {
-      auto fd=open("/dev/null",O_RDWR);
-      dup2(fd,1);
-      dup2(fd,2);
-      exit(execl("/usr/bin/perf","perf","record","-o",filename.c_str(),"-p",s.str().c_str(),nullptr));
+      auto fd = open("/dev/null", O_RDWR);
+      dup2(fd, 1);
+      dup2(fd, 2);
+      exit(execl("/usr/bin/perf", "perf", "record", "-o", filename.c_str(), "-p", s.str().c_str(), nullptr));
     }
   }
 
@@ -126,22 +124,21 @@ protected:
     if (!perf_enabled)
       return;
     // Kill profiler
-    kill(perf_pid,SIGINT);
-    waitpid(perf_pid,nullptr,0);
+    kill(perf_pid, SIGINT);
+    waitpid(perf_pid, nullptr, 0);
   }
 
 public:
-  explicit Lbench(const std::string &name)
-      : sample_name(name) {
+  explicit Lbench(const std::string &name) : sample_name(name) {
     end_called = false;
     perf_start(name);
 
     const std::vector<int> evts{
 #ifdef __linux__
-      PERF_COUNT_HW_CPU_CYCLES,
-      PERF_COUNT_HW_INSTRUCTIONS,
-      PERF_COUNT_HW_BRANCH_MISSES,
-      PERF_COUNT_HW_CACHE_REFERENCES
+        PERF_COUNT_HW_CPU_CYCLES,
+        PERF_COUNT_HW_INSTRUCTIONS,
+        PERF_COUNT_HW_BRANCH_MISSES,
+        PERF_COUNT_HW_CACHE_REFERENCES
 #endif
     };
     linux.setup(evts);
@@ -150,7 +147,7 @@ public:
   }
 
   ~Lbench() {
-    if(end_called)
+    if (end_called)
       return;
     end();
     perf_stop();
@@ -181,8 +178,8 @@ public:
   double get_secs() const {
     Time_Point tp = std::chrono::system_clock::now();
 
-    Time_Point prev     = start_time;
-    std::chrono::duration<double> t = tp - start_time;
+    Time_Point                    prev = start_time;
+    std::chrono::duration<double> t    = tp - start_time;
     return t.count();
   }
 
@@ -196,14 +193,14 @@ public:
     Time_Point prev     = start_time;
     int        prev_mem = start_mem;
 
-    for(const auto &s : record) {
+    for (const auto &s : record) {
       std::chrono::duration<double> t = s.tp - prev;
 
-      if(s.name == "end" && t.count() < 0.01)
+      if (s.name == "end" && t.count() < 0.01)
         continue;
 
       int m;
-      if(prev_mem > s.mem)
+      if (prev_mem > s.mem)
         m = prev_mem - s.mem;
       else
         m = s.mem - prev_mem;
@@ -227,19 +224,15 @@ public:
     linux.close();
 
     std::chrono::duration<double> t = tp - start_time;
-    std::stringstream sstr;
-    sstr
-      << std::setw(20) << std::left << sample_name 
-      << " secs="      << std::setw(15)  << t.count()
-      << " IPC="       << std::setw(10)  << ((double)stats[1]) / (stats[0]+1)
-      << " BR_MPKI="   << std::setw(10)  << ((double)stats[2]*1000) / (stats[1]+1)
-      << " L2_MPKI="   << std::setw(10)  << ((double)stats[3]*1000) / (stats[1]+1)
-      << "\n";
+    std::stringstream             sstr;
+    sstr << std::setw(20) << std::left << sample_name << " secs=" << std::setw(15) << t.count() << " IPC=" << std::setw(10)
+         << ((double)stats[1]) / (stats[0] + 1) << " BR_MPKI=" << std::setw(10) << ((double)stats[2] * 1000) / (stats[1] + 1)
+         << " L2_MPKI=" << std::setw(10) << ((double)stats[3] * 1000) / (stats[1] + 1) << "\n";
     // std::cerr << sstr.str();
 
-    int tfd = ::open("lbench.trace",O_CREAT|O_RDWR|O_APPEND, 0644);
+    int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
 
-    if (tfd>=0) {
+    if (tfd >= 0) {
       write(tfd, sstr.str().data(), sstr.str().size());
       close(tfd);
     }

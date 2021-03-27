@@ -21,14 +21,14 @@
 #define __STDC_LIMIT_MACROS
 #define __STDC_FORMAT_MACROS
 
+#include "lezminisat.hpp"
+
 #include <limits.h>
 #include <stdint.h>
 
 #include <cassert>
 #include <cinttypes>
 #include <csignal>
-
-#include "lezminisat.hpp"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -85,7 +85,7 @@ bool lezMiniSAT::eliminated(int idx) {
 
 #ifndef _WIN32
 lezMiniSAT *lezMiniSAT::alarmHandlerThis    = NULL;
-clock_t    lezMiniSAT::alarmHandlerTimeout = 0;
+clock_t     lezMiniSAT::alarmHandlerTimeout = 0;
 
 void lezMiniSAT::alarmHandler(int) {
   if (clock() > alarmHandlerTimeout) {
@@ -97,7 +97,7 @@ void lezMiniSAT::alarmHandler(int) {
 #endif
 
 bool lezMiniSAT::solver(const std::vector<int> &modelExpressions, std::vector<bool> &modelValues,
-                       const std::vector<int> &assumptions) {
+                        const std::vector<int> &assumptions) {
   preSolverCallback();
 
   solverTimoutStatus = false;

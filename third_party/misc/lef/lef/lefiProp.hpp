@@ -30,8 +30,9 @@
 #ifndef lefiProp_h
 #define lefiProp_h
 
-#include "lefiKRDefs.hpp"
 #include <stdio.h>
+
+#include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -57,13 +58,13 @@ public:
   const char* string() const;
   const char* propType() const;
   const char* propName() const;
-  char  dataType() const;
-      // either I:integer R:real S:string Q:quotedstring
-      // N:property name is not defined in the property definition section
-  int hasNumber() const;
-  int hasRange() const;
-  int hasString() const;
-  int hasNameMapString() const;
+  char        dataType() const;
+  // either I:integer R:real S:string Q:quotedstring
+  // N:property name is not defined in the property definition section
+  int    hasNumber() const;
+  int    hasRange() const;
+  int    hasString() const;
+  int    hasNameMapString() const;
   double number() const;
   double left() const;
   double right() const;
@@ -74,19 +75,19 @@ public:
   void print(FILE* f) const;
 
 protected:
-  char* propType_;      // "design" "net" "macro" ...
-  char* propName_;      // name.
-  int nameSize_;        // allocated size of name.
-  char hasRange_;       // either 0:NO or 1:YES.
-  char hasNumber_;      // either 0:NO or 1:YES.
-  char hasNameMapString_;
-  char dataType_;       // either I:integer R:real S:string Q:quotedstring.
-            // N:property name is not defined.
-  char* stringData_;    // if it is a string the data is here.
-  int stringLength_;    // allocated size of stringData.
+  char* propType_;   // "design" "net" "macro" ...
+  char* propName_;   // name.
+  int   nameSize_;   // allocated size of name.
+  char  hasRange_;   // either 0:NO or 1:YES.
+  char  hasNumber_;  // either 0:NO or 1:YES.
+  char  hasNameMapString_;
+  char  dataType_;       // either I:integer R:real S:string Q:quotedstring.
+                         // N:property name is not defined.
+  char*  stringData_;    // if it is a string the data is here.
+  int    stringLength_;  // allocated size of stringData.
   double left_;
-  double right_; // if it has a range the numbers are here.
-  double d_;            // if it is a real or int the number is here.
+  double right_;  // if it has a range the numbers are here.
+  double d_;      // if it is a real or int the number is here.
 };
 
 END_LEFDEF_PARSER_NAMESPACE

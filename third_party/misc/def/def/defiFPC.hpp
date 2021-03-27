@@ -31,6 +31,7 @@
 #define defiFPC_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -39,7 +40,7 @@ class defrData;
 
 class defiFPC {
 public:
-  defiFPC(defrData *data);
+  defiFPC(defrData* data);
   void Init();
 
   void Destroy();
@@ -59,15 +60,15 @@ public:
   void addItem(char typ, const char* name);
 
   const char* name() const;
-  int isVertical() const;
-  int isHorizontal() const;
-  int hasAlign() const;
-  int hasMax() const;
-  int hasMin() const;
-  int hasEqual() const;
-  double alignMax() const;
-  double alignMin() const;
-  double equal() const;
+  int         isVertical() const;
+  int         isHorizontal() const;
+  int         hasAlign() const;
+  int         hasMax() const;
+  int         hasMin() const;
+  int         hasEqual() const;
+  double      alignMax() const;
+  double      alignMin() const;
+  double      equal() const;
 
   int numParts() const;
 
@@ -82,23 +83,22 @@ public:
   void print(FILE* f) const;
 
 protected:
-  char* name_;
-  int nameLength_;
-  char direction_; // H or V
-  char hasAlign_;
-  char hasMin_;
-  char hasMax_;
-  char hasEqual_;
-  char corner_;   // Bottomleft or Topright
+  char*  name_;
+  int    nameLength_;
+  char   direction_;  // H or V
+  char   hasAlign_;
+  char   hasMin_;
+  char   hasMax_;
+  char   hasEqual_;
+  char   corner_;  // Bottomleft or Topright
   double minMaxEqual_;
-  int namesAllocated_;  // allocated size of names_ and rowOrComp_
-  int namesUsed_;       // number of entries used in the arrays
-  char* rowOrComp_;
+  int    namesAllocated_;  // allocated size of names_ and rowOrComp_
+  int    namesUsed_;       // number of entries used in the arrays
+  char*  rowOrComp_;
   char** names_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

@@ -30,8 +30,9 @@
 #ifndef lefiPropType_h
 #define lefiPropType_h
 
-#include "lefiKRDefs.hpp"
 #include <stdio.h>
+
+#include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -49,13 +50,13 @@ public:
   void Clear();
 
   const char propType(char* name) const;
-  void bumpProps();
+  void       bumpProps();
 
 protected:
   int    numProperties_;
   int    propertiesAllocated_;
-  char** propNames_;      // name.
-  char*  propTypes_;      // 'R' == "REAL", 'I' == "INTEGER"
+  char** propNames_;  // name.
+  char*  propTypes_;  // 'R' == "REAL", 'I' == "INTEGER"
 };
 
 END_LEFDEF_PARSER_NAMESPACE

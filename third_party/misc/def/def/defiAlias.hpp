@@ -45,15 +45,15 @@ public:
   void Destroy();
   ~defiAlias_itr();
 
-  int Next();
-  const char* Key();
-  const char* Data();
-  int Marked();
+  int         Next();
+  const char *Key();
+  const char *Data();
+  int         Marked();
 
 protected:
-  defAliasIterator   *iterator;
-  int first;
-  defrData *defData;
+  defAliasIterator *iterator;
+  int               first;
+  defrData *        defData;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

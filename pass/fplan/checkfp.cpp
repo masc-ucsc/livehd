@@ -59,7 +59,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
         return true;
       }
 
-      //fmt::print("\n{} vs {}\n", n.debug_name(), nt.debug_name());
+      // fmt::print("\n{} vs {}\n", n.debug_name(), nt.debug_name());
 
       // is (xt, yt) inside a rectangle from (x0, y0) -> (x1, y1)?
       auto inside = [](float x0, float y0, float x1, float y1, float xt, float yt) -> bool {
@@ -67,9 +67,9 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
         I(y0 < y1);
 
         bool in_x = (x0 < xt) && (xt < x1);
-        //fmt::print("x0 ({}) <= xp ({}) <= x1({}): {}\n", x0, xt, x1, in_x);
+        // fmt::print("x0 ({}) <= xp ({}) <= x1({}): {}\n", x0, xt, x1, in_x);
         bool in_y = (y0 < yt) && (yt < y1);
-        //fmt::print("y0 ({}) <= yp ({}) <= yp ({}): {}\n", y0, yt, y1, in_y);
+        // fmt::print("y0 ({}) <= yp ({}) <= yp ({}): {}\n", y0, yt, y1, in_y);
         return in_x && in_y;
       };
 
@@ -84,18 +84,18 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
       float ty1 = tp.get_y() + tp.get_height();
 
       bool intersect = false;
-      intersect = intersect || inside(tx0, ty0, tx1, ty1, px0, py0);
-      intersect = intersect || inside(tx0, ty0, tx1, ty1, px0, py1);
-      intersect = intersect || inside(tx0, ty0, tx1, ty1, px1, py0);
-      intersect = intersect || inside(tx0, ty0, tx1, ty1, px1, py1);
+      intersect      = intersect || inside(tx0, ty0, tx1, ty1, px0, py0);
+      intersect      = intersect || inside(tx0, ty0, tx1, ty1, px0, py1);
+      intersect      = intersect || inside(tx0, ty0, tx1, ty1, px1, py0);
+      intersect      = intersect || inside(tx0, ty0, tx1, ty1, px1, py1);
 
       if (intersect) {
         fmt::print("intersection detected between nodes {} and {}!\n", n.debug_name(), nt.debug_name());
         // fmt::print("node {} collides with node {}!\n", n1.debug_name(), n2.debug_name());
         // fmt::print("n1\tnid: {}, level: {}, pos: {} ", n1.get_nid(), n1.get_hidx().level, n1.get_hidx().pos);
-        //fmt::print("({}, {}) -> ({}, {})\n", psx, psy, pex, pey);
+        // fmt::print("({}, {}) -> ({}, {})\n", psx, psy, pex, pey);
         // fmt::print("n2\tnid: {}, level: {}, pos: {} ", n2.get_nid(), n2.get_hidx().level, n2.get_hidx().pos);
-        //fmt::print("({}, {}) -> ({}, {})\n\n", tsx, tsy, tex, tey);
+        // fmt::print("({}, {}) -> ({}, {})\n\n", tsx, tsy, tex, tey);
 
         issue_counter++;
       }

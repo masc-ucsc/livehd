@@ -1,17 +1,17 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <cassert>
 #include <unistd.h>
 
 #include <atomic>
+#include <cassert>
 #include <condition_variable>
 #include <functional>
+#include <iostream>
 #include <mutex>
 #include <thread>
 #include <type_traits>
 #include <vector>
-#include <iostream>
 
 //#define MPMC
 #ifdef MPMC
@@ -22,14 +22,17 @@
 
 #define DISABLE_THREAD_POOL
 
-template <class Func, class... Args> inline auto forward_as_lambda(Func &&func, Args &&... args) {
+template <class Func, class... Args>
+inline auto forward_as_lambda(Func &&func, Args &&...args) {
   return [f   = std::forward<decltype(func)>(func),
           tup = std::tuple<std::conditional_t<std::is_lvalue_reference_v<Args>, Args, std::remove_reference_t<Args>>...>(
               std::forward<decltype(args)>(args)...)]() mutable { return std::apply(std::move(f), std::move(tup)); };
 }
 
-template <class Func, class T, class... Args> inline auto forward_as_lambda2(Func &&func, T &&first, Args &&... args) {
-  return [f = std::forward<decltype(func)>(func), tt = std::forward<decltype(first)>(first),
+template <class Func, class T, class... Args>
+inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
+  return [f   = std::forward<decltype(func)>(func),
+          tt  = std::forward<decltype(first)>(first),
           tup = std::tuple<std::conditional_t<std::is_lvalue_reference_v<Args>, Args, std::remove_reference_t<Args>>...>(
               std::forward<decltype(args)>(args)...)]() mutable {
     return std::apply(std::move(f), std::tuple_cat(std::forward_as_tuple(tt), std::move(tup)));
@@ -37,7 +40,6 @@ template <class Func, class T, class... Args> inline auto forward_as_lambda2(Fun
 }
 
 class Thread_pool {
-
   std::vector<std::thread> threads;
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
@@ -57,14 +59,13 @@ class Thread_pool {
     static std::atomic_flag lock = ATOMIC_FLAG_INIT;
 
     if (!lock.test_and_set(std::memory_order_acquire)) {
-      for(unsigned i = 1; i < thread_count; ++i)
-        threads.push_back(std::thread([this] { this->task(); }));
+      for (unsigned i = 1; i < thread_count; ++i) threads.push_back(std::thread([this] { this->task(); }));
     }
 
-    while(!finishing) {
-      //while(!queue.empty()) {
-        next_job()();
-        jobs_left.fetch_sub(1, std::memory_order_relaxed);
+    while (!finishing) {
+      // while(!queue.empty()) {
+      next_job()();
+      jobs_left.fetch_sub(1, std::memory_order_relaxed);
       //}
     }
   }
@@ -83,7 +84,7 @@ class Thread_pool {
 
     jobs_left.fetch_add(1, std::memory_order_relaxed);
 
-    return [] {}; // Nothing to do
+    return [] {};  // Nothing to do
   }
 
   void add_(std::function<void(void)> job) {
@@ -91,7 +92,7 @@ class Thread_pool {
     job();
     return;
 #else
-    if(jobs_left > 48) { //FIXME->sh: what if not so much core?
+    if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
       job();
       return;
     }
@@ -112,16 +113,16 @@ public:
       , finishing(false) {
 
     thread_count = _thread_count;
-    size_t lim   = (std::thread::hardware_concurrency() - 1); // -1 for calling thread
+    size_t lim   = (std::thread::hardware_concurrency() - 1);  // -1 for calling thread
 
-    if(thread_count > lim || thread_count == 0)
+    if (thread_count > lim || thread_count == 0)
       thread_count = lim;
-    else if(thread_count < 1)
+    else if (thread_count < 1)
       thread_count = 1;
 
     assert(thread_count);
 
-    threads.push_back(std::thread([this] { this->task(); })); // Just one thread in critical path
+    threads.push_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
 
   ~Thread_pool() {
@@ -133,30 +134,31 @@ public:
     }
     job_available_var.notify_all();
 
-    for(auto &x : threads)
-      if(x.joinable())
+    for (auto &x : threads)
+      if (x.joinable())
         x.join();
   }
 
-  inline unsigned size() const {
-    return thread_count;
-  }
+  inline unsigned size() const { return thread_count; }
 
-  template <class Func, class... Args> void add(Func &&func, Args &&... args) {
+  template <class Func, class... Args>
+  void add(Func &&func, Args &&...args) {
     return add_(forward_as_lambda(std::forward<decltype(func)>(func), std::forward<decltype(args)>(args)...));
   }
 #if 1
-  template <class Func, class T, class... Args> void add(Func &&func, T *first, Args &&... args) {
-    return add_(forward_as_lambda2(std::forward<decltype(func)>(func), std::forward<decltype(first)>(first),
+  template <class Func, class T, class... Args>
+  void add(Func &&func, T *first, Args &&...args) {
+    return add_(forward_as_lambda2(std::forward<decltype(func)>(func),
+                                   std::forward<decltype(first)>(first),
                                    std::forward<decltype(args)>(args)...));
   }
 #endif
 
   void wait_all() {
-    while(jobs_left > 0) {
+    while (jobs_left > 0) {
       std::function<void(void)> res;
       bool                      has_work = queue.dequeue(res);
-      if(has_work) {
+      if (has_work) {
         res();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
       }
@@ -165,4 +167,3 @@ public:
 };
 
 extern Thread_pool thread_pool;
-

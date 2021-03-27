@@ -30,86 +30,80 @@
 #ifndef defiRowTrack_h
 #define defiRowTrack_h
 
-#include "defiKRDefs.hpp"
 #include <stdio.h>
+
+#include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 class defrData;
 
-class defiRow{
+class defiRow {
 public:
-
-  defiRow(defrData *data);
+  defiRow(defrData* data);
   void Init();
 
   ~defiRow();
   void Destroy();
   void clear();
 
-  void setup(const char* name, const char* macro,
-	     double x, double y, int orient);
-  void setDo(double x_num, double y_num,
-	     double x_step, double y_step);
+  void setup(const char* name, const char* macro, double x, double y, int orient);
+  void setDo(double x_num, double y_num, double x_step, double y_step);
   void setHasDoStep();
   void addProperty(const char* name, const char* value, const char type);
-  void addNumProperty(const char* name, const double d,
-                      const char* value, const char type);
+  void addNumProperty(const char* name, const double d, const char* value, const char type);
 
   const char* name() const;
   const char* macro() const;
-  double x() const;
-  double y() const;
-  int orient() const;
+  double      x() const;
+  double      y() const;
+  int         orient() const;
   const char* orientStr() const;
-  int hasDo() const;               // 5.6, DO is optional
-  double xNum() const;
-  double yNum() const;
-  int hasDoStep() const;           // 5.6, STEP is optional in DO
-  double xStep() const;
-  double yStep() const;
+  int         hasDo() const;  // 5.6, DO is optional
+  double      xNum() const;
+  double      yNum() const;
+  int         hasDoStep() const;  // 5.6, STEP is optional in DO
+  double      xStep() const;
+  double      yStep() const;
 
-  int numProps() const;
-  const char*  propName(int index) const;
-  const char*  propValue(int index) const;
-  double propNumber(int index) const;
-  const char   propType(int index) const;
-  int propIsNumber(int index) const;
-  int propIsString(int index) const;
+  int         numProps() const;
+  const char* propName(int index) const;
+  const char* propValue(int index) const;
+  double      propNumber(int index) const;
+  const char  propType(int index) const;
+  int         propIsNumber(int index) const;
+  int         propIsString(int index) const;
 
   void print(FILE* f) const;
 
 protected:
-  int nameLength_;
-  char* name_;
-  int macroLength_;
-  char* macro_;
+  int    nameLength_;
+  char*  name_;
+  int    macroLength_;
+  char*  macro_;
   double x_;
   double y_;
   double xNum_;
   double yNum_;
-  int orient_;
+  int    orient_;
   double xStep_;
   double yStep_;
   int    hasDo_;
   int    hasDoStep_;
 
-  int numProps_;
-  int propsAllocated_;
+  int     numProps_;
+  int     propsAllocated_;
   char**  propNames_;
   char**  propValues_;
   double* propDValues_;
   char*   propTypes_;
 
-  defrData *defData;
+  defrData* defData;
 };
 
-
-
-class defiTrack{
+class defiTrack {
 public:
-
-  defiTrack(defrData *data);
+  defiTrack(defrData* data);
   void Init();
 
   ~defiTrack();
@@ -121,37 +115,34 @@ public:
   void addMask(int colorMask, int sameMask);
 
   const char* macro() const;
-  double x() const;
-  double xNum() const;
-  double xStep() const;
-  int numLayers() const;
+  double      x() const;
+  double      xNum() const;
+  double      xStep() const;
+  int         numLayers() const;
   const char* layer(int index) const;
-  int firstTrackMask() const;
-  int sameMask() const;
+  int         firstTrackMask() const;
+  int         sameMask() const;
 
   void print(FILE* f) const;
 
 protected:
-  int macroLength_;  // allocated size of macro_;
-  char* macro_;
+  int    macroLength_;  // allocated size of macro_;
+  char*  macro_;
   double x_;
   double xNum_;
   double xStep_;
-  int layersLength_;  // allocated size of layers_
-  int numLayers_;  // number of places used in layers_
+  int    layersLength_;  // allocated size of layers_
+  int    numLayers_;     // number of places used in layers_
   char** layers_;
-  int firstTrackMask_;
-  int samemask_;
+  int    firstTrackMask_;
+  int    samemask_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
-
 
 class defiGcellGrid {
 public:
-
-  defiGcellGrid(defrData *data);
+  defiGcellGrid(defrData* data);
   void Init();
 
   ~defiGcellGrid();
@@ -160,22 +151,21 @@ public:
   void setup(const char* macro, int x, int xNum, double xStep);
 
   const char* macro() const;
-  int x() const;
-  int xNum() const;
-  double xStep() const;
+  int         x() const;
+  int         xNum() const;
+  double      xStep() const;
 
   void print(FILE* f) const;
 
 protected:
-  int macroLength_;
-  char* macro_;
-  int x_;
-  int xNum_;
+  int    macroLength_;
+  char*  macro_;
+  int    x_;
+  int    xNum_;
   double xStep_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

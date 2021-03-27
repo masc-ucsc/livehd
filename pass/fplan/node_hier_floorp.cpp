@@ -97,6 +97,4 @@ geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
   return l;
 }
 
-void Node_hier_floorp::load() {
-  root_layout = load_lg_nodes(root_lg);
-}
+void Node_hier_floorp::load() { root_layout = load_lg_nodes(root_lg); }

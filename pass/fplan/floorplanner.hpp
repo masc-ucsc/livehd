@@ -5,8 +5,8 @@
 #include <memory>
 #include <string_view>
 
-#include "absl/container/flat_hash_map.h"
 #include "GeogLayout.hpp"
+#include "absl/container/flat_hash_map.h"
 #include "lgraph.hpp"
 #include "node_tree.hpp"
 #include "node_type_area.hpp"
@@ -42,13 +42,8 @@ protected:
   */
 
   // using std::array for fixed max size
-  constexpr static std::array<GeographyHint, 5> hint_seq = {
-      GeographyHint::Center,
-      GeographyHint::Top,
-      GeographyHint::Bottom,
-      GeographyHint::Left,
-      GeographyHint::Right
-  };
+  constexpr static std::array<GeographyHint, 5> hint_seq
+      = {GeographyHint::Center, GeographyHint::Top, GeographyHint::Bottom, GeographyHint::Left, GeographyHint::Right};
 
   // these hints are only valid for node counts divisible by 2
   constexpr static std::array<GeographyHint, 6> hint_seq_2 = {

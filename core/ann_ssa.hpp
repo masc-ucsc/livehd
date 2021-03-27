@@ -1,9 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #pragma once
+#include <cstdint>
 #include <string_view>
 #include <utility>
-#include <cstdint>
 
 class __attribute__((packed)) Ann_ssa {
 private:

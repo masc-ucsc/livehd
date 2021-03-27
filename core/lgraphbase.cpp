@@ -16,8 +16,9 @@
 // #define DEBUG_SLOW
 
 LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
-    : Lgraph_base_core(_path, _name, _lgid), node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes")), library(_lib) {
-}
+    : Lgraph_base_core(_path, _name, _lgid)
+    , node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
+    , library(_lib) {}
 
 LGraph_Base::~LGraph_Base() {
   // TODO: This is NOT a bug. The reason is that we need to preserve the

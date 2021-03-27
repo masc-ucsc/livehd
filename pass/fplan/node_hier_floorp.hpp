@@ -2,9 +2,9 @@
 
 #pragma once
 
+#include "GeogLayout.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "floorplanner.hpp"
-#include "GeogLayout.hpp"
 #include "lgedgeiter.hpp"
 #include "node_pin.hpp"
 
@@ -14,7 +14,6 @@ public:
   void load();
 
 private:
-
   // load all the nodes in a given lgraph into an ArchFP geogLayout instance and return that instance
   geogLayout* load_lg_nodes(LGraph* lg);
 };

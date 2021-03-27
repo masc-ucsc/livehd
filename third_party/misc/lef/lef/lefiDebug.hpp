@@ -35,15 +35,15 @@
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 // Set flag
-extern void lefiSetDebug (int num, int value) ;
+extern void lefiSetDebug(int num, int value);
 
 // Read flag
-extern int lefiDebug (int num) ;
+extern int lefiDebug(int num);
 
 // Error reporting routine
-extern void lefiError (int check, int msgNum, const char* msg);
+extern void lefiError(int check, int msgNum, const char* msg);
 
-extern const char* CASE(const char *x);
+extern const char* CASE(const char* x);
 
 END_LEFDEF_PARSER_NAMESPACE
 

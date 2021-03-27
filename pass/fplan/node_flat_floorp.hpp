@@ -3,8 +3,8 @@
 #pragma once
 
 #include "floorplanner.hpp"
-#include "node_pin.hpp"
 #include "lgedgeiter.hpp"
+#include "node_pin.hpp"
 
 class Node_flat_floorp : public Lhd_floorplanner {
 public:

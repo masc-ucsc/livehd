@@ -3,11 +3,11 @@
 #include <cstdint>
 
 struct Sample1_stage {
-  bool to2_aValid;
+  bool     to2_aValid;
   uint32_t to2_a;
   uint32_t to2_b;
 
-  bool to3_cValid;
+  bool     to3_cValid;
   uint32_t to3_c;
 
   uint32_t tmp;
@@ -29,4 +29,3 @@ struct Sample1_stage {
   void cycle(uint32_t s3_to1_b, bool s2_to1_aValid, uint32_t s2_to1_a);
 #endif
 };
-

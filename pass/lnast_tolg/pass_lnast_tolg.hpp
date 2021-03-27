@@ -4,13 +4,11 @@
 
 class Pass_lnast_tolg : public Pass {
 protected:
-
   // eprp callbacks
-  static void tolg          (Eprp_var &var);
-  static void dbg_lnast_ssa (Eprp_var &var);
+  static void tolg(Eprp_var &var);
+  static void dbg_lnast_ssa(Eprp_var &var);
 
 public:
   explicit Pass_lnast_tolg(const Eprp_var &var);
   static void setup();
 };
-

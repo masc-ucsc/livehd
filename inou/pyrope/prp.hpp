@@ -221,8 +221,9 @@ protected:
 
   std::unique_ptr<Ast_parser>                ast;
   absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
-  absl::flat_hash_map<Token_id, uint16_t>    ws_map;  // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
-  std::vector<std::string>                   rule_call_stack;
+  absl::flat_hash_map<Token_id, uint16_t>
+                           ws_map;  // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
+  std::vector<std::string> rule_call_stack;
   uint64_t                 term_token = 1;
 
   void elaborate();

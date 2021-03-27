@@ -1,13 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include <string>
-
 #include "pass_sample.hpp"
 
+#include <string>
+
 #include "annotate.hpp"
+#include "cell.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "cell.hpp"
 
 static Pass_plugin sample("pass_sample", Pass_sample::setup);
 
@@ -118,7 +118,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
   std::map<Ntype_op, int> histogram;
 
   int cells = 0;
-  for (const auto& node : g->forward()) {
+  for (const auto &node : g->forward()) {
     cells++;
     auto type = node.get_type_op();
 
@@ -138,7 +138,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
   absl::flat_hash_map<Node::Compact, int> depth;
 
   int max_depth = 0;
-  for (const auto& node : g->forward()) {
+  for (const auto &node : g->forward()) {
     int local_max = 0;
     for (const auto &edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
@@ -175,8 +175,8 @@ void Pass_sample::annotate_placement(LGraph *g) {
 }
 
 void Pass_sample::create_sample_graph(LGraph *g) {
-  auto lg_path   = g->get_path();
-  std::string lg_source{g->get_library().get_source(g->get_lgid())}; // must be string because create can free it
+  auto        lg_path = g->get_path();
+  std::string lg_source{g->get_library().get_source(g->get_lgid())};  // must be string because create can free it
 
   LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample LGraph...\n");
@@ -184,8 +184,8 @@ void Pass_sample::create_sample_graph(LGraph *g) {
   auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1);  // Module position 1, 1 bit
   auto graph_out   = lg->add_graph_output("g_out", 2, 3);   // Module possition 2, 3 bits
 
-  auto shr_node     = lg->create_node(Ntype_op::SRA);
-  auto shr_out_drv  = shr_node.setup_driver_pin();
+  auto shr_node    = lg->create_node(Ntype_op::SRA);
+  auto shr_out_drv = shr_node.setup_driver_pin();
   shr_out_drv.set_bits(8);
   shr_out_drv.set_name("shr_out");
 

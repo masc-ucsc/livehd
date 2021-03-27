@@ -1,10 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_label.hpp"
+
 #include "eprp_utils.hpp"
-#include "label_synth.hpp"
-#include "label_mincut.hpp"
 #include "label_acyclic.hpp"
+#include "label_mincut.hpp"
+#include "label_synth.hpp"
 
 static Pass_plugin sample("pass_label", Pass_label::setup);
 
@@ -70,4 +71,3 @@ void Pass_label::label_acyclic(Eprp_var &var) {
     p.label(l);
   }
 }
-

@@ -4,9 +4,9 @@
 
 #include <string_view>
 
+#include "floorplanner.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
-#include "floorplanner.hpp"
 
 class Pass_fplan_makefp : public Pass {
 public:
@@ -19,4 +19,3 @@ private:
 
   void makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const std::string_view opt, const float ar);
 };
-

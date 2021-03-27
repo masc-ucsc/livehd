@@ -36,8 +36,8 @@ static bool primesInitialized = false;
 // However, then I can't send it any arguments.  Unclear what is best here.
 // Indicate we are now initialized.
 
-bool *Primes::candidateArray    = new bool[candidateArrayLen];
-int *Primes::primeArray    = new int[primeArrayLen];
+bool *Primes::candidateArray = new bool[candidateArrayLen];
+int * Primes::primeArray     = new int[primeArrayLen];
 
 int Primes::currMaxPrimeInx = 0;
 int Primes::currPrimeInx    = 0;
@@ -106,8 +106,8 @@ primeFactorization::primeFactorization(int num) {
   // For now use the following reasoning.
   // 2*3*5*7*11*13*17*19*23*29 = 6,469,693,230 > any 32 bit int.
   // Therefore, a 32 bit int can not possibly have more than 10 DIFFERENT prime factors.
-  factorization  = new primeFactor[factorArrayLen];
-  currMaxFactor  = 0;
+  factorization = new primeFactor[factorArrayLen];
+  currMaxFactor = 0;
   // Start by getting some facts about num.
   int posnum  = abs(num);
   int sqrtnum = (int)ceil(sqrt((double)posnum));

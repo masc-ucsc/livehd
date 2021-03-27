@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass.hpp"
-
 #include "live_options.hpp"
+
+#include "pass.hpp"
 
 void Live_pass_options::set(const std::string &key, const std::string &value) {
   try {

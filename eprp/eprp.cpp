@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <ctype.h>
-#include <algorithm>
-
 #include "eprp.hpp"
+
+#include <ctype.h>
+
+#include <algorithm>
 
 void Eprp::eat_comments() {
   while (scan_is_token(Token_id_comment) && !scan_is_end()) scan_next();
@@ -13,8 +14,8 @@ void Eprp::eat_comments() {
 bool Eprp::rule_path(std::string &path) {
   assert(!scan_is_end());
 
-  if (!(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string) ||
-        scan_is_token(Token_id_div)))
+  if (!(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
+        || scan_is_token(Token_id_div)))
     return false;
 
   do {
@@ -23,21 +24,23 @@ bool Eprp::rule_path(std::string &path) {
     ast->add(Eprp_rule_path, scan_token());
 
     bool ok = scan_next();
-    if (!ok) break;
+    if (!ok)
+      break;
     eat_comments();
 
     if (scan_is_next_token(1, Token_id_colon))
-      break; // stop if file:foo is the next argument list
+      break;  // stop if file:foo is the next argument list
 
-  } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string) ||
-           scan_is_token(Token_id_comma) || scan_is_token(Token_id_div));
+  } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
+           || scan_is_token(Token_id_comma) || scan_is_token(Token_id_div));
 
   return true;
 }
 
 // rule_label_path = label path
 bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
-  if (!(scan_is_token(Token_id_alnum) && scan_is_next_token(1, Token_id_colon))) return false;
+  if (!(scan_is_token(Token_id_alnum) && scan_is_next_token(1, Token_id_colon)))
+    return false;
 
   auto label = scan_text();
 
@@ -73,7 +76,8 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 
 // rule_reg = reg+
 bool Eprp::rule_reg(bool first) {
-  if (!scan_is_token(Token_id_register)) return false;
+  if (!scan_is_token(Token_id_register))
+    return false;
 
   std::string var{scan_text()};
   ast->add(Eprp_rule_reg, scan_token());
@@ -95,25 +99,29 @@ bool Eprp::rule_reg(bool first) {
 
 // rule_cmd_line = alnum (dot alnum)*
 bool Eprp::rule_cmd_line(std::string &path) {
-  if (scan_is_end()) return false;
+  if (scan_is_end())
+    return false;
 
-  if (!scan_is_token(Token_id_alnum)) return false;
+  if (!scan_is_token(Token_id_alnum))
+    return false;
 
   do {
-    absl::StrAppend(&path, scan_text()); // Add the Token_id_alnum
+    absl::StrAppend(&path, scan_text());  // Add the Token_id_alnum
     ast->add(Eprp_rule_cmd_line, scan_token());
 
     bool ok1 = scan_next();
-    if (!ok1) break;
+    if (!ok1)
+      break;
 
     if (!scan_is_token(Token_id_dot))
       break;
 
-    absl::StrAppend(&path, scan_text());   // Add the Token_id_dot
+    absl::StrAppend(&path, scan_text());  // Add the Token_id_dot
     ast->add(Eprp_rule_cmd_line, scan_token());
 
     bool ok2 = scan_next();
-    if (!ok2) break;
+    if (!ok2)
+      break;
 
   } while (scan_is_token(Token_id_alnum));
 
@@ -131,7 +139,8 @@ bool Eprp::rule_cmd_full() {
   ast->down();
   bool cmd_found = rule_cmd_line(cmd_line);
   ast->up(Eprp_rule_cmd_full);
-  if (!cmd_found) return false;
+  if (!cmd_found)
+    return false;
 
   bool path_found;
   do {
@@ -149,9 +158,11 @@ bool Eprp::rule_cmd_full() {
 
 // rule_pipe = |> rule_cmd_or_reg
 bool Eprp::rule_pipe() {
-  if (scan_is_end()) return false;
+  if (scan_is_end())
+    return false;
 
-  if (!scan_is_token(Token_id_pipe)) return false;
+  if (!scan_is_token(Token_id_pipe))
+    return false;
 
   scan_next();
   eat_comments();
@@ -172,7 +183,8 @@ bool Eprp::rule_cmd_or_reg(bool first) {
   ast->down();
   bool try_reg_rule = rule_reg(first);
   ast->up(Eprp_rule_cmd_or_reg);
-  if (try_reg_rule) return true;
+  if (try_reg_rule)
+    return true;
 
   ast->down();
   bool cmd_found = rule_cmd_full();
@@ -222,15 +234,17 @@ void Eprp::elaborate() {
 
   while (!scan_is_end()) {
     eat_comments();
-    if (scan_is_end()) return;
+    if (scan_is_end())
+      return;
 
     bool cmd = rule_top();
-    if (!cmd) return;
+    if (!cmd)
+      return;
   }
 
   ast->up(Eprp_rule);
 
-  //process_ast();
+  // process_ast();
 
   ast = nullptr;
   last_cmd_var.clear();
@@ -259,8 +273,7 @@ void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parse
 }
 
 void Eprp::process_ast() {
-
-  for(const auto &ti:ast->depth_preorder(ast->get_root())) {
+  for (const auto &ti : ast->depth_preorder(ast->get_root())) {
     fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 
@@ -320,7 +333,8 @@ void Eprp::get_commands(std::function<void(const std::string &, const std::strin
 void Eprp::get_labels(const std::string &                                                          cmd,
                       std::function<void(const std::string &, const std::string &, bool required)> fn) const {
   const auto &it = methods.find(cmd);
-  if (it == methods.end()) return;
+  if (it == methods.end())
+    return;
 
   for (const auto &v : it->second.labels) {
     fn(v.first, v.second.help, v.second.required);

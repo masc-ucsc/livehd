@@ -31,6 +31,7 @@
 #define defiMisc_h
 
 #include <stdio.h>
+
 #include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -38,14 +39,14 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 class defrData;
 
 struct defiPoints {
-  int numPoints;
+  int  numPoints;
   int* x;
   int* y;
 };
 
 class defiGeometries {
 public:
-  defiGeometries(defrData *data);
+  defiGeometries(defrData* data);
   void Init();
   void Reset();
 
@@ -59,12 +60,12 @@ public:
   void points(int index, int* x, int* y) const;
 
 protected:
-  int numPoints_;
-  int pointsAllocated_;
+  int  numPoints_;
+  int  pointsAllocated_;
   int* x_;
   int* y_;
 
-  defrData *defData;
+  defrData* defData;
 };
 
 class defiStyles {
@@ -80,13 +81,13 @@ public:
   void setStyle(int styleNum);
   void setPolygon(defiGeometries* geom);
 
-  int style() const;
+  int               style() const;
   struct defiPoints getPolygon() const;
 
-  protected:
-    int    styleNum_;
-    struct defiPoints* polygon_;
-    int    numPointAlloc_;
+protected:
+  int                styleNum_;
+  struct defiPoints* polygon_;
+  int                numPointAlloc_;
 };
 
 END_LEFDEF_PARSER_NAMESPACE

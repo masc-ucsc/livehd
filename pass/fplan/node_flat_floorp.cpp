@@ -2,14 +2,13 @@
 
 #include "node_flat_floorp.hpp"
 
-#include "node_type_area.hpp"
-
 #include "GeogLayout.hpp"
+#include "node_type_area.hpp"
 
 Node_flat_floorp::Node_flat_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
 void Node_flat_floorp::load() {
-  unsigned int count = 0; // avoid tons of memory reallocations when creating nodes
+  unsigned int count = 0;  // avoid tons of memory reallocations when creating nodes
   for (auto n : nt.get_root_lg()->fast(true)) {
     (void)n;
     count++;

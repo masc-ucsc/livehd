@@ -12,4 +12,3 @@ public:
   Pass_gioc(const Eprp_var &var);
   static void setup();
 };
-

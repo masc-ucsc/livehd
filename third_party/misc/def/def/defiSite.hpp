@@ -30,9 +30,10 @@
 #ifndef defiSite_h
 #define defiSite_h
 
+#include <stdio.h>
+
 #include "defiKRDefs.hpp"
 #include "defiMisc.hpp"
-#include <stdio.h>
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -44,7 +45,7 @@ class defrData;
  */
 class defiSite {
 public:
-  defiSite(defrData *data);
+  defiSite(defrData* data);
   void Init();
 
   ~defiSite();
@@ -57,13 +58,13 @@ public:
   void setOrient(int orient);
   void setDo(double x_num, double y_num, double x_step, double y_step);
 
-  double x_num() const;
-  double y_num() const;
-  double x_step() const;
-  double y_step() const;
-  double x_orig() const;
-  double y_orig() const;
-  int orient() const;
+  double      x_num() const;
+  double      y_num() const;
+  double      x_step() const;
+  double      y_step() const;
+  double      x_orig() const;
+  double      y_orig() const;
+  int         orient() const;
   const char* orientStr() const;
   const char* name() const;
 
@@ -72,17 +73,15 @@ public:
   void bumpName(int size);
 
 protected:
-  char* siteName_;     // Name of this.
-  int nameSize_;       // allocated size of siteName_
+  char*  siteName_;         // Name of this.
+  int    nameSize_;         // allocated size of siteName_
   double x_orig_, y_orig_;  // Origin
   double x_step_, y_step_;  // Array step size.
   double x_num_, y_num_;
-  int orient_;         // orientation
+  int    orient_;  // orientation
 
-  defrData *defData;
+  defrData* defData;
 };
-
-
 
 /* Struct holds the data for a Box */
 class defiBox {
@@ -104,17 +103,16 @@ public:
   int xh() const;
   int yh() const;
 
-  void addPoint(defiGeometries* geom);
+  void       addPoint(defiGeometries* geom);
   defiPoints getPoint() const;
 
   void print(FILE* f) const;
 
 protected:
-  int xl_, yl_;
-  int xh_, yh_;
-  defiPoints* points_;    // 5.6
+  int         xl_, yl_;
+  int         xh_, yh_;
+  defiPoints* points_;  // 5.6
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

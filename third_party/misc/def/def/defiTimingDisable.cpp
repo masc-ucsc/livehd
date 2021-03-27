@@ -27,14 +27,15 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <string.h>
-#include <stdlib.h>
-#include "lex.h"
 #include "defiTimingDisable.hpp"
+
+#include <stdlib.h>
+#include <string.h>
+
 #include "defiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
-
 
 //////////////////////////////////////////////
 //////////////////////////////////////////////
@@ -44,69 +45,55 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //////////////////////////////////////////////
 //////////////////////////////////////////////
 
-
-defiTimingDisable::defiTimingDisable(defrData *data)
- : defData(data)
-{
-  Init();
-}
-
+defiTimingDisable::defiTimingDisable(defrData* data) : defData(data) { Init(); }
 
 void defiTimingDisable::Init() {
-  fromInst_ = 0;
+  fromInst_       = 0;
   fromInstLength_ = 0;
-  toInst_ = 0;
-  toInstLength_ = 0;
-  toPin_ = 0;
-  toPinLength_ = 0;
-  fromPin_ = 0;
-  fromPinLength_ = 0;
+  toInst_         = 0;
+  toInstLength_   = 0;
+  toPin_          = 0;
+  toPinLength_    = 0;
+  fromPin_        = 0;
+  fromPinLength_  = 0;
 }
 
-
-defiTimingDisable::~defiTimingDisable() {
-  Destroy();
-}
-
+defiTimingDisable::~defiTimingDisable() { Destroy(); }
 
 void defiTimingDisable::Destroy() {
-
   clear();
 
-  if (fromInst_) free(fromInst_);
-  fromInst_ = 0;
+  if (fromInst_)
+    free(fromInst_);
+  fromInst_       = 0;
   fromInstLength_ = 0;
 
-  if (toInst_) free(toInst_);
-  toInst_ = 0;
+  if (toInst_)
+    free(toInst_);
+  toInst_       = 0;
   toInstLength_ = 0;
 
-  if (toPin_) free(toPin_);
-  toPin_ = 0;
+  if (toPin_)
+    free(toPin_);
+  toPin_       = 0;
   toPinLength_ = 0;
 
-  if (fromPin_) free(fromPin_);
-  fromPin_ = 0;
+  if (fromPin_)
+    free(fromPin_);
+  fromPin_       = 0;
   fromPinLength_ = 0;
-
 }
 
-
 void defiTimingDisable::clear() {
-  hasFromTo_ = 0;
-  hasThru_ = 0;
-  hasMacro_ = 0;
+  hasFromTo_             = 0;
+  hasThru_               = 0;
+  hasMacro_              = 0;
   hasReentrantPathsFlag_ = 0;
 }
 
+void defiTimingDisable::setReentrantPathsFlag() { hasReentrantPathsFlag_ = 1; }
 
-void defiTimingDisable::setReentrantPathsFlag() {
-  hasReentrantPathsFlag_ = 1;
-}
-
-
-void defiTimingDisable::setFromTo(const char* fromInst, const char* fromPin,
-	 const char* toInst, const char* toPin) {
+void defiTimingDisable::setFromTo(const char* fromInst, const char* fromPin, const char* toInst, const char* toPin) {
   int len;
 
   clear();
@@ -114,38 +101,40 @@ void defiTimingDisable::setFromTo(const char* fromInst, const char* fromPin,
 
   len = strlen(fromInst) + 1;
   if (len > fromInstLength_) {
-    if (fromInst_) free(fromInst_);
+    if (fromInst_)
+      free(fromInst_);
     fromInstLength_ = len;
-    fromInst_ = (char*)malloc(len);
+    fromInst_       = (char*)malloc(len);
   }
-  strcpy(fromInst_,defData->DEFCASE(fromInst));
+  strcpy(fromInst_, defData->DEFCASE(fromInst));
 
   len = strlen(fromPin) + 1;
   if (len > fromPinLength_) {
-    if (fromPin_) free(fromPin_);
+    if (fromPin_)
+      free(fromPin_);
     fromPinLength_ = len;
-    fromPin_ = (char*)malloc(len);
+    fromPin_       = (char*)malloc(len);
   }
-  strcpy(fromPin_,defData->DEFCASE(fromPin));
+  strcpy(fromPin_, defData->DEFCASE(fromPin));
 
   len = strlen(toInst) + 1;
   if (len > toInstLength_) {
-    if (toInst_) free(toInst_);
+    if (toInst_)
+      free(toInst_);
     toInstLength_ = len;
-    toInst_ = (char*)malloc(len);
+    toInst_       = (char*)malloc(len);
   }
   strcpy(toInst_, toInst);
 
   len = strlen(toPin) + 1;
   if (len > toPinLength_) {
-    if (toPin_) free(toPin_);
+    if (toPin_)
+      free(toPin_);
     toPinLength_ = len;
-    toPin_ = (char*)malloc(len);
+    toPin_       = (char*)malloc(len);
   }
   strcpy(toPin_, toPin);
-
 }
-
 
 void defiTimingDisable::setThru(const char* fromInst, const char* fromPin) {
   int len;
@@ -155,22 +144,22 @@ void defiTimingDisable::setThru(const char* fromInst, const char* fromPin) {
 
   len = strlen(fromInst) + 1;
   if (len > fromInstLength_) {
-    if (fromInst_) free(fromInst_);
+    if (fromInst_)
+      free(fromInst_);
     fromInstLength_ = len;
-    fromInst_ = (char*)malloc(len);
+    fromInst_       = (char*)malloc(len);
   }
-  strcpy(fromInst_,defData->DEFCASE(fromInst));
+  strcpy(fromInst_, defData->DEFCASE(fromInst));
 
   len = strlen(fromPin) + 1;
   if (len > fromPinLength_) {
-    if (fromPin_) free(fromPin_);
+    if (fromPin_)
+      free(fromPin_);
     fromPinLength_ = len;
-    fromPin_ = (char*)malloc(len);
+    fromPin_       = (char*)malloc(len);
   }
-  strcpy(fromPin_,defData->DEFCASE(fromPin));
-
+  strcpy(fromPin_, defData->DEFCASE(fromPin));
 }
-
 
 void defiTimingDisable::setMacroFromTo(const char* fromPin, const char* toPin) {
   int len;
@@ -180,22 +169,22 @@ void defiTimingDisable::setMacroFromTo(const char* fromPin, const char* toPin) {
 
   len = strlen(fromPin) + 1;
   if (len > fromPinLength_) {
-    if (fromPin_) free(fromPin_);
+    if (fromPin_)
+      free(fromPin_);
     fromPinLength_ = len;
-    fromPin_ = (char*)malloc(len);
+    fromPin_       = (char*)malloc(len);
   }
-  strcpy(fromPin_,defData->DEFCASE(fromPin));
+  strcpy(fromPin_, defData->DEFCASE(fromPin));
 
   len = strlen(toPin) + 1;
   if (len > toPinLength_) {
-    if (toPin_) free(toPin_);
+    if (toPin_)
+      free(toPin_);
     toPinLength_ = len;
-    toPin_ = (char*)malloc(len);
+    toPin_       = (char*)malloc(len);
   }
-  strcpy(toPin_,defData->DEFCASE(toPin));
-
+  strcpy(toPin_, defData->DEFCASE(toPin));
 }
-
 
 void defiTimingDisable::setMacroThru(const char* thru) {
   int len;
@@ -206,14 +195,13 @@ void defiTimingDisable::setMacroThru(const char* thru) {
 
   len = strlen(thru) + 1;
   if (len > fromPinLength_) {
-    if (fromPin_) free(fromPin_);
+    if (fromPin_)
+      free(fromPin_);
     fromPinLength_ = len;
-    fromPin_ = (char*)malloc(len);
+    fromPin_       = (char*)malloc(len);
   }
-  strcpy(fromPin_,defData->DEFCASE(thru));
-
+  strcpy(fromPin_, defData->DEFCASE(thru));
 }
-
 
 void defiTimingDisable::setMacro(const char* name) {
   int len;
@@ -224,97 +212,58 @@ void defiTimingDisable::setMacro(const char* name) {
 
   len = strlen(name) + 1;
   if (len > fromInstLength_) {
-    if (fromInst_) free(fromInst_);
+    if (fromInst_)
+      free(fromInst_);
     fromInstLength_ = len;
-    fromInst_ = (char*)malloc(len);
+    fromInst_       = (char*)malloc(len);
   }
-  strcpy(fromInst_,defData->DEFCASE(name));
+  strcpy(fromInst_, defData->DEFCASE(name));
 }
-
 
 void defiTimingDisable::print(FILE* f) const {
-
   if (hasMacroFromTo()) {
-    fprintf(f, "TimingDisable macro '%s' thru '%s'\n",
-	fromInst_, fromPin_);
+    fprintf(f, "TimingDisable macro '%s' thru '%s'\n", fromInst_, fromPin_);
 
   } else if (hasMacroThru()) {
-    fprintf(f, "TimingDisable macro '%s' from '%s' to '%s'\n",
-	fromInst_, fromPin_, toPin_);
+    fprintf(f, "TimingDisable macro '%s' from '%s' to '%s'\n", fromInst_, fromPin_, toPin_);
 
   } else if (hasFromTo()) {
-    fprintf(f, "TimingDisable from '%s' '%s'  to '%s' '%s'\n",
-      fromInst_, fromPin_, toInst_, toPin_);
+    fprintf(f, "TimingDisable from '%s' '%s'  to '%s' '%s'\n", fromInst_, fromPin_, toInst_, toPin_);
 
   } else if (hasThru()) {
-    fprintf(f, "TimingDisable thru '%s' '%s'\n",
-      fromInst_, fromPin_);
+    fprintf(f, "TimingDisable thru '%s' '%s'\n", fromInst_, fromPin_);
 
   } else {
-    defiError(0, 6170, "ERROR (DEFPARS-6170): The TimingDisable type is invalid. The valid types are FROMPIN, & THRUPIN. Specify the valid type and then try again.", defData);
+    defiError(0,
+              6170,
+              "ERROR (DEFPARS-6170): The TimingDisable type is invalid. The valid types are FROMPIN, & THRUPIN. Specify the valid "
+              "type and then try again.",
+              defData);
   }
 }
 
+int defiTimingDisable::hasReentrantPathsFlag() const { return hasReentrantPathsFlag_; }
 
-int defiTimingDisable::hasReentrantPathsFlag() const {
-  return hasReentrantPathsFlag_;
-}
+int defiTimingDisable::hasMacroFromTo() const { return (hasMacro_ && hasFromTo_) ? 1 : 0; }
 
+int defiTimingDisable::hasMacroThru() const { return (hasMacro_ && hasThru_) ? 1 : 0; }
 
-int defiTimingDisable::hasMacroFromTo() const {
-  return (hasMacro_ && hasFromTo_) ? 1 : 0;
-}
+int defiTimingDisable::hasThru() const { return (hasMacro_ == 0 && hasThru_) ? 1 : 0; }
 
+int defiTimingDisable::hasFromTo() const { return (hasMacro_ == 0 && hasFromTo_) ? 1 : 0; }
 
-int defiTimingDisable::hasMacroThru() const {
-  return (hasMacro_ && hasThru_) ? 1 : 0;
-}
+const char* defiTimingDisable::toPin() const { return toPin_; }
 
+const char* defiTimingDisable::fromPin() const { return fromPin_; }
 
-int defiTimingDisable::hasThru() const {
-  return (hasMacro_ == 0 && hasThru_) ? 1 : 0;
-}
+const char* defiTimingDisable::toInst() const { return toInst_; }
 
+const char* defiTimingDisable::fromInst() const { return fromInst_; }
 
-int defiTimingDisable::hasFromTo() const {
-  return (hasMacro_ == 0 && hasFromTo_) ? 1 : 0;
-}
+const char* defiTimingDisable::macroName() const { return fromInst_; }
 
+const char* defiTimingDisable::thruPin() const { return fromPin_; }
 
-const char* defiTimingDisable::toPin() const {
-  return toPin_;
-}
-
-
-const char* defiTimingDisable::fromPin() const {
-  return fromPin_;
-}
-
-
-const char* defiTimingDisable::toInst() const {
-  return toInst_;
-}
-
-
-const char* defiTimingDisable::fromInst() const {
-  return fromInst_;
-}
-
-
-const char* defiTimingDisable::macroName() const {
-  return fromInst_;
-}
-
-
-const char* defiTimingDisable::thruPin() const {
-  return fromPin_;
-}
-
-
-const char* defiTimingDisable::thruInst() const {
-  return fromInst_;
-}
-
+const char* defiTimingDisable::thruInst() const { return fromInst_; }
 
 END_LEFDEF_PARSER_NAMESPACE
-

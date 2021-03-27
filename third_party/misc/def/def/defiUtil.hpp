@@ -49,4 +49,3 @@ const char* defiOrientStr(int orient);
 END_LEFDEF_PARSER_NAMESPACE
 
 #endif
-

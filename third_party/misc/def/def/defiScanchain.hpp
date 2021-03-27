@@ -30,8 +30,9 @@
 #ifndef defiScanchain_h
 #define defiScanchain_h
 
-#include "defiKRDefs.hpp"
 #include <stdio.h>
+
+#include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -39,41 +40,40 @@ class defrData;
 
 class defiOrdered {
 public:
-  defiOrdered(defrData *data);
+  defiOrdered(defrData* data);
   ~defiOrdered();
 
   void addOrdered(const char* inst);
   void addIn(const char* pin);
   void addOut(const char* pin);
-  void setOrderedBits(int bits);        // 5.4.1
+  void setOrderedBits(int bits);  // 5.4.1
   void bump();
   void Init();
   void Destroy();
   void clear();
 
-  int num() const;
+  int    num() const;
   char** inst() const;
   char** in() const;
   char** out() const;
-  int*   bits() const;                  // 5.4.1
+  int*   bits() const;  // 5.4.1
 
 protected:
-  int num_;
-  int allocated_;
+  int    num_;
+  int    allocated_;
   char** inst_;
   char** in_;
   char** out_;
-  int*   bits_;                       // 5.4.1
+  int*   bits_;  // 5.4.1
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 // Struct holds the data for one Scan chain.
 //
 class defiScanchain {
 public:
-  defiScanchain(defrData *data);
+  defiScanchain(defrData* data);
   void Init();
 
   void Destroy();
@@ -86,28 +86,28 @@ public:
   void addOrderedInst(const char* inst);
   void addOrderedIn(const char* inPin);
   void addOrderedOut(const char* outPin);
-  void setOrderedBits(int bits);      // 5.4.1
+  void setOrderedBits(int bits);  // 5.4.1
 
   void addFloatingInst(const char* inst);
   void addFloatingIn(const char* inPin);
   void addFloatingOut(const char* outPin);
-  void setFloatingBits(int bits);     // 5.4.1
+  void setFloatingBits(int bits);  // 5.4.1
 
   void setStart(const char* inst, const char* pin);
   void setStop(const char* inst, const char* pin);
   void setCommonIn(const char* pin);
   void setCommonOut(const char* pin);
-  void setPartition(const char* partName, int maxBits);    // 5.4.1
+  void setPartition(const char* partName, int maxBits);  // 5.4.1
 
   const char* name() const;
-  int hasStart() const;
-  int hasStop() const;
-  int hasFloating() const;
-  int hasOrdered() const;
-  int hasCommonInPin() const;
-  int hasCommonOutPin() const;
-  int hasPartition() const;           // 5.4.1
-  int hasPartitionMaxBits() const;    // 5.4.1
+  int         hasStart() const;
+  int         hasStop() const;
+  int         hasFloating() const;
+  int         hasOrdered() const;
+  int         hasCommonInPin() const;
+  int         hasCommonOutPin() const;
+  int         hasPartition() const;         // 5.4.1
+  int         hasPartitionMaxBits() const;  // 5.4.1
 
   // If the pin part of these routines were not supplied in the DEF
   // then a NULL pointer will be returned.
@@ -127,40 +127,38 @@ public:
   // For example if the second instance has
   // instnam= "FOO" and IN="A", but no OUT given, then inst[1] points
   // to "FOO"  inPin[1] points to "A" and outPin[1] is a NULL pointer.
-  void ordered(int index, int* size, char*** inst, char*** inPin,
-                                      char*** outPin, int** bits) const;
+  void ordered(int index, int* size, char*** inst, char*** inPin, char*** outPin, int** bits) const;
 
   // All of the floating constructs in the scan chain are
   // stored in this one array.
   // If the IN or OUT of an entry is not supplied then the array will have
   // a NULL pointer in that place.
-  void floating(int* size, char*** inst, char*** inPin, char*** outPin,
-                                      int** bits) const;
+  void floating(int* size, char*** inst, char*** inPin, char*** outPin, int** bits) const;
 
   const char* commonInPin() const;
   const char* commonOutPin() const;
 
-  const char* partitionName() const;        // 5.4.1
-  int partitionMaxBits() const;             // 5.4.1
+  const char* partitionName() const;     // 5.4.1
+  int         partitionMaxBits() const;  // 5.4.1
 
   void print(FILE* f) const;
 
 protected:
   char* name_;
-  char hasStart_;
-  char hasStop_;
-  int nameLength_;
+  char  hasStart_;
+  char  hasStop_;
+  int   nameLength_;
 
-  int numOrderedAllocated_;
-  int numOrdered_;
+  int           numOrderedAllocated_;
+  int           numOrdered_;
   defiOrdered** ordered_;
 
-  int numFloatingAllocated_;
-  int numFloating_;
-  char** floatInst_;    // Array of floating names
+  int    numFloatingAllocated_;
+  int    numFloating_;
+  char** floatInst_;  // Array of floating names
   char** floatIn_;
   char** floatOut_;
-  int*   floatBits_;    // 5.4.1
+  int*   floatBits_;  // 5.4.1
 
   char* stopInst_;
   char* stopPin_;
@@ -175,9 +173,8 @@ protected:
   char* partName_;      // 5.4.1
   int   maxBits_;       // 5.4.1
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

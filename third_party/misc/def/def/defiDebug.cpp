@@ -27,21 +27,21 @@
 // *****************************************************************************
 // *****************************************************************************
 
+#include "defiDebug.hpp"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "lex.h"
-#include "defiDebug.hpp"
-
 
 #include "defrData.hpp"
 #include "defrSettings.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 extern defrContext defContext;
 
-    /*******************
+/*******************
  *  Debug flags:
  *  0 -
  *  1 - malloc debug
@@ -59,15 +59,12 @@ extern defrContext defContext;
  ******************************/
 
 /* Set flag */
-void defiSetDebug(int, int) {
-}
+void defiSetDebug(int, int) {}
 
 /* Read flag */
-int defiDebug(int) {
-    return 0;
-}
+int defiDebug(int) { return 0; }
 
-void defiError(int check, int msgNum, const char* mess, defrData *defData) {
+void defiError(int check, int msgNum, const char* mess, defrData* defData) {
   /* check is 1 if the caller function has checked totalMsgLimit, etc. */
   if (!defData) {
     defData = defContext.data;
@@ -76,21 +73,20 @@ void defiError(int check, int msgNum, const char* mess, defrData *defData) {
   return defData->defiError(check, msgNum, mess);
 }
 
-const char* upperCase(const char* str, defrData *defData) {
+const char* upperCase(const char* str, defrData* defData) {
   if (!defData) {
     defData = defContext.data;
   }
 
-   return defData->upperCase(str);
+  return defData->upperCase(str);
 }
 
-const char* DEFCASE(const char* ch, defrData *defData) {
+const char* DEFCASE(const char* ch, defrData* defData) {
   if (!defData) {
     defData = defContext.data;
   }
 
-   return defData->DEFCASE(ch);
+  return defData->DEFCASE(ch);
 }
 
 END_LEFDEF_PARSER_NAMESPACE
-

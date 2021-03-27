@@ -58,7 +58,7 @@ protected:
                                     Lnast_node name_node = Lnast_node());
   Lnast_node eval_sub_expression(mmap_lib::Tree_index idx_start_ast, Lnast_node operator_node);
 
-  void add_tuple_nodes(mmap_lib::Tree_index idx_start_ln, std::vector<std::array<Lnast_node, 3>> &tuple_nodes);
+  void       add_tuple_nodes(mmap_lib::Tree_index idx_start_ln, std::vector<std::array<Lnast_node, 3>> &tuple_nodes);
   Lnast_node evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_start_ast, const mmap_lib::Tree_index &idx_start_ln);
 
   Lnast_node     gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs);

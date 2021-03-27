@@ -32,85 +32,44 @@
  *
  */
 
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
 #ifdef WIN32
-#   include <io.h>
-#else // not WIN32
-#   include <unistd.h>
+#include <io.h>
+#else  // not WIN32
+#include <unistd.h>
 
-#endif // WIN32
+#endif  // WIN32
 
+FILE *encOpenFileForRead(char *filename) { return fopen(filename, "r"); }
 
-FILE *
-encOpenFileForRead(char *filename)
-{
-    return fopen(filename, "r");
-}
+FILE *encOpenFileForWrite(char *filename, int encrypt_f) { return fopen(filename, "w"); }
 
-FILE *
-encOpenFileForWrite(char    *filename,
-                    int     encrypt_f)
-{
-    return fopen(filename, "w");
-}
+int encCloseFile(FILE *fp) { return fclose(fp); }
 
-int
-encCloseFile(FILE *fp)
-{
-    return fclose(fp);
-}
+void encClearBuf(FILE *fp) {}
 
-void
-encClearBuf(FILE *fp)
-{
-}
+void encReadingEncrypted() {}
 
-void
-encReadingEncrypted()
-{
-}
+void encWritingEncrypted() {}
 
-void
-encWritingEncrypted()
-{
-}
+int encIsEncrypted(unsigned char *buf) { return false; }
 
-int
-encIsEncrypted(unsigned char *buf)
-{
-    return false;
-}
+int encFgetc(FILE *fp) { return fgetc(fp); }
 
-int
-encFgetc(FILE *fp)
-{
-    return fgetc(fp);
-}
+int encFputc(char c, FILE *fp) { return fputc(c, fp); }
 
-int
-encFputc(char   c,
-         FILE   *fp)
-{
-    return fputc(c, fp);
-}
+void encPrint(FILE *fp, char *format, ...) {
+  va_list ap;
 
-void
-encPrint(FILE   *fp,
-         char   *format,
-         ...)
-{
-    va_list ap;
-
-    va_start(ap, format);
-    vfprintf(fp, format, ap);
-    va_end(ap);
+  va_start(ap, format);
+  vfprintf(fp, format, ap);
+  va_end(ap);
 }
 
 END_LEFDEF_PARSER_NAMESPACE
-

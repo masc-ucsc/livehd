@@ -28,14 +28,15 @@
 // *****************************************************************************
 
 #include "lefiDebug.hpp"
-#include "lefrReader.hpp"
-#include "lex.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "lefrData.hpp"
+#include "lefrReader.hpp"
 #include "lefrSettings.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -59,342 +60,77 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // ******************************
 
 // Set flag
-void
-lefiSetDebug(int    num,
-             int    value)
-{
-    lefData->lefDebug[num] = value;
-}
+void lefiSetDebug(int num, int value) { lefData->lefDebug[num] = value; }
 // Read flag
-int
-lefiDebug(int num)
-{
-    return lefData->lefDebug[num];
+int lefiDebug(int num) { return lefData->lefDebug[num]; }
+
+void lefiError(int check, int msgNum, const char *str) {
+  // check is 1 if the caller function has checked TotalMsgLimit, etc.
+
+  if (!check) {
+    if ((lefSettings->TotalMsgLimit > 0) && (lefData->lefErrMsgPrinted >= lefSettings->TotalMsgLimit))
+      return;
+    if (lefSettings->MsgLimit[msgNum] > 0) {
+      if (lefData->msgLimit[0][msgNum] >= lefSettings->MsgLimit[msgNum])  // over the limit
+        return;
+      lefData->msgLimit[0][msgNum] = lefData->msgLimit[0][msgNum] + 1;
+    }
+    lefData->lefErrMsgPrinted++;
+  }
+
+  if (lefSettings->ErrorLogFunction)
+    (*lefSettings->ErrorLogFunction)(str);
+  else
+    fprintf(stderr, "%s", str);
 }
 
-void
-lefiError(int           check,
-          int           msgNum,
-          const char    *str)
-{
+static char lefiShift[]
+    = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', ' ',  '!',  '"',  '#',  '$',  '%',  '&',  '\'',
+       '(',  ')',  '*',  '+',  ',',  '-',  '.',  '/',  '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',  '9',  ':',  ';',
+       '<',  '=',  '>',  '?',  '@',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',  'M',  'N',  'O',
+       'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  'X',  'Y',  'Z',  '[',  '\\', ']',  '^',  '_',  '`',  'A',  'B',  'C',
+       'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'l',  'M',  'N',  'O',  'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',
+       'X',  'Y',  'Z',  '{',  '|',  '}',  '~',  '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+       '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'};
 
-    // check is 1 if the caller function has checked TotalMsgLimit, etc.
+const char *lefUpperCase(const char *str) {
+  char *place = (char *)str;
+  char *to;
+  int   len = strlen(str) + 1;
 
-    if (!check) {
-        if ((lefSettings->TotalMsgLimit > 0) && (lefData->lefErrMsgPrinted >= lefSettings->TotalMsgLimit))
-            return;
-        if (lefSettings->MsgLimit[msgNum] > 0) {
-            if (lefData->msgLimit[0][msgNum] >= lefSettings->MsgLimit[msgNum]) //over the limit
-                return;
-            lefData->msgLimit[0][msgNum] = lefData->msgLimit[0][msgNum] + 1;
-        }
-        lefData->lefErrMsgPrinted++;
+  if (len > lefData->shiftBufLength) {
+    if (lefData->shiftBuf == 0) {
+      len                     = len < 64 ? 64 : len;
+      lefData->shiftBuf       = (char *)lefMalloc(len);
+      lefData->shiftBufLength = len;
+    } else {
+      lefFree(lefData->shiftBuf);
+      lefData->shiftBuf       = (char *)malloc(len);
+      lefData->shiftBufLength = len;
     }
+  }
 
-    if (lefSettings->ErrorLogFunction)
-        (*lefSettings->ErrorLogFunction)(str);
-    else
-        fprintf(stderr, "%s", str);
-}
+  to = lefData->shiftBuf;
+  while (*place) {
+    int i = (int)*place;
+    place++;
+    *to++ = lefiShift[i];
+  }
+  *to = '\0';
 
-static char lefiShift [] = {
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    ' ',
-    '!',
-    '"',
-    '#',
-    '$',
-    '%',
-    '&',
-    '\'',
-    '(',
-    ')',
-    '*',
-    '+',
-    ',',
-    '-',
-    '.',
-    '/',
-    '0',
-    '1',
-    '2',
-    '3',
-    '4',
-    '5',
-    '6',
-    '7',
-    '8',
-    '9',
-    ':',
-    ';',
-    '<',
-    '=',
-    '>',
-    '?',
-    '@',
-    'A',
-    'B',
-    'C',
-    'D',
-    'E',
-    'F',
-    'G',
-    'H',
-    'I',
-    'J',
-    'K',
-    'L',
-    'M',
-    'N',
-    'O',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'X',
-    'Y',
-    'Z',
-    '[',
-    '\\',
-    ']',
-    '^',
-    '_',
-    '`',
-    'A',
-    'B',
-    'C',
-    'D',
-    'E',
-    'F',
-    'G',
-    'H',
-    'I',
-    'J',
-    'K',
-    'l',
-    'M',
-    'N',
-    'O',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'X',
-    'Y',
-    'Z',
-    '{',
-    '|',
-    '}',
-    '~',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0',
-    '\0'
-};
-
-const char *
-lefUpperCase(const char *str)
-{
-    char    *place = (char*) str;
-    char    *to;
-    int     len = strlen(str) + 1;
-
-    if (len > lefData->shiftBufLength) {
-        if (lefData->shiftBuf == 0) {
-            len = len < 64 ? 64 : len;
-            lefData->shiftBuf = (char*) lefMalloc(len);
-            lefData->shiftBufLength = len;
-        } else {
-            lefFree(lefData->shiftBuf);
-            lefData->shiftBuf = (char*) malloc(len);
-            lefData->shiftBufLength = len;
-        }
-    }
-
-    to = lefData->shiftBuf;
-    while (*place) {
-        int i = (int) *place;
-        place++;
-        *to++ = lefiShift[i];
-    }
-    *to = '\0';
-
-    return lefData->shiftBuf;
+  return lefData->shiftBuf;
 }
 
 // for auto upshifting names in case insensitive files
 extern const char *lefUpperCase(const char *c);
 
 // Function is done from #define CASE, compatibility only
-const char *
-CASE(const char *x)
-{
-    return !lefData->namesCaseSensitive && lefSettings->ShiftCase ? lefUpperCase(x) : x;
-}
+const char *CASE(const char *x) { return !lefData->namesCaseSensitive && lefSettings->ShiftCase ? lefUpperCase(x) : x; }
 
 END_LEFDEF_PARSER_NAMESPACE
-

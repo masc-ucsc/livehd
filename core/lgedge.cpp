@@ -364,7 +364,7 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
 Port_ID Edge_raw::get_dst_pid() const { return Node_internal::get(this).get_dst_pid(); }
 
 Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
-  I(get_self_idx()==self_idx);
+  I(get_self_idx() == self_idx);
   if (is_input())
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), false);
   else
@@ -372,7 +372,7 @@ Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
 }
 
 Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
-  I(get_self_idx()==self_idx);
+  I(get_self_idx() == self_idx);
   if (is_input())
     return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), true);
   else
@@ -380,4 +380,3 @@ Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
 }
 
 Index_ID Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }
-

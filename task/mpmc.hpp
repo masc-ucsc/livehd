@@ -29,23 +29,25 @@
 #ifndef __MPMC_BOUNDED_QUEUE_INCLUDED__
 #define __MPMC_BOUNDED_QUEUE_INCLUDED__
 
-#include <cassert>
 #include <strings.h>
 
+#include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 
-#include <atomic>
-
-template <typename T> class mpmc {
+template <typename T>
+class mpmc {
   mpmc() = delete;
+
 public:
   mpmc(size_t size)
       : _size(size)
       ,
       //_buffer(reinterpret_cast<node_t *>(aligned_alloc(128,sizeof(node_t)*(_size + 1)))), // page align needed for muslc (alpine)
-      _buffer(reinterpret_cast<node_t *>(std::aligned_alloc(8 * alignof(std::max_align_t), ((((sizeof(node_t) * (_size)))>>12)|1)<<12)))
-      , // page align needed for muslc (alpine)
+      _buffer(reinterpret_cast<node_t *>(
+          std::aligned_alloc(8 * alignof(std::max_align_t), ((((sizeof(node_t) * (_size))) >> 12) | 1) << 12)))
+      ,  // page align needed for muslc (alpine)
       _mask(size - 1)
       , _head_seq(0)
       , _tail_seq(0) {
@@ -54,32 +56,30 @@ public:
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));
 
-    for(size_t i = 0; i < _size; ++i) {
+    for (size_t i = 0; i < _size; ++i) {
       _buffer[i].seq.store(i, std::memory_order_relaxed);
     }
   }
 
-  ~mpmc() {
-    std::free(_buffer);
-  }
+  ~mpmc() { std::free(_buffer); }
 
   bool enqueue(const T &data) {
     // _head_seq only wraps at MAX(_head_seq) instead we use a mask to convert the sequence to an array index
     // this is why the ring buffer must be a size which is a power of 2. this also allows the sequence to double as a ticket/lock.
     size_t head_seq = _head_seq.load(std::memory_order_relaxed);
 
-    for(;;) {
+    for (;;) {
       node_t * node     = &_buffer[head_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)head_seq;
 
-      if(dif == 0) {
-        if(_head_seq.compare_exchange_weak(head_seq, head_seq + 1, std::memory_order_relaxed)) {
+      if (dif == 0) {
+        if (_head_seq.compare_exchange_weak(head_seq, head_seq + 1, std::memory_order_relaxed)) {
           node->data = data;
           node->seq.store(head_seq + 1, std::memory_order_release);
           return true;
         }
-      } else if(dif < 0) {
+      } else if (dif < 0) {
         return false;
       } else {
         // under normal circumstances this branch should never be taken
@@ -94,18 +94,18 @@ public:
   bool dequeue(T &data) {
     size_t tail_seq = _tail_seq.load(std::memory_order_relaxed);
 
-    for(;;) {
+    for (;;) {
       node_t * node     = &_buffer[tail_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)(tail_seq + 1);
 
-      if(dif == 0) {
-        if(_tail_seq.compare_exchange_weak(tail_seq, tail_seq + 1, std::memory_order_relaxed)) {
+      if (dif == 0) {
+        if (_tail_seq.compare_exchange_weak(tail_seq, tail_seq + 1, std::memory_order_relaxed)) {
           data = node->data;
           node->seq.store(tail_seq + _mask + 1, std::memory_order_release);
           return true;
         }
-      } else if(dif < 0) {
+      } else if (dif < 0) {
         return false;
       } else {
         // under normal circumstances this branch should never be taken
@@ -117,9 +117,7 @@ public:
     return false;
   }
 
-  bool empty() const {
-    return _head_seq.load() == _tail_seq.load();
-  }
+  bool empty() const { return _head_seq.load() == _tail_seq.load(); }
 
 private:
   struct node_t {
@@ -127,7 +125,7 @@ private:
     std::atomic<size_t> seq;
   };
 
-  typedef char cache_line_pad_t[128]; // Some CPUs could have 128 cache line in LLC
+  typedef char cache_line_pad_t[128];  // Some CPUs could have 128 cache line in LLC
 
   // Mostly read only data
   const size_t     _size;
@@ -141,10 +139,8 @@ private:
   std::atomic<size_t> _tail_seq;
   cache_line_pad_t    _pad3;
 
-  mpmc(const mpmc &) {
-  }
-  void operator=(const mpmc &) {
-  }
+  mpmc(const mpmc &) {}
+  void operator=(const mpmc &) {}
 };
 
 #endif

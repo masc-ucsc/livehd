@@ -8,17 +8,16 @@
 
 class Main_api {
 protected:
-
 public:
   static void error(const std::string &msg) { Pass::eprp.parser_error(msg); }
   static void warn(const std::string &msg) { Pass::eprp.parser_warn(msg); }
 
   template <typename... Args>
-  static void error(std::string_view format, const Args &... args) {
+  static void error(std::string_view format, const Args &...args) {
     Pass::eprp.parser_error(format, args...);
   }
   template <typename... Args>
-  static void warn(std::string_view format, const Args &... args) {
+  static void warn(std::string_view format, const Args &...args) {
     Pass::eprp.parser_warn(format, args...);
   }
 
@@ -38,4 +37,3 @@ public:
 
   static void init();
 };
-

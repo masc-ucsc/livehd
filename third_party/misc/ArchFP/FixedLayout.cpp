@@ -1,7 +1,7 @@
 #include "FixedLayout.hpp"
 
-#include <fstream>
 #include <cmath>
+#include <fstream>
 
 #include "FPCompWrapper.hpp"
 #include "FPObject.hpp"

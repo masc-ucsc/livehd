@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "inou_cgen.hpp"
-#include "eprp_utils.hpp"
+
 #include "cgen_verilog.hpp"
+#include "eprp_utils.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
@@ -27,4 +28,3 @@ void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
     p.do_from_lgraph(l);
   }
 }
-

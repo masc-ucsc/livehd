@@ -27,12 +27,14 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include "lex.h"
-#include "defiDebug.hpp"
 #include "defiMisc.hpp"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "defiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -41,16 +43,12 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //    Handle points for a polygon
 //
 ////////////////////////////////////////////////////
-defiGeometries::defiGeometries(defrData *data)
- : defData(data)
-{
-    pointsAllocated_ = 0;
-    numPoints_ = 0;
+defiGeometries::defiGeometries(defrData* data) : defData(data) {
+  pointsAllocated_ = 0;
+  numPoints_       = 0;
 }
 
-void defiGeometries::Init() {
-    Destroy();
-}
+void defiGeometries::Init() { Destroy(); }
 
 void defiGeometries::Destroy() {
   if (pointsAllocated_) {
@@ -58,36 +56,32 @@ void defiGeometries::Destroy() {
     free((char*)(y_));
   }
   pointsAllocated_ = 0;
-  numPoints_ = 0;
+  numPoints_       = 0;
 }
 
-defiGeometries::~defiGeometries() {
-  Destroy();
-}
+defiGeometries::~defiGeometries() { Destroy(); }
 
-void defiGeometries::Reset() {
-  numPoints_ = 0;
-}
+void defiGeometries::Reset() { numPoints_ = 0; }
 
 void defiGeometries::startList(int x, int y) {
   if (pointsAllocated_ == 0) {
     pointsAllocated_ = 16;
-    x_ = (int*)malloc(sizeof(int)*16);
-    y_ = (int*)malloc(sizeof(int)*16);
-    numPoints_ = 0;
-  } else   // reset the numPoints to 0
+    x_               = (int*)malloc(sizeof(int) * 16);
+    y_               = (int*)malloc(sizeof(int) * 16);
+    numPoints_       = 0;
+  } else  // reset the numPoints to 0
     numPoints_ = 0;
   addToList(x, y);
 }
 
 void defiGeometries::addToList(int x, int y) {
   if (numPoints_ == pointsAllocated_) {
-    int i;
+    int  i;
     int* nx;
     int* ny;
     pointsAllocated_ *= 2;
-    nx = (int*)malloc(sizeof(int)*pointsAllocated_);
-    ny = (int*)malloc(sizeof(int)*pointsAllocated_);
+    nx = (int*)malloc(sizeof(int) * pointsAllocated_);
+    ny = (int*)malloc(sizeof(int) * pointsAllocated_);
     for (i = 0; i < numPoints_; i++) {
       nx[i] = x_[i];
       ny[i] = y_[i];
@@ -102,16 +96,17 @@ void defiGeometries::addToList(int x, int y) {
   numPoints_ += 1;
 }
 
-int defiGeometries::numPoints() const {
-  return numPoints_;
-}
+int defiGeometries::numPoints() const { return numPoints_; }
 
 void defiGeometries::points(int index, int* x, int* y) const {
   char msg[160];
   if ((index < 0) || (index >= numPoints_)) {
-     sprintf (msg, "ERROR (LEFPARS-6070): The index number %d given for GEOMETRY POINTS is invalid.\nValid index is from 0 to %d", index, numPoints_);
-     defiError(0, 6070, msg, defData);
-     return;
+    sprintf(msg,
+            "ERROR (LEFPARS-6070): The index number %d given for GEOMETRY POINTS is invalid.\nValid index is from 0 to %d",
+            index,
+            numPoints_);
+    defiError(0, 6070, msg, defData);
+    return;
   }
   *x = x_[index];
   *y = y_[index];
@@ -124,22 +119,16 @@ void defiGeometries::points(int index, int* x, int* y) const {
 //
 ////////////////////////////////////////////////////
 
-defiStyles::defiStyles() {
-  Init();
-}
+defiStyles::defiStyles() { Init(); }
 
 void defiStyles::Init() {
   styleNum_ = 0;
-  polygon_ = 0;
+  polygon_  = 0;
 }
 
-defiStyles::~defiStyles() {
-  Destroy();
-}
+defiStyles::~defiStyles() { Destroy(); }
 
-void defiStyles::Destroy() {
- clear();
-}
+void defiStyles::Destroy() { clear(); }
 
 void defiStyles::clear() {
   struct defiPoints* p;
@@ -151,35 +140,33 @@ void defiStyles::clear() {
     free((char*)(polygon_));
   }
   styleNum_ = 0;
-  polygon_ = 0;
+  polygon_  = 0;
 }
 
-void defiStyles::setStyle(int styleNum) {
-  styleNum_ = styleNum;
-}
+void defiStyles::setStyle(int styleNum) { styleNum_ = styleNum; }
 
 void defiStyles::setPolygon(defiGeometries* geom) {
   struct defiPoints* p;
-  int i, x, y;
+  int                i, x, y;
 
   if (polygon_ == 0) {
-    p = (struct defiPoints*)malloc(sizeof(struct defiPoints));
-    p->numPoints = geom->numPoints();
-    p->x = (int*)malloc(sizeof(int)*p->numPoints);
-    p->y = (int*)malloc(sizeof(int)*p->numPoints);
-    numPointAlloc_ = p->numPoints; // keep track the max number pts
+    p              = (struct defiPoints*)malloc(sizeof(struct defiPoints));
+    p->numPoints   = geom->numPoints();
+    p->x           = (int*)malloc(sizeof(int) * p->numPoints);
+    p->y           = (int*)malloc(sizeof(int) * p->numPoints);
+    numPointAlloc_ = p->numPoints;  // keep track the max number pts
   } else if (numPointAlloc_ < geom->numPoints()) {
     // the incoming polygon has more number then has been allocated,
     // need to reallocate more memory
     p = polygon_;
     free((char*)(p->x));
     free((char*)(p->y));
-    p->numPoints = geom->numPoints();
-    p->x = (int*)malloc(sizeof(int)*p->numPoints);
-    p->y = (int*)malloc(sizeof(int)*p->numPoints);
-    numPointAlloc_ = p->numPoints; // keep track the max number pts
+    p->numPoints   = geom->numPoints();
+    p->x           = (int*)malloc(sizeof(int) * p->numPoints);
+    p->y           = (int*)malloc(sizeof(int) * p->numPoints);
+    numPointAlloc_ = p->numPoints;  // keep track the max number pts
   } else {
-    p = polygon_;
+    p            = polygon_;
     p->numPoints = geom->numPoints();
   }
   for (i = 0; i < p->numPoints; i++) {
@@ -190,12 +177,9 @@ void defiStyles::setPolygon(defiGeometries* geom) {
   polygon_ = p;
 }
 
-int defiStyles::style() const {
-  return styleNum_;
-}
+int defiStyles::style() const { return styleNum_; }
 
 struct defiPoints defiStyles::getPolygon() const {
   return *(polygon_);
 }
 END_LEFDEF_PARSER_NAMESPACE
-

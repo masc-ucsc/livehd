@@ -27,9 +27,9 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <stdlib.h>
-
 #include "lefiEncryptInt.hpp"
+
+#include <stdlib.h>
 
 #include "lefrSettings.hpp"
 
@@ -39,10 +39,6 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 // Global variables
 // *****************************************************************************
 
-void
-lefrEnableReadEncrypted()
-{
-    lefSettings->ReadEncrypted = 1;
-}
+void lefrEnableReadEncrypted() { lefSettings->ReadEncrypted = 1; }
 
 END_LEFDEF_PARSER_NAMESPACE

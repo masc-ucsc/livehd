@@ -30,8 +30,9 @@
 #ifndef defiProp_h
 #define defiProp_h
 
-#include "defiKRDefs.hpp"
 #include <stdio.h>
+
+#include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -40,7 +41,7 @@ class defrData;
 // Struct holds the data for one property.
 class defiProp {
 public:
-  defiProp(defrData *data);
+  defiProp(defrData* data);
   void Init();
 
   void Destroy();
@@ -59,12 +60,12 @@ public:
   const char* string() const;
   const char* propType() const;
   const char* propName() const;
-  char  dataType() const;
-       // either I:integer R:real S:string Q:quotedstring N:nameMapString
-  int hasNumber() const;
-  int hasRange() const;
-  int hasString() const;
-  int hasNameMapString() const;
+  char        dataType() const;
+  // either I:integer R:real S:string Q:quotedstring N:nameMapString
+  int    hasNumber() const;
+  int    hasRange() const;
+  int    hasString() const;
+  int    hasNameMapString() const;
   double number() const;
   double left() const;
   double right() const;
@@ -75,22 +76,21 @@ public:
   void print(FILE* f) const;
 
 protected:
-  char* propType_;      // "design" ...
-  char* propName_;      // name.
-  int nameSize_;        // allocated size of name.
-  char hasRange_;       // either 0:NO or 1:YES.
-  char hasNumber_;      // either 0:NO or 1:YES.
-  char hasNameMapString_;
-  char dataType_;       // either I:integer R:real S:string Q:quotedstring.
-                        //   N:nameMapString
-  char* stringData_;    // if it is a string the data is here.
-  int stringLength_;    // allocated size of stringData.
-  double left_, right_; // if it has a range the numbers are here.
-  double d_;            // if it is a real or int the number is here.
+  char* propType_;   // "design" ...
+  char* propName_;   // name.
+  int   nameSize_;   // allocated size of name.
+  char  hasRange_;   // either 0:NO or 1:YES.
+  char  hasNumber_;  // either 0:NO or 1:YES.
+  char  hasNameMapString_;
+  char  dataType_;       // either I:integer R:real S:string Q:quotedstring.
+                         //   N:nameMapString
+  char*  stringData_;    // if it is a string the data is here.
+  int    stringLength_;  // allocated size of stringData.
+  double left_, right_;  // if it has a range the numbers are here.
+  double d_;             // if it is a real or int the number is here.
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

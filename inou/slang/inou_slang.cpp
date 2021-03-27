@@ -1,12 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+// clang-format off
+
 #include "slang_tree.hpp"
-
-#include "lgraph.hpp"
 #include "inou_slang.hpp"
-#include "lbench.hpp"
 
-extern int slang_main(int argc, char** argv); // in slang_driver.cpp
+#include "lbench.hpp"
+#include "lgraph.hpp"
+
+// clang-format on
+
+extern int slang_main(int argc, char **argv);  // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 
@@ -23,16 +27,15 @@ void Inou_slang::setup() {
 Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Inou_slang::work(Eprp_var &var) {
-  Lbench      b("inou.SLANG_verilog");
+  Lbench     b("inou.SLANG_verilog");
   Inou_slang p(var);
 
   std::vector<std::string> default_args = {"--ignore-unknown-modules", "--single-unit"};
-  std::vector<char*> argv;
+  std::vector<char *>      argv;
 
   argv.push_back(strdup("lgshell"));
 
-  for (const auto& arg : default_args)
-    argv.push_back(strdup(arg.c_str()));
+  for (const auto &arg : default_args) argv.push_back(strdup(arg.c_str()));
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
@@ -67,17 +70,16 @@ void Inou_slang::work(Eprp_var &var) {
 
   argv.push_back(nullptr);
 
-  Slang_tree::setup(); // setup
+  Slang_tree::setup();  // setup
 
-  slang_main(argv.size() - 1, argv.data()); // compile to lnasts
+  slang_main(argv.size() - 1, argv.data());  // compile to lnasts
 
-  for (auto &ln:Slang_tree::pick_lnast()) {
+  for (auto &ln : Slang_tree::pick_lnast()) {
     var.add(ln);
   }
 
-  for(char *ptr:argv) {
+  for (char *ptr : argv) {
     if (ptr)
       free(ptr);
   }
 }
-

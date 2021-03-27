@@ -16,8 +16,8 @@
 #include <regex>
 #include <string>
 
-#include "iassert.hpp"
 #include "gtest/gtest.h"
+#include "iassert.hpp"
 #include "tmt_test.hpp"
 
 using testing::HasSubstr;

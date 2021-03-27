@@ -31,6 +31,7 @@
 #define lefiUnits_h
 
 #include <stdio.h>
+
 #include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -54,7 +55,7 @@ public:
   void setFrequency(double num);
 
   int hasDatabase() const;
-  int hasCapacitance()const;
+  int hasCapacitance() const;
   int hasResistance() const;
   int hasTime() const;
   int hasPower() const;
@@ -63,28 +64,28 @@ public:
   int hasFrequency() const;
 
   const char* databaseName() const;
-  double databaseNumber() const;
-  double capacitance() const;
-  double resistance() const;
-  double time() const;
-  double power() const;
-  double current() const;
-  double voltage() const;
-  double frequency() const;
+  double      databaseNumber() const;
+  double      capacitance() const;
+  double      resistance() const;
+  double      time() const;
+  double      power() const;
+  double      current() const;
+  double      voltage() const;
+  double      frequency() const;
 
   // Debug print
-  void print(FILE* f) const ;
+  void print(FILE* f) const;
 
 protected:
-  int hasDatabase_;
-  int hasCapacitance_;
-  int hasResistance_;
-  int hasTime_;
-  int hasPower_;
-  int hasCurrent_;
-  int hasVoltage_;
-  int hasFrequency_;
-  char* databaseName_;
+  int    hasDatabase_;
+  int    hasCapacitance_;
+  int    hasResistance_;
+  int    hasTime_;
+  int    hasPower_;
+  int    hasCurrent_;
+  int    hasVoltage_;
+  int    hasFrequency_;
+  char*  databaseName_;
   double databaseNumber_;
   double capacitance_;
   double resistance_;

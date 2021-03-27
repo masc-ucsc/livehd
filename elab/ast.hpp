@@ -17,13 +17,14 @@ public:
 class Ast_parser : public mmap_lib::tree<Ast_parser_node> {
 private:
 protected:
-  mmap_lib::Tree_level             level;
-  mmap_lib::Tree_level             down_added;
+  mmap_lib::Tree_level   level;
+  mmap_lib::Tree_level   down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 
   std::vector<mmap_lib::Tree_index> last_added;
 
   void add_track_parent(const mmap_lib::Tree_index &index);
+
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);
 
@@ -33,6 +34,6 @@ public:
 
   void dump() const;
 
-  std::string_view get_memblock() const; // FIXME: memblock has to go. Support user provided strings (memblock should be inside lnast)
+  std::string_view get_memblock()
+      const;  // FIXME: memblock has to go. Support user provided strings (memblock should be inside lnast)
 };
-

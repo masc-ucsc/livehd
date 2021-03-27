@@ -42,20 +42,19 @@ struct lefiPoints {
 
 typedef struct lefiPoints lefiNum;
 
-//int lefiValidTime();
+// int lefiValidTime();
 extern int lefiValidUser();
 
 extern char* lefiUser();
 
 extern char* lefiOrientStr(int orient);
 
-extern double convert_name2num(const char *versionName);
+extern double convert_name2num(const char* versionName);
 
-extern bool  validateMaskNumber(int num);
+extern bool validateMaskNumber(int num);
 
 END_LEFDEF_PARSER_NAMESPACE
 
 USE_LEFDEF_PARSER_NAMESPACE
 
 #endif
-

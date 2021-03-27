@@ -3,10 +3,10 @@
 #include "sub_node.hpp"
 
 void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
-  name = new_name;
-  lgid = new_lgid;
-  io_pins = sub.io_pins;
-  name2id = sub.name2id;
+  name                   = new_name;
+  lgid                   = new_lgid;
+  io_pins                = sub.io_pins;
+  name2id                = sub.name2id;
   graph_pos2instance_pid = sub.graph_pos2instance_pid;
 }
 
@@ -129,7 +129,6 @@ void Sub_node::dump() const {
 /* LCOV_EXCL_STOP */
 
 std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
-
   std::vector<IO_pin> slist;
   for (auto i = 1u; i < io_pins.size(); ++i) {
     if (io_pins[i].is_invalid())
@@ -159,11 +158,11 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
       continue;
 
     auto pos_swap = p.graph_io_pos;
-    int ntries = slist.size();
+    int  ntries   = slist.size();
     while (ntries) {
       ntries--;
       std::swap(slist[pos], slist[pos_swap]);
-      if (pos_swap>pos)
+      if (pos_swap > pos)
         break;
       if (slist[pos].graph_io_pos == pos || slist[pos].graph_io_pos == Port_invalid)
         break;
@@ -175,10 +174,10 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
 }
 
 void Sub_node::populate_graph_pos() {
-  if (graph_pos2instance_pid.size() == io_pins.size()-1)
-    return; // all the pins are already populated
+  if (graph_pos2instance_pid.size() == io_pins.size() - 1)
+    return;  // all the pins are already populated
 
-  Port_ID pos=0;
+  Port_ID pos = 0;
   for (auto &sorted_pin : get_sorted_io_pins()) {
     pos++;
     if (sorted_pin.graph_io_pos != pos)
@@ -197,10 +196,9 @@ void Sub_node::del_pin(Port_ID instance_pid) {
     graph_pos2instance_pid[pos] = Port_invalid;
   }
   auto keep_name = io_pins[instance_pid].name;
-  io_pins[instance_pid].clear(); // do not erase to avoid remap of all the instance_pids (users)
+  io_pins[instance_pid].clear();  // do not erase to avoid remap of all the instance_pids (users)
   io_pins[instance_pid].name = keep_name;
 
   deleted.emplace_back(instance_pid);
   std::sort(deleted.begin(), deleted.end(), std::greater<>());
 }
-

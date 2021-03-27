@@ -14,20 +14,20 @@
 #include "node_pin.hpp"
 
 struct Ann_name {
-  static constexpr char delay[]         = "delay";
-  static constexpr char io_unsign[]     = "io_unsign";
-  static constexpr char offset[]        = "offset";
-  static constexpr char pin_name[]      = "pin_name";
-  static constexpr char prp_vname[]     = "prp_vname";
-  static constexpr char ssa[]           = "ssa";
+  static constexpr char delay[]     = "delay";
+  static constexpr char io_unsign[] = "io_unsign";
+  static constexpr char offset[]    = "offset";
+  static constexpr char pin_name[]  = "pin_name";
+  static constexpr char prp_vname[] = "prp_vname";
+  static constexpr char ssa[]       = "ssa";
 
-  static constexpr char nodename[]      = "nodename";
-  static constexpr char instname[]      = "instname";
-  static constexpr char nodeplace[]     = "nodeplace";
-  static constexpr char file_loc[]      = "file_loc";
-  static constexpr char tree_pos[]      = "tree_pos";
-  static constexpr char color[]         = "color";
-  static constexpr char hier_color[]    = "hier_color";
+  static constexpr char nodename[]   = "nodename";
+  static constexpr char instname[]   = "instname";
+  static constexpr char nodeplace[]  = "nodeplace";
+  static constexpr char file_loc[]   = "file_loc";
+  static constexpr char tree_pos[]   = "tree_pos";
+  static constexpr char color[]      = "color";
+  static constexpr char hier_color[] = "hier_color";
 };
 
 using Ann_node_pin_offset = Attribute<Ann_name::offset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;

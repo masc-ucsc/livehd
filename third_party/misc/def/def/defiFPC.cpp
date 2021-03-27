@@ -27,11 +27,13 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <string.h>
-#include <stdlib.h>
-#include "lex.h"
 #include "defiFPC.hpp"
+
+#include <stdlib.h>
+#include <string.h>
+
 #include "defiDebug.hpp"
+#include "lex.h"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -43,36 +45,26 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 //////////////////////////////////////////////
 //////////////////////////////////////////////
 
-
-defiFPC::defiFPC(defrData *data)
- : defData(data)
-{
-  Init();
-}
-
+defiFPC::defiFPC(defrData* data) : defData(data) { Init(); }
 
 void defiFPC::Init() {
-  name_ = 0;
-  nameLength_ = 0;
+  name_           = 0;
+  nameLength_     = 0;
   namesAllocated_ = 0;
-  namesUsed_ = 0;
-  names_ = 0;
-  rowOrComp_ = 0;
+  namesUsed_      = 0;
+  names_          = 0;
+  rowOrComp_      = 0;
   clear();
 }
 
-
-defiFPC::~defiFPC() {
-  Destroy();
-}
-
+defiFPC::~defiFPC() { Destroy(); }
 
 void defiFPC::Destroy() {
-
   clear();
 
-  if (name_) free(name_);
-  name_ = 0;
+  if (name_)
+    free(name_);
+  name_       = 0;
   nameLength_ = 0;
 
   free((char*)(names_));
@@ -80,23 +72,22 @@ void defiFPC::Destroy() {
   namesAllocated_ = 0;
 }
 
-
 void defiFPC::clear() {
   int i;
 
   direction_ = 0;
-  hasAlign_ = 0;
-  hasMin_ = 0;
-  hasMax_ = 0;
-  hasEqual_ = 0;
-  corner_ = 0;
+  hasAlign_  = 0;
+  hasMin_    = 0;
+  hasMax_    = 0;
+  hasEqual_  = 0;
+  corner_    = 0;
 
   for (i = 0; i < namesUsed_; i++) {
-    if (names_[i]) free (names_[i]) ;
+    if (names_[i])
+      free(names_[i]);
   }
   namesUsed_ = 0;
 }
-
 
 void defiFPC::setName(const char* name, const char* direction) {
   int len = strlen(name) + 1;
@@ -104,9 +95,10 @@ void defiFPC::setName(const char* name, const char* direction) {
   clear();
 
   if (len > nameLength_) {
-    if (name_) free(name_);
+    if (name_)
+      free(name_);
     nameLength_ = len;
-    name_ = (char*)malloc(len);
+    name_       = (char*)malloc(len);
   }
   strcpy(name_, defData->DEFCASE(name));
 
@@ -115,140 +107,85 @@ void defiFPC::setName(const char* name, const char* direction) {
   else if (*direction == 'V')
     direction_ = 'V';
   else
-    defiError(0, 6030, "ERROR (DEFPARS-6030): Invalid direction specified with FPC name. The valid direction is either 'H' or 'V'. Specify a valid value and then try again.", defData);
-
+    defiError(0,
+              6030,
+              "ERROR (DEFPARS-6030): Invalid direction specified with FPC name. The valid direction is either 'H' or 'V'. Specify "
+              "a valid value and then try again.",
+              defData);
 }
 
+void defiFPC::print(FILE* f) const { fprintf(f, "FPC '%s'\n", name_); }
 
-void defiFPC::print(FILE* f) const {
-  fprintf(f, "FPC '%s'\n", name_);
-}
+const char* defiFPC::name() const { return name_; }
 
+int defiFPC::isVertical() const { return direction_ == 'V' ? 1 : 0; }
 
-const char* defiFPC::name() const {
-  return name_;
-}
+int defiFPC::isHorizontal() const { return direction_ == 'H' ? 1 : 0; }
 
+int defiFPC::hasAlign() const { return (int)(hasAlign_); }
 
-int defiFPC::isVertical() const {
-  return direction_ == 'V' ? 1 : 0 ;
-}
+int defiFPC::hasMax() const { return (int)(hasMax_); }
 
+int defiFPC::hasMin() const { return (int)(hasMin_); }
 
-int defiFPC::isHorizontal() const {
-  return direction_ == 'H' ? 1 : 0 ;
-}
+int defiFPC::hasEqual() const { return (int)(hasEqual_); }
 
+double defiFPC::alignMin() const { return minMaxEqual_; }
 
-int defiFPC::hasAlign() const {
-  return (int)(hasAlign_);
-}
+double defiFPC::alignMax() const { return minMaxEqual_; }
 
+double defiFPC::equal() const { return minMaxEqual_; }
 
-int defiFPC::hasMax() const {
-  return (int)(hasMax_);
-}
+int defiFPC::numParts() const { return namesUsed_; }
 
+void defiFPC::setAlign() { hasAlign_ = 0; }
 
-int defiFPC::hasMin() const {
-  return (int)(hasMin_);
-}
+void defiFPC::setMin(double num) { minMaxEqual_ = num; }
 
+void defiFPC::setMax(double num) { minMaxEqual_ = num; }
 
-int defiFPC::hasEqual() const {
-  return (int)(hasEqual_);
-}
+void defiFPC::setEqual(double num) { minMaxEqual_ = num; }
 
+void defiFPC::setDoingBottomLeft() { corner_ = 'B'; }
 
-double defiFPC::alignMin() const {
-  return minMaxEqual_;
-}
-
-
-double defiFPC::alignMax() const {
-  return minMaxEqual_;
-}
-
-
-double defiFPC::equal() const {
-  return minMaxEqual_;
-}
-
-
-int defiFPC::numParts() const {
-  return namesUsed_;
-}
-
-
-void defiFPC::setAlign() {
-  hasAlign_ = 0;
-}
-
-
-void defiFPC::setMin(double num) {
-  minMaxEqual_ = num;
-}
-
-
-void defiFPC::setMax(double num) {
-  minMaxEqual_ = num;
-}
-
-
-void defiFPC::setEqual(double num) {
-  minMaxEqual_ = num;
-}
-
-
-void defiFPC::setDoingBottomLeft() {
-  corner_ = 'B';
-}
-
-
-void defiFPC::setDoingTopRight() {
-  corner_ = 'T';
-}
-
+void defiFPC::setDoingTopRight() { corner_ = 'T'; }
 
 void defiFPC::getPart(int index, int* corner, int* typ, char** name) const {
   if (index >= 0 && index <= namesUsed_) {
     // 4 for bottom left  0 for topright
     // 2 for row   0 for comps
-    if (corner) *corner = (int)((rowOrComp_[index] & 4) ? 'B' : 'T') ;
-    if (typ) *typ = (int)((rowOrComp_[index] & 2) ? 'R' : 'C') ;
-    if (name) *name = names_[index];
+    if (corner)
+      *corner = (int)((rowOrComp_[index] & 4) ? 'B' : 'T');
+    if (typ)
+      *typ = (int)((rowOrComp_[index] & 2) ? 'R' : 'C');
+    if (name)
+      *name = names_[index];
   }
 }
 
+void defiFPC::addRow(const char* name) { addItem('R', defData->DEFCASE(name)); }
 
-void defiFPC::addRow(const char* name) {
-  addItem('R', defData->DEFCASE(name));
-}
-
-
-void defiFPC::addComps(const char* name) {
-  addItem('C', defData->DEFCASE(name));
-}
-
+void defiFPC::addComps(const char* name) { addItem('C', defData->DEFCASE(name)); }
 
 void defiFPC::addItem(char item, const char* name) {
   int len = strlen(name) + 1;
 
   if (namesUsed_ >= namesAllocated_) {
-    char* newR;
+    char*  newR;
     char** newN;
-    int i;
-    namesAllocated_ =
-	namesAllocated_ ? namesAllocated_ * 2 : 8 ;
-    newN = (char**) malloc(sizeof(char*) * namesAllocated_);
-    newR = (char*) malloc(sizeof(char) * namesAllocated_);
+    int    i;
+    namesAllocated_ = namesAllocated_ ? namesAllocated_ * 2 : 8;
+    newN            = (char**)malloc(sizeof(char*) * namesAllocated_);
+    newR            = (char*)malloc(sizeof(char) * namesAllocated_);
     for (i = 0; i < namesUsed_; i++) {
       newN[i] = names_[i];
       newR[i] = rowOrComp_[i];
     }
-    if (names_) free((char*)(names_));
-    if (rowOrComp_) free(rowOrComp_);
-    names_ = newN;
+    if (names_)
+      free((char*)(names_));
+    if (rowOrComp_)
+      free(rowOrComp_);
+    names_     = newN;
     rowOrComp_ = newR;
   }
 
@@ -257,13 +194,9 @@ void defiFPC::addItem(char item, const char* name) {
 
   // 4 for bottomleft
   // 2 for row
-  rowOrComp_[namesUsed_] =
-         (char)(((corner_ == 'B') ? 4 : 0) |
-	 (item == 'R' ? 2 : 0));
+  rowOrComp_[namesUsed_] = (char)(((corner_ == 'B') ? 4 : 0) | (item == 'R' ? 2 : 0));
 
   namesUsed_ += 1;
 }
 
-
 END_LEFDEF_PARSER_NAMESPACE
-

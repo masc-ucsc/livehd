@@ -70,7 +70,8 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {  // fpin 
   tmp_cell.add_pin(fpin->name(), dir);
   Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
-  if (fpin->hasUse()) tmp_pin.use = fpin->use();
+  if (fpin->hasUse())
+    tmp_pin.use = fpin->use();
 
   for (pn = 0; pn < fpin->numPorts(); pn++) {
     const lefiGeometries *geometry = fpin->port(pn);
@@ -142,8 +143,8 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {  //
     tmp_layer.pitches.push_back(flayer->pitchY());
   }
 
-  tmp_layer.width =
-      flayer->width();  // if (flayer->hasWidth()) //bugy with Layer Via width detection, so remove condition judgement
+  tmp_layer.width
+      = flayer->width();  // if (flayer->hasWidth()) //bugy with Layer Via width detection, so remove condition judgement
 
   if (flayer->hasSpacingNumber()) {
     for (i = 0; i < flayer->numSpacing(); i++) {

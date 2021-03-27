@@ -47,8 +47,8 @@ private:
 
 #ifndef _WIN32
   static lezMiniSAT *alarmHandlerThis;
-  static clock_t    alarmHandlerTimeout;
-  static void       alarmHandler(int);
+  static clock_t     alarmHandlerTimeout;
+  static void        alarmHandler(int);
 #endif
 
 public:

@@ -30,7 +30,7 @@
 #define NUM_124 6
 #define NUM_223 6
 
-lezMiniSAT                  ez;
+lezMiniSAT                 ez;
 int                        blockidx = 0;
 std::map<int, std::string> blockinfo;
 std::vector<int>           grid[DIM_X][DIM_Y][DIM_Z];

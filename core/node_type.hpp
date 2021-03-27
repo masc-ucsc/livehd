@@ -1,14 +1,14 @@
 //  this file is distributed under the bsd 3-clause license. see license for details.
 #pragma once
 
+#include "cell.hpp"
 #include "lgraph_base_core.hpp"
 #include "lgraphbase.hpp"
 #include "mmap_bimap.hpp"
 #include "mmap_map.hpp"
 #include "mmap_vector.hpp"
-#include "cell.hpp"
-#include "sub_node.hpp"
 #include "node.hpp"
+#include "sub_node.hpp"
 
 using Node_down_map = mmap_lib::map<Node::Compact_class, Lg_type_id>;
 
@@ -24,8 +24,8 @@ protected:
 
   void clear();
 
-  void             set_type(Index_ID nid, const Ntype_op op);
-  Ntype_op          get_type_op(Index_ID nid) const {
+  void     set_type(Index_ID nid, const Ntype_op op);
+  Ntype_op get_type_op(Index_ID nid) const {
     I(node_internal[nid].is_master_root());
     return node_internal[nid].get_type();
   }

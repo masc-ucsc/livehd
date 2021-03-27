@@ -1,6 +1,6 @@
-#include "mathutil.hpp"
-
 #include "GridLayout.hpp"
+
+#include "mathutil.hpp"
 
 gridLayout::gridLayout(unsigned int rsize) : FPContainer(rsize) {
   type = Ntype_op::Invalid;
@@ -19,8 +19,8 @@ bool gridLayout::layout(FPOptimization opt, double targetAR) {
   double theight = sqrt(tarea / abs(targetAR));
   double twidth  = tarea / theight;
   if (verbose)
-    std::cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea << " Implied W=" << twidth
-         << " H=" << theight << "\n";
+    std::cout << "Begin Grid Layout for " << getName() << ", TargetAR=" << targetAR << " My area=" << tarea
+              << " Implied W=" << twidth << " H=" << theight << "\n";
 
   FPObject* obj   = getComponent(0);
   int       total = obj->getCount();
@@ -63,14 +63,14 @@ void gridLayout::outputHotSpotLayout(std::ostream& o, double startX, double star
     return;
   }
 
-  double    compWidth, compHeight;
-  std::string    compName;
-  FPObject* obj = getComponent(0);
-  compWidth     = obj->getWidth();
-  compHeight    = obj->getHeight();
-  compName      = obj->getName();
+  double      compWidth, compHeight;
+  std::string compName;
+  FPObject*   obj = getComponent(0);
+  compWidth       = obj->getWidth();
+  compHeight      = obj->getHeight();
+  compName        = obj->getName();
 
-  int    compCount = xCount * yCount;
+  int         compCount = xCount * yCount;
   std::string GridName  = getUniqueName();
   o << "# " << GridName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
     << ", area=" << area << "mm²\n";
@@ -93,12 +93,12 @@ unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, do
     throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
   }
 
-  double    compWidth, compHeight;
-  std::string    compName;
-  FPObject* obj = getComponent(0);
-  compWidth     = obj->getWidth();
-  compHeight    = obj->getHeight();
-  compName      = obj->getName();
+  double      compWidth, compHeight;
+  std::string compName;
+  FPObject*   obj = getComponent(0);
+  compWidth       = obj->getWidth();
+  compHeight      = obj->getHeight();
+  compName        = obj->getName();
 
   int compNum = 1;
 

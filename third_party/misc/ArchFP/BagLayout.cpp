@@ -1,9 +1,9 @@
 #include "BagLayout.hpp"
-#include "FPObject.hpp"
-#include "GridLayout.hpp"
 
 #include <iostream>
 
+#include "FPObject.hpp"
+#include "GridLayout.hpp"
 #include "cell.hpp"
 
 bagLayout::bagLayout(unsigned int rsize) : FPContainer(rsize) {
@@ -31,8 +31,8 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
 
   // Sort the components, placing them in decreasing order of size.
   sortByArea();
-  int itemCount = getComponentCount();
-  bool correct = true;
+  int  itemCount = getComponentCount();
+  bool correct   = true;
   for (int i = 0; i < itemCount; i++) {
     FPObject* comp     = getComponent(i);
     double    compArea = comp->totalArea();
@@ -92,7 +92,7 @@ void bagLayout::recalcSize() {
 
 void bagLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
-  int    itemCount = getComponentCount();
+  int         itemCount = getComponentCount();
   std::string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();

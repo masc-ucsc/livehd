@@ -46,18 +46,23 @@ public:
   [[nodiscard]] bool has_key(const Key &key) const { return key2val.has(key); }
   [[nodiscard]] bool has_val(const T &val) const { return val2key.has(val); }
 
-  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &        get_val(const Key &key) const { return key2val.get(key); }
-  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T                get_val(const Key &key) const { return key2val.get(key); }
+  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
+  [[nodiscard]] const T &get_val(const Key &key) const {
+    return key2val.get(key);
+  }
+  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T get_val(const Key &key) const {
+    return key2val.get(key);
+  }
 
-  [[nodiscard]] Key              get_key(const T &val) const { return val2key.get(val); }
+  [[nodiscard]] Key get_key(const T &val) const { return val2key.get(val); }
 
   [[nodiscard]] iterator       find(const Key &key) { return key2val.find(key); }
   [[nodiscard]] const_iterator find(const Key &key) const { return key2val.find(key); }
   [[nodiscard]] const_iterator find_val(const T &val) const {
     const auto it = val2key.find(val);
-    if (it == val2key.end()) return key2val.end();
+    if (it == val2key.end())
+      return key2val.end();
 
     const Key  key = val2key.get(it);
     const auto it2 = key2val.find(key);
@@ -85,7 +90,8 @@ public:
 
   size_t erase_key(const Key &key) {
     auto it = key2val.find(key);
-    if (it == key2val.end()) return 0;
+    if (it == key2val.end())
+      return 0;
 
     erase(it);
 
@@ -102,18 +108,26 @@ public:
 
   [[nodiscard]] size_t capacity() const { return key2val.capacity(); }
 
-  [[nodiscard]] Key              get_key(const iterator &it) const { return key2val.get_key(it); }
-  [[nodiscard]] Key              get_key(const const_iterator &it) const { return key2val.get_key(it); }
+  [[nodiscard]] Key get_key(const iterator &it) const { return key2val.get_key(it); }
+  [[nodiscard]] Key get_key(const const_iterator &it) const { return key2val.get_key(it); }
 
-  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &        get_val(const iterator &it) const { return key2val.get(it); }
-  template<typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &        get_val(const const_iterator &it) const { return key2val.get(it); }
+  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
+  [[nodiscard]] const T &get_val(const iterator &it) const {
+    return key2val.get(it);
+  }
+  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
+  [[nodiscard]] const T &get_val(const const_iterator &it) const {
+    return key2val.get(it);
+  }
 
-  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T                get_val(const iterator &it) const { return key2val.get(it); }
-  template<typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T                get_val(const const_iterator &it) const { return key2val.get(it); }
+  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T get_val(const iterator &it) const {
+    return key2val.get(it);
+  }
+  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
+  [[nodiscard]] T get_val(const const_iterator &it) const {
+    return key2val.get(it);
+  }
 };
 
 }  // namespace mmap_lib

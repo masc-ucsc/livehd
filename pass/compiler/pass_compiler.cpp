@@ -1,35 +1,36 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_compiler.hpp"
+
 #include <bits/stdint-uintn.h>
+
 #include <cstddef>
+
 #include "lcompiler.hpp"
 
 static Pass_plugin sample("pass_compiler", Pass_compiler::setup);
 
 void Pass_compiler::setup() {
-  Eprp_method m1("pass.compiler",  "LiveHD multi-HDLs compilation, default language: Pyrope", &Pass_compiler::compile);
-  m1.add_label_optional("path",    "lgraph path", "lgdb");
-  m1.add_label_optional("files",   "files to process (comma separated)");
-  m1.add_label_optional("firrtl",  "is firrtl front-end");
-  m1.add_label_optional("top",     "specify the top module");
-  m1.add_label_optional("odir",    "output directory", ".");
-  m1.add_label_optional("gviz",    "dump graphviz");
+  Eprp_method m1("pass.compiler", "LiveHD multi-HDLs compilation, default language: Pyrope", &Pass_compiler::compile);
+  m1.add_label_optional("path", "lgraph path", "lgdb");
+  m1.add_label_optional("files", "files to process (comma separated)");
+  m1.add_label_optional("firrtl", "is firrtl front-end");
+  m1.add_label_optional("top", "specify the top module");
+  m1.add_label_optional("odir", "output directory", ".");
+  m1.add_label_optional("gviz", "dump graphviz");
 
   register_pass(m1);
 }
 
-
-
 Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
 
 void Pass_compiler::compile(Eprp_var &var) {
-  //Lbench b("pass.compile.front");
+  // Lbench b("pass.compile.front");
   Pass_compiler pc(var);
-  auto path      = pc.get_path(var);
-  auto odir      = pc.get_odir(var);
-  auto top       = pc.check_option_top(var);
-  auto gviz      = pc.check_option_gviz(var);
-  bool is_firrtl = pc.check_option_firrtl(var);
+  auto          path      = pc.get_path(var);
+  auto          odir      = pc.get_odir(var);
+  auto          top       = pc.check_option_top(var);
+  auto          gviz      = pc.check_option_gviz(var);
+  bool          is_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -41,15 +42,13 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : absl::StrSplit(files, ','))
-      Pass::warn("todo: start from prp parser:{}", f);
+    for (auto f : absl::StrSplit(files, ',')) Pass::warn("todo: start from prp parser:{}", f);
   }
-
 
   if (is_firrtl) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
-    LGraph* seed_lg;
-    auto *library = Graph_library::instance(path);
+    LGraph *seed_lg;
+    auto *  library = Graph_library::instance(path);
     if (!library->exists(path, "__firop_seed")) {
       seed_lg = LGraph::create(path, "__firop_seed", "-");
       setup_firmap_library(seed_lg);
@@ -70,13 +69,10 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
   // TODO: try to separate local cprop/bw out of do_prp_lnast2lgraph()
   // compiler.do_local_cprop_bitwidth();
 
-
   // FIXME: I think that global should be called only if top is set
   compiler.global_io_connection();
   compiler.global_bitwidth_inference();
 }
-
-
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 #ifdef DISABLE_THREAD_POOL
@@ -92,7 +88,6 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 #endif
 }
 
-
 void Pass_compiler::setup_firmap_library(LGraph *lg) {
   auto &lg_fir_const = lg->ref_library()->setup_sub("__fir_const", "-");
   lg_fir_const.add_output_pin("Y");
@@ -101,7 +96,6 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
   lg_fir_add.add_input_pin("e1");
   lg_fir_add.add_input_pin("e2");
   lg_fir_add.add_output_pin("Y");
-
 
   auto &lg_fir_sub = lg->ref_library()->setup_sub("__fir_sub", "-");
   lg_fir_sub.add_input_pin("e1");
@@ -240,8 +234,8 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
 
   auto &lg_fir_bits = lg->ref_library()->setup_sub("__fir_bits", "-");
   lg_fir_bits.add_input_pin("e1");
-  lg_fir_bits.add_input_pin("e2"); //hi
-  lg_fir_bits.add_input_pin("e3"); //lo
+  lg_fir_bits.add_input_pin("e2");  // hi
+  lg_fir_bits.add_input_pin("e3");  // lo
   lg_fir_bits.add_output_pin("Y");
 
   auto &lg_fir_head = lg->ref_library()->setup_sub("__fir_head", "-");
@@ -256,7 +250,6 @@ void Pass_compiler::setup_firmap_library(LGraph *lg) {
 
   lg->ref_library()->sync();
 }
-
 
 bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   bool gviz_en;
@@ -277,15 +270,13 @@ std::string Pass_compiler::check_option_top(Eprp_var &var) {
   return top;
 }
 
-
 bool Pass_compiler::check_option_firrtl(Eprp_var &var) {
   bool is_firrtl;
   if (var.has_label("firrtl")) {
-    auto fir = var.get("firrtl");
+    auto fir  = var.get("firrtl");
     is_firrtl = fir != "false" && fir != "0";
   } else {
     is_firrtl = false;
   }
   return is_firrtl;
 }
-

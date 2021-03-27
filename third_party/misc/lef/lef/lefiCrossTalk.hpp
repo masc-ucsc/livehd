@@ -31,6 +31,7 @@
 #define lefiCrossTalk_h
 
 #include <stdio.h>
+
 #include "lefiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
@@ -55,14 +56,14 @@ public:
   void addVictimNoise(double d);
 
   double length() const;
-  int numNoises() const;
+  int    numNoises() const;
   double noise(int index) const;
 
 protected:
   double length_;
 
-  int numNoises_;
-  int noisesAllocated_;
+  int     numNoises_;
+  int     noisesAllocated_;
   double* noises_;
 };
 
@@ -80,19 +81,19 @@ public:
   void addVictimLength(double d);
   void addVictimNoise(double d);
 
-  int numNums() const;
+  int    numNums() const;
   double num(int index) const;
 
-  int numVictims() const;
+  int              numVictims() const;
   lefiNoiseVictim* victim(int index) const;
 
 protected:
-  int numNums_;
-  int numsAllocated_;
+  int     numNums_;
+  int     numsAllocated_;
   double* nums_;
 
-  int numVictims_;
-  int victimsAllocated_;
+  int               numVictims_;
+  int               victimsAllocated_;
   lefiNoiseVictim** victims_;
 };
 
@@ -112,15 +113,15 @@ public:
   void addVictimLength(double d);
   void addVictimNoise(double d);
 
-  double edge();
-  int numResistances();
+  double               edge();
+  int                  numResistances();
   lefiNoiseResistance* resistance(int index);
 
 protected:
   double edge_;
 
-  int numResistances_;
-  int resistancesAllocated_;
+  int                   numResistances_;
+  int                   resistancesAllocated_;
   lefiNoiseResistance** resistances_;
 };
 
@@ -142,15 +143,15 @@ public:
 
   void clear();
 
-  int num();
-  int numEdges();
+  int            num();
+  int            numEdges();
   lefiNoiseEdge* edge(int index);
 
 protected:
   int num_;
 
-  int numEdges_;
-  int edgesAllocated_;
+  int             numEdges_;
+  int             edgesAllocated_;
   lefiNoiseEdge** edges_;
 };
 
@@ -167,14 +168,14 @@ public:
   void addVictimCorrection(double d);
 
   double length();
-  int numCorrections();
+  int    numCorrections();
   double correction(int index);
 
 protected:
   double length_;
 
-  int numCorrections_;
-  int correctionsAllocated_;
+  int     numCorrections_;
+  int     correctionsAllocated_;
   double* corrections_;
 };
 
@@ -192,19 +193,19 @@ public:
   void addVictimLength(double d);
   void addVictimCorrection(double d);
 
-  int numNums();
+  int    numNums();
   double num(int index);
 
-  int numVictims();
+  int                   numVictims();
   lefiCorrectionVictim* victim(int index);
 
 protected:
-  int numNums_;
-  int numsAllocated_;
+  int     numNums_;
+  int     numsAllocated_;
   double* nums_;
 
-  int numVictims_;
-  int victimsAllocated_;
+  int                    numVictims_;
+  int                    victimsAllocated_;
   lefiCorrectionVictim** victims_;
 };
 
@@ -224,15 +225,15 @@ public:
   void addVictimLength(double d);
   void addVictimCorrection(double d);
 
-  double edge();
-  int numResistances();
+  double                    edge();
+  int                       numResistances();
   lefiCorrectionResistance* resistance(int index);
 
 protected:
   double edge_;
 
-  int numResistances_;
-  int resistancesAllocated_;
+  int                        numResistances_;
+  int                        resistancesAllocated_;
   lefiCorrectionResistance** resistances_;
 };
 
@@ -254,15 +255,15 @@ public:
 
   void clear();
 
-  int num();
-  int numEdges();
+  int                 num();
+  int                 numEdges();
   lefiCorrectionEdge* edge(int index);
 
 protected:
   int num_;
 
-  int numEdges_;
-  int edgesAllocated_;
+  int                  numEdges_;
+  int                  edgesAllocated_;
   lefiCorrectionEdge** edges_;
 };
 

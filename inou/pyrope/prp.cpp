@@ -1167,8 +1167,7 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
   if (SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_tilde, Prp_rule_identifier))
     op = true;
 
-  Token_id toks[]
-      = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar};
+  Token_id toks[] = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar};
   if (!SCAN_IS_TOKENS(toks, 6, Prp_rule_reference)) {
     RULE_FAILED("Failed rule_identifier; couldn't find a name.\n");
   }
@@ -1380,7 +1379,7 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
       next = false;
     } else {
       if (CHECK_RULE(&Prp::rule_tuple_notation)) {
-      }else{
+      } else {
         PSEUDO_FAIL();
         next = false;
       }
@@ -1471,9 +1470,9 @@ uint8_t Prp::rule_additive_expression(std::list<std::tuple<Rule_id, Token_entry>
     RULE_FAILED("Failed rule_additive_expression; couldn't find a multiplicative expression.\n");
   }
   PRINT_DBG_AST("rule_additive_expression: just checked for first operand; sub_cnt = {}.\n", sub_cnt);
-  bool    next      = true;
-  bool    found_op  = false;
-  bool    op_failed = false;
+  bool next      = true;
+  bool found_op  = false;
+  bool op_failed = false;
 
   INIT_PSEUDO_FAIL();
 
@@ -2000,7 +1999,7 @@ void Prp::ast_handler() {
     auto node       = ast->get_data(it);
     rule_name       = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
-		(void)token_text;
+    (void)token_text;
     PRINT_AST("Rule name: {}, Etoken text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
@@ -2008,12 +2007,11 @@ void Prp::ast_handler() {
 void Prp::ast_dump(mmap_lib::Tree_index tree_idx) const {
   for (const auto &index : ast->depth_preorder(tree_idx)) {
     std::string indent(index.level, ' ');
-    const auto &d  = ast->get_data(index);
-    auto rule_name = rule_id_to_string(d.rule_id);
-    auto token_text = scan_text(d.token_entry);
+    const auto &d          = ast->get_data(index);
+    auto        rule_name  = rule_id_to_string(d.rule_id);
+    auto        token_text = scan_text(d.token_entry);
 
-    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n"
-        , indent.c_str(), index.level, index.pos, d.rule_id, rule_name, token_text);
+    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent.c_str(), index.level, index.pos, d.rule_id, rule_name, token_text);
   }
 }
 
@@ -2039,7 +2037,8 @@ void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) 
   }
 }
 
-uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
+uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
+                            std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
   PRINT_DBG_AST("Called check_function.\n");
   uint64_t starting_size = loc_list.size();
   uint8_t  ret           = (this->*rule)(loc_list);

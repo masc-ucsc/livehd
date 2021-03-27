@@ -7,7 +7,7 @@
 
 namespace Live {
 
-class Graph_Node { // FIXME: remove an use Node_pin (same info)
+class Graph_Node {  // FIXME: remove an use Node_pin (same info)
 public:
   LGraph *    module;
   Index_ID    idx;
@@ -23,10 +23,10 @@ public:
   Graph_Node() {}
 
   bool operator<(const Graph_Node &rhs) const {
-    return (module < rhs.module) || (module == rhs.module && idx < rhs.idx) ||
-           (module == rhs.module && idx == rhs.idx && pid < rhs.pid) ||
-           (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit < rhs.bit) ||
-           (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit == rhs.bit && instance < rhs.instance);
+    return (module < rhs.module) || (module == rhs.module && idx < rhs.idx)
+           || (module == rhs.module && idx == rhs.idx && pid < rhs.pid)
+           || (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit < rhs.bit)
+           || (module == rhs.module && idx == rhs.idx && pid == rhs.pid && bit == rhs.bit && instance < rhs.instance);
   }
 };
 

@@ -1,25 +1,25 @@
 // *****************************************************************************
 // *****************************************************************************
 // Copyright 2012, Cadence Design Systems
-// 
+//
 // This  file  is  part  of  the  Cadence  LEF/DEF  Open   Source
-// Distribution,  Product Version 5.8. 
-// 
+// Distribution,  Product Version 5.8.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 //    you may not use this file except in compliance with the License.
 //    You may obtain a copy of the License at
-// 
+//
 //        http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 //    Unless required by applicable law or agreed to in writing, software
 //    distributed under the License is distributed on an "AS IS" BASIS,
 //    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
 //    implied. See the License for the specific language governing
 //    permissions and limitations under the License.
-// 
+//
 // For updates, support, or to become part of the LEF/DEF Community,
 // check www.openeda.org for details.
-// 
+//
 //  $Author$
 //  $Revision$
 //  $Date$
@@ -27,11 +27,11 @@
 // *****************************************************************************
 // *****************************************************************************
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifndef WIN32
-#   include <unistd.h>
+#include <unistd.h>
 #endif /* not WIN32 */
 #include "defwWriter.hpp"
 #include "defwWriterCalls.hpp"
@@ -43,13 +43,11 @@ int   userData;
 
 #define CHECK_STATUS(status) \
   if (status) {              \
-     defwPrintError(status); \
-     return(status);         \
+    defwPrintError(status);  \
+    return (status);         \
   }
 
-void dataError() {
-  fprintf(fout, "ERROR: returned user data is not correct!\n");
-}
+void dataError() { fprintf(fout, "ERROR: returned user data is not correct!\n"); }
 
 void checkType(defwCallbackType_e c) {
   if (c >= 0 && c <= defwDesignEndCbkType) {
@@ -63,83 +61,85 @@ int versionCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwVersion(5, 6);
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int dividerCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwDividerChar("/");
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int busbitCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwBusBitChars("[]");
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int designCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwDesignName("muk");
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int technologyCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwTechnology("muk");
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int arrayCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwArray("core_array");
   CHECK_STATUS(status);
   return 0;
-
 }
- 
+
 int floorplanCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwFloorplan("DEFAULT");
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 int unitsCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwUnits(100);
   CHECK_STATUS(status);
   status = defwNewLine();
@@ -152,7 +152,8 @@ int historyCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwHistory("Corrected STEP for ROW_9 and added ROW_10 of SITE CORE1 (def)");
   CHECK_STATUS(status);
   status = defwHistory("Removed NONDEFAULTRULE from the net XX100 (def)");
@@ -163,13 +164,14 @@ int historyCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // PROPERTYDEFINITIONS
 int propdefCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartPropDef();
   CHECK_STATUS(status);
   defwAddComment("defwPropDef is broken into 3 routines, defwStringPropDef");
@@ -234,26 +236,28 @@ int propdefCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // DIEAREA
 int dieareaCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwDieArea(-190000, -120000, 190000, 70000);
   CHECK_STATUS(status);
   status = defwNewLine();
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // ROW
 int rowCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwRow("ROW_9", "CORE", -177320, -111250, 5, 911, 1, 360, 0);
   CHECK_STATUS(status);
   status = defwRealProperty("minlength", 50.5);
@@ -266,21 +270,22 @@ int rowCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // TRACKS
 int trackCB(defwCallbackType_e c, defiUserData ud) {
-  int status;
+  int          status;
   const char** layers;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
-  layers = (const char**)malloc(sizeof(char*)*1);
+  if ((int)ud != userData)
+    dataError();
+  layers    = (const char**)malloc(sizeof(char*) * 1);
   layers[0] = strdup("M1");
-  status = defwTracks("X", 3000, 40, 120, 1, layers);
+  status    = defwTracks("X", 3000, 40, 120, 1, layers);
   CHECK_STATUS(status);
   free((char*)layers[0]);
   layers[0] = strdup("M2");
-  status = defwTracks("Y", 5000, 10, 20, 1,layers);
+  status    = defwTracks("Y", 5000, 10, 20, 1, layers);
   CHECK_STATUS(status);
   free((char*)layers[0]);
   free((char*)layers);
@@ -288,13 +293,14 @@ int trackCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // GCELLGRID
 int gcellgridCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwGcellGrid("X", 0, 100, 600);
   CHECK_STATUS(status);
   status = defwGcellGrid("Y", 10, 120, 400);
@@ -303,13 +309,14 @@ int gcellgridCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // VIAS
 int viaCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartVias(2);
   CHECK_STATUS(status);
   status = defwViaName("VIA_ARRAY");
@@ -331,18 +338,19 @@ int viaCB(defwCallbackType_e c, defiUserData ud) {
   status = defwViaRect("M2", -50, -50, 50, 50);
   CHECK_STATUS(status);
   status = defwOneViaEnd();
- 
+
   status = defwEndVias();
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // REGIONS
 int regionCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartRegions(2);
   CHECK_STATUS(status);
   status = defwRegionName("region1");
@@ -367,61 +375,241 @@ int regionCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // COMPONENTS
 int componentCB(defwCallbackType_e c, defiUserData ud) {
-  int status;
+  int          status;
   const char** foreigns;
-  int *foreignX, *foreignY, *foreignOrient;
+  int *        foreignX, *foreignY, *foreignOrient;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
-  foreigns = (const char**)malloc(sizeof(char*)*1);
-  foreignX = (int*)malloc(sizeof(int)*1);
-  foreignY = (int*)malloc(sizeof(int)*1);
-  foreignOrient = (int*)malloc(sizeof(int)*1);
-  status = defwStartComponents(11);
+  if ((int)ud != userData)
+    dataError();
+  foreigns      = (const char**)malloc(sizeof(char*) * 1);
+  foreignX      = (int*)malloc(sizeof(int) * 1);
+  foreignY      = (int*)malloc(sizeof(int) * 1);
+  foreignOrient = (int*)malloc(sizeof(int) * 1);
+  status        = defwStartComponents(11);
   CHECK_STATUS(status);
-  status = defwComponent("Z38A01", "DFF3", 0, NULL, NULL, NULL, NULL, NULL,
-                         0, NULL, NULL, NULL, NULL, "PLACED", 18592, 5400, 6, 0,
-                         NULL, 0, 0, 0, 0);
+  status = defwComponent("Z38A01",
+                         "DFF3",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         18592,
+                         5400,
+                         6,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("Z38A03", "DFF3", 0, NULL, NULL, NULL, NULL, NULL,
-                         0, NULL, NULL, NULL, NULL, "PLACED", 16576, 45600, 6,
-                         0, NULL, 0, 0, 0, 0);
+  status = defwComponent("Z38A03",
+                         "DFF3",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         16576,
+                         45600,
+                         6,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("Z38A05", "DFF3", 0, NULL, NULL, NULL, NULL, NULL,
-                         0, NULL, NULL, NULL, NULL, "PLACED", 51520, 9600, 6, 0,
-                         NULL, 0, 0, 0, 0);
+  status = defwComponent("Z38A05",
+                         "DFF3",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         51520,
+                         9600,
+                         6,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("|i0", "INV_B", 0, NULL, "INV", NULL, NULL, NULL,
-                         0, NULL, NULL, NULL, NULL, NULL, 0, 0, -1, 0,
-                         "region1", 0, 0, 0, 0);
+  status = defwComponent("|i0",
+                         "INV_B",
+                         0,
+                         NULL,
+                         "INV",
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         0,
+                         -1,
+                         0,
+                         "region1",
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("|i1", "INV_B", 0, NULL, "INV", NULL, NULL, NULL,
-                         0, NULL, NULL, NULL, NULL, "UNPLACED", 1000, 1000, 0,
-                         0, NULL, 0, 0, 0, 0);
+  status = defwComponent("|i1",
+                         "INV_B",
+                         0,
+                         NULL,
+                         "INV",
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "UNPLACED",
+                         1000,
+                         1000,
+                         0,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("cell1", "CHM6A", 0, NULL, NULL, "generator", NULL,
-                         "USER", 0, NULL, NULL, NULL, NULL, "FIXED", 0, 10, 0,
-                         100, NULL, 0, 0, 0, 0);
+  status = defwComponent("cell1",
+                         "CHM6A",
+                         0,
+                         NULL,
+                         NULL,
+                         "generator",
+                         NULL,
+                         "USER",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "FIXED",
+                         0,
+                         10,
+                         0,
+                         100,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("cell2", "CHM6A", 0, NULL, NULL, NULL, NULL,
-                         "NETLIST", 0, NULL, NULL, NULL, NULL, "COVER", 120,
-                         10, 4, 2, NULL, 0, 0, 0, 0);
+  status = defwComponent("cell2",
+                         "CHM6A",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "NETLIST",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "COVER",
+                         120,
+                         10,
+                         4,
+                         2,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  foreigns[0] = strdup("gds2name");
-  foreignX[0] = -500;
-  foreignY[0] = -500;
+  foreigns[0]      = strdup("gds2name");
+  foreignX[0]      = -500;
+  foreignY[0]      = -500;
   foreignOrient[0] = 3;
-  status = defwComponent("cell3", "CHM6A", 0, NULL, NULL, NULL, NULL,
-                         "TIMING", 1, foreigns, foreignX, foreignY,
-                         foreignOrient, "PLACED", 240,
-                         10, 0, 0, "region1", 0, 0, 0, 0);
+  status           = defwComponent("cell3",
+                         "CHM6A",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "TIMING",
+                         1,
+                         foreigns,
+                         foreignX,
+                         foreignY,
+                         foreignOrient,
+                         "PLACED",
+                         240,
+                         10,
+                         0,
+                         0,
+                         "region1",
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("cell4", "CHM3A", 0, NULL, "CHM6A", NULL, NULL,
-                         "DIST", 0, NULL, NULL, NULL, NULL, "PLACED", 360,
-                         10, 1, 0, "region2", 0, 0, 0, 0);
+  status = defwComponent("cell4",
+                         "CHM3A",
+                         0,
+                         NULL,
+                         "CHM6A",
+                         NULL,
+                         NULL,
+                         "DIST",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         360,
+                         10,
+                         1,
+                         0,
+                         "region2",
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
   status = defwStringProperty("cc", "This is the copy list");
   CHECK_STATUS(status);
@@ -429,13 +617,53 @@ int componentCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwRealProperty("size", 7.8);
   CHECK_STATUS(status);
-  status = defwComponent("scancell1", "CHK3A", 0, NULL, NULL, NULL, NULL,
-                         NULL, 0, NULL, NULL, NULL, NULL, "PLACED", 500,
-                         10, 7, 0, NULL, 0, 0, 0, 0);
+  status = defwComponent("scancell1",
+                         "CHK3A",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         500,
+                         10,
+                         7,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
-  status = defwComponent("scancell2", "CHK3A", 0, NULL, NULL, NULL, NULL,
-                         NULL, 0, NULL, NULL, NULL, NULL, "PLACED", 700,
-                         10, 6, 0, NULL, 0, 0, 0, 0);
+  status = defwComponent("scancell2",
+                         "CHK3A",
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         0,
+                         NULL,
+                         NULL,
+                         NULL,
+                         NULL,
+                         "PLACED",
+                         700,
+                         10,
+                         6,
+                         0,
+                         NULL,
+                         0,
+                         0,
+                         0,
+                         0);
   CHECK_STATUS(status);
   status = defwEndComponents();
   CHECK_STATUS(status);
@@ -446,44 +674,40 @@ int componentCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)foreignOrient);
   return 0;
 }
- 
+
 // PINS
 int pinCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartPins(6);
   CHECK_STATUS(status);
-  status = defwPin("scanpin", "SCAN", 0, "INPUT", NULL, NULL, 0, 0, -1, NULL,
-                   0, 0, 0, 0);
+  status = defwPin("scanpin", "SCAN", 0, "INPUT", NULL, NULL, 0, 0, -1, NULL, 0, 0, 0, 0);
   CHECK_STATUS(status);
-  status = defwPin("pin1", "net1", 1, NULL, "POWER", NULL, 0, 0, -1, "M1",
-                   -5000, -100, -4950, -90);
+  status = defwPin("pin1", "net1", 1, NULL, "POWER", NULL, 0, 0, -1, "M1", -5000, -100, -4950, -90);
   CHECK_STATUS(status);
-  status = defwPin("pin2", "net2", 0, "INPUT", "SIGNAL", NULL, 0, 0, -1, "M1",
-                   -5000, 0, -4950, 10);
+  status = defwPin("pin2", "net2", 0, "INPUT", "SIGNAL", NULL, 0, 0, -1, "M1", -5000, 0, -4950, 10);
   CHECK_STATUS(status);
-  status = defwPin("INBUS[1]", "|INBUS[1]", 0, "INPUT", "SIGNAL", "FIXED",
-                   45, -2160, 0, "M2", 0, 0, 30, 135);
+  status = defwPin("INBUS[1]", "|INBUS[1]", 0, "INPUT", "SIGNAL", "FIXED", 45, -2160, 0, "M2", 0, 0, 30, 135);
   CHECK_STATUS(status);
-  status = defwPin("INBUS<0>", "|INBUS<0>", 0, "INPUT", "SIGNAL", "PLACED",
-                   -45, 2160, 1, "M2", 0, 0, 30, 134);
+  status = defwPin("INBUS<0>", "|INBUS<0>", 0, "INPUT", "SIGNAL", "PLACED", -45, 2160, 1, "M2", 0, 0, 30, 134);
   CHECK_STATUS(status);
-  status = defwPin("OUTBUS<1>", "|OUTBUS<1>", 0, "OUTPUT", "SIGNAL", "COVER",
-                   2160, 645, 2, "M1", 0, 0, 30, 135);
+  status = defwPin("OUTBUS<1>", "|OUTBUS<1>", 0, "OUTPUT", "SIGNAL", "COVER", 2160, 645, 2, "M1", 0, 0, 30, 135);
   CHECK_STATUS(status);
   status = defwEndPins();
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // PINPROPERTIES
 int pinpropCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartPinProperties(2);
   CHECK_STATUS(status);
   status = defwPinProperty("cell1", "PB1");
@@ -500,14 +724,15 @@ int pinpropCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // SPECIALNETS
 int snetCB(defwCallbackType_e c, defiUserData ud) {
-  int status;
+  int          status;
   const char **coorX, **coorY;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartSpecialNets(2);
   CHECK_STATUS(status);
   status = defwSpecialNet("net1");
@@ -562,15 +787,15 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwSpecialNetPathShape("IOWIRE");
   CHECK_STATUS(status);
-  coorX = (const char**)malloc(sizeof(char*)*3);
-  coorY = (const char**)malloc(sizeof(char*)*3);
+  coorX    = (const char**)malloc(sizeof(char*) * 3);
+  coorY    = (const char**)malloc(sizeof(char*) * 3);
   coorX[0] = strdup("5");
   coorY[0] = strdup("15");
   coorX[1] = strdup("125");
   coorY[1] = strdup("*");
   coorX[2] = strdup("245");
   coorY[2] = strdup("*");
-  status = defwSpecialNetPathPoint(3, coorX, coorY);
+  status   = defwSpecialNetPathPoint(3, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetPathEnd();
   free((char*)coorX[0]);
@@ -588,7 +813,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   coorY[0] = strdup("342440");
   coorX[1] = strdup("13920");
   coorY[1] = strdup("*");
-  status = defwSpecialNetShieldPoint(2, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(2, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldVia("M2_TURN");
   CHECK_STATUS(status);
@@ -596,7 +821,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[0]);
   coorX[0] = strdup("*");
   coorY[0] = strdup("263200");
-  status = defwSpecialNetShieldPoint(1, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(1, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldVia("M1_M2");
   CHECK_STATUS(status);
@@ -604,7 +829,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[0]);
   coorX[0] = strdup("2400");
   coorY[0] = strdup("*");
-  status = defwSpecialNetShieldPoint(1, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(1, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldEnd();
   CHECK_STATUS(status);
@@ -622,7 +847,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   coorY[0] = strdup("342440");
   coorX[1] = strdup("13920");
   coorY[1] = strdup("*");
-  status = defwSpecialNetShieldPoint(2, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(2, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldVia("M2_TURN");
   CHECK_STATUS(status);
@@ -630,7 +855,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[0]);
   coorX[0] = strdup("*");
   coorY[0] = strdup("263200");
-  status = defwSpecialNetShieldPoint(1, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(1, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldVia("M1_M2");
   CHECK_STATUS(status);
@@ -638,7 +863,7 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[0]);
   coorX[0] = strdup("2400");
   coorY[0] = strdup("*");
-  status = defwSpecialNetShieldPoint(1, coorX, coorY);
+  status   = defwSpecialNetShieldPoint(1, coorX, coorY);
   CHECK_STATUS(status);
   status = defwSpecialNetShieldEnd();
   CHECK_STATUS(status);
@@ -660,15 +885,16 @@ int snetCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // NETS
 int netCB(defwCallbackType_e c, defiUserData ud) {
-  int status;
+  int          status;
   const char **coorX, **coorY;
-  const char **coorValue;
+  const char** coorValue;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartNets(11);
   CHECK_STATUS(status);
   status = defwNet("net1");
@@ -681,7 +907,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("net2");
   CHECK_STATUS(status);
   status = defwNetConnection("cell1", "PB1", 0);
@@ -696,7 +922,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("net3");
   CHECK_STATUS(status);
   status = defwNetConnection("cell4", "PA3", 0);
@@ -721,11 +947,11 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
-  coorX = (const char**)malloc(sizeof(char*)*5);
-  coorY = (const char**)malloc(sizeof(char*)*5);
-  coorValue = (const char**)malloc(sizeof(char*)*5);
-  status = defwNet("my_net");
+
+  coorX     = (const char**)malloc(sizeof(char*) * 5);
+  coorY     = (const char**)malloc(sizeof(char*) * 5);
+  coorValue = (const char**)malloc(sizeof(char*) * 5);
+  status    = defwNet("my_net");
   CHECK_STATUS(status);
   status = defwNetConnection("I1", "A", 0);
   CHECK_STATUS(status);
@@ -741,25 +967,25 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M2", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("14000");
-  coorY[0] = strdup("341440");
+  coorX[0]     = strdup("14000");
+  coorY[0]     = strdup("341440");
   coorValue[0] = NULL;
-  coorX[1] = strdup("9600");
-  coorY[1] = strdup("*");
+  coorX[1]     = strdup("9600");
+  coorY[1]     = strdup("*");
   coorValue[1] = NULL;
-  coorX[2] = strdup("*");
-  coorY[2] = strdup("282400");
+  coorX[2]     = strdup("*");
+  coorY[2]     = strdup("282400");
   coorValue[2] = NULL;
-  status = defwNetPathPoint(3, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(3, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   status = defwNetPathVia("nd1VIA12");
   CHECK_STATUS(status);
-  coorX[0] = strdup("2400");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("2400");
+  coorY[0]     = strdup("*");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -769,13 +995,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 1, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("2400");
-  coorY[0] = strdup("282400");
+  coorX[0]     = strdup("2400");
+  coorY[0]     = strdup("282400");
   coorValue[0] = NULL;
-  coorX[1] = strdup("240");
-  coorY[1] = strdup("*");
+  coorX[1]     = strdup("240");
+  coorY[1]     = strdup("*");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -789,41 +1015,41 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   coorY[0] = strdup("341440");
   coorX[1] = strdup("14000");
   coorY[1] = strdup("*");
-  status = defwNetNoshieldPoint(2, coorX, coorY);
+  status   = defwNetNoshieldPoint(2, coorX, coorY);
   CHECK_STATUS(status);
   status = defwNetNoshieldEnd();
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("|INBUS[1]");
   CHECK_STATUS(status);
   status = defwNetConnection("|i1", "A", 0);
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("|INBUS<0>");
   CHECK_STATUS(status);
   status = defwNetConnection("|i0", "A", 0);
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("|OUTBUS<1>");
   CHECK_STATUS(status);
   status = defwNetConnection("|i0", "Z", 0);
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("MUSTJOIN");
   CHECK_STATUS(status);
   status = defwNetConnection("cell4", "PA1", 0);
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("XX100");
   CHECK_STATUS(status);
   status = defwNetConnection("Z38A05", "G", 0);
@@ -832,14 +1058,11 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetConnection("Z38A01", "G", 0);
   CHECK_STATUS(status);
-  status = defwNetVpin("V_SUB3_XX100", NULL, -333, -333, 333, 333, "PLACED",
-                       189560, 27300, 0);
+  status = defwNetVpin("V_SUB3_XX100", NULL, -333, -333, 333, 333, "PLACED", 189560, 27300, 0);
   CHECK_STATUS(status);
-  status = defwNetVpin("V_SUB2_XX100", NULL, -333, -333, 333, 333, "PLACED",
-                       169400, 64500, 0);
+  status = defwNetVpin("V_SUB2_XX100", NULL, -333, -333, 333, 333, "PLACED", 169400, 64500, 0);
   CHECK_STATUS(status);
-  status = defwNetVpin("V_SUB1_XX100", NULL, -333, -333, 333, 333, "PLACED",
-                       55160, 31500, 0);
+  status = defwNetVpin("V_SUB1_XX100", NULL, -333, -333, 333, 333, "PLACED", 55160, 31500, 0);
   CHECK_STATUS(status);
   status = defwNetSubnetStart("SUB1_XX100");
   CHECK_STATUS(status);
@@ -851,13 +1074,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, "RULE1");
   CHECK_STATUS(status);
-  coorX[0] = strdup("54040");
-  coorY[0] = strdup("30300");
+  coorX[0]     = strdup("54040");
+  coorY[0]     = strdup("30300");
   coorValue[0] = strdup("0");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("30900");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("30900");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -866,13 +1089,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[1]);
   status = defwNetPathVia("nd1VIA12");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("0");
-  coorX[1] = strdup("56280");
-  coorY[1] = strdup("*");
+  coorX[1]     = strdup("56280");
+  coorY[1]     = strdup("*");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -881,13 +1104,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[1]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("31500");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("31500");
   coorValue[0] = NULL;
-  coorX[1] = strdup("55160");
-  coorY[1] = strdup("*");
+  coorX[1]     = strdup("55160");
+  coorY[1]     = strdup("*");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -907,13 +1130,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("168280");
-  coorY[0] = strdup("63300");
+  coorX[0]     = strdup("168280");
+  coorY[0]     = strdup("63300");
   coorValue[0] = strdup("7");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("64500");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("64500");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -922,10 +1145,10 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[1]);
   status = defwNetPathVia("M1_M2");
   CHECK_STATUS(status);
-  coorX[0] = strdup("169400");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("169400");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("8");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   status = defwNetPathVia("M2_M3");
   CHECK_STATUS(status);
@@ -946,13 +1169,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("188400");
-  coorY[0] = strdup("26100");
+  coorX[0]     = strdup("188400");
+  coorY[0]     = strdup("26100");
   coorValue[0] = strdup("0");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("27300");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("27300");
   coorValue[1] = strdup("0");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -962,10 +1185,10 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorValue[1]);
   status = defwNetPathVia("M1_M2");
   CHECK_STATUS(status);
-  coorX[0] = strdup("189560");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("189560");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("0");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -990,22 +1213,22 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M3", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("269400");
-  coorY[0] = strdup("64500");
+  coorX[0]     = strdup("269400");
+  coorY[0]     = strdup("64500");
   coorValue[0] = strdup("0");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("54900");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("54900");
   coorValue[1] = NULL;
-  coorX[2] = strdup("170520");
-  coorY[2] = strdup("*");
+  coorX[2]     = strdup("170520");
+  coorY[2]     = strdup("*");
   coorValue[2] = NULL;
-  coorX[3] = strdup("*");
-  coorY[3] = strdup("37500");
+  coorX[3]     = strdup("*");
+  coorY[3]     = strdup("37500");
   coorValue[3] = NULL;
-  coorX[4] = strdup("*");
-  coorY[4] = strdup("30300");
+  coorX[4]     = strdup("*");
+  coorY[4]     = strdup("30300");
   coorValue[4] = NULL;
-  status = defwNetPathPoint(5, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(5, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1020,13 +1243,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[4]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("171080");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("171080");
+  coorY[0]     = strdup("*");
   coorValue[0] = NULL;
-  coorX[1] = strdup("17440");
-  coorY[1] = strdup("0");
+  coorX[1]     = strdup("17440");
+  coorY[1]     = strdup("0");
   coorValue[1] = strdup("0");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1035,13 +1258,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorValue[1]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("*");
   coorValue[0] = NULL;
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("26700");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("26700");
   coorValue[1] = strdup("8");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1050,23 +1273,23 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorValue[1]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("177800");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("177800");
+  coorY[0]     = strdup("*");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   free((char*)coorValue[1]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("8");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("30300");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("30300");
   coorValue[1] = strdup("8");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
@@ -1078,20 +1301,20 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorValue[1]);
   status = defwNetPathVia("nd1VIA23");
   CHECK_STATUS(status);
-  coorX[0] = strdup("189560");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("189560");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("8");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   free((char*)coorValue[1]);
   status = defwNetPathVia("nd1VIA12");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("27300");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("27300");
   coorValue[0] = strdup("0");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1100,13 +1323,13 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M3", 1, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("55160");
-  coorY[0] = strdup("31500");
+  coorX[0]     = strdup("55160");
+  coorY[0]     = strdup("31500");
   coorValue[0] = strdup("8");
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("34500");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("34500");
   coorValue[1] = strdup("0");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1116,23 +1339,23 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorValue[1]);
   status = defwNetPathVia("M2_M3");
   CHECK_STATUS(status);
-  coorX[0] = strdup("149800");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("149800");
+  coorY[0]     = strdup("*");
   coorValue[0] = strdup("8");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   free((char*)coorValue[0]);
   status = defwNetPathVia("M2_M3");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("35700");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("35700");
   coorValue[0] = NULL;
-  coorX[1] = strdup("*");
-  coorY[1] = strdup("37500");
+  coorX[1]     = strdup("*");
+  coorY[1]     = strdup("37500");
   coorValue[1] = NULL;
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1140,13 +1363,14 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   free((char*)coorY[1]);
   status = defwNetPathVia("M2_M3");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("*");
-  coorValue[0] = strdup("8");;
-  coorX[1] = strdup("170520");
-  coorY[1] = strdup("*");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("*");
+  coorValue[0] = strdup("8");
+  ;
+  coorX[1]     = strdup("170520");
+  coorY[1]     = strdup("*");
   coorValue[1] = strdup("0");
-  status = defwNetPathPoint(2, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(2, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1160,7 +1384,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("SCAN");
   CHECK_STATUS(status);
   status = defwNetConnection("scancell1", "P10", 1);
@@ -1171,7 +1395,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetEndOneNet();
   CHECK_STATUS(status);
- 
+
   status = defwNet("testBug");
   CHECK_STATUS(status);
   status = defwNetConnection("Z38A05", "G", 0);
@@ -1184,10 +1408,10 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("1288210");
-  coorY[0] = strdup("580930");
+  coorX[0]     = strdup("1288210");
+  coorY[0]     = strdup("580930");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1195,7 +1419,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   coorX[0] = strdup("*");
   coorY[0] = strdup("582820");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status   = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1205,10 +1429,10 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M3", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("1141350");
-  coorY[0] = strdup("582820");
+  coorX[0]     = strdup("1141350");
+  coorY[0]     = strdup("582820");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1216,7 +1440,7 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   coorX[0] = strdup("*");
   coorY[0] = strdup("580930");
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status   = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1226,10 +1450,10 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("1278410");
-  coorY[0] = strdup("275170");
+  coorX[0]     = strdup("1278410");
+  coorY[0]     = strdup("275170");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1237,28 +1461,28 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   status = defwNetPathLayer("M1", 0, NULL);
   CHECK_STATUS(status);
-  coorX[0] = strdup("1141210");
-  coorY[0] = strdup("271250");
+  coorX[0]     = strdup("1141210");
+  coorY[0]     = strdup("271250");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   status = defwNetPathVia("GETH1W1W1");
   CHECK_STATUS(status);
-  coorX[0] = strdup("*");
-  coorY[0] = strdup("271460");
+  coorX[0]     = strdup("*");
+  coorY[0]     = strdup("271460");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
   status = defwNetPathVia("GETH2W1W1");
   CHECK_STATUS(status);
-  coorX[0] = strdup("1142820");
-  coorY[0] = strdup("*");
+  coorX[0]     = strdup("1142820");
+  coorY[0]     = strdup("*");
   coorValue[0] = NULL;
-  status = defwNetPathPoint(1, coorX, coorY, coorValue);
+  status       = defwNetPathPoint(1, coorX, coorY, coorValue);
   CHECK_STATUS(status);
   free((char*)coorX[0]);
   free((char*)coorY[0]);
@@ -1278,17 +1502,18 @@ int netCB(defwCallbackType_e c, defiUserData ud) {
 
 // GROUPS
 int groupCB(defwCallbackType_e c, defiUserData ud) {
-  int status;
-  const char **groupExpr;
+  int          status;
+  const char** groupExpr;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
-  groupExpr = (const char**)malloc(sizeof(char*)*2);
-  status = defwStartGroups(2);
+  if ((int)ud != userData)
+    dataError();
+  groupExpr = (const char**)malloc(sizeof(char*) * 2);
+  status    = defwStartGroups(2);
   CHECK_STATUS(status);
   groupExpr[0] = strdup("cell2");
   groupExpr[1] = strdup("cell3");
-  status = defwGroup("group1", 2, groupExpr);
+  status       = defwGroup("group1", 2, groupExpr);
   CHECK_STATUS(status);
   free((char*)groupExpr[0]);
   free((char*)groupExpr[1]);
@@ -1301,7 +1526,7 @@ int groupCB(defwCallbackType_e c, defiUserData ud) {
   status = defwRealProperty("maxarea", 5.6);
   CHECK_STATUS(status);
   groupExpr[0] = strdup("cell1");
-  status = defwGroup("group2", 1, groupExpr);
+  status       = defwGroup("group2", 1, groupExpr);
   CHECK_STATUS(status);
   free((char*)groupExpr[0]);
   status = defwGroupRegion(0, 10, 1000, 1010, NULL);
@@ -1317,13 +1542,14 @@ int groupCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 // BEGINEXT
 int extensionCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwStartBeginext("tag");
   CHECK_STATUS(status);
   status = defwBeginextCreator("CADENCE");
@@ -1340,12 +1566,13 @@ int extensionCB(defwCallbackType_e c, defiUserData ud) {
   CHECK_STATUS(status);
   return 0;
 }
- 
+
 static int designendCB(defwCallbackType_e c, defiUserData ud) {
   int status;
 
   checkType(c);
-  if ((int)ud != userData) dataError();
+  if ((int)ud != userData)
+    dataError();
   status = defwEnd();
   CHECK_STATUS(status);
   return 0;
@@ -1353,7 +1580,7 @@ static int designendCB(defwCallbackType_e c, defiUserData ud) {
 
 main(int argc, char** argv) {
   char* outfile;
-  int   status;    // return code, if none 0 means error
+  int   status;  // return code, if none 0 means error
   int   res;
 
   // assign the default
@@ -1370,22 +1597,22 @@ main(int argc, char** argv) {
   argc--;
   argv++;
   while (argc--) {
-     if (strcmp(*argv, "-o") == 0) {   // output filename
-        argv++;
-        argc--;
-        outfile = *argv;
-        if ((fout = fopen(outfile, "w")) == 0) {
-           fprintf(stderr, "ERROR: could not open output file\n");
-           return 2;
-        }
-     } else if (strncmp(*argv,  "-h", 2) == 0) {  // compare with -h[elp]
-        fprintf(stderr, "Usage: defwrite [-o <filename>] [-help]\n");
-        return 1;
-     } else {
-        fprintf(stderr, "ERROR: Illegal command line option: '%s'\n", *argv);
+    if (strcmp(*argv, "-o") == 0) {  // output filename
+      argv++;
+      argc--;
+      outfile = *argv;
+      if ((fout = fopen(outfile, "w")) == 0) {
+        fprintf(stderr, "ERROR: could not open output file\n");
         return 2;
-     }
-     argv++;
+      }
+    } else if (strncmp(*argv, "-h", 2) == 0) {  // compare with -h[elp]
+      fprintf(stderr, "Usage: defwrite [-o <filename>] [-help]\n");
+      return 1;
+    } else {
+      fprintf(stderr, "ERROR: Illegal command line option: '%s'\n", *argv);
+      return 2;
+    }
+    argv++;
   }
 
   // initalize
@@ -1393,29 +1620,29 @@ main(int argc, char** argv) {
   CHECK_STATUS(status);
 
   // set the callback functions
-  defwSetArrayCbk (arrayCB);
-  defwSetBusBitCbk (busbitCB);
-  defwSetDividerCbk (dividerCB);
-  defwSetComponentCbk (componentCB);
-  defwSetDesignCbk (designCB);
-  defwSetDesignEndCbk ((defwVoidCbkFnType)designendCB);
-  defwSetDieAreaCbk (dieareaCB);
-  defwSetExtCbk (extensionCB);
-  defwSetFloorPlanCbk (floorplanCB);
-  defwSetGcellGridCbk (gcellgridCB);
-  defwSetGroupCbk (groupCB);
-  defwSetHistoryCbk (historyCB);
-  defwSetNetCbk (netCB);
-  defwSetPinCbk (pinCB);
-  defwSetPinPropCbk (pinpropCB);
-  defwSetPropDefCbk (propdefCB);
-  defwSetRegionCbk (regionCB);
-  defwSetRowCbk (rowCB);
-  defwSetSNetCbk (snetCB);
-  defwSetTechnologyCbk (technologyCB);
-  defwSetTrackCbk (trackCB);
-  defwSetUnitsCbk (unitsCB);
-  defwSetViaCbk (viaCB);
+  defwSetArrayCbk(arrayCB);
+  defwSetBusBitCbk(busbitCB);
+  defwSetDividerCbk(dividerCB);
+  defwSetComponentCbk(componentCB);
+  defwSetDesignCbk(designCB);
+  defwSetDesignEndCbk((defwVoidCbkFnType)designendCB);
+  defwSetDieAreaCbk(dieareaCB);
+  defwSetExtCbk(extensionCB);
+  defwSetFloorPlanCbk(floorplanCB);
+  defwSetGcellGridCbk(gcellgridCB);
+  defwSetGroupCbk(groupCB);
+  defwSetHistoryCbk(historyCB);
+  defwSetNetCbk(netCB);
+  defwSetPinCbk(pinCB);
+  defwSetPinPropCbk(pinpropCB);
+  defwSetPropDefCbk(propdefCB);
+  defwSetRegionCbk(regionCB);
+  defwSetRowCbk(rowCB);
+  defwSetSNetCbk(snetCB);
+  defwSetTechnologyCbk(technologyCB);
+  defwSetTrackCbk(trackCB);
+  defwSetUnitsCbk(unitsCB);
+  defwSetViaCbk(viaCB);
 
   res = defwWrite(fout, outfile, (void*)userData);
 

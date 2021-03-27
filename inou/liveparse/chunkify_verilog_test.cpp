@@ -73,12 +73,10 @@ TEST_F(VTest1, interface) {
 void test_throw() {
   std::string test2_verilog = "";
 
-  mkdir("tdelta/noaccess_dir",0000);
+  mkdir("tdelta/noaccess_dir", 0000);
 
   Chunkify_verilog chunker("lgdb/noaccess_dir");
   chunker.parse_inline(test2_verilog.c_str());
 }
 
-TEST_F(VTest1, noaccess) {
-  ASSERT_THROW(test_throw() ,std::runtime_error);
-}
+TEST_F(VTest1, noaccess) { ASSERT_THROW(test_throw(), std::runtime_error); }

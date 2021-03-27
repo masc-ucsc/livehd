@@ -30,8 +30,9 @@
 #ifndef defiPinProp_h
 #define defiPinProp_h
 
-#include "defiKRDefs.hpp"
 #include <stdio.h>
+
+#include "defiKRDefs.hpp"
 
 BEGIN_LEFDEF_PARSER_NAMESPACE
 
@@ -39,7 +40,7 @@ class defrData;
 
 class defiPinProp {
 public:
-  defiPinProp(defrData *data);
+  defiPinProp(defrData* data);
   void Init();
 
   ~defiPinProp();
@@ -49,40 +50,38 @@ public:
 
   void setName(const char* inst, const char* pin);
   void addProperty(const char* name, const char* value, const char type);
-  void addNumProperty(const char* name, const double d,
-                      const char* value, const char type);
+  void addNumProperty(const char* name, const double d, const char* value, const char type);
 
-  int isPin() const;
+  int         isPin() const;
   const char* instName() const;
   const char* pinName() const;
 
-  int numProps() const;
-  const char*  propName(int index) const;
-  const char*  propValue(int index) const;
-  double propNumber(int index) const;
-  const char   propType(int index) const;
-  int    propIsNumber(int index) const;
-  int    propIsString(int index) const;
+  int         numProps() const;
+  const char* propName(int index) const;
+  const char* propValue(int index) const;
+  double      propNumber(int index) const;
+  const char  propType(int index) const;
+  int         propIsNumber(int index) const;
+  int         propIsString(int index) const;
 
   void print(FILE* f) const;
 
 protected:
-  char isPin_;
-  int instNameSize_;
+  char  isPin_;
+  int   instNameSize_;
   char* instName_;
-  int pinNameSize_;
+  int   pinNameSize_;
   char* pinName_;
 
-  int numProps_;
-  int propsAllocated_;
+  int     numProps_;
+  int     propsAllocated_;
   char**  propNames_;
   char**  propValues_;
   double* propDValues_;
   char*   propTypes_;
 
-  defrData *defData;
+  defrData* defData;
 };
-
 
 END_LEFDEF_PARSER_NAMESPACE
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <iostream>
+#include <string>
 
 // Temporary local for crazy mirror reflection stuff.
 constexpr int maxMirrorDepth = 20;
@@ -15,11 +15,11 @@ extern double yBottom[];
 extern double yTop[];
 extern int    yMirrorDepth;
 
-int    Name2Count(const std::string& arg);
-void   clearCount();
+int         Name2Count(const std::string& arg);
+void        clearCount();
 std::string getStringFromInt(int in);
-void   setNameMode(bool);
+void        setNameMode(bool);
 
 // Output Helper Functions.
 std::ostream& outputHotSpotHeader(const char* filename);
-void     outputHotSpotFooter(std::ostream& o);
+void          outputHotSpotFooter(std::ostream& o);

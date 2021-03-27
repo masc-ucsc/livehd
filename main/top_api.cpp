@@ -59,7 +59,8 @@ void Top_api::files(Eprp_var &var) {
     var.delete_label("path");  // Path was used for looking for files
 
   } catch (const std::regex_error &e) {
-    Main_api::error("invalid regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\" | grep -v \"filter\"`",
+    Main_api::error(
+        "invalid regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\" | grep -v \"filter\"`",
         match);
   }
 }

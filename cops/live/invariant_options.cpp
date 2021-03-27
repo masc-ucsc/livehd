@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass.hpp"
-
 #include "invariant_options.hpp"
+
+#include "pass.hpp"
 
 void Invariant_find_options::set(const std::string &key, const std::string &value) {
   try {

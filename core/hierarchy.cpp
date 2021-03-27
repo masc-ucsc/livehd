@@ -11,7 +11,7 @@ Hierarchy_tree::Hierarchy_tree(LGraph *_top)
     : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
 
 LGraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
-  I(!hidx.is_invalid()); // no hierarchical should not call this
+  I(!hidx.is_invalid());  // no hierarchical should not call this
 
   // NOTE: if this becomes a bottleneck, we can memorize the LGraph *
   const auto &data = get_data(hidx);
@@ -48,7 +48,6 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
 
   int conta = 0;
   for (auto it : lg->get_down_nodes_map()) {
-
     auto child_lgid = lg->get_type_sub(it.first.get_nid());
 
     auto node = it.first.get_node(lg);
@@ -57,17 +56,17 @@ void Hierarchy_tree::regenerate_step(LGraph *lg, const Hierarchy_index &parent) 
     I(child_lgid == node.get_type_sub());
 #endif
 
-    auto *child_lg  = lg->get_library().try_find_lgraph(child_lgid); // faster
-    if (child_lg==nullptr) {
+    auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);  // faster
+    if (child_lg == nullptr) {
       child_lg = node.ref_type_sub_lgraph();
-      if (child_lg==nullptr)
+      if (child_lg == nullptr)
         continue;
     }
 
-    //Hierarchy_data data(child_lgid, node.get_nid());
-    auto      child = add_child(parent, {child_lgid, node.get_nid()});
+    // Hierarchy_data data(child_lgid, node.get_nid());
+    auto child = add_child(parent, {child_lgid, node.get_nid()});
 
-    I(child.pos == conta+get_first_child(parent).pos);
+    I(child.pos == conta + get_first_child(parent).pos);
     tree_pos->set(it.first, conta);
 
     regenerate_step(child_lg, child);

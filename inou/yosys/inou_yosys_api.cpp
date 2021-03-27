@@ -56,7 +56,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
     else
       do_read_str = "inou_yosys_write.ys";
 
-    for (const auto& e : alt_paths) {
+    for (const auto &e : alt_paths) {
       auto test = main_path + e + do_read_str;
       if (access(test.c_str(), R_OK) != -1) {
         script_file = test;

@@ -32,8 +32,8 @@
 #ifndef DEFI_DEFS_H
 #define DEFI_DEFS_H
 
-#include <stdio.h>
 #include <limits.h>
+#include <stdio.h>
 
 #include "defiKRDefs.hpp"
 
@@ -56,24 +56,24 @@ BEGIN_LEFDEF_PARSER_NAMESPACE
 typedef struct defpoint defPOINT;
 
 struct defpoint {
-    int x;
-    int y;
-    };
+  int x;
+  int y;
+};
 
 typedef struct defrect defRECT;
 
 struct defrect {
-    defPOINT ll,ur;
-    };
+  defPOINT ll, ur;
+};
 
 typedef struct deftoken defTOKEN;
 
 struct deftoken {
-    defTOKEN *next;
-    int what;
-    int data;
-    defPOINT pt;
-    };
+  defTOKEN *next;
+  int       what;
+  int       data;
+  defPOINT  pt;
+};
 
 #define START_LIST 10001
 #define POINT_SPEC 10002
@@ -82,17 +82,17 @@ struct deftoken {
 #define LAYER_SPEC 10005
 #define SHAPE_SPEC 10006
 
-#ifndef	MIN
-#define MIN(x,y) ((x) < (y)? (x) : (y))
+#ifndef MIN
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
 #endif
 
-#ifndef	MIN
-#define MAX(x,y) ((x) > (y)? (x) : (y))
+#ifndef MIN
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
 #endif
 
-#define ROUND(x) ((x) >= 0 ? (int)((x)+0.5) : (int)((x)-0.5))
+#define ROUND(x) ((x) >= 0 ? (int)((x) + 0.5) : (int)((x)-0.5))
 
-//defTOKEN *TokenFromRect();
+// defTOKEN *TokenFromRect();
 
 /*=================== Enumerated Types ============================*/
 typedef int defiBoolean;
@@ -102,14 +102,12 @@ typedef int defiBoolean;
  * as the first member in the structure.
  *
  */
-typedef enum
-{
+typedef enum {
   /* decrease likelihood of accidentally correct values by starting
      at an unusual number */
   defiInvalidObject = 41713,
   defiUnknownObject /* void * */
 } defiObjectType_e;
-
 
 /* The memory policy controls how an object which refers to or is composed of
  * other objects manages those sub-objects, particularly when the parent
@@ -145,15 +143,14 @@ typedef enum
  * made of a child sub-object, the memory policy of the child controls
  * whether deep or shallow copies are made of the grandchildren.
  */
-typedef enum
-{
+typedef enum {
   /* decrease likelihood of accidentally correct values by starting
      at an unusual number */
   defiInvalidMemoryPolicy = 23950,
-  defiPrivateSubObjects,      // deep copy + delete
-  defiReferencedSubObjects,   // shallow copy, no delete
-  defiOrphanSubObjects,       // deep copy, no delete
-  defiAdoptedSubObjects       // shallow copy + delete
+  defiPrivateSubObjects,     // deep copy + delete
+  defiReferencedSubObjects,  // shallow copy, no delete
+  defiOrphanSubObjects,      // deep copy, no delete
+  defiAdoptedSubObjects      // shallow copy + delete
 } defiMemoryPolicy_e;
 
 /* An opaque pointer for passing user data through from one API
@@ -161,14 +158,14 @@ typedef enum
  * A handle which a user can set to point to their own data
  * on a per-callback basis.  (See the comment in defwWriter.h)
  */
-#define defiUserData void *
+#define defiUserData       void *
 #define defiUserDataHandle void **
 
 /* On SunOs 4.1.3 with acc, this is in libansi.a, but isn't properly
  * declared anywhere in the header files supplied with the compiler.
  */
 #ifdef __SunOS_4_1_3
-extern int strcasecmp(const char*, const char*);
+extern int strcasecmp(const char *, const char *);
 #endif
 
 #ifdef WIN32
