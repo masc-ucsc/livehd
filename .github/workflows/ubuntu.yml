@@ -71,13 +71,7 @@ jobs:
 
       - run: bazel coverage --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //... || true
 
-      - name: Get a comma-separated list of coverage reports
-        id: get_coverage_files
-        run: |
-          coverage_reports=`find ./bazel-testlogs/ -name 'coverage.dat' | tr '\n' ',' | head -c -1`
-          echo $coverage_reports
-          echo ::set-output name=COVERAGE_REPORTS::$coverage_reports
-
       - uses: codecov/codecov-action@v1
         with:
-          files: ${{ steps.get_coverage_files.outputs.COVERAGE_REPORTS }}
+          directory: ./bazel-testlogs/
+
