@@ -151,7 +151,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
     absl::flat_hash_map<std::string, uint32_t> map2;
 
     int conta = 0;
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 10000; i++) {
       int              sz     = rng.max(0xFFFFF);
       std::string      sz_str = "base" + std::to_string(sz) + "foo";
       std::string_view key{sz_str};

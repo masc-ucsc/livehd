@@ -111,10 +111,7 @@ cc_test(
 cc_test(
     name = "mmap_map_test",
     srcs = ["tests/mmap_map_test.cpp"],
-    tags = [
-        "fixme",
-        "timeout",
-    ],
+    #tags = [ "fixme", ],
     deps = [
         ":mmap_lib_test_lib",
         "//lbench:headers",

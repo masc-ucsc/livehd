@@ -42,10 +42,7 @@ cc_test(
     srcs = ["tests/lgtuple_test.cpp"],
     copts = COPTS,
     includes = ["."],
-    tags = [
-        "fixme",
-        "timeout",
-    ],
+    #tags = [ "fixme", ],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
@@ -67,10 +64,7 @@ cc_test(
 cc_test(
     name = "traverse_test",
     srcs = ["tests/traverse_test.cpp"],
-    tags = [
-        "fixme",
-        "timeout",
-    ],
+    #tags = [ "fixme", ],
     deps = [
         ":tree_lgdb_test",
     ],

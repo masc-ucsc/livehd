@@ -214,7 +214,7 @@ TEST_F(Edge_test, random_insert) {
   check_connected_pins();
   check_edges();
 
-  for (int i = 0; i < 6000; ++i) {
+  for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
     if (rbool.any())
@@ -325,7 +325,7 @@ TEST_F(Edge_test, overflow_delete_node) {
   check_connected_pins();
   check_edges();
 
-  for (int i = 0; i < 6000; ++i) {
+  for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
     if (rbool.any())
@@ -352,7 +352,7 @@ TEST_F(Edge_test, overflow_delete_node) {
 TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   auto s1 = g->create_node(Ntype_op::Sum);
 
-  for (int i = 0; i < 6000; ++i) {
+  for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
     if (rbool.any())
@@ -395,7 +395,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   auto s1 = g->create_node(Ntype_op::Sum);
 
   int all_edges = 0;
-  for (int i = 0; i < 6000; ++i) {
+  for (int i = 0; i < 2000; ++i) {
     Node_pin d;
     Node_pin s;
     if (rbool.any())

@@ -22,10 +22,7 @@ cc_library(
 cc_test(
     name = "chunkify_verilog_test",
     srcs = ["chunkify_verilog_test.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
+    #tags = [ "fixme", ],
     deps = [
         ":inou_liveparse",
         "@com_google_googletest//:gtest_main",

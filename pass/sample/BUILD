@@ -25,19 +25,13 @@ sh_test(
         "//inou/yosys:verilog_tests",
         "//main:lgshell",
     ],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
+    tags = [ "fixme", ],
 )
 
 cc_test(
     name = "sample_test2",
     srcs = ["sample_test2.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
+    # tags = [ "fixme", ],
     deps = [
         ":pass_sample",
         "@com_google_googletest//:gtest_main",
