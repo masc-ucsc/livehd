@@ -1240,7 +1240,7 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
 
   // evaluate the rhs of the function call (the fcall_arg_notation), but it has to be a tuple
   Lnast_node arg_lhs;
-  Lnast_node func_def_lhs;
+  // Lnast_node func_def_lhs;
 
   auto idx_func_lhs           = ast->get_child(idx_nxt_ast);
   auto idx_func_name          = idx_func_lhs;
