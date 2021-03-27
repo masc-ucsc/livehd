@@ -94,7 +94,7 @@ protected:
   }
   static std::string to_string(Number num);
 
-  Number get_num() const { return num; }
+  const Number &get_num() const { return num; }
   Lconst adjust(const Number &res_num, const Lconst &o) const;
 
 public:

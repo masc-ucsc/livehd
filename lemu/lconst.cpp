@@ -432,7 +432,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     mask_pos_num = mask_pos.get_num();
   }
 
-  Number res_num;
+  Number res_num=0;
 
   while(i_mask_num) {
     if (i_mask_num & mask_pos_num) {
