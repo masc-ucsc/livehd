@@ -69,7 +69,7 @@ jobs:
       - name: Print the list of targets
         run: bazel query --output label_kind //...
 
-      - run: bazel coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //... || true
+      - run: bazel coverage --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //... || true
 
       - name: Get a comma-separated list of coverage reports
         id: get_coverage_files
