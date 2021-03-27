@@ -1239,8 +1239,6 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
   // whether we are an assignment expression or not, idx_nxt_ast will equal fcall_explicit
 
   // evaluate the rhs of the function call (the fcall_arg_notation), but it has to be a tuple
-  Lnast_node arg_lhs;
-  // Lnast_node func_def_lhs;
 
   auto idx_func_lhs           = ast->get_child(idx_nxt_ast);
   auto idx_func_name          = idx_func_lhs;
@@ -1266,6 +1264,7 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
     idx_func_name        = ast->get_last_child(idx_func_name);
   }
 
+  Lnast_node arg_lhs;
   auto idx_fcall_args = idx_nxt_ast;
   if (ast->get_data(ast->get_last_child(idx_nxt_ast)).rule_id == Prp_rule_fcall_arg_notation) {
     idx_fcall_args = ast->get_last_child(idx_nxt_ast);

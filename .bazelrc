@@ -7,7 +7,7 @@ build --cxxopt="-std=c++17" --cxxopt="-fexceptions" --force_pic --build_tag_filt
 # Use Clang
 build:clang --action_env=CC=clang
 build:clang --action_env=CXX=clang++
-build:clang --linkopt -fuse-ld=lld
+#build:clang --linkopt -fuse-ld=lld
 
 # config that enables super aggressive optimization for max performance
 build:bench --copt -ffast-math

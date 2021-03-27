@@ -423,7 +423,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     mask_pos = mask.not_op();
 
     mask_pos_num = mask_pos.get_num();
-    for(auto i=mask_pos.get_bits();i<max_bits;++i) {
+    for(auto i=mask_pos.get_bits()-1;i<max_bits;++i) {
       mask_pos_num = mask_pos_num | (Number(1)<<i);
     }
   }else{
@@ -671,7 +671,7 @@ Lconst Lconst::not_op() const {
     throw std::runtime_error(fmt::format("ERROR: can not not strings {}", to_pyrope()));
   }
 
-  auto res_num = -get_num()-Number(1);
+  auto res_num = -1-get_num();
 
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
