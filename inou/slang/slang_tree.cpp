@@ -231,6 +231,8 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
   } else if (lhs.kind == slang::ExpressionKind::ElementSelect) {
+    dest_var_sign = false;
+    dest_var_bits = 0;
     I(false);  // FIXME:
   } else {
     I(lhs.kind == slang::ExpressionKind::RangeSelect);
