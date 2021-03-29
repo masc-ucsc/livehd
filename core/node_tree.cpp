@@ -11,7 +11,6 @@ Node_tree::Node_tree(LGraph* root_arg)
   set_root(Node());
 
   absl::flat_hash_set<Hierarchy_index> hidx_used;
-
   std::function<void(LGraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](LGraph* lg, Hierarchy_index hidx, Tree_index tidx) {
     auto ht = root->ref_htree();
 

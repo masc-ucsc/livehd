@@ -1,12 +1,6 @@
 Plan:
 1. Do SA floorplanner pass
 
-a. make it so that geogLayout isn't the default
-b. adjust classes to take hints
-
-2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
-
-
 1. Write/pull in a floorplanning method that actually works properly into ArchFP
 
     General idea:
@@ -39,7 +33,7 @@ Possible Improvements:
 - Cleanup items:
     - implement blackboxes (FixedLayout.cpp needs work / error checking)
     - write back module-level floorplans to livehd (once node level is solid - node is much larger and reveals more errors)
-    - get lg_hier and node_flat to use geogLayout hints (currently only uses annLayout for everything - broken if hints are available...?)
+    - get lg_hier and node_flat to take hints (currently only uses annLayout for everything)
 
 Issues:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo

@@ -11,7 +11,13 @@ An example floorplan generated from [this](../../inou/yosys/tests/long_gcd.v) ve
 livehd> inou.yosys.tolg files:./inou/yosys/tests/hier_test.v root:hier_test
 
 # define the area and aspect ratio of all possible synthesizable node types in the current hierarchy
-livehd> pass.fplan.writearea
+livehd> pass.fplan.write_range
+
+# print all node instance names
+livehd> pass.fplan.analyzefp top:hier_test nodes:dump
+
+# set a hint for a given node instance
+livehd> pass.fplan.analyzefp top:hier_test nodes:i_lgmid1_hidx2_20_nid8 hint:Top
 
 # generate a floorplan at the node level and write it to livehd/floorplan.flp
 livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_lg dest:file
