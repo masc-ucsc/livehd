@@ -2,7 +2,7 @@
 
 #include "node_flat_floorp.hpp"
 
-#include "GeogLayout.hpp"
+#include "AnnLayout.hpp"
 #include "node_type_area.hpp"
 
 Node_flat_floorp::Node_flat_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
@@ -14,7 +14,7 @@ void Node_flat_floorp::load() {
     count++;
   }
 
-  root_layout = new geogLayout(count);
+  root_layout = new annLayout(count);
 
   Ntype_area narea(nt.get_root_lg()->get_path());
 
@@ -42,7 +42,7 @@ void Node_flat_floorp::load() {
 
       auto d = narea.get_dim(op);
 
-      root_layout->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect, randomHint(1));
+      root_layout->addComponentCluster(op, 1, d.area, d.max_aspect, d.min_aspect);
     }
   }
 }

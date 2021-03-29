@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "floorplanner.hpp"
 
+#include <typeinfo>
+
 #include "annotate.hpp"
 #include "cell.hpp"
 #include "core/ann_place.hpp"
@@ -37,6 +39,45 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   }
 
   return hint_seq[sel];
+}
+
+FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx, size_t size) {
+  FPContainer* l;
+  if (!tidx.is_root() && hint_map.has(nt.get_data(tidx).get_compact())) {
+    l = new geogLayout(size);
+  } else {
+    l = new annLayout(size);
+  }
+
+  return l;
+}
+
+void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
+                              FPObject* comp, int count) {
+  if (typeid(*c) == typeid(geogLayout)) {
+    if (hint_map.has(child_c)) {
+      GeographyHint hint = hint_map.get(child_c);
+      static_cast<geogLayout*>(c)->addComponent(comp, count, hint);
+    } else {
+      static_cast<geogLayout*>(c)->addComponent(comp, count, randomHint(count));
+    }
+  } else {
+    static_cast<annLayout*>(c)->addComponent(comp, count);
+  }
+}
+
+void Lhd_floorplanner::addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
+                               Ntype_op type, int count, double area, double maxARArg, double minARArg) {
+  if (typeid(*c) == typeid(geogLayout)) {
+    if (hint_map.has(child_c)) {
+      GeographyHint hint = hint_map.get(child_c);
+      static_cast<geogLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg, hint);
+    } else {
+      static_cast<geogLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg, randomHint(count));
+    }
+  } else {
+    static_cast<annLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg);
+  }
 }
 
 void Lhd_floorplanner::create(FPOptimization opt, float ar) {

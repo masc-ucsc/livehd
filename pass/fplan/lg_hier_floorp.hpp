@@ -10,5 +10,5 @@ public:
   void load();
 
 private:
-  geogLayout* load_lg_modules(LGraph* lg);
+  FPContainer* load_lg_modules(LGraph* lg);
 };

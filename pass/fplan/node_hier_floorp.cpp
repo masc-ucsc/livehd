@@ -6,89 +6,94 @@
 #include <memory>
 
 #include "ann_place.hpp"
+#include "mmap_map.hpp"
 
 Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
-geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
+FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, LGraph* lg, const Tree_index tidx) {
   /*
     It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
     However, ArchFP does not support calling addComponent more than once on the same pointer, so we are forced to deep copy repeated
     subgraphs.
   */
 
-  geogLayout* l = new geogLayout(lg->size());
+  FPContainer* l = makeNode(hint_map, tidx, lg->size());
 
   const std::string_view path = root_lg->get_path();
 
-  // count and floorplan subnodes
-  absl::flat_hash_map<LGraph*, unsigned int> sub_lg_count;
-  lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
-    (void)n;
-    LGraph* sub_lg = LGraph::open(path, lgid);
-    sub_lg_count[sub_lg]++;
-  });
-
-  for (auto pair : sub_lg_count) {
-    const auto& sub_lg = pair.first;
-
-    if (debug_print) {
-      fmt::print("generating subcomponent {}\n", sub_lg->get_name());
-    }
-
-    geogLayout* subl = load_lg_nodes(sub_lg);
-
-    if (debug_print) {
-      fmt::print("done.\n");
-    }
-
-    if (debug_print) {
-      fmt::print("adding {} of subcomponent {} to cluster of lg {}\n", sub_lg_count[sub_lg], sub_lg->get_name(), lg->get_name());
-    }
-
-    l->addComponent(subl, sub_lg_count[sub_lg], randomHint(sub_lg_count[sub_lg]));
-  }
-
+  // count instances of leaves and subnodes for later use
+  absl::flat_hash_map<LGraph*, unsigned int>  sub_lg_count;
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
-  absl::flat_hash_set<Ntype_op>               skip;
-
-  for (auto n : lg->fast()) {
-    Ntype_op op = n.get_type_op();
-    if (!Ntype::is_synthesizable(op)) {
-      continue;
+  for (auto child_idx : nt.children(tidx)) {
+    const Node& child = nt.get_data(child_idx);
+    if (child.is_type_sub_present()) {
+      const auto child_lg = LGraph::open(path, child.get_type_sub());
+      sub_lg_count[child_lg]++;
+    } else {  // if (child.is_type_synth())
+      grid_count[child.get_type_op()]++;
     }
-
-    grid_count[op]++;
   }
 
-  // count and floorplan leaves
-  for (auto n : lg->fast()) {
-    Ntype_op op = n.get_type_op();
-    if (!Ntype::is_synthesizable(op) || skip.contains(op)) {
-      continue;
+  absl::flat_hash_set<Ntype_op> skip;
+  for (auto child_idx : nt.children(tidx)) {
+    const Node& child = nt.get_data(child_idx);
+
+    if (child.is_type_sub_present()) {
+      const auto child_lg = LGraph::open(path, child.get_type_sub());
+      if (sub_lg_count[child_lg] == 0) {
+        continue;
+      }
+
+      if (debug_print) {
+        fmt::print("generating subcomponent {}\n", child_lg->get_name());
+      }
+
+      FPContainer* subl = load_lg_nodes(hint_map, child_lg, child_idx);
+
+      if (debug_print) {
+        fmt::print("done.\n");
+      }
+
+      if (debug_print) {
+        fmt::print("adding {} of subcomponent {} to cluster of lg {}\n",
+                   sub_lg_count[child_lg],
+                   child_lg->get_name(),
+                   lg->get_name());
+      }
+
+      addSub(l, hint_map, child.get_compact(), subl, sub_lg_count[child_lg]);
+
+      sub_lg_count[child_lg] = 0;  // set to zero so no other copies of the child lgraph get added
+
+    } else {  // if (child.is_type_synth()) {
+      Ntype_op op = child.get_type_op();
+      if (skip.contains(op)) {
+        continue;
+      }
+
+      if (!na.has_dim(op)) {
+        std::string errstr = "node type ";
+        errstr.append(Ntype::get_name(op));
+        errstr.append(" has no area information!");
+        throw std::runtime_error(errstr);
+      }
+
+      auto  dim       = na.get_dim(op);
+      float node_area = dim.area;
+
+      unsigned int count = 1;
+      if (grid_count[op] >= grid_thresh[op] && grid_thresh[op] > 0) {
+        count = grid_count[op];
+        skip.emplace(op);
+      }
+
+      if (debug_print) {
+        fmt::print("adding {} of leaf {} to cluster of lg {}", count, child.get_type_name(), lg->get_name());
+        fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
+      }
+
+      addLeaf(l, hint_map, child.get_compact(), op, count, node_area, dim.max_aspect, dim.min_aspect);
     }
-
-    if (!na.has_dim(op)) {
-      std::string errstr = "node type ";
-      errstr.append(Ntype::get_name(op));
-      errstr.append(" has no area information!");
-      throw std::runtime_error(errstr);
-    }
-
-    auto  dim       = na.get_dim(op);
-    float node_area = dim.area;
-
-    unsigned int count = 1;
-    if (grid_count[op] >= grid_thresh[op] && grid_thresh[op] > 0) {
-      count = grid_count[op];
-      skip.emplace(op);
-    }
-
-    if (debug_print) {
-      fmt::print("adding {} of leaf {} to cluster of lg {}", count, n.get_type_name(), lg->get_name());
-      fmt::print("\tarea: {}, min asp: {}, max asp: {}\n", node_area, dim.min_aspect, dim.max_aspect);
-    }
-
-    l->addComponentCluster(n.get_type_op(), count, node_area, dim.max_aspect, dim.min_aspect, randomHint(count));
   }
 
   l->setName(lg->get_name().data());
@@ -97,4 +102,7 @@ geogLayout* Node_hier_floorp::load_lg_nodes(LGraph* lg) {
   return l;
 }
 
-void Node_hier_floorp::load() { root_layout = load_lg_nodes(root_lg); }
+void Node_hier_floorp::load() {
+  mmap_lib::map<Node::Compact, GeographyHint> hint_map(root_lg->get_path(), "node_hints");
+  root_layout = load_lg_nodes(hint_map, root_lg, nt.root_index());
+}

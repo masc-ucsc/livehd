@@ -4,23 +4,16 @@ Plan:
 a. make it so that geogLayout isn't the default
 b. adjust classes to take hints
 
-remove node hint class in core if not used?
-
 2. Possibly adjust stuff so DeFer and ArchFP can both operate on the same node hierarchy (and so that different floorplanners can operate on different segments)
 
 
-lgraph.list - lists lgraphs!
-
-
-1. Write/pull in a floorplanning method that actually works properly into ArchFP (SA)
+1. Write/pull in a floorplanning method that actually works properly into ArchFP
 
     General idea:
     - if someone wants to manually provide hints to a module, use geogLayout for it (since it is assumed that the person knows what they're doing)
     - otherwise, use some other method to generate an initial floorplan (SA)
     - this initial floorplan is used to generate hints for the placer (it would be really cool if the floorplanner itself used some of the same hints!)
 
-2. Create method of writing and reading geographic hints manually
-    - implement hint storage
 3. Find out what kind of hint information needs to be provided to pnr algorithm and pass it on
 4. Work on creating methods for automatic hint insertion
     - better hints (place near here, put in this section, block divide design around here, put anchor points here, etc)
@@ -42,8 +35,11 @@ Possible Improvements:
     - use HPWL as benchmark
     - easy: swap positions of leaves of the same type (within a hierarchy), see if HPWL gets better
     - identify components that are far away, set geography hints to be closer?
-3. Misc
+
+- Cleanup items:
     - implement blackboxes (FixedLayout.cpp needs work / error checking)
+    - write back module-level floorplans to livehd (once node level is solid - node is much larger and reveals more errors)
+    - get lg_hier and node_flat to use geogLayout hints (currently only uses annLayout for everything - broken if hints are available...?)
 
 Issues:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo

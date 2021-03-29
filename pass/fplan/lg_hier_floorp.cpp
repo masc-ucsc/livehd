@@ -11,7 +11,7 @@ Lg_hier_floorp::Lg_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(
 
 // can't return geogLayouts since ArchFP calls totalArea on components, which breaks if geogLayouts have no children (returns 0 for
 // area)
-geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
+FPContainer* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
   const std::string_view path = root_lg->get_path();
 
   // count and load subnodes only
@@ -22,7 +22,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
     sub_lg_count[sub_lg]++;
   });
 
-  geogLayout* l = new geogLayout(sub_lg_count.size());
+  FPContainer* l = new annLayout(sub_lg_count.size());
   l->setName(lg->get_name().data());
 
   if (sub_lg_count.empty()) {
@@ -52,7 +52,7 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
       fmt::print("generating subcomponent {}\n", sub_lg->get_name());
     }
 
-    geogLayout* subl = load_lg_modules(sub_lg);
+    FPContainer* subl = load_lg_modules(sub_lg);
 
     if (debug_print) {
       fmt::print("done, area {:.3f}.\n", subl->getArea());
@@ -64,9 +64,13 @@ geogLayout* Lg_hier_floorp::load_lg_modules(LGraph* lg) {
 
     unsigned int count = sub_lg_count[sub_lg];
     if (subl->getType() == Ntype_op::Const) {
-      l->addComponentCluster(subl->getName(), count, subl->getArea(), 8.0, 1.0, randomHint(count));
+      l->addComponentCluster(subl->getName(),
+                             count,
+                             subl->getArea(),
+                             8.0, // TODO: guessing on valid AR range here
+                             1.0);
     } else {
-      l->addComponent(subl, count, randomHint(count));
+      l->addComponent(subl, count);
     }
   }
 
