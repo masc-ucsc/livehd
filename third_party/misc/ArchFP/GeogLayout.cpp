@@ -63,7 +63,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
     }
     // Not sure if we need to set the hint, but when I missed this for the grid below, it was a bug.
     FPLayout->setHint(Center);
-    bool correct = FPLayout->layout(HardAspectRatio, targetAR);
+    bool correct = FPLayout->layout(AreaWirelength, targetAR);
     assert(FPLayout->valid());
     if (verbose)
       std::cout << "Laying out Center item(s).  Current x and y are(" << curX << "," << curY << ")\n";
@@ -170,7 +170,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
       grid->setHint(compHint);
       FPLayout = grid;
     }
-    correct = FPLayout->layout(HardAspectRatio, targetAR);
+    correct = FPLayout->layout(AreaWirelength, targetAR);
     assert(FPLayout->valid());
     FPLayout->setLocation(curX, curY);
     // Put the layout on the stack.
@@ -189,6 +189,7 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
 }
 
 bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
+  (void)opt;
   // All this routine does is set up some data structures,
   //   and then call the helper to recursively do the layout work.
   // We will keep track of containers we make in a "stack".

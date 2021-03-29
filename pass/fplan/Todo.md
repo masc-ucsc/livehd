@@ -34,6 +34,7 @@ Possible Improvements:
     - implement blackboxes (FixedLayout.cpp needs work / error checking)
     - write back module-level floorplans to livehd (once node level is solid - node is much larger and reveals more errors)
     - get lg_hier and node_flat to take hints (currently only uses annLayout for everything)
+    - ArchFP uses bubble sort for sorting - is using std::sort faster?
 
 Issues:
  - view.py output is flipped due to mismatch between coordinates for HotSpot and png coordinates in PyCairo

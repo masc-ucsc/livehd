@@ -2,6 +2,7 @@
 #include "floorplanner.hpp"
 
 #include <typeinfo>
+#include <stdexcept>
 
 #include "annotate.hpp"
 #include "cell.hpp"
@@ -10,7 +11,7 @@
 #include "helpers.hpp"
 
 Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg)
-    : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), na(root_lg->get_path()) {
+    : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), na(root_lg->get_path()), root_layout(nullptr) {
   // set how many nodes of a given type must be encountered before they are put in a grid together
   // thresholds can be 0, in which case that type of leaf is never put in a grid.
   for (uint8_t type = 0; type < (uint8_t)Ntype_op::Last_invalid; type++) {
@@ -25,7 +26,10 @@ Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg)
 }
 
 Lhd_floorplanner::~Lhd_floorplanner() {
-  delete root_layout;
+  if (root_layout != nullptr) {
+    // only call delete on root_layout if it exists (may not if root floorplan fails)
+    delete root_layout;
+  }
   root_layout = nullptr;
   root_lg     = nullptr;
 }
@@ -41,7 +45,8 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   return hint_seq[sel];
 }
 
-FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx, size_t size) {
+FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx,
+                                        size_t size) {
   FPContainer* l;
   if (!tidx.is_root() && hint_map.has(nt.get_data(tidx).get_compact())) {
     l = new geogLayout(size);
@@ -52,8 +57,8 @@ FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, Geogr
   return l;
 }
 
-void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
-                              FPObject* comp, int count) {
+void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map,
+                              const Node::Compact& child_c, FPObject* comp, int count) {
   if (typeid(*c) == typeid(geogLayout)) {
     if (hint_map.has(child_c)) {
       GeographyHint hint = hint_map.get(child_c);
@@ -66,8 +71,9 @@ void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact,
   }
 }
 
-void Lhd_floorplanner::addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
-                               Ntype_op type, int count, double area, double maxARArg, double minARArg) {
+void Lhd_floorplanner::addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map,
+                               const Node::Compact& child_c, Ntype_op type, int count, double area, double maxARArg,
+                               double minARArg) {
   if (typeid(*c) == typeid(geogLayout)) {
     if (hint_map.has(child_c)) {
       GeographyHint hint = hint_map.get(child_c);
@@ -83,7 +89,11 @@ void Lhd_floorplanner::addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact
 void Lhd_floorplanner::create(FPOptimization opt, float ar) {
   bool success = root_layout->layout(opt, ar);
   if (!success) {
-    fmt::print("WARNING: floorplan may contain overlapping layouts.  Adjusting the overall aspect ratio is recommended.\n");
+    if (typeid(*root_layout) == typeid(geogLayout)) {
+      fmt::print("WARNING: floorplan may contain overlapping layouts.  Adjusting the overall aspect ratio is recommended.\n");
+    } else {
+      throw std::runtime_error("floorplan failed!");
+    }
   }
 }
 

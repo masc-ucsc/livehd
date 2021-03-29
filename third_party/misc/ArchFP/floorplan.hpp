@@ -8,7 +8,7 @@
 // Here is an enumeration for the optimazation goals for a layout manager.
 // SliceTree: create an optimal slice tree floorplan (not implemented)
 // HardAspectRatio: optimize for a given aspect ratio, possibly forming a floorplan with gaps / overlaps
-enum FPOptimization { SliceTree, HardAspectRatio };
+enum FPOptimization { Area, Wirelength, AreaWirelength };
 
 // Here is the enumeration for layout hints for the geographic layout.
 enum GeographyHint {

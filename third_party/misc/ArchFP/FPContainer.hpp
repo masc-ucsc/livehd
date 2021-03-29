@@ -25,7 +25,7 @@ class FPContainer : public FPObject {
 
 protected:
   // These allow safe access to the item list.
-  int       getComponentCount() const { return items.size(); }
+  size_t    getComponentCount() const { return items.size(); }
   FPObject* getComponent(int index) const { return items[index]; }
   FPObject* removeComponent(int index);
   void      replaceComponent(FPObject* comp, int index);
