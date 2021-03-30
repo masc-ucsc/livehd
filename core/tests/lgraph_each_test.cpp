@@ -16,18 +16,18 @@ unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {
 protected:
-  LGraph *top  = 0;
-  LGraph *c1   = 0;  // Child 1
-  LGraph *c3   = 0;  // Child 2
-  LGraph *c2   = 0;  // Child 3
-  LGraph *gc11 = 0;  // Grand Child from 1, 1st
-  LGraph *gc31 = 0;  // Grand child from 3, 1st
-  LGraph *gc32 = 0;  // Grand child from 3, 2nd
-  LGraph *top2 = 0;
+  Lgraph *top  = 0;
+  Lgraph *c1   = 0;  // Child 1
+  Lgraph *c3   = 0;  // Child 2
+  Lgraph *c2   = 0;  // Child 3
+  Lgraph *gc11 = 0;  // Grand Child from 1, 1st
+  Lgraph *gc31 = 0;  // Grand child from 3, 1st
+  Lgraph *gc32 = 0;  // Grand child from 3, 2nd
+  Lgraph *top2 = 0;
 
   absl::flat_hash_map<std::string, int> children;
 
-  void add_child(LGraph *parent, LGraph *child, std::string_view iname, bool randomize) {
+  void add_child(Lgraph *parent, Lgraph *child, std::string_view iname, bool randomize) {
     Node node;
 
     if (child) {
@@ -65,7 +65,7 @@ protected:
           }
         } else if (io_pin->dir == Sub_node::Direction::Invalid) {
         } else {
-          I(false);                                 // For LGraph sub there should be no undefined iopins
+          I(false);                                 // For Lgraph sub there should be no undefined iopins
           I(io_pin->graph_io_pos != Port_invalid);  // graph_io_pos must be defined too
         }
       }
@@ -76,7 +76,7 @@ protected:
       node.set_name(iname);
   }
 
-  void add_io(LGraph *g) {
+  void add_io(Lgraph *g) {
     int inps = rand_r(&rseed) % 4;  // 0..3 inputs
     int pos  = 0;
     for (int j = 0; j < inps; j++) {
@@ -88,24 +88,24 @@ protected:
     }
   }
 
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
 
   void SetUp() override {
-    top = LGraph::create("lgdb_lgraph_each", "top", "nosource");
+    top = Lgraph::create("lgdb_lgraph_each", "top", "nosource");
     ASSERT_NE(top, nullptr);
-    c1 = LGraph::create("lgdb_lgraph_each", "c1", "nosource");
+    c1 = Lgraph::create("lgdb_lgraph_each", "c1", "nosource");
     ASSERT_NE(c1, nullptr);
-    c2 = LGraph::create("lgdb_lgraph_each", "c2", "nosource");
+    c2 = Lgraph::create("lgdb_lgraph_each", "c2", "nosource");
     ASSERT_NE(c2, nullptr);
-    c3 = LGraph::create("lgdb_lgraph_each", "c3", "nosource");
+    c3 = Lgraph::create("lgdb_lgraph_each", "c3", "nosource");
     ASSERT_NE(c3, nullptr);
-    gc11 = LGraph::create("lgdb_lgraph_each", "gc11", "nosource");
+    gc11 = Lgraph::create("lgdb_lgraph_each", "gc11", "nosource");
     ASSERT_NE(gc11, nullptr);
-    gc31 = LGraph::create("lgdb_lgraph_each", "gc31", "nosource");
+    gc31 = Lgraph::create("lgdb_lgraph_each", "gc31", "nosource");
     ASSERT_NE(gc31, nullptr);
-    gc32 = LGraph::create("lgdb_lgraph_each", "gc32", "nosource");
+    gc32 = Lgraph::create("lgdb_lgraph_each", "gc32", "nosource");
     ASSERT_NE(gc32, nullptr);
-    top2 = LGraph::create("lgdb_lgraph_each", "top2", "nosource");
+    top2 = Lgraph::create("lgdb_lgraph_each", "top2", "nosource");
     ASSERT_NE(top2, nullptr);
 
     lgs.push_back(top);
@@ -162,7 +162,7 @@ TEST_F(Setup_graphs_test, each_sub_graph) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
-      LGraph *child = LGraph::open(parent->get_path(), node.get_type_sub());
+      Lgraph *child = Lgraph::open(parent->get_path(), node.get_type_sub());
 
       ASSERT_NE(child, nullptr);
 
@@ -197,7 +197,7 @@ TEST_F(Setup_graphs_test, each_sub_graph_twice) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
-      LGraph *child = LGraph::open(parent->get_path(), node.get_type_sub());
+      Lgraph *child = Lgraph::open(parent->get_path(), node.get_type_sub());
 
       ASSERT_NE(child, nullptr);
 

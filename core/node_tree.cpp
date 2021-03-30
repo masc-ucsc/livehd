@@ -6,12 +6,12 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-Node_tree::Node_tree(LGraph* root_arg)
+Node_tree::Node_tree(Lgraph* root_arg)
     : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
   absl::flat_hash_set<Hierarchy_index> hidx_used;
-  std::function<void(LGraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](LGraph* lg, Hierarchy_index hidx, Tree_index tidx) {
+  std::function<void(Lgraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](Lgraph* lg, Hierarchy_index hidx, Tree_index tidx) {
     auto ht = root->ref_htree();
 
     Tree_index last_sib;
@@ -48,7 +48,7 @@ Node_tree::Node_tree(LGraph* root_arg)
 
         bool found = false;
         while (sub_hidx != ht->invalid_index()) {
-          LGraph* sub_lg = LGraph::open(root->get_path(), cn.get_type_sub());
+          Lgraph* sub_lg = Lgraph::open(root->get_path(), cn.get_type_sub());
 
           if (debug_verbose) {
             fmt::print("testing l:{}, p:{} ({})\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());

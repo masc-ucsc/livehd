@@ -127,7 +127,7 @@ double FPContainer::totalArea() {
   return area;
 }
 
-unsigned int FPContainer::outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
+unsigned int FPContainer::outputLgraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
   pushMirrorContext(startX, startY);
 
   unsigned int total = 0;

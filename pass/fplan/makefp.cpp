@@ -16,10 +16,10 @@ constexpr size_t           opt_map_size               = 2;
 constexpr std::string_view opt_name_map[opt_map_size] = {"slice_tree", "aspect_ratio"};
 
 void Pass_fplan_makefp::setup() {
-  auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an LGraph", &Pass_fplan_makefp::pass);
+  auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an Lgraph", &Pass_fplan_makefp::pass);
 
   m.add_label_optional("traversal",
-                       "LGraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
+                       "Lgraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
 
   m.add_label_optional("strategy",

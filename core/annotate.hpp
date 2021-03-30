@@ -5,7 +5,7 @@
 // TODO: Move this as a callback registration for Graph_Library
 // Then all the files are distributed per pass as needed
 
-// TODO: We have attributes per node/pin/edge, we should have also per lgraph module (lef attributes)
+// TODO: We have attributes per node/pin/edge, we should have also per Lgraph module (lef attributes)
 #include "ann_file_loc.hpp"
 #include "ann_place.hpp"
 #include "ann_ssa.hpp"
@@ -58,7 +58,7 @@ using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Co
 
 struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
-  static void clear(LGraph *lg) {
+  static void clear(Lgraph *lg) {
     Ann_node_pin_delay::clear(lg);
     Ann_node_pin_io_unsign::clear(lg);
     Ann_node_pin_offset::clear(lg);
@@ -74,7 +74,7 @@ struct Ann_support {
     Ann_node_color::clear(lg);
   };
 
-  static void sync(LGraph *lg) {
+  static void sync(Lgraph *lg) {
     Ann_node_pin_delay::sync(lg);
     Ann_node_pin_io_unsign::sync(lg);
     Ann_node_pin_offset::sync(lg);

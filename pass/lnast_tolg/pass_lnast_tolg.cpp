@@ -31,7 +31,7 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
   }
 
   /* Lbench b2("pass.lnast_tolg.tolg"); */
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
   for (const auto &ln : var.lnasts) {
     auto       module_name = ln->get_top_module_name();
     const auto top         = ln->get_root();

@@ -6,7 +6,7 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 
-Node_pin::Node_pin(LGraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
+Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!comp.hidx.is_invalid());  // Why to Compact. Use Compact_class
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);
@@ -14,7 +14,7 @@ Node_pin::Node_pin(LGraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx)
 }
 
 Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
-  current_g = LGraph::open(path, comp.lgid);
+  current_g = Lgraph::open(path, comp.lgid);
   top_g     = current_g;
 
   hidx = Hierarchy_tree::invalid_index();
@@ -25,14 +25,14 @@ Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
+Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
+Node_pin::Node_pin(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), hidx(_hidx), idx(comp.idx), sink(comp.sink) {
   I(!hidx.is_invalid());
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -40,19 +40,19 @@ Node_pin::Node_pin(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Compact_class &comp)
+Node_pin::Node_pin(Lgraph *_g, const Compact_class &comp)
     : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(LGraph *_g, const Compact_class_driver &comp)
+Node_pin::Node_pin(Lgraph *_g, const Compact_class_driver &comp)
     : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(get_root_idx()));
 }
 
-const Index_ID Node_pin::get_root_idx() const {
+const Index_id Node_pin::get_root_idx() const {
   if (unlikely(current_g == nullptr))
     return 0;
   return current_g->get_root_idx(idx);
@@ -132,7 +132,7 @@ Node Node_pin::get_node() const {
   return Node(top_g, current_g, hidx, nid);
 }
 
-Index_ID Node_pin::get_node_nid() const { return current_g->get_node_nid(idx); }
+Index_id Node_pin::get_node_nid() const { return current_g->get_node_nid(idx); }
 
 Ntype_op Node_pin::get_type_op() const {
   auto nid = current_g->get_node_nid(idx);
@@ -419,7 +419,7 @@ bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_
 
 bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }
 
-Node_pin Node_pin::find_driver_pin(LGraph *top, std::string_view wname) {
+Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
   auto       ref = Ann_node_pin_name::ref(top);
   const auto it  = ref->find_val(wname);
   if (it == ref->end()) {
@@ -551,7 +551,7 @@ Node_pin Node_pin::get_down_pin() const {
   auto *down_current_g = htree.ref_lgraph(down_hidx);
 
   // 4th: get down_idx
-  Index_ID down_idx = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);
+  Index_id down_idx = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);
   I(down_idx);
 
   bool down_sink = is_driver();  // top driver goes to an down output which should be a sink
@@ -579,7 +579,7 @@ Node_pin Node_pin::get_up_pin() const {
   auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
 
   // 3rd: get up_idx
-  Index_ID up_idx = up_node.get_class_lgraph()->find_idx_from_pid(up_node.get_nid(), up_pid);
+  Index_id up_idx = up_node.get_class_lgraph()->find_idx_from_pid(up_node.get_nid(), up_pid);
   if (up_idx.is_invalid())
     return Node_pin();  // Invalid, the input is not connected
 

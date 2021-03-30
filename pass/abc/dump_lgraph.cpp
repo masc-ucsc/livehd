@@ -7,7 +7,7 @@
 #include "lgraph.hpp"
 #include "pass_abc.hpp"
 
-void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   if (!Abc_NtkIsAigNetlist(pNtk) && !Abc_NtkIsMappedNetlist(pNtk)) {
     Pass::error("Io_WriteVerilog(): Can produce Verilog for mapped or AIG netlists only.");
     return;
@@ -24,7 +24,7 @@ void Pass_abc::from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *p
   conn_combinational_cell(new_graph, old_graph, pNtk);
 }
 
-void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
   int        i = 0;
@@ -69,7 +69,7 @@ void Pass_abc::gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_grap
   }
 }
 
-void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   const Tech_library &tlib  = new_graph->get_tlibrary();
   const Tech_cell *   tcell = nullptr;
@@ -149,7 +149,7 @@ void Pass_abc::gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph
   }
 }
 
-void Pass_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   Abc_Obj_t *pLatch = nullptr;
   int        i      = 0;
@@ -166,7 +166,7 @@ void Pass_abc::gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Ab
   }
 }
 
-void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   for (const auto &idx : graph_info->memory_id) {
     Index_ID new_memory_idx       = new_graph->create_node().get_nid();
@@ -192,7 +192,7 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         Port_ID  old_offset     = static_cast<Port_ID>(std::stol(memory_info[3]));
 
         Index_ID new_memory_idx = graph_info->memory_remap[old_memory_idx];
-        if (LGRAPH_MEMOP_ISWREN(old_inp_pid) || LGRAPH_MEMOP_ISRDEN(old_inp_pid)) {
+        if (LgRAPH_MEMOP_ISWREN(old_inp_pid) || LgRAPH_MEMOP_ISRDEN(old_inp_pid)) {
           auto dpin = new_graph->get_node(graph_info->cell2id[pNet])
                           .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
           auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
@@ -229,7 +229,7 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
 
     for (const auto &input : old_graph->inp_edges(old_idx)) {
       Port_ID old_inp_pid = input.get_inp_pin().get_pid();
-      if (old_inp_pid < LGRAPH_MEMOP_CLK) {
+      if (old_inp_pid < LgRAPH_MEMOP_CLK) {
         auto node_idx = input.get_idx();
         auto width    = old_graph->get_bits(node_idx);
         auto val      = 0;
@@ -238,22 +238,22 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
         }
         auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
         connect_constant(new_graph, val, width, spin);
-      } else if (old_inp_pid == LGRAPH_MEMOP_CLK) {
+      } else if (old_inp_pid == LgRAPH_MEMOP_CLK) {
         for (const auto &sg : graph_info->skew_group_map) {
           if (sg.second.find(old_idx) != sg.second.end()) {
             std::string ck_name = sg.first;
             auto        dpin    = new_graph->get_node(graph_info->ck_remap[ck_name])
                             .setup_driver_pin(graph_info->cell_out_pid[graph_info->ck_remap[ck_name]]++);
-            auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(LGRAPH_MEMOP_CLK);
+            auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(LgRAPH_MEMOP_CLK);
             new_graph->add_edge(dpin, spin);
           }
         }
-      } else if (old_inp_pid == LGRAPH_MEMOP_CE) {
+      } else if (old_inp_pid == LgRAPH_MEMOP_CE) {
         auto dpin = new_graph->get_node(graph_info->cell2id[pNet])
                         .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNet]]++);
         auto spin = new_graph->get_node(new_memory_idx).setup_sink_pin(old_inp_pid);
         new_graph->add_edge(dpin, spin);
-      } else if (LGRAPH_MEMOP_ISWRADDR(old_inp_pid) || LGRAPH_MEMOP_ISWRDATA(old_inp_pid) || LGRAPH_MEMOP_ISRDADDR(old_inp_pid)) {
+      } else if (LgRAPH_MEMOP_ISWRADDR(old_inp_pid) || LgRAPH_MEMOP_ISWRDATA(old_inp_pid) || LgRAPH_MEMOP_ISRDADDR(old_inp_pid)) {
         auto inp_info  = graph_info->memory_conn[old_idx][old_inp_pid];
         auto join_node = new_graph->create_node(Join_Op, inp_info.size());
 
@@ -291,7 +291,7 @@ void Pass_abc::gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, A
   }
 }
 
-void Pass_abc::gen_sub_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   for (const auto &idx : graph_info->subgraph_id) {
     std::string subgraph_name(old_graph->get_library().get_name(old_graph->subgraph_id_get(idx)));
@@ -300,7 +300,7 @@ void Pass_abc::gen_sub_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_
     new_graph->node_type_set(new_sub_idx, SubGraph_Op);
     new_graph->set_node_instance_name(new_sub_idx, old_graph->get_node_instancename(idx));
 
-    LGraph *sub_graph = LGraph::open(old_graph->get_path(), subgraph_name);
+    Lgraph *sub_graph = Lgraph::open(old_graph->get_path(), subgraph_name);
     new_graph->node_subgraph_set(new_sub_idx, sub_graph->get_lgid());
   }
   Abc_Obj_t *pTerm = nullptr, *pNet = nullptr;
@@ -381,7 +381,7 @@ void Pass_abc::gen_sub_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_
   }
 }
 
-void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pLatch = nullptr;
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
@@ -437,7 +437,7 @@ void Pass_abc::conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t 
   }
 }
 
-void Pass_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pTerm = nullptr;
   int        i     = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
@@ -459,7 +459,7 @@ void Pass_abc::conn_primary_output(LGraph *new_graph, const LGraph *old_graph, A
   }
 }
 
-void Pass_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk) {
+void Pass_abc::conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   Abc_Obj_t *pObj = nullptr;
   int        k    = 0;
   Abc_NtkForEachNode(pNtk, pObj, k) {
@@ -479,12 +479,12 @@ void Pass_abc::conn_combinational_cell(LGraph *new_graph, const LGraph *old_grap
   }
 }
 
-void Pass_abc::connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_pin &spin) {
+void Pass_abc::connect_constant(Lgraph *g, uint32_t value, uint32_t size, const Node_pin &spin) {
   auto node = g->create_node_u32(value, size);
   g->add_edge(node.get_driver_pin(), spin);
 }
 
-Node_pin Pass_abc::create_pick_operator(LGraph *g, const Node_pin &driver, int offset, int width) {
+Node_pin Pass_abc::create_pick_operator(Lgraph *g, const Node_pin &driver, int offset, int width) {
   if (offset == 0 && g->get_bits(driver) == width)
     return driver;
 

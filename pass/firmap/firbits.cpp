@@ -25,7 +25,7 @@ void Firmap::dump() const {
   }
 }
 
-void Firmap::do_firbits_analysis(LGraph *lg) {
+void Firmap::do_firbits_analysis(Lgraph *lg) {
   Lbench b("pass.firbits");
 
   lg_path = lg->get_path();  // common for all the libs

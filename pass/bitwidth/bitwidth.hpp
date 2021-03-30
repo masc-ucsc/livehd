@@ -54,10 +54,10 @@ protected:
   void try_delete_attr_node(Node &node);
   void set_subgraph_boundary_bw(Node &node);
 
-  void bw_pass(LGraph *lg);
+  void bw_pass(Lgraph *lg);
 
 public:
   Bitwidth(bool hier, int max_iterations, BWMap_flat &flat_bwmap, BWMap_hier &hier_bwmap);
-  void do_trans(LGraph *orig);
+  void do_trans(Lgraph *orig);
   bool is_finished() const { return !not_finished; }
 };

@@ -493,7 +493,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
     (void)e_name;
     auto e_node = e.second.get_node();
     if (!e_node.is_type_const()) {
-      LGraph::info("tuple {} can not be indexed with {} key:{} because it is not constant", get_name(), tup->get_name(), e.first);
+      Lgraph::info("tuple {} can not be indexed with {} key:{} because it is not constant", get_name(), tup->get_name(), e.first);
       return nullptr;
     }
     auto        v = e_node.get_type_const();
@@ -505,7 +505,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
     }
     auto dpin = get_dpin(txt);
     if (dpin.is_invalid()) {
-      LGraph::info("tuple {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, txt);
+      Lgraph::info("tuple {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, txt);
       return nullptr;
     }
     if (!ret_tup) {
@@ -581,7 +581,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
       }
       dump();
       tup->dump();
-      LGraph::info("tuples {} and {} can not concat for key:{}", get_name(), tup->get_name(), it.first);
+      Lgraph::info("tuples {} and {} can not concat for key:{}", get_name(), tup->get_name(), it.first);
       ok = false;
       continue;
     }
@@ -594,7 +594,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
     for (const auto &e : key_map) {
       if (e.first.empty()) {
         dump();
-        LGraph::info("can not append pin to tuple {} when some are unnamed", get_name());
+        Lgraph::info("can not append pin to tuple {} when some are unnamed", get_name());
         return false;
       }
       int x = 0;
@@ -604,7 +604,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
         std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
       } else {
         dump();
-        LGraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
+        Lgraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
         return false;
       }
       if (x > max_pos)
@@ -644,7 +644,7 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
   for (const auto &e : key_map) {
     if (e.first.empty()) {
       dump();
-      LGraph::info("can not append pin to tuple {} when some are unnamed", get_name());
+      Lgraph::info("can not append pin to tuple {} when some are unnamed", get_name());
       return false;
     }
     int x = 0;
@@ -654,7 +654,7 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
       std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
     } else {
       dump();
-      LGraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
+      Lgraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
       return false;
     }
     if (x > max_pos)

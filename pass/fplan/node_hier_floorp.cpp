@@ -10,7 +10,7 @@
 
 Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
-FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, LGraph* lg, const Tree_index tidx) {
+FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg, const Tree_index tidx) {
   /*
     It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
     However, ArchFP does not support calling addComponent more than once on the same pointer, so we are forced to deep copy repeated
@@ -22,12 +22,12 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
   const std::string_view path = root_lg->get_path();
 
   // count instances of leaves and subnodes for later use
-  absl::flat_hash_map<LGraph*, unsigned int>  sub_lg_count;
+  absl::flat_hash_map<Lgraph*, unsigned int>  sub_lg_count;
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;
   for (auto child_idx : nt.children(tidx)) {
     const Node& child = nt.get_data(child_idx);
     if (child.is_type_sub_present()) {
-      const auto child_lg = LGraph::open(path, child.get_type_sub());
+      const auto child_lg = Lgraph::open(path, child.get_type_sub());
       sub_lg_count[child_lg]++;
     } else {  // if (child.is_type_synth())
       grid_count[child.get_type_op()]++;
@@ -39,7 +39,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
     const Node& child = nt.get_data(child_idx);
 
     if (child.is_type_sub_present()) {
-      const auto child_lg = LGraph::open(path, child.get_type_sub());
+      const auto child_lg = Lgraph::open(path, child.get_type_sub());
       if (sub_lg_count[child_lg] == 0) {
         continue;
       }

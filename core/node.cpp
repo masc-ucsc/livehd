@@ -8,7 +8,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-void Node::invalidate(LGraph *_g) {
+void Node::invalidate(Lgraph *_g) {
   top_g     = _g;
   current_g = _g;
   hidx.invalidate();
@@ -21,7 +21,7 @@ void Node::invalidate() {
   nid = 0;
 }
 
-void Node::update(const Hierarchy_index &_hidx, Index_ID _nid) {
+void Node::update(const Hierarchy_index &_hidx, Index_id _nid) {
   if (_hidx != hidx) {
     current_g = top_g->ref_htree()->ref_lgraph(_hidx);
     hidx      = _hidx;
@@ -48,7 +48,7 @@ void Node::update(const Node &node) {
   nid       = node.nid;
 }
 
-void Node::update(LGraph *_g, const Node::Compact &comp) {
+void Node::update(Lgraph *_g, const Node::Compact &comp) {
   I(comp.nid);
   I(_g);
 
@@ -85,7 +85,7 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
+Node::Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
@@ -101,7 +101,7 @@ Node::Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
-  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
@@ -109,7 +109,7 @@ Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
 Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_sink(get_type_op(), pid));
-  Index_ID idx = current_g->find_idx_from_pid(nid, pid);
+  Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
@@ -127,7 +127,7 @@ Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
   auto pid = sub.get_instance_pid(pname);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
@@ -144,7 +144,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   auto pid = sub.get_instance_pid(pname);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
@@ -161,7 +161,7 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   auto pid = sub.get_instance_pid(name);
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
@@ -169,7 +169,7 @@ bool Node::is_sink_connected(std::string_view pname) const {
   if (!is_type_sub()) {
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
-    Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+    Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
     if (idx == 0)
       return false;
     return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
@@ -185,7 +185,7 @@ bool Node::is_sink_connected(std::string_view pname) const {
   if (pid == Port_invalid)
     return false;
 
-  Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+  Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
   if (idx == 0)
     return false;
 
@@ -196,7 +196,7 @@ bool Node::is_driver_connected(std::string_view pname) const {
   if (!is_type_sub()) {
     auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
-    Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+    Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
     if (idx == 0)
       return false;
     return get_lg()->has_outputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
@@ -212,7 +212,7 @@ bool Node::is_driver_connected(std::string_view pname) const {
   if (pid == Port_invalid)
     return false;
 
-  Index_ID idx = get_lg()->find_idx_from_pid(nid, pid);
+  Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
   if (idx == 0)
     return false;
 
@@ -253,7 +253,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
@@ -268,7 +268,7 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
   }
 #endif
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
@@ -298,7 +298,7 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   }
 #endif
 
-  Index_ID idx = current_g->setup_idx_from_pid(nid, pid);
+  Index_id idx = current_g->setup_idx_from_pid(nid, pid);
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
@@ -383,9 +383,9 @@ void Node::set_type_sub(Lg_type_id subid) { current_g->set_type_sub(nid, subid);
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 
-LGraph *Node::ref_type_sub_lgraph() const {
+Lgraph *Node::ref_type_sub_lgraph() const {
   auto lgid = current_g->get_type_sub(nid);
-  return LGraph::open(top_g->get_path(), lgid);
+  return Lgraph::open(top_g->get_path(), lgid);
 }
 
 bool Node::is_type_sub_present() const {

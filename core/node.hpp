@@ -18,13 +18,13 @@ using Node_iterator = std::vector<Node>;
 
 class Node {
 protected:
-  LGraph *        top_g;
-  mutable LGraph *current_g;
+  Lgraph *        top_g;
+  mutable Lgraph *current_g;
   Hierarchy_index hidx;
-  Index_ID        nid;
+  Index_id        nid;
 
-  friend class LGraph;
-  friend class LGraph_Node_Type;
+  friend class Lgraph;
+  friend class Lgraph_Node_Type;
   friend class Node_pin;
   friend class XEdge;
   friend class Fast_edge_iterator;
@@ -33,17 +33,17 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Hierarchy_tree;
 
-  constexpr Node(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _nid)
+  constexpr Node(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _nid)
       : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
     assert(nid);
     assert(top_g);
     assert(current_g);
   }
 
-  void invalidate(LGraph *_g);
+  void invalidate(Lgraph *_g);
   void invalidate();
-  void update(Index_ID _nid) { nid = _nid; }
-  void update(const Hierarchy_index &_hidx, Index_ID _nid);
+  void update(Index_id _nid) { nid = _nid; }
+  void update(const Hierarchy_index &_hidx, Index_id _nid);
 
 public:
   class __attribute__((packed)) Compact {
@@ -51,8 +51,8 @@ public:
     Hierarchy_index hidx;
     uint64_t        nid : Index_bits;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -63,10 +63,10 @@ public:
     friend class mmap_lib::hash<Compact>;
 
   public:
-    constexpr Compact(const Hierarchy_index &_hidx, Index_ID _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
+    constexpr Compact(const Hierarchy_index &_hidx, Index_id _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
     constexpr Compact() : nid(0){};
 
-    constexpr Index_ID get_nid() const { return nid; }  // Mostly for debugging or to know order
+    constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
     constexpr Hierarchy_index get_hidx() const {
       I(!hidx.is_invalid());
@@ -74,7 +74,7 @@ public:
     }
 
     // Can not be constexpr find current_g
-    Node get_node(LGraph *lg) const { return Node(lg, *this); }
+    Node get_node(Lgraph *lg) const { return Node(lg, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }
 
@@ -93,8 +93,8 @@ public:
   protected:
     uint64_t nid : Index_bits;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -109,11 +109,11 @@ public:
     // constexpr operator size_t() const { return nid; }
     constexpr Compact_class() : nid(0){};  // needed for mmap_tree which allocates empty data
 
-    constexpr Compact_class(const Index_ID &_nid) : nid(_nid){};
+    constexpr Compact_class(const Index_id &_nid) : nid(_nid){};
 
-    constexpr Node get_node(LGraph *lg) const { return Node(lg, *this); }
+    constexpr Node get_node(Lgraph *lg) const { return Node(lg, *this); }
 
-    constexpr Index_ID get_nid() const { return nid; }
+    constexpr Index_id get_nid() const { return nid; }
     constexpr bool     is_invalid() const { return nid == 0; }
 
     constexpr bool operator==(const Compact_class &other) const { return nid == other.nid; }
@@ -133,15 +133,15 @@ public:
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
-  void update(LGraph *_g, const Node::Compact &comp);
+  void update(Lgraph *_g, const Node::Compact &comp);
   void update(const Node::Compact &comp);
   void update(const Node &node);
 
   constexpr Node() : top_g(nullptr), current_g(nullptr), nid(0) {}
 
-  Node(LGraph *_g, const Compact &comp) { update(_g, comp); }
-  Node(LGraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
-  constexpr Node(LGraph *_g, const Compact_class &comp)
+  Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
+  Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
+  constexpr Node(Lgraph *_g, const Compact_class &comp)
       : top_g(_g), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
     I(nid);
     I(top_g);
@@ -153,7 +153,7 @@ public:
     I(this != &obj); // Do not assign object to itself. works but wastefull
     top_g     = obj.top_g;
     current_g = obj.current_g;
-    const_cast<Index_ID&>(nid)     = obj.nid;
+    const_cast<Index_id&>(nid)     = obj.nid;
     const_cast<Hierarchy_index&>(hidx) = obj.hidx;
 
     return *this;
@@ -167,11 +167,11 @@ public:
     return Compact_class(nid);
   }
 
-  LGraph *get_top_lgraph() const { return top_g; }
-  LGraph *get_class_lgraph() const { return current_g; }
-  LGraph *get_lg() const { return current_g; }  // To handle hierarchical API
+  Lgraph *get_top_lgraph() const { return top_g; }
+  Lgraph *get_class_lgraph() const { return current_g; }
+  Lgraph *get_lg() const { return current_g; }  // To handle hierarchical API
 
-  Index_ID        get_nid() const { return nid; }
+  Index_id        get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
 
   Node_pin get_driver_pin() const {
@@ -284,7 +284,7 @@ public:
   Lg_type_id      get_type_sub() const;
   const Sub_node &get_type_sub_node() const;
   Sub_node *      ref_type_sub_node() const;
-  LGraph *        ref_type_sub_lgraph() const;  // Slower than other get_type_sub
+  Lgraph *        ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool            is_type_sub_present() const;
 
   Lconst get_type_const() const;

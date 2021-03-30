@@ -16,7 +16,7 @@
 
 Gioc::Gioc(std::string_view _path) : path(_path) {}
 
-void Gioc::do_trans(LGraph *lg) {
+void Gioc::do_trans(Lgraph *lg) {
   auto *library = lg->ref_library();
 
   lg->each_sub_unique_fast([&](Node &node, Lg_type_id lgid) {
@@ -71,7 +71,7 @@ void Gioc::reconnect_the_tgs_from_unified_out(std::string_view ret_name) {
   }
 }
 
-void Gioc::subgraph_io_connection(LGraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name,
+void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name,
                                   Node subg_node) {
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto *io_pin : sub->get_io_pins()) {
@@ -213,7 +213,7 @@ std::vector<std::string_view> Gioc::split_name(std::string_view hier_name, std::
   return token_vec;
 }
 
-Node_pin Gioc::setup_tuple_ref(LGraph *lg, std::string_view ref_name) {
+Node_pin Gioc::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
   auto it = name2dpin.find(ref_name);
 
   if (it != name2dpin.end())
@@ -231,7 +231,7 @@ Node_pin Gioc::setup_tuple_ref(LGraph *lg, std::string_view ref_name) {
   return dpin;
 }
 
-Node_pin Gioc::setup_field_dpin(LGraph *lg, std::string_view field_name) {
+Node_pin Gioc::setup_field_dpin(Lgraph *lg, std::string_view field_name) {
   auto it = field2dpin.find(field_name);
   if (it != field2dpin.end()) {
     return it->second;

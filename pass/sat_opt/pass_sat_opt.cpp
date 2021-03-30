@@ -24,14 +24,14 @@ and add SAT formula to the solver based on node type
 static Pass_plugin sample("pass_sat_opt", Pass_sat_opt::setup);
 
 void Pass_sat_opt::setup() {
-  Eprp_method m1("pass.sat_opt", "Checks if MSBs of all the LGraph node outputs are satisfiable", &Pass_sat_opt::work);
+  Eprp_method m1("pass.sat_opt", "Checks if MSBs of all the Lgraph node outputs are satisfiable", &Pass_sat_opt::work);
 
   register_pass(m1);
 }
 
 Pass_sat_opt::Pass_sat_opt(const Eprp_var &var) : Pass("pass.sat_opt", var) {}
 
-void Pass_sat_opt::do_work(LGraph *g) { check_sat_opt(g); }
+void Pass_sat_opt::do_work(Lgraph *g) { check_sat_opt(g); }
 
 void Pass_sat_opt::work(Eprp_var &var) {
   Pass_sat_opt p(var);
@@ -41,8 +41,8 @@ void Pass_sat_opt::work(Eprp_var &var) {
   }
 }
 
-void Pass_sat_opt::check_sat_opt(LGraph *g) {
-  fmt::print("Running SAT_OPT to check if MSB of the LGraph node outputs are satisfiable\n");
+void Pass_sat_opt::check_sat_opt(Lgraph *g) {
+  fmt::print("Running SAT_OPT to check if MSB of the Lgraph node outputs are satisfiable\n");
   //-----------------------------------------------------------------------------------------------------
   lezMiniSAT sat;
 

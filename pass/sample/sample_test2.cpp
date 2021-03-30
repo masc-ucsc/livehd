@@ -17,10 +17,10 @@ protected:
   void SetUp() override {}
 };
 
-TEST_F(SampleMainTest, EmptyLGraph) {
+TEST_F(SampleMainTest, EmptyLgraph) {
   Eprp_utils::clean_dir("pass_test_lgdb");
 
-  LGraph *g = LGraph::create("pass_test_lgdb", "empty", "nosource");
+  Lgraph *g = Lgraph::create("pass_test_lgdb", "empty", "nosource");
 
   Eprp_var var;
   var.add(g);

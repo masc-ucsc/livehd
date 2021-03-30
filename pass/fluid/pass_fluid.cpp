@@ -20,7 +20,7 @@ Pass_fluid::Pass_fluid() : Pass("fluid") {}
     bool        input;
 */
 
-void Pass_fluid::find_join(LGraph *g) {
+void Pass_fluid::find_join(Lgraph *g) {
   fmt::print("\n**Find Join: **\n");
   for (auto idx : g->forward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
@@ -72,7 +72,7 @@ void Pass_fluid::find_join(LGraph *g) {
   }
 }
 
-void Pass_fluid::find_fork(LGraph *g) {
+void Pass_fluid::find_fork(Lgraph *g) {
   fmt::print("\n**Find Fork: **\n");
   for (auto idx : g->backward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
@@ -133,7 +133,7 @@ void Pass_fluid::find_fork(LGraph *g) {
   }
 }
 
-void Pass_fluid::add_fork(LGraph *g) {
+void Pass_fluid::add_fork(Lgraph *g) {
   // add v and s first
   fmt::print("\n**Add Fork: **\n");
 
@@ -371,7 +371,7 @@ void Pass_fluid::add_fork(LGraph *g) {
   */
 }
 
-void Pass_fluid::add_fork_deadlock(LGraph *g) {
+void Pass_fluid::add_fork_deadlock(Lgraph *g) {
   // add v and s first
   fmt::print("\n**Add Fork: **\n");
 
@@ -547,9 +547,9 @@ void Pass_fluid::add_fork_deadlock(LGraph *g) {
   Port_ID ffsin = 2;
 */
 
-void Pass_fluid::add_join(LGraph *g) {}
+void Pass_fluid::add_join(Lgraph *g) {}
 
-void Pass_fluid::add_join_deadlock(LGraph *g) {
+void Pass_fluid::add_join_deadlock(Lgraph *g) {
   fmt::print("\n**Add Join (possible dead lock): **\n");
   for (auto idx : g->forward()) {
     fmt::print("\n*****Visiting idx:{}\n", idx);
@@ -683,7 +683,7 @@ void Pass_fluid::add_join_deadlock(LGraph *g) {
   }
 }
 
-void Pass_fluid::traverse(LGraph *g, int round) {
+void Pass_fluid::traverse(Lgraph *g, int round) {
   std::cout << "RTP 2" << std::endl;
   find_join(g);
   std::cout << "RTP 3" << std::endl;
@@ -695,4 +695,4 @@ void Pass_fluid::traverse(LGraph *g, int round) {
   std::cout << "RTP 6" << std::endl;
   // result_graph(g);
 }
-void Pass_fluid::transform(LGraph *g) { traverse(g, 1); }
+void Pass_fluid::transform(Lgraph *g) { traverse(g, 1); }

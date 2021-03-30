@@ -19,7 +19,7 @@ protected:
   void SetUp() override {}
 };
 
-TEST_F(LecMainTest, NoLGraphTest) {
+TEST_F(LecMainTest, NoLgraphTest) {
   // Attempt 2 to add to Git for review
 
   lezMiniSAT sat;

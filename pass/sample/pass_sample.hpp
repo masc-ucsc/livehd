@@ -5,13 +5,13 @@
 
 class Pass_sample : public Pass {
 protected:
-  void compute_histogram(LGraph *g);
-  void compute_max_depth(LGraph *g);
-  void annotate_placement(LGraph *g);
-  void create_sample_graph(LGraph *g);
+  void compute_histogram(Lgraph *g);
+  void compute_max_depth(Lgraph *g);
+  void annotate_placement(Lgraph *g);
+  void create_sample_graph(Lgraph *g);
 
-  void do_work(LGraph *g);
-  void do_wirecount(LGraph *g, int indent);
+  void do_work(Lgraph *g);
+  void do_wirecount(Lgraph *g, int indent);
 
   // eprp callbacks
   static void wirecount(Eprp_var &var);

@@ -39,20 +39,20 @@ private:
   void process_mux(std::string &buffer, Node &node);
   void process_simple_node(std::string &buffer, Node &node);
 
-  void create_module_io(std::string &buffer, LGraph *lg);
-  void create_subs(std::string &buffer, LGraph *lg);
-  void create_combinational(std::string &buffer, LGraph *lg);
-  void create_outputs(std::string &buffer, LGraph *lg);
-  void create_registers(std::string &buffer, LGraph *lg);
+  void create_module_io(std::string &buffer, Lgraph *lg);
+  void create_subs(std::string &buffer, Lgraph *lg);
+  void create_combinational(std::string &buffer, Lgraph *lg);
+  void create_outputs(std::string &buffer, Lgraph *lg);
+  void create_registers(std::string &buffer, Lgraph *lg);
 
   void add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned);
-  void create_locals(std::string &buffer, LGraph *lg);
+  void create_locals(std::string &buffer, Lgraph *lg);
 
-  std::tuple<std::string, int> setup_file(LGraph *lg) const;
+  std::tuple<std::string, int> setup_file(Lgraph *lg) const;
   void                         append_to_file(const std::string &filename, int fd, const std::string &buffer) const;
 
 public:
-  void do_from_lgraph(LGraph *lg_parent);
+  void do_from_lgraph(Lgraph *lg_parent);
 
   Cgen_verilog(bool _verbose, std::string_view _odir);
 };

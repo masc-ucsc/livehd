@@ -12,7 +12,7 @@ using testing::HasSubstr;
 
 class Edge_test : public ::testing::Test {
 protected:
-  LGraph *  g;
+  Lgraph *  g;
   Node      n1;
   Node      n2;
   Sub_node *n1_sub;
@@ -33,7 +33,7 @@ protected:
   mmap_lib::map<int, bool> n2_graph_pos_created;
 
   void SetUp() override {
-    g = LGraph::create("lgdb_edge_test", "test0", "test");
+    g = Lgraph::create("lgdb_edge_test", "test0", "test");
 
     n1 = g->create_node_sub("n1");  // creates n1
     n2 = g->create_node_sub("n2");  // creates n2
@@ -425,7 +425,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
 }
 
 TEST_F(Edge_test, trivial_delete2) {
-  LGraph *g2 = LGraph::create("lgdb_edge_test", "test22", "test");
+  Lgraph *g2 = Lgraph::create("lgdb_edge_test", "test22", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
@@ -492,7 +492,7 @@ TEST_F(Edge_test, trivial_delete2) {
 }
 
 TEST_F(Edge_test, trivial_delete3) {
-  LGraph *g2 = LGraph::create("lgdb_edge_test", "test3", "test");
+  Lgraph *g2 = Lgraph::create("lgdb_edge_test", "test3", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");

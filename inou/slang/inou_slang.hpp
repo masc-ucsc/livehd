@@ -5,9 +5,9 @@
 
 class Inou_slang : public Pass {
 protected:
-  void check_lec(LGraph *g);
+  void check_lec(Lgraph *g);
 
-  void do_work(LGraph *g);
+  void do_work(Lgraph *g);
 
 public:
   static void work(Eprp_var &var);

@@ -48,49 +48,49 @@ do
     if [ -f ${pt}.v ]; then rm ${pt}.v; fi
 
     echo "----------------------------------------------------"
-    echo "Verilog -> LGraph"
+    echo "Verilog -> Lgraph"
     echo "----------------------------------------------------"
     ${LGSHELL} "inou.yosys.tolg files:inou/yosys/tests/${pt}.v top:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> inou.graphviz.from"
     if [ $? -eq 0 ]; then
-      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+      echo "Successfully created the inital Lgraph using Yosys: ${pt}.v"
     else
-      echo "ERROR: Verilog -> LGraph failed... testcase: ${pt}.v"
+      echo "ERROR: Verilog -> Lgraph failed... testcase: ${pt}.v"
       exit 1
     fi
     mv ${pt}.dot ${pt}.origlg.dot
     echo "----------------------------------------------------"
-    echo "LGraph -> LNAST"
+    echo "Lgraph -> LNAST"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump"
     if [ $? -eq 0 ]; then
-      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+      echo "Successfully created the inital Lgraph using Yosys: ${pt}.v"
     else
-      echo "ERROR: LGraph -> LNAST failed... testcase: ${pt}.v"
+      echo "ERROR: Lgraph -> LNAST failed... testcase: ${pt}.v"
       exit 1
     fi
 #    echo "----------------------------------------------------"
-#    echo "LGraph -> LNAST -> code_gen prp"
+#    echo "Lgraph -> LNAST -> code_gen prp"
 #    echo "----------------------------------------------------"
 #    ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp"
 #    if [ $? -eq 0 ]; then
-#      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+#      echo "Successfully created the inital Lgraph using Yosys: ${pt}.v"
 #    else
 #      echo "ERROR: LNAST -> code_gen prp  failed... testcase: ${pt}.v"
 #      exit 1
 #    fi
     echo "----------------------------------------------------"
-    echo "LGraph -> LNAST -> lgraph2"
+    echo "Lgraph -> LNAST -> lgraph2"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.match |> pass.lnast_fromlg |> pass.lnast_tolg path:lgdb2"
     if [ $? -eq 0 ]; then
-      echo "Successfully created the inital LGraph using Yosys: ${pt}.v"
+      echo "Successfully created the inital Lgraph using Yosys: ${pt}.v"
     else
-      echo "ERROR: LGraph -> LNAST -> LGraph2 failed... testcase: ${pt}.v"
+      echo "ERROR: Lgraph -> LNAST -> Lgraph2 failed... testcase: ${pt}.v"
       exit 1
     fi
 
     echo "----------------------------------------------------"
-    echo "LGraph Optimization"
+    echo "Lgraph Optimization"
     echo "----------------------------------------------------"
     ${LGSHELL} "lgraph.match path:lgdb2 |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
     if [ $? -eq 0 ]; then
@@ -104,7 +104,7 @@ do
 
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
+    echo "Lgraph -> Verilog"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.match path:lgdb2 |> inou.yosys.fromlg"

@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-class LGraph;
+class Lgraph;
 class XEdge;
 class Node;
 
@@ -17,8 +17,8 @@ using Node_pin_iterator = std::vector<Node_pin>;
 
 class Node_pin {
 protected:
-  friend class LGraph;
-  friend class LGraph_Node_Type;
+  friend class Lgraph;
+  friend class Lgraph_Node_Type;
   friend class XEdge;
   friend class Node;
   friend class Fast_edge_iterator;
@@ -27,24 +27,24 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Edge_raw;
 
-  LGraph *        top_g;
-  LGraph *        current_g;
+  Lgraph *        top_g;
+  Lgraph *        current_g;
   Hierarchy_index hidx;
-  Index_ID        idx;
+  Index_id        idx;
   Port_ID         pid;
   bool            sink;
 
-  constexpr Node_pin(LGraph *_g, LGraph *_c_g, const Hierarchy_index &_hidx, Index_ID _idx, Port_ID _pid, bool _sink)
+  constexpr Node_pin(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _idx, Port_ID _pid, bool _sink)
       : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
     assert(_g);
     // Could be IDX=0 for invalid
   }
 
-  const Index_ID get_idx() const {
+  const Index_id get_idx() const {
     I(idx);
     return idx;
   }
-  const Index_ID get_root_idx() const;
+  const Index_id get_root_idx() const;
 
   Node_pin switch_to_driver() const;
   Node_pin switch_to_sink() const;
@@ -56,8 +56,8 @@ public:
     uint32_t        idx : Index_bits;
     uint32_t        sink : 1;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -71,7 +71,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
-    Compact(const Hierarchy_index _hidx, Index_ID _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
+    Compact(const Hierarchy_index _hidx, Index_id _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
       I(!hidx.is_invalid());
     };
     Compact() : idx(0), sink(0){};
@@ -102,8 +102,8 @@ public:
     uint32_t   idx : Index_bits;
     uint32_t   sink : 1;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -117,7 +117,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), idx(obj.idx), sink(obj.sink) {}
-    Compact_flat(const Lg_type_id _lgid, Index_ID _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
+    Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
     Compact_flat() : idx(0), sink(0){};
     Compact_flat &operator=(const Compact_flat &obj) {
       I(this != &obj);
@@ -145,8 +145,8 @@ public:
     Hierarchy_index hidx;
     uint32_t        idx : Index_bits;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -160,7 +160,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
-    Compact_driver(const Hierarchy_index _hidx, Index_ID _idx) : hidx(_hidx), idx(_idx) { I(!hidx.is_invalid()); };
+    Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!hidx.is_invalid()); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
@@ -187,8 +187,8 @@ public:
     uint32_t idx : Index_bits;
     uint32_t sink : 1;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -202,7 +202,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_class(const Compact_class &obj) : idx(obj.idx), sink(obj.sink) {}
-    Compact_class(Index_ID _idx, bool _sink) : idx(_idx), sink(_sink) {}
+    Compact_class(Index_id _idx, bool _sink) : idx(_idx), sink(_sink) {}
     Compact_class() : idx(0), sink(0) {}
     Compact_class &operator=(const Compact_class &obj) {
       I(this != &obj);
@@ -226,8 +226,8 @@ public:
   protected:
     uint32_t idx : Index_bits;
 
-    friend class LGraph;
-    friend class LGraph_Node_Type;
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -241,7 +241,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_class_driver(const Compact_class_driver &obj) : idx(obj.idx) {}
-    Compact_class_driver(Index_ID _idx) : idx(_idx) {}
+    Compact_class_driver(Index_id _idx) : idx(_idx) {}
     Compact_class_driver() : idx(0) {}
     Compact_class_driver &operator=(const Compact_class_driver &obj) {
       I(this != &obj);
@@ -268,12 +268,12 @@ public:
 
   constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
-  Node_pin(LGraph *_g, const Compact &comp);
+  Node_pin(Lgraph *_g, const Compact &comp);
   Node_pin(std::string_view path, const Compact_flat &comp);
-  Node_pin(LGraph *_g, const Compact_driver &comp);
-  Node_pin(LGraph *_g, const Compact_class &comp);
-  Node_pin(LGraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
-  Node_pin(LGraph *_g, const Compact_class_driver &comp);
+  Node_pin(Lgraph *_g, const Compact_driver &comp);
+  Node_pin(Lgraph *_g, const Compact_class &comp);
+  Node_pin(Lgraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
+  Node_pin(Lgraph *_g, const Compact_class_driver &comp);
 
   // No constexpr (get_root_idx)
 
@@ -295,9 +295,9 @@ public:
     return Compact_class_driver(get_root_idx());
   }
 
-  LGraph *        get_top_lgraph() const { return top_g; };
-  LGraph *        get_class_lgraph() const { return current_g; };
-  LGraph *        get_lg() const { return current_g; };
+  Lgraph *        get_top_Lgraph() const { return top_g; };
+  Lgraph *        get_class_Lgraph() const { return current_g; };
+  Lgraph *        get_lg() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 
   constexpr Port_ID get_pid() const { return pid; }
@@ -334,7 +334,7 @@ public:
     return !sink;
   }
 
-  Index_ID get_node_nid() const;
+  Index_id get_node_nid() const;
   Node     get_node() const;
   Ntype_op get_type_op() const;
 
@@ -396,7 +396,7 @@ public:
   void             del_name();
   std::string_view get_name() const;
   bool             has_name() const;
-  static Node_pin  find_driver_pin(LGraph *top, std::string_view wname);
+  static Node_pin  find_driver_pin(Lgraph *top, std::string_view wname);
   std::string_view get_pin_name() const;
 
   void             set_prp_vname(std::string_view prp_vname);

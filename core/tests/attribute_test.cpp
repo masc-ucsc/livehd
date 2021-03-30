@@ -19,15 +19,15 @@ unsigned int rseed = 123;
 
 class Setup_attr_test : public ::testing::Test {
 protected:
-  LGraph *top;
-  LGraph *subs[1024];
+  Lgraph *top;
+  Lgraph *subs[1024];
 
   void SetUp() override {
     srand(rseed++);
     mkdir("lgdb_attr", 0755);
-    top = LGraph::create("lgdb_attr", "top", "-");
+    top = Lgraph::create("lgdb_attr", "top", "-");
     for (int i = 0; i < 1024; i++) {
-      subs[i] = LGraph::create("lgdb_attr", "sub_" + std::to_string(i), "-");
+      subs[i] = Lgraph::create("lgdb_attr", "sub_" + std::to_string(i), "-");
     }
 
     for (int i = 0; i < 1000000; i++) {

@@ -12,7 +12,7 @@ static_assert(sizeof(Node_pin::Compact_class) == 4);
 static_assert(sizeof(Node::Compact) == 12);
 static_assert(sizeof(Node::Compact_class) == 4);
 
-XEdge::XEdge(LGraph *g, const Compact &c)
+XEdge::XEdge(Lgraph *g, const Compact &c)
     : driver(g, Node_pin::Compact_class(c.driver_idx, false)), sink(g, Node_pin::Compact_class(c.sink_idx, true)) {
   I(sink.is_sink());
   I(driver.is_driver());
@@ -22,24 +22,24 @@ XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_) : driver(src_), sink(ds
   I(sink.is_sink());
   I(driver.is_driver());
 
-  I(driver.get_top_lgraph() == sink.get_top_lgraph());
+  I(driver.get_top_Lgraph() == sink.get_top_Lgraph());
 }
 
 void XEdge::del_edge() {
-  I(driver.get_class_lgraph() == sink.get_class_lgraph());
+  I(driver.get_class_Lgraph() == sink.get_class_Lgraph());
 
-  driver.get_class_lgraph()->del_edge(driver, sink);
+  driver.get_class_Lgraph()->del_edge(driver, sink);
 }
 
 void XEdge::del_edge(Node_pin &dpin, Node_pin &spin) {
-  I(dpin.get_class_lgraph() == spin.get_class_lgraph());
+  I(dpin.get_class_Lgraph() == spin.get_class_Lgraph());
 
   I(dpin.is_driver());
   I(spin.is_sink());
 
-  dpin.get_class_lgraph()->del_edge(dpin, spin);
+  dpin.get_class_Lgraph()->del_edge(dpin, spin);
 }
 
-void XEdge::add_edge() { driver.get_class_lgraph()->add_edge(driver, sink); }
+void XEdge::add_edge() { driver.get_class_Lgraph()->add_edge(driver, sink); }
 
-void XEdge::add_edge(uint32_t bits) { driver.get_class_lgraph()->add_edge(driver, sink, bits); }
+void XEdge::add_edge(uint32_t bits) { driver.get_class_Lgraph()->add_edge(driver, sink, bits); }
