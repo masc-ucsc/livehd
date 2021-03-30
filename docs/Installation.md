@@ -39,6 +39,13 @@ If you're unsure if your copy of gcc or clang is new enough, you can check the v
       sudo pacman -Syu bazel       # (Arch)
       sudo apt-get install bazel   # (Kali/Debian/Ubuntu)
    ```
+3. **Install Slang** https://sv-lang.com/building.html
+   ```
+      git clone git@github.com:MikePopoloski/slang.git
+      mkdir build && cd build
+      cmake -DCMAKE_CXX_COMPILER=g++-9 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/bin ..
+      sudo make install            # (Kali/Debian/Ubuntu)
+   ```
 4. **Build LiveHD**  
   LiveHD has several build options, detailed below.  All three should result in a working executable, but may differ in speed or output.  
   
@@ -74,6 +81,12 @@ Make sure that the openJDK installed is compatible with bazel and has the certif
 ```
     dpkg-reconfigure openjdk-11-jdk
     /var/lib/dpkg/ca-certificates-java.postinst configure
+```
+
+If you fail to build for the first time, you may need to clear the cache under your home directory before rebuilding:
+
+```
+    rm -rf ~/.cache/bazel
 ```
 
 Make sure to have enough memory (4+GB at least)
