@@ -44,7 +44,7 @@ If you're unsure if your copy of gcc or clang is new enough, you can check the v
       git clone git@github.com:MikePopoloski/slang.git
       mkdir build && cd build
       cmake -DCMAKE_CXX_COMPILER=g++-9 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/bin ..
-      sudo make install            # (Kali/Debian/Ubuntu)
+      sudo make install            
    ```
 4. **Build LiveHD**  
   LiveHD has several build options, detailed below.  All three should result in a working executable, but may differ in speed or output.  
