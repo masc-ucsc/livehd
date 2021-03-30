@@ -76,6 +76,12 @@ Make sure that the openJDK installed is compatible with bazel and has the certif
     /var/lib/dpkg/ca-certificates-java.postinst configure
 ```
 
+If you fail to build for the first time, you may need to clear the cache under your home directory before rebuilding:
+
+```
+    rm -rf ~/.cache/bazel
+```
+
 Make sure to have enough memory (4+GB at least)
 
 ## Next Steps
