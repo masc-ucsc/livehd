@@ -82,9 +82,9 @@ options.
 `LGraph`:
   The LGraph class stores graph information.  An LGraph does not contain information to uniquely identify it (TODO: does it?), but it does contain plenty of methods for querying various attributes of a node within the LGraph from a given `nid` value.  
   There are several ways to iterate over just the subgraph nodes of an LGraph:
-   - `each_sub_fast_direct`: iterates over all children.
-   - `each_sub_fast_unique`: iterates over all children, but skips repeated instantiations of the same lgraph.
-   - `get_down_nodes_map`: identical to `each_sub_fast_direct` but without the lambda.  
+   - `each_local_sub_fast`: iterates over all the local subgraph or children. It does not visit grandchildren.
+   - `each_local_unique_sub_fast`: Similar to each_local_sub_fast but each subgraph type is visited only once.
+   - `get_down_nodes_map`: identical to `each_local_sub_fast` but without the lambda.  
   
   These methods also return a (globally) unique id representing a specific LGraph in a variable of type `Lg_type_id`.
   
@@ -135,7 +135,7 @@ for (auto hidx : root_tree->depth_preorder()) {
  - Iterate over all child nodes in an LGraph:
 ```
 for (auto lg : var.lgs) {
-  lg->each_sub_fast([&](Node& n, Lg_type_id id) -> bool {
+  lg->each_local_sub_fast([&](Node& n, Lg_type_id id) -> bool {
     std::cout << "node: " << n.debug_name() << ", id: " << id << std::endl;
     return true; // return true to keep iterating over children, or false to end early
   });

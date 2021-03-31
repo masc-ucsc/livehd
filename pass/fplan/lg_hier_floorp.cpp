@@ -16,7 +16,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
 
   // count and load subnodes only
   absl::flat_hash_map<Lgraph*, unsigned int> sub_lg_count;
-  lg->each_sub_fast([&](Node& n, Lg_type_id lgid) {
+  lg->each_local_sub_fast([&](Node& n, Lg_type_id lgid) {
     (void)n;
     Lgraph* sub_lg = Lgraph::open(path, lgid);
     sub_lg_count[sub_lg]++;

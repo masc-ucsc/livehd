@@ -19,7 +19,7 @@ Gioc::Gioc(std::string_view _path) : path(_path) {}
 void Gioc::do_trans(Lgraph *lg) {
   auto *library = lg->ref_library();
 
-  lg->each_sub_unique_fast([&](Node &node, Lg_type_id lgid) {
+  lg->each_local_sub_fast([&](Node &node, Lg_type_id lgid) {
     auto sub_name = library->get_name(lgid);
     if (sub_name.substr(0, 6) == "__fir_")
       return true;

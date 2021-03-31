@@ -305,7 +305,7 @@ void Cgen_verilog::create_module_io(std::string &buffer, Lgraph *lg) {
 }
 
 void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
-  lg->each_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
+  lg->each_local_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
     (void)lgid;
 
     auto        iname = get_scaped_name(node.default_instance_name());

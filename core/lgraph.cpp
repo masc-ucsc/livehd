@@ -1266,10 +1266,11 @@ void Lgraph::dump() {
 #endif
 
   fmt::print("\n");
-  each_sub_fast([this](Node &node, Lg_type_id lgid2) {
-    Lgraph *child = Lgraph::open(get_path(), node.get_type_sub());
+  each_local_unique_sub_fast([this](Lgraph *sub_lg) -> bool {
 
-    fmt::print("  subnode name:{}, lgid:{}, child lgraph name: {}\n", node.debug_name(), lgid2, child->get_name());
+    fmt::print("  sub lgraph name:{}\n", sub_lg->get_name());
+
+    return true;
   });
 
   /*

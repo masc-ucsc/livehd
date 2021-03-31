@@ -142,7 +142,7 @@ void Lgraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
   }
 }
 
-void Lgraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
+void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
   const auto &m = get_down_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
@@ -158,7 +158,7 @@ void Lgraph::each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> 
   }
 }
 
-void Lgraph::each_hier_fast_direct(const std::function<bool(Node &)> f) {
+void Lgraph::each_hier_fast(const std::function<bool(Node &)> f) {
   const auto ht = ref_htree();
 
   for (const auto &hidx : ht->depth_preorder()) {
@@ -173,29 +173,30 @@ void Lgraph::each_hier_fast_direct(const std::function<bool(Node &)> f) {
   }
 }
 
-void Lgraph::each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn) {
+void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)> fn) {
   const auto &         m = get_down_nodes_map();
   std::set<Lg_type_id> visited;
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
     I(cid);
     I(node_internal[cid].is_node_state());
-    I(node_internal[cid].is_master_root());
 
-    auto node = Node(this, it->first);
+    if (visited.find(it->second) != visited.end())
+      continue;
 
-    bool cont = true;
-    if (visited.find(it->second) == visited.end()) {
-      cont = fn(node, it->second);
-      visited.insert(it->second);
+    visited.insert(it->second);
+
+    auto *sub_lg = Lgraph::open(path, it->second);
+    if (sub_lg) {
+      bool cont = fn(sub_lg);
+      if (!cont)
+        return;
     }
-    if (!cont)
-      return;
   }
 }
 
-void Lgraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &                        visited,
-                                                     const std::function<bool(Node &, Lg_type_id)> fn) {
+void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited,
+                                      const std::function<void(Lgraph *lg_sub)> fn) {
   const auto &m = get_down_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
@@ -203,25 +204,23 @@ void Lgraph::each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &     
     I(node_internal[cid].is_node_state());
     I(node_internal[cid].is_master_root());
 
-    auto node = Node(this, it->first);
+    if (visited.find(it->second) != visited.end())
+      continue;
 
-    bool cont = true;
+    Lgraph *lg = Lgraph::open(get_path(), it->second);
+    if (lg == nullptr)
+      continue;
+
+    lg->each_hier_unique_sub_bottom_up_int(visited, fn);
     if (visited.find(it->second) == visited.end()) {
       visited.insert(it->second);
-      Lgraph *lg = Lgraph::open(get_path(), it->second);
-      if (lg != nullptr) {
-        if (!lg->is_empty()) {
-          lg->each_sub_hierarchical_unique_direct_int(visited, fn);
-          cont = fn(node, it->second);
-        }
-      }
+      fn(lg);
     }
-    if (!cont)
-      return;
   }
 }
 
-void Lgraph::each_sub_hierarchical_unique_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
+void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn) {
   std::set<Lg_type_id> visited;
-  each_sub_hierarchical_unique_direct_int(visited, fn);
+  each_hier_unique_sub_bottom_up_int(visited, fn);
 }
+

@@ -138,7 +138,7 @@ protected:
   static void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
   static void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
 
-  void each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visited, const std::function<bool(Node &, Lg_type_id)> fn);
+  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> fn);
 
 public:
   Lgraph()               = delete;
@@ -227,40 +227,26 @@ public:
   void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
   void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
 
-  void each_hier_fast_direct(const std::function<bool(Node &)>);
-  void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
-  void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
-  void each_sub_hierarchical_unique_direct(const std::function<bool(Node &, Lg_type_id)> fn);
+  void each_hier_fast(const std::function<bool(Node &)>);
+
+  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+
+  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)> fn);
+  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn);
 
   template <typename FN>
-  void each_sub_fast(const FN f1) {
+  void each_local_sub_fast(const FN f1) {
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
-      each_sub_fast_direct(f1);
+      each_local_sub_fast_direct(f1);
     } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
       auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
         f1(node, l_lgid);
         return true;
       };
-      each_sub_fast_direct(f2);
+      each_local_sub_fast_direct(f2);
     } else {
       I(false);
-      each_sub_fast_direct(f1);  // Better error message if I keep this
-    }
-  };
-
-  template <typename FN>
-  void each_sub_hierarchical_unique(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
-      each_sub_hierarchical_unique_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
-      auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
-        f1(node, l_lgid);
-        return true;
-      };
-      each_sub_hierarchical_unique_direct(f2);
-    } else {
-      I(false);
-      each_sub_hierarchical_unique_direct(f1);  // Better error message if I keep this
+      each_local_sub_fast_direct(f1);  // Better error message if I keep this
     }
   };
 };

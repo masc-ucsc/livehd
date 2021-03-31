@@ -186,29 +186,29 @@ class Lrand_range {
 protected:
   sfc64 rint;
 
-  const int base;
-  const int delta;
+  const T base;
+  const T delta;
 
   static_assert(std::numeric_limits<T>::max() <= std::numeric_limits<uint64_t>::max(),
                 "Lrand_rage only works for base types of less than 64bits");
 
 public:
-  Lrand_range(int min, int max) : base(min), delta(max - min) { assert(max > min); }
-  Lrand_range(int min, int max, uint64_t seed) : rint(seed), base(min), delta(max - min) { assert(max > min); }
+  Lrand_range(T min, T max) : base(min), delta(max - min) { assert(max > min); }
+  Lrand_range(T min, T max, uint64_t seed) : rint(seed), base(min), delta(max - min) { assert(max > min); }
 
-  T max(uint64_t m) {
+  T max(T m) {
     assert(m > base);
     assert(m < (base + delta));
     return base + rint.uniform<int>(m - base);
   }
 
-  T min(uint64_t m) {
+  T min(T m) {
     assert(m > base);
     assert(m < (base + delta));
     return base + m + rint.uniform<T>(delta - base - m);
   }
 
-  T between(uint64_t m1, uint64_t m2) {
+  T between(T m1, T m2) {
     assert(m1 < m2);
     return m1 + rint.uniform<T>(m2 - m1);
   }

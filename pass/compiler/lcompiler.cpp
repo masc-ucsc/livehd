@@ -167,9 +167,7 @@ void Lcompiler::do_cprop() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      lg->each_sub_hierarchical_unique([this, &cp](Node &node, Lg_type_id lgid) {
-        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
-        Lgraph *lg_sub = Lgraph::open(path, lgid);
+      lg->each_hier_unique_sub_bottom_up([this, &cp](Lgraph *lg_sub) {
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
         gviz ? gv.do_from_lgraph(lg_sub, "local.cprop-ed") : void();
@@ -234,10 +232,9 @@ void Lcompiler::do_firbits() {
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
 
-      lg->each_sub_hierarchical_unique([this](Node &node, Lg_type_id lgid) {
+      lg->each_hier_unique_sub_bottom_up([this](LGraph *lg_sub) {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
-        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
-        Lgraph *lg_sub = Lgraph::open(path, lgid);
+        fmt::print("visiting lgraph name:{}\n", lg_sub->get_name());
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());

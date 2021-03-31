@@ -88,7 +88,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
              n_wire,
              n_wire_bits);
 
-  g->each_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
+  g->each_local_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
 
     Lgraph *sub_lg = Lgraph::open(path, lgid);
@@ -108,7 +108,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
       return;  // No blackboxes
     }
 
-    this->do_wirecount(sub_lg, indent + 1);
+    do_wirecount(sub_lg, indent + 1);
   });
 }
 

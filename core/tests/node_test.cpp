@@ -113,7 +113,7 @@ protected:
   }
 };
 
-TEST_F(Setup_graphs_test, each_sub_graph) {
+TEST_F(Setup_graphs_test, iterate_sub_graph) {
   for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;

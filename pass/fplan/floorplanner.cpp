@@ -100,7 +100,7 @@ void Lhd_floorplanner::write_lhd_node() {
   unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, nt.root_index());
 
   unsigned int node_count = 0;
-  root_lg->each_hier_fast_direct([&node_count](const Node& n) {
+  root_lg->each_hier_fast([&node_count](const Node& n) {
     if (!n.is_type_synth()) {
       return true;
     }
