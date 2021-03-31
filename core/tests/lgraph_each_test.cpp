@@ -301,7 +301,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   std::vector<Lgraph *> all_lgs;
 
-  top->each_hier_unique_sub_bottom_up([this, &to_pos, &all_lgs](Lgraph *lg) -> bool {
+  top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph *lg) -> bool {
     //fmt::print("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
 
     EXPECT_TRUE(to_pos.find(lg->get_lgid()) == to_pos.end());
@@ -313,7 +313,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   });
 
   // Slow but simple way to compute the levels
-  top->get_htree().each_bottom_up_fast([this, &to_level](const Hierarchy_index &hidx, const Hierarchy_data &data) {
+  top->get_htree().each_bottom_up_fast([&to_level](const Hierarchy_index &hidx, const Hierarchy_data &data) {
     // fmt::print("bottom up lgid:{}\n", data.lgid);
     to_level[data.lgid] = hidx.level;
   });
@@ -323,7 +323,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   // top->get_htree().dump();
 
-  top->each_hier_unique_sub_bottom_up([this, &to_pos, &to_level, &all_visited](Lgraph *lg) -> bool{
+  top->each_hier_unique_sub_bottom_up([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool{
     bool sure_leaf=false;
     if (to_level.find(lg->get_lgid()) != to_level.end()) {
       // auto level = to_level[lg->get_lgid()];

@@ -1266,7 +1266,7 @@ void Lgraph::dump() {
 #endif
 
   fmt::print("\n");
-  each_local_unique_sub_fast([this](Lgraph *sub_lg) -> bool {
+  each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {
 
     fmt::print("  sub lgraph name:{}\n", sub_lg->get_name());
 
