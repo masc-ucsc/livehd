@@ -77,7 +77,5 @@ void Eprp_utils::clean_dir(std::string_view dir) {
 
   mkdir(path.c_str(), 0755);  // Create clean directory again
 
-  static Thread_pool tp(2);  // Keep pool running for frequent calls
-
-  tp.add(clean_dir_thread, dtemp2);
+  thread_pool.add(clean_dir_thread, dtemp2);
 }
