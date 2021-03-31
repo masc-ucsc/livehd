@@ -56,7 +56,7 @@ void Hierarchy_tree::regenerate_step(Lgraph *lg, const Hierarchy_index &parent) 
     I(child_lgid == node.get_type_sub());
 #endif
 
-    auto *child_lg = lg->get_library().try_find_Lgraph(child_lgid);  // faster
+    auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);  // faster
     if (child_lg == nullptr) {
       child_lg = node.ref_type_sub_lgraph();
       if (child_lg == nullptr)

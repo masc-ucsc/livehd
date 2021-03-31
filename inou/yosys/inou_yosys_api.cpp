@@ -263,7 +263,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   call_yosys(vars);
 
   std::vector<Lgraph *> lgs;
-  gl->each_Lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
+  gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
     (void)name;
     if (gl->get_version(id) > max_version) {
       Lgraph *lg = Lgraph::open(path, id);

@@ -2239,7 +2239,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
-      auto *         g      = library->try_find_Lgraph(&module->name.c_str()[1]);
+      auto *         g      = library->try_find_lgraph(&module->name.c_str()[1]);
       if (g == nullptr) {
         g = ::Lgraph::create(path, &module->name.c_str()[1], "-");
       }
@@ -2290,7 +2290,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
           }
         }
 
-        auto *g = library->try_find_Lgraph(mod_name);
+        auto *g = library->try_find_lgraph(mod_name);
         I(g);
 
         process_cell_drivers_intialization(module, g);

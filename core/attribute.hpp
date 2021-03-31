@@ -48,8 +48,8 @@ class Attribute {
 
 public:
   static Attr_data *ref(const Base &obj) {
-    if (unlikely(obj.get_top_Lgraph() != last_lg))
-      setup_table(obj.get_top_Lgraph());
+    if (unlikely(obj.get_top_lgraph() != last_lg))
+      setup_table(obj.get_top_lgraph());
     return last_attr;
   }
   static Attr_data *ref(const Lgraph *lg) {

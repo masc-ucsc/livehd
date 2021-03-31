@@ -25,12 +25,12 @@ Lgraph::~Lgraph() {
   library->unregister(name, lgid, this);
 }
 
-bool Lgraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_Lgraph(path, name) != nullptr; }
+bool Lgraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
 Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string_view source) {
   auto *lib = Graph_library::instance(path);
   I(lib);
-  auto *lg = lib->setup_Lgraph(name, source);
+  auto *lg = lib->setup_lgraph(name, source);
   lg->clear();
 
   return lg;
@@ -62,7 +62,7 @@ Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
   if (unlikely(lib == nullptr))
     return nullptr;
 
-  Lgraph *lg = lib->try_find_Lgraph(lgid);
+  Lgraph *lg = lib->try_find_lgraph(lgid);
   if (likely(lg != nullptr)) {
     return lg;
   }
@@ -73,11 +73,11 @@ Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
   auto        name = lib->get_name(lgid);
   std::string source{lib->get_source(lgid)};
 
-  return lib->setup_Lgraph(name, source);
+  return lib->setup_lgraph(name, source);
 }
 
 Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
-  Lgraph *lg = Graph_library::try_find_Lgraph(path, name);
+  Lgraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
     return lg;
   }
@@ -91,7 +91,7 @@ Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
 
   std::string source{lib->get_source(name)};
 
-  return lib->setup_Lgraph(name, source);
+  return lib->setup_lgraph(name, source);
 }
 
 void Lgraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {

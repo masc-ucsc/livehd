@@ -59,7 +59,7 @@ void Meta_api::copy(Eprp_var &var) {
 
   auto *glibrary = Graph_library::instance(path);
 
-  glibrary->copy_Lgraph(name, dest);
+  glibrary->copy_lgraph(name, dest);
 }
 
 void Meta_api::match(Eprp_var &var) {
@@ -75,7 +75,7 @@ void Meta_api::match(Eprp_var &var) {
   std::vector<Lgraph *> lgs;
 
   try {
-    library->each_Lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
+    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
       Lgraph *lg = Lgraph::open(path, name);

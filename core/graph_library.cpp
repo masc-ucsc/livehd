@@ -249,7 +249,7 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
   return sub_nodes[lgid].get_lgid() == lgid;
 }
 
-Lgraph *Graph_library::try_find_Lgraph_int(std::string_view path, std::string_view name) {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, std::string_view name) {
   const Graph_library *lib = instance_int(path);  // path must be full path
 
   const auto &glib2 = global_name2lgraph[lib->path];  // WARNING: This inserts name too when needed
@@ -260,7 +260,7 @@ Lgraph *Graph_library::try_find_Lgraph_int(std::string_view path, std::string_vi
   return nullptr;
 }
 
-Lgraph *Graph_library::try_find_Lgraph_int(std::string_view name) const {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view name) const {
   I(global_name2lgraph.find(path) != global_name2lgraph.end());
 
   const auto &glib2 = global_name2lgraph[path];
@@ -271,7 +271,7 @@ Lgraph *Graph_library::try_find_Lgraph_int(std::string_view name) const {
   return nullptr;
 }
 
-Lgraph *Graph_library::try_find_Lgraph_int(Lg_type_id lgid) const {
+Lgraph *Graph_library::try_find_lgraph_int(Lg_type_id lgid) const {
   if (lgid >= attributes.size())
     return nullptr;
 
@@ -296,9 +296,9 @@ Lgraph *Graph_library::try_find_Lgraph_int(Lg_type_id lgid) const {
   return lg;
 }
 
-Lgraph *Graph_library::try_find_Lgraph_int(std::string_view path, Lg_type_id lgid) {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
   const Graph_library *lib = instance_int(path);  // path must be full path
-  return lib->try_find_Lgraph_int(lgid);
+  return lib->try_find_lgraph_int(lgid);
 }
 
 Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
@@ -494,9 +494,9 @@ void Graph_library::reload_int() {
   }
 }
 
-Lgraph *Graph_library::setup_Lgraph(std::string_view name, std::string_view source) {
+Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
   std::lock_guard<std::mutex> guard(lgs_mutex);
-  auto *                      lg = try_find_Lgraph_int(name);
+  auto *                      lg = try_find_lgraph_int(name);
   if (lg)
     return lg;
 
@@ -583,7 +583,7 @@ void Graph_library::clear_int(Lg_type_id lgid) {
   sub_nodes[lgid].reset_pins();
 }
 
-Lg_type_id Graph_library::copy_Lgraph_int(std::string_view name, std::string_view new_name) {
+Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_view new_name) {
   graph_library_clean = false;
   auto it2            = global_name2lgraph[path].find(name);
   if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
@@ -643,7 +643,7 @@ Lg_type_id Graph_library::copy_Lgraph_int(std::string_view name, std::string_vie
   return id_new;
 }
 
-Lg_type_id Graph_library::register_Lgraph_int(std::string_view name, std::string_view source, Lgraph *lg) {
+Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string_view source, Lgraph *lg) {
   I(false);  // deprecated
 
   if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
@@ -685,13 +685,13 @@ void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgrap
     expunge_int(name);
 }
 
-void Graph_library::each_Lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+void Graph_library::each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
   for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
 
-void Graph_library::each_Lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+void Graph_library::each_lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 
