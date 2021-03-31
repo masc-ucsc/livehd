@@ -222,8 +222,8 @@ protected:
     I((index.pos >> 2) < (int)pointers_stack[index.level].size());
 
     auto pos = pointers_stack[index.level][index.pos >> 2].next_sibling;
-    if ((pos & 3) <= index.pos & 3 || has_next_sibling_space(index))
-      return true;
+    if ((pos & 3) > (index.pos & 3) || (pos&3)==0)
+      return true; // Either the index is smaller than end or all the entries are used (pos==0)
 
     return false;
   }

@@ -232,7 +232,7 @@ void Lcompiler::do_firbits() {
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
 
-      lg->each_hier_unique_sub_bottom_up([this](LGraph *lg_sub) {
+      lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
         fmt::print("visiting lgraph name:{}\n", lg_sub->get_name());
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
