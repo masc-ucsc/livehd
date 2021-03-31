@@ -47,10 +47,10 @@ void Pass_compiler::compile(Eprp_var &var) {
 
   if (is_firrtl) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
-    LGraph *seed_lg;
+    Lgraph *seed_lg;
     auto *  library = Graph_library::instance(path);
     if (!library->exists(path, "__firop_seed")) {
-      seed_lg = LGraph::create(path, "__firop_seed", "-");
+      seed_lg = Lgraph::create(path, "__firop_seed", "-");
       setup_firmap_library(seed_lg);
     }
     firrtl_compilation(var, compiler);
@@ -88,7 +88,7 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 #endif
 }
 
-void Pass_compiler::setup_firmap_library(LGraph *lg) {
+void Pass_compiler::setup_firmap_library(Lgraph *lg) {
   auto &lg_fir_const = lg->ref_library()->setup_sub("__fir_const", "-");
   lg_fir_const.add_output_pin("Y");
 

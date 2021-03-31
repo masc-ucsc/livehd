@@ -18,11 +18,11 @@ static_assert(sizeof(Node_internal) == 32, "Node should be 32 bytes and 32 bytes
 static_assert(sizeof(Node_internal_Page) == 32, "Node should 32 bytes and 32 bytes aligned");
 static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
-Index_ID SEdge_Internal::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
+Index_id SEdge_Internal::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
 
-Index_ID Edge_raw::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
+Index_id Edge_raw::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
 
-const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_ID ptr_idx, Port_ID inp_pid, Port_ID dst_pid) {
+const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Index_id ptr_idx, Port_ID inp_pid, Port_ID dst_pid) {
   const Edge_raw *eit = bt;
   while (eit != et) {
     if (eit->get_idx() == ptr_idx && eit->get_dst_pid() == dst_pid) {
@@ -39,22 +39,22 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
   return nullptr;
 }
 
-Index_ID Edge_raw::get_self_idx() const {
+Index_id Edge_raw::get_self_idx() const {
   const auto &root_page = Node_internal_Page::get(this);
   const auto &root_self = Node_internal::get(this);
 
-  SIndex_ID delta = &root_self - (const Node_internal *)&root_page;  // Signed and bigger than Index_ID
+  SIndex_id delta = &root_self - (const Node_internal *)&root_page;  // Signed and bigger than Index_id
   I(delta < 4096 / sizeof(Node_internal) && delta > 0);
 
-  SIndex_ID idx = delta + root_page.get_idx();
+  SIndex_id idx = delta + root_page.get_idx();
 
-  return static_cast<Index_ID>(idx);
+  return static_cast<Index_id>(idx);
 }
 
-Index_ID Node_internal::get_self_idx() const {
+Index_id Node_internal::get_self_idx() const {
   const auto &root_page = Node_internal_Page::get(this);
 
-  SIndex_ID delta = this - (const Node_internal *)&root_page;
+  SIndex_id delta = this - (const Node_internal *)&root_page;
 
   return delta + root_page.get_idx();
 }
@@ -67,7 +67,7 @@ const Node_internal &Node_internal::get_root() const {
   const auto &         root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr  = (const Node_internal *)&root_page;
 
-  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx();  // Signed and bigger than Index_ID
+  SIndex_id delta = static_cast<SIndex_id>(nid) - root_page.get_idx();  // Signed and bigger than Index_id
   root_ptr        = (root_ptr + delta);
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
@@ -83,14 +83,14 @@ const Node_internal &Node_internal::get_master_root() const {
   const auto &         root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr;
 
-  SIndex_ID delta = static_cast<SIndex_ID>(nid) - root_page.get_idx();  // Signed and bigger than Index_ID
+  SIndex_id delta = static_cast<SIndex_id>(nid) - root_page.get_idx();  // Signed and bigger than Index_id
   root_ptr        = ((const Node_internal *)&root_page) + delta;
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
   if (root_ptr->is_master_root())
     return *root_ptr;
 
-  delta    = static_cast<SIndex_ID>(root_ptr->get_nid()) - root_page.get_idx();
+  delta    = static_cast<SIndex_id>(root_ptr->get_nid()) - root_page.get_idx();
   root_ptr = ((const Node_internal *)&root_page) + delta;
 
   I(root_ptr->is_root());
@@ -110,7 +110,7 @@ void Node_internal::try_recycle() {
 
   // TODO: recycle the node no matter what
 
-  SIndex_ID self_idx = get_self_idx();
+  SIndex_id self_idx = get_self_idx();
 
   set_free_state();
 
@@ -182,7 +182,7 @@ void Node_internal::del_output_int(const Edge_raw *out_edge) {
 }
 
 #if 0
-bool Node_internal::xxx(Index_ID src_idx, Port_ID pid, bool input) {
+bool Node_internal::xxx(Index_id src_idx, Port_ID pid, bool input) {
   const Edge_raw *eit = nullptr;
   if (input)
     eit = Edge_raw::find_edge(get_output_begin(), get_output_end(), src_idx, pid, get_dst_pid());
@@ -232,12 +232,12 @@ void Node_internal::dump() const {
 void Node_internal::dump_full() const {
   Node_internal *root_ptr = (Node_internal *)&get_root();
 
-  Index_ID             root_idx = root_ptr->get_nid();
+  Index_id             root_idx = root_ptr->get_nid();
   const Node_internal *node     = this;
 
   node->dump();
   while (true) {
-    Index_ID idx = node->get_next();
+    Index_id idx = node->get_next();
     node         = &root_ptr[idx - root_idx];
 
     node->dump();
@@ -363,7 +363,7 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
 
 Port_ID Edge_raw::get_dst_pid() const { return Node_internal::get(this).get_dst_pid(); }
 
-Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
+Node_pin Edge_raw::get_out_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id self_idx) const {
   I(get_self_idx() == self_idx);
   if (is_input())
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), false);
@@ -371,7 +371,7 @@ Node_pin Edge_raw::get_out_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
     return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), false);
 }
 
-Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hidx, Index_ID self_idx) const {
+Node_pin Edge_raw::get_inp_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id self_idx) const {
   I(get_self_idx() == self_idx);
   if (is_input())
     return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), true);
@@ -379,4 +379,4 @@ Node_pin Edge_raw::get_inp_pin(LGraph *g, LGraph *cg, const Hierarchy_index &hid
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), true);
 }
 
-Index_ID Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }
+Index_id Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }

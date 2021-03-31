@@ -35,7 +35,7 @@ void Pass_mockturtle::work(Eprp_var &var) {
   }
 }
 
-void Pass_mockturtle::do_work(LGraph *g) {
+void Pass_mockturtle::do_work(Lgraph *g) {
   // LGBench b("pass.mockturtle");
 
   fmt::print("Partitioning...\n");
@@ -55,9 +55,9 @@ void Pass_mockturtle::do_work(LGraph *g) {
   convert_mockturtle_to_KLUT();
   fmt::print("All mockturtle networks are converted to KLUT networks.\n\n");
 
-  fmt::print("Creating lutified LGraph...\n");
+  fmt::print("Creating lutified Lgraph...\n");
   create_lutified_lgraph(g);
-  fmt::print("Lutified LGraph created.\n\n");
+  fmt::print("Lutified Lgraph created.\n\n");
 
   node2gid.clear();
   gid2mt.clear();
@@ -72,7 +72,7 @@ void Pass_mockturtle::do_work(LGraph *g) {
   gid_pi2sink_node_lg_pid.clear();
 }
 
-bool Pass_mockturtle::lg_partition(LGraph *g) {
+bool Pass_mockturtle::lg_partition(Lgraph *g) {
   unsigned int new_group_id = 0;
 
   for (const auto &node : g->forward()) {
@@ -204,8 +204,8 @@ void Pass_mockturtle::match_bit_width_by_sign_extension(const Comparator_input_s
   }
 }
 
-// creating and mapping a logic-op LGraph node to a mig node
-// mapping it's both input and output LGraph edges to mig signals
+// creating and mapping a logic-op Lgraph node to a mig node
+// mapping it's both input and output Lgraph edges to mig signals
 template <typename sig_type, typename ntk_type>
 void Pass_mockturtle::mapping_logic_cell_lg2mt(sig_type (ntk_type::*create_nary_op)(std::vector<sig_type> const &),
                                                ntk_type &mt_ntk, const Node &node, const unsigned int &group_id) {
@@ -385,8 +385,8 @@ sig_type Pass_mockturtle::compare_op(const Comparator_input_signal<sig_type> &l_
   return output;
 }
 
-// creating and mapping a compare-op LGraph node to a mig node
-// mapping it's both input and output LGraph edges to mig signals
+// creating and mapping a compare-op Lgraph node to a mig node
+// mapping it's both input and output Lgraph edges to mig signals
 template <typename ntk_type>
 void Pass_mockturtle::mapping_comparison_cell_lg2mt(const bool &lt_op, const bool &eq_op, ntk_type &mt_ntk, const Node &node,
                                                     const unsigned int &group_id) {
@@ -621,7 +621,7 @@ void Pass_mockturtle::mapping_dynamic_shift_cell_lg2mt(const bool &is_shift_righ
   }
 }
 
-void Pass_mockturtle::create_mockturtle_network(LGraph *g) {
+void Pass_mockturtle::create_mockturtle_network(Lgraph *g) {
   for (const auto &node : g->forward()) {
 #if 1
     if (node2gid.find(node.get_compact()) == node2gid.end())
@@ -901,9 +901,9 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
   }
 }
 
-void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
+void Pass_mockturtle::create_lutified_lgraph(Lgraph *old_lg) {
   auto    new_lg_name = absl::StrCat(old_lg->get_name(), LUTIFIED_NETWORK_NAME_SIGNATURE);
-  LGraph *new_lg      = old_lg->clone_skeleton(new_lg_name);
+  Lgraph *new_lg      = old_lg->clone_skeleton(new_lg_name);
 
   auto old_ginp_node                                = old_lg->get_graph_input_node();
   auto old_gout_node                                = old_lg->get_graph_output_node();
@@ -981,7 +981,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     fmt::print("number of gates in klut_ntk:{}\n", klut_ntk.num_gates());
 
     // create new lut nodes
-    fmt::print("Step-II-a: Creating KLUT network (gid:{}) cells in LGraph...\n", group_id);
+    fmt::print("Step-II-a: Creating KLUT network (gid:{}) cells in Lgraph...\n", group_id);
     klut_ntk.foreach_node([&](const auto &klut_ntk_node) {
       // pi does not have any fan-in, continue
       if (klut_ntk.is_pi(klut_ntk_node))
@@ -1015,7 +1015,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
     fmt::print("finished.\n");
 
     // create inner edges to connect lg_nodes already created
-    fmt::print("Step-II-b: Creating KLUT network (gid:{}) inner edges in LGraph...\n", group_id);
+    fmt::print("Step-II-b: Creating KLUT network (gid:{}) inner edges in Lgraph...\n", group_id);
     klut_ntk.foreach_node([&](const auto &klut_ntk_node) {
       // constant and primary input do not have fanin
       if (klut_ntk.is_pi(klut_ntk_node) || klut_ntk.is_constant(klut_ntk_node))
@@ -1044,7 +1044,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
   fmt::print("Lutified part mapped.\n\n");
 
   // create edges for input signals
-  fmt::print("Creating KLUT boundary input edges in LGraph...\n");
+  fmt::print("Creating KLUT boundary input edges in Lgraph...\n");
   for (const auto &inp_edge : bdinp_edges) {
     const auto                                           group_id = edge2klut_inp_sigs[inp_edge].gid;
     const std::vector<mockturtle::klut_network::signal> &sigs     = edge2klut_inp_sigs[inp_edge].signals;
@@ -1097,7 +1097,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
   fmt::print("finished.\n");
 
   // create edges for output signal
-  fmt::print("Creating KLUT boundary output edges in LGraph...\n");
+  fmt::print("Creating KLUT boundary output edges in Lgraph...\n");
   for (const auto &out_edge : bdout_edges) {
     const auto                                           group_id = edge2klut_out_sigs[out_edge].gid;
     const auto                                           klut     = gid2klut[group_id];
@@ -1134,7 +1134,7 @@ void Pass_mockturtle::create_lutified_lgraph(LGraph *old_lg) {
 }
 
 // solve complemented signal
-void Pass_mockturtle::connect_complemented_signal(LGraph *g, Node_pin &driver_pin, Node_pin &sink_pin,
+void Pass_mockturtle::connect_complemented_signal(Lgraph *g, Node_pin &driver_pin, Node_pin &sink_pin,
                                                   const mockturtle::klut_network &        klut,
                                                   const mockturtle::klut_network::signal &signal) {
   if (klut.is_complemented(signal)) {

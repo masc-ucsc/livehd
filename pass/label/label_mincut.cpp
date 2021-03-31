@@ -7,7 +7,7 @@
 
 Label_mincut::Label_mincut(bool _verbose, bool _hier) : verbose(_verbose), hier(_hier) { (void)verbose; }
 
-void Label_mincut::label(LGraph *g) {
+void Label_mincut::label(Lgraph *g) {
   g->each_graph_input([&](const Node_pin &pin) {
     (void)pin;  // to avoid warning
   });

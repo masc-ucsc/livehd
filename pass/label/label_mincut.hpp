@@ -13,7 +13,7 @@ private:
   const bool hier;
 
 public:
-  void label(LGraph *g);
+  void label(Lgraph *g);
 
   Label_mincut(bool _verbose, bool _hier);
 };

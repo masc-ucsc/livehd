@@ -75,7 +75,7 @@ public:
 
   virtual bool         layout(FPOptimization opt, double targetAR = 1.0) = 0;
   virtual void         outputHotSpotLayout(std::ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual unsigned int outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
+  virtual unsigned int outputLgraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
 
   // find a node in tree that can be mapped to this FPObject
   unsigned int findNode(Node_tree& tree, Tree_index tidx, double calcX, double calcY);

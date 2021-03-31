@@ -220,7 +220,7 @@ public:
   bool             is_output(std::string_view name) { return name.at(0) == '%'; }
   bool             is_input(std::string_view name) { return name.at(0) == '$'; }
   std::string_view get_name(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
-  std::string_view get_vname(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }  // better expression for LGraph
+  std::string_view get_vname(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }  // better expression for Lgraph
                                                                                                // passes
   Lnast_ntype get_type(const Lnast_nid &nid) { return get_data(nid).type; }
   int16_t     get_subs(const Lnast_nid &nid) { return get_data(nid).subs; }

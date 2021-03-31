@@ -21,7 +21,7 @@ void pass_submatch::setup() {
 
 pass_submatch::pass_submatch(const Eprp_var &var) : Pass("pass.submatch", var) {}
 
-void pass_submatch::do_work(LGraph *g) { find_subs(g); }
+void pass_submatch::do_work(Lgraph *g) { find_subs(g); }
 
 void pass_submatch::work(Eprp_var &var) {
   pass_submatch p(var);
@@ -32,7 +32,7 @@ void pass_submatch::work(Eprp_var &var) {
   }
 }
 
-void pass_submatch::find_subs(LGraph *g) {
+void pass_submatch::find_subs(Lgraph *g) {
   fmt::print("TODO: implement pass\n");
 
   struct Hash_attr {

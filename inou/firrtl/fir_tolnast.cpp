@@ -2042,8 +2042,8 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
   return sub;
 }
 
-/* Used to populate Sub_Nodes so that when LGraphs are constructed,
- * all the LGraphs will be able to populate regardless of order. */
+/* Used to populate Sub_Nodes so that when Lgraphs are constructed,
+ * all the Lgraphs will be able to populate regardless of order. */
 void Inou_firrtl::AddPortToSub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_pos, const std::string& port_id,
                                const uint8_t& dir) {
   if (dir == 1) {                // PORT_DIRECTION_IN
@@ -2133,7 +2133,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
 /* Not much to do here since this is just a Verilog
  * module that FIRRTL is going to use. Will have to
  * rely upon some Verilog pass to get the actual
- * contents of this into LGraph form. */
+ * contents of this into Lgraph form. */
 void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule& emod) {
   // Figure out all of mods IO and their respective bw + dir.
   std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>>

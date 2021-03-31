@@ -19,7 +19,7 @@ protected:
   std::set<std::string> name_set;
 
   void SetUp() override {
-    auto *lg = LGraph::create("lgdb_lgtest", "constants", "-");
+    auto *lg = Lgraph::create("lgdb_lgtest", "constants", "-");
 
     for (int i = 0; i < 100; ++i) {
       dpin.emplace_back(lg->create_node_const(i).get_driver_pin());

@@ -15,7 +15,7 @@ public:
   static void pass(Eprp_var& v);
 
 private:
-  LGraph* root_lg;
+  Lgraph* root_lg;
 
   void makefp_int(Lhd_floorplanner& fp, const std::string_view dest, const std::string_view opt, const float ar);
 };

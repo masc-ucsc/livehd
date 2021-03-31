@@ -6,23 +6,23 @@
 #include "mmap_tree.hpp"
 
 class Node;
-class LGraph;
+class Lgraph;
 
 class Hierarchy_tree : public mmap_lib::tree<Hierarchy_data> {
 protected:
-  LGraph *top;
+  Lgraph *top;
 
-  void regenerate_step(LGraph *lg, const Hierarchy_index &parent);
+  void regenerate_step(Lgraph *lg, const Hierarchy_index &parent);
 
 public:
-  Hierarchy_tree(LGraph *top);
+  Hierarchy_tree(Lgraph *top);
 
   void regenerate();  // Triggered when the hierarchy may have changed
 
   // Lg_type_id get_lgid(const Hierarchy_index &hidx) const { return get_data(hidx).lgid; }
   Node get_instance_up_node(const Hierarchy_index &hidx) const;
 
-  LGraph *ref_lgraph(const Hierarchy_index &hidx) const;
+  Lgraph *ref_lgraph(const Hierarchy_index &hidx) const;
 
   Hierarchy_index go_down(const Node &node) const;
 

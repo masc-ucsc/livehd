@@ -16,11 +16,11 @@ protected:
 
   absl::flat_hash_map<Node_pin::Compact_class_driver, std::string> dpin_name_map;
 
-  void do_trans(LGraph* g, Eprp_var& var, std::string_view module_name);
+  void do_trans(Lgraph* g, Eprp_var& var, std::string_view module_name);
 
-  void initial_tree_coloring(LGraph* g, Lnast& lnast);
-  void begin_transformation(LGraph* g, Lnast& lnast, Lnast_nid& ln_node);
-  void handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);
+  void initial_tree_coloring(Lgraph* g, Lnast& lnast);
+  void begin_transformation(Lgraph* g, Lnast& lnast, Lnast_nid& ln_node);
+  void handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node);
 
   void attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
@@ -43,7 +43,7 @@ protected:
   void attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
   void attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
 
-  void handle_io(LGraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
+  void handle_io(Lgraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
   // void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
   void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, const std::string_view& pin_name, const uint32_t& bits);
 

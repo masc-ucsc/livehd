@@ -14,9 +14,9 @@ protected:
   // std::vector <std::string > graph1, graph2;
   // std::multimap <std::string, std::multimap <std::string, int> > graphsToCheck;
 
-  void check_lec(LGraph *g);
+  void check_lec(Lgraph *g);
 
-  void do_work(LGraph *g);
+  void do_work(Lgraph *g);
 
 public:
   static void work(Eprp_var &var);

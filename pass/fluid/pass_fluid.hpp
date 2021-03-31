@@ -83,15 +83,15 @@ public:
   Port_ID ffvq   = 1;
   Port_ID ffsin  = 2;
 
-  void find_join(LGraph *g);
-  void find_fork(LGraph *g);
-  void add_fork_deadlock(LGraph *g);
-  void add_fork(LGraph *g);
-  void add_join_deadlock(LGraph *g);
-  void add_join(LGraph *g);
-  void result_graph(LGraph *g);
-  void transform(LGraph *orig) final;
-  void traverse(LGraph *g, int round);
+  void find_join(Lgraph *g);
+  void find_fork(Lgraph *g);
+  void add_fork_deadlock(Lgraph *g);
+  void add_fork(Lgraph *g);
+  void add_join_deadlock(Lgraph *g);
+  void add_join(Lgraph *g);
+  void result_graph(Lgraph *g);
+  void transform(Lgraph *orig) final;
+  void traverse(Lgraph *g, int round);
 };
 
 #endif

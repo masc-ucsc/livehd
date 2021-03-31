@@ -9,14 +9,14 @@
 
 class Invariant_finder {
 private:
-  LGraph *             elab_graph;
-  LGraph *             synth_graph;
+  Lgraph *             elab_graph;
+  Lgraph *             synth_graph;
   Invariant_boundaries boundaries;
 
   bool          processed;
   bm::bvector<> stack;
 
-  typedef std::pair<Index_ID, uint32_t>   Node_bit;
+  typedef std::pair<Index_id, uint32_t>   Node_bit;
   absl::flat_hash_map<Node_bit, Gate_set> partial_cone_cells;  // partial_gate_count
   absl::flat_hash_map<Node_bit, Net_set>  partial_endpoints;   // sips
 
@@ -31,11 +31,11 @@ private:
 
   void find_invariant_boundaries();
 
-  void propagate_until_boundary(Index_ID nid, uint32_t bit_selection);
+  void propagate_until_boundary(Index_id nid, uint32_t bit_selection);
   void clear_cache(const Node_bit &entry);
 
 public:
-  Invariant_finder(LGraph *elab, LGraph *synth, const std::string &hier_sep = ".") : boundaries(hier_sep) {
+  Invariant_finder(Lgraph *elab, Lgraph *synth, const std::string &hier_sep = ".") : boundaries(hier_sep) {
     processed   = false;
     elab_graph  = elab;
     synth_graph = synth;
@@ -43,8 +43,8 @@ public:
 
   Invariant_finder(const Invariant_find_options &pack) : boundaries(pack.hierarchical_separator) {
     processed   = false;
-    elab_graph  = LGraph::open(pack.elab_lgdb, pack.top);
-    synth_graph = LGraph::open(pack.synth_lgdb, pack.top);
+    elab_graph  = Lgraph::open(pack.elab_lgdb, pack.top);
+    synth_graph = Lgraph::open(pack.synth_lgdb, pack.top);
   }
 
   const Invariant_boundaries &get_boundaries() {

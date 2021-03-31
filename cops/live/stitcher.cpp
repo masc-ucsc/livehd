@@ -17,7 +17,7 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   boundaries = Invariant_boundaries::deserialize(invariant_file);
   invariant_file.close();
 
-  original = LGraph::open(pack.osynth_lgdb, boundaries->top);
+  original = Lgraph::open(pack.osynth_lgdb, boundaries->top);
 
   if (!original) {
     Pass::error(fmt::format("Live_stitcher: I was not able to open original synthesized netlist {} in {}",
@@ -26,10 +26,10 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   }
 }
 
-void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
-  std::map<Index_ID, Index_ID> nsynth2originalid;
-  std::map<Index_ID, Index_ID> inp2originalid;
-  std::map<Index_ID, Index_ID> out2originalid;
+void Live_stitcher::stitch(Lgraph *nsynth, const std::set<Net_ID> &diffs) {
+  std::map<Index_id, Index_id> nsynth2originalid;
+  std::map<Index_id, Index_id> inp2originalid;
+  std::map<Index_id, Index_id> out2originalid;
 
   // add new cells
   for (auto &idx : nsynth->fast()) {
@@ -51,7 +51,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
         }
       }
       else {
-        Index_ID nidx          = original->create_node().get_nid();
+        Index_id nidx          = original->create_node().get_nid();
         nsynth2originalid[idx] = nidx;
 
         switch (nsynth->node_type_get(idx).op) {
@@ -103,7 +103,7 @@ void Live_stitcher::stitch(LGraph *nsynth, const std::set<Net_ID> &diffs) {
           auto name = nsynth->get_node_wirename(idx);
           if (!original->has_wirename(name))
             continue;
-          Index_ID oidx = original->get_node_id(name);
+          Index_id oidx = original->get_node_id(name);
           for (auto &edge : original->out_edges(oidx)) {
             Node_pin dpin = original->get_node(nsynth2originalid[idx]).setup_driver_pin(edge.get_out_pin().get_pid());
 

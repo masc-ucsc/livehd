@@ -1280,7 +1280,7 @@ void Cprop::setup_clock(Node &reg_node) {
   lg->add_edge(clk_dpin, clk_spin);
 }
 
-void Cprop::do_trans(LGraph *lg) {
+void Cprop::do_trans(Lgraph *lg) {
   Lbench b("pass.cprop");
   /* bool tup_get_left = false; */
 

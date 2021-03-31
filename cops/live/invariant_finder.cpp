@@ -8,8 +8,8 @@
 using namespace Live;
 
 void Invariant_finder::get_topology() {
-  std::vector<LGraph *>         discovered;
-  absl::flat_hash_set<LGraph *> visited;
+  std::vector<Lgraph *>         discovered;
+  absl::flat_hash_set<Lgraph *> visited;
 
   discovered.push_back(elab_graph);
 
@@ -19,7 +19,7 @@ void Invariant_finder::get_topology() {
   boundaries.top                          = elab_graph->get_name();
 
   while (discovered.size()) {
-    LGraph *current = discovered.back();
+    Lgraph *current = discovered.back();
     discovered.pop_back();
     if (visited.find(current) != visited.end()) {
       continue;
@@ -32,7 +32,7 @@ void Invariant_finder::get_topology() {
       if (current->node_type_get(idx).op != SubGraph_Op)
         continue;
 
-      LGraph *subgraph = LGraph::open(current->get_path(), current->subgraph_id_get(idx));
+      Lgraph *subgraph = Lgraph::open(current->get_path(), current->subgraph_id_get(idx));
       I(subgraph);
 
       boundaries.hierarchy_tree[Invariant_boundaries::get_graphID(subgraph)].insert(Invariant_boundaries::get_graphID(current));
@@ -60,8 +60,8 @@ void Invariant_finder::get_topology() {
   }
 }
 
-void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selection) {
-  Index_ID    master_id = synth_graph->get_master_nid(nid);
+void Invariant_finder::propagate_until_boundary(Index_id nid, uint32_t bit_selection) {
+  Index_id    master_id = synth_graph->get_master_nid(nid);
   const auto &op        = synth_graph->node_type_get(master_id).op;
   if (op == GraphIO_Op || op == U32Const_Op || op == StrConst_Op) {
     return;
@@ -100,7 +100,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
       continue;
 
     for (uint32_t t_bit_selection : bit_selections) {
-      Index_ID driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
+      Index_id driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
       Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
       Net_ID   net_bit     = std::make_pair(synth_graph->get_wid(driver_cell), t_bit_selection);
 
@@ -135,7 +135,7 @@ void Invariant_finder::propagate_until_boundary(Index_ID nid, uint32_t bit_selec
   cached.insert(nid_bit);
   for (auto &edge : synth_graph->inp_edges(master_id)) {
     for (uint32_t t_bit_selection = 0; t_bit_selection < synth_graph->get_bits(edge.get_out_pin()); t_bit_selection++) {
-      Index_ID driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
+      Index_id driver_cell = synth_graph->get_node(edge.get_out_pin()).get_nid();
       Node_bit driver_bit  = std::make_pair(driver_cell, t_bit_selection);
       clear_cache(driver_bit);
     }
@@ -167,7 +167,7 @@ void Invariant_finder::find_invariant_boundaries() {
   std::string path = elab_graph->get_path();
   get_topology();
 
-  absl::flat_hash_map<Net_ID, Index_ID> invariant_boundaries;
+  absl::flat_hash_map<Net_ID, Index_id> invariant_boundaries;
   for (auto &_inst : boundaries.instance_type_map) {
     Instance_name inst = _inst.first;
     if (inst == "##TOP##")
@@ -175,7 +175,7 @@ void Invariant_finder::find_invariant_boundaries() {
     else
       inst = inst + boundaries.hierarchical_separator;
 
-    LGraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
+    Lgraph *lg = Invariant_boundaries::get_graph(_inst.second, path);
     I(lg);
 
     for (auto &nid : lg->forward()) {
@@ -188,7 +188,7 @@ void Invariant_finder::find_invariant_boundaries() {
 
       auto hierarchical_name = absl::StrCat(inst, net_name);
 
-      Index_ID    idx;
+      Index_id    idx;
       WireName_ID wire_id;
       if (synth_graph->has_wirename(hierarchical_name)) {
         idx     = synth_graph->get_node_id(hierarchical_name);
@@ -208,7 +208,7 @@ void Invariant_finder::find_invariant_boundaries() {
   }
 
   for (auto &invar : invariant_boundaries) {
-    Index_ID idx = invar.second;
+    Index_id idx = invar.second;
     uint32_t bit = invar.first.second;
 
     propagate_until_boundary(idx, bit);

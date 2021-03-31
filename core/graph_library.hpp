@@ -17,9 +17,9 @@
 #include "sub_node.hpp"
 #include "tech_library.hpp"
 
-class LGraph;
+class Lgraph;
 
-// FIXME: lgid keep increasing. We may want a garbage collector once the lgraph is shutdown to remap
+// FIXME: lgid keep increasing. We may want a garbage collector once the Lgraph is shutdown to remap
 // or at least find holes in lgids no longer used
 
 class Graph_library {
@@ -27,8 +27,8 @@ protected:
   inline static std::mutex lgs_mutex;
 
   struct Graph_attributes {
-    LGraph *    lg;
-    std::string source;  // File were this module came from. If file updated (all the associated lgraphs must be deleted). If empty,
+    Lgraph *    lg;
+    std::string source;  // File were this module came from. If file updated (all the associated Lgraphs must be deleted). If empty,
                          // it ies not present (blackbox)
     Lg_type_id version;  // In which sequence order were the graphs last modified
     Graph_attributes() { expunge(); }
@@ -49,7 +49,7 @@ protected:
   // END: common attributes
 
   using Global_instances   = absl::flat_hash_map<std::string, Graph_library *>;
-  using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, LGraph *>>;
+  using Global_name2lgraph = absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Lgraph *>>;
   using Name2id            = absl::flat_hash_map<std::string, Lg_type_id::type>;
   using Recycled_id        = absl::flat_hash_set<uint64_t>;
 
@@ -85,10 +85,10 @@ protected:
   static bool exists_int(std::string_view path, std::string_view name);
   bool        exists_int(Lg_type_id lgid) const;
 
-  static LGraph *try_find_lgraph_int(std::string_view path, std::string_view name);
-  static LGraph *try_find_lgraph_int(std::string_view path, Lg_type_id lgid);
-  LGraph *       try_find_lgraph_int(std::string_view name) const;
-  LGraph *       try_find_lgraph_int(Lg_type_id lgid) const;
+  static Lgraph *try_find_lgraph_int(std::string_view path, std::string_view name);
+  static Lgraph *try_find_lgraph_int(std::string_view path, Lg_type_id lgid);
+  Lgraph *       try_find_lgraph_int(std::string_view name) const;
+  Lgraph *       try_find_lgraph_int(Lg_type_id lgid) const;
 
   Sub_node &      reset_sub_int(std::string_view name, std::string_view source);
   Sub_node &      setup_sub_int(std::string_view name, std::string_view source);
@@ -133,8 +133,8 @@ protected:
   static Graph_library *instance_int(std::string_view path);
 
   Lg_type_id  copy_lgraph_int(std::string_view name, std::string_view new_name);
-  Lg_type_id  register_lgraph_int(std::string_view name, std::string_view source, LGraph *lg);
-  void        unregister_int(std::string_view name, Lg_type_id lgid, LGraph *lg = 0);
+  Lg_type_id  register_lgraph_int(std::string_view name, std::string_view source, Lgraph *lg);
+  void        unregister_int(std::string_view name, Lg_type_id lgid, Lgraph *lg = 0);
   void        expunge_int(std::string_view name);
   void        clear_int(Lg_type_id lgid);
   void        sync_int() { clean_library_int(); }
@@ -156,22 +156,22 @@ public:
     return exists_int(lgid);
   }
 
-  static LGraph *try_find_lgraph(std::string_view path, std::string_view name) {
+  static Lgraph *try_find_lgraph(std::string_view path, std::string_view name) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(path, name);
   }
 
-  static LGraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
+  static Lgraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(path, lgid);
   }
 
-  LGraph *try_find_lgraph(std::string_view name) const {
+  Lgraph *try_find_lgraph(std::string_view name) const {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(name);
   }
 
-  LGraph *try_find_lgraph(Lg_type_id lgid) const {
+  Lgraph *try_find_lgraph(Lg_type_id lgid) const {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(lgid);
   }
@@ -269,9 +269,9 @@ public:
     return copy_lgraph_int(name, new_name);
   }
 
-  LGraph *setup_lgraph(std::string_view name, std::string_view source);
+  Lgraph *setup_lgraph(std::string_view name, std::string_view source);
 
-  void unregister(std::string_view name, Lg_type_id lgid, LGraph *lg = 0) {  // unregister open instance
+  void unregister(std::string_view name, Lg_type_id lgid, Lgraph *lg = 0) {  // unregister open instance
     std::lock_guard<std::mutex> guard(lgs_mutex);
     unregister_int(name, lgid, lg);
   }

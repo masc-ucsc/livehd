@@ -47,7 +47,7 @@ enum class Ntype_op : uint8_t {
   Const,  // Constant
   //------------------END PIPELINED (break LOOPS)
 
-  // High Level LGraph constructs
+  // High Level Lgraph constructs
 
   TupAdd,
   TupGet,

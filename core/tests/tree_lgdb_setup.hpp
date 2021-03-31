@@ -18,7 +18,7 @@ protected:
   struct Node_data {
     Node_data() : cnode(0) {}
     int                 create_pos;
-    LGraph *            lg;
+    Lgraph *            lg;
     Hierarchy_index     hidx;
     Node::Compact_class cnode;
     int                 fwd_pos;
@@ -29,7 +29,7 @@ protected:
 
   mmap_lib::tree<Node_data> tree;
   std::vector<Node>         node_order;
-  LGraph *                  lg_root;
+  Lgraph *                  lg_root;
 
   absl::flat_hash_map<Node::Compact, uint64_t> absl_fwd_pos;
   absl::flat_hash_map<Node::Compact, uint64_t> absl_bwd_pos;
@@ -53,7 +53,7 @@ protected:
         index_order.emplace_back(index);
     });
 
-    lg_root = LGraph::create("lgdb_hierarchy_test", "node_l0p0", "hierarchy_test");
+    lg_root = Lgraph::create("lgdb_hierarchy_test", "node_l0p0", "hierarchy_test");
     lg_root->add_graph_output("o0", 0, 17);
     lg_root->add_graph_input("i0", 1, 31);
 
@@ -75,14 +75,14 @@ protected:
       auto        parent_index = tree.get_parent(index);
       const auto &parent_data  = tree.get_data(parent_index);
 
-      LGraph *parent_lg = LGraph::open("lgdb_hierarchy_test", parent_data.name);
+      Lgraph *parent_lg = Lgraph::open("lgdb_hierarchy_test", parent_data.name);
       I(parent_lg);
       Node node;
       if (data->leaf && rbool.any()) {
         node = parent_lg->create_node(Ntype_op::Sum, 10);
       } else {
         node           = parent_lg->create_node_sub(data->name);
-        LGraph *sub_lg = LGraph::create("lgdb_hierarchy_test", data->name, "hierarchy_test");
+        Lgraph *sub_lg = Lgraph::create("lgdb_hierarchy_test", data->name, "hierarchy_test");
         I(sub_lg);
         I(node.get_class_lgraph() == parent_lg);
         I(node.get_type_sub() == sub_lg->get_lgid());
@@ -156,7 +156,7 @@ protected:
 
       // const auto &parent_index = tree.get_parent(curr_index);
       // const auto &parent_data = tree.get_data(parent_index);
-      // LGraph *parent_lg = LGraph::open("lgdb_hierarchy_test", parent_data.name);
+      // Lgraph *parent_lg = Lgraph::open("lgdb_hierarchy_test", parent_data.name);
 
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i - 1];
@@ -169,7 +169,7 @@ protected:
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin();
       } else {
-        LGraph *prev_lg = LGraph::open("lgdb_hierarchy_test", prev_data.name);
+        Lgraph *prev_lg = Lgraph::open("lgdb_hierarchy_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         auto d_pid = prev_node.get_type_sub_node().get_instance_pid("o0");
         dpin       = prev_node.setup_driver_pin("o0");
@@ -185,7 +185,7 @@ protected:
         else
           spin = curr_node.setup_sink_pin("B");
       } else {
-        LGraph *curr_lg = LGraph::open("lgdb_hierarchy_test", curr_data.name);
+        Lgraph *curr_lg = Lgraph::open("lgdb_hierarchy_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         auto s_pid = curr_node.get_type_sub_node().get_instance_pid("i0");
         spin       = curr_node.setup_sink_pin("i0");
@@ -214,7 +214,7 @@ protected:
 
     lg_root->get_library().each_lgraph([this](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
-      LGraph *lg = LGraph::open(lg_root->get_path(), name);
+      Lgraph *lg = Lgraph::open(lg_root->get_path(), name);
       I(lg);
 
       int  sz = 0;

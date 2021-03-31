@@ -27,14 +27,14 @@
 static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
 void Pass_lec::setup() {
-  Eprp_method m1("pass.lec", "Checks if all the LGraph outputs are satisfiable", &Pass_lec::work);
+  Eprp_method m1("pass.lec", "Checks if all the Lgraph outputs are satisfiable", &Pass_lec::work);
 
   register_pass(m1);
 }
 
 Pass_lec::Pass_lec(const Eprp_var &var) : Pass("pass.lec", var) {}
 
-void Pass_lec::do_work(LGraph *g) {
+void Pass_lec::do_work(Lgraph *g) {
   fmt::print("\n--- DO WORK\n");
   // input_compare(g);
   check_lec(g);
@@ -62,7 +62,7 @@ void Pass_lec::work(Eprp_var &var) {
 
 //}
 
-void Pass_lec::check_lec(LGraph *g) {
+void Pass_lec::check_lec(Lgraph *g) {
   fmt::print("\n---Test CHECK LEC \nLGraph name: {}\n", g->get_name());
 
   /*Btor *btorInputs;     //creates boolector instance

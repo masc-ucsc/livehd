@@ -5,9 +5,9 @@
 
 class pass_submatch : public Pass {
 protected:
-  void find_subs(LGraph *g);
+  void find_subs(Lgraph *g);
 
-  void do_work(LGraph *g);
+  void do_work(Lgraph *g);
 
 public:
   static void work(Eprp_var &var);

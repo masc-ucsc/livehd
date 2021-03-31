@@ -13,7 +13,7 @@ private:
   constexpr static bool debug_verbose = false;
 
 protected:
-  LGraph *root;
+  Lgraph *root;
 
   // store last tree index written for each component type (costs a bit to set up, but drops write time from O(n^2) -> O(n))
   // TODO: find a way of determining the number of synth types in an lgraph
@@ -23,10 +23,10 @@ public:
   // do not copy node trees if possible, very slow
   Node_tree(const Node_tree &other) = delete;
   Node_tree(Node_tree &&other)      = default;
-  Node_tree(LGraph *root);
+  Node_tree(Lgraph *root);
 
-  // return root LGraph used to generate the node tree
-  LGraph *get_root_lg() const { return root; }
+  // return root Lgraph used to generate the node tree
+  Lgraph *get_root_lg() const { return root; }
 
   Tree_index get_last_free(Tree_index tidx, Ntype_op op) { return last_free[tidx][size_t(op) - 1]; }
   void       set_last_free(Tree_index tidx, Ntype_op op, Tree_index new_tidx) { last_free[tidx][size_t(op) - 1] = new_tidx; }

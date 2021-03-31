@@ -22,7 +22,7 @@ void                                    setup_test_order() {
   test_order_sequence = 1;
 }
 
-void check_test_order(LGraph *top) {
+void check_test_order(Lgraph *top) {
   for (auto node : top->fast(true)) {
     if (node.is_type_sub_present())
       continue;
@@ -66,7 +66,7 @@ void check_test_order(LGraph *top) {
 }
 
 // performs Topological Sort on a given DAG
-void do_fwd_traversal(LGraph *lg, const std::string &name) {
+void do_fwd_traversal(Lgraph *lg, const std::string &name) {
   {
     Lbench b("core.ITER_" + name + "_fast");
 
@@ -99,7 +99,7 @@ void generate_graphs(int n) {
 
   for (int i = 0; i < n; i++) {
     std::string                    gname = "test_" + std::to_string(i);
-    LGraph *                       g     = LGraph::create("lgdb_iter_test", gname, "test");
+    Lgraph *                       g     = Lgraph::create("lgdb_iter_test", gname, "test");
     std::vector<Node_pin::Compact> spins;
     std::vector<Node_pin::Compact> dpins;
 
@@ -206,7 +206,7 @@ void generate_graphs(int n) {
 bool fwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
+    Lgraph *    g     = Lgraph::open("lgdb_iter_test", gname);
     if (g == nullptr)
       return false;
 
@@ -224,7 +224,7 @@ bool fwd(int n) {
 bool bwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    LGraph *    g     = LGraph::open("lgdb_iter_test", gname);
+    Lgraph *    g     = Lgraph::open("lgdb_iter_test", gname);
     if (g == 0)
       return false;
 
@@ -274,7 +274,7 @@ bool bwd(int n) {
 
 void simple_line() {
   std::string gname   = "top_0";
-  LGraph *    g0      = LGraph::create("lgdb_iter_test", "g0", "test");
+  Lgraph *    g0      = Lgraph::create("lgdb_iter_test", "g0", "test");
   auto &      sfuture = g0->ref_library()->setup_sub("future", "test");
   if (!sfuture.has_pin("fut_i"))
     sfuture.add_input_pin("fut_i", 10);
@@ -282,9 +282,9 @@ void simple_line() {
     sfuture.add_output_pin("fut_o", 11);
   g0->ref_library()->sync();
 
-  LGraph *s0 = LGraph::create("lgdb_iter_test", "s0", "test");
-  LGraph *s1 = LGraph::create("lgdb_iter_test", "s1", "test");
-  LGraph *s2 = LGraph::create("lgdb_iter_test", "s2", "test");
+  Lgraph *s0 = Lgraph::create("lgdb_iter_test", "s0", "test");
+  Lgraph *s1 = Lgraph::create("lgdb_iter_test", "s1", "test");
+  Lgraph *s2 = Lgraph::create("lgdb_iter_test", "s2", "test");
 
   auto g0_i_pin = g0->add_graph_input("g0_i", 1, 0);
   auto g0_o_pin = g0->add_graph_output("g0_o", 2, 0);
@@ -349,8 +349,8 @@ void simple_line() {
 
 void simple(int num) {
   std::string gname = "simple_iter";
-  LGraph *    g     = LGraph::create("lgdb_iter_test", gname, "test");
-  LGraph *    sub_g = LGraph::create("lgdb_iter_test", "sub", "test");
+  Lgraph *    g     = Lgraph::create("lgdb_iter_test", gname, "test");
+  Lgraph *    sub_g = Lgraph::create("lgdb_iter_test", "sub", "test");
 
   for (int i = 0; i < 256; i++) {
     // Disconnected IOs from 1000-1512
@@ -506,7 +506,7 @@ protected:
   std::thread  pth;
   bool running;
 
-  void worker(LGraph *lg, bool visit_sub) {
+  void worker(Lgraph *lg, bool visit_sub) {
     for(auto node:lg->forward(visit_sub)) {
       while(true) {
         auto done = queue.enqueue(node);
@@ -559,7 +559,7 @@ public:
     bool is_invalid() const { return current_node.is_invalid(); }
   };
 
-  Decouple_forward_iterator(LGraph *lg, bool visit_sub) {
+  Decouple_forward_iterator(Lgraph *lg, bool visit_sub) {
     running = true;
     pth = std::thread([this, lg, visit_sub] { this->worker(lg, visit_sub); });
   }
@@ -601,7 +601,7 @@ int main(int argc, char **argv) {
     }
 
     fmt::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
-    auto *lg = LGraph::open(argv[1], argv[2]);
+    auto *lg = Lgraph::open(argv[1], argv[2]);
 
     Lbench bench("fwd.custom");
     int    total = 0;
@@ -678,7 +678,7 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_REBUILD
-    auto *                                                        tlg = LGraph::create(argv[1], "topo_sorted", "-");
+    auto *                                                        tlg = Lgraph::create(argv[1], "topo_sorted", "-");
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> lg2tlg;
     for (auto node : lg->forward()) {
       auto tnode = tlg->create_node(node);

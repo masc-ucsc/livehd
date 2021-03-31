@@ -270,7 +270,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
   }
 }
 
-void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_module_io(std::string &buffer, Lgraph *lg) {
   absl::StrAppend(&buffer, "module ", get_scaped_name(lg->get_name()), "(\n");
 
   bool first_arg = true;
@@ -304,7 +304,7 @@ void Cgen_verilog::create_module_io(std::string &buffer, LGraph *lg) {
   absl::StrAppend(&buffer, ");\n");
 }
 
-void Cgen_verilog::create_subs(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
   lg->each_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
     (void)lgid;
 
@@ -344,7 +344,7 @@ void Cgen_verilog::create_subs(std::string &buffer, LGraph *lg) {
   });
 }
 
-void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_combinational(std::string &buffer, Lgraph *lg) {
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
     if (Ntype::is_multi_driver(op)) {
@@ -363,7 +363,7 @@ void Cgen_verilog::create_combinational(std::string &buffer, LGraph *lg) {
   }
 }
 
-void Cgen_verilog::create_outputs(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
   lg->each_graph_output([&](const Node_pin &dpin) {
     const auto name = get_scaped_name(dpin.get_name());
     auto       spin = dpin.change_to_sink_from_graph_out_driver();
@@ -381,7 +381,7 @@ void Cgen_verilog::create_outputs(std::string &buffer, LGraph *lg) {
   }
 }
 
-void Cgen_verilog::create_registers(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
   for (auto node : lg->fast()) {
     if (!node.is_type_flop())
       continue;
@@ -481,7 +481,7 @@ void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std
   }
 }
 
-void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
+void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
   // IDEA: This pass can create "sub-blocks in lg". Two blocks can process in
   // parallel, if there is not backward edge crossing blocks. Edges that read
   // pin2var are OK, edges that go to pin2expr (future passes) are not OK.
@@ -546,7 +546,7 @@ void Cgen_verilog::create_locals(std::string &buffer, LGraph *lg) {
   }
 }
 
-std::tuple<std::string, int> Cgen_verilog::setup_file(LGraph *lg) const {
+std::tuple<std::string, int> Cgen_verilog::setup_file(Lgraph *lg) const {
   std::string filename;
   if (odir.empty()) {
     filename = absl::StrCat(lg->get_name(), ".v");
@@ -578,7 +578,7 @@ void Cgen_verilog::append_to_file(const std::string &filename, int fd, const std
   }
 }
 
-void Cgen_verilog::do_from_lgraph(LGraph *lg) {
+void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
   (void)verbose;
 
   pin2var.clear();

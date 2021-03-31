@@ -32,7 +32,7 @@ void Eprp_var::add(const Eprp_var &_var) {
   add(_var.dict);
 }
 
-void Eprp_var::add(LGraph *lg) {
+void Eprp_var::add(Lgraph *lg) {
   if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end())
     lgs.push_back(lg);
 }

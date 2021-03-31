@@ -71,7 +71,7 @@ protected:
                int count, double area, double maxARArg, double minARArg);
 
   // information for layout of root node, used frequently
-  LGraph* root_lg;
+  Lgraph* root_lg;
 
   // hierarchy of node instances
   Node_tree nt;

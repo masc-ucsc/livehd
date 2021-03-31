@@ -7,7 +7,7 @@ class Node;
 
 class XEdge {  // FIXME: s/XEdge/Edge/g
 protected:
-  friend class LGraph;
+  friend class Lgraph;
   friend class Node;
   friend class Node_pin;
 
@@ -20,7 +20,7 @@ public:
     uint64_t        sink_idx : Index_bits;
     uint16_t        pad2 : 1;  // Just to improve alignment of
 
-    Compact(const Hierarchy_index &d_hidx, const Index_ID &d_idx, const Hierarchy_index &s_hidx, const Index_ID &s_idx)
+    Compact(const Hierarchy_index &d_hidx, const Index_id &d_idx, const Hierarchy_index &s_hidx, const Index_id &s_idx)
         : driver_hidx(d_hidx), driver_idx(d_idx), pad1(0), sink_hidx(s_hidx), sink_idx(s_idx), pad2(0) {}
     Compact() : driver_idx(0), pad1(0), sink_idx(0), pad2(0) {}
 
@@ -57,7 +57,7 @@ public:
   Node_pin sink;
 
   constexpr XEdge(){};
-  XEdge(LGraph *g, const Compact &c);
+  XEdge(Lgraph *g, const Compact &c);
   XEdge(const Node_pin &src_, const Node_pin &dst_);
 
   constexpr bool is_invalid() const { return driver.is_invalid(); }

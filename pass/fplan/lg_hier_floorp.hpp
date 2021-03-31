@@ -10,5 +10,5 @@ public:
   void load();
 
 private:
-  FPContainer* load_lg_modules(LGraph* lg);
+  FPContainer* load_lg_modules(Lgraph* lg);
 };

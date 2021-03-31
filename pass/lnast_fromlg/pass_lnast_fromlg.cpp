@@ -20,7 +20,7 @@
 static Pass_plugin sample("pass_lnast_fromlg", Pass_lnast_fromlg::setup);
 
 void Pass_lnast_fromlg::setup() {
-  Eprp_method m1("pass.lnast_fromlg", "translates LGraph to LNAST", &Pass_lnast_fromlg::trans);
+  Eprp_method m1("pass.lnast_fromlg", "translates Lgraph to LNAST", &Pass_lnast_fromlg::trans);
   // For bw_in_ln, if __bits are not put in the LNAST then they can be accessed using bw_table in LNAST.
   m1.add_label_optional("bw_in_ln", "true/false: put __ubits or __sbits nodes in LNAST?", "true");
   register_pass(m1);
@@ -38,7 +38,7 @@ void Pass_lnast_fromlg::trans(Eprp_var& var) {
   }
 }
 
-void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view module_name) {
+void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, std::string_view module_name) {
   if (var.has_label("bw_in_ln")) {
     if (var.get("bw_in_ln") == "false") {
       put_bw_in_ln = false;
@@ -63,7 +63,7 @@ void Pass_lnast_fromlg::do_trans(LGraph* lg, Eprp_var& var, std::string_view mod
   var.add(std::move(lnast));
 }
 
-void Pass_lnast_fromlg::initial_tree_coloring(LGraph* lg, Lnast& lnast) {
+void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg, Lnast& lnast) {
   for (const auto& node : lg->fast()) {
     auto node_editable = node;
     node_editable.set_color(WHITE);
@@ -100,7 +100,7 @@ void Pass_lnast_fromlg::initial_tree_coloring(LGraph* lg, Lnast& lnast) {
   lg->get_graph_output_node().set_color(WHITE);
 }
 
-void Pass_lnast_fromlg::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid& ln_node) {
+void Pass_lnast_fromlg::begin_transformation(Lgraph* lg, Lnast& lnast, Lnast_nid& ln_node) {
   // note: in graph out node, spin_pid == dpin_pid is always true
 
   auto out_node = lg->get_graph_output_node();
@@ -124,8 +124,8 @@ void Pass_lnast_fromlg::begin_transformation(LGraph* lg, Lnast& lnast, Lnast_nid
 }
 
 /* Purpose of this function is to serve as the recursive
- * call we will invoke constantly as we work up the LGraph */
-void Pass_lnast_fromlg::handle_source_node(LGraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
+ * call we will invoke constantly as we work up the Lgraph */
+void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lnast, Lnast_nid& ln_node) {
   // If pin is a driver pin for an already handled node, just return driver pin's name.
   if (pin.get_node().get_color() == BLACK) {
     // Node is already in LNAST, nothing to do.
@@ -259,7 +259,7 @@ void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool 
   lnast.add_child(idx_dot, Lnast_node::create_const(lnast.add_string(std::to_string(bits))));
 }
 
-void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
+void Pass_lnast_fromlg::handle_io(Lgraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
   /* Any input or output that has its bitwidth specified should add info to the LNAST.
    * As an example, if we had an input x that was 7 bits wide, this would be added:
    *     dot             asg
@@ -321,7 +321,7 @@ void Pass_lnast_fromlg::handle_io(LGraph* lg, Lnast_nid& parent_lnast_node, Lnas
   }
 }
 
-// -------- How to convert each LGraph node type to LNAST -------------
+// -------- How to convert each Lgraph node type to LNAST -------------
 void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
   // PID: 0 = AS, 1 = AU, 2 = BS, 3 = BU, 4 = Y... Y = (AS+...+AS+AU+...+AU) - (BS+...+BS+BU+...+BU)
   // new version: PID: 0=A, 1=B, else invalid ; we are dealing with signed only now.
@@ -793,7 +793,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   attach_child(lnast, idx_asg, din_pin);
 
   /* Create a dot node that points to reg's qpin. Then change name of reg pin in
-   * LGraph to match the LHS of that dot node (so all future references to that
+   * Lgraph to match the LHS of that dot node (so all future references to that
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
   auto tmp_var_q = create_temp_var(lnast);
@@ -850,7 +850,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   attach_child(lnast, idx_asg, din_pin);
 
   /* Create a dot node that points to reg's qpin. Then change name of reg pin in
-   * LGraph to match the LHS of that dot node (so all future references to that
+   * Lgraph to match the LHS of that dot node (so all future references to that
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
   auto tmp_var_q = create_temp_var(lnast);

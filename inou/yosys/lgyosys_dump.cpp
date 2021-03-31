@@ -38,11 +38,11 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
     // fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
     return module->addWire(module->uniquify(name), pin.get_bits());
   } else {
-    return module->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
+    return module->addWire(next_id(pin.get_class_Lgraph()), pin.get_bits());
   }
 }
 
-RTLIL::Wire *Lgyosys_dump::create_tree(LGraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
+RTLIL::Wire *Lgyosys_dump::create_tree(Lgraph *g, const std::vector<RTLIL::Wire *> &wires, RTLIL::Module *mod,
                                        add_cell_fnc_sign add_fnc, bool sign, RTLIL::Wire *result_wire, int width) {
   assert(mod);
 
@@ -145,7 +145,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
   mod->fixup_ports();
 }
 
-void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
+void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *module, Node &node) {
   (void)g;
 
   assert(node.get_type_op() == Ntype_op::Memory);
@@ -293,7 +293,7 @@ void Lgyosys_dump::create_memory(LGraph *g, RTLIL::Module *module, Node &node) {
   memory->setPort("\\RD_EN", rd_en);
 }
 
-void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node) {
+void Lgyosys_dump::create_subgraph(Lgraph *g, RTLIL::Module *module, Node &node) {
   (void)g;
 
   assert(node.get_type_op() == Ntype_op::Sub);
@@ -319,7 +319,7 @@ void Lgyosys_dump::create_subgraph(LGraph *g, RTLIL::Module *module, Node &node)
   }
 }
 
-void Lgyosys_dump::create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Node &node) {
+void Lgyosys_dump::create_subgraph_outputs(Lgraph *g, RTLIL::Module *module, Node &node) {
   (void)g;
 
   assert(node.get_type_op() == Ntype_op::Sub);
@@ -329,7 +329,7 @@ void Lgyosys_dump::create_subgraph_outputs(LGraph *g, RTLIL::Module *module, Nod
   }
 }
 
-void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
+void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *module) {
   // first create all the output wires
 
   uint32_t port_id = 0;
@@ -406,7 +406,7 @@ void Lgyosys_dump::create_wires(LGraph *g, RTLIL::Module *module) {
   }
 }
 
-RTLIL::Wire *Lgyosys_dump::zero_extend_one_bit(LGraph *g, RTLIL::Module *module, RTLIL::Wire *w) {
+RTLIL::Wire *Lgyosys_dump::zero_extend_one_bit(Lgraph *g, RTLIL::Module *module, RTLIL::Wire *w) {
   auto  w2       = RTLIL::SigSpec(w);
   auto *new_wire = module->addWire(next_id(g), w->width + 1);
   w2.extend_u0(w->width + 1, false);  // zero extend
@@ -415,7 +415,7 @@ RTLIL::Wire *Lgyosys_dump::zero_extend_one_bit(LGraph *g, RTLIL::Module *module,
   return new_wire;
 }
 
-void Lgyosys_dump::to_yosys(LGraph *g) {
+void Lgyosys_dump::to_yosys(Lgraph *g) {
   std::string name(g->get_name());
 
 #if 0

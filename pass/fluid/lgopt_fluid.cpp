@@ -18,7 +18,7 @@ int main(int argc, const char **argv) {
 
   Options::setup_lock();
 
-  std::vector<LGraph *> lgs = inou.generate();
+  std::vector<Lgraph *> lgs = inou.generate();
   b.sample("setup");
 
   for (auto g : lgs) {

@@ -69,7 +69,7 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
 }
 
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
-  LGraph* root = LGraph::open(path, var.get("top"));
+  Lgraph* root = Lgraph::open(path, var.get("top"));
   if (root == nullptr) {
     error("cannot find top level lgraph!");
   }
@@ -177,7 +177,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
         }
 
         // computing the "regularity" of a hierarchical design using a method presented in the HiReg paper:
-        // regularity = 1 - (area only counting instances of a given LGraph once) / (area counting all instances of an LGraph)
+        // regularity = 1 - (area only counting instances of a given Lgraph once) / (area counting all instances of an Lgraph)
         if (action == "regularity" || action == "all") {
           // come up with some metric for regularity - HiReg has one, but it requires a hierarchy DAG which is annoying to generate.
         }

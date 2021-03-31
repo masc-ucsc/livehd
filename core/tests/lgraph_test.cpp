@@ -29,7 +29,7 @@ protected:
 
   Setup_lgraph() : rand_pos(1, Port_invalid - 1), rand_bits(1, Bits_max) {}
 
-  void randomly_delete_one_io(LGraph *lg) {
+  void randomly_delete_one_io(Lgraph *lg) {
     if (posused.empty())
       return;
 
@@ -64,7 +64,7 @@ protected:
     name2bits.erase(name);
   }
 
-  void add_input(LGraph *lg, const std::string &name) {
+  void add_input(Lgraph *lg, const std::string &name) {
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
 
@@ -95,7 +95,7 @@ protected:
     EXPECT_TRUE(lg->has_graph_input(name));
   }
 
-  void add_output(LGraph *lg, const std::string &name) {
+  void add_output(Lgraph *lg, const std::string &name) {
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
 
@@ -129,7 +129,7 @@ protected:
     // Graph_library::sync_all();
   }
 
-  void check_ios(LGraph *lg) {
+  void check_ios(Lgraph *lg) {
     auto &sub_node = lg->get_self_sub_node();
 
     for (auto it : name2pos) {
@@ -175,13 +175,13 @@ protected:
 };
 
 TEST_F(Setup_lgraph, add_remove_inputs) {
-  Lbench b("core.LGRAPH_add_remove_inputs");
+  Lbench b("core.LgRAPH_add_remove_inputs");
 
   std::string_view lgdb = "lgdb_lgraph_test";
 
   Eprp_utils::clean_dir(lgdb);
 
-  LGraph *lg1 = LGraph::create(lgdb, "lg1", "file1.xxx");
+  Lgraph *lg1 = Lgraph::create(lgdb, "lg1", "file1.xxx");
 
   check_ios(lg1);
 

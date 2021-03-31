@@ -5,9 +5,9 @@
 
 class Pass_sat_opt : public Pass {
 protected:
-  void check_sat_opt(LGraph *g);
+  void check_sat_opt(Lgraph *g);
 
-  void do_work(LGraph *g);
+  void do_work(Lgraph *g);
 
 public:
   static void work(Eprp_var &var);

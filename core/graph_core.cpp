@@ -10,7 +10,7 @@
 Graph_core::Graph_core(std::string_view path, std::string_view name) {
   (void)path;
   (void)name;
-  // std::queue<Index_ID> deletedEdges;
+  // std::queue<Index_id> deletedEdges;
 }
 
 void Graph_core::Entry16::set_master_root() { master_root = 1; }
@@ -20,13 +20,13 @@ void Graph_core::Entry16::set_master() { master_root = 0; }
 void Graph_core::Entry16::set_type(uint8_t type) { pid_bits_or_type = type; }
 
 // Create a master root node
-Index_ID Graph_core::create_master_root(uint8_t type) {
+Index_id Graph_core::create_master_root(uint8_t type) {
   Entry16 m;
   // set the fields
 
   m.set_master_root();  // set it as master root
   // pid zero is already set to zero, because there is type or pid bits
-  Index_ID id = table16.size();
+  Index_id id = table16.size();
   m.set_type(type);
   table16.emplace_back(m);  // emplace back is more efficient
   // use pointers to deal with mismatching type
@@ -38,7 +38,7 @@ Index_ID Graph_core::create_master_root(uint8_t type) {
 }
 
 // Create a master and point to master root m
-Index_ID Graph_core::create_master(const Index_ID master_root_id, const Port_ID pid) {
+Index_id Graph_core::create_master(const Index_id master_root_id, const Port_ID pid) {
   Entry16 newMaster;
   // set the fields
 

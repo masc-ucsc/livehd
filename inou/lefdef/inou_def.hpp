@@ -114,8 +114,8 @@ public:
   Inou_def_options_pack get_opack() { return opack; }
   void                  set_def_info(Def_info &);
 
-  std::vector<LGraph *> generate();                                  // final;
-  void                  generate(std::vector<const LGraph *> &out);  // final;
+  std::vector<Lgraph *> generate();                                  // final;
+  void                  generate(std::vector<const Lgraph *> &out);  // final;
 };
 
 #endif

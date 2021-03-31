@@ -59,7 +59,7 @@ void Inou_json::tolg(Eprp_var &var) {
     return;
   }
 
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
   for (const auto &f : absl::StrSplit(files, ',')) {
     std::string_view name = f.substr(f.find_last_of("/\\") + 1);
     if (absl::EndsWith(name, ".json")) {
@@ -76,7 +76,7 @@ void Inou_json::tolg(Eprp_var &var) {
       continue;
     }
 
-    LGraph *lg = LGraph::create(lgdb, name, f);
+    Lgraph *lg = Lgraph::create(lgdb, name, f);
 
     char                      buffer[65536];
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
