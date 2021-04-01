@@ -6,6 +6,9 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 #include "sub_node.hpp"
+#include "thread_pool.hpp"
+
+#include "absl/container/flat_hash_map.h"
 
 void Lgraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid)
@@ -223,4 +226,81 @@ void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
 }
+
+void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn) {
+
+  std::unordered_map<uint32_t, int> visited;
+
+  std::vector<Lgraph *> next_round;
+
+  const auto &href = get_htree();
+
+  href.each_bottom_up_fast([this, &href, &visited,&next_round](const Hierarchy_index &hidx, const Hierarchy_data &data) {
+    auto it = visited.find(data.lgid);
+    if (it != visited.end())
+      return;
+    if (unlikely(hidx.is_root()))
+      return;
+
+    I(href.is_leaf(hidx)); // Otherwise, it will be not visited
+    visited[data.lgid] = 0;
+
+    auto *lg = Lgraph::open(path, data.lgid);
+    if (lg != nullptr)
+      next_round.emplace_back(lg);
+
+    auto index = href.get_parent(hidx);
+    int level = 0;
+    while(!index.is_root()) {
+      const auto index_lgid = href.get_data(index).lgid;
+
+      const auto it2 = visited.find(index_lgid);
+      if (it2 == visited.end()) {
+        visited[index_lgid] = level;
+      }else{
+        if (it2->second>level) {
+          level = it2->second;
+        }else{
+          it2->second = level;
+        }
+      }
+      index = href.get_parent(index);
+      level = level + 1;
+    }
+  });
+
+  for(auto *lg:next_round) {
+    thread_pool.add(fn, lg);
+    // fn(lg); // can be in parallel
+    visited.erase(lg->get_lgid());
+  }
+  if (!next_round.empty())
+    thread_pool.wait_all();
+
+  int level=0;
+  while(!visited.empty()) {
+    next_round.clear();
+    auto it = visited.begin();
+    while(it!=visited.end()) {
+      if (it->second > level) {
+        ++it;
+        continue;
+      }
+      I(level == it->second);
+
+      auto *lg = Lgraph::open(path, it->first);
+      if (lg != nullptr)
+        next_round.emplace_back(lg);
+      it = visited.erase(it);
+    }
+    ++level;
+    for(auto *lg:next_round) {
+      thread_pool.add(fn, lg);
+      //fn(lg); // can be in parallel
+    }
+    if (!next_round.empty())
+      thread_pool.wait_all();
+  }
+}
+
 

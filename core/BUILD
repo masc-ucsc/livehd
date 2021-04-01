@@ -15,6 +15,7 @@ cc_library(
     linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     visibility = ["//visibility:public"],
     deps = [
+        "//task",
         "//eprp",
         "//lbench:headers",
         "//lemu",

@@ -233,6 +233,7 @@ public:
 
   void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)> fn);
   void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn);
+  void each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn);
 
   template <typename FN>
   void each_local_sub_fast(const FN f1) {

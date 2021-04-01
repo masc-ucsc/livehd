@@ -318,7 +318,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     to_level[data.lgid] = hidx.level;
   });
 
-  std::vector<int> all_visited;
+  std::vector<int> all_visited; // Only monotonic st and ld operator, so it is atomic
   all_visited.resize(all_lgs.size());
 
   // top->get_htree().dump();
@@ -336,7 +336,42 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
     auto pos = to_pos[lg->get_lgid()];
 
-    all_visited[pos]++;
+    EXPECT_EQ(all_visited[pos], 0); // no double insertions
+    all_visited[pos]=1;
+    EXPECT_EQ(all_visited[pos], 1); // no double insertions
+
+    lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
+      // fmt::print("checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+
+      EXPECT_FALSE(sure_leaf); // A leaf should not have sub nodes
+      I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
+      auto pos = to_pos[sub_lg->get_lgid()];
+
+      EXPECT_EQ(all_visited[pos], 1); // already visited
+
+      return true; // continue
+    });
+
+    return true; // continue
+  });
+
+  all_visited.clear();
+  all_visited.resize(all_lgs.size());
+  top->each_hier_unique_sub_bottom_up_parallel([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool{
+    bool sure_leaf=false;
+    if (to_level.find(lg->get_lgid()) != to_level.end()) {
+      auto level = to_level[lg->get_lgid()];
+      fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
+    }else{
+      sure_leaf = true;
+      fmt::print("visiting name:{} lgid:{} LEAF sub\n", lg->get_name(), lg->get_lgid());
+    }
+
+    I(to_pos.find(lg->get_lgid()) != to_pos.end());
+    auto pos = to_pos[lg->get_lgid()];
+
+    EXPECT_EQ(all_visited[pos], 0); // no double insertions
+    all_visited[pos]=1;
     EXPECT_EQ(all_visited[pos], 1); // no double insertions
 
     lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
