@@ -1,5 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_foreign_cc//tools/build_defs:cmake.bzl", "cmake_external")
 load("//tools:copt_default.bzl", "COPTS")
 

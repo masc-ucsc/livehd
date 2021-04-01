@@ -16,12 +16,12 @@
 # Verilog-2005 support and provides a basic set of synthesis algorithms for
 # various application domains.
 
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_python//python:defs.bzl", "py_binary")
+
 licenses(["restricted"])
 
 exports_files(["LICENSE"])
-
-load("@rules_flex//flex:flex.bzl", "flex")
-load("@rules_bison//bison:bison.bzl", "bison")
 
 genrule(
     name = "version_src",

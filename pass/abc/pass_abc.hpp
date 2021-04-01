@@ -51,7 +51,7 @@ protected:
 public:
   // customize a hash function for absl::flat_hash_map
   struct IndexID_Hash {
-    inline std::size_t operator()(const Index_ID k) const { return (size_t)k.value; }
+    inline std::size_t operator()(const Index_id k) const { return (size_t)k.value; }
   };
 
   struct Abc_primary_input {
@@ -75,7 +75,7 @@ public:
   };
 
   struct index_offset {
-    Index_ID idx;
+    Index_id idx;
     Port_ID  pid;
     int      offset[2];
 

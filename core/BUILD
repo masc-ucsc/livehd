@@ -1,5 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -28,7 +29,7 @@ cc_library(
 
 cc_library(
     name = "tree_lgdb_test",
-    hdrs = glob(["tests/tree_lgdb_setup.hpp"]),
+    hdrs = ["tests/tree_lgdb_setup.hpp"],
     copts = COPTS,
     includes = ["."],
     deps = [
