@@ -1,11 +1,12 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "pass_mockturtle",
-    srcs = glob(["pass_mockturtle.cpp"]),
-    hdrs = glob(["pass_mockturtle.hpp"]),
+    srcs = ["pass_mockturtle.cpp"],
+    hdrs = ["pass_mockturtle.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],

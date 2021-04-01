@@ -1,3 +1,6 @@
+""" TODO: Add a module docstring
+"""
+
 def _impl_gencss(ctx):
     tree = ctx.actions.declare_directory(ctx.attr.name + ".cc")
     ctx.actions.run(
