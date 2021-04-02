@@ -270,14 +270,17 @@ std::string Pass_compiler::check_option_top(Eprp_var &var) {
   return top;
 }
 std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
-  std::string_view is_firrtl = "";
+  std::string_view is_firrtl;
   if (var.has_label("firrtl")) {
     auto fir  = var.get("firrtl");
     if (fir.compare("false") != 0 && fir.compare("0") !=0 ) {
       is_firrtl = fir;
     } else {
-      return is_firrtl;
+      is_firrtl = "";
     }
+  }
+  else {
+    is_firrtl = "";
   }
   return is_firrtl;
 }
