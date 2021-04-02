@@ -360,11 +360,11 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   top->each_hier_unique_sub_bottom_up_parallel([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool{
     bool sure_leaf=false;
     if (to_level.find(lg->get_lgid()) != to_level.end()) {
-      auto level = to_level[lg->get_lgid()];
-      fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
+      //auto level = to_level[lg->get_lgid()];
+      //fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
     }else{
       sure_leaf = true;
-      fmt::print("visiting name:{} lgid:{} LEAF sub\n", lg->get_name(), lg->get_lgid());
+      //fmt::print("visiting name:{} lgid:{} LEAF sub\n", lg->get_name(), lg->get_lgid());
     }
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());

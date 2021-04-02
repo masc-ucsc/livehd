@@ -41,6 +41,7 @@ sh_library(
     srcs = [
         "lgcheck",
         ":yosys2",
+        ":inou_yosys_scripts",
     ],
     visibility = ["//visibility:public"],
 )
