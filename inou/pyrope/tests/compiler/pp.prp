@@ -1,0 +1,12 @@
+$inp.__ubits = 16
+#x.__ubits   = 16
+#x = #x.__create_flop
+
+x_q = #x
+
+if ($loading) {
+  #x = $inp
+}
+
+%out = x_q
+

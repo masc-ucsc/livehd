@@ -214,7 +214,7 @@ void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgrap
 
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
   bw.do_trans(new_lg);
-  gviz ? gv.do_from_lgraph(new_lg, "local.bitwidth-ed-0") : void();
+  gviz ? gv.do_from_lgraph(new_lg, "") : void();
 
   mapped_lgs.emplace_back(new_lg);
 }

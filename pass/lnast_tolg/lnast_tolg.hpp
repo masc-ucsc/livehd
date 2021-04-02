@@ -70,7 +70,7 @@ protected:
   Ntype_op decode_lnast_op(const Lnast_nid &lnidx_opr);
   void     setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs);
   void     nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std::vector<Node_pin> &opds, bool is_subt);
-  void     setup_clock(Lgraph *lg, Node &reg_node);
+  void     setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node);
   void     setup_lnast_to_lgraph_primitive_type_mapping();
 
   static bool is_tmp_var(std::string_view name) {
