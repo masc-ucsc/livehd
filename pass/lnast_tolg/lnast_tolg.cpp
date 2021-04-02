@@ -977,6 +977,9 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
     // note-I: the register is first appear at the rhs! Create a floating Or to represent this reg
     // later, this Or should be driven by the reg q-pin at the end of program sequence
     // note-II: in the case that the Or is driven by a reg TA chain, change Or -> assignment TA
+    // FIXME->sh: I think the Or node here could generate the Register directly and mimic what 
+    // attr_get __create_flop is doing. i.e. create register and let d-pin drivern by the largest
+    // SSA in the end of lnast_tolg pass
     auto wire_or_node = lg->create_node(Ntype_op::Or);
     node_dpin         = wire_or_node.setup_driver_pin();
     node_dpin.set_name(name);
@@ -1044,7 +1047,6 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
 }
 
 void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset) {
-  // auto val_aset   = lnast->get_first_child(lnidx_aset);
   auto name_aset  = lnast->get_first_child(lnidx_aset);
   auto field_aset = lnast->get_sibling_next(name_aset);
 
@@ -1554,7 +1556,7 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   // FIXME->sh: to be extended ...
 }
 
-void Lnast_tolg::setup_clock(Lgraph *lg, Node &reg_node) {
+void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
   Node_pin clk_dpin;
   if (!lg->has_graph_input("clock")) {
     clk_dpin = lg->add_graph_input("clock", Port_invalid, 1);
@@ -1564,6 +1566,19 @@ void Lnast_tolg::setup_clock(Lgraph *lg, Node &reg_node) {
 
   auto clk_spin = reg_node.setup_sink_pin("clock");
   lg->add_edge(clk_dpin, clk_spin);
+
+  /////////////////////////////////
+
+  Node_pin rst_dpin;
+  if (!lg->has_graph_input("reset")) {
+    rst_dpin = lg->add_graph_input("reset", Port_invalid, 1);
+  } else {
+    rst_dpin = lg->get_graph_input("reset");
+  }
+
+  auto rst_spin = reg_node.setup_sink_pin("reset");
+  lg->add_edge(rst_dpin, rst_spin);
+
 }
 
 void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
@@ -1682,6 +1697,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     }
   }
 
+  // FIXME->sh: could be deprecated if get rid of __q_pin
   // note: you have to wait the outputs have been connected to the unified output % TA so that the
   // attr_get.__q_pin has a real sink output pin (val_dpin of the TA %).
   for (auto const &[vname, dpin_largest_ssa] : vname2ssa_dpin) {
@@ -1719,7 +1735,7 @@ void Lnast_tolg::setup_final_register(Lgraph *lg, std::string_view vname, const 
   auto reg_node = lg->create_node(Ntype_op::Flop);
   auto reg_din  = reg_node.setup_sink_pin("din");
   dpin_largest_ssa.connect_sink(reg_din);
-  setup_clock(lg, reg_node);
+  setup_scalar_reg_clkrst(lg, reg_node);
   auto     smallest_ssa_name = absl::StrCat(vname, "_0");
   auto     node_smallest_ssa = name2dpin[smallest_ssa_name].get_node();
   Node_pin spin;

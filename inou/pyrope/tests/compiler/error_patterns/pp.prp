@@ -1,3 +1,0 @@
-b = #reg.foo
-
-#reg.foo = 1
