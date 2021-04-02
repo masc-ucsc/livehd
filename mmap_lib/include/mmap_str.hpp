@@ -221,21 +221,130 @@ public:
   [[nodiscard]] constexpr bool empty() const { return 0 == _size; }
 
   template <std::size_t N>
-  constexpr bool operator==(const char (&rhs)[N]) const {
-    return str(rhs) == *this; //saves rhs into vec and map if rhs.size >= 14
+  constexpr bool operator==(const char (&rhs)[N]) const {       
+    #if 1
+    auto rhs_size = N - 1;
+    // if size doesnt match, false
+    if (_size != rhs_size) { return false; }
+    else { // If size matches, keep comparing
+      if (_size < 14) { // size less than 14, check e and p_o_s
+        // checking p_o_s for first 4 chars
+        uint8_t idx = 0;
+        for (auto i = _size<=4 ? ((_size-1) * 8) : 24; i >= 0; i -= 8) {
+          // if any chars don't match here, return false
+          if (((ptr_or_start >> i) & 0xff) != (rhs[idx++] & 0xff)) { 
+            return false; 
+          }
+        }
+        
+        // if _size is 4 or less than 4, no need to check e
+        if (_size == rhs_size && _size <= 4) { return true; }
+        // checking e for rest of chars
+        for (auto i = 4; i < _size; ++i) {
+          if (e[i-4] != rhs[i]) { return false; }
+        }
+        return true; 
+      } else if (_size >= 14) {
+        // e now holds first 2 and last 8
+        if (e[0] != rhs[0] || e[1] != rhs[1]) { return false; }
+    
+        uint8_t idx = 8;
+        for (auto i = 2; i < 10; ++i) { 
+          if (e[i] != rhs[rhs_size - idx--]) { return false; } 
+        }
+        // Getting data from string_vector and comparing with rest of rhs 
+        auto j = 2; // (2) .. (_size - 8) --> the long part
+        // (ptr_or_start) ... (ptr_or_start + _size-10) 
+        for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {   
+          if (string_vector.at(i) != rhs[j]) { 
+            return false; 
+          }
+          j = j < _size-8 ? j+1 : j;
+        }
+        return true;
+      }
+    }
+    return false;
+    #endif
+
+    #if 0
+    return str(rhs) == *this;//saves rhs into vec and map if rhs.size >= 14
+    #endif
   }
 
-  constexpr bool operator==(const str &rhs) const {
-    for (auto i = 0u; i < e.size(); ++i) {
-      if (e[i] != rhs.e[i])
-        return false;
+  constexpr bool operator==(std::string_view rhs) const {       
+    #if 1
+    auto rhs_size = rhs.size();
+    // if size doesnt match, false
+    if (_size != rhs_size) { return false; }
+    else { // If size matches, keep comparing
+      if (_size < 14) { // size less than 14, check e and p_o_s
+        // checking p_o_s for first 4 chars
+        uint8_t idx = 0;
+        for (auto i = _size<=4 ? ((_size-1) * 8) : 24; i >= 0; i -= 8) {
+          // if any chars don't match here, return false
+          if (((ptr_or_start >> i) & 0xff) != (rhs.at(idx++) & 0xff)) { 
+            return false; 
+          }
+        }
+        
+        // if _size is 4 or less than 4, no need to check e
+        if (_size == rhs_size && _size <= 4) { return true; }
+        // checking e for rest of chars
+        for (auto i = 4; i < _size; ++i) {
+          if (e[i-4] != rhs.at(i)) { return false; }
+        }
+        return true; 
+      } else if (_size >= 14) {
+        // e now holds first 2 and last 8
+        if (e[0] != rhs.at(0) || e[1] != rhs.at(1)) { return false; }
+    
+        uint8_t idx = 8;
+        for (auto i = 2; i < 10; ++i) { 
+          if (e[i] != rhs.at(rhs_size - idx--)) { return false; } 
+        }
+        // Getting data from string_vector and comparing with rest of rhs 
+        auto j = 2; // (2) .. (_size - 8) --> the long part
+        // (ptr_or_start) ... (ptr_or_start + _size-10) 
+        for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {   
+          if (string_vector.at(i) != rhs.at(j)) { 
+            return false; 
+          }
+          j = j < _size-8 ? j+1 : j;
+        }
+        return true;
+      }
     }
-    return ptr_or_start == ptr_or_start && _size == rhs._size;
+    return false;
+    #endif
+
+    #if 0
+    return str(rhs) == *this;//saves rhs into vec and map if rhs.size >= 14
+    #endif
   }
+
+  //constexpr bool operator==(const char* rhs) const { return *this == rhs; }    
+
+  constexpr bool operator==(const str &rhs) const {
+    //1) compare size
+    //1) compare e
+    //2) compare ptr_or_start
+    if (_size != rhs._size) { return false; }
+    for (auto i = 0; i < e.size(); ++i) {
+      if (e[i] != rhs.e[i]) { return false; }
+    }
+    return (ptr_or_start == rhs.ptr_or_start);
+  }
+
+
   constexpr bool operator!=(const str &rhs) const { return !(*this == rhs); }
 
   template <std::size_t N>
   constexpr bool operator!=(const char (&rhs)[N]) const { return !(*this == rhs); }
+
+  //constexpr bool operator!=(const char* rhs) const { return !(*this == rhs); }
+  
+  constexpr bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
   constexpr char operator[](std::size_t pos) const {
 #ifndef NDEBUG
