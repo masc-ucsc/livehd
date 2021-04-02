@@ -16,6 +16,8 @@ class FPObject {
 
   // Make the common variables available to the inheriting classes.
 protected:
+  friend class annLayout;
+
   // The x,y values will be relative to the enclosing object.
   double        x;       // The location in the container.  0.0 is on the left.
   double        y;       // The location in the container.  0.0 is on the bottom.

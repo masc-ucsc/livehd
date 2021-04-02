@@ -11,7 +11,7 @@ protected:
 };
 
 // floorplan fetched from ArchFP website
-TEST_F(archfp_test, floorplan_test1) {
+TEST_F(archfp_test, floorplan_test) {
   geogLayout* dCacheStack = new geogLayout(2);
   dCacheStack->addComponentCluster("Control", 1, 4, 10., 1., Top);
   dCacheStack->addComponentCluster("L1", 4, 9, 3., 1., Bottom);
@@ -34,7 +34,7 @@ TEST_F(archfp_test, floorplan_test1) {
   chip->addComponentCluster("L2", 12, 9.5, 2., 1., Left);
   chip->addComponent(coreCluster, 2, TopBottomMirror);
 
-  bool success = chip->layout(HardAspectRatio, 1.0);
+  bool success = chip->layout(AspectRatio, 1.0);
   if (!success) {
     std::cerr << "Unable to layout specified CMP configuration.\n";
   }

@@ -90,6 +90,7 @@ void Lhd_floorplanner::create(FPOptimization opt, float ar) {
   bool success = root_layout->layout(opt, ar);
   if (!success) {
     if (typeid(*root_layout) == typeid(geogLayout)) {
+      // geographic layouts assume that the user's input is valid and generates illegal floorplans if this is not the case
       fmt::print("WARNING: floorplan may contain overlapping layouts.  Adjusting the overall aspect ratio is recommended.\n");
     } else {
       throw std::runtime_error("floorplan failed!");

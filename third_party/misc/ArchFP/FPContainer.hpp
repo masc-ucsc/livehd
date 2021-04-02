@@ -24,6 +24,8 @@ class FPContainer : public FPObject {
   FPObject*              removeComponentAtIndex(int index);
 
 protected:
+  friend class annLayout;
+
   // These allow safe access to the item list.
   size_t    getComponentCount() const { return items.size(); }
   FPObject* getComponent(int index) const { return items[index]; }

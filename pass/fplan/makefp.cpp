@@ -12,9 +12,6 @@
 #include "node_type_area.hpp"
 #include "profile_time.hpp"
 
-constexpr size_t           opt_map_size               = 3;
-constexpr std::string_view opt_name_map[opt_map_size] = {"area", "wirelength", "area_wirelength"};
-
 void Pass_fplan_makefp::setup() {
   auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an Lgraph", &Pass_fplan_makefp::pass);
 
@@ -43,6 +40,10 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
   bool found = false;
   t.start();
   fmt::print("  creating floorplan...");
+
+  constexpr size_t           opt_map_size   = (size_t)IllegalOpt;
+  constexpr std::string_view opt_name_map[] = {"area", "wirelength", "area_wirelength", "aspect_ratio"};
+
   for (size_t i = 0; i < opt_map_size; i++) {
     if (opt_name_map[i] == opt) {
       fp.create((FPOptimization)i, ar);

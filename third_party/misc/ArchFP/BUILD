@@ -24,12 +24,20 @@ cc_library(
 )
 
 cc_test(
-    name = "floorplan_test",
-    srcs = ["tests/archfp_test.cpp"],
+    name = "ann_test",
+    srcs = ["tests/ann_test.cpp"],
     tags = [
         "fixme",
-        "flaky",
     ],
+    deps = [
+        ":archfp",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "floorplan_test",
+    srcs = ["tests/archfp_test.cpp"],
     deps = [
         ":archfp",
         "@com_google_googletest//:gtest_main",
