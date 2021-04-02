@@ -30,7 +30,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto          odir      = pc.get_odir(var);
   auto          top       = pc.check_option_top(var);
   auto          gviz      = pc.check_option_gviz(var);  
-  std::string_view is_firrtl = pc.check_option_firrtl(var);
+  std::string_view get_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -45,7 +45,7 @@ void Pass_compiler::compile(Eprp_var &var) {
     for (auto f : absl::StrSplit(files, ',')) Pass::warn("todo: start from prp parser:{}", f);
   }
 
-  if (!is_firrtl.empty()) {
+  if (!get_firrtl.empty()) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     Lgraph *seed_lg;
     auto *  library = Graph_library::instance(path);
@@ -270,17 +270,17 @@ std::string Pass_compiler::check_option_top(Eprp_var &var) {
   return top;
 }
 std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
-  std::string_view is_firrtl;
+  std::string_view get_firrtl;
   if (var.has_label("firrtl")) {
     auto fir  = var.get("firrtl");
     if (fir.compare("false") != 0 && fir.compare("0") !=0 ) {
-      is_firrtl = fir;
+      get_firrtl = fir;
     } else {
-      is_firrtl = "";
+      get_firrtl = "";
     }
   }
   else {
-    is_firrtl = "";
+    get_firrtl = "";
   }
-  return is_firrtl;
+  return get_firrtl;
 }
