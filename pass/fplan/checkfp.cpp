@@ -28,7 +28,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
   std::vector<Node> nodes;
 
-  var.lgs[0]->each_hier_fast_direct([&](const Node& n) -> bool {
+  var.lgs[0]->each_hier_fast([&](const Node& n) -> bool {
     if (!n.is_type_synth()) {
       return true;
     }
@@ -45,7 +45,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
   });
 
   for (auto n : nodes) {
-    var.lgs[0]->each_hier_fast_direct([&](const Node& nt) -> bool {
+    var.lgs[0]->each_hier_fast([&](const Node& nt) -> bool {
       if (!nt.is_type_synth()) {
         return true;
       }

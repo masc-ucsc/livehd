@@ -12,7 +12,7 @@ void Inou_lef_api::tolg(Eprp_var &var) {
     inou.set(l.first, l.second);
   }
 
-  std::vector<LGraph *> lgs = inou.tolg();
+  std::vector<Lgraph *> lgs = inou.tolg();
 
   if (lgs.empty()) {
     Main_api::warn(fmt::format("inou.lef.tolg could not create a {} lgraph in {} path", var.get("name"), var.get("path")));

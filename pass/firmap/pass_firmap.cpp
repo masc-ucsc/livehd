@@ -32,7 +32,7 @@ void Pass_firmap::trans(Eprp_var &var) {
   absl::node_hash_map<uint32_t, XorrMap> spinmaps_xorr;  // Lg_type_id -> spinmap
 
   Firmap                fm(fbmaps, pinmaps, spinmaps_xorr);
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
   for (const auto &lg : var.lgs) {
     auto name{lg->get_name()};
     if (name.substr(0, 11) != "__firrtl_") {

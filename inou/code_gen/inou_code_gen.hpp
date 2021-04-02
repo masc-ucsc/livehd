@@ -11,7 +11,7 @@ public:
   enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 
 private:
-  LGraph *lg;
+  Lgraph *lg;
 
   void to_xxx(Code_gen_type code_gen_type, std::shared_ptr<Lnast> lnast);
 

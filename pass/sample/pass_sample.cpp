@@ -23,7 +23,7 @@ void Pass_sample::setup() {
 
 Pass_sample::Pass_sample(const Eprp_var &var) : Pass("pass.sample", var) {}
 
-void Pass_sample::do_work(LGraph *g) {
+void Pass_sample::do_work(Lgraph *g) {
   compute_histogram(g);
   compute_max_depth(g);
   // annotate_placement(g);
@@ -47,7 +47,7 @@ void Pass_sample::wirecount(Eprp_var &var) {
   }
 }
 
-void Pass_sample::do_wirecount(LGraph *g, int indent) {
+void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   int i_num  = 0;
   int i_bits = 0;
   g->each_graph_input([&i_num, &i_bits](const Node_pin &pin) {
@@ -88,10 +88,10 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
              n_wire,
              n_wire_bits);
 
-  g->each_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
+  g->each_local_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
 
-    LGraph *sub_lg = LGraph::open(path, lgid);
+    Lgraph *sub_lg = Lgraph::open(path, lgid);
     if (!sub_lg)
       return;
     if (sub_lg->is_empty()) {
@@ -108,11 +108,11 @@ void Pass_sample::do_wirecount(LGraph *g, int indent) {
       return;  // No blackboxes
     }
 
-    this->do_wirecount(sub_lg, indent + 1);
+    do_wirecount(sub_lg, indent + 1);
   });
 }
 
-void Pass_sample::compute_histogram(LGraph *g) {
+void Pass_sample::compute_histogram(Lgraph *g) {
   Lbench b("pass.SAMPLE_compute_histogram");
 
   std::map<Ntype_op, int> histogram;
@@ -132,7 +132,7 @@ void Pass_sample::compute_histogram(LGraph *g) {
   fmt::print("Pass: cells {}\n", cells);
 }
 
-void Pass_sample::compute_max_depth(LGraph *g) {
+void Pass_sample::compute_max_depth(Lgraph *g) {
   Lbench b("pass.SAMPLE_max_depth");
 
   absl::flat_hash_map<Node::Compact, int> depth;
@@ -152,7 +152,7 @@ void Pass_sample::compute_max_depth(LGraph *g) {
   fmt::print("Pass: max_depth {}\n", max_depth);
 }
 
-void Pass_sample::annotate_placement(LGraph *g) {
+void Pass_sample::annotate_placement(Lgraph *g) {
   Lbench b("pass.SAMPLE_replace_inline");
 
   int x_pos = 0;
@@ -174,12 +174,12 @@ void Pass_sample::annotate_placement(LGraph *g) {
   }
 }
 
-void Pass_sample::create_sample_graph(LGraph *g) {
+void Pass_sample::create_sample_graph(Lgraph *g) {
   auto        lg_path = g->get_path();
   std::string lg_source{g->get_library().get_source(g->get_lgid())};  // must be string because create can free it
 
-  LGraph *lg = LGraph::create(lg_path, "pass_sample", lg_source);
-  fmt::print("Creating new sample LGraph...\n");
+  Lgraph *lg = Lgraph::create(lg_path, "pass_sample", lg_source);
+  fmt::print("Creating new sample Lgraph...\n");
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4);  // First io in module, 4 bits
   auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1);  // Module position 1, 1 bit
   auto graph_out   = lg->add_graph_output("g_out", 2, 3);   // Module possition 2, 3 bits

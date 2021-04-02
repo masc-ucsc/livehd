@@ -74,9 +74,9 @@ struct LG2Yosys_Pass : public Yosys::Pass {
 
     Lbench b("inou.yosys_fromlg");
 
-    std::vector<LGraph *> lgs;
+    std::vector<Lgraph *> lgs;
     if (single_graph_mode) {
-      LGraph *lg = LGraph::open(path, name);
+      Lgraph *lg = Lgraph::open(path, name);
       if (lg == 0) {
         log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
@@ -92,7 +92,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
       log("converting all graphs in path %s.\n", path.c_str());
     }
 
-    std::set<LGraph *> generated;
+    std::set<Lgraph *> generated;
     Lgyosys_dump       dumper(design, hierarchy);
 
     dumper.fromlg(lgs);

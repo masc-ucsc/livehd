@@ -107,10 +107,10 @@ void Lhd_floorplanner::write_lhd_node() {
   Ann_node_place::clear(nt.get_root_lg());  // clear out any existing node placements
   clearCount();                             // clear ArchFP name counts
 
-  unsigned int placed_nodes = root_layout->outputLGraphLayout(nt, nt.root_index());
+  unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, nt.root_index());
 
   unsigned int node_count = 0;
-  root_lg->each_hier_fast_direct([&node_count](const Node& n) {
+  root_lg->each_hier_fast([&node_count](const Node& n) {
     if (!n.is_type_synth()) {
       return true;
     }

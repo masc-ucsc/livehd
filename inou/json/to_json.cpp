@@ -2,7 +2,7 @@
 
 #include "inou_json.hpp"
 
-void to_json(LGraph *lg, const std::string &filename) {
+void to_json(Lgraph *lg, const std::string &filename) {
   (void)lg;
   (void)filename;
 }

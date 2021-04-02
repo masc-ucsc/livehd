@@ -7,7 +7,7 @@ class Inou_pyrope : public Pass {
 protected:
   void to_lgraph(std::string_view file);
 
-  void do_work(const LGraph *g);
+  void do_work(const Lgraph *g);
 
   // eprp callbacks
   static void parse_to_lnast(Eprp_var &var);

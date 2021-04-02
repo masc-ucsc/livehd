@@ -7,23 +7,23 @@
 
 class Fast_edge_iterator {
 protected:
-  LGraph *   top_g;
+  Lgraph *   top_g;
   const bool visit_sub;
 
 public:
   class Fast_iter {
   private:
     // TODO: It may be clear to have Node, not all the Node fileds here (historical reasons before Node existed)
-    LGraph *        top_g;
-    LGraph *        current_g;
+    Lgraph *        top_g;
+    Lgraph *        current_g;
     Hierarchy_index hidx;
-    Index_ID        nid;
+    Index_id        nid;
     const bool      visit_sub;
 
     void go_next();
 
   public:
-    constexpr Fast_iter(LGraph *_g, LGraph *_cg, const Hierarchy_index &_hidx, const Index_ID _nid, bool _visit_sub)
+    constexpr Fast_iter(Lgraph *_g, Lgraph *_cg, const Hierarchy_index &_hidx, const Index_id _nid, bool _visit_sub)
         : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) {}
     constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) {}
 
@@ -59,7 +59,7 @@ public:
   };
 
   Fast_edge_iterator() = delete;
-  explicit Fast_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
+  explicit Fast_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
   Fast_iter begin() const;
   Fast_iter end() const { return Fast_iter(visit_sub); }
@@ -77,7 +77,7 @@ protected:
   std::vector<Node>                       pending_stack;
   absl::flat_hash_map<Node::Compact, int> pending_loop_detect;
 
-  Flow_base_iterator(LGraph *lg, bool _visit_sub);
+  Flow_base_iterator(Lgraph *lg, bool _visit_sub);
   Flow_base_iterator(bool _visit_sub);
 
 public:
@@ -107,13 +107,13 @@ public:
   protected:
     void topo_add_chain_down(const Node_pin &dst_pin);
     void topo_add_chain_fwd(const Node_pin &driver_pin);
-    void fwd_get_from_linear(LGraph *top);
+    void fwd_get_from_linear(Lgraph *top);
     void fwd_get_from_pending();
-    void fwd_first(LGraph *lg);
+    void fwd_first(Lgraph *lg);
     void fwd_next();
 
   public:
-    Fwd_iter(LGraph *lg, bool _visit_sub) : Flow_base_iterator(lg, _visit_sub) { fwd_first(lg); }
+    Fwd_iter(Lgraph *lg, bool _visit_sub) : Flow_base_iterator(lg, _visit_sub) { fwd_first(lg); }
     Fwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { I(current_node.is_invalid()); }
 
     bool operator!=(const Fwd_iter &other) const {
@@ -130,12 +130,12 @@ public:
   };
 
 protected:
-  LGraph *   top_g;
+  Lgraph *   top_g;
   const bool visit_sub;
 
 public:
   Fwd_edge_iterator() = delete;
-  explicit Fwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
+  explicit Fwd_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
   Fwd_iter begin() const {
     if (top_g->is_empty())
@@ -150,11 +150,11 @@ class Bwd_edge_iterator {
 public:
   class Bwd_iter : public Flow_base_iterator {
   protected:
-    void bwd_first(LGraph *lg);
+    void bwd_first(Lgraph *lg);
     void bwd_next();
 
   public:
-    Bwd_iter(LGraph *lg, bool _visit_sub) : Flow_base_iterator(lg, _visit_sub) { bwd_first(lg); }
+    Bwd_iter(Lgraph *lg, bool _visit_sub) : Flow_base_iterator(lg, _visit_sub) { bwd_first(lg); }
     Bwd_iter(bool _visit_sub) : Flow_base_iterator(_visit_sub) { I(current_node.is_invalid()); }
 
     bool operator!=(const Bwd_iter &other) const {
@@ -171,12 +171,12 @@ public:
   };
 
 protected:
-  LGraph *   top_g;
+  Lgraph *   top_g;
   const bool visit_sub;
 
 public:
   Bwd_edge_iterator() = delete;
-  explicit Bwd_edge_iterator(LGraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
+  explicit Bwd_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
   Bwd_iter begin() const { return Bwd_iter(top_g, visit_sub); }
 

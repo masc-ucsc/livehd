@@ -46,24 +46,24 @@ lgtoln_verif() {
     echo ""
     echo ""
     echo "===================================================="
-    echo "Compilation to get stable LGraph"
+    echo "Compilation to get stable Lgraph"
     echo "===================================================="
 
     echo "----------------------------------------------------"
-    echo "Pyrope -> LNAST -> LGraph"
+    echo "Pyrope -> LNAST -> Lgraph"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "inou.pyrope files:inou/pyrope/tests/compiler/${pt}.prp |> pass.lnast_tolg"
     if [ $? -eq 0 ]; then
-      echo "Successfully created optimized LGraph: ${pt}"
+      echo "Successfully created optimized Lgraph: ${pt}"
     else
-      echo "ERROR: Pyrope compiler failed on Pyrope -> LNAST -> LGraph, testcase: ${pt}"
+      echo "ERROR: Pyrope compiler failed on Pyrope -> LNAST -> Lgraph, testcase: ${pt}"
       exit 1
     fi
 
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph optimization"
+    echo "Lgraph optimization"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
@@ -84,20 +84,20 @@ lgtoln_verif() {
     echo "===================================================="
 
     echo "----------------------------------------------------"
-    echo "LGraph (golden) -> LNAST -> LGraph (new)"
+    echo "Lgraph (golden) -> LNAST -> Lgraph (new)"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} |> pass.lnast_fromlg |> lnast.dump |> pass.lnast_tolg path:lgdb2"
     if [ $? -eq 0 ]; then
       echo "Successfully create the new LG: ${pt}"
     else
-      echo "ERROR: Tester failed: LG -> LNAST -> LGraph, testcase: ${pt}"
+      echo "ERROR: Tester failed: LG -> LNAST -> Lgraph, testcase: ${pt}"
       exit 1
     fi
 
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph Optimization (newlg)"
+    echo "Lgraph Optimization (newlg)"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> pass.bitwidth"
@@ -112,7 +112,7 @@ lgtoln_verif() {
 
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
+    echo "Lgraph -> Verilog"
     echo "----------------------------------------------------"
 
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.yosys.fromlg"

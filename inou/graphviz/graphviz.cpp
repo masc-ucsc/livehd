@@ -81,7 +81,7 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   return legal;
 }
 
-void Graphviz::do_hierarchy(LGraph *g) {
+void Graphviz::do_hierarchy(Lgraph *g) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
@@ -96,8 +96,8 @@ void Graphviz::do_hierarchy(LGraph *g) {
     Node h_inp(g, hidx, Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n",
-                 e.driver.get_class_lgraph()->get_name(),
-                 e.sink.get_class_lgraph()->get_name(),
+                 e.driver.get_class_Lgraph()->get_name(),
+                 e.sink.get_class_Lgraph()->get_name(),
                  (int)hidx.level,
                  (int)hidx.pos);
 
@@ -109,10 +109,10 @@ void Graphviz::do_hierarchy(LGraph *g) {
       added.insert(p);
 
       data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
-                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
+                          graphviz_legalize_name(e.driver.get_class_Lgraph()->get_name()),
                           (int)e.driver.get_hidx().level,
                           (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
+                          graphviz_legalize_name(e.sink.get_class_Lgraph()->get_name()),
                           (int)e.sink.get_hidx().level,
                           (int)e.sink.get_hidx().pos);
     }
@@ -120,8 +120,8 @@ void Graphviz::do_hierarchy(LGraph *g) {
     Node h_out(g, hidx, Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n",
-                 e.driver.get_class_lgraph()->get_name(),
-                 e.sink.get_class_lgraph()->get_name(),
+                 e.driver.get_class_Lgraph()->get_name(),
+                 e.sink.get_class_Lgraph()->get_name(),
                  (int)hidx.level,
                  (int)hidx.pos);
 
@@ -133,10 +133,10 @@ void Graphviz::do_hierarchy(LGraph *g) {
       added.insert(p);
 
       data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
-                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
+                          graphviz_legalize_name(e.driver.get_class_Lgraph()->get_name()),
                           (int)e.driver.get_hidx().level,
                           (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
+                          graphviz_legalize_name(e.sink.get_class_Lgraph()->get_name()),
                           (int)e.sink.get_hidx().level,
                           (int)e.sink.get_hidx().pos);
     }
@@ -158,22 +158,22 @@ void Graphviz::do_hierarchy(LGraph *g) {
   close(fd);
 }
 
-void Graphviz::do_from_lgraph(LGraph *lg_parent, std::string_view dot_postfix) {
+void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
   populate_lg_data(lg_parent, dot_postfix);
 
-  lg_parent->each_sub_fast([&, this](Node &node, Lg_type_id lgid) {
+  lg_parent->each_local_sub_fast([&, this](Node &node, Lg_type_id lgid) {
     // no need to populate firrtl_op_subgraph, it's just tmap cells.
     if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir")
       return;
 
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
-    LGraph *lg_child = LGraph::open(lg_parent->get_path(), lgid);
+    Lgraph *lg_child = Lgraph::open(lg_parent->get_path(), lgid);
     populate_lg_data(lg_child, dot_postfix);
   });
 }
 
-void Graphviz::populate_lg_data(LGraph *g, std::string_view dot_postfix) {
+void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (auto node : g->fast(false)) {

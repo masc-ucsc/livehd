@@ -16,12 +16,12 @@ struct eprp_casecmp_str : public std::binary_function<const std::string, const s
   bool operator()(const std::string &lhs, const std::string &rhs) const { return strcasecmp(lhs.c_str(), rhs.c_str()) < 0; }
 };
 
-class LGraph;
+class Lgraph;
 
 class Eprp_var {
 public:
   using Eprp_dict   = absl::flat_hash_map<const std::string, std::string>;
-  using Eprp_lgs    = std::vector<LGraph *>;
+  using Eprp_lgs    = std::vector<Lgraph *>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
   Eprp_dict   dict;
@@ -42,7 +42,7 @@ public:
   void add(const Eprp_var &_var);
   void add(Eprp_lnasts &_var);
 
-  void add(LGraph *lg);
+  void add(Lgraph *lg);
   void add(std::unique_ptr<Lnast> lnast);
   void add(std::shared_ptr<Lnast> lnast);
   void add(const std::string &name, std::string_view value);

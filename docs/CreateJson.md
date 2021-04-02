@@ -111,7 +111,7 @@ For example, let's say we have the following:
 2. A is the top module and instantiates two instances of B and C and some miscellaneous boolean logic.
 3. Inside of B, there are four instantiations of C and some miscellaneous logic.
 4. Inside of C, there is only boolean logic.
-In this example, we have three graphs: A, B, and C. A is the top-level graph passed into the flow, and we must create a vector listing A, B, and C before creating the Inou_Tojson object. This is achieved via "lg->each_sub_unique_fast()".
+In this example, we have three graphs: A, B, and C. A is the top-level graph passed into the flow, and we must create a vector listing A, B, and C before creating the Inou_Tojson object. This is achieved via "lg->each_local_unique_sub_fast()".
 
 Note: were we not to initially track all the graphs at the start, we would have to use recursive data structures within the private fields. This would prove too complex and costly (memory/CPU wise).
 
@@ -162,7 +162,7 @@ Creates the Inou_Tojson object; we keep a reference to the top-level graph and J
 int dump_graph(Lg_type_id lgid);
 ```
 
-For each LGraph, we obtain their lgid via toplg->get_id() (for the top level graph) or toplg->each_sub_unique_fast() (for the subgraphs). We call dump_graph() N times, one per lgid. Each dump_graph() call will write the entire "module"
+For each LGraph, we obtain their lgid via toplg->get_id() (for the top level graph) or toplg->each_local_unique_sub_fast() (for the subgraphs). We call dump_graph() N times, one per lgid. Each dump_graph() call will write the entire "module"
 
 # LGraph API Functions Used
 
@@ -185,7 +185,7 @@ lg->get_name();
 Obtains the name of the name of the current LGraph pointed to by lg. Note that names can refer to a "real" module instantiated in the user-written Verilog files, or it can refer to a "black-box" module created by either Yosys or LGraph. In the latter case, we would want to set the "hide_name" attribute to true.
 
 ```cpp
-lg->each_sub_unique_fast([&](Node&, Lg_type_id lgid) { /**/ });
+lg->each_local_unique_sub_fast([&](Node&, Lg_type_id lgid) { /**/ });
 ```
 
 A loop that calls a given lambda function on each of the subgraphs, and their subgraphs recursively; these subgraphs are represented via a unique index (LG_type_id lgid). In order to retrieve the corresponding LGraph pointer for each subgraph, we must call the following:

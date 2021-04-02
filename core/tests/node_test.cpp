@@ -16,20 +16,20 @@ unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {
 protected:
-  LGraph *top = 0;
-  LGraph *c1  = 0;
-  LGraph *c2  = 0;
+  Lgraph *top = 0;
+  Lgraph *c1  = 0;
+  Lgraph *c2  = 0;
 
   absl::flat_hash_map<std::string, int> children;
 
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
 
   void SetUp() override {
-    top = LGraph::create("lgdb_node_test", "top", "nosource");
+    top = Lgraph::create("lgdb_node_test", "top", "nosource");
     ASSERT_NE(top, nullptr);
-    c1 = LGraph::create("lgdb_node_test", "c1", "nosource");
+    c1 = Lgraph::create("lgdb_node_test", "c1", "nosource");
     ASSERT_NE(c1, nullptr);
-    c2 = LGraph::create("lgdb_node_test", "c2", "nosource");
+    c2 = Lgraph::create("lgdb_node_test", "c2", "nosource");
     ASSERT_NE(c2, nullptr);
 
     //---------------------------------------------------
@@ -113,7 +113,7 @@ protected:
   }
 };
 
-TEST_F(Setup_graphs_test, each_sub_graph) {
+TEST_F(Setup_graphs_test, iterate_sub_graph) {
   for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;

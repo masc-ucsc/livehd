@@ -7,11 +7,11 @@
 #include "gtest/gtest.h"
 
 // Fake lgraph class for testing
-class LGraph {
+class Lgraph {
 public:
   int id;
 
-  LGraph() {
+  Lgraph() {
     static int conta = 0;
     id               = conta++;
   };
@@ -86,7 +86,7 @@ public:
     fmt::print("\n");
 
     var.add("test2_bar", "field2");
-    var.add(new LGraph());
+    var.add(new Lgraph());
   }
 };
 

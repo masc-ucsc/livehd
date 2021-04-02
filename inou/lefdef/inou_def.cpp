@@ -11,13 +11,13 @@ Inou_def::Inou_def() { fmt::print("DEBUG:: Inou_def class created\n"); };
 
 void Inou_def::set_def_info(Def_info &dinfo_in) { dinfo = dinfo_in; };
 
-std::vector<LGraph *> Inou_def::generate() {
-  std::vector<LGraph *> lgs;
+std::vector<Lgraph *> Inou_def::generate() {
+  std::vector<Lgraph *> lgs;
 #if 1
   I(false);
 #else
   // clear since loading from def
-  auto *g = LGraph::create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
+  auto *g = Lgraph::create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
 
   const Tech_library &tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib.get_cell_types_size();
@@ -120,7 +120,7 @@ std::vector<LGraph *> Inou_def::generate() {
   return lgs;
 }
 
-void Inou_def::generate(std::vector<const LGraph *> &out) {
+void Inou_def::generate(std::vector<const Lgraph *> &out) {
   assert(0);  // just generate
   out.clear();
 }

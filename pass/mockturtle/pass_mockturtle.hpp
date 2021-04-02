@@ -79,12 +79,12 @@ protected:
   absl::flat_hash_map<std::pair<unsigned int, mockturtle::klut_network::signal>,
                       std::vector<std::pair<mockturtle::klut_network::node, Port_ID>>>
        gid_pi2sink_node_lg_pid;
-  bool lg_partition(LGraph *);
-  void create_mockturtle_network(LGraph *);
+  bool lg_partition(Lgraph *);
+  void create_mockturtle_network(Lgraph *);
   void convert_mockturtle_to_KLUT();
-  void create_lutified_lgraph(LGraph *);
+  void create_lutified_lgraph(Lgraph *);
 
-  void connect_complemented_signal(LGraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &,
+  void connect_complemented_signal(Lgraph *, Node_pin &, Node_pin &, const mockturtle::klut_network &,
                                    const mockturtle::klut_network::signal &);
 
   template <typename sig_type, typename ntk_type>
@@ -225,7 +225,7 @@ protected:
     return true;
   }
 
-  void do_work(LGraph *g);
+  void do_work(Lgraph *g);
 
 public:
   Pass_mockturtle(const Eprp_var &var) : Pass("pass.mockturtle", var){};

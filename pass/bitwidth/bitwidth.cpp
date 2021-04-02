@@ -13,7 +13,7 @@
 Bitwidth::Bitwidth(bool _hier, int _max_iterations, BWMap_flat &_flat_bwmap, BWMap_hier &_hier_bwmap)
     : max_iterations(_max_iterations), hier(_hier), flat_bwmap(_flat_bwmap), hier_bwmap(_hier_bwmap) {}
 
-void Bitwidth::do_trans(LGraph *lg) {
+void Bitwidth::do_trans(Lgraph *lg) {
   Lbench b("pass.bitwidth");
   bw_pass(lg);
 }
@@ -931,7 +931,7 @@ void Bitwidth::forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw) {
 void Bitwidth::set_graph_boundary(Node_pin &dpin, Node_pin &spin) {
   I(hier);  // do not call unless hierarchy is set
 
-  if (dpin.get_class_lgraph() == spin.get_class_lgraph())
+  if (dpin.get_class_Lgraph() == spin.get_class_Lgraph())
     return;
 
   I(dpin.get_hidx() != spin.get_hidx());
@@ -958,7 +958,7 @@ void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
   }
 }
 
-void Bitwidth::bw_pass(LGraph *lg) {
+void Bitwidth::bw_pass(Lgraph *lg) {
   discovered_some_backward_nodes_try_again = true;
   not_finished                             = true;
 

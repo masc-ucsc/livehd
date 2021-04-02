@@ -342,7 +342,7 @@ public:
            || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt) || (val == Lnast_ntype_ge);
   }
 
-  // basic_op have 1 to 1 translation between LNAST and LGraph
+  // basic_op have 1 to 1 translation between LNAST and Lgraph
   bool constexpr is_direct_lgraph_op() const {
     return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_reduce_xor
            && val != Lnast_ntype_mod

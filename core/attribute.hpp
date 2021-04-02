@@ -13,7 +13,7 @@ template <const char *Name, typename Base, typename Attr_data>
 class Attribute {
   inline static std::mutex                                    lgs_mutex;
   inline static absl::flat_hash_map<std::string, Attr_data *> lg2attr;
-  inline static __thread const LGraph *                       last_lg   = nullptr;
+  inline static __thread const Lgraph *                       last_lg   = nullptr;
   inline static __thread Attr_data *                          last_attr = nullptr;
 
   static std::string_view get_base() {
@@ -27,7 +27,7 @@ class Attribute {
 
   static std::string get_filename(Lg_type_id lgid) { return absl::StrCat("lg_", std::to_string(lgid), get_base(), Name); };
 
-  static void setup_table(const LGraph *lg) {
+  static void setup_table(const Lgraph *lg) {
     last_lg = lg;
 
     const auto key = absl::StrCat(lg->get_unique_name(), Name);
@@ -52,13 +52,13 @@ public:
       setup_table(obj.get_top_lgraph());
     return last_attr;
   }
-  static Attr_data *ref(const LGraph *lg) {
+  static Attr_data *ref(const Lgraph *lg) {
     if (unlikely(lg != last_lg))
       setup_table(lg);
     return last_attr;
   }
 
-  static void clear(const LGraph *lg) {
+  static void clear(const Lgraph *lg) {
     setup_table(lg);
 
     I(last_lg == lg);  // setup table forces this
@@ -78,7 +78,7 @@ public:
     last_attr = nullptr;
   }
 
-  static void sync(const LGraph *lg) {
+  static void sync(const Lgraph *lg) {
     if (last_lg == lg) {
       last_lg   = nullptr;
       last_attr = nullptr;

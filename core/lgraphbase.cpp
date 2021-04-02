@@ -1,4 +1,4 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+ //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "lgraphbase.hpp"
 
@@ -15,12 +15,12 @@
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
 
-LGraph_Base::LGraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+Lgraph_Base::Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
     : Lgraph_base_core(_path, _name, _lgid)
     , node_internal(path, absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
     , library(_lib) {}
 
-LGraph_Base::~LGraph_Base() {
+Lgraph_Base::~Lgraph_Base() {
   // TODO: This is NOT a bug. The reason is that we need to preserve the
   // string pointers for graph name. Then, we can use string_view maps for all
   // of them. Otherwise, we can not.
@@ -31,12 +31,12 @@ LGraph_Base::~LGraph_Base() {
   // I(false);
 }
 
-LGraph_Base::_init::_init() {
-  // fmt::print("LGraph_Base static init done\n");
+Lgraph_Base::_init::_init() {
+  // fmt::print("Lgraph_Base static init done\n");
   // Add here sequence of static initialization that may be needed
 }
 
-void LGraph_Base::clear() {
+void Lgraph_Base::clear() {
   idx_insert_cache.clear();
 
   node_internal.clear();
@@ -46,17 +46,17 @@ void LGraph_Base::clear() {
   library->clear(lgid);
 }
 
-void LGraph_Base::sync() {
+void Lgraph_Base::sync() {
   Lgraph_base_core::sync();
   // Avoid recursion library->sync();
 }
 
-void LGraph_Base::emplace_back() {
+void Lgraph_Base::emplace_back() {
   I(locked);
 
   node_internal.emplace_back();
 
-  Index_ID nid = node_internal.size() - 1;
+  Index_id nid = node_internal.size() - 1;
   auto *   ptr = node_internal.ref(nid);
 
   if (ptr->is_page_align()) {
@@ -74,7 +74,7 @@ void LGraph_Base::emplace_back() {
   ptr->set_nid(nid);          // self by default
 }
 
-Index_ID LGraph_Base::create_node_int() {
+Index_id Lgraph_Base::create_node_int() {
   get_lock();  // FIXME: change to Copy on Write permissions (mmap exception, and remap)
   emplace_back();
 
@@ -83,9 +83,9 @@ Index_ID LGraph_Base::create_node_int() {
   return node_internal.size() - 1;
 }
 
-Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID dst_pid, const Index_ID master_nid,
-                                        const Index_ID root_idx) {
-  Index_ID idx2 = create_node_int();
+Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID dst_pid, const Index_id master_nid,
+                                        const Index_id root_idx) {
+  Index_id idx2 = create_node_int();
 
   I(dst_pid < (1 << Port_bits));
 
@@ -151,7 +151,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
 
   // last_idx (pid1) -> idx2 (dst_pid) -> idx3 (pid1)
 
-  Index_ID idx3 = create_node_int();
+  Index_id idx3 = create_node_int();
 
   // make space in idx so that we can push_next_state
   node_internal.ref(idx3)->set_dst_pid(node_internal[last_idx].get_dst_pid());
@@ -184,7 +184,7 @@ Index_ID LGraph_Base::create_node_space(const Index_ID last_idx, const Port_ID d
   return idx2;
 }
 
-void LGraph_Base::print_stats() const {
+void Lgraph_Base::print_stats() const {
   double bytes = 0;
 
   size_t n_nodes       = 1;
@@ -256,8 +256,8 @@ static inline unsigned long long get_cycles(void) {
 }
 #endif
 
-Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Index_ID start_nid, const Port_ID dst_pid,
-                                           const Index_ID root_idx) {
+Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Index_id start_nid, const Port_ID dst_pid,
+                                           const Index_id root_idx) {
 #ifdef PERF_OUTPUT_PIN
   auto             start          = get_cycles();
   static long long total_cycles_1 = 0;
@@ -300,7 +300,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   }
 
   // Look for space
-  Index_ID idx = start_nid;
+  Index_id idx = start_nid;
 
   // Trick to avoid checking frequently that there is extra space. Most of the
   // time the list if full, no need to traverse. If traversed, it will find a
@@ -326,7 +326,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
       return create_node_space(idx, dst_pid, master_nid, root_idx);
     }
 
-    Index_ID idx2 = ptr->get_next();
+    Index_id idx2 = ptr->get_next();
 #ifdef DEBUG_SLOW
     I(node_internal[idx2].get_master_root_nid() == ptr->get_master_root_nid());
 #endif
@@ -352,12 +352,12 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID master_nid, const Inde
   return 0;
 }
 
-Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID nid, const Port_ID pid) const {
+Index_id Lgraph_Base::find_idx_from_pid_int(const Index_id nid, const Port_ID pid) const {
   I(node_internal[nid].get_dst_pid() != pid);  // short-cut for common case
   I(node_internal[nid].is_master_root());
   I(node_internal[nid].is_valid());
 
-  Index_ID idx2 = nid;
+  Index_id idx2 = nid;
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pid && node_internal[idx2].is_root()) {
       return idx2;
@@ -375,15 +375,15 @@ Index_ID LGraph_Base::find_idx_from_pid_int(const Index_ID nid, const Port_ID pi
   return 0;
 }
 
-Index_ID LGraph_Base::setup_idx_from_pid(const Index_ID nid, const Port_ID pid) {
-  Index_ID pos = find_idx_from_pid(nid, pid);
+Index_id Lgraph_Base::setup_idx_from_pid(const Index_id nid, const Port_ID pid) {
+  Index_id pos = find_idx_from_pid(nid, pid);
   if (pos) {
     I(node_internal[pos].is_root());
     return pos;
   }
 
-  Index_ID root_idx = 0;
-  Index_ID idx_new  = get_space_output_pin(nid, pid, root_idx);
+  Index_id root_idx = 0;
+  Index_id idx_new  = get_space_output_pin(nid, pid, root_idx);
   if (root_idx == 0)
     root_idx = idx_new;
 
@@ -393,7 +393,7 @@ Index_ID LGraph_Base::setup_idx_from_pid(const Index_ID nid, const Port_ID pid) 
   return root_idx;
 }
 
-Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_ID dst_pid, Index_ID &root_idx) {
+Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_ID dst_pid, Index_id &root_idx) {
   I(node_internal[start_nid].is_root());
   I(node_internal[start_nid].is_node_state());
   if (node_internal[start_nid].has_space_short() && node_internal[start_nid].get_dst_pid() == dst_pid) {
@@ -401,7 +401,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
     return start_nid;
   }
 
-  Index_ID idx = start_nid;
+  Index_id idx = start_nid;
 
   while (true) {
     if (node_internal[idx].get_dst_pid() == dst_pid) {
@@ -417,7 +417,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
     }
 
     if (node_internal[idx].is_last_state()) {
-      Index_ID idx_new;
+      Index_id idx_new;
       idx_new = create_node_space(idx, dst_pid, start_nid, root_idx);
       if (root_idx == 0)
         root_idx = idx_new;
@@ -425,7 +425,7 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
       return idx_new;
     }
 
-    Index_ID idx2 = node_internal[idx].get_next();
+    Index_id idx2 = node_internal[idx].get_next();
     I(node_internal[idx2].get_master_root_nid() == node_internal[idx].get_master_root_nid());
     idx = idx2;
   }
@@ -435,12 +435,12 @@ Index_ID LGraph_Base::get_space_output_pin(const Index_ID start_nid, const Port_
   return 0;
 }
 
-void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, Index_ID src_idx, Port_ID dst_pid) {
+void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, Index_id src_idx, Port_ID dst_pid) {
   // Do not point to intermediate nodes which can be remapped, just root nodes
   I(node_internal[dst_idx].is_root());
   I(node_internal[src_idx].is_root());
 
-  Index_ID root_idx = src_idx;
+  Index_id root_idx = src_idx;
 
   bool out_done = false;
   auto it       = idx_insert_cache.find(src_idx);
@@ -473,7 +473,7 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
   }
 
   if (!out_done) {
-    Index_ID src_nid = node_internal[src_idx].get_master_root_nid();
+    Index_id src_nid = node_internal[src_idx].get_master_root_nid();
 
     I(node_internal[dst_idx].is_node_state());
     I(node_internal[src_idx].is_node_state());
@@ -543,9 +543,9 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
   }
 
   if (!inp_done) {
-    Index_ID dst_nid      = node_internal[dst_idx].get_master_root_nid();
-    Index_ID inp_root_nid = dst_idx;
-    Index_ID idx          = get_space_output_pin(dst_nid, dst_idx, inp_pid, inp_root_nid);
+    Index_id dst_nid      = node_internal[dst_idx].get_master_root_nid();
+    Index_id inp_root_nid = dst_idx;
+    Index_id idx          = get_space_output_pin(dst_nid, dst_idx, inp_pid, inp_root_nid);
     I(inp_root_nid != 0);
     I(node_internal[inp_root_nid].is_root());
     int i = node_internal[idx].next_free_input_pos();
@@ -574,9 +574,9 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
   }
 
 #ifdef DEBUG_SLOW
-  Index_ID master_nid = src_nid;
+  Index_id master_nid = src_nid;
   I(node_internal[master_nid].is_master_root());
-  Index_ID          j = master_nid;
+  Index_id          j = master_nid;
   std::set<Port_ID> mset;
 
   while (true) {
@@ -617,13 +617,13 @@ void LGraph_Base::add_edge_int(const Index_ID dst_idx, const Port_ID inp_pid, In
   I(node_internal[root_idx].is_root());
 }
 
-void LGraph_Base::warn_int(std::string_view text) { fmt::print("warning:{}\n", text); }
+void Lgraph_Base::warn_int(std::string_view text) { fmt::print("warning:{}\n", text); }
 
-void LGraph_Base::error_int(std::string_view text) {
+void Lgraph_Base::error_int(std::string_view text) {
   fmt::print("error:{}\n", text);
   throw std::runtime_error(std::string(text));
 }
 
-void LGraph_Base::info_int(std::string_view text) {
+void Lgraph_Base::info_int(std::string_view text) {
   fmt::print("info:{}\n", text);  // to be used by future warning/error reporting system
 }

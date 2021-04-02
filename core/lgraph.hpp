@@ -12,7 +12,7 @@
 #include "node_pin.hpp"
 #include "node_type.hpp"
 
-class LGraph : public LGraph_Node_Type {
+class Lgraph : public Lgraph_Node_Type {
 protected:
   friend class Node;
   friend class Hierarchy_tree;
@@ -25,19 +25,19 @@ protected:
   friend class Graph_library;
 
   // Memoize tables that provide hints (not certainty because add/del operations)
-  std::array<Index_ID, 16> memoize_const_hint;
+  std::array<Index_id, 16> memoize_const_hint;
 
   Hierarchy_tree htree;
 
-  explicit LGraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
+  explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
 
-  Index_ID get_root_idx(Index_ID idx) const {
+  Index_id get_root_idx(Index_id idx) const {
     if (node_internal[idx].is_root())
       return idx;
     return node_internal[idx].get_nid();
   }
 
-  Index_ID get_node_nid(Index_ID idx) const {
+  Index_id get_node_nid(Index_id idx) const {
     while (!node_internal[idx].is_master_root()) {
       idx = node_internal[idx].get_nid();
     }
@@ -78,7 +78,7 @@ protected:
   void del_driver2node_int(Node &driver, const Node &sink);
   void del_sink2node_int(const Node &driver, Node &sink);
 
-  void try_del_node_int(Index_ID last_idx, Index_ID idx);
+  void try_del_node_int(Index_id last_idx, Index_id idx);
   bool del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin);
   bool del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin);
 
@@ -86,31 +86,31 @@ protected:
   void del_node(const Node &node);
   void del_edge(const Node_pin &dpin, const Node_pin &spin);
 
-  bool has_graph_io(Index_ID idx) const {
-    I(static_cast<Index_ID>(node_internal.size()) > idx);
+  bool has_graph_io(Index_id idx) const {
+    I(static_cast<Index_id>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid;
   }
 
-  bool has_graph_input(Index_ID idx) const {
-    I(static_cast<Index_ID>(node_internal.size()) > idx);
+  bool has_graph_input(Index_id idx) const {
+    I(static_cast<Index_id>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_input_nid;
   }
 
-  bool has_graph_output(Index_ID idx) const {
-    I(static_cast<Index_ID>(node_internal.size()) > idx);
+  bool has_graph_output(Index_id idx) const {
+    I(static_cast<Index_id>(node_internal.size()) > idx);
     auto nid = node_internal[idx].get_nid();
     nid      = node_internal[nid].get_nid();
     return nid == Hardcoded_output_nid;
   }
 
-  Index_ID fast_next(Index_ID nid) const {
+  Index_id fast_next(Index_id nid) const {
     while (true) {
       nid.value++;
-      if (nid >= static_cast<Index_ID>(node_internal.size()))
+      if (nid >= static_cast<Index_id>(node_internal.size()))
         return 0;
       if (!node_internal[nid].is_valid())
         continue;
@@ -123,12 +123,12 @@ protected:
     return 0;
   }
 
-  Index_ID fast_first() const {
+  Index_id fast_first() const {
     static_assert(Hardcoded_output_nid > Hardcoded_input_nid);
     return fast_next(Hardcoded_output_nid);
   }
 
-  bool is_sub(Index_ID nid) const {  // Very common function (shoud be fast)
+  bool is_sub(Index_id nid) const {  // Very common function (shoud be fast)
     I(node_internal[nid].is_node_state());
     I(node_internal[nid].is_master_root());
 
@@ -138,13 +138,13 @@ protected:
   static void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
   static void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
 
-  void each_sub_hierarchical_unique_direct_int(std::set<Lg_type_id> &visited, const std::function<bool(Node &, Lg_type_id)> fn);
+  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> fn);
 
 public:
-  LGraph()               = delete;
-  LGraph(const LGraph &) = delete;
+  Lgraph()               = delete;
+  Lgraph(const Lgraph &) = delete;
 
-  virtual ~LGraph();
+  virtual ~Lgraph();
 
   bool is_empty() const { return fast_first() == 0; }
 
@@ -174,12 +174,12 @@ public:
   Bwd_edge_iterator  backward(bool visit_sub = false);
   Fast_edge_iterator fast(bool visit_sub = false);
 
-  LGraph *clone_skeleton(std::string_view new_lg_name);
+  Lgraph *clone_skeleton(std::string_view new_lg_name);
 
   static bool    exists(std::string_view path, std::string_view name);
-  static LGraph *create(std::string_view path, std::string_view name, std::string_view source);
-  static LGraph *open(std::string_view path, Lg_type_id lgid);
-  static LGraph *open(std::string_view path, std::string_view name);
+  static Lgraph *create(std::string_view path, std::string_view name, std::string_view source);
+  static Lgraph *open(std::string_view path, Lg_type_id lgid);
+  static Lgraph *open(std::string_view path, std::string_view name);
   static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
 
   void clear() override;
@@ -222,45 +222,32 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_pin(const Node_pin &dpin, std::function<bool(Index_ID idx)> f1) const;
+  void each_pin(const Node_pin &dpin, std::function<bool(Index_id idx)> f1) const;
   void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical = false);
   void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
   void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
 
-  void each_hier_fast_direct(const std::function<bool(Node &)>);
-  void each_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
-  void each_sub_unique_fast(const std::function<bool(Node &, Lg_type_id)> fn);
-  void each_sub_hierarchical_unique_direct(const std::function<bool(Node &, Lg_type_id)> fn);
+  void each_hier_fast(const std::function<bool(Node &)>);
+
+  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+
+  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)> fn);
+  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn);
+  void each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn);
 
   template <typename FN>
-  void each_sub_fast(const FN f1) {
+  void each_local_sub_fast(const FN f1) {
     if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
-      each_sub_fast_direct(f1);
+      each_local_sub_fast_direct(f1);
     } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
       auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
         f1(node, l_lgid);
         return true;
       };
-      each_sub_fast_direct(f2);
+      each_local_sub_fast_direct(f2);
     } else {
       I(false);
-      each_sub_fast_direct(f1);  // Better error message if I keep this
-    }
-  };
-
-  template <typename FN>
-  void each_sub_hierarchical_unique(const FN f1) {
-    if constexpr (std::is_invocable_r_v<bool, FN &, Node &, Lg_type_id>) {  // WARNING: bool must be before void
-      each_sub_hierarchical_unique_direct(f1);
-    } else if constexpr (std::is_invocable_r_v<void, FN &, Node &, Lg_type_id>) {
-      auto f2 = [&f1](Node &node, Lg_type_id l_lgid) {
-        f1(node, l_lgid);
-        return true;
-      };
-      each_sub_hierarchical_unique_direct(f2);
-    } else {
-      I(false);
-      each_sub_hierarchical_unique_direct(f1);  // Better error message if I keep this
+      each_local_sub_fast_direct(f1);  // Better error message if I keep this
     }
   };
 };

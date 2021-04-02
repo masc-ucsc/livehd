@@ -70,6 +70,6 @@ public:
 
   void dump_node2tuples() const;
 
-  void do_trans(LGraph *orig);
+  void do_trans(Lgraph *orig);
   bool has_tuple_issues() const { return tuple_issues; }
 };

@@ -218,17 +218,14 @@ protected:
   }
 
   bool is_valid(const Tree_index &index) const {
-    if (index.level >= (int)pointers_stack.size())
-      return false;
-
-    if ((index.pos >> 2) >= (int)pointers_stack[index.level].size())
-      return false;
+    I(index.level < (int)pointers_stack.size());
+    I((index.pos >> 2) < (int)pointers_stack[index.level].size());
 
     auto pos = pointers_stack[index.level][index.pos >> 2].next_sibling;
-    if ((pos >> 2) == 0 && (pos <= index.pos & 3))
-      return false;
+    if ((pos & 3) > (index.pos & 3) || (pos&3)==0)
+      return true; // Either the index is smaller than end or all the entries are used (pos==0)
 
-    return true;
+    return false;
   }
 
   const Tree_pos get_next_sibling_pos(const Tree_index &index) const {

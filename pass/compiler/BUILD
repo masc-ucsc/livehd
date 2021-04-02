@@ -1,5 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -25,29 +26,29 @@ cc_library(
 sh_test(
     name = "pyrope_compile",
     srcs = ["tests/pyrope_compile.sh"],
-    # tags = ["manual"],
     data = [
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
+    # tags = [
+    #     "fixme",
+    #     "manual",
+    # ],
     deps = [
         "//inou/yosys:scripts",
     ],
-    # tags = ["fixme"],
 )
 
 sh_test(
     name = "regression_compile",
     srcs = ["tests/regression_compile.sh"],
-    # tags = ["manual"],
-    tags = ["fixme"],
     data = [
         "//inou/firrtl:firrtl_tests",
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
+    tags = ["fixme"],
     deps = [
         "//inou/yosys:scripts",
     ],
-    # tags = ["fixme"],
 )

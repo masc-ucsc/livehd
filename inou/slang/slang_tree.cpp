@@ -784,7 +784,7 @@ std::string_view Slang_tree::process_expression(const slang::Expression &expr) {
 }
 
 std::string_view Slang_tree::process_reduce_and(const slang::UnaryExpression &uexpr) {
-  // reduce and does not have a direct mapping in LGraph
+  // reduce and does not have a direct mapping in Lgraph
   // And(Not(Ror(Not(inp))), inp.MSB)
 
   const auto &op      = uexpr.operand();

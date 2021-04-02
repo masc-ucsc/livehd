@@ -10,8 +10,8 @@ using namespace Live;
 
 class Diff_finder {
 private:
-  const LGraph *        original;
-  const LGraph *        synth;
+  const Lgraph *        original;
+  const Lgraph *        synth;
   Invariant_boundaries *boundaries;
 
   std::string hier_sep;
@@ -23,11 +23,11 @@ private:
   std::map<Graph_Node, Net_ID>               synth_map;
   std::map<Graph_Node, std::string>          bound2net;
 
-  using Name2graph_type = absl::flat_hash_map<std::string, LGraph *>;
+  using Name2graph_type = absl::flat_hash_map<std::string, Lgraph *>;
 
   std::set<Graph_Node> fwd_visited;
 
-  bool is_user_def(LGraph *current, Index_ID idx, Port_ID pid) const;
+  bool is_user_def(Lgraph *current, Index_id idx, Port_ID pid) const;
   bool set_invariant(Graph_Node node);
 
   void find_fwd_boundaries(Graph_Node &start_boundary, std::set<Graph_Node> &discovered, bool went_up = false);
@@ -38,11 +38,11 @@ private:
 
   void generate_modules(std::set<Graph_Node> &different_nodes, const std::string &out_lgdb);
 
-  void add_ios_up(LGraph *module, const Node_pin &pin, Name2graph_type &name2graph);
+  void add_ios_up(Lgraph *module, const Node_pin &pin, Name2graph_type &name2graph);
 
 public:
   // FIXME: can we remove the dependency on the synthesized graph?
-  Diff_finder(LGraph *original, LGraph *synth, Invariant_boundaries *boundaries, const std::string &hier_sep = ".")
+  Diff_finder(Lgraph *original, Lgraph *synth, Invariant_boundaries *boundaries, const std::string &hier_sep = ".")
       : original(original), synth(synth), boundaries(boundaries), hier_sep(hier_sep) {}
 
   Diff_finder(Live_pass_options pack);

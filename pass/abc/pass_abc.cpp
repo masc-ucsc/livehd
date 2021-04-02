@@ -39,7 +39,7 @@ void Pass_abc::optimize(Eprp_var &var) {
   pass.opack.verbose      = var.get("verbose") == "true";
 
   for (const auto &l : var.lgs) {
-    LGraph *lg = pass.regen(l);
+    Lgraph *lg = pass.regen(l);
     var.add(lg);
   }
 }
@@ -71,11 +71,11 @@ Pass_abc::Pass_abc()
 
 Pass_abc::~Pass_abc() { delete graph_info; }
 
-void Pass_abc::trans(LGraph *lg) {
+void Pass_abc::trans(Lgraph *lg) {
   lg->sync();  // sync because Tech Library is loaded
 }
 
-LGraph *Pass_abc::regen(const LGraph *lg) {
+Lgraph *Pass_abc::regen(const Lgraph *lg) {
   if (!setup_techmap(lg)) {
     Pass::error("pass_abc.regen: supports techmap graphs only");
     return 0;
@@ -83,7 +83,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
 
   find_cell_conn(lg);
   std::string source{lg->get_library().get_source(lg->get_lgid())};
-  LGraph *    mapped = LGraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
+  Lgraph *    mapped = Lgraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if (opack.verbose)
@@ -96,7 +96,7 @@ LGraph *Pass_abc::regen(const LGraph *lg) {
   return mapped;
 }
 
-static std::string get_clock_name(const LGraph *g, Index_ID clk_idx) {
+static std::string get_clock_name(const Lgraph *g, Index_ID clk_idx) {
   std::string clock_name;
 
   if (g->has_graph_input(clk_idx)) {
@@ -111,7 +111,7 @@ static std::string get_clock_name(const LGraph *g, Index_ID clk_idx) {
 /************************************************************************
  * Function:  Pass_abc::find_cell_conn()
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  *
  * returns: nothing
  *
@@ -124,7 +124,7 @@ static std::string get_clock_name(const LGraph *g, Index_ID clk_idx) {
  * 							block_conn memory_conn;
  ***********************************************************************/
 
-void Pass_abc::find_latch_conn(const LGraph *g) {
+void Pass_abc::find_latch_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->latch_id) {
     graph_topology::topology_info topo;
     const Tech_cell *             tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
@@ -179,7 +179,7 @@ void Pass_abc::find_latch_conn(const LGraph *g) {
   }
 }
 
-void Pass_abc::find_combinational_conn(const LGraph *g) {
+void Pass_abc::find_combinational_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->combinational_id) {
     std::map<Port_ID, const Edge *> inp_edges;  // NOTE: recursive_find needs ordered inp_pids (sorting at the end is not enough)
     graph_topology::topology_info   topo;
@@ -200,7 +200,7 @@ void Pass_abc::find_combinational_conn(const LGraph *g) {
   }
 }
 
-void Pass_abc::find_graphio_output_conn(const LGraph *g) {
+void Pass_abc::find_graphio_output_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->graphio_output_id) {
     graph_topology::topology_info topo;
 
@@ -219,7 +219,7 @@ void Pass_abc::find_graphio_output_conn(const LGraph *g) {
   }
 }
 
-void Pass_abc::find_sub_conn(const LGraph *g) {
+void Pass_abc::find_sub_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->subgraph_id) {
     if (opack.verbose)
       fmt::print("\nSubGraph_Op NodeID:{} has direct input from Node: \n", idx);
@@ -254,7 +254,7 @@ void Pass_abc::find_sub_conn(const LGraph *g) {
   }
 }
 
-void Pass_abc::find_memory_conn(const LGraph *g) {
+void Pass_abc::find_memory_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->memory_id) {
     if (opack.verbose)
       fmt::print("\nMemory_Op NodeID:{} has direct input from Node: \n", idx);
@@ -264,7 +264,7 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
 
     for (const auto &input : g->inp_edges(idx)) {
       Port_ID inp_id = input.get_inp_pin().get_pid();
-      if (inp_id >= LGRAPH_MEMOP_CLK)
+      if (inp_id >= LgRAPH_MEMOP_CLK)
         inp_edges[inp_id] = &input;
       else
         continue;
@@ -286,7 +286,7 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
         int bit_index[2] = {0, 0};
         recursive_find(g, input.second, topo, bit_index);
       }
-      if (input_id == LGRAPH_MEMOP_CLK) {
+      if (input_id == LgRAPH_MEMOP_CLK) {
         assert(topo.size() == 1);
         Index_ID clk_idx = topo[0].idx;
 
@@ -301,7 +301,7 @@ void Pass_abc::find_memory_conn(const LGraph *g) {
   }
 }
 
-void Pass_abc::find_cell_conn(const LGraph *g) {
+void Pass_abc::find_cell_conn(const Lgraph *g) {
 #ifndef NDEBUG
   fmt::print("\n******************************************************************\n");
   fmt::print("Begin Computing Netlist Topology Based On Lgraph\n");
@@ -322,7 +322,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
 /************************************************************************
  * Function:  Pass_abc::recursive_find()
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> const Edge *input
  * input arg2 -> topology_info &topo
  * input arg3 -> int *bit_addr
@@ -334,7 +334,7 @@ void Pass_abc::find_cell_conn(const LGraph *g) {
  * 						FIXME: More Join & Pick Node means (a way to reduce ?)
  * 						"deeper" traverse depth and recursion
  ***********************************************************************/
-void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topology::topology_info &topo, int bit_addr[2]) {
+void Pass_abc::recursive_find(const Lgraph *g, const Edge_raw *input, graph_topology::topology_info &topo, int bit_addr[2]) {
   Index_ID     this_idx       = input->get_idx();
   Node_Type_Op this_node_type = g->get_node(this_idx).get_type_op();
   if (this_node_type == U32Const_Op) {
@@ -470,14 +470,14 @@ void Pass_abc::recursive_find(const LGraph *g, const Edge_raw *input, graph_topo
 /************************************************************************
  * Function:  Pass_abc::setup_techmap
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  *
  * returns: true/false
  *
  * description: iterate the lgraph to see it is a valid graph to pass abc
  *
  ***********************************************************************/
-bool Pass_abc::setup_techmap(const LGraph *g) {
+bool Pass_abc::setup_techmap(const Lgraph *g) {
   bool is_valid_input = true;
 
   for (const auto &idx : g->fast()) {
@@ -599,13 +599,13 @@ bool Pass_abc::setup_techmap(const LGraph *g) {
 /************************************************************************
  * Function:  pass_abc::to_abc()
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  *
  * returns: mapped Abc_Ntk_t
  *
  * description: feed to abc for comb synthesis and mapping
  ***********************************************************************/
-Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
+Abc_Ntk_t *Pass_abc::to_abc(const Lgraph *g) {
   Abc_Start();
 
   if (pAbc == 0)
@@ -683,14 +683,14 @@ Abc_Ntk_t *Pass_abc::to_abc(const LGraph *g) {
 /************************************************************************
  * Function:  Pass_abc::gen_NetList()
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: build the netlist
  ***********************************************************************/
-void Pass_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_netList(const Lgraph *g, Abc_Ntk_t *pAig) {
   gen_primary_io_from_lgraph(g, pAig);
   gen_latch_from_lgraph(g, pAig);
   gen_comb_cell_from_lgraph(g, pAig);
@@ -707,14 +707,14 @@ void Pass_abc::gen_netList(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_memory
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_memory(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->memory_id) {
     auto inp_info = graph_info->memory_conn[idx];
     for (const auto &src : inp_info) {
@@ -778,14 +778,14 @@ void Pass_abc::conn_memory(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_sub
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all generated subgraph signal
  ***********************************************************************/
-void Pass_abc::conn_sub(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_sub(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->subgraph_id) {
     auto inp_info = graph_info->subgraph_conn[idx];
     for (const auto &src : inp_info) {
@@ -861,14 +861,14 @@ void Pass_abc::conn_sub(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::gen_latch
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: create Latch nodes from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->latch_id) {
     Abc_Obj_t *pLatch, *pLatchInput, *pLatchOutput;
     pLatch       = Abc_NtkCreateLatch(pAig);
@@ -922,14 +922,14 @@ void Pass_abc::gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::gen_primary_io
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: create Primary Input & output node from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
   Abc_Obj_t *pObj;
 
   for (const auto &idx : graph_info->graphio_output_id) {
@@ -1010,51 +1010,51 @@ void Pass_abc::gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::gen_combinational_cell
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: create All combinational cell from Lgraph
  ***********************************************************************/
-void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::gen_comb_cell_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->combinational_id) {
     const Tech_cell *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
 
     if (tcell->get_name() == "$_NOT_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateNot(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateNot(pAig);
     } else if (tcell->get_name() == "$_AND_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateAnd(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateAnd(pAig);
     } else if (tcell->get_name() == "$_OR_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateOr(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateOr(pAig);
     } else if (tcell->get_name() == "$_XOR_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateXor(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateXor(pAig);
     } else if (tcell->get_name() == "$_NAND_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateNand(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateNand(pAig);
     } else if (tcell->get_name() == "$_NOR_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateNor(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateNor(pAig);
     } else if (tcell->get_name() == "$_XNOR_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateXnor(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateXnor(pAig);
     } else if (tcell->get_name() == "$_ANDNOT_") {
       // assign Y = A & (~B);
-      graph_info->combinational_cell[idx] = LGraph_CreateAndnot(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateAndnot(pAig);
     } else if (tcell->get_name() == "$_ORNOT_") {
       // assign Y = A | (~B);
-      graph_info->combinational_cell[idx] = LGraph_CreateOrnot(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateOrnot(pAig);
     } else if (tcell->get_name() == "$_AOI3_") {
       // assign Y = ~((A & B) | C);
-      graph_info->combinational_cell[idx] = LGraph_CreateAoi3(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateAoi3(pAig);
     } else if (tcell->get_name() == "$_OAI3_") {
       // assign Y = ~((A | B) & C);
-      graph_info->combinational_cell[idx] = LGraph_CreateOai3(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateOai3(pAig);
     } else if (tcell->get_name() == "$_AOI4_") {
       // assign Y = ~((A & B) | (C & D));
-      graph_info->combinational_cell[idx] = LGraph_CreateAoi4(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateAoi4(pAig);
     } else if (tcell->get_name() == "$_OAI4_") {
       // assign Y = ~((A | B) & (C | D));
-      graph_info->combinational_cell[idx] = LGraph_CreateOai4(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateOai4(pAig);
     } else if (tcell->get_name() == "$_MUX_") {
-      graph_info->combinational_cell[idx] = LGraph_CreateMUX(pAig);
+      graph_info->combinational_cell[idx] = Lgraph_CreateMUX(pAig);
     } else {
       Pass::error("pass_abc: unknown cell {} type!", tcell->get_name());
     }
@@ -1064,7 +1064,7 @@ void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::gen_const
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg1 -> Abc_PIO key
  * input arg2 -> Abc_Ntk_t *pAig
  *
@@ -1074,7 +1074,7 @@ void Pass_abc::gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig) {
  * 							"key.bits" of the U32Const_Op/StrConst_Op
  * 							and return the node fanout net
  ***********************************************************************/
-Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig) {
+Abc_Obj_t *Pass_abc::gen_const_from_lgraph(const Lgraph *g, index_offset key, Abc_Ntk_t *pAig) {
   Abc_Obj_t *pObj = nullptr;
   Abc_Obj_t *pNet = nullptr;
 
@@ -1171,14 +1171,14 @@ Abc_Obj_t *Pass_abc::gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t 
 /************************************************************************
  * Function:  Pass_abc::conn_combinational_cell
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all the combinational cell based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->combinational_id) {
     auto src = graph_info->comb_conn[idx];
     for (const auto &inp : src) {
@@ -1233,14 +1233,14 @@ void Pass_abc::conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_latch
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all the sequential cell based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_latch(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->latch_id) {
     auto src = graph_info->latch_conn[idx];
     for (const auto &inp : src) {
@@ -1295,14 +1295,14 @@ void Pass_abc::conn_latch(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_primary_output
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all the primary output based on computed topology
  ***********************************************************************/
-void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &idx : graph_info->graphio_output_id) {
     auto src       = graph_info->primary_output_conn[idx];
     int  bit_index = 0;
@@ -1345,14 +1345,14 @@ void Pass_abc::conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_reset
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all generated reset signal
  ***********************************************************************/
-void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_reset(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &rg : graph_info->reset_group_map) {
     std::string reset_name = rg.first;
     // check if this reset is the graph IO otherwise create it
@@ -1375,14 +1375,14 @@ void Pass_abc::conn_reset(const LGraph *g, Abc_Ntk_t *pAig) {
 /************************************************************************
  * Function:  Pass_abc::conn_clock
  * --------------------
- * input arg0 -> const LGraph *g
+ * input arg0 -> const Lgraph *g
  * input arg2 -> Abc_Ntk_t *pAig
  *
  * returns: nothing
  *
  * description: connect all generated clock signal
  ***********************************************************************/
-void Pass_abc::conn_clock(const LGraph *g, Abc_Ntk_t *pAig) {
+void Pass_abc::conn_clock(const Lgraph *g, Abc_Ntk_t *pAig) {
   for (const auto &sg : graph_info->skew_group_map) {
     std::string clock_name = sg.first;
     // check if this clock is the graph IO otherwise create it

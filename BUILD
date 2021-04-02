@@ -1,1 +1,1 @@
-load("//tools:copt_default.bzl", "COPTS")
+# Empty BUILD file, just to make this directory a Bazel package.

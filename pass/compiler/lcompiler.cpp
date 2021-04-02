@@ -21,7 +21,7 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
-  fmt::print("------------------------ LNAST-> LGraph ({})----------------------------- \n", ln->get_top_module_name());
+  fmt::print("------------------------ LNAST-> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
 
   auto module_name = ln->get_top_module_name();
 
@@ -58,7 +58,7 @@ void Lcompiler::do_local_cprop_bitwidth() {
   thread_pool.wait_all();
 }
 
-void Lcompiler::prp_thread_local_cprop_bitwidth(LGraph *lg, Cprop &cp, Bitwidth &bw) {
+void Lcompiler::prp_thread_local_cprop_bitwidth(Lgraph *lg, Cprop &cp, Bitwidth &bw) {
   fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-0)\n", lg->get_name());
   cp.do_trans(lg);
   gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
@@ -79,7 +79,7 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
-  fmt::print("------------------------ LNAST-> LGraph ({})----------------------------- \n", ln->get_top_module_name());
+  fmt::print("------------------------ LNAST-> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
 
   auto module_name = ln->get_top_module_name();
 
@@ -134,7 +134,7 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   // note: since the first generated lgraphs are firrtl_op_lgs, they will be removed in the end,
   // we should keep the original module_name for the firrtl_op mapped lgraph, so here I attached
   // "__firrtl_" prefix for the firrtl_op_lgs
-  fmt::print("---------------- LNAST-> LGraph ({}) --------------------- (LN-1)\n",
+  fmt::print("---------------- LNAST-> Lgraph ({}) --------------------- (LN-1)\n",
              absl::StrCat("__firrtl_", ln->get_top_module_name()));
 
   auto module_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
@@ -167,9 +167,7 @@ void Lcompiler::do_cprop() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      lg->each_sub_hierarchical_unique([this, &cp](Node &node, Lg_type_id lgid) {
-        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
-        LGraph *lg_sub = LGraph::open(path, lgid);
+      lg->each_hier_unique_sub_bottom_up([this, &cp](Lgraph *lg_sub) {
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
         gviz ? gv.do_from_lgraph(lg_sub, "local.cprop-ed") : void();
@@ -192,7 +190,7 @@ void Lcompiler::do_cprop() {
 }
 
 // FIXME->sh: to be deprecated by bottom-up paralellism
-void Lcompiler::fir_thread_cprop(LGraph *lg, Cprop &cp) {
+void Lcompiler::fir_thread_cprop(Lgraph *lg, Cprop &cp) {
   fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
   cp.do_trans(lg);
   gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
@@ -200,7 +198,7 @@ void Lcompiler::fir_thread_cprop(LGraph *lg, Cprop &cp) {
 
 void Lcompiler::do_firmap_bitwidth() {
   // map __firrtl_foo.lg to foo.lg
-  std::vector<LGraph *> mapped_lgs;
+  std::vector<Lgraph *> mapped_lgs;
   Bitwidth              bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   for (auto &lg : lgs) {
     thread_pool.add(&Lcompiler::fir_thread_firmap_bw, this, lg, bw, mapped_lgs);
@@ -208,7 +206,7 @@ void Lcompiler::do_firmap_bitwidth() {
   lgs = mapped_lgs;
 }
 
-void Lcompiler::fir_thread_firmap_bw(LGraph *lg, Bitwidth &bw, std::vector<LGraph *> &mapped_lgs) {
+void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgraph *> &mapped_lgs) {
   Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
   fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
   auto new_lg = fm.do_firrtl_mapping(lg);
@@ -234,10 +232,9 @@ void Lcompiler::do_firbits() {
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
 
-      lg->each_sub_hierarchical_unique([this](Node &node, Lg_type_id lgid) {
+      lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
-        fmt::print("visiting lgraph lgid:{} called from node:{}\n", lgid, node.debug_name());
-        LGraph *lg_sub = LGraph::open(path, lgid);
+        fmt::print("visiting lgraph name:{}\n", lg_sub->get_name());
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-0)\n", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         fmt::print("---------------- Firrtl Bits Analysis ({}) --------------- (F-1)\n", lg_sub->get_name());

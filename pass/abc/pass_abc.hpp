@@ -44,14 +44,14 @@ protected:
   static void tmap(Eprp_var &var);
   static void optimize(Eprp_var &var);
 
-  LGraph *regen(const LGraph *lg);
-  void    trans(LGraph *lg);
-  void    dump_blif(const LGraph *g, const std::string &filename);
+  Lgraph *regen(const Lgraph *lg);
+  void    trans(Lgraph *lg);
+  void    dump_blif(const Lgraph *g, const std::string &filename);
 
 public:
   // customize a hash function for absl::flat_hash_map
   struct IndexID_Hash {
-    inline std::size_t operator()(const Index_ID k) const { return (size_t)k.value; }
+    inline std::size_t operator()(const Index_id k) const { return (size_t)k.value; }
   };
 
   struct Abc_primary_input {
@@ -75,7 +75,7 @@ public:
   };
 
   struct index_offset {
-    Index_ID idx;
+    Index_id idx;
     Port_ID  pid;
     int      offset[2];
 
@@ -197,7 +197,7 @@ public:
 private:
   graph_topology *graph_info;
 
-  bool setup_techmap(const LGraph *g);
+  bool setup_techmap(const Lgraph *g);
 
   bool is_latch(const Tech_cell *tcell) const {
     std::string_view cell_name = tcell->get_name();
@@ -215,76 +215,76 @@ private:
     graph_info = new graph_topology;
   }
 
-  void find_cell_conn(const LGraph *g);
-  void find_latch_conn(const LGraph *g);
-  void find_combinational_conn(const LGraph *g);
-  void find_graphio_output_conn(const LGraph *g);
-  void find_subgraph_conn(const LGraph *g);
-  void find_memory_conn(const LGraph *g);
+  void find_cell_conn(const Lgraph *g);
+  void find_latch_conn(const Lgraph *g);
+  void find_combinational_conn(const Lgraph *g);
+  void find_graphio_output_conn(const Lgraph *g);
+  void find_subgraph_conn(const Lgraph *g);
+  void find_memory_conn(const Lgraph *g);
 
-  void recursive_find(const LGraph *g, const Edge_raw *input, graph_topology::topology_info &pid, int bit_addr[2]);
+  void recursive_find(const Lgraph *g, const Edge_raw *input, graph_topology::topology_info &pid, int bit_addr[2]);
 
-  Abc_Obj_t *gen_const_from_lgraph(const LGraph *g, index_offset key, Abc_Ntk_t *pAig);
+  Abc_Obj_t *gen_const_from_lgraph(const Lgraph *g, index_offset key, Abc_Ntk_t *pAig);
 
-  void gen_latch_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
+  void gen_latch_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void gen_primary_io_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
+  void gen_primary_io_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void gen_comb_cell_from_lgraph(const LGraph *g, Abc_Ntk_t *pAig);
+  void gen_comb_cell_from_lgraph(const Lgraph *g, Abc_Ntk_t *pAig);
 
   Abc_Obj_t *gen_pseudo_subgraph_input(const index_offset &inp, Abc_Ntk_t *pAig);
 
   Abc_Obj_t *gen_pseudo_memory_input(const index_offset &inp, Abc_Ntk_t *pAig);
 
-  void conn_latch(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_latch(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_combinational_cell(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_combinational_cell(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_primary_output(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_primary_output(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_reset(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_reset(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_clock(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_clock(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_subgraph(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_subgraph(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void conn_memory(const LGraph *g, Abc_Ntk_t *pAig);
+  void conn_memory(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  void gen_netList(const LGraph *g, Abc_Ntk_t *pAig);
+  void gen_netList(const Lgraph *g, Abc_Ntk_t *pAig);
 
-  Abc_Ntk_t *to_abc(const LGraph *g);
+  Abc_Ntk_t *to_abc(const Lgraph *g);
 
-  void from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_latch_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_primary_io_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_comb_cell_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_subgraph_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_subgraph_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_memory_from_abc(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  Node_pin create_pick_operator(LGraph *g, const Node_pin &driver, int offset, int width);
+  Node_pin create_pick_operator(Lgraph *g, const Node_pin &driver, int offset, int width);
 
-  void connect_constant(LGraph *g, uint32_t value, uint32_t size, const Node_pin &dst);
+  void connect_constant(Lgraph *g, uint32_t value, uint32_t size, const Node_pin &dst);
 
-  void conn_latch(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void conn_primary_output(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void conn_combinational_cell(LGraph *new_graph, const LGraph *old_graph, Abc_Ntk_t *pNtk);
+  void conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk);
 
-  void gen_module(const LGraph *g, std::ofstream &fs);
+  void gen_module(const Lgraph *g, std::ofstream &fs);
 
-  void gen_io_conn(const LGraph *g, std::ofstream &fs);
+  void gen_io_conn(const Lgraph *g, std::ofstream &fs);
 
-  void gen_cell_conn(const LGraph *g, std::ofstream &fs);
+  void gen_cell_conn(const Lgraph *g, std::ofstream &fs);
 
-  void gen_latch_conn(const LGraph *g, std::ofstream &fs);
+  void gen_latch_conn(const Lgraph *g, std::ofstream &fs);
 
-  void write_src_info(const LGraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
+  void write_src_info(const Lgraph *g, const Pass_abc::index_offset &inp, std::ofstream &fs);
 
   void gen_generic_lib(const std::string &buffer) const;
 };

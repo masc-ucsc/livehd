@@ -14,5 +14,5 @@ jobs:
       - run: sudo wget https://github.com/bazelbuild/buildtools/releases/latest/download/buildifier-linux-amd64 -O /usr/local/bin/buildifier
       - run: sudo chmod +x /usr/local/bin/buildifier
 
-      - run: buildifier -lint warn -r . || true
-      - run: buildifier -lint warn external/BUILD.* || true
+      - run: buildifier -lint warn -r .
+      - run: buildifier -lint warn external/BUILD.*

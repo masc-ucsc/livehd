@@ -82,6 +82,7 @@ void mock_test_or(int net_size) {
 
   b.sample("tmap");
   int sz = tmap(net);
+  (void)sz;
   assert(sz == 1);
 }
 
@@ -111,6 +112,7 @@ void mock_test_xor(int net_size) {
 
   b.sample("tmap");
   int sz = tmap(net);
+  (void)sz;
   assert(sz > 1 && sz < net_size / 2);
 }
 

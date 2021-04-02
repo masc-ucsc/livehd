@@ -17,11 +17,11 @@ public:
   class Fast_iter {
   private:
     Graph_core *gc;
-    Index_ID    id;
+    Index_id    id;
     // May need to add extra data here
 
   public:
-    constexpr Fast_iter(Graph_core *_gc, const Index_ID _id) : gc(_gc), id(_id) {}
+    constexpr Fast_iter(Graph_core *_gc, const Index_id _id) : gc(_gc), id(_id) {}
     constexpr Fast_iter(const Fast_iter &it) : gc(it.gc), id(it.id) {}
 
     constexpr Fast_iter &operator=(const Fast_iter &it) {
@@ -41,7 +41,7 @@ public:
       return id == other.id;
     }
 
-    constexpr Index_ID operator*() const { return id; }
+    constexpr Index_id operator*() const { return id; }
   };
 
   Index_iter() = delete;
@@ -63,12 +63,12 @@ protected:
     void set_input() { last_byte |= 0x80; }   // set 8th bit
     void set_output() { last_byte &= 0x7F; }  // clear 8th bit
 
-    constexpr Index_ID get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
+    constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
-    void fill_inp(std::vector<Index_ID> &ev) const;  // fill the list of edges to ev (requires expand)
-    void fill_out(std::vector<Index_ID> &ev) const;  // fill the list of edges to ev (requires expand)
-    bool try_add_driver(Index_ID id);                // return false if there was no space
-    bool try_add_sink(Index_ID id);                  // return false if there was no space
+    void fill_inp(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
+    void fill_out(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
+    bool try_add_driver(Index_id id);                // return false if there was no space
+    bool try_add_sink(Index_id id);                  // return false if there was no space
   };
 
   class __attribute__((packed)) Entry16 {  // AKA master or master_root entry
@@ -88,8 +88,8 @@ protected:
     void set_master();
     void set_type(uint8_t type);
 
-    constexpr Index_ID get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
-    constexpr Index_ID get_next() const;      // returns the next Entry16 that is master, zero if none
+    constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
+    constexpr Index_id get_next() const;      // returns the next Entry16 that is master, zero if none
 
     constexpr bool is_driver_set() const { return driver_set; }
     constexpr bool is_sink_set() const { return sink_set; }
@@ -107,48 +107,48 @@ protected:
       return pid;  // 22 bits PID
     }
 
-    constexpr Index_ID get_master_root() const;  // ptr to master root (zero if itself is root)
+    constexpr Index_id get_master_root() const;  // ptr to master root (zero if itself is root)
 
-    void fill_inp(std::vector<Index_ID> &ev) const;  // fill the list of edges to ev (requires expand)
-    void fill_out(std::vector<Index_ID> &ev) const;  // fill the list of edges to ev (requires expand)
-    bool try_add_driver(Index_ID id);                // return false if there was no space
-    bool try_add_sink(Index_ID id);                  // return false if there was no space
+    void fill_inp(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
+    void fill_out(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
+    bool try_add_driver(Index_id id);                // return false if there was no space
+    bool try_add_sink(Index_id id);                  // return false if there was no space
   };
 
   std::vector<Entry64> table;  // to be replaced by mmap_lib::vector once it works
   std::vector<Entry16> table16;
 
-  Index_ID next16_free;  // Pointer to 12byte free chunks
-  Index_ID next64_free;  // Pointer to 48byte free chunks
+  Index_id next16_free;  // Pointer to 12byte free chunks
+  Index_id next64_free;  // Pointer to 48byte free chunks
 
 public:
   Graph_core(std::string_view path, std::string_view name);
-  void add_edge(const Index_ID sink_id, const Index_ID driver_id);  // Add edge from s->d and d->s
-  void del_edge(const Index_ID sink_id, const Index_ID driver_id);  // Remove both s->d and d->s
+  void add_edge(const Index_id sink_id, const Index_id driver_id);  // Add edge from s->d and d->s
+  void del_edge(const Index_id sink_id, const Index_id driver_id);  // Remove both s->d and d->s
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const std::vector<Index_ID> get_setup_drivers(const Index_ID master_root_id) const;  // the drivers set for master_root_id
-  const std::vector<Index_ID> get_setup_sinks(const Index_ID master_root_id) const;    // the sinks set for master_root_id
+  const std::vector<Index_id> get_setup_drivers(const Index_id master_root_id) const;  // the drivers set for master_root_id
+  const std::vector<Index_id> get_setup_sinks(const Index_id master_root_id) const;    // the sinks set for master_root_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
   //   // traversing
-  Index_ID fast_next(Index_ID start);  // faster iterator returning all the master_root Index_ID (0 if last)
+  Index_id fast_next(Index_id start);  // faster iterator returning all the master_root Index_id (0 if last)
 
   // Unlike get_setup_drivers, this returns all the drivers/sinks that reach
   // the s index. This can be a large list, so it is not a short vector but an
   // iterator.
-  Index_iter out_ids(const Index_ID s);  // Iterate over the out edges of s (*it is Index_ID)
-  Index_iter inp_ids(const Index_ID s);  // Iterate over the inp edges of s
+  Index_iter out_ids(const Index_id s);  // Iterate over the out edges of s (*it is Index_id)
+  Index_iter inp_ids(const Index_id s);  // Iterate over the inp edges of s
 
-  uint8_t get_type(const Index_ID master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_ID master_root_id);
+  uint8_t get_type(const Index_id master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
+  void    set_type(const Index_id master_root_id);
 
-  Port_ID get_pid(const Index_ID master_root_id) const;  // pid for master or 0 for master_root
+  Port_ID get_pid(const Index_id master_root_id) const;  // pid for master or 0 for master_root
 
   // Create a master root node
-  Index_ID create_master_root(uint8_t type);
+  Index_id create_master_root(uint8_t type);
   // Create a master and point to master root m
-  Index_ID create_master(const Index_ID master_root_id, const Port_ID pid);
+  Index_id create_master(const Index_id master_root_id, const Port_ID pid);
   // Delete node s, all related edges and masters (if master root)
-  void del(const Index_ID s);
+  void del(const Index_id s);
 };

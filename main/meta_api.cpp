@@ -14,7 +14,7 @@ void Meta_api::open(Eprp_var &var) {
   auto name = var.get("name");
   assert(!name.empty());
 
-  LGraph *lg = LGraph::open(path, name);
+  Lgraph *lg = Lgraph::open(path, name);
 
   if (lg == 0) {
     Main_api::warn("lgraph.open could not find {} lgraph in {} path", name, path);
@@ -31,7 +31,7 @@ void Meta_api::create(Eprp_var &var) {
   auto name = var.get("name");
   assert(!name.empty());
 
-  LGraph *lg = LGraph::create(path, name, "lgshell");
+  Lgraph *lg = Lgraph::create(path, name, "lgshell");
 
   if (lg == 0) {
     Main_api::error("lgraph.create could not open {} lgraph in {} path", name, path);
@@ -72,13 +72,13 @@ void Meta_api::match(Eprp_var &var) {
     return;
   }
 
-  std::vector<LGraph *> lgs;
+  std::vector<Lgraph *> lgs;
 
   try {
     library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
-      LGraph *lg = LGraph::open(path, name);
+      Lgraph *lg = Lgraph::open(path, name);
       if (lg) {
         if (lg->is_empty()) {
           fmt::print("lgraph.match lgraph {} is empty\n", name);
@@ -90,7 +90,7 @@ void Meta_api::match(Eprp_var &var) {
     Main_api::error("invalid match:{} regex. It is a FULL regex unlike bash. To test, try: `ls path | grep -E \"match\"`", match);
   }
 
-  for (LGraph *lg : lgs) {
+  for (Lgraph *lg : lgs) {
     var.add(lg);
   }
 }
