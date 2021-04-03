@@ -224,20 +224,8 @@ public:
   constexpr bool operator==(const char (&rhs)[N]) const {       
     auto rhs_size = N - 1;
     if (_size != rhs_size) { return false; } // if size doesnt match, false
-    if (_size < 14) { // actual chars in e & ptr_or_start
-      uint8_t idx = 0u;
-      // for loop shifts ptr_or_start to get the first 4 chars of pstr
-      for (auto i = _size<=4 ? ((_size-1) * 8) : 24; i >= 0; i -= 8) {
-        if (((ptr_or_start >> i) & 0xff) != (rhs[idx++] & 0xff)) { 
-          return false; // ptr_or_start & rhs mismatch -> false
-        }
-      }
-      if (_size <= 4) { return true; } // _size <= 4, don't need to check e
-      for (auto i = 4; i < _size; ++i) { // checking e for rest of chars
-        if (e[i-4] != rhs[i]) { return false; } // e & rhs mismatch -> false
-      }
-      return true; 
-    } else if (_size >= 14) { // string_vector ptr in ptr_or_start, chars in e
+    if (_size < 14) { return str(rhs) == *this; }
+    else if (_size >= 14) { // string_vector ptr in ptr_or_start, chars in e
       if (e[0] != rhs[0] || e[1] != rhs[1]) { return false; } // check first two
       uint8_t idx = 8;
       for (auto i = 2; i < 10; ++i) { 
@@ -247,37 +235,19 @@ public:
       auto j = 2; // rhs[2 .. _size - 8] --> the long part
       // for loop range: (ptr_or_start) .. (ptr_or_start + _size-10) 
       for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {   
-        if (string_vector.at(i) != rhs[j]) { 
-          return false; 
-        }
+        if (string_vector.at(i) != rhs[j]) { return false; }
         j = j < _size-8 ? j+1 : j;
       }
       return true;
     }
     return false;
-
-    #if 0
-    return str(rhs) == *this;//saves rhs into vec and map if rhs.size >= 14
-    #endif
   }
 
   constexpr bool operator==(std::string_view rhs) const {       
     auto rhs_size = rhs.size();
     if (_size != rhs_size) { return false; } // if size doesnt match, false
-    if (_size < 14) { // actual chars in e & ptr_or_start
-      uint8_t idx = 0u;
-      // for loop shifts ptr_or_start to get the first 4 chars of pstr
-      for (auto i = _size<=4 ? ((_size-1) * 8) : 24; i >= 0; i -= 8) {
-        if (((ptr_or_start >> i) & 0xff) != (rhs.at(idx++) & 0xff)) { 
-          return false; // ptr_or_start & rhs mismatch -> false
-        }
-      }
-      if (_size <= 4) { return true; } // _size <= 4, don't need to check e
-      for (auto i = 4; i < _size; ++i) { // checking e for rest of chars
-        if (e[i-4] != rhs.at(i)) { return false; } // e & rhs mismatch -> false
-      }
-      return true; 
-    } else if (_size >= 14) { // string_vector ptr in ptr_or_start, chars in e
+    if (_size < 14) { return str(rhs) == *this; }
+    else if (_size >= 14) { // string_vector ptr in ptr_or_start, chars in e
       if (e[0] != rhs.at(0) || e[1] != rhs.at(1)) { return false; } // check first two
       uint8_t idx = 8;
       for (auto i = 2; i < 10; ++i) { 
@@ -287,18 +257,12 @@ public:
       auto j = 2; // rhs[2 .. _size - 8] --> the long part
       // for loop range: (ptr_or_start) .. (ptr_or_start + _size-10) 
       for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {   
-        if (string_vector.at(i) != rhs.at(j)) { 
-          return false; 
-        }
+        if (string_vector.at(i) != rhs.at(j)) { return false; }
         j = j < _size-8 ? j+1 : j;
       }
       return true;
     }
     return false;
-
-    #if 0
-    return str(rhs) == *this;//saves rhs into vec and map if rhs.size >= 14
-    #endif
   }
 
   //constexpr bool operator==(const char* rhs) const { return *this == rhs; }    
