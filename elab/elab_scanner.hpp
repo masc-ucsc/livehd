@@ -136,7 +136,6 @@ public:
 class Elab_scanner {
 public:
   typedef std::vector<Etoken> Token_list;
-
 protected:
   Token_list token_list;
 

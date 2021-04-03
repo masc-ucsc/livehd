@@ -92,9 +92,6 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (type.is_tuple()) {
       rename_to_real_tuple_name(psts_nid, opr_nid);
-    } else if (is_attribute_related(opr_nid)) {
-      auto selc_nid = opr_nid;
-      sel2attr_set_get(psts_nid, selc_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (type.is_select()) {
@@ -114,9 +111,6 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           trans_tuple_opr_if_subtree(opr_nid);
-        } else if (is_attribute_related(opr_nid)) {
-          auto selc_nid = opr_nid;
-          sel2attr_set_get(itr_nid, selc_nid);
         } else if (type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (type.is_tuple()) {
@@ -180,44 +174,6 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
  $a __bits 0d4     ___t     0d4
 */
 
-void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
-  auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
-  auto  paired_assign_nid = selc_lrhs_table[selc_nid].second;
-
-  auto c0_sel = get_first_child(selc_nid);
-  auto c1_sel = get_sibling_next(c0_sel);
-  // auto c2_sel = get_sibling_next(c1_sel);
-  if (get_name(c1_sel).substr(0, 3) == "___") {
-    merge_hierarchical_attr_set(selc_nid);
-    return;
-  }
-
-  if (is_lhs(psts_nid, selc_nid)) {
-    // change node semantic from sel->attr_set ; assign->invalid
-    auto c0_assign                    = get_first_child(paired_assign_nid);
-    auto c1_assign                    = get_sibling_next(c0_assign);
-    ref_data(selc_nid)->type          = Lnast_ntype::create_attr_set();
-    ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-    auto it1_ast                      = c0_sel;
-    auto it2_ast                      = get_sibling_next(it1_ast);
-
-    while (!it2_ast.is_invalid()) {
-      set_data(it1_ast, get_data(it2_ast));
-      it1_ast = it2_ast;
-      it2_ast = get_sibling_next(it2_ast);
-    }
-    set_data(it1_ast, get_data(c1_assign));
-
-    // set_data(c0_sel, get_data(c1_sel));
-    // set_data(c1_sel, get_data(c2_sel));
-    // set_data(c2_sel, get_data(c1_assign));
-    // set_data(c0_sel, get_data(c1_assign));
-
-  } else {
-    // is rhs, change node semantic from sel->attr_get
-    ref_data(selc_nid)->type = Lnast_ntype::create_attr_get();
-  }
-}
 
 void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
   I(get_type(selc_nid).is_select());

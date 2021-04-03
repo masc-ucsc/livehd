@@ -30,7 +30,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto          odir      = pc.get_odir(var);
   auto          top       = pc.check_option_top(var);
   auto          gviz      = pc.check_option_gviz(var);  
-  std::string_view get_firrtl = pc.check_option_firrtl(var);
+  auto       get_firrtl   = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -262,8 +262,8 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   return gviz_en;
 }
 
-std::string Pass_compiler::check_option_top(Eprp_var &var) {
-  std::string top;
+std::string_view Pass_compiler::check_option_top(Eprp_var &var) {
+  std::string_view top = "";
   if (var.has_label("top")) {
     top = var.get("top");
   }
