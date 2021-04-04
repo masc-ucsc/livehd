@@ -41,8 +41,6 @@ private:
 // https://scholars.lib.ntu.edu.tw/bitstream/123456789/147652/1/1467.pdf
 
 class annLayout : public FPContainer {
-private:
-  float getSide(float area, float ar);
 protected:
   bstar horiz;  // horizontal B*-tree
   bstar vert;  // vertical B*-tree

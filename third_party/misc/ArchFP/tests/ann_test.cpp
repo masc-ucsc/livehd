@@ -16,8 +16,6 @@ TEST_F(ann_test, basic_test) {
   chip->addComponentCluster("C2", 1, 4, 4., 1.);
   chip->addComponentCluster("C3", 1, 2, 4., 1.);
 
-  EXPECT_TRUE(false);
-
   bool success = chip->layout(AspectRatio, 1.0);
   EXPECT_TRUE(success);
 }
