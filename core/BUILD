@@ -44,7 +44,7 @@ cc_test(
     srcs = ["tests/lgtuple_test.cpp"],
     copts = COPTS,
     includes = ["."],
-    #tags = [ "fixme", ],
+    tags = [ "fixme", ],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
