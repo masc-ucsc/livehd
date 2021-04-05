@@ -1,7 +1,7 @@
-foo.a.b.__ubits = 3
+foo.a.b.__ubits = 73
 foo.a.b = 5
 
-%out  = foo.a.b.__ubits
+%out  = foo.a.b.__ubits  // 3 needed for 0b0101
 %out2 = foo.a.b
 
 c = 3

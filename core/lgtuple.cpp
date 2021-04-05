@@ -2,10 +2,19 @@
 
 #include "lgtuple.hpp"
 
+#include <algorithm>
 #include <charconv>
 
 #include "lgraph.hpp"
 #include "likely.hpp"
+
+static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
+  return lhs.first < rhs.first;
+}
+
+void Lgtuple::sort_key_map() {
+  std::sort(key_map.begin(), key_map.end(), tuple_sort);
+}
 
 std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
   I(a[a_pos] == ':');
@@ -286,6 +295,17 @@ void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
 }
 
 bool Lgtuple::match(std::string_view a, std::string_view b) {
+  if (a == b)
+    return true;
+  if (a.empty()) {
+    if (b=="0" || (b.size()>3 && b.substr(0,3)==":0:"))
+      return true;
+  }
+  if (b.empty()) {
+    if (a=="0" || (a.size()>3 && a.substr(0,3)==":0:"))
+      return true;
+  }
+
   auto [m1, m2, x] = match_int(a, b);
   (void)x;
   return m1 && m2;  // both reach the end in match_int
@@ -456,12 +476,22 @@ bool Lgtuple::has_dpin(std::string_view key) const {
 }
 
 std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
+  if (key.empty()) {
+    return std::make_shared<Lgtuple>(*this);
+  }
+
   I(!key.empty());  // do not call without sub-fields
 
   std::shared_ptr<Lgtuple> tup;
 
   for (auto &e : key_map) {
     std::string_view entry(e.first);
+    if (key=="0" && e.first.empty()) {
+      if (!tup)
+        tup = std::make_shared<Lgtuple>(get_name());
+      tup->key_map.emplace_back("", e.second);
+      continue;
+    }
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0)
       continue;
@@ -526,8 +556,17 @@ void Lgtuple::del(std::string_view key) {
 
   Key_map_type new_map;
 
+  bool is_attr_key = is_root_attribute(key);
+
   for (auto i = 0u; i < key_map.size(); ++i) {
     std::string_view entry{key_map[i].first};
+    if (entry.empty()) {
+      if (is_attr_key) {
+        new_map.emplace_back(std::move(key_map[i]));
+      }
+      continue; // "" keys must be gone by now
+    }
+
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0) {
       new_map.emplace_back(std::move(key_map[i]));
@@ -561,14 +600,42 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 }
 
 void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
-  del(key);
+
+  if (!key_map.empty()) {
+    if (key.empty()) {
+      key = "0";
+    }
+    for(auto &it:key_map) {
+      if (it.first.empty()) {
+        it.first = "0";
+      }else if (is_root_attribute(it.first)) {
+        it.first = absl::StrCat("0.", it.first);
+      }
+    }
+  }
 
   auto fixed_key = learn_fix(key);
 
+  del(key);
+
   key_map.emplace_back(fixed_key, dpin);
+
+  if (is_trivial_scalar()) {
+    for(auto &it:key_map) {
+      if (it.first == "0") {
+        it.first = "";
+      }else if (is_attribute(it.first)) {
+        auto f = get_all_but_last_level(it.first);
+        if (f == "0") {
+          auto attr = get_last_level(it.first);
+          it.first = attr;
+        }
+      }
+    }
+  }
 }
 
-bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
+bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Node_pin>> delayed_numbers;
@@ -594,7 +661,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
     for (const auto &e : key_map) {
       if (e.first.empty()) {
         dump();
-        Lgraph::info("can not append pin to tuple {} when some are unnamed", get_name());
+        Lgraph::info("can not concat pin to tuple {} when some are unnamed", get_name());
         return false;
       }
       int x = 0;
@@ -604,7 +671,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
         std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
       } else {
         dump();
-        Lgraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
+        Lgraph::info("can not concat pin to tuple unordered {} field {}", get_name(), e.first);
         return false;
       }
       if (x > max_pos)
@@ -620,7 +687,7 @@ bool Lgtuple::append_tuple(std::shared_ptr<Lgtuple const> tup) {
   return ok;
 }
 
-bool Lgtuple::append_tuple(const Node_pin &dpin) {
+bool Lgtuple::concat(const Node_pin &dpin) {
   if (key_map.size() == 1 && key_map[0].first.empty()) {
 #if 0
     // Not right to concat
@@ -644,7 +711,7 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
   for (const auto &e : key_map) {
     if (e.first.empty()) {
       dump();
-      Lgraph::info("can not append pin to tuple {} when some are unnamed", get_name());
+      Lgraph::info("can not concat pin to tuple {} when some are unnamed", get_name());
       return false;
     }
     int x = 0;
@@ -654,7 +721,7 @@ bool Lgtuple::append_tuple(const Node_pin &dpin) {
       std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
     } else {
       dump();
-      Lgraph::info("can not append pin to tuple unordered {} field {}", get_name(), e.first);
+      Lgraph::info("can not concat pin to tuple unordered {} field {}", get_name(), e.first);
       return false;
     }
     if (x > max_pos)
@@ -719,7 +786,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     }
   }
 
-  if (fixing_tup->is_scalar()) {
+  if (fixing_tup->is_trivial_scalar()) {
     return nullptr;
   }
 
@@ -791,7 +858,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
   I(flop.is_type(Ntype_op::Flop));
 
-  if (is_scalar())
+  if (is_scalar()) // scalar and trivial scalar
     return nullptr;
 
   std::string_view flop_name;
@@ -814,11 +881,71 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 
   std::shared_ptr<Lgtuple> ret_tup;
 
+  sort_key_map();
+
+  auto *lg   = flop.get_class_lgraph();
+
   for (auto &e : key_map) {
     if (e.second.get_node() == flop)
       continue;  // no loop to itself
     if (is_attribute(e.first)) {
-      fmt::print("FIXME 2: Set the flop to attribute:{}\n", e.first);
+      // key_map is sorted. The field before the tuple must be created (or it
+      // does not exist, in which case, nothing to do)
+
+      auto attr          = get_last_level(e.first);
+      auto key           = get_all_but_last_level(e.first);
+      auto new_flop_name = absl::StrCat(flop_root_name, ".", key);
+      auto dpin          = Node_pin::find_driver_pin(lg, new_flop_name);
+      if (dpin.is_invalid()) {
+        Lgraph::info("found attribute:{} but could not bind to flop:{} (missing). It may be OK until convergence", attr, new_flop_name);
+        continue;
+      }
+      auto flop_node = dpin.get_node();
+
+      if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2))) { // Is this a FLOP attribute (reset, initial...)
+        auto flop_spin = flop_node.setup_sink_pin(attr.substr(2));
+        if (flop_spin.is_connected()) {
+          auto dpin2 = flop_spin.get_driver_pin();
+          if (dpin2 == dpin) { // already correctly connected. Nothing to do
+            continue;
+          }
+          XEdge::del_edge(dpin2, flop_spin);
+        }
+        flop_spin.connect_driver(e.second);
+      }else{
+        // If not a FLOP attribute, it may be a plain attribute
+
+        auto flop_din = flop_node.setup_sink_pin("din");
+        if (flop_din.is_connected()) {
+          auto parent_node = flop_din.get_driver_pin().get_node();
+          if (parent_node.is_type(Ntype_op::AttrSet)) {
+            auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
+            I(!attr2_dpin.is_invalid());
+            auto attr2 = attr2_dpin.get_name();
+            if (attr2 == attr)
+              continue; // same attribute already set (can it have different value??)
+          }
+        }
+
+        auto attr_node = lg->create_node(Ntype_op::AttrSet);
+        {
+          auto key_dpin = lg->create_node_const(attr).setup_driver_pin();
+          attr_node.setup_sink_pin("field").connect_driver(key_dpin);
+        }
+        {
+          attr_node.setup_sink_pin("value").connect_driver(e.second);
+        }
+        auto flop_din_driver = flop_din.get_driver_pin();
+        if (flop_din_driver.is_invalid()) {
+          // Disconnected flop?
+          Lgraph::info("flop:{} seems disconnected. May be fine or intentional but strange", new_flop_name);
+        }else{
+          XEdge::del_edge(flop_din_driver, flop_din);
+          attr_node.setup_sink_pin("name").connect_driver(flop_din_driver);
+        }
+
+        flop_din.connect_driver(attr_node.setup_driver_pin("Y"));
+      }
       continue;
     }
     Node node;
@@ -831,7 +958,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
       node       = flop;
       first_flop = false;
     } else {
-      auto *lg   = flop.get_class_lgraph();
       auto  dpin = Node_pin::find_driver_pin(lg, new_flop_name);
       if (dpin.is_invalid()) {
         node = lg->create_node(Ntype_op::Flop);
@@ -863,6 +989,16 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 
   std::vector<std::pair<std::string, Node_pin>> v;
 
+  if (key.empty() || is_scalar()) {
+    for (const auto &e : key_map) {
+      if (!is_attribute(e.first))
+        continue;
+      v.emplace_back(e.first, e.second);
+    }
+
+    return v;
+  }
+
   for (const auto &e : key_map) {
     std::string_view entry{e.first};
     auto             e_pos = match_first_partial(key, entry);
@@ -879,6 +1015,41 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 
   return v;
 }
+
+bool Lgtuple::is_scalar() const {
+  auto conta = 0;
+  for(const auto &e:key_map) {
+    if (is_attribute(e.first))
+      continue;
+    if (conta>0)
+      return false;
+    ++conta;
+  }
+  return true;
+}
+
+bool Lgtuple::is_trivial_scalar() const {
+  auto conta       = 0;
+
+  for(const auto &e:key_map) {
+    std::string_view field{e.first};
+
+    if (is_attribute(field)) {
+      field = get_all_but_last_level(field);
+    }else{
+      if (conta>0)
+        return false;
+      ++conta;
+    }
+    if (field.empty() || field == "0")
+      continue;
+
+    return false;
+  }
+
+  return true;
+}
+
 
 void Lgtuple::dump() const {
   fmt::print("tuple_name: {}\n", name);

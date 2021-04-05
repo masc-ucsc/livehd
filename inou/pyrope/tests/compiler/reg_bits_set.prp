@@ -1,4 +1,7 @@
-$a.__ubits = 8
+$input.__ubits = 8
+
+// reg reserved verilog keyword
+// input is another verilog reserved keyword
 
 reg = reg.__create_flop
 reg_q = reg
@@ -6,7 +9,7 @@ reg_q = reg
 foo = reg == 0
 reg.__ubits = 8
 if (foo) {
-  reg := $a
+  reg := $input
 } else {
   reg := reg - 1
 }

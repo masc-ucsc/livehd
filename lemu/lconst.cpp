@@ -124,6 +124,20 @@ Lconst::Lconst(Number v) {
   bits         = calc_num_bits();
 }
 
+Lconst Lconst::string(std::string_view orig_txt) {
+  Lconst lc;
+
+  for (int i = orig_txt.size() - 1; i >= 0; --i) {
+    lc.num <<= 8;
+    lc.num += orig_txt[i];
+  }
+
+  lc.bits         = orig_txt.size() * 8;
+  lc.explicit_str = true;
+
+  return lc;
+}
+
 Lconst::Lconst(std::string_view orig_txt) {
   explicit_str = false;
   bits         = 0;

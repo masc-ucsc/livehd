@@ -83,7 +83,8 @@ Pyrope_compile () {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
@@ -169,7 +170,7 @@ Pyrope_compile_hier () {
     echo "----------------------------------------------------"
 
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog "
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*

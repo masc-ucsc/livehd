@@ -87,6 +87,8 @@ public:
   // Lconst(int64_t v, Bits_t bits);
   Lconst();
 
+  static Lconst string(std::string_view txt);
+
   Container serialize() const;
   uint64_t  hash() const;
 

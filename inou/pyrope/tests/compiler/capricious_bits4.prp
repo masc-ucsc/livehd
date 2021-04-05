@@ -13,7 +13,7 @@ if (1 == 1) {
 T = T + 10           // T8
 %out = T             // 23
 
-T = 11               // T9 = ; new attr chain
-T.__ubits = 12        // T10
+T.__ubits = 12        // T9
+T = 11               // T10 = ; new attr chain
 
-%out2 = T + T.__ubits // 23
+%out2 = T + T.__ubits // 11 + 5

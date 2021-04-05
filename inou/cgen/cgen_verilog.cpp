@@ -13,7 +13,46 @@
 #include "mmap_gc.hpp"
 #include "pass.hpp"
 
-Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {}
+Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
+
+  if (reserved_keyword.empty()) {
+    reserved_keyword.insert("reg");
+    reserved_keyword.insert("input");
+    reserved_keyword.insert("output");
+    reserved_keyword.insert("wire");
+    reserved_keyword.insert("assign");
+    reserved_keyword.insert("always");
+    reserved_keyword.insert("posedge");
+    reserved_keyword.insert("negedge");
+    reserved_keyword.insert("module");
+    reserved_keyword.insert("if");
+    reserved_keyword.insert("else");
+    reserved_keyword.insert("begin");
+    reserved_keyword.insert("end");
+    reserved_keyword.insert("logic");
+  }
+}
+
+std::string Cgen_verilog::get_scaped_name(std::string_view name) {
+  if (name[0] == '%') {
+    if (name[1] == '.') {
+      name = name.substr(2);
+    }else{
+      name = name.substr(1);
+    }
+  }
+
+  if (reserved_keyword.contains(name)) {
+    return absl::StrCat("\\", name , " ");
+  }
+
+  for (auto ch : name) {
+    if (!std::isalnum(ch) && ch != '_')
+      return absl::StrCat("\\", name , " ");
+  }
+
+  return std::string{name};
+}
 
 std::string Cgen_verilog::get_append_to_name(const std::string &name, std::string_view ext) const {
   std::string name_next;
@@ -229,7 +268,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Const) {
     final_expr = node.get_type_const().to_verilog();
-  } else if (op == Ntype_op::TupKey || op == Ntype_op::TupRef || op == Ntype_op::TupAdd || op == Ntype_op::TupGet
+  } else if (op == Ntype_op::TupRef || op == Ntype_op::TupAdd || op == Ntype_op::TupGet
              || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
@@ -365,12 +404,14 @@ void Cgen_verilog::create_combinational(std::string &buffer, Lgraph *lg) {
 
 void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
   lg->each_graph_output([&](const Node_pin &dpin) {
-    const auto name = get_scaped_name(dpin.get_name());
     auto       spin = dpin.change_to_sink_from_graph_out_driver();
-    if (spin.is_connected()) {
-      auto out_dpin = spin.get_driver_pin();
-      absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
-    }
+    if (!spin.is_connected())
+      return;
+
+    auto name = get_scaped_name(dpin.get_name());
+
+    auto out_dpin = spin.get_driver_pin();
+    absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
   });
 
   for (auto node : lg->fast()) {
@@ -408,18 +449,27 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
     bool        negreset = false;
 
     if (node.get_sink_pin("reset").is_connected()) {
-      if (node.get_sink_pin("negreset").is_connected()) {
-        negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i() != 0;
-      }
-
-      if (node.get_sink_pin("async").is_connected()) {
-        auto v = node.get_sink_pin("async").get_driver_pin().get_type_const().to_i() != 0;
-        if (v) {
-          reset_async = absl::StrCat(negreset ? "or negedge " : "or posedge ", reset);
+      auto reset_dpin = node.get_sink_pin("reset").get_driver_pin();
+      if (reset_dpin.is_type_const()) {
+       auto reset_const = reset_dpin.get_node().get_type_const();
+       if (reset_const != Lconst(0) && reset_const != Lconst("false")) {
+         Pass::info("flop reset is hardwired to value:{}. (weird)", reset_const.to_pyrope());
+         reset = reset_const.to_verilog(); // hardcoded value???
+       }
+      }else{
+        if (node.get_sink_pin("negreset").is_connected()) {
+          negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i() != 0;
         }
-      }
 
-      reset = get_scaped_name(node.get_sink_pin("reset").get_wire_name());
+        if (node.get_sink_pin("async").is_connected()) {
+          auto v = node.get_sink_pin("async").get_driver_pin().get_type_const().to_i() != 0;
+          if (v) {
+            reset_async = absl::StrCat(negreset ? "or negedge " : "or posedge ", reset);
+          }
+        }
+
+        reset = get_scaped_name(node.get_sink_pin("reset").get_wire_name());
+      }
     }
 
     std::string reset_initial = "'h0";

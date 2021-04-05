@@ -16,7 +16,23 @@
 #define TRACE(x)
 //#define TRACE(x) x
 
+// Single step CPROP for debugging
+//#define TRIVIAL_CPROP
+
 Cprop::Cprop(bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc) {}
+
+std::tuple<Node_pin, std::shared_ptr<Lgtuple const> > Cprop::get_value(const Node &node) const {
+  I(node.is_type(Ntype_op::TupAdd) || node.is_type(Ntype_op::AttrSet));
+
+  auto value_spin = node.get_sink_pin("value");
+  if (value_spin.is_connected()) {
+    auto value_dpin = value_spin.get_driver_pin();
+    auto tup = find_lgtuple(value_dpin);
+    return std::make_tuple(value_dpin, tup);
+  }
+
+  return std::make_tuple(invalid_pin, nullptr);
+}
 
 void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
   auto op = node.get_type_op();
@@ -100,22 +116,6 @@ void Cprop::collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered) 
     bwd_del_node(node);
   }
 }
-
-#if 0
-void Cprop::collapse_forward_shiftleft(Node &node) {
-  I(node.get_type_op()==ShiftLeft_Op);
-
-  // a <<n | b -> join(a,b) if b.bits>=n
-  for (auto &out : node.out_edges()) {
-    auto sink_node = out.sink.get_node();
-    if (sink_node.get_type_op() != Or_Op) continue;
-
-    if (!sink_node.get_driver_pin(0).has_outputs()) continue;
-
-    HERE
-  }
-}
-#endif
 
 // Collase forward single node but only for pid!=0 (not reduction ops)
 void Cprop::collapse_forward_always_pin0(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -368,14 +368,6 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
-#if 0
-    Bits_t max_bits = 0;
-    for (auto &i : inp_edges_ordered) {
-      auto c = i.driver.get_node().get_type_const();
-      if (c.get_bits() > max_bits)
-        max_bits = c.get_bits();
-    }
-#endif
     Lconst result("-1");
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
@@ -638,34 +630,18 @@ void Cprop::process_flop(Node &node) {
 }
 
 std::tuple<std::string, std::string> Cprop::get_tuple_name_key(Node &node) const {
-  std::string tup_name;
-
-  if (node.is_sink_connected("tuple_name")) {
-    auto dpin = node.get_sink_pin("tuple_name").get_driver_pin();
-    if (dpin.is_type_const()) {
-      auto v   = dpin.get_node().get_type_const();
-      tup_name = v.to_string();
-    } else if (dpin.has_name()) {
-      tup_name = dpin.get_name();
-    }
-  }
 
   std::string key_name;
-
-  // FIXME: We can get rid of the "position" pin, Use the :num:label
   if (node.is_sink_connected("position")) {
     auto node2 = node.get_sink_pin("position").get_driver_node();
     if (node2.is_type_const()) {
       key_name = node2.get_type_const().to_string();
     }
-    const auto node2_it = node2tuple.find(node2.get_compact());
-    if (node2_it != node2tuple.end() && node2_it->second->is_scalar()) {
-      const auto &d2 = node2_it->second->get_dpin();
-      if (!d2.is_invalid() && d2.is_type_const()) {
-        key_name = d2.get_node().get_type_const().to_string();
-      }
-    }
   }
+
+  std::string tup_name;
+  if (node.setup_driver_pin("Y").has_name())
+    tup_name = node.setup_driver_pin("Y").get_name();
 
   return std::make_tuple(tup_name, key_name);
 }
@@ -750,72 +726,31 @@ bool Cprop::reg_q_pin_access_preparation(Node &tg_parent_node, Node_pin &ori_tgq
   return true;
 }
 
-bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
+bool Cprop::process_tuple_get(Node &node) {
   I(node.get_type_op() == Ntype_op::TupGet);
+
+  if (tuple_issues)
+    return true;
+
   auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
-  if (key_name == "__q_pin") {
-    auto tg_dpin = node.setup_driver_pin();
-    return reg_q_pin_access_preparation(parent_node, tg_dpin);  // start from parent tg to collect the hierarchical reg name
-  }
 
-#if 0
-  // this attr comes from tail of TG chain where the TG tail has been transformed into an AttrSet node.
-  if (parent_node.get_type_op() == Ntype_op::AttrSet) {
-    auto attr_val_dpin = parent_node.get_sink_pin("value").get_driver_pin();
-    collapse_forward_for_pin(node, attr_val_dpin);
-    return true;
-  }
-#endif
-
-  // note: if child is TG(__q_pin), don't change cur_tg into AttrSet
-  bool child_is_tg_qpin_fetch = false;
-  for (auto &e : node.out_edges()) {
-    auto sink_node = e.sink.get_node();
-    if (sink_node.get_type_op() == Ntype_op::TupGet) {
-      auto [child_tup_name, child_key_name] = get_tuple_name_key(sink_node);
-      if (child_key_name == "__q_pin")
-        child_is_tg_qpin_fetch = true;
-    }
-  }
+  std::shared_ptr<Lgtuple const> node_tup;
 
   auto ptup_it = node2tuple.find(parent_node.get_compact());
-  if (ptup_it == node2tuple.end()) {
-    if (tuple_issues) {
-      return false;
-    }
-    if (!parent_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
-      collapse_forward_for_pin(node, parent_dpin);
-      return true;
-    }
-
-    auto wname = absl::StrCat(tup_name, ".", key_name);
-
-    auto dpin = Node_pin::find_driver_pin(node.get_class_lgraph(), wname);
-    if (!dpin.is_invalid()) {
-      auto flop_node = dpin.get_node();
-      if (flop_node.is_type_flop()) {
-        collapse_forward_for_pin(node, dpin);
-        return true;
-      }
-    }
-
-    Pass::info("tuple_get {} could not decide the field {} (1)", node.debug_name(), key_name);
-    return false;
+  if (ptup_it != node2tuple.end()) {
+    node_tup = ptup_it->second;
   }
 
-  const auto &node_tup = ptup_it->second;
-
   if (key_name.empty()) {
-    if (node.is_sink_connected("position")) {
+    if (node.is_sink_connected("position") && node_tup) {
       auto field_node = node.get_sink_pin("position").get_driver_node();
-
       auto fieldtup_it = node2tuple.find(field_node.get_compact());
       if (fieldtup_it != node2tuple.end()) {
         auto sub_tup = node_tup->get_sub_tuple(fieldtup_it->second);
         if (sub_tup) {
-          if (sub_tup->is_scalar() && !child_is_tg_qpin_fetch) {
+          if (sub_tup->is_trivial_scalar()) {
             auto dpin = sub_tup->get_dpin();
             collapse_forward_for_pin(node, dpin);
           } else {
@@ -823,145 +758,144 @@ bool Cprop::process_tuple_get(Node &node, XEdge_iterator &inp_edges_ordered) {
           }
           return true;
         }
+        fieldtup_it->second->dump();
+        node.dump();
+        Pass::error("FIXME: need to handle runtime tuple index node:{}\n",node.debug_name());
+        tuple_issues = true;
+        return false;
       }
     }
-
-    Pass::info("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
+    Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
+    tuple_issues = true;
     return false;
   }
 
-  auto val_dpin = node_tup->get_dpin(key_name);
-  if (!val_dpin.is_invalid() && !child_is_tg_qpin_fetch) {
-    int conta = 0;
-    for (auto it : node_tup->get_level_attributes(key_name)) {
-      auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
-      auto attr_key_dpin = attr_key_node.setup_driver_pin();
-      attr_key_dpin.set_name(it.first);
+  if (node_tup) {
+    bool is_attr_get = false;
+    std::string main_field{key_name};
+    if (Lgtuple::is_attribute(key_name)) {
+      main_field = Lgtuple::get_all_but_last_level(key_name);
+      is_attr_get = true;
+    }
 
-      if (conta == 0) {
-#ifndef NDEBUG
-        fmt::print("cprop: changing node:{} to AttrSet node for attr:{} from pin:{}\n",
-                   node.debug_name(),
-                   it.first,
-                   it.second.debug_name());
-#endif
-        // Reuse current node. First delete input edges
-        for (auto &e : inp_edges_ordered) {
-          e.del_edge();
+    auto sub_tup = node_tup->get_sub_tuple(main_field);
+    if (sub_tup->is_trivial_scalar() || is_attr_get) {
+      auto out_edges_list = node.out_edges();
+      auto new_dpin = expand_data_and_attributes("", out_edges_list, sub_tup);
+      I(!node.has_outputs());
+      if (is_attr_get) {
+        if (new_dpin.is_invalid()) {
+          Pass::info("tuple_get {} for key:{} has no data (may be OK)", node.debug_name(), key_name);
+        }else{
+          node.setup_sink_pin("tuple_name").del();
+          node.set_type(Ntype_op::AttrGet);
+
+          for(auto &e:new_dpin.out_edges()) {
+            node.setup_driver_pin().connect_sink(e.sink);
+            e.del_edge();
+          }
+          node.setup_sink_pin("name").connect_driver(new_dpin);
         }
+      }else{
+        std::string non_attr_name;
+        {
+          auto a_name = sub_tup->get_map()[0].first;
+          if (Lgtuple::is_attribute(a_name))
+            non_attr_name = Lgtuple::get_all_but_last_level(a_name);
+          else
+            non_attr_name = a_name;
+        }
+        if (non_attr_name.empty()) {
+          bwd_del_node(node);
+        }else{
+          node.setup_sink_pin("tuple_name").del();
+          node.setup_sink_pin("position").del();
 
-        node.set_type(Ntype_op::AttrSet);  // Replace TupGet for AttrSet
-        node.setup_sink_pin("name").connect_driver(val_dpin);
-        node.setup_sink_pin("field").connect_driver(attr_key_dpin);
-        node.setup_sink_pin("value").connect_driver(it.second);
-      } else {
-        I(false);  // FIXME: TODO handle multiple attr set (create node)
+          auto pos_dpin = node.get_lg()->create_node_const(Lconst::string(non_attr_name)).setup_driver_pin();
+          node.setup_sink_pin("position").connect_driver(pos_dpin);
+
+          node.set_type(Ntype_op::TupAdd);
+
+          for(auto &e:new_dpin.out_edges()) {
+            node.setup_driver_pin().connect_sink(e.sink);
+            e.del_edge();
+          }
+          node.setup_sink_pin("value").connect_driver(new_dpin);
+
+          node2tuple[node.get_compact()] = sub_tup;
+        }
       }
-      conta++;
-    }
-
-    if (conta == 0) {  // No attributes
-      collapse_forward_for_pin(node, val_dpin);
-    }
-    return true;
-  }
-
-  I(!key_name.empty());
-  auto sub_tup = node_tup->get_sub_tuple(key_name);
-  if (sub_tup) {
-    if (sub_tup->is_scalar() && !child_is_tg_qpin_fetch) {
-      auto dpin = sub_tup->get_dpin();
-      collapse_forward_for_pin(node, dpin);
-    } else {
+    }else{
       node2tuple[node.get_compact()] = sub_tup;
     }
+
     return true;
   }
 
-  if (child_is_tg_qpin_fetch)
+  if (key_name=="0") {
+    if (!tuple_issues) {
+      auto dpin = node.get_sink_pin("tuple_name").get_driver_pin();
+      collapse_forward_for_pin(node, dpin);
+    }
     return true;
+  }
 
-  Pass::info("tuple_get {} could not decide the field {} (2)", node.debug_name(), key_name);
-  return false;  // Could not resolve (maybe compile error, maybe hierarchical needed)
+  if (!Lgtuple::is_root_attribute(key_name)) {
+    Pass::info("tuple_get {} for key:{} has no defined tuple (may be OK)", node.debug_name(), key_name);
+    return false;
+  }
+
+  node.set_type(Ntype_op::AttrGet);
+  I(node.get_sink_pin("field").get_driver_pin().get_type_const().to_string() == key_name);
+
+  return true;
 }
 
-void Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
+bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
+
+  if (tuple_issues || hier)
+    return false;
+
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
+  tup_list.resize(inp_edges_ordered.size()-1);
 
-  Node_pin sel_dpin;
+  Node_pin &sel_dpin = inp_edges_ordered[0].driver;
 
-  for (auto &e : inp_edges_ordered) {  // Mux needs the edges ordered
-    if (e.sink.get_pid() == 0) {
-      I(e.sink.get_pin_name() == "0");
-
-      sel_dpin = e.driver;
-    } else {
-      auto tup = find_lgtuple(e.driver);
-      if (tup) {
-        tup_list.emplace_back(tup);
-      }
-    }
+  bool some_tuple_found = false;
+  for(auto i=1u;i<inp_edges_ordered.size();++i) {
+    auto tup = find_lgtuple(inp_edges_ordered[i].driver);
+    tup_list[i-1] = tup;
+    if (tup)
+      some_tuple_found = true;
   }
 
-  std::shared_ptr<Lgtuple> tup;
-  if (!tuple_issues && !tup_list.empty()) {
-    if (tup_list.size() == 1) {
-      std::string non_attr_key;
-      Node_pin    non_attr_dpin;
-      if ((tup_list.size() + 1) != inp_edges_ordered.size()) {
-        for (auto tup2 : tup_list) {
-          // OK not to have all the inputs as tuples if each input is a scalar
-          if (!tup2->is_scalar()) {
-            tuple_issues = true;
-            break;
-          }
-          for (const auto &e : tup2->get_map()) {
-            if (Lgtuple::is_attribute(e.first))
-              continue;
+  if (!some_tuple_found)
+    return false; // nothing to do
 
-            if (non_attr_dpin.is_invalid()) {
-              non_attr_key  = e.first;
-              non_attr_dpin = e.second;
-            } else {
-              if (non_attr_key != e.first) {
-                tuple_issues = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      if (non_attr_dpin.is_invalid())
-        return;  // no tuple to create
-
-      tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
-      tup->add(non_attr_key, non_attr_dpin);
-    } else {
-      tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
-      if (!tup) {
-        return;  // It was a scalar entry, no need to create tuple
-      }
-      // WARNING: new flops are not added to the iterator. Call them now, but
-      // not much besides code OPT (they have no tuples for sure)
-    }
-    node2tuple[node.get_compact()] = tup;
-    // tup->dump();
+  for(auto i=1u;i<inp_edges_ordered.size();++i) {
+    if (tup_list[i-1])
+      continue;
+    auto tup = std::make_shared<Lgtuple>(""); // scalar
+    tup->add(inp_edges_ordered[i].driver);
+    tup_list[i-1] = tup;
   }
 
-  // create registers if mux is tuple-reg tail
-  bool is_tail = true;
-  if (tup && !hier && !tuple_issues) {
-    for (auto &e : node.out_edges()) {
-      auto sink_type = e.sink.get_type_op();
-      if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux) {
-        is_tail = false;
-      }
-    }
+  auto tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
+  if (!tup) {
+    for(auto i=1u;i<inp_edges_ordered.size();++i) {
+      auto &e = inp_edges_ordered[i];
 
-    if (is_tail) {
-      try_create_register(node, tup);
+      XEdge_iterator mux_inp_edge;
+      mux_inp_edge.emplace_back(e);
+
+      expand_data_and_attributes("", mux_inp_edge, tup_list[i-1]);
     }
+    return true;  // It was a scalar entry, no need to create tuple
   }
+
+  node2tuple[node.get_compact()] = tup;
+
+  return false;
 }
 
 void Cprop::process_sext(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -995,7 +929,7 @@ void Cprop::process_sext(Node &node, XEdge_iterator &inp_edges_ordered) {
   node.setup_sink_pin("a").connect_driver(parent_wire_dpin);
 }
 
-std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) {
+std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) const {
   auto up_node = up_dpin.get_node();
   if (up_node.is_type_const())
     return nullptr;
@@ -1012,199 +946,234 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) {
   return ptup_it->second;
 }
 
-void Cprop::process_attr_get(Node &node) {
-  if (tuple_issues)
+void Cprop::process_attr_set(Node &node) {
+  if (tuple_issues || hier) // hier still not supported
     return;
 
-  auto field_spin = node.get_sink_pin("field");
-  I(field_spin.is_connected() && field_spin.get_driver_node().is_type(Ntype_op::TupKey));
-  auto field_txt = field_spin.get_driver_pin().get_name();
+  // Not much to do, just check for compile error in cases like foo := xxx (were xxx is a tuple)
 
-  if (field_txt.substr(0, 2) == "__")
-    return;  // done
-
-  std::shared_ptr<Lgtuple> node_tup;
-
-  auto name_spin = node.get_sink_pin("name");
-  if (name_spin.is_connected()) {
-    std::shared_ptr<Lgtuple const> name_tup = find_lgtuple(name_spin.get_driver_pin());
-    if (name_tup)
-      node_tup = std::make_shared<Lgtuple>(*name_tup);
-  }
-
-  if (!node_tup)
-    return;  // Not much to do (or working on a scalar)
-
-  auto dpin_name = Lgtuple::get_all_but_last_level(field_txt);
-
-  I(name_spin.is_connected());
-
-  auto d = name_spin.get_driver_pin();
-  name_spin.del_driver(d);
-
-  Node_pin new_dpin;
-  if (!node_tup->has_dpin(dpin_name)) {
-    new_dpin = node.get_lg()->create_node_const(0).setup_driver_pin();
-  } else {
-    new_dpin = node_tup->get_dpin(dpin_name);
-  }
-  name_spin.connect_driver(new_dpin);
-
-  // NOTE: do not fix field name (may be useful to provide better error/warnings)
-}
-
-void Cprop::process_attr_set(Node &node) {
   auto field_spin = node.get_sink_pin("field");
   if (!field_spin.is_connected()) {
     I(node.is_sink_connected("chain"));  // must be a chain attrset
     return;
   }
 
-  I(field_spin.is_connected() && field_spin.get_driver_node().is_type(Ntype_op::TupKey));
-  auto field_txt = field_spin.get_driver_pin().get_name();
+  auto field_txt = field_spin.get_driver_pin().get_type_const().to_string();
+  I(Lgtuple::is_root_attribute(field_txt)); // AttrSet is only for root fields
 
-  if (Lgtuple::is_root_attribute(field_txt)) {
-    if (field_txt != "__dp_assign")
-      return;  // following stages will have to deal with this
-  }
-
-  std::shared_ptr<Lgtuple> node_tup;
+  auto attr_field = Lgtuple::get_last_level(field_txt);
 
   auto name_spin = node.get_sink_pin("name");
   if (name_spin.is_connected()) {
     std::shared_ptr<Lgtuple const> name_tup = find_lgtuple(name_spin.get_driver_pin());
-    if (name_tup)
-      node_tup = std::make_shared<Lgtuple>(*name_tup);
-  }
-
-  if (!node_tup) {
-    auto dpin = node.get_driver_pin("Y");
-    if (dpin.has_name())
-      node_tup = std::make_shared<Lgtuple>(dpin.get_name());
-    else
-      node_tup = std::make_shared<Lgtuple>("unknown");
-  }
-
-  auto attr_field = Lgtuple::get_last_level(field_txt);
-  if (attr_field == "__dp_assign") {
-    // WARNING: __dp_assign sets itself as driver. Bitwidth expect this.
-    // Maybe a nicer way will be to chain here all the attributes and attr set
-#ifndef NDEBUG
-    for (const auto &it : node_tup->get_map()) {
-      if (!Lgtuple::is_attribute(it.first))
-        continue;
-      fmt::print("dp_assign to {} with attr:{}\n", node_tup->get_name(), it.first);
+    if (attr_field == "__dp_assign") {
+      if (name_tup && !name_tup->is_scalar()) {
+        name_tup->dump();
+        node.dump();
+        Pass::error("node:{} has := assign with a tuple, only scalars allowed", node.debug_name());
+        return;
+      }
     }
-#endif
-    auto no_attr_field = Lgtuple::get_all_but_last_level(field_txt);
-    node_tup->add(no_attr_field, node.setup_driver_pin("Y"));
-  } else {
-    auto value_dpin = node.get_sink_pin("value").get_driver_pin();
-    node_tup->add(field_txt, value_dpin);
   }
-
-  node2tuple[node.get_compact()] = node_tup;
 }
 
 void Cprop::process_tuple_add(Node &node) {
-  auto [tup_name, key_name] = get_tuple_name_key(node);
+  auto [tup_name, key_name]    = get_tuple_name_key(node);
 
+  auto [value_dpin, value_tup] = get_value(node);
+
+  bool                           parent_is_a_sub = false;
   Node_pin                       parent_dpin;
   std::shared_ptr<Lgtuple const> parent_tup;
-  std::shared_ptr<Lgtuple const> value_tup;
-  bool                           parent_is_a_sub = false;
+  {
+    auto parent_spin = node.get_sink_pin("tuple_name");
+    if (parent_spin.is_connected()) {
+      parent_dpin     = parent_spin.get_driver_pin();
+      parent_tup      = find_lgtuple(parent_dpin);
+      parent_is_a_sub = parent_dpin.get_type_op() == Ntype_op::Sub;
+    }
+  }
+
+  const bool has_key           = !key_name.empty();
+  const bool has_parent_scalar = !parent_dpin.is_invalid() && parent_tup == nullptr;
+  const bool has_parent_tup    = parent_tup != nullptr;
+  const bool has_value_scalar  = !value_dpin.is_invalid() && value_tup == nullptr;
+  const bool has_value_tup     = value_tup != nullptr;
+
   std::shared_ptr<Lgtuple>       node_tup;
 
-  // Try to get parent tuple or value tuple
-  if (node.is_sink_connected("value")) {
-    value_tup = find_lgtuple(node.get_sink_pin("value").get_driver_pin());
-  }
+  if (has_key) {
+    // When key is provided it is mostly variations of tuple add
 
-  if (node.get_sink_pin("tuple_name").is_connected()) {
-    parent_dpin     = node.get_sink_pin("tuple_name").get_driver_pin();
-    parent_tup      = find_lgtuple(parent_dpin);
-    parent_is_a_sub = parent_dpin.get_type_op() == Ntype_op::Sub;
-    if (parent_tup) {
+    auto v = (has_parent_tup? 0x4:0) + (has_parent_scalar?0x2:0) + (has_value_scalar?0x1:0);
+
+    switch(v) {
+      case 0x0: {
+        if (!has_value_tup) {
+          if (!tuple_issues) {
+            node.dump();
+            Pass::error("tuple:{} with key:{} no scalar or parent value", node.debug_name(), key_name);
+            // NOTE: this could be an empty tuple. Do we want to support this case? Why?
+          }
+          return;
+        }
+        node_tup = std::make_shared<Lgtuple>(tup_name);
+        node_tup->add(key_name, value_tup);
+      }
+      break;
+      case 0x1: {
+        node_tup = std::make_shared<Lgtuple>(tup_name);
+        node_tup->add(key_name, value_dpin);
+      }
+      break;
+      case 0x2: {
+        if (!has_value_tup) {
+          if (!tuple_issues) {
+            node.dump();
+            Pass::error("tuple:{} with key:{} parent value and no scalar (connect to value)", node.debug_name(), key_name);
+          }
+          return;
+        }
+        node_tup = std::make_shared<Lgtuple>(tup_name);
+        node_tup->add(key_name, value_tup);
+        node_tup->concat(parent_dpin); // Do we generate this case?
+      }
+      break;
+      case 0x3: {
+        node_tup = std::make_shared<Lgtuple>(tup_name);
+        node_tup->add(parent_dpin);
+        node_tup->add(key_name, value_dpin);
+      }
+      break;
+      case 0x4: {
+        node_tup = std::make_shared<Lgtuple>(*parent_tup);
+        node_tup->add(key_name, value_tup);
+      }
+      break;
+      case 0x5: {
+        node_tup = std::make_shared<Lgtuple>(*parent_tup);
+        node_tup->add(key_name, value_dpin);
+      }
+      break;
+      default:
+        I(false); // impossible cases
+    }
+  }else{
+    // When key is NOT provided it is mostly variations of tuple concat
+
+    if (has_parent_tup) {
       node_tup = std::make_shared<Lgtuple>(*parent_tup);
-    }
-  }
+    }else if (parent_is_a_sub) {
 
-  if (!node_tup) {
-    I(!parent_tup);
-    node_tup = std::make_shared<Lgtuple>(tup_name);  // new tuple if not already created
-    if (!value_tup && !parent_dpin.is_invalid()) {
-      if (key_name.empty())
-        node_tup->add("", parent_dpin);  // the chain was a constant
-    }
-  }
+      node_tup = std::make_shared<Lgtuple>(tup_name);
 
-  if (value_tup) {
-    if (key_name.empty()) {  // Tuple Concatenation
-      bool ok = node_tup->append_tuple(value_tup);
-      if (!ok) {
-        tuple_issues = true;
-        return;
-      }
-    } else {
-      node_tup->add(key_name, value_tup);
-    }
-  } else if (node.is_sink_connected("value")) {
-    auto val_dpin = node.get_sink_pin("value").get_driver_pin();
-    I(val_dpin.get_node().get_type_op() != Ntype_op::TupAdd);  // value_tup should be true otherwise
-    if (key_name.empty()) {                                    // Tuple Concatenation
-      bool ok = node_tup->append_tuple(val_dpin);
-      if (!ok) {
-        tuple_issues = true;
-        return;
-      }
-    } else {
-      node_tup->add(key_name, val_dpin);
-    }
-  } else if (parent_is_a_sub) {
-    auto parent_node = node.get_sink_pin("tuple_name").get_driver_node();
-    I(parent_node.is_type_sub());
+      auto parent_node = node.get_sink_pin("tuple_name").get_driver_node();
+      I(parent_node.is_type_sub());
 
-    const auto &sub = parent_node.get_type_sub_node();
-    for (const auto *io_pin : sub.get_output_pins()) {
-      auto sub_dpin = parent_node.get_driver_pin(io_pin->name);
-      if (io_pin->has_io_pos()) {
-        auto io_name = absl::StrCat(":", std::to_string(io_pin->get_io_pos()), ":", io_pin->name);
-        node_tup->add(io_name, sub_dpin);
-      } else {
-        node_tup->add(io_pin->name, sub_dpin);
+      const auto &sub = parent_node.get_type_sub_node();
+      for (const auto *io_pin : sub.get_output_pins()) {
+        auto sub_dpin = parent_node.get_driver_pin(io_pin->name);
+        if (io_pin->has_io_pos()) {
+          auto io_name = absl::StrCat(":", std::to_string(io_pin->get_io_pos()), ":", io_pin->name);
+          node_tup->add(io_name, sub_dpin);
+        } else {
+          node_tup->add(io_pin->name, sub_dpin);
+        }
       }
+    }else{
+      node_tup = std::make_shared<Lgtuple>(tup_name);
     }
-  } else {
-    // I(parent_tup);  // tup1 = tup2 can have no sink("value") // FIXME->sh: could have a empty parent_tup if the parent is a just
-    // tuple predeclaration before if-else
+
+    if (has_value_scalar) {
+      node_tup->concat(value_dpin);
+    }
+    if (has_value_tup) {
+      node_tup->concat(value_tup);
+    }
   }
 
   node2tuple[node.get_compact()] = node_tup;
 
   // post handling for graph outputs, sub-graph and register.
-  bool is_tail = true;
-  if (!hier && !tuple_issues) {
-    for (auto &e : node.out_edges()) {
-      auto sink_type = e.sink.get_type_op();
-      if (e.sink.is_graph_output() && e.sink.get_pin_name() == "%") {
-        try_create_graph_output(node, node_tup);  // first add outputs
-        return;
-      } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
-        auto sub_node = e.sink.get_node();
-        try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
-        return;
-      } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux) {
-        is_tail = false;
-      }
-    }
+  if (hier || tuple_issues)
+    return;
 
-    if (is_tail) {
-      try_create_register(node, node_tup);
+  bool keep_tuple_add = false;
+  XEdge_iterator pending_out_edges;
+  for (auto &e : node.out_edges()) {
+    auto sink_type = e.sink.get_type_op();
+    if (e.sink.is_graph_output() && e.sink.get_pin_name() == "%") {
+      try_create_graph_output(node, node_tup);  // first add outputs
+      return;
+    } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
+      auto sub_node = e.sink.get_node();
+      try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
+      return;
+    } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
+      keep_tuple_add = true;
+    } else {
+      pending_out_edges.emplace_back(e);
+    }
+  }
+
+  if (!pending_out_edges.empty() && node_tup->is_trivial_scalar()) {
+    expand_data_and_attributes("", pending_out_edges, node_tup);
+    if (!keep_tuple_add) {
+      bwd_del_node(node);
     }
   }
 }
 
+Node_pin Cprop::expand_data_and_attributes(const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup) {
+  I(!hier);
+  I(!tuple_issues);
+
+  if (pending_out_edges.empty())
+    return invalid_pin;
+
+  auto *lg = pending_out_edges[0].driver.get_class_Lgraph();
+
+  auto value_dpin = node_tup->get_dpin(key_name);
+
+  for (auto it : node_tup->get_level_attributes(key_name)) {
+    I(Lgtuple::is_attribute(it.first));
+
+    auto attr_node = lg->create_node(Ntype_op::AttrSet);
+    auto an_spin   = attr_node.setup_sink_pin("name");
+    auto af_spin   = attr_node.setup_sink_pin("field");
+    auto av_spin   = attr_node.setup_sink_pin("value");
+
+    auto attr_key_node = lg->create_node_const(Lconst::string(it.first));
+    auto attr_key_dpin = attr_key_node.setup_driver_pin();
+    attr_key_dpin.connect_sink(af_spin);
+
+    av_spin.connect_driver(it.second);
+    if (!value_dpin.is_invalid()) // weird but valid case of just attributes no data
+      an_spin.connect_driver(value_dpin);
+
+    value_dpin = attr_node.setup_driver_pin("Y"); // to chain all the attributes
+    value_dpin.set_name(node_tup->get_name());
+  }
+
+  if (value_dpin.is_invalid()) {
+    node_tup->dump();
+    Pass::error("tuple could not find key:{} or any attribute", key_name);
+    return invalid_pin;
+  }
+
+  for(auto &e:pending_out_edges) {
+    auto sink_node = e.sink.get_node();
+    if (sink_node.is_type(Ntype_op::AttrSet) && sink_node.get_driver_pin("Y").get_name() == node_tup->get_name())
+      continue; // already connected attribute field
+    value_dpin.connect_sink(e.sink);
+    e.del_edge();
+  }
+
+  return value_dpin;
+}
+
 void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
+  return; // FIXME: DELETE THIS METHOD. Not needed with __create_flop
   I(!tuple_issues);
 
   auto node_dpin = node.setup_driver_pin();
@@ -1255,9 +1224,8 @@ void Cprop::try_create_register(Node &node, std::shared_ptr<Lgtuple> tup) {
     auto af_spin   = attr_node.setup_sink_pin("field");
     auto av_spin   = attr_node.setup_sink_pin("value");
 
-    auto attr_key_node = node.get_lg()->create_node(Ntype_op::TupKey);
+    auto attr_key_node = node.get_lg()->create_node_const(Lconst::string(attr.first));
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
-    attr_key_dpin.set_name(attr.first);
 
     it_qpin->second.connect_sink(an_spin);
     attr_key_dpin.connect_sink(af_spin);
@@ -1288,29 +1256,15 @@ void Cprop::do_trans(Lgraph *lg) {
   flop_needs_2nd_iteration = false;
   do {
     tuple_issues = false;
-#if 0
-    bool last_tuple_issues = false;
-    Node last_node;
-#endif
-    for (auto node : lg->forward()) {
-#if 0
-      if (tuple_issues && !last_tuple_issues) {
-        if (last_node.is_invalid())
-          last_node = node;
-        fmt::print("node:{} changed tuple issues\n",last_node.debug_name());
-        last_node.dump();
-      }
-      last_node = node;
-      last_tuple_issues = tuple_issues;
-#endif
+    auto lgit = lg->forward();
+    for (auto fwd_it = lgit.begin(); fwd_it != lgit.end(); ++fwd_it) {
+      auto node = *fwd_it;
 
-      auto op = node.get_type_op();
-
+      auto op                = node.get_type_op();
       auto inp_edges_ordered = node.inp_edges_ordered();
 
       // Special cases to handle in cprop
       if (op == Ntype_op::AttrGet) {
-        process_attr_get(node);
         continue;
       } else if (op == Ntype_op::AttrSet) {
         process_attr_set(node);
@@ -1332,7 +1286,7 @@ void Cprop::do_trans(Lgraph *lg) {
         process_tuple_add(node);
         continue;
       } else if (op == Ntype_op::TupGet) {
-        auto ok = process_tuple_get(node, inp_edges_ordered);
+        auto ok = process_tuple_get(node);
         if (!ok) {
           if (!flop_needs_2nd_iteration && !tuple_issues)
             Pass::info("cprop could not simplify node:{}", node.debug_name());
@@ -1342,7 +1296,9 @@ void Cprop::do_trans(Lgraph *lg) {
       } else if (op == Ntype_op::Sext) {
         process_sext(node, inp_edges_ordered);
       } else if (op == Ntype_op::Mux) {
-        process_mux(node, inp_edges_ordered);
+        bool updated = process_mux(node, inp_edges_ordered);
+        if (updated)
+          inp_edges_ordered = node.inp_edges_ordered();
       } else if (!node.has_outputs()) {  // This must be after Mux/Tup because those can insert a flop
         node.del_node();
         continue;
@@ -1368,10 +1324,17 @@ void Cprop::do_trans(Lgraph *lg) {
 
       try_collapse_forward(node, inp_edges_ordered);
     }
+#ifdef TRIVIAL_CPROP
+    break;
+#endif
     ++n_iters;
     if (n_iters >= 2)
       break;
   } while (flop_needs_2nd_iteration);
+
+#ifdef TRIVIAL_CPROP
+  //return;
+#endif
 
   // connect register q_pin to sinks
   for (const auto &[reg_name, sink_pins] : reg_name2sink_pins) {
@@ -1407,6 +1370,21 @@ void Cprop::do_trans(Lgraph *lg) {
             node2tuple.erase(it);
           }
         }
+        if (node.is_type(Ntype_op::TupAdd)) {
+          // Some tupleAdd should be converted to AttrSet
+          auto pos_spin = node.get_sink_pin("position");
+          if (!pos_spin.is_invalid()) {
+            auto pos_dpin = pos_spin.get_driver_pin();
+            if (pos_dpin.is_type_const()) {
+              auto field = pos_dpin.get_type_const().to_string();
+              if (Lgtuple::is_root_attribute) {
+                node.set_type(Ntype_op::AttrSet);
+                continue;
+              }
+            }
+          }
+        }
+
         node.del_node();
         continue;
       } else if (node.is_type_flop()) {

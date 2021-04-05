@@ -29,6 +29,8 @@ protected:
 
   Key_map_type key_map;
 
+  void sort_key_map();
+
   static std::tuple<bool, size_t, size_t> match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos);
   static std::tuple<bool, bool, size_t>   match_int(std::string_view a, std::string_view b);
 
@@ -106,8 +108,8 @@ public:
 
   void add(const Node_pin &dpin) { return add("", dpin); }
 
-  bool append_tuple(const std::shared_ptr<Lgtuple const> tup2);
-  bool append_tuple(const Node_pin &dpin);
+  bool concat(const std::shared_ptr<Lgtuple const> tup2);
+  bool concat(const Node_pin &dpin);
 
   /// Get all the attributes (__bits) in the same tuple level
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;
@@ -116,11 +118,8 @@ public:
 
   bool is_empty() const { return (key_map.empty()); }
 
-  bool is_scalar() const {
-    if (key_map.empty())
-      return true;
-    return key_map.size() == 1 && key_map[0].first == "";
-  }
+  bool is_scalar() const;
+  bool is_trivial_scalar() const;
 
   void dump() const;
 };

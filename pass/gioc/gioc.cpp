@@ -237,8 +237,7 @@ Node_pin Gioc::setup_field_dpin(Lgraph *lg, std::string_view field_name) {
     return it->second;
   }
 
-  auto dpin = lg->create_node(Ntype_op::TupKey).setup_driver_pin();
-  dpin.set_name(field_name);
+  auto dpin = lg->create_node_const(field_name).setup_driver_pin();
   field2dpin[field_name] = dpin;
 
   return dpin;

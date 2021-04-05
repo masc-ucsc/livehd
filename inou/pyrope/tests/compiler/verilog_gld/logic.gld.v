@@ -1,16 +1,16 @@
-module logic_gld (
-  input        a,
-  input  [2:0] b,
-  input  [2:0] c,
-  output       o1,
-  output [2:0] o2,
-  output [2:0] o3,
-  output [2:0] o4,
-  output [2:0] o5,
-  output       o6,
-  output       o7,
-  output       o8,
-  output       o9
+module \logic (
+  input  signed       a,
+  input  signed [2:0] b,
+  input  signed [2:0] c,
+  output signed       o1,
+  output signed [2:0] o2,
+  output signed [2:0] o3,
+  output signed [2:0] o4,
+  output signed [2:0] o5,
+  output signed       o6,
+  output signed       o7,
+  output signed       o8,
+  output signed       o9
 );
 
 assign o1 = ~a;

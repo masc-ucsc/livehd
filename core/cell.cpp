@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "cell.hpp"
+#include "iassert.hpp"
 
 Ntype::_init Ntype::_static_initializer;
 
@@ -197,29 +198,24 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::TupAdd:
       switch (pid) {
         case 0: return "tuple_name";  // tuple name
-        case 2: return "position";    // position of tuple field
         case 4: return "value";
-        // case 5: return "field";  // tuple field
+        case 5: return "position";    // position of tuple field
         default: return "invalid";
       }
       break;
     case Ntype_op::TupGet:
       switch (pid) {
         case 0: return "tuple_name";
-        case 2:
-          return "position";
-          // no 3,4 to keep f 5
-        // case 5: return "field";
+        case 5: return "position";   // SAME as AttrGet field to avoid rewire
         default: return "invalid";
       }
       break;
     case Ntype_op::TupRef: return "invalid"; break;
-    case Ntype_op::TupKey: return "invalid"; break;
     case Ntype_op::AttrSet:
       switch (pid) {
         case 0: return "name";  // variable name
         case 2: return "chain";
-        case 3: return "value";
+        case 4: return "value";
         case 5: return "field";
         default: return "invalid";
       }
@@ -235,6 +231,18 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
   }
 
   return "invalid";
+}
+
+bool Ntype::is_valid_sink(Ntype_op op, std::string_view name) {
+
+  I(op<Ntype_op::Last_invalid);
+
+  for (auto i = 0u; i < sink_pid2name.size(); ++i) {
+    if (sink_pid2name[i][static_cast<int>(op)] == name)
+      return true;
+  }
+
+  return false;
 }
 
 #ifdef NDEBUG

@@ -57,7 +57,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {
         continue;
     } else if (op == Ntype_op::Const) {
       analysis_lg_const(node, fbmap);
-    } else if (op == Ntype_op::TupKey || op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
+    } else if (op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
       continue;  // Nothing to do for this
     } else if (op == Ntype_op::AttrSet) {
       analysis_lg_attr_set(node, fbmap);
@@ -183,7 +183,7 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
 void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_name();
+  auto key      = dpin_key.get_type_const().to_string();
   auto attr     = get_key_attr(key);
   if (attr == Attr::Set_other) {
     return;  // don't care
@@ -197,8 +197,7 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("value"));
   auto dpin_val = node_attr.get_sink_pin("value").get_driver_pin();
 
-  I(dpin_key.get_node().is_type(Ntype_op::TupKey));
-  I(dpin_key.has_name());
+  I(dpin_key.get_node().is_type_const());
 
   // copy parent's bw for some judgement and then update to attr_set value
   Firrtl_bits fb(0);
@@ -305,7 +304,20 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
 }
 
 Firmap::Attr Firmap::get_key_attr(std::string_view key) {
-  auto sz = key.size();
+  // FIXME: code duplicated in bitwidth. Create a separate class for Attr
+  const auto sz = key.size();
+
+  if (sz<5)
+    return Attr::Set_other;
+
+  if (key.substr(sz - 5, sz) == "__max")
+    return Attr::Set_max;
+
+  if (key.substr(sz - 5, sz) == "__min")
+    return Attr::Set_min;
+
+  if (sz<7)
+    return Attr::Set_other;
 
   if (key.substr(sz - 7, sz) == "__ubits")
     return Attr::Set_ubits;
@@ -313,11 +325,8 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
   if (key.substr(sz - 7, sz) == "__sbits")
     return Attr::Set_sbits;
 
-  if (key.substr(sz - 5, sz) == "__max")
-    return Attr::Set_max;
-
-  if (key.substr(sz - 5, sz) == "__min")
-    return Attr::Set_min;
+  if (sz<11)
+    return Attr::Set_other;
 
   if (key.substr(sz - 11, sz) == "__dp_assign")
     return Attr::Set_dp_assign;

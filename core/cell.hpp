@@ -52,7 +52,6 @@ enum class Ntype_op : uint8_t {
   TupAdd,
   TupGet,
   TupRef,
-  TupKey,
 
   AttrSet,
   AttrGet,
@@ -68,7 +67,7 @@ protected:
       = {"Invalid",  "Sum",      "Mult",   "Div",     "And",     "Or",         "Xor",         "Ror",   "Not",
          "Get_mask", "Set_mask", "Sext",   "LT",      "GT",      "EQ",         "SHL",         "SRA",   "Mux",
          "LUT",      "IO",       "Memory", "Flop",    "Latch",   "Fflop",      "Sub",         "Const", "TupAdd",
-         "TupGet",   "TupRef",   "TupKey", "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
+         "TupGet",   "TupRef",   "AttrSet", "AttrGet", "CompileErr", "Last_invalid"};
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 
@@ -96,7 +95,7 @@ public:
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
     return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet && op != Ntype_op::TupRef
-           && op != Ntype_op::TupKey && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr
+           && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr
            && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
   }
 
@@ -163,6 +162,7 @@ public:
       return is_unlimited_sink(op);
     return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
   }
+  static bool is_valid_sink(Ntype_op op, std::string_view name);
 
   static inline constexpr int get_driver_pid(Ntype_op op, std::string_view str) {
     if (__builtin_expect(str == "Y", 1)) {  // likely case

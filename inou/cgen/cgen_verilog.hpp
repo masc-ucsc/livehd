@@ -17,17 +17,12 @@ private:
   pin2str_type                                          pin2var;
   absl::flat_hash_map<Node::Compact_class, std::string> mux2vector;
 
-  inline static std::string get_scaped_name(const std::string &name) {
-    for (auto ch : name) {
-      if (!std::isalnum(ch) && ch != '_')
-        return std::string("\\") + name + " ";
-    }
-    return name;
-  }
+  inline static absl::flat_hash_set< std::string>       reserved_keyword;
 
-  static std::string get_scaped_name(std::string_view wire_name) {
-    std::string name{wire_name};
-    return get_scaped_name(name);
+  static std::string get_scaped_name(std::string_view wire_name);
+  static std::string get_scaped_name(const std::string &name) {
+    std::string_view name_sv{name};
+    return get_scaped_name(name_sv);
   }
 
   std::string get_append_to_name(const std::string &name, std::string_view ext) const;
