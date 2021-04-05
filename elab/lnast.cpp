@@ -34,9 +34,7 @@ std::string_view Lnast::add_string(std::string_view sview) {
 
 std::string_view Lnast::add_string(const std::string &str) {
   string_pool.emplace_back(new std::string(str));
-
   auto *str_ptr = string_pool.back();
-
   return *str_ptr;
 }
 

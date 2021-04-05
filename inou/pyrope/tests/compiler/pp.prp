@@ -1,6 +1,6 @@
 $inp.__ubits = 16
-#x.__ubits   = 16
 #x = #x.__create_flop
+#x.__ubits   = 16
 
 x_q = #x
 

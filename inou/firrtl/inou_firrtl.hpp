@@ -33,7 +33,9 @@ protected:
   std::string_view create_tmp_var(Lnast &lnast);
   std::string_view create_dummy_expr_node_var(Lnast &lnast);
   std::string_view get_new_seq_name(Lnast &lnast);
-  std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
+  // std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
+  std::string      get_full_name(const std::string &term, const bool is_rhs);
+  void             setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
 
   // Helper Functions (for handling specific cases)
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
@@ -46,13 +48,13 @@ protected:
   void     init_reg_ref_dots(Lnast &lnast, const std::string &id, const firrtl::FirrtlPB_Expression &clock,
                              const firrtl::FirrtlPB_Expression &reset, const firrtl::FirrtlPB_Expression &init, uint32_t bitwidth,
                              Lnast_nid &parent_node, bool sign);
-  void     PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement &stmt);
-  void     InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
-  void     InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
-  void     HandleMemPortPre(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void     HandleMemPort(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void     PortDirInference(const std::string &port_name, const std::string &mem_name, const bool is_rhs);
-  void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  void PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement &stmt);
+  void InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
+  void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
+  void HandleMemPortPre(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
+  void HandleMemPort(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
+  void PortDirInference(const std::string &port_name, const std::string &mem_name, const bool is_rhs);
+  void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
   void set_leaf_type(std::string_view subname, std::string_view hier_name, size_t prev,
                      std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
@@ -86,7 +88,7 @@ protected:
   std::string_view CreateSelectsFromStr(Lnast &ln, Lnast_nid &parent_node, const std::string &flattened_str);
   std::string      FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
-  void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
+  // void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
 
   // Deconstructing Protobuf Hierarchy
   void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
@@ -177,6 +179,8 @@ private:
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> async_rst_names;
 
+  // Maps a register name to its q_pin
+  absl::flat_hash_map<std::string, std::string> reg2qpin;
   // Maps an instance name to the module name.
   absl::flat_hash_map<std::string, std::string> inst_to_mod_map;
   // Maps (module name + I/O name) pair to direction of that I/O in that module.
