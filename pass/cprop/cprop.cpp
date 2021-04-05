@@ -1377,7 +1377,7 @@ void Cprop::do_trans(Lgraph *lg) {
             auto pos_dpin = pos_spin.get_driver_pin();
             if (pos_dpin.is_type_const()) {
               auto field = pos_dpin.get_type_const().to_string();
-              if (Lgtuple::is_root_attribute) {
+              if (Lgtuple::is_root_attribute(field)) {
                 node.set_type(Ntype_op::AttrSet);
                 continue;
               }
