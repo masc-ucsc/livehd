@@ -90,9 +90,9 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       trans_tuple_opr_if_subtree(opr_nid);
     } else if (type.is_tuple()) {
       rename_to_real_tuple_name(psts_nid, opr_nid);
-    } else if (is_attribute_related(opr_nid)) {
+    } else if (is_scalar_attribute_related(opr_nid)) {
       auto selc_nid = opr_nid;
-      sel2attr_set_get(psts_nid, selc_nid);
+      selc2attr_set_get(psts_nid, selc_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
     } else if (type.is_select()) {
@@ -112,9 +112,9 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           trans_tuple_opr_if_subtree(opr_nid);
-        } else if (is_attribute_related(opr_nid)) {
+        } else if (is_scalar_attribute_related(opr_nid)) {
           auto selc_nid = opr_nid;
-          sel2attr_set_get(itr_nid, selc_nid);
+          selc2attr_set_get(itr_nid, selc_nid);
         } else if (type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (type.is_tuple()) {
@@ -139,23 +139,17 @@ bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, cons
   return false;
 }
 
-bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
+bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
   if (!get_type(opr_nid).is_select())
     return false;
 
-  for (auto &child : children(opr_nid)) {
-    auto name = get_name(child);
-#if 0
-    // FIXME: DO NOT CREATE ANY ATTR, Just TupleAdd/Get which cprop can convert to Attr on use
-    // __dp_assign can be created directly
-    if (name == "__ubits" || name == "__sbits" || name == "__q_pin")
-      continue;
-#endif
-    auto attr = (name.substr(0, 2) == "__" && name.substr(0, 3) != "___");
-    if (attr)
-      return true;
+  if (get_type(opr_nid).is_select()) {
+    auto c0_sel  = get_first_child(opr_nid);
+    auto c1_sel  = get_sibling_next(c0_sel);
+    auto c2_sel  = get_sibling_next(c1_sel);
+    auto c2_name = get_name(c2_sel);
+    return (c2_name.substr(0, 2) == "__" && c2_name.substr(0, 3) != "___");
   }
-
   return false;
 }
 
@@ -178,7 +172,7 @@ bool Lnast::is_attribute_related(const Lnast_nid &opr_nid) {
  $a __bits 0d4     ___t     0d4
 */
 
-void Lnast::sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
+void Lnast::selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
   auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  paired_assign_nid = selc_lrhs_table[selc_nid].second;
 

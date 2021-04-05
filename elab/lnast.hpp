@@ -166,8 +166,8 @@ private:
   void             sel2local_tuple_chain(const Lnast_nid &pats_nid, Lnast_nid &sel_nid);
   void             merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
   void             rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid);
-  bool             is_attribute_related(const Lnast_nid &opr_nid);
-  void             sel2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
+  bool             is_scalar_attribute_related(const Lnast_nid &opr_nid);
+  void             selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
   void             update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
   bool             update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid);
   bool             check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name,
