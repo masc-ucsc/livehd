@@ -31,22 +31,18 @@ If you're unsure if your copy of gcc or clang is new enough, you can check the v
 ## Steps
 
 1. **Download LiveHD source**  
-  ```
-    git clone https://github.com/masc-ucsc/livehd
-  ```
-2. **Install Bazel** https://docs.bazel.build/versions/master/install-ubuntu.html
-   ```
-      sudo pacman -Syu bazel       # (Arch)
-      sudo apt-get install bazel   # (Kali/Debian/Ubuntu)
-   ```
-4. **Build LiveHD**  
-  LiveHD has several build options, detailed below.  All three should result in a working executable, but may differ in speed or output.  
-  
-  - Build LiveHD.  A binary will be created in `livehd/bazel-bin/main/lgshell`
       ```
-          bazel build //main:all        # fast build
-          bazel build //main:all -c opt # fast execution
-          bazel build //main:all -c dbg # debug symbols
+        git clone https://github.com/masc-ucsc/livehd
+      ```
+2. **Install Bazel**
+  - For Debian-derived distros (including Ubuntu and Kali), follow [these](https://docs.bazel.build/versions/master/install-ubuntu.html) instructions.
+  - For Arch-derived distros, install the `bazel` package with `sudo pacman -Syu bazel`.
+4. **Build LiveHD**  
+  LiveHD has several build options, detailed below.  All three should result in a working executable, but may differ in speed or output.  A binary will be created in `livehd/bazel-bin/main/lgshell`.
+      ```
+          bazel build //main:all        # fast build, no debug symbols, slow execution (default)
+          bazel build //main:all -c opt # fastest execution speed, no debug symbols, no assertions
+          bazel build //main:all -c dbg # moderate execution speed, debug symbols
       ```
 5. **Install pandoc (optional)**
    ```
