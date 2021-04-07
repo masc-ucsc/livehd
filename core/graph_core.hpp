@@ -101,7 +101,7 @@ protected:
         return 0;
 
       uint32_t pid = pid_bits_or_type;
-      pid <
+      pid <<= 16;
       pid |= edge_storage_or_pid_bits;
 
       return pid;  // 22 bits PID
@@ -141,7 +141,7 @@ public:
   Index_iter inp_ids(const Index_id s);  // Iterate over the inp edges of s
 
   uint8_t get_type(const Index_id master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_id master_root_id);
+  void    set_type(const Index_id master_root_id, uint8_t type);
 
   Port_ID get_pid(const Index_id master_root_id) const;  // pid for master or 0 for master_root
 
@@ -150,7 +150,7 @@ public:
   // Create a master and point to master root m
   Index_id create_master(const Index_id master_root_id, const Port_ID pid);
   // Delete node s, all related edges and masters (if master root)
-  void del(const Index_ID s);
+  void del(const Index_id s);
   // check if the node is a master_root or not
-  bool is_master_root(const Index_ID master_root_id);
+  bool is_master_root(const Index_id master_root_id);
 };

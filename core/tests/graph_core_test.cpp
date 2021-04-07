@@ -1,7 +1,4 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
-#include "graph_core.hpp"
-
 #include <string>
 #include <vector>
 
@@ -11,18 +8,14 @@
 #include "lbench.hpp"
 #include "lrand.hpp"
 
-<<<<<<< Updated upstream
-=======
 #include "graph_core.hpp"
 #include "graph_core_compress.hpp"
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
 #include <unordered_map>
+
 using namespace std;
 
->>>>>>> Stashed changes
 using testing::HasSubstr;
 
 class Setup_graph_core : public ::testing::Test {
@@ -76,7 +69,7 @@ TEST_F(Setup_graph_core, shallow_tree) {
    // Port_ID testPID = 103;
    // Port_ID receiveMasterPID;
 
-   for(int i = 0; i < 100; i++){
+   for(int i = 0; i < 20; i++){
      auto instruction_type = rand() % 200 + 1;
      auto root_ID = c1.create_master_root(instruction_type);
      testingMap[root_ID] = instruction_type;
