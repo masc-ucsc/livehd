@@ -307,13 +307,13 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
   // }
 
 
-  // __reset_pin/__init per expanded hier-tuple
+  // __reset/__init per expanded hier-tuple
   bool tied0_reset = false;
   auto resete_case = resete.expression_case();
   if (resete_case == firrtl::FirrtlPB_Expression::kUintLiteral ||
       resete_case == firrtl::FirrtlPB_Expression::kSintLiteral
       ) {
-    auto acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
+    auto acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset"));
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(acc_name)));
     auto str_val = resete.uint_literal().value().value();
@@ -321,7 +321,7 @@ void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const 
     if (str_val == "0")
       tied0_reset = true;
   } else if (resete_case == firrtl::FirrtlPB_Expression::kReference) {
-    auto acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset_pin"));
+    auto acc_name = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__reset"));
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(acc_name)));
     std::string_view ref_str = inite.reference().id();
