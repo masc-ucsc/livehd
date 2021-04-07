@@ -33,9 +33,9 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  # pts='Flop'
-  pts='Register'
-  pts='VecShiftRegister'
+  pts='Flop'
+  # pts='Register'
+  # pts='VecShiftRegister'
 
 else
   file=$(basename $1)

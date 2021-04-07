@@ -19,8 +19,8 @@ hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
 hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
 firrtl_gcd_3bits nested_if firrtl_tail3 counter_nested_if tuple_nested1 tuple_empty_attr'
 
-# pts='reg_bits_set'
-# pts='pp'
+pts='counter'
+pts='pp'
 # pts='tuple_reg tuple_nested2'
 # pts='tuple_reg tuple_reg2'
 # pts='vector'
@@ -215,7 +215,7 @@ rm -rf ./lgdb
 
 # Do not remove verilog, I tend to have tests cases in homedirectory
 #rm -f *.v
-rm -f ./*.dot
-rm -f ./lgcheck*
-rm -f ./*.tcl
+# rm -f ./*.dot
+# rm -f ./lgcheck*
+# rm -f ./*.tcl
 

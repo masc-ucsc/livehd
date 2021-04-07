@@ -1758,6 +1758,7 @@ void Lnast_tolg::setup_final_register(Lgraph *lg, std::string_view vname, const 
     return;
   }
 
+
   auto reg_node = lg->create_node(Ntype_op::Flop);
   auto reg_din  = reg_node.setup_sink_pin("din");
   dpin_largest_ssa.connect_sink(reg_din);

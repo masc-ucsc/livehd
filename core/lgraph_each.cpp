@@ -213,6 +213,8 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited,
     Lgraph *lg = Lgraph::open(get_path(), it->second);
     if (lg == nullptr)
       continue;
+    if (lg->is_empty())
+      continue;
 
     lg->each_hier_unique_sub_bottom_up_int(visited, fn);
     if (visited.find(it->second) == visited.end()) {
@@ -225,6 +227,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited,
 void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn) {
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
+  // fn(this); //TODO after firrtl regression is back
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn) {
@@ -246,7 +249,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     visited[data.lgid] = 0;
 
     auto *lg = Lgraph::open(path, data.lgid);
-    if (lg != nullptr)
+    if (lg != nullptr && !lg->is_empty())
       next_round.emplace_back(lg);
 
     auto index = href.get_parent(hidx);
@@ -289,7 +292,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
       I(level == it->second);
 
       auto *lg = Lgraph::open(path, it->first);
-      if (lg != nullptr)
+      if (lg != nullptr && !lg->is_empty())
         next_round.emplace_back(lg);
       it = visited.erase(it);
     }
@@ -301,6 +304,8 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     if (!next_round.empty())
       thread_pool.wait_all();
   }
+
+  // fn(this); //TODO after firrtl regression is back
 }
 
 
