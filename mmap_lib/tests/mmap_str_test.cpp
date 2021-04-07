@@ -1,5 +1,3 @@
-
-
 #include "mmap_str.hpp"
 
 #include <functional>
@@ -13,10 +11,11 @@ class Mmap_str_test : public ::testing::Test {
   std::vector<std::vector<std::string>> ast_sorted_verification;
 
 public:
-  void SetUp() override {}
+  void SetUp() override {} // rand gen here
 };
 
-#if 0
+#if 1
+// TEST_F are different types of tests
 TEST_F(Mmap_str_test, small_strings) {
 
   mmap_lib::str a("hello");
