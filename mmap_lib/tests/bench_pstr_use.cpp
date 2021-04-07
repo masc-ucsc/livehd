@@ -281,6 +281,51 @@ void pstrVcstr_noeq_tests() {
   r += test_neq(amethysts,   chi,          true); ++t;
   printf("passed(%02d/%02d), failed(%02d/%02d)\n", r, t, t-r, t);
 }
+void pstr_at_operator(){
+  std::cout << "pstr_at_operator Operator [] Tests: ";
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str micro("micro-architecture");
+  mmap_lib::str foo("--foo1234567890!!!");
+  uint8_t p = 0u ,f = 0u;
+  (hello[2] == 'l') ? p++ : f++;
+  (hello[0] == 'h') ? p++ : f++;
+  (hello[1] == 'e') ? p++ : f++;
+  (hi[0] == 'h') ? p++ : f++;
+  (hi[1] == 'i') ? p++ : f++;
+  (micro[1] == 'i') ? p++ : f++;
+  (micro[5] == '-') ? p++ : f++;
+  (micro[10] == 'i') ? p++ : f++;
+  (micro[9] == 'h') ? p++ : f++;
+  (micro[17] == 'e') ? p++ : f++;
+  (micro[3] == 'r') ? p++ : f++;
+  (micro[2] == 'c') ? p++ : f++;
+  (foo[0] == '-') ? p++ : f++;
+  (foo[1] == '-') ? p++ : f++;
+  printf("passed(%02d/%02d), failed(%02d/%02d)\n", p, p+f, f, p+f);
+}
+
+
+void pstr_isI(){
+  std::cout << "pstr_isI Tests: ";
+  mmap_lib::str hello("hello");
+  mmap_lib::str eight("888888");
+  mmap_lib::str neg_one("-111111");
+  mmap_lib::str not_i("123g5");
+  mmap_lib::str not_int("-1234f");
+  mmap_lib::str zero("-1234f");
+  mmap_lib::str num_float("12.34");
+  uint8_t p = 0u ,f = 0u;
+  (hello.is_i() == false) ? p++ : f++;
+  (eight.is_i() == true) ? p++ : f++;
+  (neg_one.is_i() == true) ? p++ : f++;
+  (not_i.is_i() == false) ? p++ : f++;
+  (not_int.is_i() == false) ? p++ : f++;
+  (zero.is_i() == false) ? p++ : f++;
+  (num_float.is_i() == false) ? p++ : f++;
+  printf("passed(%02d/%02d), failed(%02d/%02d)\n", p, p+f, f, p+f);
+}
 
 
 int main(int argc, char **argv) {
@@ -295,7 +340,9 @@ int main(int argc, char **argv) {
   pstrVpstr_eqeq_tests(); 
   pstrVpstr_noeq_tests(); 
   pstrVcstr_eqeq_tests(); 
-  pstrVcstr_noeq_tests(); 
+  pstrVcstr_noeq_tests();
+  pstr_at_operator();
+  pstr_isI(); 
   std::cout << "==========================" << std::endl;
   #endif
 

@@ -290,19 +290,30 @@ public:
   
   constexpr bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
-  constexpr char operator[](std::size_t pos) const {
+constexpr char operator[](std::size_t pos) const {
 #ifndef NDEBUG
     if (pos >= _size)
       throw std::out_of_range("");
 #endif
     if (_size < 14) {
-      if (pos < 4)
+      if (pos < 4){
+        if(_size == 1) return (ptr_or_start >> (8 * (0 - pos))) & 0xFF;
+        if(_size == 2) return (ptr_or_start >> (8 * (1 - pos))) & 0xFF;
+        if(_size == 3) return (ptr_or_start >> (8 * (2 - pos))) & 0xFF;
         return (ptr_or_start >> (8 * (3 - pos))) & 0xFF;
-      return e[pos - 4];  // FIXME: this fails if string has digits like "f33a"
-    }
+      }else{
+        return e[pos - 4];
+      }
+    } else {
+      if(pos <2){
+        return e[pos];
+      } else if (pos >= (_size-8)) {
+        return e[10 -( _size - pos)];
+      } else{
+        return string_vector.at(ptr_or_start+pos-2);
 
-    assert(false);  // FIXME for long strings
-    return 0;
+      }
+    }
   }
 
   bool starts_with(const str &v) const;
@@ -314,6 +325,94 @@ public:
   bool ends_with(std::string s) const;
 
   std::size_t find(const str &v, std::size_t pos = 0) const;
+  #if 0
+
+  std::size_t find(const str &v, std::size_t pos = 0) const{
+
+    if (v._size >_size) return -1;
+    //if size ==vsize and == is true return 0 else return -1
+
+    if (_size<14){
+      char first = ((v.ptr_or_start >> (8 * (v._size-1))) & 0xFF);//different ways
+      size_t retval = 0;
+      bool found_flag = false;
+      int i,j,k;
+      int e_pos_self =0;
+      int e_pos_thier =0;
+      for ( i =0; i <4 ; i++){
+        retval = 0;
+        found_flag = false;
+        e_pos_self =0;
+        e_pos_thier =0;
+        if (first == ((ptr_or_start >> (8 * (3 - i))) & 0xFF)) && pos >= i {
+          retval = i;
+          found_flag = true;
+          for ( j = i,  k =1; j< 4; j++,k++){
+            
+            if (((v.ptr_or_start >> (8 * (3 - k))) & 0xFF) != ((ptr_or_start >> (8 * (3 - j))) & 0xFF)){
+              found_flag = false;
+              break;
+            }
+          }
+          while(k < v._size){
+            if (k < 4){
+              if(((v.ptr_or_start >> (8 * (3 - k))) & 0xFF)  != e[e_pos_self]) {
+
+                found_flag = false;
+                break;
+              }
+            } else {
+              if (v.e[e_pos_thier ] != e[e_pos_self]){
+                found_flag = false;
+                e_pos_thier++;
+                break;
+              }
+            }
+            e_pos_self++;
+            k++;
+          }
+
+        }
+        if (found_flag == true) return retval;
+      }
+      //if you havent found the string at this point and this string is < 4 chaars then find returns -1
+      if(_size < 4 ) and (found_flag == false) return -1;
+      
+      if (found_flag = true) return retval;
+      return -1;
+    
+    } else{
+
+      if (v._size < 14){
+
+      } else {
+        char first = v.e[0];
+        int count = 0;
+        for (i = 0; i<2 ;i++){
+          if (first == e[i]) &&(pos <= i){
+            retval = i;
+            found_flag = true;
+            for (j = 1; j<v._size ; j++){
+              if (count < 1){
+                if (e[count + 1] != v.e[1])
+              } else {
+
+              }
+              count ++
+            }
+          }
+          count ++;
+        }
+
+      }
+
+    }
+
+
+  }
+ 
+
+#endif 
   std::size_t find(char c, std::size_t pos = 0) const;
   template <std::size_t N>
   constexpr std::size_t find(const char (&s)[N], std::size_t pos = 0) {
@@ -392,7 +491,62 @@ public:
 
   } // convert to integer
 */
-  bool        is_i() const;  // starts with digit -> is integer
+  bool is_i() const{ 
+    if (_size < 14) {
+      char first = ((ptr_or_start >> (8 * (_size -1))) & 0xFF);
+      if (first !='-' and( first <'0' or first > '9')) {
+        std::cout << "Non-number char detected in ptr_or_start[0]\n";
+        return false;
+      }
+      for (int i= 1; i<(_size>4?4:_size);i++){
+        switch ((ptr_or_start >> (8 * (3 - i))) & 0xFF){
+          case '0'...'9':
+            break;
+          default:
+            std::cout << "Non-number char detected in ptr_or_start[1:3]\n";
+            return false;
+            break;
+        }
+      }
+      for (int i=0; i<(_size>4?_size-4:0);i++){
+        switch (e[i]){
+          case '0'...'9':
+            break;
+          default:
+            std::cout << "Non-number char detected in e\n";
+            return false;
+            break;
+        }
+      }
+    } else {
+      char first = e[0];
+      if (first !='-' and( first <'0' or first > '9')) {
+        std::cout << "Non-number char detected in ptr_or_start[0]\n";
+        return false;
+      }
+      for (int i = 1;i<10 ; i++){
+        switch (e[i]){
+          case '0'...'9':
+            break;
+          default:
+            std::cout << "Non-number char detected in e\n";
+            return false;
+            break;
+        } 
+      }
+      for (int i = ptr_or_start ; i< _size-10;i++){
+        switch (string_vector.at(i)){
+          case '0'...'9':
+            break;
+          default:
+            std::cout << "Non-number char detected in e\n";
+            return false;
+            break;
+        }
+      }
+    }
+    return true;
+  }
   int64_t     to_i() const;  // convert to integer
   std::string to_s() const;  // convert to string
 
