@@ -853,8 +853,9 @@ bool Cprop::process_tuple_get(Node &node) {
 
 bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 
-  if (tuple_issues || hier)
+  if (tuple_issues && !flop_needs_2nd_iteration) {
     return false;
+  }
 
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
   tup_list.resize(inp_edges_ordered.size()-1);
@@ -881,6 +882,14 @@ bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   }
 
   auto tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
+  if (tuple_issues) {
+    I(flop_needs_2nd_iteration);
+    if (tup)
+      node2tuple[node.get_compact()] = tup;
+
+    return false;
+  }
+
   if (!tup) {
     for(auto i=1u;i<inp_edges_ordered.size();++i) {
       auto &e = inp_edges_ordered[i];

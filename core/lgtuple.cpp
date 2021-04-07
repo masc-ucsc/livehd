@@ -746,47 +746,51 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   //  -Each tuples may have diff name (:0:a, a, 0) which sould be unified/fixed
 
   // find all the possible keys
-  std::set<std::string> key_entries;
+  absl::flat_hash_map<std::string, Node_pin> key_entries;
   for (auto tup : tup_list) {
     for (const auto &e : tup->get_map()) {
-      key_entries.insert(e.first);  // There can be replicates like :0:a, a, 0
+      auto it = key_entries.find(e.first);
+      if (it == key_entries.end()) {
+        key_entries.emplace(e.first, e.second);  // There can be replicates like :0:a, a, 0
+      }else{
+        if (e.second != it->second)
+          it->second.invalidate();
+      }
     }
   }
 
   // Put the keys after learning (may collapse entries)
-  auto fixing_tup = std::make_shared<Lgtuple>(*tup_list[0]);
-  for (auto key : key_entries) {
+  auto fixing_tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
+
+  for (auto it : key_entries) {
     bool found = false;
+    std::string key{it.first};
+
     for (auto &e : fixing_tup->key_map) {
       learn_fix_int(key, e.first);
       if (key == e.first) {
+        e.first = key; // Put new expanded name
+        if (is_attribute(e.first)) { // Attributes merge if invalid from others
+          if (e.second.is_invalid()) {
+            e.second = it.second;
+          }else if (it.second.is_invalid()) {
+            // keep e.second
+          }else if (it.second != e.second) { // both valid but different
+            e.second.invalidate();
+          }
+        }else if (e.second != it.second) { // Non-attributes invalidate
+          e.second.invalidate();
+        }
         found = true;
         break;
       }
     }
     if (!found) {
-      fixing_tup->key_map.emplace_back(key, invalid_dpin);
+      fixing_tup->key_map.emplace_back(key, it.second);
     }
   }
 
-  // If an entry is not in all the tuples, mark as invalid
-  for (auto &e : fixing_tup->key_map) {
-    if (e.second.is_invalid())
-      continue;  // already marked as pending
-
-    for (auto tup_pos = 1u; tup_pos < tup_list.size(); ++tup_pos) {
-      auto tup = tup_list[tup_pos];
-
-      auto tup_dpin = tup->get_dpin(e.first);
-      if (tup_dpin == e.second)
-        continue;
-
-      e.second.invalidate();
-      break;
-    }
-  }
-
-  if (fixing_tup->is_trivial_scalar()) {
+  if (fixing_tup->key_map.size()<=1) {
     return nullptr;
   }
 
@@ -858,9 +862,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
   I(flop.is_type(Ntype_op::Flop));
 
-  if (is_scalar()) // scalar and trivial scalar
-    return nullptr;
-
   std::string_view flop_name;
   if (flop.get_driver_pin().has_name())
     flop_name = flop.get_driver_pin().get_name();
@@ -888,14 +889,20 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
   for (auto &e : key_map) {
     if (e.second.get_node() == flop)
       continue;  // no loop to itself
+
+    std::string new_flop_name;
+    if(e.first.empty())
+      new_flop_name = flop_root_name;
+    else
+      new_flop_name = absl::StrCat(flop_root_name, ".", e.first);
+
     if (is_attribute(e.first)) {
       // key_map is sorted. The field before the tuple must be created (or it
       // does not exist, in which case, nothing to do)
 
       auto attr          = get_last_level(e.first);
-      auto key           = get_all_but_last_level(e.first);
-      auto new_flop_name = absl::StrCat(flop_root_name, ".", key);
-      auto dpin          = Node_pin::find_driver_pin(lg, new_flop_name);
+      auto key           = get_all_but_last_level(new_flop_name);
+      auto dpin          = Node_pin::find_driver_pin(lg, key);
       if (dpin.is_invalid()) {
         Lgraph::info("found attribute:{} but could not bind to flop:{} (missing). It may be OK until convergence", attr, new_flop_name);
         continue;
@@ -949,15 +956,14 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
       continue;
     }
     Node node;
-    auto new_flop_name = absl::StrCat(flop_root_name, ".", e.first);
 
-    if (flop_name == new_flop_name) {
-      I(!first_flop);
-      node = flop;
-    } else if (first_flop) {
+
+    if (first_flop) {
       node       = flop;
       first_flop = false;
     } else {
+      I(!e.first.empty()); // "" should be the first in sort, so always first_flop
+
       auto  dpin = Node_pin::find_driver_pin(lg, new_flop_name);
       if (dpin.is_invalid()) {
         node = lg->create_node(Ntype_op::Flop);

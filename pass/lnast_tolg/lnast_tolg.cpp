@@ -592,9 +592,10 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
         flattened_inp = name2dpin[full_inp_hier_name];
 
       //(2) create attr_set node for input
-      auto aset_node = lg->create_node(Ntype_op::AttrSet);
-      auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name
-      auto af_spin   = aset_node.setup_sink_pin("field");  // attribute field
+      //auto aset_node = lg->create_node(Ntype_op::AttrSet);
+      auto aset_node = lg->create_node(Ntype_op::TupAdd);
+      auto vn_spin   = aset_node.setup_sink_pin("tuple_name");   // variable name
+      auto af_spin   = aset_node.setup_sink_pin("position");  // attribute field
       auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value
 
       flattened_inp.connect_sink(vn_spin);

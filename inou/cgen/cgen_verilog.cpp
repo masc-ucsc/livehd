@@ -433,7 +433,7 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
 
     // FIXME: HERE if flop is output, do not create flop
     const auto name      = get_scaped_name(pin_name);
-    const auto name_next = get_scaped_name(std::string(pin_name) + "_next ");  // space to scape
+    const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
 
     std::string edge = "posedge";
     if (node.get_sink_pin("posclk").is_connected()) {
@@ -662,7 +662,7 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
     if (!buffer.empty()) {
       absl::StrAppend(&buffer, "end\n");
 
-      append_to_file(filename, fd, "always @(*) begin\n");
+      append_to_file(filename, fd, "always_comb begin\n");
       append_to_file(filename, fd, buffer);
     }
   }
@@ -673,7 +673,7 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
     if (!buffer.empty()) {
       absl::StrAppend(&buffer, "end\n");
 
-      append_to_file(filename, fd, "always @(*) begin\n");
+      append_to_file(filename, fd, "always_comb begin\n");
       append_to_file(filename, fd, buffer);
     }
   }
