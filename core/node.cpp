@@ -380,6 +380,9 @@ Node Node::get_up_node() const {
 }
 
 void Node::set_type_sub(Lg_type_id subid) { current_g->set_type_sub(nid, subid); }
+void Node::set_type_const(const Lconst &val) {
+  current_g->set_type_const(nid, val);
+}
 
 Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 

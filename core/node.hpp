@@ -281,6 +281,7 @@ public:
   bool            is_root() const;
 
   void            set_type_sub(Lg_type_id subid);
+  void            set_type_const(const Lconst &val);
   Lg_type_id      get_type_sub() const;
   const Sub_node &get_type_sub_node() const;
   Sub_node *      ref_type_sub_node() const;

@@ -41,7 +41,7 @@ protected:
   void process_ror(Node &node, XEdge_iterator &inp_edges);
   void process_logic_and(Node &node, XEdge_iterator &inp_edges);
   void process_attr_get(Node &node);
-  void process_attr_set_dp_assign(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
+  void process_attr_set_dp_assign(Node &node);
   void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
   void process_attr_set_propagate(Node &node);
   void process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
