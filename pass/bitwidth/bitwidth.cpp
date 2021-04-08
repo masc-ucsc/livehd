@@ -26,27 +26,49 @@ void Bitwidth::process_const(Node &node) {
 
 void Bitwidth::process_flop(Node &node) {
   I(node.is_sink_connected("din"));
-  auto d_dpin = node.get_sink_pin("din").get_driver_pin();
-  auto qpin   = node.get_driver_pin();
+  std::vector<Node_pin::Compact_flat> flop_cpins;
+
+  if (node.is_sink_connected("din")) {
+    flop_cpins.emplace_back(node.get_sink_pin("din").get_driver_pin().get_compact_flat());
+  }
+
+  flop_cpins.emplace_back(node.get_driver_pin().get_compact_flat());
+  if (node.is_sink_connected("initial")) {
+    flop_cpins.emplace_back(node.get_sink_pin("initial").get_driver_pin().get_compact_flat());
+  }
 
   Lconst max_val;
   Lconst min_val;
-  auto   it_d_dpin = flat_bwmap.find(d_dpin.get_compact_flat());
-  auto   it_qpin   = flat_bwmap.find(qpin.get_compact_flat());
-  if (it_d_dpin != flat_bwmap.end()) {
-    max_val = it_d_dpin->second.get_max();
-    min_val = it_d_dpin->second.get_min();
-    flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
-    return;
-  } else if (it_qpin != flat_bwmap.end()) {  // At least propagate backward the width
-    auto tmp_min = Lconst(it_qpin->second.min);
-    auto tmp_max = Lconst(it_qpin->second.max);
-    flat_bwmap.insert_or_assign(d_dpin.get_compact_flat(), Bitwidth_range(tmp_min, tmp_max));
-    return;
-  } else {
-    debug_unconstrained_msg(node, d_dpin);
+
+  for(auto &cpin:flop_cpins) {
+    auto it = flat_bwmap.find(cpin);
+    if (it == flat_bwmap.end()) {
+      continue;
+    }
+
+    auto a = it->second.get_max();
+    if (max_val<a) {
+      if (max_val!=0)
+        not_finished = true;
+
+      max_val = a;
+    }
+    auto b = it->second.get_max();
+    if (min_val>b) {
+      if (min_val!=0)
+        not_finished = true;
+      min_val = b;
+    }
+  }
+
+  for(auto &cpin:flop_cpins) {
+    flat_bwmap.insert_or_assign(cpin, Bitwidth_range(min_val, max_val));
+  }
+
+  if (flop_cpins.empty()) {
+    auto dpin = node.setup_driver_pin();
+    debug_unconstrained_msg(node, dpin);
     not_finished = true;
-    return;
   }
 }
 
