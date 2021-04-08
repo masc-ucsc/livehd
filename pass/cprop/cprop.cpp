@@ -1206,6 +1206,8 @@ Node_pin Cprop::expand_data_and_attributes(const std::string &key_name, XEdge_it
 
   for (auto it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));
+    if (Ntype::is_valid_sink(Ntype_op::Flop, it.first.substr(2)))
+      continue; // Do not create attr for flop config (handled in cprop directly)
 
     auto attr_node = lg->create_node(Ntype_op::AttrSet);
     auto an_spin   = attr_node.setup_sink_pin("name");

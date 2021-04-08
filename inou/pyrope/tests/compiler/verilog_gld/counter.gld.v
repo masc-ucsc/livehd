@@ -1,5 +1,4 @@
 module counter (
-  input reset,
   input clock,
   input en,
   output reg [3:0] cnt_o
@@ -15,11 +14,7 @@ always @ (*) begin
 end
 
 always @ (posedge clock) begin
-  if (reset) begin
-    cnt_o <= 'h0;
-  end else begin
-    cnt_o <= cnt_o_next[3:0];
-  end
+  cnt_o <= cnt_o_next[3:0];
 end
 
 
