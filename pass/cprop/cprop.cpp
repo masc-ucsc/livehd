@@ -640,8 +640,20 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(Node &node) const
   }
 
   std::string tup_name;
-  if (node.setup_driver_pin("Y").has_name())
+  if (node.setup_driver_pin("Y").has_name()) {
     tup_name = node.setup_driver_pin("Y").get_name();
+  }else{
+    auto spin = node.get_sink_pin("tuple_name");
+    if (spin.is_connected()) {
+      auto dpin = spin.get_driver_pin();
+      if (dpin.has_name())
+        tup_name = dpin.get_name();
+    }
+  }
+
+  if (tup_name.empty()) {
+    tup_name = node.debug_name();
+  }
 
   return std::make_tuple(tup_name, key_name);
 }
@@ -891,6 +903,7 @@ bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   }
 
   if (!tup) {
+#if 0
     for(auto i=1u;i<inp_edges_ordered.size();++i) {
       auto &e = inp_edges_ordered[i];
 
@@ -899,6 +912,7 @@ bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 
       expand_data_and_attributes("", mux_inp_edge, tup_list[i-1]);
     }
+#endif
     return true;  // It was a scalar entry, no need to create tuple
   }
 
@@ -1107,7 +1121,8 @@ void Cprop::process_tuple_add(Node &node) {
   if (hier || tuple_issues)
     return;
 
-  bool keep_tuple_add = false;
+  bool keep_tuple_add     = false;
+  //bool in_tuple_add_chain = false;
   XEdge_iterator pending_out_edges;
   for (auto &e : node.out_edges()) {
     auto sink_type = e.sink.get_type_op();
@@ -1118,12 +1133,45 @@ void Cprop::process_tuple_add(Node &node) {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
       return;
-    } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
+    } else if (sink_type == Ntype_op::TupAdd) {
+      //in_tuple_add_chain = true;
+      keep_tuple_add     = true;
+    } else if (sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
       keep_tuple_add = true;
     } else {
       pending_out_edges.emplace_back(e);
     }
   }
+#if 0
+  // Not needed
+  if (!in_tuple_add_chain) {
+    std::vector<std::pair<std::string, Node_pin>> pending_fixes;
+
+    for (const auto &e:node_tup->get_map()) {
+      if (Lgtuple::is_attribute(e.first))
+        continue;
+      if (!e.second.is_graph_input()) {
+        if (e.second.get_pin_name() == "$") {
+          fmt::print("adding input {} to lgraph {} that was decided late\n", e.first, node.get_lg()->get_name());
+          I(false); // FIXME
+        }
+        continue;
+      }
+
+      auto input_edge = e.second.out_edges();
+      auto new_dpin = expand_data_and_attributes(e.first, input_edge, node_tup);
+      if (node_tup->is_trivial_scalar())
+        pending_out_edges.clear();
+      if (!new_dpin.is_invalid() && e.second != new_dpin) {
+        pending_fixes.emplace_back(e.first, new_dpin);
+      }
+    }
+
+    for(auto &it:pending_fixes) { // If inserted directly, it affects the iterator
+      node_tup->add(it.first, it.second);
+    }
+  }
+#endif
 
   if (!pending_out_edges.empty() && node_tup->is_trivial_scalar()) {
     expand_data_and_attributes("", pending_out_edges, node_tup);
@@ -1143,6 +1191,18 @@ Node_pin Cprop::expand_data_and_attributes(const std::string &key_name, XEdge_it
   auto *lg = pending_out_edges[0].driver.get_class_Lgraph();
 
   auto value_dpin = node_tup->get_dpin(key_name);
+
+#if 0
+  if (!value_dpin.is_invalid()) {
+    auto e_list = value_dpin.out_edges();
+    if (e_list.size() == 1 && e_list[0].sink.is_type(Ntype_op::AttrSet)) {
+#ifndef NDEBUG
+      fmt::print("node:{} already has expanded attributes\n", value_dpin.get_node().debug_name());
+#endif
+      return invalid_pin;
+    }
+  }
+#endif
 
   for (auto it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));

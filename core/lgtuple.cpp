@@ -790,7 +790,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     }
   }
 
-  if (fixing_tup->key_map.size()<=1) {
+  if (fixing_tup->key_map.empty() || (fixing_tup->key_map.size()==1 && fixing_tup->key_map[0].first.empty()) ) {
+    // Either nothing or key == ""
     return nullptr;
   }
 

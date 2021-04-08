@@ -313,6 +313,7 @@ public:
   bool   is_type_const() const;
   bool   is_type_flop() const;
   bool   is_type_loop_breaker() const;
+  bool   is_type(const Ntype_op op) const;
   Lconst get_type_const() const;
 
   Node_pin change_to_sink_from_graph_out_driver() const {

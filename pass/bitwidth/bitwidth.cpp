@@ -736,11 +736,6 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp, Fwd_edge_iterator::Fwd_
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
   I(node_attr.is_sink_connected("field"));
 
-  if (!hier && !node_attr.has_outputs()) {
-    node_attr.del_node();
-    return;
-  }
-
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_type_const().to_string();
   auto attr     = get_key_attr(key);

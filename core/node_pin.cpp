@@ -97,6 +97,11 @@ bool Node_pin::is_type_loop_breaker() const {
   return Ntype::is_loop_breaker(op);
 }
 
+bool Node_pin::is_type(const Ntype_op op) const {
+  auto nid = current_g->get_node_nid(idx);
+  return op == current_g->get_type_op(nid);
+}
+
 Lconst Node_pin::get_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->get_type_const(nid);

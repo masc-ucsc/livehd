@@ -38,7 +38,7 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
   }
 
   auto dbits   = out.driver.get_bits();
-  auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "");
+  auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "unk");
 
   if (node.get_type_op() == Ntype_op::Const)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
