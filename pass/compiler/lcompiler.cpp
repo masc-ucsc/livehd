@@ -37,7 +37,7 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   }
 
   // FIXME->sh: DEBUG: cannot separate to do_local_cprop_bitwidth(), why?
-  Cprop cp(false, false);                                     // hier = false, gioc = false
+  Cprop cp(false, false);                                        // hier = false, gioc = false
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
@@ -213,6 +213,8 @@ void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgrap
   gviz ? gv.do_from_lgraph(new_lg, "gioc.firmap-ed") : void();
 
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
+  bw.do_trans(new_lg);
+  fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", new_lg->get_name());
   bw.do_trans(new_lg);
   gviz ? gv.do_from_lgraph(new_lg, "") : void();
 

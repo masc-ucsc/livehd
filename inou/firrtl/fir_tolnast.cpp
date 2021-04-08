@@ -1756,20 +1756,24 @@ void Inou_firrtl::AttachExprStrToNode(Lnast& lnast, const std::string_view acces
  
 void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
   auto idx_attget = lnast.add_child(parent_node, Lnast_node::create_attr_get());
-  auto full_register_name = absl::StrCat("#", stmt.register_().id());
-  // auto tmp_var_str = create_tmp_var(lnast);
-  // lnast.add_child(idx_attget, Lnast_node::create_ref(tmp_var_str));
-  lnast.add_child(idx_attget, Lnast_node::create_ref(lnast.add_string(full_register_name)));
-  lnast.add_child(idx_attget, Lnast_node::create_ref(lnast.add_string(full_register_name)));
+  auto full_register_name = lnast.add_string(absl::StrCat("#", stmt.register_().id()));
+  auto tmp_var_str = create_tmp_var(lnast);
+  lnast.add_child(idx_attget, Lnast_node::create_ref(tmp_var_str));
+  // lnast.add_child(idx_attget, Lnast_node::create_ref(lnast.add_string(full_register_name)));
+  lnast.add_child(idx_attget, Lnast_node::create_ref(full_register_name));
   std::string tmp_str = "__create_flop";
   lnast.add_child(idx_attget, Lnast_node::create_const(lnast.add_string(tmp_str)));
 
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+  // lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_register_name)));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(full_register_name));
+  lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var_str));
 
 
   auto flop_qpin_var = lnast.add_string(absl::StrCat("___", stmt.register_().id(), "_q"));
-  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(idx_asg,    Lnast_node::create_ref(flop_qpin_var));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_register_name)));
+  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
+  lnast.add_child(idx_asg2,    Lnast_node::create_ref(flop_qpin_var));
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(full_register_name)));
 
   reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
 

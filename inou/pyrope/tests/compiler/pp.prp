@@ -1,13 +1,17 @@
-$inp.__ubits = 16
+$clock.__ubits = 1
+$reset.__ubits = 1
+$inp_io.inp.__ubits = 16
+$inp_io.loading.__ubits = 1
+%out_io.out.__ubits = 16
 #x = #x.__create_flop
 x_q = #x
-#x.__ubits   = 16
+#x.__ubits = 16
 #x.__reset = 0
 
 
-if ($loading) {
-  #x = $inp
+if ($inp_io.loading) {
+  #x = $inp_io.inp
 }
 
-%out = x_q
+%out_io.out = x_q
 

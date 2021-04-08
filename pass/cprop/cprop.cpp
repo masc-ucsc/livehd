@@ -1507,6 +1507,7 @@ void Cprop::do_trans(Lgraph *lg) {
     node2tuple.clear();
   }
 
+ 
   if (!tuple_issues && (!hier || at_gioc)) {
     // remove unified input $ if fully resolved
     if (lg->has_graph_input("$")) {

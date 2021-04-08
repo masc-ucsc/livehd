@@ -148,7 +148,10 @@ bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
     auto c1_sel  = get_sibling_next(c0_sel);
     auto c2_sel  = get_sibling_next(c1_sel);
     auto c2_name = get_name(c2_sel);
-    return (c2_name.substr(0, 2) == "__" && c2_name.substr(0, 3) != "___");
+    if (c2_name.substr(0, 2) == "__") {
+      if (c2_name == "__create_flop" || c2_name == "__last_value" || c2_name == "__dp_assign")
+        return true;
+    }
   }
   return false;
 }
@@ -863,6 +866,7 @@ void Lnast::opr_lhs_merge(const Lnast_nid &psts_nid) {
     } else if (type.is_tuple()) {
       collect_reg_hier_name_tup(opr_nid);
     } else if (type.is_tuple_get()) {
+      // FIXME->sh: to be deprecated
       insert_tg_q_pin_fetch(opr_nid);
     }
   }
