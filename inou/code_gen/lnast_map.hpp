@@ -25,7 +25,7 @@ protected:
 
                                              ">>",        "<<",         ">>>",
 
-                                             "sext",      "tposs",
+                                             "sext",      "set_mask", "get_mask",
 
                                              "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 
@@ -80,7 +80,8 @@ protected:
       ">>>",
 
       "sext",
-      "tposs",
+      "set_mask",
+      "get_mask",
 
       "is",
       "!=",
@@ -148,7 +149,8 @@ protected:
       ">>>",
 
       "sext",
-      "tposs",
+      "set_mask",
+      "get_mask",
 
       "is",
       "!=",

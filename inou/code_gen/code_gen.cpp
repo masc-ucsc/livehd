@@ -108,7 +108,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_if(curr_index);
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
-    } else if (curr_node_type.is_select() || curr_node_type.is_tuple_add()) {
+    } else if (curr_node_type.is_select() || curr_node_type.is_tuple_add() || curr_node_type.is_attr_get()) {
       do_select(curr_index, "selc");
     } else if (curr_node_type.is_tuple_get()) {
       do_select(curr_index, "tuple_get");
@@ -610,7 +610,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   if(add_to_ref_map) { i = 1u;}
   std::string value;
   // const auto& dot_node_data = lnast->get_data(dot_node_index);
-  while (i < (dot_str_vect.size() - 1)) {
+  while ((i < dot_str_vect.size() && is_temp_var(key)) || (i < (dot_str_vect.size()-1) && !is_temp_var(key))) { //condition set as per if.prp and adder_stage.prp test cases. To accomodate attr_get and tuple_add.
     auto ref    = std::string(dot_str_vect[i]);
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -661,8 +661,33 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
     curr_index = lnast->get_sibling_next(curr_index);
   }
   //if (has_DblUndrScor(sel_str_vect.back())) {    // treat like dot operator
-  if (has_DblUndrScor(*(sel_str_vect.rbegin()+1))) {    // treat like dot operator
+  if (has_DblUndrScor(sel_str_vect.back()) || has_DblUndrScor(*(sel_str_vect.rbegin()+1))) {    // treat like dot operator
     do_dot(select_node_index);                   // TODO: pass the vector also, no need to calc it again!
+  } else if (select_type == "tuple_get") {
+    I(sel_str_vect.size() >= 3, "\n\nunexpected tuple_get type. Please check.\n\n");
+
+    auto        key   = sel_str_vect.front();
+    std::string value = std::string(sel_str_vect[1]);
+
+    auto i = 2u;
+    while (i < sel_str_vect.size()) {
+      auto ref = sel_str_vect[i];
+
+      auto map_it = ref_map.find(ref);
+      if (map_it != ref_map.end()) {
+        ref = map_it->second;
+      }
+      //absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->ref_name(ref), lnast_to->select_end(select_type));
+      absl::StrAppend(&value, lnast_to->dot_type_op(), lnast_to->ref_name(ref));
+      i++;
+    }
+
+    if (is_temp_var(key)) {
+      ref_map.insert(std::pair<std::string_view, std::string>(key, value));
+    } else {
+      fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
+    }
+
   } else if (is_pos_int(sel_str_vect.back())) {  // do not treat like dot operator
 
     if (select_type == "bit") {
@@ -695,32 +720,6 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
     } else {
       fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
     }
-  } else if (select_type == "tuple_get") {
-    I(sel_str_vect.size() >= 3, "\n\nunexpected tuple_get type. Please check.\n\n");
-
-    auto        key   = sel_str_vect.front();
-    std::string value = std::string(sel_str_vect[1]);
-
-    auto i = 2u;
-    while (i < sel_str_vect.size()) {
-      auto ref = sel_str_vect[i];
-
-      auto map_it = ref_map.find(ref);
-      if (map_it != ref_map.end()) {
-        ref = map_it->second;
-      }
-      //absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->ref_name(ref), lnast_to->select_end(select_type));
-      absl::StrAppend(&value, lnast_to->dot_type_op(), lnast_to->ref_name(ref));
-      i++;
-    }
-
-    if (is_temp_var(key)) {
-      // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
-      ref_map.insert(std::pair<std::string_view, std::string>(key, value));
-    } else {
-      fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS IF -----!!\n");
-    }
-
   } else {
     I(false, "Unexpected node. Please check.");
   }
