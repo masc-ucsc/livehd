@@ -17,6 +17,7 @@ static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 void Inou_slang::setup() {
   Eprp_method m1("inou.verilog", "System verilog to LNAST using slang", &Inou_slang::work);
 
+  m1.add_label_optional("files", "input verilog file paths)");
   m1.add_label_optional("includes", "comma separated include paths (otherwise, verilog paths)");
   m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
   m1.add_label_optional("undefines", "comma separated undefines");

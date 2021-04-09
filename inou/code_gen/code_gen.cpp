@@ -108,7 +108,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_if(curr_index);
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
-    } else if (curr_node_type.is_select()) {
+    } else if (curr_node_type.is_select() || curr_node_type.is_tuple_add()) {
       do_select(curr_index, "selc");
     } else if (curr_node_type.is_func_def()) {
       do_func_def(curr_index);
@@ -596,12 +596,12 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   // dot_str_vect now has all the children of the operation "op"
 
   assert(dot_str_vect.size() > 2);
-  auto key = dot_str_vect.front();
+  auto key = dot_str_vect.back();
 
-  auto        i = 1u;
+  auto        i = 0u;
   std::string value;
   // const auto& dot_node_data = lnast->get_data(dot_node_index);
-  while (i < dot_str_vect.size()) {
+  while (i < (dot_str_vect.size() - 1)) {
     auto ref    = std::string(dot_str_vect[i]);
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -634,10 +634,8 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
     auto ref_map_inst_succ = ref_map.insert(std::pair<std::string_view, std::string>(key, value));
     I(ref_map_inst_succ.second,
       "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
-    // works for inou.pyrope input
   } else {
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(value), " = ", key, "\n");
-    // Works for lnast_fromlg pass input
   }
 }
 //-------------------------------------------------------------------------------------
@@ -653,7 +651,8 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
     sel_str_vect.push_back(lnast->get_name(curr_index));
     curr_index = lnast->get_sibling_next(curr_index);
   }
-  if (has_DblUndrScor(sel_str_vect.back())) {    // treat like dot operator
+  //if (has_DblUndrScor(sel_str_vect.back())) {    // treat like dot operator
+  if (has_DblUndrScor(sel_str_vect[1])) {    // treat like dot operator
     do_dot(select_node_index);                   // TODO: pass the vector also, no need to calc it again!
   } else if (is_pos_int(sel_str_vect.back())) {  // do not treat like dot operator
 
