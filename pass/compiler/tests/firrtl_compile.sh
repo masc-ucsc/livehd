@@ -22,8 +22,8 @@ if [ $# -eq 0 ]; then
 
   # pts_hifirrtl_todo='
   # passed hifirrtl pattern pool
-  pts='EnableShiftRegister Flop Cell_alone MaxN PlusAnd Test2 SingleEvenFilter
-  Coverage Counter Decrementer SubModule BundleConnect LogShifter Adder4
+  pts='EnableShiftRegister Flop MaxN PlusAnd Test2 
+  Coverage 
   Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
   Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
   Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
@@ -33,9 +33,15 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='Flop'
-  # pts='Register'
   # pts='VecShiftRegister'
+  # pts='Cell_alone'
+  # pts='SingleEvenFilter'
+  # pts='SubModule'
+  # pts='BundleConnect'
+  # pts='LogShifter'
+  # pts='Adder4'
+  # pts='Counter'
+  pts='Decrementer'
 
 else
   file=$(basename $1)

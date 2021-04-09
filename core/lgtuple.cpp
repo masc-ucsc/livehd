@@ -874,7 +874,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 
   if (is_single_level(flop_name)) {
     flop_root_name = flop_name;
-
   } else {
     flop_root_name = get_first_level_name(flop_name);
     if (has_dpin(flop_name))
@@ -920,7 +919,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
           XEdge::del_edge(dpin2, flop_spin);
         }
         flop_spin.connect_driver(e.second);
-      }else{
+      } else {
         // If not a FLOP attribute, it may be a plain attribute
 
         auto flop_din = flop_node.setup_sink_pin("din");

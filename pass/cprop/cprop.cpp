@@ -601,7 +601,9 @@ void Cprop::process_flop(Node &node) {
     return;
   }
 
+  fmt::print("DEBUG0\n");
   auto din_node = node.get_sink_pin("din").get_driver_node();
+  fmt::print("din_node:{}\n", din_node.debug_name());
 
   auto din_it = node2tuple.find(din_node.get_compact());
   if (din_it == node2tuple.end()) {
@@ -617,6 +619,7 @@ void Cprop::process_flop(Node &node) {
         tuple_issues             = true;
       }
     }
+    fmt::print("DEBUG1\n");
     return;  // done or wait for 2nd iteration
   }
 
@@ -1484,12 +1487,13 @@ void Cprop::do_trans(Lgraph *lg) {
                 reset_pin = lg->add_graph_input("reset", Port_invalid, 1);
               }
             }
+            fmt::print("DEBUG2\n");
             spin_reset.connect_driver(reset_pin);
           }
         }
         continue;
       }
-    }
+    } // end of (!tuple_issues)
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
@@ -1503,12 +1507,11 @@ void Cprop::do_trans(Lgraph *lg) {
       }
       continue;
     }
-  }
+  } // end of lg->fast()
 
   if (!hier) {
     node2tuple.clear();
   }
-
  
   if (!tuple_issues && (!hier || at_gioc)) {
     // remove unified input $ if fully resolved
@@ -1527,7 +1530,7 @@ void Cprop::do_trans(Lgraph *lg) {
       }
     }
   }
-}
+} // end of do_trans()
 
 void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
   I(!hier);
