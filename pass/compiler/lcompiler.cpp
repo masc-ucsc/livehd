@@ -170,12 +170,16 @@ void Lcompiler::do_cprop() {
       lg->each_hier_unique_sub_bottom_up_parallel([this, &cp](Lgraph *lg_sub) {
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
+        // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
+        // cp.do_trans(lg_sub);
         gviz ? gv.do_from_lgraph(lg_sub, "local.cprop-ed") : void();
       });
 
       // for top lgraph
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
       cp.do_trans(lg);
+      // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
+      // cp.do_trans(lg);
       gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
     }
   }
@@ -216,6 +220,10 @@ void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgrap
   bw.do_trans(new_lg);
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", new_lg->get_name());
   bw.do_trans(new_lg);
+  
+  fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", new_lg->get_name());
+  Cprop cp(false, false);  // hier = false, gioc = false
+  cp.do_trans(new_lg);
   gviz ? gv.do_from_lgraph(new_lg, "") : void();
 
   mapped_lgs.emplace_back(new_lg);

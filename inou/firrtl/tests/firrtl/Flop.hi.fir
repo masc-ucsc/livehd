@@ -1,7 +1,7 @@
 circuit Flop :
   module Flop :
     input clock : Clock
-    input reset : UInt<1>
+    input reset : UInt<1> 
     output io : { flip inp : UInt<16>, flip loading : UInt<1>, out : UInt<16> }
 
     reg x : UInt<16>, clock with :

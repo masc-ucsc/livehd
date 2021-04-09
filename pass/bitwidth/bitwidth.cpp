@@ -648,6 +648,7 @@ void Bitwidth::process_attr_get(Node &node) {
   auto attr = get_key_attr(key);
   I(attr != Attr::Set_dp_assign);  // Not get attr with __dp_assign
   if (attr == Attr::Set_other) {
+    fmt::print("DEBUG0\n");
     not_finished = true;
     return;
   }
@@ -657,6 +658,7 @@ void Bitwidth::process_attr_get(Node &node) {
 
   auto it = flat_bwmap.find(dpin_val.get_compact_flat());
   if (it == flat_bwmap.end()) {
+    fmt::print("DEBUG1\n");
     not_finished = true;
     return;
   }
@@ -723,6 +725,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   auto attr     = get_key_attr(key);
 
   if (attr == Attr::Set_other) {
+    fmt::print("DEBUG2\n");
     not_finished = true;
     return;
   }
@@ -736,6 +739,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   auto dpin_val = node_attr.get_sink_pin("value").get_driver_pin();
 
   if (!dpin_key.get_node().is_type_const()) {
+    fmt::print("DEBUG3\n");
     not_finished = true;
     return;  // can not handle now
   }
@@ -1178,7 +1182,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
 void Bitwidth::try_delete_attr_node(Node &node) {
   I(!hier);
 
-  Attr attr;
+  Attr attr = Attr::Set_other;
   if (node.is_sink_connected("field")) {
     auto key_dpin = node.get_sink_pin("field").get_driver_pin();
     attr     = get_key_attr(key_dpin.get_type_const().to_string());
