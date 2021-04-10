@@ -78,12 +78,14 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
 
 Flow_base_iterator::Flow_base_iterator(bool _visit_sub)
     : global_it(Fast_edge_iterator::Fast_iter(_visit_sub)), visit_sub(_visit_sub) {
-  linear_phase = true;
+  linear_first_phase = true;
+  linear_last_phase  = false;
 }
 
 Flow_base_iterator::Flow_base_iterator(Lgraph *lg, bool _visit_sub)
     : global_it(lg->fast(_visit_sub).begin()), visit_sub(_visit_sub) {
-  linear_phase = true;
+  linear_first_phase = true;
+  linear_last_phase  = false;
 }
 
 void Fwd_edge_iterator::Fwd_iter::topo_add_chain_down(const Node_pin &dst_pin) {
@@ -135,22 +137,25 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   pending_stack.push_back(dst_node);
 }
 
-void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(Lgraph *top) {
-  I(linear_phase);
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
+  I(linear_first_phase);
 
   current_node.invalidate();
   global_it.advance_if_deleted();
 
-  while (linear_phase && !global_it.is_invalid()) {
+  while (linear_first_phase && !global_it.is_invalid()) {
     auto next_node = *global_it;
     ++global_it;
 
+    if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
+      if (!visit_sub || !next_node.is_type_sub_present()) {
+        continue; // Keep it for linear_last_phase
+      }
+    }
+
     bool is_topo_sorted = true;
-    if (next_node.is_type_loop_breaker()) {
-      if (visit_sub && next_node.is_type_sub())
-        is_topo_sorted = false;
-    } else {
-      for (const auto &edge : next_node.inp_edges()) {
+    if (!next_node.is_type_loop_first()) { // NOTE: !next_node.has_inputs() may be nicer but a bit slower
+      for (const auto &edge : next_node.inp_edges()) { // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
         auto driver_node = edge.driver.get_node();
 
         if (driver_node.is_graph_input())
@@ -180,15 +185,37 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear(Lgraph *top) {
   }
 
   if (current_node.is_invalid()) {
-    linear_phase = false;
+    linear_first_phase = false;
+    I(linear_last_phase==false);
     global_it    = top->fast(visit_sub).begin();
   }
 }
 
-void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_last() {
+  I(linear_last_phase);
+
+  current_node.invalidate();
+  global_it.advance_if_deleted();
+
+  while (!global_it.is_invalid()) {
+    auto next_node = *global_it;
+    ++global_it;
+
+    if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
+      if (visit_sub && next_node.is_type_sub_present()) {
+        continue;
+      }
+      current_node.update(next_node);
+      return;
+    }
+  }
+}
+
+void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
+      I(!node.is_type_flop());
 
       if (!unvisited.count(node.get_compact())) {
         pending_stack.pop_back();
@@ -200,10 +227,6 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
         pending_stack.pop_back();
         continue;
       }
-
-      //      if (node.debug_name() == "node_372_xor_lg_test_2")
-      //        fmt::print("HERE\n");
-      //
 
       // fmt::print("trying {}\n",node.debug_name());
 
@@ -258,11 +281,15 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
     global_it.advance_if_deleted();
     if (global_it.is_invalid()) {
       current_node.invalidate();
+      linear_last_phase = true;
+      I(linear_first_phase==false);
+      global_it    = top->fast(visit_sub).begin();
       return;
     }
 
     I(!(*global_it).is_graph_io());  // NOTE: should we propagate IO for going up?
     if (unvisited.count((*global_it).get_compact())) {
+      I(!(*global_it).is_type_flop());
       pending_stack.push_back(*global_it);
       for (auto &dpin : (*global_it).inp_drivers()) {  // fwd
         if (unvisited.contains(dpin.get_node().get_compact()))
@@ -278,30 +305,41 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending() {
 void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
   I(!lg->is_empty());
   I(current_node.is_invalid());
-  I(linear_phase);
+  I(linear_first_phase);
 
-  fwd_get_from_linear(lg);
+  fwd_get_from_linear_first(lg);
   if (current_node.is_invalid()) {
-    I(!linear_phase);
-    fwd_get_from_pending();
+    I(!linear_first_phase);
+    fwd_get_from_pending(lg);
+    if (current_node.is_invalid()) {
+      I(linear_last_phase);
+      fwd_get_from_linear_last();
+    }
   }
 
-  I(!current_node.is_invalid());
+  I(!current_node.is_invalid()); // method not called if empty, so something must be here
   I(current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_next() {
-  if (linear_phase) {
-    fwd_get_from_linear(current_node.get_top_lgraph());
-    GI(current_node.is_invalid(), !linear_phase);
-
-    if (current_node.is_invalid() || !current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()))
-      fwd_get_from_pending();
-    return;
+  auto *top_g = current_node.get_top_lgraph();
+  if (linear_first_phase) {
+    fwd_get_from_linear_first(top_g);
+    GI(current_node.is_invalid(), !linear_first_phase);
+    if (!current_node.is_invalid())
+      return;
   }
 
-  fwd_get_from_pending();
-  GI(!current_node.is_invalid(), current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
+  if (!linear_last_phase) {
+    fwd_get_from_pending(top_g);
+    if (!current_node.is_invalid())
+      return;
+
+    GI(!current_node.is_invalid(), current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
+    GI(current_node.is_invalid(), linear_last_phase);
+  }
+
+  fwd_get_from_linear_last();
 }
 
 void Bwd_edge_iterator::Bwd_iter::bwd_first(Lgraph *lg) {

@@ -27,7 +27,7 @@ protected:
   const std::string      name;
   static inline Node_pin invalid_dpin;
 
-  Key_map_type key_map;
+  mutable Key_map_type key_map;
 
   void sort_key_map();
 
@@ -55,7 +55,7 @@ public:
 
   static std::shared_ptr<Lgtuple> make_mux(Node &mux_node, Node_pin &sel_dpin,
                                            const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
-  std::shared_ptr<Lgtuple>        make_flop(Node &flop);
+  std::shared_ptr<Lgtuple>        make_flop(Node &flop) const;
 
   bool has_dpin(std::string_view key) const;
   bool has_dpin() const { return has_dpin(""); }

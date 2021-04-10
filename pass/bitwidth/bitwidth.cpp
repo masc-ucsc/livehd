@@ -599,7 +599,7 @@ void Bitwidth::process_logic_and(Node &node, XEdge_iterator &inp_edges) {
     if (bw_bits)
       continue;  // only handle unconstrained inputs
 
-    if (e.driver.is_graph_io() || e.driver.get_node().is_type_loop_breaker())
+    if (e.driver.is_graph_io() || e.driver.get_node().is_type_loop_last())
       e.driver.set_bits(bw.get_sbits());
   }
 
@@ -689,10 +689,10 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   I(node_dp.is_sink_connected("value"));
   I(node_dp.is_sink_connected("name"));
 
-  auto dpin_lhs = node_dp.get_sink_pin("value").get_driver_pin();
-  auto dpin_rhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_lhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
-  auto           it = flat_bwmap.find(dpin_lhs.get_compact_flat());
+  auto it = flat_bwmap.find(dpin_lhs.get_compact_flat());
   if (it == flat_bwmap.end()) {
 #ifndef NDEBUG
     fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
@@ -705,7 +705,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
     flat_bwmap.insert_or_assign(out_dpin.get_compact_flat(), it->second);
   }
 
-  auto           it2 = flat_bwmap.find(dpin_rhs.get_compact_flat());
+  auto it2 = flat_bwmap.find(dpin_rhs.get_compact_flat());
   if (it2 == flat_bwmap.end()) {
 #ifndef NDEBUG
     fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
@@ -1187,8 +1187,8 @@ void Bitwidth::try_delete_attr_node(Node &node) {
   }
 
   if (attr == Attr::Set_dp_assign) {
-    auto dpin_lhs = node.get_sink_pin("value").get_driver_pin();
-    auto dpin_rhs = node.get_sink_pin("name").get_driver_pin();
+    auto dpin_lhs = node.get_sink_pin("name").get_driver_pin();
+    auto dpin_rhs = node.get_sink_pin("value").get_driver_pin();
     auto      it1 = flat_bwmap.find(dpin_lhs.get_compact_flat());
     auto      it2 = flat_bwmap.find(dpin_rhs.get_compact_flat());
 

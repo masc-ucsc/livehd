@@ -13,12 +13,11 @@ private:
   bool hier;
   bool at_gioc;
   bool tuple_issues;
-  bool flop_needs_2nd_iteration;
 
   inline static Node_pin invalid_pin; // just for speed
 
 protected:
-  absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple>>       node2tuple;  // node to the most up-to-dated tuple chain
+  absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple const>> node2tuple;  // node to the most up-to-dated tuple chain
   absl::flat_hash_map<std::string_view, Node_pin>                    oname2dpin;
   absl::flat_hash_map<std::string, Node_pin>                         reg_name2qpin;
   absl::flat_hash_map<std::string, std::pair<std::string, Node_pin>> reg_attr_map;
@@ -40,7 +39,7 @@ protected:
   void replace_node(Node &node, const Lconst &result);
   void replace_logic_node(Node &node, const Lconst &result);
 
-  void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple> tup, Node &sub_node, Node &tup_node);
+  void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(Node &node);
   void try_connect_sub_inputs(Node &node);
 
@@ -48,11 +47,12 @@ protected:
 
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin) const;
+  std::shared_ptr<Lgtuple const> find_lgtuple(Node up_node) const;
 
   void  process_attr_get(Node &node);
   void  process_attr_set(Node &node);
   void  process_tuple_add(Node &node);
-  Node_pin  expand_data_and_attributes(const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup);
+  Node_pin  expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup);
   bool  process_tuple_get(Node &node);
 
   bool  process_mux(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -60,12 +60,6 @@ protected:
 
   // io construction
   void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup);
-
-  // reg construction
-  void try_create_register(Node &node, std::shared_ptr<Lgtuple> tup);
-  bool reg_q_pin_access_preparation(Node &parent_node, Node_pin &ori_tg_dpin);
-  void setup_clock(Node &reg_node);
-  void split_hier_name(std::string_view hier_name, std::vector<std::string_view> &subnames);
 
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);

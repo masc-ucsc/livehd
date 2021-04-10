@@ -27,7 +27,7 @@ void check_test_order(Lgraph *top) {
     if (node.is_type_sub_present())
       continue;
 
-    if (node.is_type_loop_breaker())
+    if (node.is_type_loop_last())
       continue;
 
     auto it_node = test_order.find(node.get_compact());
@@ -236,10 +236,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::IO) {
+      if (!node.is_type_loop_last() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
         for (auto &out : node.out_edges()) {
-          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
+          if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -255,10 +255,10 @@ bool bwd(int n) {
 
       visited.insert(node.get_compact());
 
-      if (!node.is_type_loop_breaker() && node.get_type_op() != Ntype_op::IO) {
+      if (!node.is_type_loop_last() && node.get_type_op() != Ntype_op::IO) {
         // check if all incoming edges were visited
         for (auto &out : node.out_edges()) {
-          if (!out.sink.get_node().is_type_loop_breaker() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
+          if (!out.sink.get_node().is_type_loop_last() && out.sink.get_node().get_type_op() != Ntype_op::IO) {
             if (visited.find(out.sink.get_node().get_compact()) == visited.end()) {
               fmt::print("bwd failed for lgraph node:{} bwd:{}\n", node.debug_name(), out.sink.get_node().debug_name());
               I(false);
@@ -623,7 +623,7 @@ int main(int argc, char **argv) {
 
     size_t max_level = 0;
     for (auto node : lg->fast()) {
-      if (node.is_type_loop_breaker())
+      if (node.is_type_loop_last())
         continue;
 
       size_t level              = 0u;
@@ -631,7 +631,7 @@ int main(int argc, char **argv) {
       for (const auto &dpin : node.inp_drivers()) {
         auto d_node = dpin.get_node();
 
-        if (d_node.is_type_loop_breaker() || dpin.is_graph_input()) {
+        if (d_node.is_type_loop_last() || dpin.is_graph_input()) {
           if (min_level[d_node.get_nid()] == 0) {
             // FIXME: visit the node first
           }

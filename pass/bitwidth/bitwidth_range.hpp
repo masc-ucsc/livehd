@@ -9,6 +9,41 @@ class __attribute__((packed)) Bitwidth_range {
 protected:
   static Lconst to_lconst(bool overflow, int64_t val);
 
+  // TODO:
+  //  It may be interesting to explore to have unknowns, known zero, know ones
+  //  for inside the valid range (when not overflow). Some code like:
+  //  https://dougallj.wordpress.com/2020/01/13/bit-twiddling-addition-with-unknown-bits/
+  //
+  // struct known_bits {
+  //   unsigned ones;
+  //   unsigned unknowns;
+  // };
+  //
+  // struct known_bits kb_add(struct known_bits a, struct known_bits b) {
+  //  struct known_bits result;
+  //  unsigned x = a.ones + b.ones;
+  //  result.unknowns = a.unknowns | b.unknowns | (x ^ (x + a.unknowns + b.unknowns));
+  //  result.ones = x & ~result.unknowns;
+  //  return result;
+  // }
+  //
+  //  This could help to find simpler code.
+  //
+  //  E.g: if the bit 1 is guarantee to be zero:
+  //
+  //  x = get_mask(x,-3); // 0b111...101
+  //
+  //  If guaranteed to be one:
+  //
+  //  x = or(get_mask(x,-3), 0x2)
+  //
+  //  NOTE: IF lower bits are dropped, the result has less bits (get_max(x,-2)
+  //
+  //  When translating to mockturtle those bits should be set to zero/one for speed and better optimization
+  //
+  //  When generating Verilog/Pyrope we could
+  //  {x[33:2], 1'b0, x[0]} // verilog
+
 public:
   int64_t max;
   int64_t min;

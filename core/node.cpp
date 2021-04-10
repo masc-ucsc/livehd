@@ -345,7 +345,7 @@ bool Node::is_type_tup() const {
   return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
-bool Node::is_type_loop_breaker() const {
+bool Node::is_type_loop_last() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
     const auto sub_name = get_type_sub_node().get_name();
@@ -353,7 +353,7 @@ bool Node::is_type_loop_breaker() const {
       return false;
     return true;
   }
-  return Ntype::is_loop_breaker(op);
+  return Ntype::is_loop_last(op);
 }
 
 Hierarchy_index Node::hierarchy_go_down() const {
@@ -436,6 +436,20 @@ Node_pin_iterator Node::inp_drivers() const { return current_g->inp_drivers(*thi
 void Node::del_node() {
   current_g->del_node(*this);
   nid = 0;  // invalidate node after delete
+}
+
+Node Node::create(Ntype_op op) const {
+  auto node  = current_g->create_node(op);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
+}
+
+Node Node::create_const(const Lconst &value) const {
+  auto node  = current_g->create_node_const(value);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
 }
 
 void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }

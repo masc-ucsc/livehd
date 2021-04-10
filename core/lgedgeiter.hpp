@@ -67,7 +67,8 @@ public:
 
 class Flow_base_iterator {
 protected:
-  bool                          linear_phase;
+  bool                          linear_first_phase;
+  bool                          linear_last_phase;
   Node                          current_node;
   Fast_edge_iterator::Fast_iter global_it;
 
@@ -107,8 +108,11 @@ public:
   protected:
     void topo_add_chain_down(const Node_pin &dst_pin);
     void topo_add_chain_fwd(const Node_pin &driver_pin);
-    void fwd_get_from_linear(Lgraph *top);
-    void fwd_get_from_pending();
+
+    void fwd_get_from_linear_first(Lgraph *top);
+    void fwd_get_from_pending(Lgraph *top);
+    void fwd_get_from_linear_last();
+
     void fwd_first(Lgraph *lg);
     void fwd_next();
 

@@ -68,7 +68,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     std::sort(i_hash.begin(), i_hash.begin() + i_hash.size());
 
     uint64_t input_key = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 8);
-    if (node.is_type_loop_breaker())
+    if (node.is_type_loop_last())
       input_depth = 0;
 
     for (auto dpin : node.out_connected_pins()) {

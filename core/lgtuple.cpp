@@ -12,9 +12,6 @@ static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::p
   return lhs.first < rhs.first;
 }
 
-void Lgtuple::sort_key_map() {
-  std::sort(key_map.begin(), key_map.end(), tuple_sort);
-}
 
 std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
   I(a[a_pos] == ':');
@@ -752,9 +749,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       auto it = key_entries.find(e.first);
       if (it == key_entries.end()) {
         key_entries.emplace(e.first, e.second);  // There can be replicates like :0:a, a, 0
-      }else{
-        if (e.second != it->second)
-          it->second.invalidate();
+      }else if (!it->second.is_invalid() && e.second != it->second) {
+        it->second.invalidate();
       }
     }
   }
@@ -803,8 +799,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   //
   //  Reuse the original mux_node (must reconnect edges)
 
-  auto *lg = mux_node.get_class_lgraph();
-
   std::vector<Node_pin> mux_input_dpins;
   mux_input_dpins.resize(tup_list.size() + 1);  // +1 for sel
   for (auto &e : mux_node.inp_edges()) {
@@ -812,8 +806,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     I(pid < mux_input_dpins.size());
     mux_input_dpins[pid] = e.driver;
 
-    if (pid)  // keep sel
-      e.del_edge();
   }
 
   Node_pin error_dpin;
@@ -822,7 +814,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       continue;
 
     if (error_dpin.is_invalid()) {
-      error_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin();
+      error_dpin = mux_node.create(Ntype_op::CompileErr).setup_driver_pin();
     }
     e = error_dpin;
   }
@@ -836,9 +828,14 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
     Node node;
     if (mux_node_reused) {
-      node = lg->create_node(Ntype_op::Mux);
+      node = mux_node.create(Ntype_op::Mux);
       node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
     } else {
+      for (auto &spin : mux_node.inp_connected_pins()) {
+        if (spin.get_pid())  // keep sel
+          spin.del();
+      }
+
       node            = mux_node;
       mux_node_reused = true;
     }
@@ -860,7 +857,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   return fixing_tup;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
+std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   I(flop.is_type(Ntype_op::Flop));
 
   std::string_view flop_name;
@@ -882,7 +879,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) {
 
   std::shared_ptr<Lgtuple> ret_tup;
 
-  sort_key_map();
+  std::sort(key_map.begin(), key_map.end(), tuple_sort); // mutable (no semantic check. Just faster to process)
 
   auto *lg   = flop.get_class_lgraph();
 

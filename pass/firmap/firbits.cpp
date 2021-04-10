@@ -265,8 +265,8 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
 }
 
 void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
-  auto dpin_lhs = node_dp.get_sink_pin("value").get_driver_pin();
-  auto dpin_rhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_lhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
   auto        it = fbmap.find(dpin_lhs.get_compact_flat());
   Firrtl_bits fb_lhs(0);

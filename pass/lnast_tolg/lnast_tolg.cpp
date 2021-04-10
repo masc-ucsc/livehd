@@ -295,29 +295,30 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
 
 void Lnast_tolg::process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx_dp_assign) {
   auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
-  auto c1_dp       = lnast->get_sibling_next(c0_dp);
-  auto c2_dp       = lnast->get_sibling_next(c1_dp);
-  auto c2_dp_name  = lnast->get_sname(c2_dp);
+  auto lhs_dp      = lnast->get_sibling_next(c0_dp);
+  auto rhs_dp      = lnast->get_sibling_next(lhs_dp);
+  auto rhs_dp_name = lnast->get_sname(rhs_dp);
   auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
   auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
   auto attr_vname  = "__dp_assign";
 
-  if (name2dpin.find(c2_dp_name) == name2dpin.end()) {
+  if (name2dpin.find(rhs_dp_name) == name2dpin.end()) {
     process_ast_assign_op(lg, lnidx_dp_assign);
     return;
   }
 
   auto aset_node = lg->create_node(Ntype_op::AttrSet);
-  auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name
+  auto vn_spin   = aset_node.setup_sink_pin("name");   // variable name (lhs)
   auto af_spin   = aset_node.setup_sink_pin("field");  // attribute field
-  auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value
+  auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value (rhs)
 
-  auto vn_dpin = setup_ref_node_dpin(lg, c1_dp);
-  lg->add_edge(vn_dpin, vn_spin);
   auto af_dpin = setup_field_dpin(lg, attr_vname);
   lg->add_edge(af_dpin, af_spin);
 
-  auto av_dpin = setup_ref_node_dpin(lg, c2_dp);
+  auto vn_dpin = setup_ref_node_dpin(lg, rhs_dp);
+  lg->add_edge(vn_dpin, vn_spin);
+
+  auto av_dpin = setup_ref_node_dpin(lg, lhs_dp);
   lg->add_edge(av_dpin, av_spin);
 
   aset_node.setup_driver_pin("Y").set_name(c0_dp_name);
