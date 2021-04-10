@@ -74,7 +74,7 @@ protected:
   class __attribute__((packed)) Entry16 {  // AKA master or master_root entry
   protected:
     uint8_t  edge_storage[16 - 5];
-    uint16_t edge_storage_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
+    uint16_t edge_storate_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
   public:
     uint8_t pid_bits_or_type : 6;  // type in master_root, 6 pid bits in master
     uint8_t driver_set : 1;
@@ -82,7 +82,7 @@ protected:
     uint8_t ptrs;             // master_next in master_root (master_prev in master) and overflow_next
     uint8_t inp_mask : 7;     // 7bits inp_mask (8 or 0b111 means not used)
     uint8_t master_root : 1;  // for speed good to remember root vs master (pid==0?)
-    constexpr Entry16() : edge_storage{0,}, edge_storage_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0) {
+    constexpr Entry16() : edge_storage{0,}, edge_storate_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0) {
     }
     void set_master_root();
     void set_master();
@@ -102,7 +102,7 @@ protected:
 
       uint32_t pid = pid_bits_or_type;
       pid <<= 16;
-      pid |= edge_storage_or_pid_bits;
+      pid |= edge_storate_or_pid_bits;
 
       return pid;  // 22 bits PID
     }
@@ -119,7 +119,7 @@ protected:
   std::vector<Entry16> table16;
 
   Index_id next16_free;  // Pointer to 12byte free chunks
-  Index_id next64_free;  // Pointer to 64byte free chunks
+  Index_id next64_free;  // Pointer to 48byte free chunks
 
 public:
   Graph_core(std::string_view path, std::string_view name);
@@ -141,7 +141,7 @@ public:
   Index_iter inp_ids(const Index_id s);  // Iterate over the inp edges of s
 
   uint8_t get_type(const Index_id master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_id master_root_id, uint8_t type);
+  void    set_type(const Index_id master_root_id);
 
   Port_ID get_pid(const Index_id master_root_id) const;  // pid for master or 0 for master_root
 
@@ -151,6 +151,4 @@ public:
   Index_id create_master(const Index_id master_root_id, const Port_ID pid);
   // Delete node s, all related edges and masters (if master root)
   void del(const Index_id s);
-  // check if the node is a master_root or not
-  bool is_master_root(const Index_id master_root_id);
 };

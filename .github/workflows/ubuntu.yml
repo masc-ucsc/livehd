@@ -5,21 +5,48 @@ on:
   pull_request:
 
 jobs:
-  gcc:
+  build:
     runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        action: ["build", "test"]
 
     steps:
       - uses: actions/checkout@v2
+
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-gcc
 
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
       - run: sudo chmod +x /usr/local/bin/bazel
 
-      - run: bazel ${{ matrix.action }} --test_tag_filters=-fixme --test_output=all -s //...
+      - run: bazel build -s //...
+
+  test-and-coverage:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-gcc-instrumented
+
+      - run: sudo apt install -y build-essential
+      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
+      - run: sudo chmod +x /usr/local/bin/bazel
+
+      - name: Print the list of targets
+        run: bazel query --output label_kind //...
+
+      - run: bazel coverage --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //...
+
+      - uses: codecov/codecov-action@v1
+        with:
+          directory: ./bazel-testlogs/
 
   clang:
     runs-on: ubuntu-20.04
@@ -30,6 +57,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-clang
 
       - name: Install Clang
         run: |
@@ -55,23 +88,3 @@ jobs:
       - run: sudo chmod +x /usr/local/bin/bazel
 
       - run: bazel ${{ matrix.action }} --config=clang --test_tag_filters=-fixme --test_output=all -s //...
-
-  coverage-always-pass:
-    runs-on: ubuntu-20.04
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - run: sudo apt install -y build-essential
-      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
-      - run: sudo chmod +x /usr/local/bin/bazel
-
-      - name: Print the list of targets
-        run: bazel query --output label_kind //...
-
-      - run: bazel coverage --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all -s //... || true
-
-      - uses: codecov/codecov-action@v1
-        with:
-          directory: ./bazel-testlogs/
-
