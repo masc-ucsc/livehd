@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-gcc
+
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
       - run: sudo chmod +x /usr/local/bin/bazel
@@ -22,6 +28,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-gcc-instrumented
 
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
@@ -45,6 +57,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-clang
 
       - name: Install Clang
         run: |
