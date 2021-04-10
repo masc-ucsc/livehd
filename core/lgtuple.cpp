@@ -801,22 +801,25 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
   std::vector<Node_pin> mux_input_dpins;
   mux_input_dpins.resize(tup_list.size() + 1);  // +1 for sel
+  auto n_inputs=0u;
   for (auto &e : mux_node.inp_edges()) {
     auto pid = e.sink.get_pid();
     I(pid < mux_input_dpins.size());
     mux_input_dpins[pid] = e.driver;
-
+    ++n_inputs;
   }
 
-  Node_pin error_dpin;
-  for (auto &e : mux_input_dpins) {
-    if (!e.is_invalid())
-      continue;
+  if (n_inputs < mux_input_dpins.size()) {
+    Node_pin error_dpin;
+    for (auto &e : mux_input_dpins) {
+      if (!e.is_invalid())
+        continue;
 
-    if (error_dpin.is_invalid()) {
-      error_dpin = mux_node.create(Ntype_op::CompileErr).setup_driver_pin();
+      if (error_dpin.is_invalid()) {
+        error_dpin = mux_node.create(Ntype_op::CompileErr).setup_driver_pin();
+      }
+      e = error_dpin;
     }
-    e = error_dpin;
   }
 
   bool mux_node_reused = false;

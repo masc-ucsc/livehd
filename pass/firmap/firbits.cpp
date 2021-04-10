@@ -40,7 +40,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {
     auto &fbmap = fbmaps.find(lg->get_lgid())->second;
 
 #ifndef NDEBUG
-    fmt::print("{}\n", node.debug_name());
+    fmt::print("FIRBITS: {}\n", node.debug_name());
 #endif
     auto op = node.get_type_op();
 
