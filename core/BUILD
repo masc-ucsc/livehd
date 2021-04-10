@@ -66,7 +66,7 @@ cc_test(
 cc_test(
     name = "traverse_test",
     srcs = ["tests/traverse_test.cpp"],
-    #tags = [ "fixme", ],
+    tags = [ "fixme", ],
     deps = [
         ":tree_lgdb_test",
     ],
