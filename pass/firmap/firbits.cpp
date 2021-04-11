@@ -95,6 +95,7 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
     fbmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Firrtl_bits(bits, sign));
     return;
   } else if (it_qpin != fbmap.end()) {  // At least propagate backward the width
+    // FIXME->sh: to be deprecated, won't happen for CHIRRTL front-end
     auto bits = it_qpin->second.get_bits();
     auto sign = it_qpin->second.get_sign();
     fbmap.insert_or_assign(d_dpin.get_compact_flat(), Firrtl_bits(bits, sign));
