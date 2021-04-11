@@ -340,25 +340,25 @@ constexpr char operator[](std::size_t pos) const {
         found_flag = false;
         e_pos_self =0;
         e_pos_thier =0;
-        if ((first == ((my.ptr_or_start >> (8 * (3 - i))) & 0xFF)) and  ( pos >= i)) {
+        if ((first == ((ptr_or_start >> (8 * (3 - i))) & 0xFF)) and  ( pos >= i)) {
           retval = i;
           found_flag = true;
           for ( j = i,  k =1; j< 4; j++,k++){
             
-            if (((v.ptr_or_start >> (8 * (3 - k))) & 0xFF) != ((my.ptr_or_start >> (8 * (3 - j))) & 0xFF)){
+            if (((v.ptr_or_start >> (8 * (3 - k))) & 0xFF) != ((ptr_or_start >> (8 * (3 - j))) & 0xFF)){
               found_flag = false;
               break;
             }
           }
           while(k < v._size){
             if (k < 4){
-              if(((v.ptr_or_start >> (8 * (3 - k))) & 0xFF)  != my.e[e_pos_self]) {
+              if(((v.ptr_or_start >> (8 * (3 - k))) & 0xFF)  != e[e_pos_self]) {
 
                 found_flag = false;
                 break;
               }
             } else {
-              if (v.e[e_pos_thier ] != my.e[e_pos_self]){
+              if (v.e[e_pos_thier ] != e[e_pos_self]){
                 found_flag = false;
                 e_pos_thier++;
                 break;
