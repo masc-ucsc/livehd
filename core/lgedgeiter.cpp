@@ -322,16 +322,17 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
 }
 
 void Fwd_edge_iterator::Fwd_iter::fwd_next() {
-  auto *top_g = current_node.get_top_lgraph();
+  auto *top = current_node.get_top_lgraph();
+
   if (linear_first_phase) {
-    fwd_get_from_linear_first(top_g);
+    fwd_get_from_linear_first(top);
     GI(current_node.is_invalid(), !linear_first_phase);
     if (!current_node.is_invalid())
       return;
   }
 
   if (!linear_last_phase) {
-    fwd_get_from_pending(top_g);
+    fwd_get_from_pending(top);
     if (!current_node.is_invalid())
       return;
 
