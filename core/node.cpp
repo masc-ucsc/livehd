@@ -596,6 +596,10 @@ void Node::dump() {
     fmt::print(" lut = {}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
     fmt::print(" const = {}\n", get_type_const().to_pyrope());
+  } else if (get_type_op() == Ntype_op::Sub) {
+    Lg_type_id sub_lgid = current_g->get_type_sub(nid);
+    auto sub_name = top_g->get_library().get_name(sub_lgid);
+    fmt::print(" sub = {} (lgid:{})\n", sub_name, sub_lgid);
   } else {
     fmt::print("\n");
   }

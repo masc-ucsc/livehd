@@ -892,8 +892,9 @@ void Cprop::process_attr_set(Node &node) {
     return;
 
   auto name_spin = node.get_sink_pin("name");
+  std::shared_ptr<Lgtuple const> name_tup;
   if (name_spin.is_connected()) {
-    auto name_tup = find_lgtuple(name_spin.get_driver_node());
+    name_tup = find_lgtuple(name_spin.get_driver_node());
     if (name_tup && !name_tup->is_scalar()) {
       name_tup->dump();
       node.dump();
@@ -910,8 +911,12 @@ void Cprop::process_attr_set(Node &node) {
   }
 
   auto value_tup = find_lgtuple(value_spin.get_driver_node());
-  if (!value_tup)
+  if (!value_tup) {
+    if (name_tup) {
+      node2tuple[node.get_compact()] = name_tup;
+    }
     return; // nothing to propagate
+  }
 
   if (!value_tup->is_scalar()) {
     value_tup->dump();
@@ -921,9 +926,15 @@ void Cprop::process_attr_set(Node &node) {
   }
 
   // propagate lgtuple, but strip all the "Bitwidth" fields
-  auto node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
+  std::shared_ptr<Lgtuple> node_tup;
+  if (name_tup) {
+    node_tup = std::make_shared<Lgtuple>(*name_tup);
+  }else{
+    node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
+  }
 
   for (const auto &e:value_tup->get_map()) {
+    // Add update any attr but not the BW fields
     if (Lgtuple::is_attribute(e.first)) {
       auto attr = Lgtuple::get_last_level(e.first);
       if (attr == "__max" || attr == "__min" || attr == "__sbits" || attr == "__ubits")
@@ -1056,7 +1067,6 @@ void Cprop::process_tuple_add(Node &node) {
   if (hier || tuple_issues)
     return;
 
-  bool keep_tuple_add     = false;
   //bool in_tuple_add_chain = false;
   XEdge_iterator pending_out_edges;
   for (auto &e : node.out_edges()) {
@@ -1068,51 +1078,14 @@ void Cprop::process_tuple_add(Node &node) {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
       return;
-    } else if (sink_type == Ntype_op::TupAdd) {
-      //in_tuple_add_chain = true;
-      keep_tuple_add     = true;
-    } else if (sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
-      keep_tuple_add = true;
+    } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
     } else {
       pending_out_edges.emplace_back(e);
     }
   }
-#if 0
-  // Not needed
-  if (!in_tuple_add_chain) {
-    std::vector<std::pair<std::string, Node_pin>> pending_fixes;
-
-    for (const auto &e:node_tup->get_map()) {
-      if (Lgtuple::is_attribute(e.first))
-        continue;
-      if (!e.second.is_graph_input()) {
-        if (e.second.get_pin_name() == "$") {
-          fmt::print("adding input {} to lgraph {} that was decided late\n", e.first, node.get_lg()->get_name());
-          I(false); // FIXME
-        }
-        continue;
-      }
-
-      auto input_edge = e.second.out_edges();
-      auto new_dpin = expand_data_and_attributes(e.first, input_edge, node_tup);
-      if (node_tup->is_trivial_scalar())
-        pending_out_edges.clear();
-      if (!new_dpin.is_invalid() && e.second != new_dpin) {
-        pending_fixes.emplace_back(e.first, new_dpin);
-      }
-    }
-
-    for(auto &it:pending_fixes) { // If inserted directly, it affects the iterator
-      node_tup->add(it.first, it.second);
-    }
-  }
-#endif
 
   if (!pending_out_edges.empty() && node_tup->is_trivial_scalar()) {
     expand_data_and_attributes(node, "", pending_out_edges, node_tup);
-    if (!keep_tuple_add) {
-      bwd_del_node(node);
-    }
   }
 }
 
@@ -1126,18 +1099,6 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
     return invalid_pin;
 
   auto value_dpin = node_tup->get_dpin(key_name);
-
-#if 0
-  if (!value_dpin.is_invalid()) {
-    auto e_list = value_dpin.out_edges();
-    if (e_list.size() == 1 && e_list[0].sink.is_type(Ntype_op::AttrSet)) {
-#ifndef NDEBUG
-      fmt::print("node:{} already has expanded attributes\n", value_dpin.get_node().debug_name());
-#endif
-      return invalid_pin;
-    }
-  }
-#endif
 
   bool added_chain = false;
 
