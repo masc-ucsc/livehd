@@ -891,18 +891,6 @@ void Cprop::process_attr_set(Node &node) {
   if (attr_field != "__dp_assign")
     return;
 
-  auto name_spin = node.get_sink_pin("name");
-  std::shared_ptr<Lgtuple const> name_tup;
-  if (name_spin.is_connected()) {
-    name_tup = find_lgtuple(name_spin.get_driver_node());
-    if (name_tup && !name_tup->is_scalar()) {
-      name_tup->dump();
-      node.dump();
-      Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
-      return;
-    }
-  }
-
   auto value_spin = node.get_sink_pin("value");
   if (!value_spin.is_connected()) {
     node.dump();
@@ -910,10 +898,31 @@ void Cprop::process_attr_set(Node &node) {
     return;
   }
 
+  auto name_spin = node.get_sink_pin("name");
+  std::shared_ptr<Lgtuple> node_tup;
+  if (name_spin.is_connected()) {
+    auto name_tup = find_lgtuple(name_spin.get_driver_node());
+    if (name_tup) {
+      if ( !name_tup->is_scalar()) {
+        name_tup->dump();
+        node.dump();
+        Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
+        return;
+      }
+      node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
+      node_tup->add(node.get_driver_pin("Y"));
+      for (const auto &e:name_tup->get_map()) {
+        if (Lgtuple::is_root_attribute(e.first)) {
+          node_tup->add(e.first, e.second);
+        }
+      }
+    }
+  }
+
   auto value_tup = find_lgtuple(value_spin.get_driver_node());
   if (!value_tup) {
-    if (name_tup) {
-      node2tuple[node.get_compact()] = name_tup;
+    if (node_tup) {
+      node2tuple[node.get_compact()] = node_tup;
     }
     return; // nothing to propagate
   }
@@ -926,13 +935,6 @@ void Cprop::process_attr_set(Node &node) {
   }
 
   // propagate lgtuple, but strip all the "Bitwidth" fields
-  std::shared_ptr<Lgtuple> node_tup;
-  if (name_tup) {
-    node_tup = std::make_shared<Lgtuple>(*name_tup);
-  }else{
-    node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
-  }
-
   for (const auto &e:value_tup->get_map()) {
     // Add update any attr but not the BW fields
     if (Lgtuple::is_attribute(e.first)) {
@@ -940,10 +942,16 @@ void Cprop::process_attr_set(Node &node) {
       if (attr == "__max" || attr == "__min" || attr == "__sbits" || attr == "__ubits")
         continue;
     }
+    if (!node_tup) {
+      node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
+      node_tup->add(node.get_driver_pin("Y"));
+    }
     node_tup->add(e.first, e.second);
   }
 
-  node2tuple[node.get_compact()] = node_tup;
+  if (node_tup) {
+    node2tuple[node.get_compact()] = node_tup;
+  }
 }
 
 void Cprop::process_tuple_add(Node &node) {
