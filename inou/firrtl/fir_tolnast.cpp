@@ -1574,7 +1574,6 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       } else {
         idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
         // idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-        fmt::print("DEBUG2:{}\n", rhs_str);
       }
 
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));

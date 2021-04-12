@@ -40,7 +40,8 @@ if [ $# -eq 0 ]; then
   # pts='BundleConnect'
   # pts='LogShifter'
   # pts='Adder4'
-  pts='Counter Decrementer '
+  pts='Decrementer Counter '
+  pts='Counter '
   # pts='Decrementer '
 
 else

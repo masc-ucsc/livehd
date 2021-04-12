@@ -4,17 +4,16 @@ $inp.__ubits = 16
 %out.__ubits = 16
 
 #x = #x.__create_flop
-x_q = #x
 #x.__ubits = 16
 #x.__reset = 0
+x_q = #x
 
 if ($cond) {
   if ($inp > x_q) {
-    #x = $inp
+    #x := $inp
   } else {
-    #x = (x_q - 1) & 0xFFFF
+    #x := x_q - 1
   }
 }
 
 %out = x_q
-

@@ -909,6 +909,7 @@ void Cprop::process_attr_set(Node &node) {
         Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
         return;
       }
+      fmt::print("DEBUG2\n");
       node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
       node_tup->add(node.get_driver_pin("Y"));
       for (const auto &e:name_tup->get_map()) {
@@ -919,6 +920,7 @@ void Cprop::process_attr_set(Node &node) {
     }
   }
 
+  fmt::print("DEBUG3\n");
   auto value_tup = find_lgtuple(value_spin.get_driver_node());
   if (!value_tup) {
     if (node_tup) {
@@ -926,6 +928,7 @@ void Cprop::process_attr_set(Node &node) {
     }
     return; // nothing to propagate
   }
+  fmt::print("DEBUG4\n");
 
   if (!value_tup->is_scalar()) {
     value_tup->dump();
@@ -1311,7 +1314,6 @@ void Cprop::do_trans(Lgraph *lg) {
                 reset_pin = lg->add_graph_input("reset", Port_invalid, 1);
               }
             }
-            fmt::print("DEBUG2\n");
             spin_reset.connect_driver(reset_pin);
           }
         }
