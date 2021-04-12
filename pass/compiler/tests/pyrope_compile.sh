@@ -20,8 +20,7 @@ hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
 firrtl_gcd_3bits nested_if firrtl_tail3 counter_nested_if tuple_nested1 tuple_empty_attr'
 
 
-pts_fixme='counter3'
-pts='pp'
+# pts='pp'
 # pts='vector'
 # pts='vector2'
 # pts='hier_tuple_nested_if8'  # LNAST_TO failure
