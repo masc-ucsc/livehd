@@ -17,8 +17,9 @@ using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;      // sp
 class Firmap {
 protected:
   inline static std::mutex firrtl_maps_mutex;
-  bool                     firbits_issues = false;
-  bool                     firmap_issues  = false;
+  bool firbits_issues  = false;
+  bool firmap_issues   = false;
+  bool firbits_wait_flop = false;
 
   std::string lg_path;
 
@@ -30,7 +31,7 @@ protected:
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
   static Attr     get_key_attr(std::string_view key);
-  FBMap::iterator get_fbitr_from_hierarchy(XEdge &e);
+  FBMap::iterator get_fbits_from_hierarchy(XEdge &e);
 
   // lg_op
   void analysis_lg_const(Node &node, FBMap &fbmap);

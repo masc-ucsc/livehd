@@ -687,7 +687,15 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
 
 void Lnast::insert_implicit_dp_parent(const Lnast_nid &dp_nid) {
   auto c0 = get_first_child(dp_nid);
-  add_child(dp_nid, get_data(c0));
+  auto c0_name = get_name(c0);
+  if (is_register(c0_name)) {
+    auto new_name = add_string(absl::StrCat("_._", c0_name.substr(1), "_q"));
+    add_child(dp_nid, Lnast_node::create_ref(add_string(new_name)));
+  } else {
+    add_child(dp_nid, get_data(c0));
+  }
+
+  // add_child(dp_nid, get_data(c0));
 }
 
 void Lnast::analyze_selc_lrhs_if_subtree(const Lnast_nid &if_nid) {

@@ -192,7 +192,7 @@ void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   for (auto &e : old_node.inp_edges()) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end())
-      it = get_fbitr_from_hierarchy(e);
+      it = get_fbits_from_hierarchy(e);
 
     if (e.sink.get_type_sub_pin_name() == "e1") {
       e1_bits = it->second.get_bits();
@@ -228,7 +228,7 @@ void Firmap::map_node_fir_head(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   for (auto &e : old_node.inp_edges()) {
     auto it = fbmap.find(e.driver.get_compact_flat());
     if (it == fbmap.end())
-      it = get_fbitr_from_hierarchy(e);
+      it = get_fbits_from_hierarchy(e);
 
     if (e.sink.get_type_sub_pin_name() == "e1") {
       e1_bits = it->second.get_bits();
@@ -302,7 +302,7 @@ void Firmap::map_node_fir_cat(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
     } else {                                                              // e2
       auto it = fbmap.find(e.driver.get_compact_flat());
       if (it == fbmap.end())
-        it = get_fbitr_from_hierarchy(e);
+        it = get_fbits_from_hierarchy(e);
 
       auto e2_bits        = it->second.get_bits();
       auto new_node_const = new_lg->create_node_const(e2_bits);
@@ -345,7 +345,7 @@ void Firmap::map_node_fir_xorr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
     if (e.sink.get_type_sub_pin_name() == "e1") {
       auto it = fbmap.find(e.driver.get_compact_flat());
       if (it == fbmap.end())
-        it = get_fbitr_from_hierarchy(e);
+        it = get_fbits_from_hierarchy(e);
 
       std::vector<Node_pin> new_spins;
       new_spins.emplace_back(new_node_xor.setup_sink_pin("A"));
@@ -382,7 +382,7 @@ void Firmap::map_node_fir_andr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
     if (e.sink.get_type_sub_pin_name() == "e1") {
       auto it = fbmap.find(e.driver.get_compact_flat());
       if (it == fbmap.end())
-        it = get_fbitr_from_hierarchy(e);
+        it = get_fbits_from_hierarchy(e);
 
       auto e1_bits = it->second.get_bits();
       auto e1_sign = it->second.get_sign();
@@ -445,7 +445,7 @@ void Firmap::map_node_fir_not(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
     if (e.sink.get_type_sub_pin_name() == "e1") {
       auto it = fbmap.find(e.driver.get_compact_flat());
       if (it == fbmap.end())
-        it = get_fbitr_from_hierarchy(e);
+        it = get_fbits_from_hierarchy(e);
 
       auto e1_bits = it->second.get_bits();
       auto e1_sign = it->second.get_sign();

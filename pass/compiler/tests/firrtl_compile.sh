@@ -23,7 +23,7 @@ if [ $# -eq 0 ]; then
   # pts_hifirrtl_todo='
   # passed hifirrtl pattern pool
   pts='EnableShiftRegister Flop MaxN PlusAnd Test2 
-  Coverage 
+  Coverage Decrementer
   Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
   Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
   Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
@@ -40,8 +40,8 @@ if [ $# -eq 0 ]; then
   # pts='BundleConnect'
   # pts='LogShifter'
   # pts='Adder4'
-  # pts='Counter'
-  pts='Decrementer'
+  pts='Counter Decrementer '
+  # pts='Decrementer '
 
 else
   file=$(basename $1)
