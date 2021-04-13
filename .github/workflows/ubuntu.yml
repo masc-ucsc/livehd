@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /home/runner/.cache/bazel
-          key: bazel-clang
+          key: bazel-clang-12
 
       - name: Install Clang
         run: |
@@ -81,7 +81,7 @@ jobs:
           sudo ln -sf /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
           sudo ln -sf /usr/bin/llvm-config-$LLVM_VERSION /usr/bin/llvm-config
         env:
-          LLVM_VERSION: 11
+          LLVM_VERSION: 12
 
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
