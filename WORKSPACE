@@ -134,3 +134,30 @@ new_git_repository(
     remote = "https://github.com/lsils/mockturtle.git",
     shallow_since = "1585037117 +0100",
 )
+
+http_archive(
+    name = "rules_python",
+    sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz",
+)
+
+http_archive(
+    name = "rules_hdl",
+    sha256 = "c8ac7cd4df6b1b5d2ab6f23661c4c5833ddb75d4acf4d223a0898609c584c508",
+    strip_prefix = "bazel_rules_hdl-bfae3c11803a159b4a6f8ae3314a330846216ceb",
+    url = "https://github.com/jesec/bazel_rules_hdl/archive/bfae3c11803a159b4a6f8ae3314a330846216ceb.zip",
+)
+
+load("@rules_hdl//toolchains/cpython:cpython_toolchain.bzl", "register_cpython_repository")
+
+register_cpython_repository()
+
+register_toolchains("@rules_hdl//toolchains/cpython:cpython_toolchain")
+
+load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
+
+dependency_support()
+
+load("@rules_hdl//:init.bzl", "init")
+
+init()
