@@ -10,7 +10,7 @@ cc_library(
         exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS,
+    copts = COPTS + ["-Wno-error=shadow"],
     includes = ["."],
     linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     visibility = ["//visibility:public"],
