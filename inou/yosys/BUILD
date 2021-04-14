@@ -28,9 +28,9 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
+        "@at_clifford_yosys//:kernel",
+        "@at_clifford_yosys//:version",
         "@mustache//:headers",
-        "@yosys//:kernel",
-        "@yosys//:version",
     ],
     #alwayslink=1,
     alwayslink = True,
@@ -40,8 +40,8 @@ sh_library(
     name = "scripts",
     srcs = [
         "lgcheck",
-        ":yosys2",
         ":inou_yosys_scripts",
+        ":yosys2",
     ],
     visibility = ["//visibility:public"],
 )

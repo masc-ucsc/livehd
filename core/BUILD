@@ -10,16 +10,16 @@ cc_library(
         exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS,
+    copts = COPTS + ["-Wno-error=shadow"],
     includes = ["."],
     linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     visibility = ["//visibility:public"],
     deps = [
-        "//task",
         "//eprp",
         "//lbench:headers",
         "//lemu",
         "//mmap_lib:headers",
+        "//task",
         "@boost//:multiprecision",
         "@com_google_absl//absl/container:btree",
         "@iassert",
@@ -44,7 +44,7 @@ cc_test(
     srcs = ["tests/lgtuple_test.cpp"],
     copts = COPTS,
     includes = ["."],
-    tags = [ "fixme", ],
+    tags = ["fixme"],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
@@ -66,7 +66,7 @@ cc_test(
 cc_test(
     name = "traverse_test",
     srcs = ["tests/traverse_test.cpp"],
-    tags = [ "fixme", ],
+    tags = ["fixme"],
     deps = [
         ":tree_lgdb_test",
     ],
