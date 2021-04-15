@@ -10,6 +10,8 @@
 
 #include "mmap_map.hpp"
 
+#define posShifter(s) s<4 ? (s-1):3
+
 namespace mmap_lib {
 
 class str {
@@ -316,7 +318,89 @@ constexpr char operator[](std::size_t pos) const {
     }
   }
 
-  bool starts_with(const str &v) const;
+  // checks if *this pstr starts with st
+  bool starts_with(const str &st) const { 
+    if (st._size > _size) { return false; }// st.size > *this.size, false
+    else if (st._size == _size) { return *this == st; }
+    else { // if (st._size < *this._size), compare   
+      uint8_t mx = posShifter(_size);
+      uint8_t mx_st = posShifter(st._size); 
+      if (_size <= 13) { //==== case 1: if *this is SHORT, st is SHORT
+        for (auto i = 0; i < st._size; ++i) { // iterate based on st
+          if (i < 4) { // for *this and st, first 4 will be in p_o_s
+            if (((st.ptr_or_start >> (mx_st*8)) & 0xff) != ((ptr_or_start >> (mx*8)) & 0xff)) {
+              return false;
+            } else { --mx_st; --mx; }
+          } else { // rest of string will be in e
+            if (e[i-4] != st.e[i-4]) { return false; }
+          }
+        }
+        return true; 
+      } else if (_size > 13) { //==== case 2: if *this is LONG, st can be LONG or SHORT
+        uint32_t v_ptr = ptr_or_start;
+        uint8_t e_ptr = 0;
+        if (st._size <= 13) { //==== case 2a: *this is LONG, st is SHORT
+          for (auto i = 0; i < st._size; ++i) { //i refers to st index
+            if (i < 2) { // i = 0, 1 : *this.e is used, st.ptr_or_start is used
+              if (e[e_ptr] != ((st.ptr_or_start >> (mx_st*8)) & 0xff)) { 
+                return false; 
+              } else { --mx_st; ++e_ptr; }
+            } else if ((i >= 2) && (i < 4)) { // 1 = 2,3 *this uses vec, st uses p_o_s
+              if (string_vector.at(v_ptr) != ((st.ptr_or_start >> (mx_st*8)) & 0xff)) {
+                return false;
+              } else { --mx_st; ++v_ptr; }
+            } else { //i = 4..12 (max), *this uses vec/e, st uses e
+              // if we're done using string_vector, we use last 8 of e of *this
+              if ((v_ptr - ptr_or_start) >= (_size - 10)) {
+                if (e[e_ptr] != st.e[i - 4]) { return false; } 
+                else { ++e_ptr; }
+              } else { // use e for st and use vector for *this
+                if (string_vector.at(v_ptr) != (st.e[i - 4])) { return false; } 
+                else { ++v_ptr; }
+              }
+            }
+          }
+          return true; // made it out of the for loop means no mismatch 
+        } else if (st._size > 13) { //==== case 2b: *this is LONG, st is LONG
+          uint8_t e_ptr = 2, ste_ptr = 2; // used to iterate through last 8 of e
+          uint32_t v_ptr = ptr_or_start, stv_ptr = st.ptr_or_start;
+          // NOTE: be careful when *this is still in vec, and st runs out of vec
+          for (auto i = 0; i < st._size; ++i) { // using st._size to iterate 
+            if (i < 2) { // i = 0,1, for both use e
+              if (e[i] != st.e[i]) { return false; }
+            // i = 2..last 8, both uses vec, BUT st ALWAYS reaches e before *this
+            } else if ((i >= 2) && (i < (_size - 8))) {
+              // when st runs out of vector, need to use last 8 of e
+              if ((stv_ptr - st.ptr_or_start) >= (st._size - 10)) {
+                if (string_vector.at(v_ptr) != st.e[ste_ptr]) { return false; } 
+                else { ++v_ptr; ++ste_ptr; }
+              } else { // use vec for both
+                if (string_vector.at(v_ptr) != string_vector.at(stv_ptr)) {
+                  return false;
+                } else { ++v_ptr; ++stv_ptr; }
+              }
+            } else { // i = last 8 of st, *this could be in vec, st always in e
+              // if *this has reached last 8, we use e for *this
+              if ((v_ptr - ptr_or_start) >= (_size - 10)) {
+                if (e[e_ptr] != st.e[ste_ptr]) { return false; } 
+                else { ++e_ptr; ++ste_ptr; }
+              } else { // use vec for *this, e for st
+                if (st.e[ste_ptr] != string_vector.at(v_ptr)) { return false; } 
+                else { ++ste_ptr; ++v_ptr; }
+              }
+            }
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
+
+
+
+
   bool starts_with(std::string_view sv) const;
   bool starts_with(std::string s) const;
 
