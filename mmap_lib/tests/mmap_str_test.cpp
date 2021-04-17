@@ -35,7 +35,7 @@ public:
       t_len = MinLen + (rand() % MaxLen); // deciding string length (0-31)
                         
       // construct string with ASCII (32-126) -> 95 chars
-      for(uint8_t j = 0; j < t_len; ++j) { ele += (' ' + (rand() % 95)); }
+      for(uint8_t j = 0; j < t_len; ++j) { ele += ('!' + (rand() % 94)); }
       str_bank.push_back(ele); // add string to vector
     }
 
@@ -137,6 +137,43 @@ TEST_F(Mmap_str_test, isI_operator) {
     mmap_lib::str temp(n_get(i)); 
     EXPECT_EQ(temp.is_i(), isi_res_get(i));
   }
+}
+
+TEST_F(Mmap_str_test, starts_with) {
+  // 1) pull a string from the random str_bank
+  // 2) take a sub-string of the string 
+  //    -> randomly generate start and end indx of sub-string
+  // 3) turn string and sub-string into mmap_lib::str
+  // 4) run string.starts_with(sub-string)
+  // 5) if the randomly generated start indx is 0, 
+  //    -> then starts_with should return true
+  //    -> else it is false
+  uint32_t start = 0, end = 0; 
+  for (auto i = 0; i < RNDN; ++i) {
+    std::string orig = s_get(i);
+    mmap_lib::str temp(orig);
+    if (temp.size() == 0) { end = 0; }
+    else { end = rand() % temp.size() + 1; }
+    mmap_lib::str check(orig.substr(0, end));
+    EXPECT_TRUE(temp.starts_with(check));
+    
+  }
+
+  for (auto i = 0; i < RNDN; ++i) {
+    std::string orig = s_get(i);
+    mmap_lib::str temp(orig);
+    if (temp.size() == 0) { start = 0; }
+    else { start = rand() % temp.size(); }
+    if (temp.size() == 0) { end = 0; }
+    else { end = rand() % temp.size() + 1; }
+    mmap_lib::str check(orig.substr(start, end));
+    if (start == 0) {
+      EXPECT_TRUE(temp.starts_with(check));
+    } else {
+      EXPECT_FALSE(temp.starts_with(check));
+    }
+  }
+
 }
 
 

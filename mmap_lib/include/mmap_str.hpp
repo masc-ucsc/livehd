@@ -398,11 +398,53 @@ constexpr char operator[](std::size_t pos) const {
   }
 
 
-
-
-
-  bool starts_with(std::string_view sv) const;
-  bool starts_with(std::string s) const;
+  // const char * and std::string will come thru here?
+  bool starts_with(std::string_view st) const { 
+    if (st.size() > _size) { return false; }
+    else if (st.size() == _size) { return *this == st; }
+    else if (st.size() == 0) { return true; }
+    else if (st.size() < _size) {
+      // Actual compare logic
+      auto fndsize = 0;
+      if (_size <= 13) {
+        uint8_t mx = posShifter(_size);
+        for (auto i = mx; i >= 0, i <= 3; --i) {
+          if (((ptr_or_start >> (i*8)) & 0xff) != st[fndsize++] ) {
+            std::cout << "1" << std::endl; 
+            return false; 
+          }
+          if (fndsize == st.size()) { return true; }
+        }
+        for (uint8_t j = 0; j < e.size(); ++j) {
+          if (e[j] != st[fndsize++]) {
+            std::cout << "2" << std::endl; 
+            return false;
+          }
+          if (fndsize == st.size()) { return true; }
+        }
+      } else {
+        // compare first two of e
+        // then all the way up till _size-10
+        for (auto i = 0; i < 2; ++i) {
+          if (e[i] != st[i]) {
+            return false;
+          } else {
+            ++fndsize;
+            if (fndsize == st.size()) { return true; }
+          }
+        }
+        for (auto i = 0; i < _size-10; ++i) {
+          if (string_vector.at(ptr_or_start + i) != st[fndsize++]) {
+            std::cout << "3" << std::endl; 
+            return false;
+          }
+          if (fndsize == st.size()) { return true; }
+        }
+      }
+      std::cout << "4" << std::endl; 
+      return false;
+    }
+  }
 
   bool ends_with(const str &v) const;
   bool ends_with(std::string_view sv) const;
