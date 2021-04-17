@@ -196,6 +196,28 @@ public:
     }
     std::cout << "}" << std::endl;
   }
+  
+  void print_string() {
+    if (_size <= 13) {
+      uint8_t mx = posShifter(_size);
+      for (uint8_t i = mx; i >= 0, i <= 3; --i) {
+        std::cout << static_cast<char>((ptr_or_start >> (i*8)) & 0xff);
+      }
+      if (_size > 4) {
+        for (uint8_t j = 0; j < e.size(); ++j) {
+          std::cout << static_cast<char>(e[j]);
+        }
+      }
+    } else {
+      std::cout << char(e[0]) << char(e[1]);
+      for (auto i = 0; i < _size - 10; ++i) {
+        std::cout << static_cast<char>(string_vector.at(i + ptr_or_start));
+      }
+      for (uint8_t k = 2; k < 10; ++k) {
+        std::cout << static_cast<char>(e[k]);
+      }
+    }
+  }
 
 
 #if 0
@@ -398,7 +420,7 @@ constexpr char operator[](std::size_t pos) const {
   }
 
 
-  // const char * and std::string will come thru here?
+  // const char * and std::string will come thru here
   bool starts_with(std::string_view st) const { 
     if (st.size() > _size) { return false; }
     else if (st.size() == _size) { return *this == st; }
@@ -410,38 +432,35 @@ constexpr char operator[](std::size_t pos) const {
         uint8_t mx = posShifter(_size);
         for (auto i = mx; i >= 0, i <= 3; --i) {
           if (((ptr_or_start >> (i*8)) & 0xff) != st[fndsize++] ) {
-            std::cout << "1" << std::endl; 
             return false; 
           }
           if (fndsize == st.size()) { return true; }
         }
         for (uint8_t j = 0; j < e.size(); ++j) {
-          if (e[j] != st[fndsize++]) {
-            std::cout << "2" << std::endl; 
-            return false;
-          }
+          if (e[j] != st[fndsize++]) { return false; }
           if (fndsize == st.size()) { return true; }
         }
       } else {
         // compare first two of e
         // then all the way up till _size-10
         for (auto i = 0; i < 2; ++i) {
-          if (e[i] != st[i]) {
-            return false;
-          } else {
+          if (e[i] != st[i]) { return false; } 
+          else { 
             ++fndsize;
             if (fndsize == st.size()) { return true; }
           }
         }
         for (auto i = 0; i < _size-10; ++i) {
           if (string_vector.at(ptr_or_start + i) != st[fndsize++]) {
-            std::cout << "3" << std::endl; 
             return false;
           }
           if (fndsize == st.size()) { return true; }
         }
+        for (uint8_t i = 2; i < 10; ++i) {
+          if (e[i] != st[fndsize++]) { return false; }
+          if (fndsize == st.size()) { return true; }
+        }
       }
-      std::cout << "4" << std::endl; 
       return false;
     }
   }
@@ -533,65 +552,10 @@ constexpr char operator[](std::size_t pos) const {
 
   std::vector<str> split(const char chr);  // used as a tokenizing func, return vector of pstr's
 
-  /*
-  bool is_i() const{ // starts with digit -> is integer
-    //this fun works when str size is <14
-    //if(!isptr){
-      char chars[5];
-      std::cout << "chars[] inside is_i(): ";
-      for (int i =3, j=0;i>=0;i--,j++){
-         chars[j] = (ptr_or_start >> (i*sizeof(char)*8)) & 0x000000ff;
-         std::cout << chars[j];
-      }
-      std::cout << std::endl;
-      if (chars[0]!='-' and( chars[0]<'0' or chars[0]> '9')) {
-        std::cout << "Non-number char detected in ptr_or_start[0]\n";
-        return false;
-      }
-      for (int i= 1; i<(_size>4?4:_size);i++){
-        switch (chars[i]){
-          case '0'...'9':
-            break;
-          default:
-            std::cout << "Non-number char detected in ptr_or_start[1:3]\n";
-            return false;
-            break;
-        }
-      }
-      for (int i=0; i<(_size>4?_size-4:0);i++){
-        switch (e[i]){
-          case '0'...'9':
-            break;
-          default:
-            std::cout << "Non-number char detected in e\n";
-            return false;
-            break;
-        }
-      }
-    //}
-    return true;
-  }
-
-
-  // How to handle if it's not an int?
-  // what to return/exceptions?
-  int64_t to_i() const { // only works if _size < 14
-
-    if (this.is_i()) {
-      int64_t hold = 0;
-      // convert ptr_or_start first
-      // convert e next
-    } else {
-      return;
-    }
-
-  } // convert to integer
-*/
   bool is_i() const{ 
     if (_size < 14) {
       char first = ((ptr_or_start >> (8 * (_size -1))) & 0xFF);
       if (first !='-' and( first <'0' or first > '9')) {
-        std::cout << "Non-number char detected in ptr_or_start[0]\n";
         return false;
       }
       for (int i= 1; i<(_size>4?4:_size);i++){
@@ -599,7 +563,6 @@ constexpr char operator[](std::size_t pos) const {
           case '0'...'9':
             break;
           default:
-            std::cout << "Non-number char detected in ptr_or_start[1:3]\n";
             return false;
             break;
         }
@@ -609,7 +572,6 @@ constexpr char operator[](std::size_t pos) const {
           case '0'...'9':
             break;
           default:
-            std::cout << "Non-number char detected in e\n";
             return false;
             break;
         }
@@ -617,7 +579,6 @@ constexpr char operator[](std::size_t pos) const {
     } else {
       char first = e[0];
       if (first !='-' and( first <'0' or first > '9')) {
-        std::cout << "Non-number char detected in ptr_or_start[0]\n";
         return false;
       }
       for (int i = 1;i<10 ; i++){
@@ -625,7 +586,6 @@ constexpr char operator[](std::size_t pos) const {
           case '0'...'9':
             break;
           default:
-            std::cout << "Non-number char detected in e\n";
             return false;
             break;
         } 
@@ -635,14 +595,14 @@ constexpr char operator[](std::size_t pos) const {
           case '0'...'9':
             break;
           default:
-            std::cout << "Non-number char detected in e\n";
             return false;
             break;
         }
       }
     }
     return true;
-  }
+  } 
+
  int64_t     to_i() const;  // convert to integer
  std::string to_s() const{  // convert to string
   

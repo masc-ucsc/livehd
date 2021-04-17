@@ -9,8 +9,8 @@
 #include "fmt/format.h"
 #include "gtest/gtest.h"
 
-#define RNDN 10 // number of rand strings
-#define MaxLen 32 // max len + 1 for rand strings
+#define RNDN 30 // number of rand strings
+#define MaxLen 51 // max len + 1 for rand strings
 #define MinLen 0  // min len for rand strings
 #define RUN 1
 
@@ -25,6 +25,7 @@ class Mmap_str_test : public ::testing::Test {
                                        false, true};
 
 public:
+
   void SetUp() override {
     srand(time(0));
     uint8_t t_len = 0u, decPos = 0u;
@@ -32,17 +33,14 @@ public:
     // random string generation
     for (uint8_t i = 0; i < RNDN; ++i) { // # of strings in vectors
       std::string ele;
-      t_len = MinLen + (rand() % MaxLen); // deciding string length (0-31)
-                        
+      t_len = MinLen + (rand() % MaxLen); // deciding string length (0-31)                      
       // construct string with ASCII (32-126) -> 95 chars
       for(uint8_t j = 0; j < t_len; ++j) { ele += ('!' + (rand() % 94)); }
       str_bank.push_back(ele); // add string to vector
     }
-
-    //for (auto i = num_bank.begin(); i != num_bank.end(); ++i) {std::cout << *i << "\n";}
   }
 
-  // wrapper for vector.at() since str_bank is private
+  // wrapper for .at() since vectors are private
   std::string s_get(int i) { return str_bank.at(i); }
   std::string n_get(int i) { return num_bank.at(i); }
   bool isi_res_get(int i) { return isi_res.at(i); }
@@ -80,6 +78,7 @@ TEST_F(Mmap_str_test, basic_ctor) {
   EXPECT_EQ(d3, d2);
 }
 
+// random mmap_lib::str creation
 TEST_F(Mmap_str_test, random_ctor) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string r_st = s_get(i);
@@ -91,7 +90,10 @@ TEST_F(Mmap_str_test, random_ctor) {
   }
 }
 
-
+// testing == and != ops
+// mmap_lib::str vs. mmap_lib::str
+// mmap_lib::str vs. string_view
+// mmap_lib::str vs. std::string
 TEST_F(Mmap_str_test, random_comparisons) {
   for (auto i = 0; i < RNDN; ++i) {
     // from the str_bank, get string at current index and next index
@@ -122,6 +124,7 @@ TEST_F(Mmap_str_test, random_comparisons) {
   }
 }
 
+// std::string vs. mmap_lib::str
 TEST_F(Mmap_str_test, random_at_operator) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string hold = s_get(i);
@@ -132,48 +135,69 @@ TEST_F(Mmap_str_test, random_at_operator) {
   }  
 }
 
+// Uses two user-generated arrays to check each other
+// one for numbers, one for outcomes (bool)
 TEST_F(Mmap_str_test, isI_operator) {
-  for (auto i = 0; i < RNDN; ++i) {
+  //FIXME: how to come up with rand gen tests for is_i?
+  // IDEA: pull from two vecs, but one is rand gen for just numbers
+  //       other will be rand str vec
+  //       If pull from rand strs => false
+  //       If pull from rand nums => true
+  for (auto i = 0; i < 10; ++i) {
     mmap_lib::str temp(n_get(i)); 
     EXPECT_EQ(temp.is_i(), isi_res_get(i));
   }
 }
 
+// 1) pull a string from the random str_bank
+// 2) take a sub-string of the string 
+//    -> randomly generate start and end indx of sub-string
+// 3) turn string and sub-string into mmap_lib::str
+// 4) run string.starts_with(sub-string)
+// 5) if the randomly generated start indx is 0, 
+//    -> then starts_with should return true
+//    -> else it is false
 TEST_F(Mmap_str_test, starts_with) {
-  // 1) pull a string from the random str_bank
-  // 2) take a sub-string of the string 
-  //    -> randomly generate start and end indx of sub-string
-  // 3) turn string and sub-string into mmap_lib::str
-  // 4) run string.starts_with(sub-string)
-  // 5) if the randomly generated start indx is 0, 
-  //    -> then starts_with should return true
-  //    -> else it is false
   uint32_t start = 0, end = 0; 
+  
+  // ALWAYS TRUE
   for (auto i = 0; i < RNDN; ++i) {
-    std::string orig = s_get(i);
-    mmap_lib::str temp(orig);
-    if (temp.size() == 0) { end = 0; }
+    std::string orig = s_get(i); // std::string creation
+    mmap_lib::str temp(orig);    // mmap_lib::str creation
+
+    if (temp.size() == 0) { end = 0; } // generating end indx
     else { end = rand() % temp.size() + 1; }
-    mmap_lib::str check(orig.substr(0, end));
+
+    std::string stable = orig.substr(0, end);
+    std::string_view sv_check = stable; //sv
+    mmap_lib::str check(stable); // str
+     
     EXPECT_TRUE(temp.starts_with(check));
-    
+    EXPECT_TRUE(temp.starts_with(sv_check));
   }
 
+  // TRUE AND FALSE
   for (auto i = 0; i < RNDN; ++i) {
     std::string orig = s_get(i);
     mmap_lib::str temp(orig);
-    if (temp.size() == 0) { start = 0; }
+    
+    if (temp.size() == 0) { start = 0; } // gen start
     else { start = rand() % temp.size(); }
-    if (temp.size() == 0) { end = 0; }
+    if (temp.size() == 0) { end = 0; } // gen end
     else { end = rand() % temp.size() + 1; }
-    mmap_lib::str check(orig.substr(start, end));
+    
+    std::string stable = orig.substr(start, end);
+    std::string_view sv_check = stable;
+    mmap_lib::str check(stable);
+    
     if (start == 0) {
       EXPECT_TRUE(temp.starts_with(check));
+      EXPECT_TRUE(temp.starts_with(sv_check));
     } else {
       EXPECT_FALSE(temp.starts_with(check));
+      EXPECT_FALSE(temp.starts_with(sv_check));
     }
   }
-
 }
 
 
