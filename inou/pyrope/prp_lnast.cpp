@@ -869,7 +869,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
     Lnast_node range_start;
     bool       range_start_is_null = false;
     if (range_el.token_entry != 0) {
-      if (scan_text(range_el.token_entry) == ".") {
+      if (get_token(range_el.token_entry).tok == Token_id_colon) {
         range_start         = Lnast_node();
         range_start_is_null = true;
       }
@@ -881,8 +881,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
 
     std::array<Lnast_node, 3> nodes_start = {assign_root, range_start_sentinel, range_start};
 
-    idx_range_next = ast->get_sibling_next(idx_range_next);
-    idx_range_next = ast->get_sibling_next(idx_range_next);
+    idx_range_next = ast->get_sibling_next(idx_range_next); // Skip :
     if (!range_start_is_null) {
       idx_range_next = ast->get_sibling_next(idx_range_next);
     }
@@ -1763,7 +1762,7 @@ std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name)
   generate_priority_map();
   generate_expr_rules();
 
-  translate_code_blocks(ast->get_root(), lnast->get_root());
+  translate_code_blocks(mmap_lib::Tree_index::root(), mmap_lib::Tree_index::root());
 
   return std::move(lnast);
 }

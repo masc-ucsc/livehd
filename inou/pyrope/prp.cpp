@@ -199,17 +199,7 @@ uint8_t Prp::rule_for_index(std::list<std::tuple<Rule_id, Token_entry>> &pass_li
       next = false;
     }
   }
-  /*
-  if(!CHECK_RULE(&Prp::rule_rhs_expression_property)){ RULE_FAILED("Failed rule_for_index; couldn't find an
-  rhs_expression_property.\n"); }
 
-  next = true;
-  while(next){
-    if(!CHECK_RULE(&Prp::rule_rhs_expression_property)){
-      next = false;
-    }
-  }
-  */
   RULE_SUCCESS("Matched rule_for_index.\n", Prp_rule_for_index);
 }
 
@@ -1033,19 +1023,18 @@ uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
 
   // optional
   CHECK_RULE(&Prp::rule_bit_selection_notation);
+  //CHECK_RULE(&Prp::rule_factor);
 
-  if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_range_notation)) {
+  if (!SCAN_IS_TOKEN(Token_id_colon, Prp_rule_range_notation)) {
     RULE_FAILED("Failed rule_range_notation; couldn't find the first dot.\n");
   }
-  if (!SCAN_IS_TOKEN(Token_id_dot, Prp_rule_range_notation)) {
-    RULE_FAILED("Failed rule_range_notation; couldn't find the second dot.\n");
-  }
 
   // optional
-  CHECK_RULE(&Prp::rule_additive_expression);
+  //CHECK_RULE(&Prp::rule_additive_expression);
+  CHECK_RULE(&Prp::rule_factor);
 
   // optional
-  CHECK_RULE(&Prp::rule_tuple_by_notation);
+  //CHECK_RULE(&Prp::rule_tuple_by_notation);
 
   RULE_SUCCESS("Matched rule_range_notation.\n", Prp_rule_range_notation);
 }
@@ -1349,30 +1338,6 @@ uint8_t Prp::rule_bit_selection_bracket(std::list<std::tuple<Rule_id, Token_entr
   bool next = true;
   INIT_PSEUDO_FAIL();
 
-#if 0
-  while (next) {
-    UPDATE_PSEUDO_FAIL();
-    if (!SCAN_IS_TOKEN(Token_id_obr, Prp_rule_bit_selection_bracket)) {
-      next = false;
-    } else {
-      if (!SCAN_IS_TOKEN(Token_id_obr)) {
-        PSEUDO_FAIL();
-        next = false;
-      }
-      // optional
-      CHECK_RULE(&Prp::rule_logical_expression);
-      if (!SCAN_IS_TOKEN(Token_id_cbr)) {
-        PSEUDO_FAIL();
-        next = false;
-      }
-      if (!SCAN_IS_TOKEN(Token_id_cbr, Prp_rule_bit_selection_bracket)) {
-        PSEUDO_FAIL();
-        next = false;
-      }
-    }
-  }
-#endif
-
   while (next) {
     UPDATE_PSEUDO_FAIL();
     if (!SCAN_IS_TOKEN(Token_id_at, Prp_rule_bit_selection_bracket)) {
@@ -1653,11 +1618,7 @@ uint8_t Prp::rule_factor(std::list<std::tuple<Rule_id, Token_entry>> &pass_list)
       check_lb();
       if (!SCAN_IS_TOKEN(Token_id_cp)) {
         PSEUDO_FAIL();
-      } /*else {
-        if (SCAN_IS_TOKEN(Token_id_dot)) {
-          PSEUDO_FAIL();
-        }*/
-      else {
+      } else {
         // optional
         CHECK_RULE(&Prp::rule_bit_selection_bracket);
         RULE_SUCCESS("Matched rule_factor; option 1.\n", Prp_rule_factor);
@@ -1894,6 +1855,7 @@ void Prp::elaborate() {
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
+    ast_dump(mmap_lib::Tree_index::root());
     fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   } else {
@@ -1995,7 +1957,7 @@ bool Prp::go_back(uint64_t num_tok) {
 
 void Prp::ast_handler() {
   std::string rule_name;
-  for (const auto &it : ast->depth_preorder(ast->get_root())) {
+  for (const auto &it : ast->depth_preorder()) {
     auto node       = ast->get_data(it);
     rule_name       = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
@@ -2040,6 +2002,7 @@ void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) 
 uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                             std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
   PRINT_DBG_AST("Called check_function.\n");
+
   uint64_t starting_size = loc_list.size();
   uint8_t  ret           = (this->*rule)(loc_list);
   if (ret == false) {

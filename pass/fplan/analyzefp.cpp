@@ -121,7 +121,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
     for (const auto& index : nt.depth_preorder()) {  // preorder because higher level nodes are probably going to be analyzed more
                                                      // often than leaf nodes
-      if (index == nt.get_root()) {
+      if (index.is_root()) {
         continue;  // skip root for now
       }
 

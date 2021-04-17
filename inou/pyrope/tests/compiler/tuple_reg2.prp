@@ -6,6 +6,8 @@ pick = reg.foo.bar
 
 if (pick == 56) {
   %out = 12
+}else{
+  %out = 12
 }
 
 

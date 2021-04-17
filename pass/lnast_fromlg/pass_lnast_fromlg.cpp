@@ -49,7 +49,7 @@ void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, std::string_view mod
 
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(module_name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, lg->get_name())));
-  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts());
+  auto idx_stmts = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
 
   handle_io(lg, idx_stmts, *lnast);
   // fmt::print("PRINTING the from_lg_bw_table:");

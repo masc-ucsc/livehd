@@ -35,7 +35,8 @@ Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<L
 // this processes the node "top"
 //
 void Code_gen::generate() {
-  const auto& root_index = lnast->get_root();
+  constexpr auto root_index = mmap_lib::Tree_index::root();
+
   const auto& node_data  = lnast->get_data(root_index);
   fmt::print("\n\nprocessing LNAST tree\n\n");
   if (node_data.type.is_top()) {

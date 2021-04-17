@@ -16,16 +16,11 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   firrtl::FirrtlPB_Circuit *circuit = fir_design.add_circuit();
   auto                      top_msg = circuit->add_top();
 
-  bool first = true;
-  (void)first;
-
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    // if (first) {
-    top_msg->set_name(
-        (std::string)lnast->get_name(lnast->get_root()));  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
-    first = false;
-    //}
+    std::string n{lnast->get_name(mmap_lib::Tree_index::root())};
+
+    top_msg->set_name(n); // FIXME: Placeholder for now, need to figure out which LNAST is "top"
   }
 
   // fir_design.PrintDebugString();
@@ -43,7 +38,7 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
   name_to_range_map.clear();
   dot_map.clear();
 
-  const auto top      = ln->get_root();
+  constexpr auto top  = mmap_lib::Tree_index::root();
   const auto stmts    = ln->get_first_child(top);
   const auto top_name = (std::string)ln->get_name(top);
 

@@ -311,7 +311,6 @@ protected:
                                   std::list<std::tuple<Rule_id, Token_entry>> &loc_list);
 
   void ast_handler();
-  void ast_dump(mmap_lib::Tree_index tree_idx) const;
   void ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list);
 
 #ifdef DEBUG_AST
@@ -429,4 +428,6 @@ public:
     Prp_rule_keyword,
     Prp_rule_sentinel  // last rule is a special one for communicating with the LNAST translator
   };
+
+  void ast_dump(mmap_lib::Tree_index tree_idx) const;
 };

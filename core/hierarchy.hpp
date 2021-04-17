@@ -27,6 +27,8 @@ public:
   Hierarchy_index go_down(const Node &node) const;
 
   Hierarchy_index go_up(const Node &node) const;
+
+  static constexpr mmap_lib::Tree_index root_index() { return mmap_lib::Tree_index::root(); }
   bool            is_root(const Node &node) const;
 
   void dump() const;

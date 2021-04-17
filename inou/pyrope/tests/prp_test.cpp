@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
   Prp scanner;
 
   scanner.parse_file(argv[1]);
+  scanner.ast_dump(mmap_lib::Tree_index::root());
 
   return 0;
 }

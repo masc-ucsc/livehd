@@ -104,6 +104,6 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
 
 void Node_hier_floorp::load() {
   mmap_lib::map<Node::Compact, GeographyHint> hint_map(root_lg->get_path(), "node_hints");
-  root_layout = load_lg_nodes(hint_map, root_lg, nt.root_index());
+  root_layout = load_lg_nodes(hint_map, root_lg, mmap_lib::Tree_index::root());
   I(root_layout);
 }

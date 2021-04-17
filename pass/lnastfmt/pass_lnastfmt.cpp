@@ -38,10 +38,10 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
   // now we will make the formatted LNAST:
   lnastfmted->set_root(
       Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, ln->get_top_module_name())));  // root node of lnfmted
-  const auto& stmt_index = ln->get_child(ln->get_root());                                     // stmt node of ln
+  const auto& stmt_index = ln->get_child(mmap_lib::Tree_index::root());                                     // stmt node of ln
   // lnastfmted->add_string(ln->get_name(stmt_index));
   const auto& stmt_index_fmt
-      = lnastfmted->add_child(lnastfmted->get_root(),
+      = lnastfmted->add_child(mmap_lib::Tree_index::root(),
                               duplicate_node(lnastfmted, ln, stmt_index));  // stmt node of lnfmted (copied from ln)
 
   auto curr_index = ln->get_child(stmt_index);  // 1st child of ln after stmt
@@ -175,7 +175,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
 }
 
 void Pass_lnastfmt::observe_lnast(Lnast* ln) {
-  for (const mmap_lib::Tree_index& it : ln->depth_preorder(ln->get_root())) {
+  for (const mmap_lib::Tree_index& it : ln->depth_preorder()) {
     process_node(ln, it);
   }
 

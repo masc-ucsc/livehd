@@ -6,7 +6,7 @@ Ast_parser::Ast_parser(std::string_view _buffer, Rule_id top_rule) : buffer(_buf
   I(!buffer.empty());
 
   set_root(Ast_parser_node(top_rule, 0));
-  add_track_parent(get_root());
+  add_track_parent(mmap_lib::Tree_index::root());
 
   level = 0;
 }

@@ -27,8 +27,7 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 
   Lnast_tolg ln2lg(module_name, path);
 
-  const auto lnidx_top = ln->get_root();
-  const auto top_stmts = ln->get_first_child(lnidx_top);
+  const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
 
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
@@ -85,8 +84,7 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
 
   Lnast_tolg ln2lg(module_name, path);
 
-  const auto lnidx_top = ln->get_root();
-  const auto top_stmts = ln->get_first_child(lnidx_top);
+  const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
 
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
@@ -141,8 +139,7 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 
   Lnast_tolg ln2lg(module_name, path);
 
-  auto lnidx_top = ln->get_root();
-  auto top_stmts = ln->get_first_child(lnidx_top);
+  auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
   if (gviz) {

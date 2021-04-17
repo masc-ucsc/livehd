@@ -174,7 +174,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
   bool      printed = false;
   fmt::print("\n");
 
-  for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+  for (const auto &it : lnast->depth_preorder()) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
@@ -197,7 +197,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
   bool      printed = false;
   fmt::print("\n");
 
-  for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+  for (const auto &it : lnast->depth_preorder()) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
@@ -221,7 +221,7 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
   bool      printed = false;
   fmt::print("\n");
 
-  for (const auto &it : lnast->depth_preorder(lnast->get_root())) {
+  for (const auto &it : lnast->depth_preorder()) {
     auto        node = lnast->get_data(it);
     std::string indent{"  "};
     for (int i = 0; i < it.level; ++i) indent += "  ";
@@ -878,9 +878,7 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, s
 // NOTE: Test does only consider tuple and tuple concat operations
 void Semantic_check::do_check(Lnast *lnast) {
   // Get Lnast Root
-  const auto top = lnast->get_root();
-  // Get Lnast top statements
-  const auto stmts = lnast->get_first_child(top);
+  const auto stmts = lnast->get_first_child(mmap_lib::Tree_index::root());
   // Iterate through Lnast top statements
   for (const auto &stmt : lnast->children(stmts)) {
     const auto ntype     = lnast->get_data(stmt).type;

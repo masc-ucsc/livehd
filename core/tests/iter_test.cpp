@@ -757,7 +757,7 @@ int main(int argc, char **argv) {
       }
 #endif
 #ifdef ITER_TREE
-      for (const auto &it : fwd_order.depth_preorder(fwd_order.get_root())) {
+      for (const auto &it : fwd_order.depth_preorder()) {
         auto node = fwd_order.get_data(it).get_node(lg);
         auto op   = node.get_type_op();
         if (Ntype::is_multi_driver(op))

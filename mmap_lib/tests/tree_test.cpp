@@ -182,7 +182,7 @@ TEST_F(Elab_test, Preorder_traversal_check) {
   ast_preorder_traversal_golden.push_back("child1.2.2");
   ast_preorder_traversal_golden.push_back("child1.3");
 
-  for (const auto &it : ast.depth_preorder(ast.get_root())) {
+  for (const auto &it : ast.depth_preorder()) {
     ast_preorder_traversal.push_back(ast.get_data(it));
   }
 

@@ -2028,7 +2028,7 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
   const firrtl::FirrtlPB_Module_UserModule& user_module = module.user_module();
 
   lnast->set_root(Lnast_node::create_top());
-  auto idx_stmts = lnast->add_child(lnast->get_root(), Lnast_node::create_stmts());
+  auto idx_stmts = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
 
   // Iterate over I/O of the module.
   for (int i = 0; i < user_module.port_size(); i++) {

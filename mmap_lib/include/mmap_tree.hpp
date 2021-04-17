@@ -23,6 +23,11 @@ public:
   constexpr Tree_index() : level(-1), pos(-1){};
   constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
+  static constexpr Tree_index root() {
+    Tree_index i(0,0);
+    return i;
+  }
+
   constexpr Tree_index &operator=(const Tree_index &o) {
     level = o.level;
     pos   = o.pos;
@@ -503,8 +508,6 @@ public:
   }
 
   static constexpr Tree_index invalid_index() { return Tree_index(-1, -1); }
-  static constexpr Tree_index root_index() { return Tree_index(0, 0); }
-  constexpr Tree_index        get_root() const { return Tree_index(0, 0); }
   void                        set_root(const X &data);
 
   // NOTE: not a typical depth first traversal, goes to bottom without touching
@@ -528,8 +531,8 @@ public:
     return Tree_depth_postorder_iterator(start_index, this);
   }
 
-  Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(get_root(), this); }
-  Tree_depth_postorder_iterator depth_postorder() const { return Tree_depth_postorder_iterator(get_root(), this); }
+  Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(Tree_index::root(), this); }
+  Tree_depth_postorder_iterator depth_postorder() const { return Tree_depth_postorder_iterator(Tree_index::root(), this); }
 
   Tree_sibling_iterator siblings(const Tree_index &start_index) const { return Tree_sibling_iterator(start_index, this); }
   Tree_sibling_iterator children(const Tree_index &start_index) const {

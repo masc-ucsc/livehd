@@ -55,7 +55,7 @@ void Slang_tree::new_lnast(std::string_view name) {
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
   auto node_stmts = Lnast_node::create_stmts();
-  idx_stmts       = lnast->add_child(lnast->get_root(), node_stmts);
+  idx_stmts       = lnast->add_child(mmap_lib::Tree_index::root(), node_stmts);
 
   net2attr.clear();
 

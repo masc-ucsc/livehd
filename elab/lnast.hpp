@@ -207,7 +207,7 @@ public:
   explicit Lnast(std::string_view _module_name, std::string_view _file_name, std::pair<std::string_view, int> o)
       : top_module_name(_module_name), source_filename(_file_name), memblock(o.first), memblock_fd(o.second) {}
 
-  void ssa_trans() { do_ssa_trans(get_root()); };
+  void ssa_trans() { do_ssa_trans(mmap_lib::Tree_index::root()); };
 
   std::string_view add_string(std::string_view str);
   std::string_view add_string(const std::string &str);

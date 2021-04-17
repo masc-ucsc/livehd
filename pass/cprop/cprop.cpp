@@ -753,7 +753,7 @@ bool Cprop::process_tuple_get(Node &node) {
           else
             non_attr_name = a_name;
         }
-        if (non_attr_name.empty()) {
+        if (non_attr_name.empty() || non_attr_name=="0") {
           bwd_del_node(node);
         }else{
           node.setup_sink_pin("tuple_name").del();
@@ -939,13 +939,18 @@ void Cprop::process_attr_set(Node &node) {
         Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
         return;
       }
-      fmt::print("DEBUG2\n");
       node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
       if (!name_tup->is_correct())
         node_tup->set_issue();
       node_tup->add(node.get_driver_pin("Y"));
       for (const auto &e:name_tup->get_map()) {
         if (Lgtuple::is_root_attribute(e.first)) {
+          if (!node_tup) {
+            node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
+            if (!name_tup->is_correct())
+              node_tup->set_issue();
+            node_tup->add(node.get_driver_pin("Y"));
+          }
           node_tup->add(e.first, e.second);
         }
       }
@@ -958,7 +963,7 @@ void Cprop::process_attr_set(Node &node) {
     if (node_tup) {
       node2tuple[node.get_compact()] = node_tup;
     }
-    return; // nothing to propagate
+    return; // just propagate from name_tup, nothing from value_tup
   }
   fmt::print("DEBUG4\n");
 
@@ -1095,12 +1100,15 @@ void Cprop::process_tuple_add(Node &node) {
       }
     }else{
       node_tup = std::make_shared<Lgtuple>(tup_name);
+      if (has_parent_scalar) {
+        node_tup->add(parent_dpin);
+      }
     }
 
     if (has_value_scalar) {
+      I(!has_value_tup);
       node_tup->concat(value_dpin);
-    }
-    if (has_value_tup) {
+    }else if (has_value_tup) {
       node_tup->concat(value_tup);
     }
   }

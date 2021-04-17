@@ -279,7 +279,7 @@ public:
 
   Compact get_compact() const {
     if (hidx.is_invalid())
-      return Compact(Hierarchy_tree::root_index(), get_root_idx(), sink);
+      return Compact(mmap_lib::Tree_index::root(), get_root_idx(), sink);
     return Compact(hidx, get_root_idx(), sink);
   }
   Compact_flat   get_compact_flat() const;

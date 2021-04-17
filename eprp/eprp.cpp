@@ -273,7 +273,7 @@ void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parse
 }
 
 void Eprp::process_ast() {
-  for (const auto &ti : ast->depth_preorder(ast->get_root())) {
+  for (const auto &ti : ast->depth_preorder()) {
     fmt::print("ti.level:{} ti.pos:{}\n", ti.level, ti.pos);
   }
 

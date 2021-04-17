@@ -337,7 +337,7 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(shifted_tup_nid));
   // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
   // different hierarchy scopes
-  if (get_parent(psts_nid) == get_root())
+  if (get_parent(psts_nid).is_root())
     return;
 
   // insert tuple assignment across hier-scopes
@@ -401,7 +401,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(ta_nid));
     // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
     // different hierarchy scopes
-    if (get_parent(psts_nid) == get_root())
+    if (get_parent(psts_nid).is_root())
       return;
 
     if (is_1st_scope_ssa_tuple_var) {
@@ -450,7 +450,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, get_first_child(ta_nid));
     // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
     // different hierarchy scopes
-    if (get_parent(psts_nid) == get_root())
+    if (get_parent(psts_nid).is_root())
       return;
 
     if (is_1st_scope_ssa_tuple_var
@@ -491,7 +491,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
       return;
 
     auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, c1_sel);
-    if (get_parent(psts_nid) == get_root())
+    if (get_parent(psts_nid).is_root())
       return;
 
     if (is_1st_scope_ssa_tuple_var
@@ -564,7 +564,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   auto is_1st_scope_ssa_tuple_var = update_tuple_var_1st_scope_ssa_table(psts_nid, c1_tg);
   // no need to create Tuple_chain asg if the chain is at top scope, the tuple_chain_asg is used for chaining tuple-chain across
   // different hierarchy scopes
-  if (get_parent(psts_nid) == get_root())
+  if (get_parent(psts_nid).is_root())
     return;
 
   if (is_1st_scope_ssa_tuple_var && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, c1_tg_name, get_parent(psts_nid))) {
@@ -590,7 +590,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
 
 bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name,
                                                               const Lnast_nid &src_if_nid) {
-  if (get_parent(psts_nid) == get_root()) {
+  if (get_parent(psts_nid).is_root()) {
     auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
     auto  it                            = tuple_var_1st_scope_ssa_table.find(ref_name);
     if (it == tuple_var_1st_scope_ssa_table.end()) {
@@ -1150,7 +1150,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
   if (parent_table.find(target_name) != parent_table.end())
     return parent_table[target_name];
 
-  if (get_parent(psts_nid) == get_root()) {
+  if (get_parent(psts_nid).is_root()) {
     return Lnast_nid();
   } else {
     auto tmp_if_nid   = get_parent(psts_nid);
@@ -1247,7 +1247,7 @@ int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const
 
   if (itr != ssa_rhs_cnt_table.end()) {
     return ssa_rhs_cnt_table[target_name];
-  } else if (get_parent(psts_nid) == get_root()) {
+  } else if (get_parent(psts_nid).is_root()) {
     return 0;
   } else if (get_type(get_parent(psts_nid)).is_func_def()) {
     return 0;
@@ -1277,7 +1277,7 @@ void Lnast::set_bitwidth(const std::string_view name, const uint32_t bitwidth) {
 }
 
 void Lnast::dump() const {
-  for (const auto &it : depth_preorder(get_root())) {
+  for (const auto &it : depth_preorder()) {
     const auto &node = get_data(it);
     std::string indent{"    "};
     for (int i = 0; i < it.level; ++i) indent += "    ";
