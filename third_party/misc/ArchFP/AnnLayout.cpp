@@ -51,17 +51,33 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
   }
 
   bool correct = initLayout->layout(AspectRatio, targetAR);
-  assert(initLayout->valid());
+  if (!correct) {
+    return false;
+  }
+  
+  FPObject* root = nullptr;
+  for (size_t i = 0; i < getComponentCount(); i++) {
+	FPObject* comp = getComponent(i);
+	assert(comp->valid());
+	if (comp->getX() == 0 && comp->getY() == 0) {
+      fmt::print("root object: {}\n", comp->getName());
+	  root = comp;
+	  break;
+	}
+  }
 
-  //horiz.setRoot(*root);
+  assert(root);
+  horiz.setRoot(*root);
+
   //vert.setRoot(*root);
 
   // TODO: construct horizontal B*-tree with a random (but legal) floorplan
+  // for each object: find the (bottom) object to the right of it, construct that
+  // if nothing to the right (or done), do leftmost node above it
 
   // TODO: set area?
-  // TODO: remove getSide - no longer used?
 
-  return false;
+  return true;
 }
 
 void annLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {

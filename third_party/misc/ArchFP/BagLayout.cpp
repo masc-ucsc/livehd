@@ -50,7 +50,6 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
       comp = GL;
     }
     correct = correct && comp->layout(opt, AR);
-    assert(comp->valid());
     // Now we have the final component, we can set the location.
     comp->setLocation(nextX, nextY);
     // Prepare for the next round.
@@ -75,7 +74,7 @@ bool bagLayout::layout(FPOptimization opt, double targetAR) {
               << "\n";
   }
 
-  return true;
+  return correct;
 }
 
 void bagLayout::recalcSize() {

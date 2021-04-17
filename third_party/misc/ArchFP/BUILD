@@ -27,7 +27,7 @@ cc_test(
     name = "ann_test",
     srcs = ["tests/ann_test.cpp"],
     tags = [
-        "fixme",
+        #"fixme",
     ],
     deps = [
         ":archfp",
