@@ -70,7 +70,7 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
     } else if (c == 36) {
       legal += "_dollar_";
     } else if (c == 58) {
-      legal += ":";
+      legal += "_colon_";
     } else if (c == 95) {
       legal += "_";
     } else {

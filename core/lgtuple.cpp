@@ -416,14 +416,6 @@ std::string_view Lgtuple::get_last_level(std::string_view key) {
     return key;
 
   I(n != 0);  // name can not start with a .
-
-  // If there are attributes, show keep them.
-  if (key.substr(n, 3) == ".__") {
-    auto n2 = key.substr(0, n - 1).find_last_of('.');
-    if (n2 != std::string::npos) {
-      return key.substr(n2 + 1);
-    }
-  }
   return key.substr(n + 1);
 }
 
@@ -484,8 +476,9 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   for (auto &e : key_map) {
     std::string_view entry(e.first);
     if (key=="0" && e.first.empty()) {
-      if (!tup)
+      if (!tup) {
         tup = std::make_shared<Lgtuple>(get_name());
+      }
       tup->key_map.emplace_back("", e.second);
       continue;
     }
@@ -506,6 +499,9 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
     else
       tup->key_map.emplace_back(entry.substr(e_pos), e.second);
   }
+
+  if (!is_correct())
+    tup->set_issue();
 
   return tup;
 }
@@ -542,6 +538,8 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
     ++pos;
   }
 
+  if (!tup->is_correct())
+    ret_tup->set_issue();
   return ret_tup;
 }
 
@@ -586,11 +584,23 @@ void Lgtuple::del(std::string_view key) {
 void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
   I(!key.empty());
 
+  auto triv_scalar = tup->is_trivial_scalar();
+
   for (const auto &it : tup->key_map) {
     if (it.first.empty()) {
       add(key, it.second);
     } else {
       std::string new_key = absl::StrCat(key, ".", it.first);
+      if (triv_scalar && it.first.back()=='0') {
+        auto l = get_last_level(it.first);
+        if (l=="0") {
+          auto f = get_all_but_last_level(it.first);
+          if (f.empty())
+            new_key = key;
+          else
+            new_key = absl::StrCat(key, ".", f);
+        }
+      }
       add(new_key, it.second);
     }
   }
@@ -598,6 +608,16 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 
 void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
 
+  std::string canonical_key;
+  if (key.empty()) {
+    canonical_key = "0";
+  }else if (key.substr(0, 2) == "__" && key[3] != '_') {
+    canonical_key = absl::StrCat("0.", key);
+  }else{
+    canonical_key = key;
+  }
+
+#if 0
   if (!key_map.empty()) {
     if (key.empty()) {
       key = "0";
@@ -610,13 +630,16 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
       }
     }
   }
+#endif
 
-  auto fixed_key = learn_fix(key);
+  // fixed_key can have name too like :0:foo.__max while canonical_key is 0.__max
+  auto fixed_key = learn_fix(canonical_key);
 
-  del(key);
+  del(canonical_key);
 
   key_map.emplace_back(fixed_key, dpin);
 
+#if 0
   if (is_trivial_scalar()) {
     for(auto &it:key_map) {
       if (it.first == "0") {
@@ -630,6 +653,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
       }
     }
   }
+#endif
 }
 
 bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
@@ -668,7 +692,7 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
         std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
       } else {
         dump();
-        Lgraph::info("can not concat pin to tuple unordered {} field {}", get_name(), e.first);
+        Lgraph::info("can not concat tuple pin to tuple unordered {} field {}", get_name(), e.first);
         return false;
       }
       if (x > max_pos)
@@ -718,7 +742,7 @@ bool Lgtuple::concat(const Node_pin &dpin) {
       std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
     } else {
       dump();
-      Lgraph::info("can not concat pin to tuple unordered {} field {}", get_name(), e.first);
+      Lgraph::info("can not concat pin:{} to tuple unordered {} field {}", dpin.debug_name(), get_name(), e.first);
       return false;
     }
     if (x > max_pos)
@@ -741,22 +765,31 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   //  -If all the tup_list keys point to the same dpin, do not create mux
   //
   //  -Each tuples may have diff name (:0:a, a, 0) which sould be unified/fixed
+  //
+  // Put the keys after learning (may collapse entries)
+  auto fixing_tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
 
   // find all the possible keys
   absl::flat_hash_map<std::string, Node_pin> key_entries;
+  bool first_iter=true;
   for (auto tup : tup_list) {
+    if (!tup->is_correct())
+      fixing_tup->set_issue();
+
     for (const auto &e : tup->get_map()) {
       auto it = key_entries.find(e.first);
       if (it == key_entries.end()) {
-        key_entries.emplace(e.first, e.second);  // There can be replicates like :0:a, a, 0
+        if (first_iter || is_attribute(e.first))
+          key_entries.emplace(e.first, e.second);  // There can be replicates like :0:a, a, 0
+        else
+          key_entries.emplace(e.first, invalid_dpin);  // There can be replicates like :0:a, a, 0
       }else if (!it->second.is_invalid() && e.second != it->second) {
         it->second.invalidate();
       }
     }
+    first_iter = false;
   }
 
-  // Put the keys after learning (may collapse entries)
-  auto fixing_tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
 
   for (auto it : key_entries) {
     bool found = false;
@@ -786,7 +819,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     }
   }
 
-  if (fixing_tup->key_map.empty() || (fixing_tup->key_map.size()==1 && fixing_tup->key_map[0].first.empty()) ) {
+  if (fixing_tup->key_map.empty() || (fixing_tup->key_map.size()==1 && fixing_tup->key_map[0].first == "0") ) {
     // Either nothing or key == ""
     return nullptr;
   }
@@ -828,6 +861,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     if (!e.second.is_invalid()) {  // No need to create mux
       continue;
     }
+    if (!fixing_tup->is_correct())
+      continue; // Do not create muxes if there are issues (but propagate fields that all inputs agree
 
     Node node;
     if (mux_node_reused) {
@@ -886,6 +921,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
   auto *lg   = flop.get_class_lgraph();
 
+  std::vector<Node> all_flops;
+  std::vector<std::pair<std::string, Node_pin>> all_flop_attrs;
+
   for (auto &e : key_map) {
     if (e.second.get_node() == flop)
       continue;  // no loop to itself
@@ -901,6 +939,15 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       // does not exist, in which case, nothing to do)
 
       auto attr          = get_last_level(e.first);
+      if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2))) {
+        if (!is_root_attribute(e.first)) {
+          dump();
+          Lgraph::info("found attribute:{} which is not root for a flop:{}\n", attr, new_flop_name);
+        }
+        all_flop_attrs.emplace_back(attr.substr(2), e.second);
+        continue;
+      }
+
       auto key           = get_all_but_last_level(new_flop_name);
       auto dpin          = Node_pin::find_driver_pin(lg, key);
       if (dpin.is_invalid()) {
@@ -909,56 +956,47 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       }
       auto flop_node = dpin.get_node();
 
-      if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2))) { // Is this a FLOP attribute (reset, initial...)
-        auto flop_spin = flop_node.setup_sink_pin(attr.substr(2));
-        if (flop_spin.is_connected()) {
-          auto dpin2 = flop_spin.get_driver_pin();
-          if (dpin2 == dpin) { // already correctly connected. Nothing to do
-            continue;
-          }
-          XEdge::del_edge(dpin2, flop_spin);
-        }
-        flop_spin.connect_driver(e.second);
-      } else {
-        // If not a FLOP attribute, it may be a plain attribute
+      // If not a FLOP attribute, it may be a plain attribute
 
-        auto flop_din = flop_node.setup_sink_pin("din");
-        if (flop_din.is_connected()) {
-          auto parent_node = flop_din.get_driver_pin().get_node();
-          if (parent_node.is_type(Ntype_op::AttrSet)) {
-            auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
-            I(!attr2_dpin.is_invalid());
-            auto attr2 = attr2_dpin.get_name();
-            if (attr2 == attr)
-              continue; // same attribute already set (can it have different value??)
-          }
+      auto flop_din = flop_node.setup_sink_pin("din");
+      if (flop_din.is_connected()) {
+        auto parent_node = flop_din.get_driver_pin().get_node();
+        if (parent_node.is_type(Ntype_op::AttrSet)) {
+          auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
+          I(!attr2_dpin.is_invalid());
+          auto attr2 = attr2_dpin.get_name();
+          if (attr2 == attr)
+            continue; // same attribute already set (can it have different value??)
         }
-
-        auto attr_node = lg->create_node(Ntype_op::AttrSet);
-        {
-          auto key_dpin = lg->create_node_const(attr).setup_driver_pin();
-          attr_node.setup_sink_pin("field").connect_driver(key_dpin);
-        }
-        {
-          attr_node.setup_sink_pin("value").connect_driver(e.second);
-        }
-        auto flop_din_driver = flop_din.get_driver_pin();
-        if (flop_din_driver.is_invalid()) {
-          // Disconnected flop?
-          Lgraph::info("flop:{} seems disconnected. May be fine or intentional but strange", new_flop_name);
-        }else{
-          XEdge::del_edge(flop_din_driver, flop_din);
-          attr_node.setup_sink_pin("name").connect_driver(flop_din_driver);
-        }
-
-        flop_din.connect_driver(attr_node.setup_driver_pin("Y"));
       }
+
+      auto attr_node = lg->create_node(Ntype_op::AttrSet);
+      {
+        auto key_dpin = lg->create_node_const(attr).setup_driver_pin();
+        attr_node.setup_sink_pin("field").connect_driver(key_dpin);
+      }
+      {
+        attr_node.setup_sink_pin("value").connect_driver(e.second);
+      }
+      auto flop_din_driver = flop_din.get_driver_pin();
+      if (flop_din_driver.is_invalid()) {
+        // Disconnected flop?
+        Lgraph::info("flop:{} seems disconnected. May be fine or intentional but strange", new_flop_name);
+      }else{
+        XEdge::del_edge(flop_din_driver, flop_din);
+        attr_node.setup_sink_pin("name").connect_driver(flop_din_driver);
+      }
+
+      flop_din.connect_driver(attr_node.setup_driver_pin("Y"));
       continue;
     }
     Node node;
 
-
-    if (first_flop) {
+    if (first_flop || !is_correct()) {
+      if (is_correct()) {
+        I(first_flop);
+        flop.setup_driver_pin().reset_name(flop_name);
+      }
       node       = flop;
       first_flop = false;
     } else {
@@ -979,12 +1017,35 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       }
     }
 
-    reconnect_flop_if_needed(node, new_flop_name, e.second);
+    if (is_correct()) {
+      all_flops.emplace_back(node);
+
+      reconnect_flop_if_needed(node, new_flop_name, e.second);
+    }
 
     if (!ret_tup) {
       ret_tup = std::make_shared<Lgtuple>(flop_root_name);
+      if (!is_correct())
+        ret_tup->set_issue();
     }
     ret_tup->key_map.emplace_back(e.first, node.setup_driver_pin());
+  }
+
+  if (!ret_tup->is_correct())
+    return ret_tup;
+
+  for(auto &it:all_flop_attrs) {
+    for(auto &node:all_flops) {
+      auto flop_spin = node.setup_sink_pin(it.first);
+      if (flop_spin.is_connected()) {
+        auto dpin2 = flop_spin.get_driver_pin();
+        if (dpin2 == it.second) { // already correctly connected. Nothing to do
+          continue;
+        }
+        XEdge::del_edge(dpin2, flop_spin);
+      }
+      flop_spin.connect_driver(it.second);
+    }
   }
 
   return ret_tup;
@@ -1034,6 +1095,24 @@ bool Lgtuple::is_scalar() const {
   return true;
 }
 
+std::string Lgtuple::get_scalar_name() const {
+  std::string sname;
+
+  for(const auto &e:key_map) {
+    std::string s;
+    if (is_attribute(e.first)) {
+      s = get_all_but_last_level(e.first);
+    }else{
+      s = e.first;
+    }
+    if (!sname.empty() && sname != s)
+      return "";
+    sname = s;
+  }
+
+  return sname;
+}
+
 bool Lgtuple::is_trivial_scalar() const {
   auto conta       = 0;
 
@@ -1058,7 +1137,7 @@ bool Lgtuple::is_trivial_scalar() const {
 
 
 void Lgtuple::dump() const {
-  fmt::print("tuple_name: {}\n", name);
+  fmt::print("tuple_name: {}{}\n", name, correct?"":" ISSUES");
   for (const auto &it : key_map) {
     fmt::print("  key: {} dpin: {}\n", it.first, it.second.debug_name());
   }

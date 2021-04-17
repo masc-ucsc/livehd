@@ -228,13 +228,19 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     size_t sel = s_node.get_type_const().to_i();
 
     Node_pin a_pin;
-    if ((sel + 1) >= inp_edges_ordered.size()) {
-#ifndef NDEBUG
-      fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
-#endif
+    for(auto &e:inp_edges_ordered) {
+      if (e.sink.get_pid()==0)
+        continue; // ignore selector
+
+      if (e.sink.get_pid() == (sel+1)) {
+        a_pin = e.driver;
+        break;
+      }
+    }
+
+    if (a_pin.is_invalid()) {
+      Pass::info("WARNING: mux selector:{} for a disconnected pin in mux. Using zero\n", sel);
       a_pin = node.create_const(0).get_driver_pin();
-    } else {
-      a_pin = inp_edges_ordered[sel + 1].driver;
     }
 
     collapse_forward_for_pin(node, a_pin);
@@ -399,12 +405,19 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     size_t sel = sel_const.to_i();
 
     Lconst result;
-    if ((sel + 1) >= inp_edges_ordered.size()) {
-#ifndef NDEBUG
-      fmt::print("WARNING: mux selector:{} goes over limit:{} in mux. Using zero\n", sel, inp_edges_ordered.size());
-#endif
-    } else {
-      result = inp_edges_ordered[sel + 1].driver.get_node().get_type_const();
+    for(auto &e:inp_edges_ordered) {
+      if (e.sink.get_pid()==0)
+        continue; // ignore selector
+
+      if (e.sink.get_pid() == (sel+1)) {
+        result = e.driver.get_node().get_type_const();
+        break;
+      }
+    }
+
+    if (result.get_bits()==0) {
+      result = Lconst(0);
+      Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", node.debug_name(), sel);
     }
 
     replace_node(node, result);
@@ -493,11 +506,11 @@ void Cprop::try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtu
       sub_node.get_sink_pin(io_pin->name).connect_driver(dpin);
     } else {
       Pass::info("could not find IO {} in graph {}", io_pin->name, sub.get_name());
-      tuple_issues = true;
+      tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
     }
   }
 
-  if (!tuple_issues || sub_dollar_is_gone) {
+  if (tup->is_correct() || sub_dollar_is_gone) {
     for (const auto &it2 : tup->get_map()) {
       if (!sub.is_input(it2.first)) {
         Pass::info("potential issue, field {} unused by the sub {} at node {}", it2.first, sub.get_name(), sub_node.debug_name());
@@ -586,9 +599,6 @@ void Cprop::process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered) {
 }
 
 void Cprop::process_flop(Node &node) {
-  if (tuple_issues)
-    return;
-
   if (!node.has_outputs())
     return;
 
@@ -599,24 +609,27 @@ void Cprop::process_flop(Node &node) {
   }
 
   auto din_node = node.get_sink_pin("din").get_driver_node();
-  fmt::print("din_node:{}\n", din_node.debug_name());
 
   auto din_it = node2tuple.find(din_node.get_compact());
   if (din_it == node2tuple.end()) {
-    // Unclear if done, It may need a 2nd pass
-    if (!tuple_issues) {
-      fmt::print("2nd iteration flop:{} still did not have tuple (this may be OK)\n", node.debug_name().c_str());
-      return;
-    }
-    return;  // done or wait for 2nd iteration
+    return;  // done
+  }
+
+  // Unclear if done, It may need a 2nd pass
+  if (!din_it->second->is_correct()) {
+    I(tuple_issues);
+    din_it->second->dump();
+    fmt::print("flop:{} tuple:{} has issues (this may be OK with more iterations)\n", node.debug_name(), din_it->second->get_name());
+    return;
   }
 
   auto node_it = node2tuple.find(node.get_compact());
-  if (node_it == node2tuple.end()) {
-    auto flop_tup = din_it->second->make_flop(node);
-    if (flop_tup) {
-      node2tuple[node.get_compact()] = flop_tup;
-    }
+  if (node_it != node2tuple.end())
+    return;
+
+  auto flop_tup = din_it->second->make_flop(node);
+  if (flop_tup) {
+    node2tuple[node.get_compact()] = flop_tup;
   }
 }
 
@@ -652,9 +665,6 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(Node &node) const
 bool Cprop::process_tuple_get(Node &node) {
   I(node.get_type_op() == Ntype_op::TupGet);
 
-  if (tuple_issues)
-    return true;
-
   auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
@@ -664,6 +674,9 @@ bool Cprop::process_tuple_get(Node &node) {
   auto ptup_it = node2tuple.find(parent_node.get_compact());
   if (ptup_it != node2tuple.end()) {
     node_tup = ptup_it->second;
+    if (!node_tup->is_correct()) {
+      return false;
+    }
   }
 
   if (key_name.empty()) {
@@ -671,6 +684,8 @@ bool Cprop::process_tuple_get(Node &node) {
       auto field_node = node.get_sink_pin("position").get_driver_node();
       auto fieldtup_it = node2tuple.find(field_node.get_compact());
       if (fieldtup_it != node2tuple.end()) {
+        I(node_tup->is_correct());
+
         auto sub_tup = node_tup->get_sub_tuple(fieldtup_it->second);
         if (sub_tup) {
           if (sub_tup->is_trivial_scalar()) {
@@ -689,11 +704,14 @@ bool Cprop::process_tuple_get(Node &node) {
       }
     }
     Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
+    node_tup->set_issue(); // It is not right
     tuple_issues = true;
     return false;
   }
 
   if (node_tup) {
+    I(node_tup->is_correct());
+
     bool is_attr_get = false;
     std::string main_field{key_name};
     if (Lgtuple::is_attribute(key_name)) {
@@ -702,6 +720,13 @@ bool Cprop::process_tuple_get(Node &node) {
     }
 
     auto sub_tup = node_tup->get_sub_tuple(main_field);
+    if (!sub_tup) {
+      node_tup->dump();
+      Pass::info("tuple_get {} for key:{} field is not present (may be OK after iterations)", node.debug_name(), main_field);
+      tuple_issues = true;
+      return false;
+    }
+
     if (sub_tup->is_trivial_scalar() || is_attr_get) {
       auto out_edges_list = node.out_edges();
       auto new_dpin = expand_data_and_attributes(node, "", out_edges_list, sub_tup);
@@ -776,10 +801,6 @@ bool Cprop::process_tuple_get(Node &node) {
 
 bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 
-  if (tuple_issues) {
-    return false;
-  }
-
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
   tup_list.resize(inp_edges_ordered.size()-1);
 
@@ -787,13 +808,22 @@ bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
 
   bool some_tuple_found = false;
   bool some_pending     = false;
+  std::string scalar_field;
   for(auto i=1u;i<inp_edges_ordered.size();++i) {
     auto tup = find_lgtuple(inp_edges_ordered[i].driver);
     tup_list[i-1] = tup;
-    if (tup)
+    if (tup) {
+      auto n = tup->get_scalar_name();
+      if (!n.empty() && !scalar_field.empty() && n != scalar_field) {
+        Pass::info("mux:{} has inputs with different scalar fields {} vs {} (must be dead code eliminated)", node.debug_name(), n, scalar_field);
+        return false;
+      }
+      if (!n.empty())
+        scalar_field = n;
       some_tuple_found = true;
-    else
+    }else{
       some_pending = true;
+    }
   }
 
   if (!some_tuple_found)
@@ -804,12 +834,12 @@ bool Cprop::process_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
       if (tup_list[i-1])
         continue;
       auto tup = std::make_shared<Lgtuple>(""); // scalar
-      tup->add(inp_edges_ordered[i].driver);
+      tup->add(scalar_field, inp_edges_ordered[i].driver);
       tup_list[i-1] = tup;
     }
   }
 
-  auto tup = Lgtuple::make_mux(node, sel_dpin, tup_list);
+  auto tup = Lgtuple::make_mux(node, sel_dpin, tup_list); // it can handle tuples with issues
   if (!tup) {
     return true;  // It was a scalar entry, no need to create tuple
   }
@@ -873,7 +903,7 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node up_node) const {
 }
 
 void Cprop::process_attr_set(Node &node) {
-  if (tuple_issues || hier) // hier still not supported
+  if (hier) // hier still not supported
     return;
 
   // Not much to do, just check for compile error in cases like foo := xxx (were xxx is a tuple)
@@ -903,7 +933,7 @@ void Cprop::process_attr_set(Node &node) {
   if (name_spin.is_connected()) {
     auto name_tup = find_lgtuple(name_spin.get_driver_node());
     if (name_tup) {
-      if ( !name_tup->is_scalar()) {
+      if (!name_tup->is_scalar()) {
         name_tup->dump();
         node.dump();
         Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
@@ -911,6 +941,8 @@ void Cprop::process_attr_set(Node &node) {
       }
       fmt::print("DEBUG2\n");
       node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
+      if (!name_tup->is_correct())
+        node_tup->set_issue();
       node_tup->add(node.get_driver_pin("Y"));
       for (const auto &e:name_tup->get_map()) {
         if (Lgtuple::is_root_attribute(e.first)) {
@@ -953,13 +985,14 @@ void Cprop::process_attr_set(Node &node) {
   }
 
   if (node_tup) {
+    if (!value_tup->is_correct())
+      node_tup->set_issue();
     node2tuple[node.get_compact()] = node_tup;
   }
 }
 
 void Cprop::process_tuple_add(Node &node) {
   auto [tup_name, key_name]    = get_tuple_name_key(node);
-
   auto [value_dpin, value_tup] = get_value(node);
 
   bool                           parent_is_a_sub = false;
@@ -1015,8 +1048,8 @@ void Cprop::process_tuple_add(Node &node) {
           return;
         }
         node_tup = std::make_shared<Lgtuple>(tup_name);
+        //node_tup->add(parent_dpin); // Maybe missing tuple field?
         node_tup->add(key_name, value_tup);
-        node_tup->concat(parent_dpin); // Do we generate this case?
       }
       break;
       case 0x3: {
@@ -1075,7 +1108,7 @@ void Cprop::process_tuple_add(Node &node) {
   node2tuple[node.get_compact()] = node_tup;
 
   // post handling for graph outputs, sub-graph and register.
-  if (hier || tuple_issues)
+  if (hier || !node_tup->is_correct())
     return;
 
   //bool in_tuple_add_chain = false;
@@ -1102,8 +1135,8 @@ void Cprop::process_tuple_add(Node &node) {
 
 Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup) {
   I(!hier);
-  I(!tuple_issues);
   I(node_tup);
+  I(node_tup->is_correct());
   I(node_tup->is_scalar());
 
   if (pending_out_edges.empty())
@@ -1115,7 +1148,8 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
 
   for (auto it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));
-    if (Ntype::is_valid_sink(Ntype_op::Flop, it.first.substr(2)))
+    auto attr = Lgtuple::get_last_level(it.first);
+    if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2)))
       continue; // Do not create attr for flop config (handled in cprop directly)
 
     added_chain = true;
@@ -1124,7 +1158,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
     auto af_spin   = attr_node.setup_sink_pin("field");
     auto av_spin   = attr_node.setup_sink_pin("value");
 
-    auto attr_key_node = node.create_const(Lconst::string(it.first));
+    auto attr_key_node = node.create_const(Lconst::string(attr));
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
     attr_key_dpin.connect_sink(af_spin);
 
@@ -1133,7 +1167,11 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
       an_spin.connect_driver(value_dpin);
 
     value_dpin = attr_node.setup_driver_pin("Y"); // to chain all the attributes
-    value_dpin.set_name(node_tup->get_name());
+    auto str = node_tup->get_name();
+    if (!str.empty())
+      value_dpin.set_name(str);
+    else if (value_dpin.has_name())
+      value_dpin.del_name();
   }
 
   if (value_dpin.is_invalid()) {
@@ -1160,7 +1198,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
 void Cprop::do_trans(Lgraph *lg) {
   Lbench b("pass.cprop");
 
-  {
+  for(auto iter=0;iter<2;++iter) {
     tuple_issues = false;
     auto lgit = lg->forward();
     for (auto fwd_it = lgit.begin(); fwd_it != lgit.end(); ++fwd_it) {
@@ -1205,7 +1243,7 @@ void Cprop::do_trans(Lgraph *lg) {
       } else if (op == Ntype_op::Mux) {
         bool updated = process_mux(node, inp_edges_ordered);
         if (updated)
-          inp_edges_ordered = node.inp_edges_ordered();
+          continue; // Can not be deleted/opt if tuple are created (only once Tuples are gone)
       } else if (!node.has_outputs()) {  // This must be after Mux/Tup because those can insert a flop
         node.del_node();
         continue;
@@ -1231,6 +1269,9 @@ void Cprop::do_trans(Lgraph *lg) {
 
       try_collapse_forward(node, inp_edges_ordered);
     }
+
+    if (!tuple_issues)
+      break;
   }
 
 #ifdef TRIVIAL_CPROP
@@ -1360,7 +1401,7 @@ void Cprop::do_trans(Lgraph *lg) {
 
 void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
   I(!hier);
-  I(!tuple_issues);
+  I(tup->is_correct());
 
   auto *lg          = node.get_class_lgraph();
   bool  local_error = false;
