@@ -27,7 +27,7 @@ cc_test(
     name = "ann_test",
     srcs = ["tests/ann_test.cpp"],
     tags = [
-        #"fixme",
+        "fixme",
     ],
     deps = [
         ":archfp",
@@ -36,11 +36,14 @@ cc_test(
 )
 
 cc_test(
-    name = "floorplan_test",
+    name = "archfp_test",
     srcs = ["tests/archfp_test.cpp"],
     deps = [
         ":archfp",
         "@com_google_googletest//:gtest_main",
+    ],
+    tags = [
+        "fixme",
     ],
 )
 
