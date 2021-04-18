@@ -912,6 +912,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
   if (tuple_nodes.size() == 1) {
     return tuple_nodes[0][2];
   }
+
   auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple());
   lnast->add_child(idx_tuple_root, retnode);
   add_tuple_nodes(idx_tuple_root, tuple_nodes);

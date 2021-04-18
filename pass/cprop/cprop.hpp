@@ -51,6 +51,7 @@ protected:
 
   void  process_attr_get(Node &node);
   void  process_attr_set(Node &node);
+  bool  process_get_mask(Node &node);
   void  process_tuple_add(Node &node);
   Node_pin  expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup);
   bool  process_tuple_get(Node &node);

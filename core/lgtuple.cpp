@@ -708,6 +708,76 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
   return ok;
 }
 
+Node_pin Lgtuple::flatten() const {
+  // a_dpin = (tup[0]|(tup[1]<<tup[0].__sbits)|(tup[2]<<(tup[0..1].__sbits)|.....)
+
+  Node_pin a_dpin;
+  bool all_const=true;
+
+  std::sort(key_map.begin(), key_map.end(), tuple_sort); // mutable (no semantic check. Just faster to process)
+
+  for(auto &e:key_map) {
+    if (is_attribute(e.first))
+      continue;
+
+    a_dpin = e.second;
+    if (!e.second.is_type_const()) {
+      all_const = false;
+      break;
+    }
+  }
+  if (a_dpin.is_invalid())
+    return a_dpin;
+
+  if (all_const) {
+    Lconst result;
+    for(auto &e:key_map) {
+      if (is_attribute(e.first))
+        continue;
+      auto v = e.second.get_type_const();
+      v      = v<<result.get_bits();
+      result = result.or_op(v.get_mask_op());
+    }
+    return a_dpin.get_node().create_const(result).get_driver_pin();
+  }
+
+  Node result_node = a_dpin.get_node().create(Ntype_op::Or);
+  Node bit_chain;
+  for(auto &e:key_map) {
+    if (is_attribute(e.first))
+      continue;
+
+    auto tposs_node = result_node.create(Ntype_op::Get_mask);
+    tposs_node.setup_sink_pin("a").connect_driver(e.second);
+    tposs_node.setup_sink_pin("mask").connect_driver(result_node.create_const(-1));
+
+    auto attr_node = result_node.create(Ntype_op::AttrGet);
+    attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string("__sbits")));
+    attr_node.setup_sink_pin("name").connect_driver(e.second);
+
+    Node to_or_node;
+    if (bit_chain.is_invalid()) {
+      bit_chain  = attr_node;
+      to_or_node = tposs_node;
+    }else{
+      auto shl_node = result_node.create(Ntype_op::SHL);
+      shl_node.setup_sink_pin("a").connect_driver(tposs_node);
+      shl_node.setup_sink_pin("b").connect_driver(bit_chain);
+
+      to_or_node = shl_node;
+
+      auto add_node = result_node.create(Ntype_op::Sum);
+      add_node.setup_sink_pin("A").connect_driver(bit_chain);
+      add_node.setup_sink_pin("A").connect_driver(attr_node);
+      bit_chain = add_node;
+    }
+
+    result_node.setup_sink_pin("A").connect_driver(to_or_node);
+  }
+
+  return result_node.setup_driver_pin();
+}
+
 bool Lgtuple::concat(const Node_pin &dpin) {
   if (key_map.size() == 1 && key_map[0].first.empty()) {
 #if 0

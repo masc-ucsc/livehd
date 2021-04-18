@@ -3,5 +3,6 @@
 a.c.foo = 1
 
 index = "c" ++ ".foo"
-%out = a[index] + 2
+tmp = index@() // Force concat
+%out = a[tmp] + 2
 

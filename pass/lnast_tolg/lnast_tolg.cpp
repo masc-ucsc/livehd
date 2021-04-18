@@ -249,7 +249,19 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
       lg->add_edge(opds[1], opr_node.setup_sink_pin("B"));
     } break;
     case Ntype_op::EQ: {
-      for (const auto &opd : opds) lg->add_edge(opd, opr_node.setup_sink_pin("A"));
+      for (const auto &opd : opds) {
+        lg->add_edge(opd, opr_node.setup_sink_pin("A"));
+      }
+    } break;
+    case Ntype_op::Get_mask: {
+      I(opds.size()>0);
+      opr_node.setup_sink_pin("a").connect_driver(opds[0]);
+      if (opds.size()==1) {
+        opr_node.setup_sink_pin("mask").connect_driver(opr_node.create_const(-1));
+      }else{
+        I(opds.size()==2);
+        opr_node.setup_sink_pin("mask").connect_driver(opds[1]);
+      }
     } break;
     case Ntype_op::Div:
     case Ntype_op::SHL:
@@ -328,30 +340,43 @@ void Lnast_tolg::process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx_dp_
 }
 
 void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup) {
-  std::string      tup_name;
-  std::string_view tup_vname;
-  auto             c0_tup       = lnast->get_first_child(lnidx_tup);
-  auto             c1_tup       = lnast->get_sibling_next(c0_tup);
+
+  auto c0_tup    = lnast->get_first_child(lnidx_tup);
+  auto tup_name  = lnast->get_sname(c0_tup);
+  auto tup_vname = lnast->get_vname(c0_tup);
+  auto subs      = lnast->get_subs(c0_tup);
+
+  auto c1_tup    = lnast->get_sibling_next(c0_tup);
+  if (c1_tup.is_invalid()) {
+    // Tuple can be empty
+    // 2                             tuple :
+    // 3                                   ref : ___d
+    // 2                          get_mask :
+    // 3                                   ref : ___e
+    // 3                                   ref : index
+    // 3                                   ref : ___d
+
+    auto tup_add        = lg->create_node(Ntype_op::TupAdd);
+    name2dpin[tup_name] = tup_add.setup_driver_pin();
+    tup_add.setup_driver_pin().set_name(tup_name);
+    if (!is_tmp_var(tup_vname))
+      setup_dpin_ssa(name2dpin[tup_name], tup_vname, subs);
+
+    return;
+  }
+
   auto             c1_tup_vname = lnast->get_vname(c1_tup);
-  int8_t           subs         = 0;
   uint16_t         fp           = 0;  // field position
 
-  // note: each new tuple element will be the new tuple chain tail and inherit the tuple name
-  for (const auto &tup_child : lnast->children(lnidx_tup)) {
-    if (tup_child == lnast->get_first_child(lnidx_tup)) {
-      tup_name  = lnast->get_sname(tup_child);
-      tup_vname = lnast->get_vname(tup_child);
-      subs      = lnast->get_subs(tup_child);
-      // if (is_register(tup_vname))
-      //   tuple_reg_names.insert(tup_vname);
-      continue;
-    }
+  for (auto tup_child=c1_tup; !tup_child.is_invalid() ; tup_child = lnast->get_sibling_next(tup_child)) {
+    I(tup_child != lnast->get_first_child(lnidx_tup));
 
-    if (lnast->get_type(tup_child).is_invalid())
+    auto type = lnast->get_type(tup_child);
+    if (type.is_invalid())
       continue;
 
     // the cases with key name well-defined
-    if (lnast->get_type(tup_child).is_assign()) {
+    if (type.is_assign()) {
       auto c0         = lnast->get_first_child(tup_child);
       auto c1         = lnast->get_sibling_next(c0);
       auto field_name = lnast->get_vname(c0);
@@ -1586,8 +1611,10 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_lt]        = Ntype_op::LT;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_gt]        = Ntype_op::GT;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sra]       = Ntype_op::SRA;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shr]       = Ntype_op::SRA;  // FIXME: it should be sra(tposs(a),b)
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shr]       = Ntype_op::SRA;  // FIXME: it should be sra(get_mask(a),b)
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shl]       = Ntype_op::SHL;
+
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_get_mask] = Ntype_op::Get_mask;
 
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sext] = Ntype_op::Sext;
   // FIXME->sh: to be extended ...

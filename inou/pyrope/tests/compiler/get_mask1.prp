@@ -1,0 +1,14 @@
+
+$in.__ubits=10
+xx = $in
+
+%out1 = xx@(4:7)
+%out2 = xx@()
+%out3 = xx@(0:7)
+
+yy = 0xFEAD
+
+%out4 = yy@(0:3)  // D
+%out5 = yy@(4:7)  // A
+// %out6 = yy@(4:-1) // AEF
+

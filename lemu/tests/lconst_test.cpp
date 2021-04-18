@@ -1352,14 +1352,20 @@ TEST_F(Lconst_test, lconst_add) {
 TEST_F(Lconst_test, lconst_get_bits) {
   Lconst cadena("cadena");  // c=0x63, a=0x61, d=0x64, e=0x65, n=0x6E
 
-  EXPECT_EQ(cadena.get_mask_op(), Lconst("0x616E65646163"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF)), Lconst("0x63"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00)), Lconst("0x61"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000)), Lconst("0x64"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000)), Lconst("0x65"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00000000)), Lconst("0x6e"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000000000)), Lconst("0x61"));
-  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000000000)), Lconst("0"));
+  EXPECT_EQ(cadena.get_mask_op()                         , Lconst("cadena"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(-1))               , Lconst("cadena"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFFFFFFFFFFFFULL)), Lconst("cadena"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFFFFFFFFFF00ULL)), Lconst("adena"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFFFFFFFF00FFULL)), Lconst("cdena"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFFFFFF0000FFULL)), Lconst("cena"));
+
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFFULL)), Lconst("c"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00ULL)), Lconst("a"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000ULL)), Lconst("d"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000ULL)), Lconst("e"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF00000000ULL)), Lconst("n"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF0000000000ULL)), Lconst("a"));
+  EXPECT_EQ(cadena.get_mask_op(Lconst(0xFF000000000000ULL)), Lconst(""));
 
   EXPECT_EQ(Lconst("0xFFF").get_mask_op(Lconst("-1")), Lconst("0xFFF"));
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-1")), Lconst("0xfeef"));

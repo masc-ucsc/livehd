@@ -311,7 +311,11 @@ void Lconst::dump() const {
 
 Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
   // explicit kept if both explicit and agree
-  auto res_explicit_str = explicit_str && o.explicit_str;
+  bool res_explicit_str;
+  if (bits==0) // It can be empty
+    res_explicit_str = o.explicit_str;
+  else
+    res_explicit_str = explicit_str && o.explicit_str;
 
   return Lconst(res_explicit_str, calc_num_bits(res_num), res_num);
 }
@@ -320,9 +324,24 @@ Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) -
 
 Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
 
+int Lconst::get_trailing_zeroes() const {
+
+  if (num==0)
+    return 0;
+
+  Number tmp = num;
+  int conta = 0;
+  while ((tmp & 1)==0) {
+    tmp = tmp>>1;
+    conta++;
+  }
+
+  return conta;
+}
+
 Lconst Lconst::get_mask_op() const {
   if (unlikely(is_string())) {
-    return Lconst(false, calc_num_bits(num), num);  // convert to ascii
+    return Lconst(explicit_str, bits, num);
   }
 
   if (has_unknowns()) {
@@ -392,11 +411,23 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
     pos >>= 1;
   }
 
-  if (!has_unknowns())
+  if (has_unknowns()) {
+    auto str = absl::StrCat("0b", to_string(res_num));  // Use the string to remove leading zeroes
+    return Lconst(str);
+  }
+
+  if (!is_string())
     return Lconst(false, calc_num_bits(res_num), res_num);
 
-  auto str = absl::StrCat("0b", to_string(res_num));  // Use the string to remove leading zeroes
-  return Lconst(str);
+  std::string str;
+  while (res_num) {
+    unsigned char ch = static_cast<unsigned char>(res_num & 0xFF);
+    if (ch) // remove zeroes from string
+      str.append(1, ch);
+    res_num >>= 8;
+  }
+
+  return string(str);
 }
 
 // set_bits(0xFFF, 0xF, 0xa) -> 0xFFa
@@ -599,7 +630,10 @@ Lconst Lconst::sub_op(const Lconst &o) const {
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
-  if (is_string()) {
+  if (bits==0)
+    return *this;
+
+  if (has_unknowns()) {
     auto qmarks = to_string();
     qmarks.append(amount, '0');
     return Lconst(qmarks);
@@ -611,6 +645,9 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
+  if (bits==0)
+    return *this;
+
   if (is_string()) {
     auto qmarks = to_string();
     auto s      = qmarks.substr(amount);
@@ -628,7 +665,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
   if (o.bits == 0)
     return *this;
 
-  if (unlikely(is_string() || o.is_string())) {
+  if (unlikely(has_unknowns() || o.has_unknowns())) {
     auto        res_bits = std::max(bits, o.bits);
     std::string str;
     std::string o_str;

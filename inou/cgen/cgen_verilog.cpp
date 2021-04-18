@@ -208,7 +208,19 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
         auto ubits = v.get_bits() - 1;  // -1 because it is a positive
         final_expr = absl::StrCat(a, "[", ubits - 1, ":0]");
       } else {
-        I(false);  // FIXME: implement the more complicated cases (check lconst::get_mask_op)
+        bool clean = false;
+        auto trail_zeroes=v.get_trailing_zeroes();
+        if (trail_zeroes>0) {
+          auto v2 = v.rsh_op(trail_zeroes);
+          if (v2.is_mask()) {
+            clean = true;
+            auto ubits = v.get_bits() - 1;  // -1 because it is a positive
+            final_expr = absl::StrCat(a, "[", ubits - 1, ":", trail_zeroes, "]");
+          }
+        }
+        if (!clean) {
+          I(false);  // FIXME: implement the more complicated cases (check lconst::get_mask_op)
+        }
       }
     } else {
       I(false);  // FIXME: implement this

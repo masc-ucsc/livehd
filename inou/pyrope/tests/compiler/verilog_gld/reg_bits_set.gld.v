@@ -10,12 +10,14 @@ module reg_bits_set (
 
   wire signed [7:0] ff_next = ff == 0 ? a  : ff - 1;
   reg signed [7:0] ff;
-  always @ (posedge clock) begin
+  always @(posedge clock) begin
     if (reset) begin
       ff <= 'd0;
     end else begin
       ff <= ff_next;
     end
   end
+
+  assign out = ff;
 
 endmodule

@@ -21,6 +21,7 @@ protected:
   // std::list<std::string> temp_vars;
   std::string last_temp_var;
   Lnast_node  current_return_node;
+  const Lnast_node lnast_node_invalid;
 
   std::string get_temp_string();
   Lnast_node  get_lnast_temp_ref();

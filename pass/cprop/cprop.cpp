@@ -698,7 +698,8 @@ bool Cprop::process_tuple_get(Node &node) {
         }
         fieldtup_it->second->dump();
         node.dump();
-        Pass::error("FIXME: need to handle runtime tuple index node:{}\n",node.debug_name());
+        Pass::info("FIXME: need to handle runtime tuple index node:{}\n",node.debug_name());
+        fieldtup_it->second->set_issue();
         tuple_issues = true;
         return false;
       }
@@ -996,6 +997,155 @@ void Cprop::process_attr_set(Node &node) {
   }
 }
 
+bool Cprop::process_get_mask(Node &node) {
+  // parents can be tuple, nothing to do if not tuple.
+  //
+  // output is always scalar
+
+  auto a_it    = node2tuple.end();
+  auto a_spin  = node.get_sink_pin("a");
+  if (a_spin.is_connected()) {
+    auto a_node = a_spin.get_driver_node();
+    a_it        = node2tuple.find(a_node.get_compact());
+  }
+
+  auto mask_it   = node2tuple.end();
+  auto mask_spin = node.get_sink_pin("mask");
+  if (mask_spin.is_connected()) {
+    auto mask_node = mask_spin.get_driver_node();
+    mask_it        = node2tuple.find(mask_node.get_compact());
+  }
+
+  if (a_it == node2tuple.end() && mask_it == node2tuple.end())
+    return false;
+
+  //---------------------------------------------
+  // Figure out "a" sink
+
+  if (a_it != node2tuple.end()) {
+    auto a_tup = a_it->second;
+    if (!a_tup->is_correct())
+      return false;
+
+    auto flat_a_dpin = a_tup->flatten();
+    if (flat_a_dpin.is_invalid()) {
+      auto zero_dpin = node.create_const(0).setup_driver_pin();
+      collapse_forward_for_pin(node, zero_dpin);
+      return true;
+    }
+
+    a_spin.del();
+    node.setup_sink_pin("a").connect_driver(flat_a_dpin);
+  }
+
+  //---------------------------------------------
+  // Figure out "mask" sink
+  if (mask_it == node2tuple.end())
+    return true;
+
+  auto mask_tup = mask_it->second;
+  if (!mask_tup->is_correct())
+    return true;
+
+  if (mask_tup->is_empty()) {
+    mask_spin.del();
+    node.setup_sink_pin("mask").connect_driver(node.create_const(-1));
+  }else{
+    auto b_dpin = mask_tup->get_dpin("__range_begin");
+    auto e_dpin = mask_tup->get_dpin("__range_end");
+
+    Node mask_node;
+    if (e_dpin.is_invalid() && b_dpin.is_invalid()) {
+      mask_node = node.create_const(-1);
+    }else{
+      Node b_mask_node;
+      if (!b_dpin.is_invalid()) {
+        if (b_dpin.is_type_const()) {
+          auto v = Lconst(0)-(Lconst(1)<<b_dpin.get_type_const());
+          b_mask_node = node.create_const(v);
+        }else{
+          auto zero_dpin = node.create_const(0).setup_driver_pin();
+          auto one_dpin  = node.create_const(1).setup_driver_pin();
+
+          auto shl_node = node.create(Ntype_op::SHL);
+          shl_node.setup_sink_pin("a").connect_driver(one_dpin);
+          shl_node.setup_sink_pin("b").connect_driver(b_dpin);
+
+          b_mask_node = node.create(Ntype_op::Sum);
+          b_mask_node.setup_sink_pin("A").connect_driver(zero_dpin);
+          b_mask_node.setup_sink_pin("B").connect_driver(shl_node);
+        }
+      }
+
+      Node e_mask_node;
+      if (!e_dpin.is_invalid()) {
+        if (e_dpin.is_type_const()) {
+          auto e_val = e_dpin.get_type_const();
+          if (e_val>0)
+            e_mask_node = node.create_const((Lconst(2)<<e_val)-Lconst(1)); // 2 to avoid <<(e_val+1)
+        }
+        if (e_mask_node.is_invalid()) {
+          // if (end<0) {
+          //  tmp = a_driver.__sbits+end
+          // }else{
+          //  tmp = end
+          // }
+          // mask = ((1<<(tmp))-1)
+
+          auto zero_dpin = node.create_const(0).setup_driver_pin();
+          auto one_dpin  = node.create_const(1).setup_driver_pin();
+
+          auto lt_node = node.create(Ntype_op::LT);
+          lt_node.setup_sink_pin("A").connect_driver(e_dpin);
+          lt_node.setup_sink_pin("B").connect_driver(zero_dpin);
+
+          auto bits_node = node.create(Ntype_op::AttrGet);
+          bits_node.setup_sink_pin("field").connect_driver(node.create_const(Lconst::string("__sbits")));
+          bits_node.setup_sink_pin("name").connect_driver(a_spin.get_driver_pin());
+
+          auto tmp_node = node.create(Ntype_op::Sum);
+          tmp_node.setup_sink_pin("A").connect_driver(bits_node);
+          tmp_node.setup_sink_pin("A").connect_driver(e_dpin); // e_dpin < 0
+
+          auto mux_node = node.create(Ntype_op::Mux);
+          mux_node.setup_sink_pin("0").connect_driver(lt_node);
+          mux_node.setup_sink_pin("1").connect_driver(e_dpin);
+          mux_node.setup_sink_pin("2").connect_driver(tmp_node);
+
+          auto mux_add_node = node.create(Ntype_op::Sum);
+          mux_add_node.setup_sink_pin("A").connect_driver(mux_node);
+          mux_add_node.setup_sink_pin("A").connect_driver(node.create_const(1));
+
+          auto shl_node = node.create(Ntype_op::SHL);
+          shl_node.setup_sink_pin("a").connect_driver(one_dpin);
+          shl_node.setup_sink_pin("b").connect_driver(mux_add_node);
+
+          e_mask_node = node.create(Ntype_op::Sum);
+          e_mask_node.setup_sink_pin("A").connect_driver(shl_node);
+          e_mask_node.setup_sink_pin("B").connect_driver(one_dpin);
+        }
+      }
+      if (b_mask_node.is_invalid()) {
+        I(!e_mask_node.is_invalid());
+        mask_node = e_mask_node;
+      }else if (e_mask_node.is_invalid()) {
+        I(!b_mask_node.is_invalid());
+        mask_node = b_mask_node;
+      }else{
+        mask_node = node.create(Ntype_op::And);
+        mask_node.setup_sink_pin("A").connect_driver(b_mask_node);
+        mask_node.setup_sink_pin("A").connect_driver(e_mask_node);
+      }
+    }
+
+    I(!mask_node.is_invalid());
+    mask_spin.del();
+    node.setup_sink_pin("mask").connect_driver(mask_node);
+  }
+
+  return true;
+}
+
 void Cprop::process_tuple_add(Node &node) {
   auto [tup_name, key_name]    = get_tuple_name_key(node);
   auto [value_dpin, value_tup] = get_value(node);
@@ -1116,7 +1266,7 @@ void Cprop::process_tuple_add(Node &node) {
   node2tuple[node.get_compact()] = node_tup;
 
   // post handling for graph outputs, sub-graph and register.
-  if (hier || !node_tup->is_correct())
+  if (hier || !node_tup->is_correct() || node_tup->is_empty())
     return;
 
   //bool in_tuple_add_chain = false;
@@ -1130,7 +1280,7 @@ void Cprop::process_tuple_add(Node &node) {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(e.sink, node_tup, sub_node, node);
       return;
-    } else if (sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
+    } else if (sink_type == Ntype_op::Get_mask || sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux || sink_type == Ntype_op::TupGet) {
     } else {
       pending_out_edges.emplace_back(e);
     }
@@ -1238,6 +1388,13 @@ void Cprop::do_trans(Lgraph *lg) {
       } else if (op == Ntype_op::TupAdd) {
         process_tuple_add(node);
         continue;
+      } else if (op == Ntype_op::Get_mask) {
+        bool maybe_updated = process_get_mask(node);
+        if (maybe_updated) {
+          if (node.is_invalid())
+            continue;  // It got deleted
+          inp_edges_ordered = node.inp_edges_ordered();
+        }
       } else if (op == Ntype_op::TupGet) {
         auto ok = process_tuple_get(node);
         if (!ok) {
@@ -1372,8 +1529,8 @@ void Cprop::do_trans(Lgraph *lg) {
 
     if (!node.has_outputs()) {
       auto op = node.get_type_op();
-      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub) {
-        //&& op != Ntype_op::AttrSet) {
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Sub
+        && op != Ntype_op::AttrSet) {
         // TODO: del_dead_end_nodes(); It can propagate back and keep deleting
         // nodes until it reaches a SubGraph or a driver_pin that has some
         // other outputs. Doing this dead_end_nodes delete iterator can retuce

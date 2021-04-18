@@ -25,6 +25,22 @@ Similarly, this works but it should fail (ambiguous):
 foo = bar@(1+2:4) // bar@((1+2):4) is OK
 ```
 
+Related, the bit selector should use [] not () and support commas. It should be:
+
+```
+foo = bar@[1:3]       // pick bits 1,2,3
+foo = bar@[1+2:4, 10] // pick bits 3,4,10
+```
+
+The `@[a,b]` creates a one-hot bitmask to selects bits (feed to get_mask). The same is also
+used in the for loop.
+
+```
+for a in @[0xF] { // 0,1,2,3 iterations
+for a in 0xF { // 15 iteration
+for b in @[8,1:3,2] { // 1,2,3,8   iterations (bitmask order)
+for b in (8,1:3,2)  { // 8,1,2,3,2 iterations (ordered tuple)
+```
 
 ### Attr/Tup
 

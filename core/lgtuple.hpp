@@ -126,6 +126,7 @@ public:
 
   bool concat(const std::shared_ptr<Lgtuple const> tup2);
   bool concat(const Node_pin &dpin);
+  Node_pin flatten() const;
 
   /// Get all the attributes (__bits) in the same tuple level
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;

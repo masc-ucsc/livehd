@@ -215,12 +215,12 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
   do {
     while (!pending_stack.empty()) {
       auto node = pending_stack.back();
-      I(!node.is_type_flop());
 
       if (!unvisited.count(node.get_compact())) {
         pending_stack.pop_back();
         continue;
       }
+      I(!node.is_type_flop());
 
       if (unlikely(!node.get_class_lgraph()->is_valid_node(node.get_nid()))) {
         // The iterator can delete nodes

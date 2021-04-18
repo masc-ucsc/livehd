@@ -93,6 +93,7 @@ public:
   uint64_t  hash() const;
 
   void dump() const;
+  [[nodiscard]] int get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
