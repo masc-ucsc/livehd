@@ -25,24 +25,22 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
+  pts='TrivialAdd Test2 VendingMachineSwitch VendingMachine LFSR16
+  Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
+  GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
+  SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
+  Decrementer Counter'
   # pts='VecShiftRegister'
   # pts='Cell_alone'
   # pts='SingleEvenFilter'
   # pts='SubModule'
   # pts='BundleConnect'
-  # pts='PlusAnd'
   # pts='Coverage'
   # pts='Adder4'
   # pts='Xor6Thread2'
   # pts='XorSelfThread1'
   # pts='Accumulator'
   # pts='RegXor'
-  # pts='Mux4'
-  pts='TrivialAdd XorSelfThread1 Test2 VendingMachineSwitch VendingMachine LFSR16
-  Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
-  GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
-  SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter'
   # pts='PlusAnd'
   # pts='Mux4'
 
