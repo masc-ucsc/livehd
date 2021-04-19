@@ -1769,22 +1769,20 @@ void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, con
 
   auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
   auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(idx_asg2,    Lnast_node::create_ref(flop_qpin_var));
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(full_register_name)));
 
   reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
-
-
-  // auto flop_qpin_var = lnast.add_string(absl::StrCat("___", stmt.register_().id(), "_q"));
-  // auto idx_attget = lnast.add_child(parent_node, Lnast_node::create_attr_get());
-  // lnast.add_child(idx_attget, Lnast_node::create_ref(flop_qpin_var));
-  // lnast.add_child(idx_attget, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", stmt.register_().id()))));
-  
-  // std::string tmp_str = "__create_flop";
-  // lnast.add_child(idx_attget, Lnast_node::create_const(lnast.add_string(tmp_str)));
-  // reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
 }
 
+void Inou_firrtl::create_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
+  auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
+  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", stmt.register_().id()))));
+
+  reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
+}
 
 void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
   switch (stmt.statement_case()) {
@@ -1799,7 +1797,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
       setup_register_q_pin(lnast, parent_node, stmt);
-
       init_reg_dots(lnast,
                     stmt.register_().type(),
                     absl::StrCat("#", stmt.register_().id()),
@@ -1807,6 +1804,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
                     stmt.register_().reset(),
                     stmt.register_().init(),
                     parent_node);
+      // create_register_q_pin(lnast, parent_node, stmt);
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemory: {  // Memory

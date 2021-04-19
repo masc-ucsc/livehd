@@ -35,7 +35,8 @@ protected:
   std::string_view get_new_seq_name(Lnast &lnast);
   // std::string      get_full_name(Lnast &lnast, Lnast_nid &parent_node, const std::string &term, const bool is_rhs);
   std::string      get_full_name(const std::string &term, const bool is_rhs);
-  void             setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
+  void             setup_register_q_pin (Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
+  void             create_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
 
   // Helper Functions (for handling specific cases)
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
