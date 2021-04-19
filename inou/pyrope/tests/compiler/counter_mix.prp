@@ -1,0 +1,19 @@
+
+r = r.__create_flop
+r.__reset = 0
+r.bar.__initial = 7
+r_q = r
+
+if $in & 1 {
+  r.foo = 2
+  r.bar = 3
+}else{
+  r.foo = 14
+  r.bar = 15
+
+  r.foo.__posclk = 0
+}
+
+r.foo.__initial = 6
+
+%out = r_q.foo + r_q.bar
