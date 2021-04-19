@@ -41,6 +41,8 @@ if [ $# -eq 0 ]; then
   # pts='LogShifter'
   # pts='Adder4'
   pts='Decrementer Counter '
+  pts='Counter'
+  # pts='Decrementer'
 
 else
   file=$(basename $1)

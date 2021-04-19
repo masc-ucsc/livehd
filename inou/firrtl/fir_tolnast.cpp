@@ -1767,13 +1767,14 @@ void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, con
   lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var_str));
 
 
-  auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
-  auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
-  lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(full_register_name)));
+  // auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
+  // auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
+  // lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
+  // lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(full_register_name)));
 
-  reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
+  // reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
 }
+
 
 void Inou_firrtl::create_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
   auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
@@ -1804,7 +1805,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
                     stmt.register_().reset(),
                     stmt.register_().init(),
                     parent_node);
-      // create_register_q_pin(lnast, parent_node, stmt);
+      create_register_q_pin(lnast, parent_node, stmt);
       break;
     }
     case firrtl::FirrtlPB_Statement::kMemory: {  // Memory
