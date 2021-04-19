@@ -44,6 +44,7 @@ if [ $# -eq 0 ]; then
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
   Decrementer Counter'
+  # pts='PlusAnd'
 
 else
   file=$(basename $1)
