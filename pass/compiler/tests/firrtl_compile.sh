@@ -36,15 +36,15 @@ if [ $# -eq 0 ]; then
   # pts='Xor6Thread2'
   # pts='XorSelfThread1'
   # pts='Accumulator'
-  # pts='TrivialAdd '
   # pts='RegXor'
   # pts='Mux4'
-  pts='XorSelfThread1 Test2 VendingMachineSwitch VendingMachine LFSR16
+  pts='TrivialAdd XorSelfThread1 Test2 VendingMachineSwitch VendingMachine LFSR16
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
   Decrementer Counter'
   # pts='PlusAnd'
+  # pts='Mux4'
 
 else
   file=$(basename $1)

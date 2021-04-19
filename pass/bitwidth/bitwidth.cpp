@@ -692,6 +692,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   auto dpin_lhs = node_dp.get_sink_pin("name").get_driver_pin();
   auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
+
   auto it = flat_bwmap.find(dpin_lhs.get_compact_flat());
   if (it == flat_bwmap.end()) {
 #ifndef NDEBUG
@@ -1215,10 +1216,18 @@ void Bitwidth::try_delete_attr_node(Node &node) {
       flat_bwmap.insert_or_assign(mask_dpin.get_compact_flat(), Bitwidth_range(Lconst(0), mask_const));
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
-      for (auto e : node.out_edges()) mask_dpin.connect_sink(e.sink);
+      for (auto e : node.out_edges()) 
+        mask_dpin.connect_sink(e.sink);
 #endif
       node.del_node();
       return;
+    } else {
+      // just connect the lhs and rhs
+      for (auto e : node.out_edges()) {
+        if (e.driver.get_pid() == 0) {// No chain pin
+          e.sink.connect_driver(dpin_rhs);
+        }
+      }
     }
   }
 
@@ -1227,8 +1236,9 @@ void Bitwidth::try_delete_attr_node(Node &node) {
     auto data_dpin = node.get_sink_pin("name").get_driver_pin();
 
     for (auto e : node.out_edges()) {
-      if (e.driver.get_pid() == 0) // No chain pin
+      if (e.driver.get_pid() == 0) {// No chain pin
         e.sink.connect_driver(data_dpin);
+      }
     }
   }
   node.del_node();
