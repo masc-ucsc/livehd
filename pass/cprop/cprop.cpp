@@ -1298,8 +1298,14 @@ void Cprop::process_tuple_add(Node &node) {
     }
   }
 
-  if (!pending_out_edges.empty() && node_tup->is_trivial_scalar()) {
-    expand_data_and_attributes(node, "", pending_out_edges, node_tup);
+  if (!pending_out_edges.empty()) {
+    if (node_tup->is_trivial_scalar()) {
+      expand_data_and_attributes(node, "", pending_out_edges, node_tup);
+    }else{
+      node_tup->dump();
+      Pass::info("Some pins:{} did not connect (maybe later?)", pending_out_edges[0].sink.debug_name());
+      tuple_issues = true; // Some pins did not use the tuple_add ??
+    }
   }
 }
 
@@ -1314,7 +1320,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
 
   auto value_dpin = node_tup->get_dpin(key_name);
 
-  bool added_chain = false;
+  std::shared_ptr<Lgtuple> use_tup;
 
   for (auto it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));
@@ -1322,7 +1328,11 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
     if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2)))
       continue; // Do not create attr for flop config (handled in cprop directly)
 
-    added_chain = true;
+    if (!use_tup) {
+      use_tup = std::make_shared<Lgtuple>(*node_tup);
+    }
+    use_tup->add(attr, it.second);
+
     auto attr_node = node.create(Ntype_op::AttrSet);
     auto an_spin   = attr_node.setup_sink_pin("name");
     auto af_spin   = attr_node.setup_sink_pin("field");
@@ -1358,8 +1368,8 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
     e.del_edge();
   }
 
-  if (added_chain) {
-    node2tuple[value_dpin.get_node().get_compact()] = node_tup;
+  if (use_tup) {
+    node2tuple[value_dpin.get_node().get_compact()] = use_tup;
   }
 
   return value_dpin;
@@ -1613,10 +1623,12 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup) {
   }
 
   if (!local_error) {
-    bwd_del_node(node);  // then delete current tup_add
+    // bwd_del_node(node);  // then delete current tup_add
 
-    auto dpin = lg->get_graph_output("%");  // then delete anything left at %
-    dpin.get_non_hierarchical().del();
+    if (lg->has_graph_output("%")) {
+      auto dpin = lg->get_graph_output("%");  // then delete anything left at %
+      dpin.get_non_hierarchical().del();
+    }
   }
 }
 

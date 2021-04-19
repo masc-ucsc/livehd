@@ -600,6 +600,11 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
     } else {
       std::string key2{get_canonical_name(it.first)}; // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
 
+      if (is_attribute(key) && is_attribute(it.first)) {
+        Lgraph::info("ignoring nested attribute {} with {}", key, it.first);
+        continue;
+      }
+
       if (key2.empty())
         key2 = key;
       else
