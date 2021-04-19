@@ -70,7 +70,7 @@ public:
   bool has_dpin() const { return has_dpin(""); }
 
   static int              get_first_level_pos(std::string_view key);
-  static std::string_view get_first_level_name(std::string_view key);
+  static std::string_view get_canonical_name(std::string_view key);
   static int              get_last_level_pos(std::string_view key) { return get_first_level_pos(get_last_level(key)); }
 
   static bool is_single_level(std::string_view key) { return key.find('.') == std::string::npos; }
@@ -138,7 +138,9 @@ public:
   bool is_empty() const { return (key_map.empty()); }
 
   bool is_scalar() const;
+  bool is_ordered() const;
   bool is_trivial_scalar() const;
+  bool has_just_attributes() const;
 
   void dump() const;
 };

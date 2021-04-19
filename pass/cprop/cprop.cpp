@@ -629,6 +629,11 @@ void Cprop::process_flop(Node &node) {
 
   auto flop_tup = din_it->second->make_flop(node);
   if (flop_tup) {
+    auto it = node2tuple.find(node.get_compact());
+    if (it == node2tuple.end())
+      tuple_issues = true; // Just to trigger a new iteration
+    fmt::print("------------------------------------\n");
+    flop_tup->dump();
     node2tuple[node.get_compact()] = flop_tup;
   }
 }
@@ -726,6 +731,13 @@ bool Cprop::process_tuple_get(Node &node) {
       Pass::info("tuple_get {} for key:{} field is not present (may be OK after iterations)", node.debug_name(), main_field);
       tuple_issues = true;
       return false;
+    }
+
+    if (sub_tup->has_just_attributes() && !is_attr_get) {
+      node_tup->dump();
+      Pass::info("tuple_get {} for key:{} just has attributes (may be OK)", node.debug_name(), main_field);
+      node2tuple[node.get_compact()] = sub_tup;
+      return true;
     }
 
     if (sub_tup->is_trivial_scalar() || is_attr_get) {
@@ -1356,7 +1368,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
 void Cprop::do_trans(Lgraph *lg) {
   Lbench b("pass.cprop");
 
-  for(auto iter=0;iter<2;++iter) {
+  for(auto iter=0;iter<4;++iter) {
     tuple_issues = false;
     auto lgit = lg->forward();
     for (auto fwd_it = lgit.begin(); fwd_it != lgit.end(); ++fwd_it) {
