@@ -20,15 +20,7 @@ if [ $# -eq 0 ]; then
   Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
   VecShiftRegisterParam VecShiftRegisterSimple '
 
-  # pts_hifirrtl_todo='
   # passed hifirrtl pattern pool
-  pts='EnableShiftRegister Flop MaxN PlusAnd Test2 
-  Coverage Decrementer
-  Xor6Thread2 XorSelfThread1 ByteSelector SimpleALU Mux4 Max2 ResetShiftRegister
-  Parity RegisterSimple Register RegXor GCD_3bits Test3 TrivialAdd
-  Accumulator AddNot HiLoMultiplier Darken Shifts NotAnd TrivialArith Tail Trivial
-  LFSR16 VendingMachine VendingMachineSwitch'
-
   PATTERN_PATH=./inou/firrtl/tests/proto
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
@@ -38,10 +30,20 @@ if [ $# -eq 0 ]; then
   # pts='SingleEvenFilter'
   # pts='SubModule'
   # pts='BundleConnect'
-  # pts='LogShifter'
+  # pts='PlusAnd'
+  # pts='Coverage'
   # pts='Adder4'
-  pts='Decrementer Counter '
-  pts='Counter'
+  # pts='Xor6Thread2'
+  # pts='XorSelfThread1'
+  # pts='Accumulator'
+  # pts='TrivialAdd '
+  # pts='RegXor'
+  # pts='Mux4'
+  pts='XorSelfThread1 Test2 VendingMachineSwitch VendingMachine LFSR16
+  Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
+  GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
+  SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
+  Decrementer Counter'
 
 else
   file=$(basename $1)

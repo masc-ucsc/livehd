@@ -221,22 +221,20 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
 // When creating a register, we have to set the register's
 // clock, reset, and init values using "dot" nodes in the LNAST.
 // These functions create all of those when a reg is first declared. 
-void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string& id,
-                                const firrtl::FirrtlPB_Expression& clocke, Lnast_nid& parent_node) {
+void Inou_firrtl::setup_register_bits(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string& id, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        init_reg_dots(lnast,
+        setup_register_bits(lnast,
                       type.bundle_type().field(i).type(),
                       absl::StrCat(id, ".", type.bundle_type().field(i).id()),
-                      clocke,
                       parent_node);
       }
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        init_reg_dots(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), clocke, parent_node);
+        setup_register_bits(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
       }
       break;
     }
@@ -246,13 +244,13 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
       auto reg_bits = get_bit_count(type);
-      init_reg_ref_dots(lnast, id, clocke, reg_bits, parent_node, false);
+      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, false);
       async_rst_names.insert(id.substr(1));
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {
       auto reg_bits = get_bit_count(type);
-      init_reg_ref_dots(lnast, id, clocke, reg_bits, parent_node, true);
+      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, true);
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: {
@@ -262,18 +260,15 @@ void Inou_firrtl::init_reg_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type,
     default: {
       /* UInt Analog Reset Types*/
       auto reg_bits = get_bit_count(type);
-      init_reg_ref_dots(lnast, id, clocke, reg_bits, parent_node, false);
+      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, false);
     }
   }
 }
 
-void Inou_firrtl::init_reg_ref_dots(Lnast& lnast, const std::string& _id, const firrtl::FirrtlPB_Expression& clocke,
-                                    uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
-  std::string id{_id};
-  lnast.add_string(ReturnExprString(lnast, clocke, parent_node, true));
-
+void Inou_firrtl::setup_register_bist_scalar(Lnast& lnast, const std::string& _id, uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
+    std::string id{_id};
     std::string_view acc_name_bw;
     if (is_signed) {
       acc_name_bw = CreateSelectsFromStr(lnast, parent_node, absl::StrCat(id, ".__sbits"));
@@ -1224,7 +1219,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     }
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
       // vec.emplace_back(port_id, dir, 1, false);
-      vec.emplace_back(port_id, dir, 0, false); // intentionally put 0 bits, LiveHD compiler will handle clock bits later
+      vec.emplace_back(port_id, dir, 1, true); // intentionally put 1 signed bits, LiveHD compiler will handle clock bits later
       break;
     }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
@@ -1322,7 +1317,7 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
       lnast.add_child(idx_asg, Lnast_node::create_ref(bit_acc_name));
       lnast.add_child(idx_asg, Lnast_node::create_const(lnast.add_string(std::to_string(port_bits))));
-    }
+    }  
   }
 }
 
@@ -1750,10 +1745,9 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
       declare_register(lnast, parent_node, stmt);
-      init_reg_dots            (lnast,
+      setup_register_bits      (lnast,
                                 stmt.register_().type(),
                                 absl::StrCat("#", stmt.register_().id()),
-                                stmt.register_().clock(),
                                 parent_node);
 
       setup_register_reset_init(lnast, parent_node, 
