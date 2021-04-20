@@ -1744,7 +1744,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       // register_names.insert(stmt.register_().id());
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
-      declare_register(lnast, parent_node, stmt);
       setup_register_bits      (lnast,
                                 stmt.register_().type(),
                                 absl::StrCat("#", stmt.register_().id()),
@@ -1754,6 +1753,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
                                 stmt.register_().id(), 
                                 stmt.register_().reset(), 
                                 stmt.register_().init());
+      declare_register(lnast, parent_node, stmt);
       setup_register_q_pin(lnast, parent_node, stmt);
       break;
     }

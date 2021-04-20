@@ -32,9 +32,8 @@ private:
   absl::flat_hash_map<std::string, Node_pin>                    field2dpin;
   absl::flat_hash_map<std::string_view, std::vector<Node>>      driver_var2wire_nodes;  // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>          inp2leaf_tg_spins;
+  absl::flat_hash_map<std::string, Node>                        vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
-  absl::flat_hash_set<std::string_view>                         tuple_reg_names;
-  absl::flat_hash_map<std::string_view, absl::flat_hash_set<Node>> reg_vname2attr_get_qpin_nodes;
 
 protected:
   void top_stmts2lgraph(Lgraph *lg, const Lnast_nid &lnidx_stmts);
@@ -117,7 +116,6 @@ protected:
   void     post_process_ginp_attr_connections(Lgraph *lg);
   void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
   Node_pin create_const(Lgraph *lg, std::string_view const_str);
-  void     setup_final_register(Lgraph *lg, std::string_view vname, const Node_pin &dpin_largest_ssa);
 
   // attribute related
   bool is_new_var_chain(const Lnast_nid &lnidx_opr);

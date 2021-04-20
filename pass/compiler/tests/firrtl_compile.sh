@@ -35,7 +35,6 @@ if [ $# -eq 0 ]; then
   # pts='SingleEvenFilter'
   # pts='SubModule'
   # pts='BundleConnect'
-  # pts='Coverage'
   # pts='Adder4'
   # pts='Xor6Thread2'
   # pts='XorSelfThread1'
@@ -43,6 +42,8 @@ if [ $# -eq 0 ]; then
   # pts='RegXor'
   # pts='PlusAnd'
   # pts='Mux4'
+  # pts='Test1'
+  # pts='Coverage'
 
 else
   file=$(basename $1)

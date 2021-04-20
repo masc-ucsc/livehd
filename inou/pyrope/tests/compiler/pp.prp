@@ -3,9 +3,12 @@ $cond.__ubits = 1
 $inp.__ubits = 16
 %out.__ubits = 16
 
-#x = #x.__create_flop
+
+// OPT1: say coding style that setting flop attr before you create the flop
+// OPT2: atomic prp_library: #x = create_flop (bits = 16, reset = 0, init = 99);
 #x.__ubits = 16
 #x.__reset = 0
+#x = #x.__create_flop
 x_q = #x
 
 if ($cond) {

@@ -24,7 +24,6 @@ tuple_reg tuple_reg2 tuple_nested2 get_mask1'
 # pts='vector2'
 # pts='hier_tuple_nested_if8'  # LNAST_TO failure
 
-
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 pts_hier1='top sum top'
 pts_hier2='top top sum'

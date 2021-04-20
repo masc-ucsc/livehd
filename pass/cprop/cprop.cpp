@@ -970,7 +970,6 @@ void Cprop::process_attr_set(Node &node) {
     }
   }
 
-  fmt::print("DEBUG3\n");
   auto value_tup = find_lgtuple(value_spin.get_driver_node());
   if (!value_tup) {
     if (node_tup) {
@@ -978,7 +977,6 @@ void Cprop::process_attr_set(Node &node) {
     }
     return; // just propagate from name_tup, nothing from value_tup
   }
-  fmt::print("DEBUG4\n");
 
   if (!value_tup->is_scalar()) {
     value_tup->dump();
