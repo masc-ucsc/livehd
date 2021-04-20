@@ -27,11 +27,13 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
     gioc = true;
   else
     gioc = false;
+
+  (void)gioc; // not used now
 }
 
 void Pass_cprop::optimize(Eprp_var &var) {
   Pass_cprop pcp(var);
-  Cprop      cp(pcp.hier, pcp.gioc);
+  Cprop      cp(pcp.hier);
 
   for (auto &lg : var.lgs) {
     if (lg->is_empty())

@@ -36,7 +36,7 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   }
 
   // FIXME->sh: DEBUG: cannot separate to do_local_cprop_bitwidth(), why?
-  Cprop cp(false, false);                                        // hier = false, gioc = false
+  Cprop cp(false);                                        // hier = false, gioc = false
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
@@ -49,7 +49,7 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 
 // TODO: try to make it work
 void Lcompiler::do_local_cprop_bitwidth() {
-  Cprop    cp(false, false);                                     // hier = false, gioc = false
+  Cprop    cp(false);                                     // hier = false, gioc = false
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   for (const auto &lg : lgs) {
     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
@@ -92,7 +92,7 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "local.raw");
   }
 
-  Cprop cp(false, false);                                     // hier = false, gioc = false
+  Cprop cp(false);                                     // hier = false, gioc = false
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   for (const auto &lg : local_lgs) {
     fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-0)\n", lg->get_name());
@@ -153,7 +153,7 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 }
 
 void Lcompiler::do_cprop() {
-  Cprop cp(false, false);  // hier = false, gioc = false
+  Cprop cp(false);  // hier = false, gioc = false
   auto  lgcnt                   = 0;
   auto  hit                     = false;
   auto  top_name_before_mapping = absl::StrCat("__firrtl_", top);
@@ -260,7 +260,7 @@ void Lcompiler::do_firbits() {
 }
 
 void Lcompiler::global_io_connection() {
-  Cprop    cp(false, true);                                     // hier = false, at_gioc = true
+  Cprop    cp(false);                                     // hier = false, at_gioc = true
   Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true,  max_iters = 10
   Gioc     gioc(path);
 

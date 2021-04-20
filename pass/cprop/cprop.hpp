@@ -11,7 +11,6 @@
 class Cprop {
 private:
   bool hier;
-  bool at_gioc;
   bool tuple_issues;
   bool tuple_found; // set during scalar_pass
 
@@ -80,7 +79,7 @@ protected:
   void scalar_pass(Lgraph *orig);
   void tuple_pass(Lgraph *orig);
 public:
-  Cprop(bool _hier, bool _gioc);
+  Cprop(bool _hier);
 
   void dump_node2tuples() const;
 

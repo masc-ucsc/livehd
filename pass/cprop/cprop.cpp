@@ -19,7 +19,7 @@
 // Single step CPROP for debugging
 //#define TRIVIAL_CPROP
 
-Cprop::Cprop(bool _hier, bool _at_gioc) : hier(_hier), at_gioc(_at_gioc), tuple_found(false) {}
+Cprop::Cprop(bool _hier) : hier(_hier), tuple_found(false) { }
 
 std::tuple<Node_pin, std::shared_ptr<Lgtuple const> > Cprop::get_value(const Node &node) const {
   I(node.is_type(Ntype_op::TupAdd) || node.is_type(Ntype_op::AttrSet));
