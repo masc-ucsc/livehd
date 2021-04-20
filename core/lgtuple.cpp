@@ -1059,7 +1059,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         if (parent_node.is_type(Ntype_op::AttrSet)) {
           auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
           I(!attr2_dpin.is_invalid());
-          auto attr2 = attr2_dpin.get_name();
+          I(attr2_dpin.is_type_const());
+          auto attr2 = attr2_dpin.get_type_const().to_string();
           if (attr2 == attr)
             continue; // same attribute already set (can it have different value??)
         }
