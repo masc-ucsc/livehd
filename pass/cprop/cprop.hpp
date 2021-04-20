@@ -13,6 +13,7 @@ private:
   bool hier;
   bool at_gioc;
   bool tuple_issues;
+  bool tuple_found; // set during scalar_pass
 
   inline static Node_pin invalid_pin; // just for speed
 
@@ -25,6 +26,8 @@ protected:
   absl::flat_hash_set<Node::Compact>                                 dont_touch;
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple const> > get_value(const Node &node) const;
+
+  void add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &key, Node_pin &pin);
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -39,36 +42,43 @@ protected:
   void replace_node(Node &node, const Lconst &result);
   void replace_logic_node(Node &node, const Lconst &result);
 
-  void try_connect_tuple_to_sub(Node_pin &dollar_spin, std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node);
-  void try_connect_lgcpp(Node &node);
+  void try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node);
+  void try_connect_lgcpp(const Node &node);
   void try_connect_sub_inputs(Node &node);
-
-  void process_subgraph(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // Tuple methods
   std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin) const;
   std::shared_ptr<Lgtuple const> find_lgtuple(Node up_node) const;
 
-  void  process_attr_get(Node &node);
-  void  process_attr_set(Node &node);
-  bool  process_get_mask(Node &node);
-  void  process_tuple_add(Node &node);
-  Node_pin  expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup);
-  bool  process_tuple_get(Node &node);
+  void  reconnect_tuple_add(Node &node);
+  void  reconnect_tuple_get(Node &node);
 
-  bool  process_mux(Node &node, XEdge_iterator &inp_edges_ordered);
-  void  process_sext(Node &node, XEdge_iterator &inp_edges_ordered);
+  Node_pin  expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges, std::shared_ptr<Lgtuple const> node_tup);
+
+  // handle tuple issues but allowed to "mutate" the node
+  void  tuple_mux_mut(Node &node);
+  void  tuple_flop_mut(Node &node);
+  void  tuple_get_mask_mut(Node &node);
+
+  // handle tuple issues but not allowed to "mutate"
+  void  tuple_subgraph(const Node &node);
+  void  tuple_tuple_add(const Node &node);
+  bool  tuple_tuple_get(const Node &node);
+  void  tuple_attr_set(const Node &node);
+
+  void  scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // io construction
-  void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple> tup);
+  void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> tup);
 
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
 
-  void process_flop(Node &node);
 
-  std::tuple<std::string, std::string> get_tuple_name_key(Node &node) const;
+  std::tuple<std::string, std::string> get_tuple_name_key(const Node &node) const;
 
+  void scalar_pass(Lgraph *orig);
+  void tuple_pass(Lgraph *orig);
 public:
   Cprop(bool _hier, bool _gioc);
 

@@ -594,6 +594,8 @@ void Lgtuple::del(std::string_view key) {
 void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
   I(!key.empty());
 
+  correct = correct && tup->correct;
+
   for (const auto &it : tup->key_map) {
     if (it.first.empty()) {
       add(key, it.second);
@@ -616,6 +618,24 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 }
 
 void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
+
+#ifndef NDEBUG
+  // Dangerous. The Tup are deleted in program order. If stored here. It can be
+  // garbage later.
+  //
+  // Only TupGet for a root attr can be because they will be converted to AttrGet
+  if(dpin.get_node().is_type_tup()) {
+    auto pos_spin = dpin.get_node().get_sink_pin("position");
+    I(pos_spin.is_connected());
+    I(pos_spin.get_driver_pin().is_type_const());
+    auto v = pos_spin.get_driver_pin().get_type_const().to_string();
+    if (is_correct()) {
+      I(is_root_attribute(v));
+    }else{
+      fmt::print("tup:{} adding potentially incorrect key:{} (more iterations needed to fix)\n", name, key);
+    }
+  }
+#endif
 
   bool ordered = is_ordered();
 

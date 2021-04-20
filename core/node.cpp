@@ -590,7 +590,7 @@ int Node::get_color() const {
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
 
 // LCOV_EXCL_START
-void Node::dump() {
+void Node::dump() const {
   fmt::print("nid: {} type: {} lgraph: {} ", nid, get_type_name(), current_g->get_name());
   if (get_type_op() == Ntype_op::LUT) {
     fmt::print(" lut = {}\n", get_type_lut().to_pyrope());

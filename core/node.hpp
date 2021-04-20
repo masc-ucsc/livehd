@@ -352,7 +352,7 @@ public:
   bool has_color() const;
   // END ATTRIBUTE ACCESSORS
 
-  void dump();
+  void dump() const;
 };
 
 namespace mmap_lib {
