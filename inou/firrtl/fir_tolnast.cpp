@@ -1181,14 +1181,10 @@ std::string Inou_firrtl::FlattenExpression(Lnast& ln, Lnast_nid& parent_node, co
 
   } else if (expr.has_sub_access()) {
     auto idx_str = ReturnExprString(ln, expr.sub_access().index(), parent_node, true);
-    // DEBUGG
     return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), ".", idx_str);
-    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_access().expression()), "[", idx_str, "]"); */
 
   } else if (expr.has_sub_index()) {
     return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
-    /* return absl::StrCat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), "[", expr.sub_index().index().value(),
-     * "]"); */
 
   } else if (expr.has_reference()) {
     return expr.reference().id();
@@ -1243,8 +1239,6 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         vec.emplace_back(port_id, dir, 0, false);
-        // DEBUGG
-        /* create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, "[", i, "]"), vec); */
         create_io_list(type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), vec);
       }
       break;
@@ -2135,7 +2129,6 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         // note: get rid of [], use . all the time
 
-        // DEBUGG
         AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }
       break;

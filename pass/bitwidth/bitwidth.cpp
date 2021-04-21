@@ -372,8 +372,6 @@ void Bitwidth::process_get_mask(Node &node) {
     min_val = val4;
 
   flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(min_val, max_val));
-  // flat_bwmap.insert_or_assign(node.get_driver_pin().get_compact_flat(), Bitwidth_range(0,
-  // (Lconst(1)<<(max_val.get_bits()-1))-Lconst(1) ));
 }
 
 void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
@@ -493,12 +491,6 @@ void Bitwidth::process_logic_or_xor(Node &node, XEdge_iterator &inp_edges) {
       bits = it->second.get_sbits() - 1;
     else
       bits = it->second.get_sbits();
-
-    if (bits == 0) {
-      debug_unconstrained_msg(node, e.driver);
-      not_finished = true;
-      return;
-    }
 
     if (bits > max_bits)
       max_bits = bits;
@@ -994,7 +986,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     auto lgit = lg->forward(hier);
     for (auto fwd_it = lgit.begin(); fwd_it != lgit.end(); ++fwd_it) {
       auto node = *fwd_it;
-      // fmt::print("{}\n", node.debug_name());
+      fmt::print("{}\n", node.debug_name());
       auto inp_edges = node.inp_edges();
       auto op        = node.get_type_op();
 

@@ -25,11 +25,11 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='TrivialAdd Test2 VendingMachineSwitch VendingMachine LFSR16
+  pts='LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine 
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter'
+  Decrementer Counter RegXor'
   # pts='VecShiftRegister'
   # pts='Cell_alone'
   # pts='SingleEvenFilter'
@@ -39,8 +39,7 @@ if [ $# -eq 0 ]; then
   # pts='Xor6Thread2'
   # pts='XorSelfThread1'
   # pts='Accumulator'
-  # pts='RegXor'
-  # pts='PlusAnd'
+  # pts='PlusAnd'      // issue: first element of Vector is not ended with _0
   # pts='Mux4'
   # pts='Test1'
   # pts='Coverage'
