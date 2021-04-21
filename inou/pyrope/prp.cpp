@@ -404,12 +404,12 @@ uint8_t Prp::rule_scope_body(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
 uint8_t Prp::rule_scope(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_scope.");
 
-  if (SCAN_IS_TOKEN(Token_id_colon, Prp_rule_scope)) {
+  if (SCAN_IS_TOKEN(Token_id_or, Prp_rule_scope)) {
     // optional
     CHECK_RULE(&Prp::rule_scope_condition);
     PRINT_DBG_AST("{}\n", scan_text());
     PRINT_DBG_AST("cur_line = {}\n", cur_line);
-    if (SCAN_IS_TOKEN(Token_id_colon, Prp_rule_scope)) {
+    if (SCAN_IS_TOKEN(Token_id_or, Prp_rule_scope)) {
       // optional
       // CHECK_RULE(&Prp::rule_logical_expression);
       RULE_SUCCESS("Matched rule_scope.\n", Prp_rule_scope);

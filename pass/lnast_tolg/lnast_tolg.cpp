@@ -1583,7 +1583,7 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   auto  subg_node = lg->create_node_sub(lgid);
   auto *sub       = library->ref_sub(lgid);
 
-  subg_node.set_name(absl::StrCat(ret_name, ":", func_name));
+  subg_node.set_name(absl::StrCat(ret_name, ".", func_name));
   subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
 }
 
@@ -1591,8 +1591,8 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto       c0_fdef          = lnast->get_first_child(lnidx);
   auto       c1_fdef          = lnast->get_sibling_next(c0_fdef);
   auto       func_stmts       = lnast->get_sibling_next(c1_fdef);
-  auto       func_name        = lnast->get_vname(c0_fdef);
-  auto       subg_module_name = absl::StrCat(module_name, ":", func_name);
+  auto       func_vname       = lnast->get_vname(c0_fdef);
+  auto       subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg p(subg_module_name, path);
 
   fmt::print("============================= Sub-module: LNAST->Lgraph Start ===============================================\n");
@@ -1617,8 +1617,10 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto value_dpin = lg->create_node_const(Lconst(lgid)).setup_driver_pin();
   value_dpin.connect_sink(value_spin);
 
-  name2dpin[func_name] = tup_add.setup_driver_pin();  // note: record only the function_name instead of top.function_name
-  tup_add.setup_driver_pin().set_name(func_name);
+  //auto      func_name = lnast->get_name(c0_fdef);
+  //name2dpin[func_name] = tup_add.setup_driver_pin();  // note: record only the function_name instead of top.function_name
+  name2dpin[func_vname] = tup_add.setup_driver_pin();  // note: record only the function_name instead of top.function_name
+  tup_add.setup_driver_pin().set_name(func_vname);
 };
 
 void Lnast_tolg::process_ast_uif_op(Lgraph *lg, const Lnast_nid &lnidx) {
