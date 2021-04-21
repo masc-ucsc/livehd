@@ -25,7 +25,7 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine 
+  pts='Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine 
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
@@ -42,7 +42,6 @@ if [ $# -eq 0 ]; then
   # pts='PlusAnd'      // issue: first element of Vector is not ended with _0
   # pts='Mux4'
   # pts='Test1'
-  # pts='Coverage'
 
 else
   file=$(basename $1)

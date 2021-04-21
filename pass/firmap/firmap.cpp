@@ -377,31 +377,11 @@ void Firmap::map_node_fir_andr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   auto new_node_not1 = new_lg->create_node(Ntype_op::Not);
   auto new_node_not2 = new_lg->create_node(Ntype_op::Not);
   auto new_node_ror  = new_lg->create_node(Ntype_op::Ror);
+  (void) fbmap;
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
-      auto it = fbmap.find(e.driver.get_compact_flat());
-      if (it == fbmap.end())
-        it = get_fbits_from_hierarchy(e);
-
-      auto e1_bits = it->second.get_bits();
-      auto e1_sign = it->second.get_sign();
-
-      // unsigned graph input will have a tposs in the future(BW will insert
-      // it), the extra MSB(0) of this tposs will cause the following Not_op
-      // semantic wrong, hence, we add an Or_op with MSB(1) to avoid problem
-      auto parent_node = e.driver.get_node();
-      bool cond1       = parent_node.get_type_op() == Ntype_op::AttrSet;
-      bool cond2       = cond1 && parent_node.setup_sink_pin("name").get_driver_pin().is_graph_input();
-      if (cond2 && !e1_sign) {
-        auto new_node_or    = new_lg->create_node(Ntype_op::Or);
-        auto new_node_const = new_lg->create_node_const(Lconst(1UL) << Lconst(e1_bits));
-        pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A"));
-        new_node_const.setup_driver_pin().connect_sink(new_node_or.setup_sink_pin("A"));
-        new_node_or.setup_driver_pin().connect_sink(new_node_not1.setup_sink_pin("a"));
-      } else {
-        pinmap.insert_or_assign(e.sink, new_node_not1.setup_sink_pin("a"));
-      }
+      pinmap.insert_or_assign(e.sink, new_node_not1.setup_sink_pin("a"));
     }
   }
 
@@ -440,9 +420,11 @@ void Firmap::map_node_fir_and_or_xor(Node &old_node, Lgraph *new_lg, std::string
 
 void Firmap::map_node_fir_not(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_not = new_lg->create_node(Ntype_op::Not);
+  (void) fbmap;
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
+      // pinmap.insert_or_assign(e.sink, new_node_not.setup_sink_pin("a"));
       auto it = fbmap.find(e.driver.get_compact_flat());
       if (it == fbmap.end())
         it = get_fbits_from_hierarchy(e);
