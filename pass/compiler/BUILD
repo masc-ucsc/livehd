@@ -40,6 +40,22 @@ sh_test(
 )
 
 sh_test(
+    name = "firrtl_compile",
+    srcs = ["tests/firrtl_compile.sh"],
+    data = [
+        "//inou/firrtl:firrtl_tests",
+        "//main:lgshell",
+    ],
+    # tags = [
+    #     "fixme",
+    #     "manual",
+    # ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
     name = "regression_compile",
     srcs = ["tests/regression_compile.sh"],
     data = [
