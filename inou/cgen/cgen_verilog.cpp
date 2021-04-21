@@ -596,6 +596,14 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
     } else if (op == Ntype_op::Get_mask) {
       name         = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
+      {
+        // Force the "a" pin in get_mask to be a variable (yosys fails otherwise)
+        auto dpin2 = node.get_sink_pin("a").get_driver_pin();
+        if (!pin2var.contains(dpin2.get_compact_class())) {
+          auto name2 = get_scaped_name(dpin2.get_wire_name());
+          add_to_pin2var(buffer, dpin2, name2, false);
+        }
+      }
     } else if (!node.is_type_flop()) {
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
