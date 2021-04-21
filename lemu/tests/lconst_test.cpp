@@ -1369,6 +1369,12 @@ TEST_F(Lconst_test, lconst_get_bits) {
 
   EXPECT_EQ(Lconst("0xFFF").get_mask_op(Lconst("-1")), Lconst("0xFFF"));
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-1")), Lconst("0xfeef"));
+  auto val1 = Lconst("0xfeef").get_mask_op(Lconst("-2"));
+  auto val2 = Lconst("0xfeef").get_mask_op(Lconst("-3"));
+  fmt::print("val1:{} val2:{}\n", val1.to_pyrope(), val2.to_pyrope());
+
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-2")), Lconst("0xfeee"));
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-3")), Lconst("0xfeed"));
 
   auto v1 = Lconst("-23").get_mask_op(Lconst("-1"));
   auto v2 = Lconst("-23").get_mask_op();
