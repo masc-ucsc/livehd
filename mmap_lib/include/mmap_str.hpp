@@ -11,6 +11,9 @@
 #include "mmap_map.hpp"
 
 #define posShifter(s) s<4 ? (s-1):3
+#define isol8(pos, s) (pos >> (s*8)) & 0xff
+#define l8(size, i) i - (size - 10) 
+#define mid(pos, i) pos + (i-2)
 
 namespace mmap_lib {
 
@@ -340,17 +343,21 @@ constexpr char operator[](std::size_t pos) const {
     }
   }
 
+
   // checks if *this pstr starts with st
-  bool starts_with(const str &st) const { 
-    if (st._size > _size) { return false; }// st.size > *this.size, false
-    else if (st._size == _size) { return *this == st; }
+  bool starts_with(str &st) const { 
+    if (st.size() > _size) { return false; }// st.size > *this.size, false
+    else if (st.size() == _size) { return *this == st; }
+    else if (st.size() == 0) { return true; }
     else { // if (st._size < *this._size), compare   
       uint8_t mx = posShifter(_size);
-      uint8_t mx_st = posShifter(st._size); 
+      uint8_t mx_st = posShifter(st.size());
       if (_size <= 13) { //==== case 1: if *this is SHORT, st is SHORT
-        for (auto i = 0; i < st._size; ++i) { // iterate based on st
+        for (auto i = 0; i < st.size(); ++i) { // iterate based on st
           if (i < 4) { // for *this and st, first 4 will be in p_o_s
-            if (((st.ptr_or_start >> (mx_st*8)) & 0xff) != ((ptr_or_start >> (mx*8)) & 0xff)) {
+            uint8_t one = isol8(st.ptr_or_start,mx_st);
+            uint8_t two = isol8(ptr_or_start,mx);
+            if (one != two) {
               return false;
             } else { --mx_st; --mx; }
           } else { // rest of string will be in e
@@ -362,16 +369,25 @@ constexpr char operator[](std::size_t pos) const {
         uint32_t v_ptr = ptr_or_start;
         uint8_t e_ptr = 0;
         if (st._size <= 13) { //==== case 2a: *this is LONG, st is SHORT
-          for (auto i = 0; i < st._size; ++i) { //i refers to st index
+          for (auto i = 0; i < st.size(); ++i) { //i refers to st index
+            // i = 0, 1
+            // for *this, data will be in e -> index with i
+            // for st   , data will be in p_o_s -> shift 
             if (i < 2) { // i = 0, 1 : *this.e is used, st.ptr_or_start is used
-              if (e[e_ptr] != ((st.ptr_or_start >> (mx_st*8)) & 0xff)) { 
+              if (e[e_ptr] != static_cast<char>(isol8(st.ptr_or_start,mx_st))) { 
                 return false; 
               } else { --mx_st; ++e_ptr; }
-            } else if ((i >= 2) && (i < 4)) { // 1 = 2,3 *this uses vec, st uses p_o_s
-              if (string_vector.at(v_ptr) != ((st.ptr_or_start >> (mx_st*8)) & 0xff)) {
+            // i = 2, 3
+            // for *this, data will be in vec only -> index with v_ptr
+            // for st   , data will be in p_o_s -> shift
+            } else if ((i >= 2) && (i < 4)) {
+              if (string_vector.at(v_ptr) != static_cast<char>(isol8(st.ptr_or_start,mx_st))) {
                 return false;
               } else { --mx_st; ++v_ptr; }
-            } else { //i = 4..12 (max), *this uses vec/e, st uses e
+            // i = 4 ... 12 (max)
+            // for *this, data will be in vec/e depend on length
+            // for st   , data will be in e -> index with i-4
+            } else {
               // if we're done using string_vector, we use last 8 of e of *this
               if ((v_ptr - ptr_or_start) >= (_size - 10)) {
                 if (e[e_ptr] != st.e[i - 4]) { return false; } 
@@ -383,25 +399,25 @@ constexpr char operator[](std::size_t pos) const {
             }
           }
           return true; // made it out of the for loop means no mismatch 
-        } else if (st._size > 13) { //==== case 2b: *this is LONG, st is LONG
+        } else if (st.size() > 13) { //===== case 2b: *this is LONG, st is LONG
           uint8_t e_ptr = 2, ste_ptr = 2; // used to iterate through last 8 of e
           uint32_t v_ptr = ptr_or_start, stv_ptr = st.ptr_or_start;
+          // start with first two of e for both, then move to vector, then last 8 of e
           // NOTE: be careful when *this is still in vec, and st runs out of vec
-          for (auto i = 0; i < st._size; ++i) { // using st._size to iterate 
-            if (i < 2) { // i = 0,1, for both use e
+          for (auto i = 0; i < st.size(); ++i) { // using st._size to iterate 
+            // i = 0, 1
+            // for both, in e
+            if (i < 2) {
               if (e[i] != st.e[i]) { return false; }
-            // i = 2..last 8, both uses vec, BUT st ALWAYS reaches e before *this
-            } else if ((i >= 2) && (i < (_size - 8))) {
-              // when st runs out of vector, need to use last 8 of e
-              if ((stv_ptr - st.ptr_or_start) >= (st._size - 10)) {
-                if (string_vector.at(v_ptr) != st.e[ste_ptr]) { return false; } 
-                else { ++v_ptr; ++ste_ptr; }
-              } else { // use vec for both
-                if (string_vector.at(v_ptr) != string_vector.at(stv_ptr)) {
-                  return false;
-                } else { ++v_ptr; ++stv_ptr; }
-              }
-            } else { // i = last 8 of st, *this could be in vec, st always in e
+            // i = 2 .. start of last 8
+            // for both, in vec, BUT, st will ALWAYS reach e before *this
+            } else if ((i >= 2) && (i < (st.size() - 8))) {
+              if (string_vector.at(v_ptr) != string_vector.at(stv_ptr)) {
+                return false;
+              } else { ++v_ptr; ++stv_ptr; }
+            // i = last 8 of st
+            // *this can still be in vec, st always n e here
+            } else {
               // if *this has reached last 8, we use e for *this
               if ((v_ptr - ptr_or_start) >= (_size - 10)) {
                 if (e[e_ptr] != st.e[ste_ptr]) { return false; } 
@@ -419,7 +435,6 @@ constexpr char operator[](std::size_t pos) const {
     }
   }
 
-
   // const char * and std::string will come thru here
   bool starts_with(std::string_view st) const { 
     if (st.size() > _size) { return false; }
@@ -431,7 +446,7 @@ constexpr char operator[](std::size_t pos) const {
       if (_size <= 13) {
         uint8_t mx = posShifter(_size);
         for (auto i = mx; i >= 0, i <= 3; --i) {
-          if (((ptr_or_start >> (i*8)) & 0xff) != st[fndsize++] ) {
+          if (static_cast<char>(isol8(ptr_or_start,i)) != st[fndsize++] ) {
             return false; 
           }
           if (fndsize == st.size()) { return true; }
@@ -465,9 +480,144 @@ constexpr char operator[](std::size_t pos) const {
     }
   }
 
-  bool ends_with(const str &v) const;
-  bool ends_with(std::string_view sv) const;
-  bool ends_with(std::string s) const;
+  // checks if *this pstr ends with en
+  bool ends_with(const str &en) const {
+    if (en.size() > _size) { return false; }
+    else if (en.size() == _size) { return *this == en; }
+    else if (en.size() == 0) { return true; }
+    else if (en.size() < _size) {
+      if (_size <= 13) {// if *this is SHORT, en is SHORT too
+        uint8_t mx = posShifter(_size); // shifter for *this
+        mx = mx - (_size - en.size()); // adjusted for size of en
+        uint8_t mx_st = posShifter(en.size()); // en's shifter
+        // i keeps track of en, j keeps track of *this
+        for (long unsigned int i = 0, j = _size-en.size(); i < en.size(); ++i, ++j) {
+          // -> *this and en are in ptr_or_start 
+          if ((i <= 3) && (mx_st <= 3) && (mx_st >= 0)) { // en needs to shift
+            if (mx <= 3 && mx >= 0) { // *this needs to shift
+              uint8_t one = isol8(ptr_or_start, mx);
+              uint8_t two = isol8(en.ptr_or_start, mx_st);
+              if (one != two) { return false; }
+              else { --mx_st; --mx; }
+            } else { // *this does not need to shift anymore
+              if (e[j-4] != static_cast<char>(isol8(en.ptr_or_start, mx_st))) {
+                return false;
+              } else { --mx_st; }
+            }
+          } else { // en is in e now
+            if (e[j-4] != en.e[i-4]) { return false; }
+          } 
+        }
+        return true;
+      } else if (_size > 13) { // if *this is LONG, en can be either
+        if (en.size() > 13) { // -> en is LONG
+          for (long unsigned int i = 0, j = _size-en.size(); i < en.size(); ++i, ++j) {
+            if (i < 2) { // en in e[0,1]
+              if (j < 2) { // *this is in e[]
+                if (e[j] != en.e[i]) { return false; }
+              } else if ((j >= 2) && (j < (_size - 8))) { // *this is in vector now
+                if (string_vector.at(mid(ptr_or_start,j)) != en.e[i]) {
+                  return false;
+                }
+              } 
+            } else if ((i >= 2) && (i < (en.size() - 8))) { // en in vec
+              if ((j >= 2) && (j < (_size - 8))) { // *this is in vector
+                if (string_vector.at(mid(ptr_or_start,j)) != string_vector.at(mid(en.ptr_or_start,i))) {
+                  return false;
+                }
+              }
+            } else { // last 8 for both
+              if (l8(_size,j) <= 9 && l8(en.size(),i) <= 9 && l8(_size,j) == l8(en.size(),i)) {
+                if (e[l8(_size, j)] != en.e[l8(en.size(), i)]) {
+                  return false;
+                }
+              }
+            }
+          }
+          return true;
+        } else if (en.size() <= 13) { // -> en is SHORT
+          uint8_t mx_st = posShifter(en.size());
+          for (long unsigned int i = 0, j = _size-en.size(); i < en.size(); ++i, ++j) {
+            if (i < 4) { //en needs to shift
+              if (j < 2) { // *this in e[0,1]
+                if (e[j] != static_cast<char>(isol8(en.ptr_or_start, mx_st--))) {
+                  return false;
+                }
+              } else if ((j >= 2) && (j < (_size - 8))) { // *this is in vec
+                if (string_vector.at(mid(ptr_or_start,j)) != static_cast<char>(isol8(en.ptr_or_start, mx_st))) {
+                  return false;
+                } else { --mx_st; }
+              } else { // *this is in last 8
+                if (e[l8(_size, j)] != static_cast<char>(isol8(en.ptr_or_start, mx_st))) {
+                  return false;
+                } else { --mx_st; }
+              }
+            } else { // en is in e[]
+              if ((j >= 2) && (j < (_size - 8))) {
+                if (string_vector.at(mid(ptr_or_start,j)) != en.e[i-4]) {
+                  return false;
+                }
+              } else { // *this is in last 8
+                if (e[l8(_size, j)] != en.e[i-4]) { return false; }
+              }
+            }
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
+  bool ends_with(std::string_view en) const {
+    if (en.size() > _size) { return false; }
+    else if (en.size() == _size) { return *this == en; }
+    else if (en.size() == 0) { return true; }
+    else if (en.size() < _size) {
+      // Actual compare logic
+      auto fndsize = 0;
+      if (_size <= 13) { // *this is SHORT
+        uint8_t mx = posShifter(_size);
+        mx = mx - (_size - en.size()); //shifter for *this
+        for (auto j = _size-en.size(); j < _size; ++j) { // iterate on *this
+          if (j <= 3) { // *this needs to shift
+            if (static_cast<char>(isol8(ptr_or_start, mx)) != en[fndsize++]) {
+              return false;
+            } else { --mx; }             
+            if (fndsize == en.size()) { return true; }
+          } else { // *this is in e
+            if (e[j-4] != en[fndsize++]) { return false; } 
+            else { --mx; }
+            if (fndsize == en.size()) { return true; }
+          }
+        }
+        return true;
+      } else { // *this is LONG
+        for (auto j = _size-en.size(); j < _size; ++j) {
+          if (j < 2) { // first two in e
+            if (e[j] != en[fndsize++]) { return false; } 
+            if (fndsize == en.size()) { return true; }
+          } else if (j >= 2 && j < (_size-8)) { // in string_vec
+            if (string_vector.at(mid(ptr_or_start,j)) != en[fndsize++]) {
+              return false;
+            }
+            if (fndsize == en.size()) { return true; }
+          } else {
+            if (e[l8(_size, j)] != en[fndsize++]) { return false; } 
+            if (fndsize == en.size()) { return true; }
+          }
+        }
+        return true;
+      }
+      return false;
+    }
+  }
+
+  // will use the string_view function
+  bool ends_with(std::string en) const {
+    return ends_with(std::string_view(en.c_str())); 
+  }
+
 
   std::size_t find(const str &v, std::size_t pos = 0) const{
 
