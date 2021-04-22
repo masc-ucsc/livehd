@@ -362,26 +362,26 @@ public:
     return v;
   }
 
-  const std::vector<const IO_pin *> get_output_pins() const {
+  const std::vector<std::pair<const IO_pin *, Port_ID>> get_output_pins() const {
     I(io_pins.size() >= 1);
-    std::vector<const IO_pin *> v;
+    std::vector<std::pair<const IO_pin *, Port_ID>> v;
+    Port_ID i = 0;
     for (const auto &e : io_pins) {
-      if (e.is_invalid())
-        continue;
       if (e.is_output())
-        v.emplace_back(&e);
+        v.emplace_back(&e, i);
+      ++i;
     }
     return v;
   }
 
-  const std::vector<const IO_pin *> get_input_pins() const {
+  const std::vector<std::pair<const IO_pin *, Port_ID>> get_input_pins() const {
     I(io_pins.size() >= 1);
-    std::vector<const IO_pin *> v;
+    std::vector<std::pair<const IO_pin *, Port_ID>> v;
+    Port_ID i = 0;
     for (const auto &e : io_pins) {
-      if (e.is_invalid())
-        continue;
       if (e.is_input())
-        v.emplace_back(&e);
+        v.emplace_back(&e, i);
+      ++i;
     }
     return v;
   }

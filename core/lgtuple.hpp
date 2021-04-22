@@ -70,6 +70,7 @@ public:
   bool has_dpin() const { return has_dpin(""); }
 
   static int              get_first_level_pos(std::string_view key);
+  static std::string_view get_first_level_name(std::string_view key);
   static std::string_view get_canonical_name(std::string_view key);
   static int              get_last_level_pos(std::string_view key) { return get_first_level_pos(get_last_level(key)); }
 

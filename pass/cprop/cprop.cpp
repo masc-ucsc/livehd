@@ -515,26 +515,30 @@ void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &s
 
   bool sub_dollar_is_gone = false;
 
-  for (const auto *io_pin : sub.get_input_pins()) {
-    if (io_pin->name == "$") {
-      if (io_pin->is_invalid()) {
+  for (auto &it: sub.get_input_pins()) {
+    if (it.first->name == "$") {
+      if (it.first->is_invalid()) {
         sub_dollar_is_gone = true;
       }
       continue;
     }
 
-    if (tup->has_dpin(io_pin->name)) {
-      auto dpin = tup->get_dpin(io_pin->name);
-      sub_node.get_sink_pin(io_pin->name).connect_driver(dpin);
+    if (tup->has_dpin(it.first->name)) {
+      auto sub_spin = sub_node.setup_sink_pin_raw(it.second);
+      if (!sub_spin.is_connected()) {
+        auto dpin = tup->get_dpin(it.first->name);
+        sub_spin.connect_driver(dpin);
+      }
     } else {
-      Pass::info("could not find IO {} in graph {}", io_pin->name, sub.get_name());
+      Pass::info("could not find IO {} in graph {}", it.first->name, sub.get_name());
       tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
     }
   }
 
   if (tup->is_correct() || sub_dollar_is_gone) {
     for (const auto &it2 : tup->get_map()) {
-      if (!sub.is_input(it2.first)) {
+      auto name = Lgtuple::get_first_level_name(it2.first);
+      if (!sub.is_input(name)) {
         Pass::info("potential issue, field {} unused by the sub {} at node {}", it2.first, sub.get_name(), sub_node.debug_name());
       }
     }
@@ -873,15 +877,45 @@ void Cprop::tuple_subgraph(const Node &node) {
     return;
   }
 
+  auto it2 = node2tuple.find(node.get_compact());
+  if (it2!=node2tuple.end())
+    return;
+
   const auto &sub = node.get_type_sub_node();
-  if (sub.has_pin("%")) {
-    auto dpin = node.get_driver_pin("%");
-    if (!dpin.is_invalid() && dpin.is_connected()) {
-      sub.dump();
-      fmt::print("subgraph:{} outputs are connected to %, expand to tuple (FIXME: may reconnect) or hier", sub.get_name());
-      tuple_issues = true;
+  std::string method;
+  if (node.has_name()) {
+    method = node.get_name();
+  }else{
+    method = sub.get_name();
+  }
+
+  auto node_tup = std::make_shared<Lgtuple>(method);
+
+  for(auto &it:sub.get_output_pins()) {
+    auto pin_name{it.first->name};
+    if (pin_name.size()>2 && pin_name.substr(0,2) == "%.") {
+      pin_name = pin_name.substr(2);
+    }
+    if (it.first->has_io_pos()) {
+      auto pos = it.first->get_io_pos();
+      pin_name = absl::StrCat(":", pos, ":", pin_name);
+    }
+    auto dpin = node.setup_driver_pin_raw(it.second);
+    I(dpin == node.get_driver_pin(it.first->name));
+
+    node_tup->add(pin_name, dpin);
+
+    if (it.first->name == "%") {
+      auto dpin2 = node.get_driver_pin("%");
+      if (!dpin2.is_invalid() && dpin.is_connected()) {
+        sub.dump();
+        fmt::print("subgraph:{} outputs are connected to %, expand to tuple (FIXME: may reconnect) or hier", sub.get_name());
+        tuple_issues = true;
+      }
     }
   }
+
+  node2tuple[node.get_compact()] = node_tup;
 }
 
 void Cprop::tuple_tuple_add(const Node &node) {
@@ -977,13 +1011,17 @@ void Cprop::tuple_tuple_add(const Node &node) {
       I(parent_node.is_type_sub());
 
       const auto &sub = parent_node.get_type_sub_node();
-      for (const auto *io_pin : sub.get_output_pins()) {
-        auto sub_dpin = parent_node.get_driver_pin(io_pin->name);
-        if (io_pin->has_io_pos()) {
-          auto io_name = absl::StrCat(":", std::to_string(io_pin->get_io_pos()), ":", io_pin->name);
+      for (auto &it:sub.get_output_pins()) {
+        auto sub_dpin = parent_node.setup_driver_pin_raw(it.second);
+        auto pin_name{it.first->name};
+        if (pin_name.size()>2 && pin_name.substr(0,2) == "%.") {
+          pin_name = pin_name.substr(2);
+        }
+        if (it.first->has_io_pos()) {
+          auto io_name = absl::StrCat(":", std::to_string(it.first->get_io_pos()), ":", pin_name);
           node_tup->add(io_name, sub_dpin);
         } else {
-          node_tup->add(io_pin->name, sub_dpin);
+          node_tup->add(pin_name, sub_dpin);
         }
       }
     }else{
@@ -1074,6 +1112,18 @@ bool Cprop::tuple_tuple_get(const Node &node) {
 
   auto sub_tup = node_tup->get_sub_tuple(main_field);
   if (!sub_tup) {
+    if (main_field == "$") {
+      bool dollar_to_subs=true;
+      for(auto &e:node.out_edges()) {
+        if (e.sink.is_type(Ntype_op::Sub))
+          continue;
+        dollar_to_subs = false;
+        break;
+      }
+      if (dollar_to_subs) {
+        return true;
+      }
+    }
     node_tup->dump();
     Pass::info("tuple_get {} for key:{} field is not present (may be OK after iterations)", node.debug_name(), main_field);
     tuple_issues = true;
@@ -1249,7 +1299,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
     if (pos_dpin.is_type_const()) {
       auto field = pos_dpin.get_type_const().to_string();
       if (Lgtuple::is_root_attribute(field)) {
-        if (!Ntype::is_valid_sink(Ntype_op::Flop, field.substr(2))) {
+        if (!Ntype::is_valid_sink(Ntype_op::Flop, field.substr(2)) && field!="__fdef") {
           node.set_type(Ntype_op::AttrSet);
         }
       }

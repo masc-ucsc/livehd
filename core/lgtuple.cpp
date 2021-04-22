@@ -394,6 +394,14 @@ int Lgtuple::get_first_level_pos(std::string_view key) {
   return x;
 }
 
+std::string_view Lgtuple::get_first_level_name(std::string_view key) {
+  if (key.size()>0 && key[0] != ':')
+    return key;
+
+  auto n = key.substr(1).find(':');
+  return key.substr(1+1+n);
+}
+
 std::string_view Lgtuple::get_canonical_name(std::string_view key) {
   // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
 

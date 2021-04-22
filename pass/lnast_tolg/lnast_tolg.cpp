@@ -1337,8 +1337,6 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
 
       split_hier_name(io_pin->name, hier_inp_subnames);
       for (const auto &subname : hier_inp_subnames) {
-        auto tup_get  = lg->create_node(Ntype_op::TupGet);
-        auto pos_spin = tup_get.setup_sink_pin("position");  // key pos
 
         Node_pin tn_dpin;
         if (&subname == &hier_inp_subnames.front()) {
@@ -1347,12 +1345,20 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
           tn_dpin = created_tup_gets.back();
         }
 
+        if (!tn_dpin.is_invalid() && subname=="$") {
+          auto subg_spin = subg_node.setup_sink_pin(io_pin->name);
+          tn_dpin.connect_sink(subg_spin);
+          continue;
+        }
+
+        auto tup_get  = lg->create_node(Ntype_op::TupGet);
         if (!tn_dpin.is_invalid()) {
           auto tn_spin  = tup_get.setup_sink_pin("tuple_name");
           tn_dpin.connect_sink(tn_spin);
         }
 
         auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+        auto pos_spin = tup_get.setup_sink_pin("position");  // key pos
         lg->add_edge(pos_dpin, pos_spin);
 
         // note: for scalar input, front() == back()
@@ -1599,11 +1605,14 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   p.do_tolg(lnast, func_stmts);
   fmt::print("============================= Sub-module: LNAST->Lgraph End ===============================================\n");
 
+  // TODO: We should have a TupAdd so that the function can be passed, but this
+  // code is wrong because there is no SSA at the function definition
+
   auto tup_add    = lg->create_node(Ntype_op::TupAdd);
   auto pos_spin   = tup_add.setup_sink_pin("position");  // field name
   auto value_spin = tup_add.setup_sink_pin("value");
 
-  auto field_dpin = lg->create_node_const(Lconst("__function_call")).setup_driver_pin();
+  auto field_dpin = lg->create_node_const(Lconst("__fdef")).setup_driver_pin();
   field_dpin.connect_sink(pos_spin);
 
   std::unique_lock<std::mutex> guard(lgs_mutex);
