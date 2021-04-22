@@ -1369,12 +1369,16 @@ TEST_F(Lconst_test, lconst_get_bits) {
 
   EXPECT_EQ(Lconst("0xFFF").get_mask_op(Lconst("-1")), Lconst("0xFFF"));
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-1")), Lconst("0xfeef"));
-  auto val1 = Lconst("0xfeef").get_mask_op(Lconst("-2"));
-  auto val2 = Lconst("0xfeef").get_mask_op(Lconst("-3"));
-  fmt::print("val1:{} val2:{}\n", val1.to_pyrope(), val2.to_pyrope());
 
-  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-2")), Lconst("0xfeee"));
-  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-3")), Lconst("0xfeed"));
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-2")), Lconst("0x7F77"));
+  EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-3")), Lconst("0x7F77"));
+
+  auto val1 = Lconst("0xfeee").get_mask_op(Lconst("-2"));
+  auto val2 = Lconst("0xfeee").get_mask_op(Lconst("-3"));
+
+  fmt::print("val1:{} val2:{}\n", val1.to_pyrope(), val2.to_pyrope());
+  EXPECT_EQ(Lconst("0b1011_0110").get_mask_op(Lconst("-2")), Lconst("0b1011_011")); // -2 (1111..110) drop bit 0
+  EXPECT_EQ(Lconst("0b1011_0110").get_mask_op(Lconst("-3")), Lconst("0b1011_010")); // -3 (1111..101) drop bit 1
 
   auto v1 = Lconst("-23").get_mask_op(Lconst("-1"));
   auto v2 = Lconst("-23").get_mask_op();

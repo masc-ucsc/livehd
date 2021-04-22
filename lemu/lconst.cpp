@@ -372,7 +372,8 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   auto   mask_bits = mask.get_bits();
   if (mask < 0) {
     auto m   = std::max(get_bits(), mask.get_bits());
-    mask_num = (Number(1) << m) + ((Lconst(1) - mask).not_op()).get_num();
+    //mask_num = (Number(1) << m) + ((Lconst(1) - mask).not_op()).get_num();
+    mask_num = ((Number(1) << m)-1) & (((Lconst(-1) - mask).not_op()).get_num());
   }
 
   if (has_unknowns()) {
