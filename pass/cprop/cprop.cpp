@@ -909,7 +909,7 @@ void Cprop::tuple_subgraph(const Node &node) {
       auto dpin2 = node.get_driver_pin("%");
       if (!dpin2.is_invalid() && dpin.is_connected()) {
         sub.dump();
-        fmt::print("subgraph:{} outputs are connected to %, expand to tuple (FIXME: may reconnect) or hier", sub.get_name());
+        fmt::print("subgraph:{} outputs are connected to %, expand to tuple (FIXME: may reconnect) or hier\n", sub.get_name());
         tuple_issues = true;
       }
     }
@@ -1635,15 +1635,20 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> t
   auto *lg          = node.get_class_lgraph();
   bool  local_error = false;
   for (const auto &it : tup->get_map()) {
-    std::string_view out_name{it.first};
-    if (unlikely(out_name.empty())) {
-      local_error = true;
-      Pass::info("Tuple {} for graph {} without named field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
-      continue;
-    }
     if (unlikely(it.second.is_invalid())) {
       local_error = true;
       Pass::error("graph {} has output but it has invalid field {}", lg->get_name(), it.first);
+      continue;
+    }
+
+    std::string_view out_name{it.first};
+    if (out_name.size()>2 && out_name.substr(0,2)=="%.") {
+      out_name = out_name.substr(2);
+    }
+
+    if (unlikely(it.first.empty() || out_name.empty())) {
+      local_error = true;
+      Pass::info("Tuple {} for graph {} without named field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
       continue;
     }
     if (lg->has_graph_output(out_name))
