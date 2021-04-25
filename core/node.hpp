@@ -89,6 +89,45 @@ public:
     };
   };
 
+  class __attribute__((packed)) Compact_flat {
+  protected:
+    uint32_t     lgid;
+    uint64_t     nid : Index_bits;
+
+    friend class Lgraph;
+    friend class Lgraph_Node_Type;
+    friend class Node;
+    friend class Node_pin;
+    friend class XEdge;
+    friend class Fast_edge_iterator;
+    friend class Flow_base_iterator;
+    friend class Fwd_edge_iterator;
+    friend class Bwd_edge_iterator;
+    friend class mmap_lib::hash<Node::Compact_flat>;
+
+  public:
+    Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), nid(obj.nid) {}
+    constexpr Compact_flat(const Lg_type_id &_lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
+    constexpr Compact_flat() : lgid(0), nid(0){};
+
+    constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
+
+    // Can not be constexpr find current_g
+    Node get_node(std::string_view path) const { return Node(path, *this); }
+
+    constexpr bool is_invalid() const { return nid == 0; }
+
+    constexpr bool operator==(const Compact_flat &other) const {
+      return nid == other.nid && lgid == other.lgid;
+    }
+    constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
+
+    template <typename H>
+    friend H AbslHashValue(H h, const Compact_flat &s) {
+      return H::combine(std::move(h), s.lgid, s.nid);
+    };
+  };
+
   class __attribute__((packed)) Compact_class {
   protected:
     uint64_t nid : Index_bits;
@@ -140,6 +179,8 @@ public:
   constexpr Node() : top_g(nullptr), current_g(nullptr), nid(0) {}
 
   Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
+  Node(std::string_view path, const Compact_flat &comp);
+  Node(Lgraph *_g, const Compact_flat &comp);
   Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
   constexpr Node(Lgraph *_g, const Compact_class &comp)
       : top_g(_g), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
@@ -162,6 +203,7 @@ public:
 
   inline Compact get_compact() const { return Compact(hidx, nid); }
 
+  Compact_flat   get_compact_flat() const;
   inline Compact_class get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
     return Compact_class(nid);

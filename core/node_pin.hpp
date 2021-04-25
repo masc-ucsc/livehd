@@ -96,9 +96,9 @@ public:
       return H::combine(std::move(h), s.hidx.get_hash(), s.idx, s.sink);
     };
   };
-  class Compact_flat {
+  class __attribute__((packed)) Compact_flat {
   protected:
-    Lg_type_id lgid;
+    uint32_t   lgid;
     uint32_t   idx : Index_bits;
     uint32_t   sink : 1;
 
@@ -117,8 +117,9 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), idx(obj.idx), sink(obj.sink) {}
-    Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
-    Compact_flat() : idx(0), sink(0){};
+    constexpr Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
+    constexpr Compact_flat() : lgid(0), idx(0), sink(0){};
+
     Compact_flat &operator=(const Compact_flat &obj) {
       I(this != &obj);
       lgid = obj.lgid;
@@ -131,13 +132,13 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact_flat &other) const {
-      return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid.is_invalid() || other.lgid.is_invalid());
+      return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid==0 || other.lgid==0);
     }
     constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_flat &s) {
-      return H::combine(std::move(h), s.lgid.value, s.idx, s.sink);
+      return H::combine(std::move(h), s.lgid, s.idx, s.sink);
     };
   };
   class __attribute__((packed)) Compact_driver {
@@ -451,7 +452,7 @@ struct hash<Node_pin::Compact> {
 template <>
 struct hash<Node_pin::Compact_flat> {
   size_t operator()(Node_pin::Compact_flat const &o) const {
-    uint64_t h = o.lgid.value;
+    uint64_t h = o.lgid;
     h          = (h << 12) ^ o.idx;
     return hash<uint64_t>{}((h << 1) + o.sink);
   }
