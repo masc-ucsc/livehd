@@ -12,6 +12,7 @@
 void Meta_api::open(Eprp_var &var) {
   auto path = var.get("path");
   auto name = var.get("name");
+  auto hier = var.get("hier");
   assert(!name.empty());
 
   Lgraph *lg = Lgraph::open(path, name);
@@ -23,7 +24,13 @@ void Meta_api::open(Eprp_var &var) {
       Main_api::warn("lgraph.open lgraph {} is empty!", name);
     }
     var.add(lg);
+    if (hier != "false" && hier != "0") {
+      lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) {
+        var.add(g);
+      });
+    }
   }
+
 }
 
 void Meta_api::create(Eprp_var &var) {
@@ -170,6 +177,7 @@ void Meta_api::setup(Eprp &eprp) {
   Eprp_method m1("lgraph.open", "open an lgraph if it exists", &Meta_api::open);
   m1.add_label_optional("path", "lgraph path", "lgdb");
   m1.add_label_required("name", "lgraph name");
+  m1.add_label_optional("hier", "open all the subgraphs too", "false");
 
   eprp.register_method(m1);
 
