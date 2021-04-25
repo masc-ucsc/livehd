@@ -88,6 +88,8 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
       for (const auto &subname : hier_inp_subnames) {
         auto tup_get    = lg->create_node(Ntype_op::TupGet);
         auto tn_spin    = tup_get.setup_sink_pin("tuple_name");
+        I(false); // The "field" is gone in TupGet
+        // Do we need the gioc pass??
         auto field_spin = tup_get.setup_sink_pin("field");     // key name
         auto pos_spin   = tup_get.setup_sink_pin("position");  // key pos
 

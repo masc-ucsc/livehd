@@ -909,8 +909,7 @@ void Cprop::tuple_subgraph(const Node &node) {
       auto dpin2 = node.get_driver_pin("%");
       if (!dpin2.is_invalid() && dpin.is_connected()) {
         sub.dump();
-        fmt::print("subgraph:{} outputs are connected to %, expand to tuple (FIXME: may reconnect) or hier\n", sub.get_name());
-        tuple_issues = true;
+        fmt::print("subgraph:{} outputs are connected to %, expand to tuple or hier\n", sub.get_name());
       }
     }
   }

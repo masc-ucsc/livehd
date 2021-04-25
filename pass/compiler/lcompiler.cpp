@@ -260,14 +260,15 @@ void Lcompiler::do_firbits() {
 }
 
 void Lcompiler::global_io_connection() {
+
   Cprop    cp(false);                                     // hier = false, at_gioc = true
-  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true,  max_iters = 10
-  Gioc     gioc(path);
+  // Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true,  max_iters = 10
+  // Gioc     gioc(path); FIXME? Do we need this steps? (gioc is broken. It still uses the old TupGet
 
   for (auto &lg : lgs) {
-    fmt::print("---------------- Global IO Connection ({}) --------------- (GIOC)\n", lg->get_name());
-    gioc.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void();
+    //fmt::print("---------------- Global IO Connection ({}) --------------- (GIOC)\n", lg->get_name());
+    //gioc.do_trans(lg);
+    //gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void();
     fmt::print("---------------- Global Copy-Propagation ({}) ------------ (GC)\n", lg->get_name());
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "gioc.cprop-ed") : void();

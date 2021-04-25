@@ -1277,19 +1277,14 @@ void Bitwidth::set_subgraph_boundary_bw(Node &node) {
   auto sub_lg = node.ref_type_sub_lgraph();
 
   sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
-    auto node_subg_dpin = node.setup_driver_pin(dpin_gout.get_name());
+    auto top_dpin   = node.setup_driver_pin(dpin_gout.get_name());
 
-    if (flat_bwmap.find(dpin_gout.get_compact_flat()) == flat_bwmap.end()) {
-      const auto bits = dpin_gout.get_bits();
-      if (dpin_gout.get_bits()) {
-        Bitwidth_range bw;
-        bw.set_sbits_range(bits);
-        flat_bwmap.insert_or_assign(node_subg_dpin.get_compact_flat(), bw);
-      }
+    Bitwidth_range bw;
+    if (dpin_gout.is_unsign())
+      bw.set_ubits_range(dpin_gout.get_bits()-1);
+    else
+      bw.set_sbits_range(dpin_gout.get_bits());
 
-      return;
-    }
-
-    flat_bwmap.insert_or_assign(node_subg_dpin.get_compact_flat(), flat_bwmap[dpin_gout.get_compact_flat()]);
+    adjust_bw(top_dpin, bw);
   });
 }
