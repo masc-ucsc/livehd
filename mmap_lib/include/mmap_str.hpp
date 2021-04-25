@@ -689,16 +689,31 @@ constexpr char operator[](std::size_t pos) const {
   std::size_t rfind(const char *s, std::size_t pos, std::size_t n) const;
   std::size_t rfind(const char *s, std::size_t pos = 0) const;
 
-  // returns a pstr from two objects (pstr)
-  static str concat(const str &a, const str &b);
-  static str concat(std::string_view a, const str &b);
-  static str concat(const str &a, std::string_view b);
-  static str concat(const str &a, int v);  // just puts two things together concat(x, b); -> x.append(b)
-                                           //                               concat(b, x); -> b.append(x)
+  static str concat(const str &a, const str &b) { return a.append(b); }
+  
+  static str concat(std::string_view a, const str &b) {
+    mmap_lib::str temp(a);
+    return temp.append(b); 
+  }
 
-  str append(const str &b) const;
-  str append(std::string_view b) const;
-  str append(int b) const;
+  static str concat(const str &a, std::string_view b) { return a.append(b); }
+  
+  static str concat(const str &a, int v) { return a.append(v); }
+
+  str append(const str &b) const {
+    std::string start = this->to_s();
+    start += b.to_s();
+    return mmap_lib::str(start);
+  }
+
+  str append(std::string_view b) const {
+    return this->append(mmap_lib::str(b));
+  }
+
+  str append(int b) const {
+    std::string hold = std::to_string(b);
+    return this->append(mmap_lib::str(hold));
+  }
 
   std::vector<str> split(const char chr);  // used as a tokenizing func, return vector of pstr's
 
@@ -753,15 +768,15 @@ constexpr char operator[](std::size_t pos) const {
     return true;
   } 
 
- int64_t     to_i() const;  // convert to integer
- std::string to_s() const{  // convert to string
-  
+  int64_t     to_i() const;  // convert to integer
+  std::string to_s() const{  // convert to string
     std::string out;
-    
-    if (_size <= 13){
-      //adding charactors from ptr_or_start based on the size of the string
-      for (int i =0; i<((_size>4) ? 4: _size); i++){
-        out += (ptr_or_start >> (8 * (3-i))) & 0xFF;
+    if (_size <= 13 ){
+    //adding charactors from ptr_or_start based on the size of the string
+      for (int i =0; i < ((_size>4) ? 4: _size); i++){
+        int temp = (_size >= 4) ? 3 : (_size-1); 
+        out += (ptr_or_start >> (8 * (temp-i))) & 0xFF;
+        //std::cout << "The out is  " << out << std::endl;
       }
       //if there are any characotrs in e, we add them as well
       if(_size>4){
@@ -782,10 +797,8 @@ constexpr char operator[](std::size_t pos) const {
       for (int i = 2; i<10; i++){
         out += e[i];
       }
-
     }
-    return out;
-  
+    return out; 
   }
 
   str get_str_after_last(const char chr) const;
@@ -793,9 +806,46 @@ constexpr char operator[](std::size_t pos) const {
 
   str get_str_before_last(const char chr) const;
   str get_str_before_first(const char chr) const;
+  
+  
+  str substr(size_t start) const {
+    return this->substr(start, _size-start);
+  }
 
-  str substr(size_t start) const;
-  str substr(size_t start, size_t end) const;
+  str substr(size_t start, size_t end) const {   
+    std::string hold;
+    
+    // if *this is empty, or start indx out of range => return empty pstr
+    if ((_size == 0) || (start > (_size-1))) {
+      return mmap_lib::str();
+    }
+    // adjusting end in case user tries to step too far
+    size_t adj_end = (end > (_size-start)) ? (_size-start):end;
+    
+    uint8_t mx = posShifter(_size);
+    mx = mx - start;
+    // uint8_t e_ptr = 0;
+    for (auto i = start; i < (start + adj_end); ++i) {
+      if (_size <= 13) { // *this is SHORT
+        if (i <= 3) { // need to shift
+          hold += static_cast<char>(isol8(ptr_or_start, mx));
+          --mx;
+        } else { // in e
+          hold += e[i-4];
+        }
+      } else { // *this is LONG
+        if (i <= 1) { // first two
+          hold += e[i];
+        } else if (i >= 2 && i < (_size-8)) { // long in vec
+          hold += string_vector.at(mid(ptr_or_start, i));
+        } else { // last 8
+          hold += e[l8(_size, i)];
+        }
+      }
+    }
+    mmap_lib::str sub(hold);
+    return sub;
+  }    
 };
 
 // For static string_map
