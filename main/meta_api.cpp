@@ -23,12 +23,12 @@ void Meta_api::open(Eprp_var &var) {
     if (lg->is_empty()) {
       Main_api::warn("lgraph.open lgraph {} is empty!", name);
     }
-    var.add(lg);
     if (hier != "false" && hier != "0") {
       lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) {
         var.add(g);
       });
     }
+    var.add(lg);
   }
 
 }
