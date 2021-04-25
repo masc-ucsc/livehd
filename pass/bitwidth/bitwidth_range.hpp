@@ -71,6 +71,7 @@ public:
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
 
   void set_narrower_range(const Lconst &min_val, const Lconst &max_val);
+  void set_wider_range(const Bitwidth_range &bw);
   void set_range(const Lconst &min_val, const Lconst &max_val);
 
   bool   is_overflow() const { return overflow; };

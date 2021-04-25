@@ -203,8 +203,18 @@ int Node_pin::get_num_edges() const {
 
 uint32_t Node_pin::get_bits() const {
   I(is_driver());
-  // FIXME: hierarchical
   return current_g->get_bits(get_root_idx());
+}
+
+void Node_pin::set_size(const Node_pin &dpin) {
+  I(is_driver());
+  I(dpin.is_driver());
+
+  current_g->set_bits(get_root_idx(), dpin.get_bits());
+  if (dpin.is_unsign())
+    set_unsign();
+  else
+    set_sign();
 }
 
 void Node_pin::set_bits(uint32_t bits) {
@@ -212,19 +222,16 @@ void Node_pin::set_bits(uint32_t bits) {
   current_g->set_bits(get_root_idx(), bits);
 }
 
-void Node_pin::set_io_sign() {
-  I(is_graph_io());
-  Ann_node_pin_io_unsign::ref(get_lg())->erase(get_compact_driver());
+void Node_pin::set_unsign() {
+  Ann_node_pin_unsign::ref(get_lg())->set(get_compact_driver(), true);
 }
 
-void Node_pin::clear_io_sign() {
-  I(is_graph_io());
-  Ann_node_pin_io_unsign::ref(get_lg())->set(get_compact_driver(), true);
+void Node_pin::set_sign() {
+  Ann_node_pin_unsign::ref(get_lg())->erase(get_compact_driver());
 }
 
-bool Node_pin::is_io_sign() const {
-  I(is_graph_io());
-  return Ann_node_pin_io_unsign::ref(top_g)->has(get_compact_driver()) ? false : true;
+bool Node_pin::is_unsign() const {
+  return Ann_node_pin_unsign::ref(top_g)->has(get_compact_driver()) ? true : false;
 }
 
 std::string_view Node_pin::get_type_sub_pin_name() const {

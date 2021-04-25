@@ -15,7 +15,7 @@
 
 struct Ann_name {
   static constexpr char delay[]     = "delay";
-  static constexpr char io_unsign[] = "io_unsign";
+  static constexpr char unsign[]    = "unsign";
   static constexpr char offset[]    = "offset";
   static constexpr char pin_name[]  = "pin_name";
   static constexpr char prp_vname[] = "prp_vname";
@@ -42,7 +42,7 @@ using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_p
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
 
-using Ann_node_pin_io_unsign = Attribute<Ann_name::io_unsign, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
+using Ann_node_pin_unsign = Attribute<Ann_name::unsign, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
 
 using Ann_node_name = Attribute<Ann_name::nodename, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
 
@@ -60,7 +60,7 @@ struct Ann_support {
   // TODO: Change to object to register annotations, and have an "update" for incremental
   static void clear(Lgraph *lg) {
     Ann_node_pin_delay::clear(lg);
-    Ann_node_pin_io_unsign::clear(lg);
+    Ann_node_pin_unsign::clear(lg);
     Ann_node_pin_offset::clear(lg);
     Ann_node_pin_name::clear(lg);
     Ann_node_pin_prp_vname::clear(lg);
@@ -76,7 +76,7 @@ struct Ann_support {
 
   static void sync(Lgraph *lg) {
     Ann_node_pin_delay::sync(lg);
-    Ann_node_pin_io_unsign::sync(lg);
+    Ann_node_pin_unsign::sync(lg);
     Ann_node_pin_offset::sync(lg);
     Ann_node_pin_name::sync(lg);
     Ann_node_pin_prp_vname::sync(lg);

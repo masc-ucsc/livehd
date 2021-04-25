@@ -410,12 +410,14 @@ public:
   float get_delay() const;
   bool  has_delay() const;
 
+  void   set_size(const Node_pin &dpin); // set size and sign
+
   Bits_t get_bits() const;
   void   set_bits(Bits_t bits);
 
-  void set_io_sign();
-  void clear_io_sign();
-  bool is_io_sign() const;
+  void set_unsign();
+  void set_sign();
+  bool is_unsign() const;
 
   std::string_view get_type_sub_pin_name() const;
 

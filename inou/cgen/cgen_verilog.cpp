@@ -572,7 +572,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
 
     std::string name = get_scaped_name(dpin.get_wire_name());
 
-    bool out_unsigned = false;
+    bool out_unsigned = dpin.is_unsign();
 
     if (op == Ntype_op::Mux) {
       // mux needs name, but it can also has a vector to avoid ifs

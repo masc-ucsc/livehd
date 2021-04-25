@@ -24,6 +24,9 @@ protected:
   BWMap_flat &flat_bwmap;  // global bwmap indexing with dpin_compact_flat, (lgid, nid)
   BWMap_hier &hier_bwmap;  // global bwmap indexing with dpin_compact, (hidx, nid)
 
+  void adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw);
+  void adjust_bw(Node_pin &dpin, const Bitwidth_range &bw);
+
   void process_const(Node &node);
   void process_not(Node &node, XEdge_iterator &inp_edges);
   void process_flop(Node &node);
@@ -36,10 +39,11 @@ protected:
   void process_set_mask(Node &node);
   void process_sext(Node &node, XEdge_iterator &inp_edges);
   void process_comparator(Node &node);
-  void process_logic_or_xor(Node &node, XEdge_iterator &inp_edges);
+  void process_bit_or(Node &node, XEdge_iterator &inp_edges);
+  void process_bit_xor(Node &node, XEdge_iterator &inp_edges);
+  void process_bit_and(Node &node, XEdge_iterator &inp_edges);
   void process_assignment_or(Node &node, XEdge_iterator &inp_edges);
   void process_ror(Node &node, XEdge_iterator &inp_edges);
-  void process_logic_and(Node &node, XEdge_iterator &inp_edges);
   void process_attr_get(Node &node);
   void process_attr_set_dp_assign(Node &node);
   void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
@@ -48,8 +52,7 @@ protected:
   void insert_tposs_nodes(Node &node_attr, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
-  void forward_adjust_dpin(Node_pin &dpin, Bitwidth_range &bw);
-  void set_graph_boundary(Node_pin &dpin, Node_pin &spin);
+  void set_graph_boundary(const Node_pin &dpin, Node_pin &spin);
   void debug_unconstrained_msg(Node &node, Node_pin &d_dpin);
   void try_delete_attr_node(Node &node);
   void set_subgraph_boundary_bw(Node &node);
