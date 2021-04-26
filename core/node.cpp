@@ -604,15 +604,12 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
 
 //----- Subject to changes in the future:
-enum { WHITE = 0, GREY, BLACK };
-void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), std::to_string(new_color)); }
+void Node::set_color(int new_color) {
+  Ann_node_color::ref(current_g)->set(get_compact_class(), new_color);
+}
 
 int Node::get_color() const {
-  auto str = Ann_node_color::ref(current_g)->get_val(get_compact_class());
-  int  color;
-  auto ok = absl::SimpleAtoi(str, &color);
-  I(ok);
-  return color;
+  return Ann_node_color::ref(current_g)->get_val(get_compact_class());
 }
 
 bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }

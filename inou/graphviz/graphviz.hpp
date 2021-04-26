@@ -22,6 +22,10 @@ private:
   const bool        verbose;
   const std::string odir;
 
+  absl::flat_hash_map<int, std::string> color2rgb;
+
+  void create_color_map(Lgraph *g);
+
   static void        populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose);
   static std::string graphviz_legalize_name(std::string_view name);
   void               populate_lg_data(Lgraph *g, std::string_view dot_postfix = "");

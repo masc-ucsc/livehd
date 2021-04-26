@@ -5,6 +5,7 @@
 #include <fstream>
 #include <regex>
 
+#include "RGB.hpp"
 #include "cell.hpp"
 #include "pass.hpp"
 
@@ -158,7 +159,29 @@ void Graphviz::do_hierarchy(Lgraph *g) {
   close(fd);
 }
 
+void Graphviz::create_color_map(Lgraph *lg) {
+
+  std::set<int> colors_used;
+  for(auto node:lg->fast()) {
+    if (node.has_color()) {
+      colors_used.insert(node.get_color());
+    }
+  }
+
+  color2rgb.clear();
+  int i = 1;
+  for(auto c:colors_used) {
+    RGB color(i);
+    color2rgb[c] = color.to_s();
+    ++i;
+  }
+
+}
+
 void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
+
+  create_color_map(lg_parent);
+
   populate_lg_data(lg_parent, dot_postfix);
 
   lg_parent->each_local_sub_fast([&, this](Node &node, Lg_type_id lgid) {
@@ -189,10 +212,17 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
     }
 
     auto gv_name = graphviz_legalize_name(node.debug_name());
+    std::string color;
+    if (node.has_color()) {
+      const auto it = color2rgb.find(node.get_color());
+      if (it != color2rgb.end()) {
+        color = absl::StrCat("fillcolor=\"", it->second, "\" ");
+      }
+    }
     if (node.get_type_op() == Ntype_op::Const)
-      data += fmt::format(" {} [label=<{}:{}>];\n", gv_name, node_info, node.get_type_const().to_pyrope());
+      data += fmt::format(" {} [{}label=<{}:{}>];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
     else
-      data += fmt::format(" {} [label=<{}>];\n", gv_name, node_info);
+      data += fmt::format(" {} [{}label=<{}>];\n", gv_name, color, node_info);
 
     for (const auto &out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data, verbose);

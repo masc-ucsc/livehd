@@ -2,6 +2,7 @@
 
 #include "label_synth.hpp"
 
+#include "annotate.hpp"
 #include "cell.hpp"
 #include "pass.hpp"
 
@@ -26,16 +27,15 @@ void Label_synth::set_id(const Node &node, int id) {
 
 void Label_synth::mark_ids(Lgraph *g) {
 
+#if 0
+  // Do we cluster inputs? (FIXME: option)
   g->each_graph_input([&](const Node_pin &pin) {
     auto id = get_free_id();
     for(const auto &e:pin.out_edges()) {
-      set_id(e.sink.get_node(), id);
+      auto node = e.sink.get_node();
+      if (!node.is_type_loop_last())
+        set_id(node, id);
     }
-  });
-
-#if 0
-  g->each_graph_output([&](const Node_pin &pin) {
-    (void)pin;  // to avoid warning
   });
 #endif
 
@@ -59,13 +59,30 @@ void Label_synth::mark_ids(Lgraph *g) {
   }
 }
 
-int Label_synth::collapse_merge(int dst) {
+static int recursion=0;
+
+void Label_synth::collapse_merge(int dst) {
+  if (recursion>100) {
+    //dump();
+    fmt::print("d:{}\n",dst);
+  }
+
+  if (collapse_set_min > dst)
+    collapse_set_min = dst;
+
   auto it = flat_merges.find(dst);
   if (it == flat_merges.end())
-    return dst;
+    return;
 
-  it->second = collapse_merge(it->second);
-  return it->second;
+  collapse_set.insert(dst);
+  if (collapse_set.contains(it->second))
+    return;
+
+  recursion++;
+  collapse_merge(it->second);
+  recursion--;
+
+  flat_merges[dst]=collapse_set_min;
 }
 
 void Label_synth::merge_ids() {
@@ -76,10 +93,13 @@ void Label_synth::merge_ids() {
     do {
       updated = false;
       for(auto &it:flat_merges) {
-        auto id = collapse_merge(it.second);
-        if (id==it.second)
+        collapse_set.clear();
+        collapse_set.insert(it.second);
+        collapse_set_min = it.second;
+        collapse_merge(it.second);
+        if (collapse_set_min==it.second)
           continue;
-        it.second = id;
+        it.second = collapse_set_min;
         updated = true;
       }
     }while(updated);
@@ -89,8 +109,6 @@ void Label_synth::merge_ids() {
   for(auto &it:flat_node2id) {
     auto it2 = flat_merges.find(it.second);
     if (it2 == flat_merges.end())
-      continue;
-    if (it2->second == it.second)
       continue;
 
     it.second = it2->second;
@@ -103,14 +121,15 @@ void Label_synth::merge_ids() {
       continue;
     if (it2->second == it.second)
       continue;
-    auto id1 = collapse_merge(it.second);
-    auto id2 = collapse_merge(it2->second);
-    if (id1 == id2 && it2->second == id2)
+    collapse_set.clear();
+    collapse_set_min = it.second;
+    collapse_merge(it.second);
+    collapse_merge(it2->second);
+    if (it2->second == it.second && it.second == collapse_set_min)
       continue;
     I(false); // The collapse_merge avoid to trigger this many times
   }
 #endif
-
 }
 
 void Label_synth::dump() const {
@@ -126,11 +145,25 @@ void Label_synth::label(Lgraph *g) {
   mark_ids(g);
   merge_ids();
 
+  if (hier) {
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) {
+      Ann_node_color::clear(lg);
+    });
+  }
+  Ann_node_color::clear(g);
+
+  for(auto &it:flat_node2id) {
+    Node node(g, it.first);
+    node.set_color(it.second);
+  }
+
+#if 0
   dump();
 
   for(auto &it:flat_node2id) {
     Node node(g, it.first);
     fmt::print(":{} node:{}\n", it.second, node.debug_name());
   }
+#endif
 }
 
