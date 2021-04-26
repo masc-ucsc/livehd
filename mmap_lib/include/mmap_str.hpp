@@ -11,9 +11,12 @@
 #include "mmap_map.hpp"
 
 #define posShifter(s) s<4 ? (s-1):3
+#define posStopper(s) s<4 ? s:4
 #define isol8(pos, s) (pos >> (s*8)) & 0xff
 #define l8(size, i) i - (size - 10) 
-#define mid(pos, i) pos + (i-2)
+#define mid(p_o_s, i) p_o_s + (i-2)
+
+
 
 namespace mmap_lib {
 
@@ -61,12 +64,13 @@ public:
 
   //===========constructor 0 (template obj) ============
   str() : ptr_or_start(0), e{0}, _size(0) {}
-  
-  //===========constructor 1=========
+
+
+  //===========constructor 1 (_size <= 13) ============
   template<std::size_t N, typename = std::enable_if_t<(N - 1) < 14>>
   constexpr str(const char(&s)[N]): ptr_or_start(0), e{0}, _size(N-1) {
-    // if _size is less than 4, then whole string will be in ptr_or_start
-    auto stop = _size < 4 ? _size : 4;
+    // if _size is less than 4, then whole thing will be in ptr_or_start
+    auto stop = posStopper(_size);
     // ptr_or_start will hold first 4 chars
     // | first | second | third | forth |
     // 31      23       15      7       0 
@@ -75,7 +79,7 @@ public:
       ptr_or_start |= s[i];
     }
     auto e_pos = 0u; // e indx starts at 0
-    // stores rest of string in e, starting from stop to end
+    // stores rest in e, starting from stop to end of string
     for(auto i = stop; i < N - 1; ++i) {
       e[e_pos] = s[i];
       ++e_pos;
@@ -84,7 +88,7 @@ public:
 
   //=====helper function to check if a string exists in string_vector=====
   std::pair<int, int> insertfind(const char *string_to_check, uint32_t size) { 
-    std::string_view sv(string_to_check);   // string to sv
+    std::string_view sv(string_to_check); // string to sv
     // using substr here to take out all the weird things that come with sview
     auto it = string_map2.find(sv.substr(0, size)); // find the sv in the string_map2
     if (it == string_map2.end()) {          // if we can't find the sv
@@ -95,9 +99,32 @@ public:
       return std::make_pair(string_map2.get(it), size); //found it, return
       // pair is (ptr_or_start, size of string)
     }
+
+#if 0
+    bool vector_flag = true;
+    
+    // the line below should be constant time
+    
+    for (auto i = string_map.begin(), end = string_map.end(); i != end; ++i) {
+      uint32_t key   = string_map.get_key(i);
+      uint16_t value = string_map.get(i);
+      if (value != size)
+        continue;i
+      for (int i = 0; i < size; i++) {
+        if (string_vector.at(key + i) != string_to_check[i]) {
+          vector_flag = false;
+          break;
+        }
+        if (vector_flag)
+          return std::make_pair(key, value);
+        vector_flag = true;
+      }
+    }
+    return std::make_pair(0/*pos in vector*/, 0/*size of str*/);
+#endif
   }
 
-  //==========constructor 2==========
+  //==========constructor 2 (_size >= 14) ==========
   template<std::size_t N, typename = std::enable_if_t<(N-1)>=14>, typename=void>
   str(const char (&s)[N]) : ptr_or_start(0), e{0}, _size(N - 1) {
     // the first two characters saved in e
@@ -112,10 +139,10 @@ public:
     std::pair<int, int> pair = insertfind(long_str, _size - 10);
 
     // if string exists in vector, get the ptr to it in string_map2
-    // pair is (position in string_map2, size of string)
+    // pair is (ptr_or_start, size of string)
     if (pair.second) {
       ptr_or_start = pair.first;
-    } else { // if string is not in vector, put it in vector
+    } else { // if string is not invector, put it in vector
       for (int i = 0; i < _size - 10; i++) { 
         string_vector.push_back(long_str[i]); 
       }
@@ -129,8 +156,8 @@ public:
   //
   // std::string will also go through this one
   str(std::string_view sv) : ptr_or_start(0), e{0}, _size(sv.size()) {
-  	if (_size < 14 ){ // constructor 1 logic
-		  auto stop = _size<4?_size:4;
+    if (_size < 14 ){ // constructor 1 logic
+		  auto stop = posStopper(_size);
 	    for(auto i=0;i<stop;++i) {
 	      ptr_or_start <<= 8;
 	      ptr_or_start |= sv.at(i);
@@ -164,7 +191,9 @@ public:
   	}
   }
 
-  void print_PoS () { 
+
+  //=========Printing==============
+  void print_PoS () const { 
     std::cout << "ptr_or_start is";
     if (_size >= 14) {
       std::cout << "(ptr): " << ptr_or_start << std::endl;
@@ -178,13 +207,13 @@ public:
     } 
   }
 
-  void print_e () {
+  void print_e () const {
     std::cout << "e is: [ ";
     for (int i = 0; i < e.size(); ++i) { std::cout << e[i] << " "; }
     std::cout << "]" << std::endl;
   }
 
-  void print_StrVec () {
+  void print_StrVec () const {
     std::cout << "StrVec{ ";
     for (std::vector<int>::const_iterator i = string_vector.begin(); i != string_vector.end(); ++i) 
     {
@@ -193,7 +222,7 @@ public:
     std::cout << "}" << std::endl;
   }
 
-  void print_StrMap () {
+  void print_StrMap () const {
     std::cout << "StrMap{ ";
     for (auto it = string_map2.begin(), end = string_map2.end(); it != end; ++it) {
       std::string key = std::string(string_map2.get_key(it));
@@ -225,16 +254,14 @@ public:
     }
   }
 
+  //=================================
 
 #if 0
   fixme_const_iterator begin()  const {
     for(const auto &ch:data.b) {
-      if (ch!=0)
-        return &ch;
+      if (ch!=0) { return &ch; }
     }
-    if (size<16)
-      return &e[0];
-
+    if (size<16) { return &e[0]; }
     return ptr;
   }
   fixme_const_iterator end()    const {
@@ -251,7 +278,6 @@ public:
   [[nodiscard]] constexpr std::size_t size() const { return _size; }
   [[nodiscard]] constexpr std::size_t length() const { return _size; }
   [[nodiscard]] constexpr std::size_t max_size() const { return 65535; }
-
   [[nodiscard]] constexpr bool empty() const { return 0 == _size; }
 
   template <std::size_t N>
@@ -265,6 +291,7 @@ public:
       for (auto i = 2; i < 10; ++i) { 
         if (e[i] != rhs[rhs_size - idx--]) { return false; } // check last eight
       }
+      
       // Getting data from string_vector and comparing with rest of rhs 
       auto j = 2; // rhs[2 .. _size - 8] --> the long part
       // for loop range: (ptr_or_start) .. (ptr_or_start + _size-10) 
@@ -297,12 +324,11 @@ public:
     return false;
   }
 
-  //constexpr bool operator==(const char* rhs) const { return *this == rhs; }    
-
   constexpr bool operator==(const str &rhs) const {
     //1) compare size
     //1) compare e
     //2) compare ptr_or_start
+    if (_size == 0 && rhs._size == 0) { return true; }
     if (_size != rhs._size) { return false; }
     for (auto i = 0; i < e.size(); ++i) {
       if (e[i] != rhs.e[i]) { return false; }
@@ -310,18 +336,16 @@ public:
     return (ptr_or_start == rhs.ptr_or_start);
   }
 
-
   constexpr bool operator!=(const str &rhs) const { return !(*this == rhs); }
 
   template <std::size_t N>
   constexpr bool operator!=(const char (&rhs)[N]) const { return !(*this == rhs); }
-
-  //constexpr bool operator!=(const char* rhs) const { return !(*this == rhs); }
-  
+ 
   constexpr bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
   constexpr char operator[](std::size_t pos) const {
     if (pos >= _size) { throw std::out_of_range(""); }
+    #if 1
     if (_size < 14) {
       if (pos < 4) {
         uint8_t mx = posShifter(_size);
@@ -339,10 +363,34 @@ public:
         return e[l8(_size, pos)];
       }
     }
+    #endif
+
+    #if 0
+    if (_size < 14) {
+      if (pos < 4){
+        if(_size == 1) return (ptr_or_start >> (8 * (0 - pos))) & 0xFF;
+        if(_size == 2) return (ptr_or_start >> (8 * (1 - pos))) & 0xFF;
+        if(_size == 3) return (ptr_or_start >> (8 * (2 - pos))) & 0xFF;
+        return (ptr_or_start >> (8 * (3 - pos))) & 0xFF;
+      }else{
+        return e[pos - 4];
+      }
+    } else {
+      if(pos <2){
+        return e[pos];
+      } else if (pos >= (_size-8)) {
+        return e[10 -( _size - pos)];
+      } else{
+        return string_vector.at(ptr_or_start+pos-2);
+      }
+    }
+    #endif
   }
 
-
   // checks if *this pstr starts with st
+  // Thought...
+  // Can use substr function of sview in cases where both st and *this are LONG,
+  //    and just compare sviews
   bool starts_with(str &st) const { 
     if (st.size() > _size) { return false; }// st.size > *this.size, false
     else if (st.size() == _size) { return *this == st; }
@@ -354,7 +402,7 @@ public:
         }
       }
       return true;
-    }
+    }  
   }
 
   // const char * and std::string will come thru here
@@ -407,64 +455,123 @@ public:
     return ends_with(std::string_view(en.c_str())); 
   }
 
+  //OLY
+
 
   std::size_t find(const str &v, std::size_t pos = 0) const{
-
     if (v._size >_size) return -1;
     //if size ==vsize and == is true return 0 else return -1
     if (_size<14){
-      char first = ((v.ptr_or_start >> (8 * (v._size-1))) & 0xFF);//different ways
+      int vtemp = (v._size >=4 ) ? 3 : (v._size -1);
+      int temp = (_size >=4 ) ? 3 : (_size -1);
+      char first = ((v.ptr_or_start >> (8 * (vtemp))) & 0xFF);//different ways
+      //std::cout << "first char is :" << first << std::endl;
       size_t retval = 0;
       bool found_flag = false;
       int i,j,k;
       int e_pos_self =0;
       int e_pos_thier =0;
-      for ( i =0; i <4 ; i++){
+      for (  i =0; i <4 ; i++){
         retval = 0;
         found_flag = false;
         e_pos_self =0;
         e_pos_thier =0;
-        if ((first == ((ptr_or_start >> (8 * (3 - i))) & 0xFF)) and  ( pos >= i)) {
+        if ((first == ((ptr_or_start >> (8 * (temp - i))) & 0xFF)) ){//and  ( pos >= i)) {
+          //std::cout << "found first " << i << std::endl;
           retval = i;
+          if (v._size ==1 ) return retval;
           found_flag = true;
-          for ( j = i,  k =1; j< 4; j++,k++){
-            
-            if (((v.ptr_or_start >> (8 * (3 - k))) & 0xFF) != ((ptr_or_start >> (8 * (3 - j))) & 0xFF)){
+          if (v._size == 1)return retval;
+          for ( j = i+1,  k =1; j< 4; j++,k++){
+            if (k >= v._size ) break;
+            if (((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF) != ((ptr_or_start >> (8 * (temp - j))) & 0xFF)){//k starts from 1 
+              //std::cout << "turned to false in 1" << std::endl;
               found_flag = false;
               break;
             }
           }
+          if (found_flag == false) continue;
           while(k < v._size){
+            //k++;
             if (k < 4){
-              if(((v.ptr_or_start >> (8 * (3 - k))) & 0xFF)  != e[e_pos_self]) {
+              //std::cout << "did i make it here " << std::endl;
+              if(((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF)  != e[e_pos_self]) {
 
                 found_flag = false;
+                //std::cout << "turned to false in 2" << std::endl;
                 break;
               }
             } else {
               if (v.e[e_pos_thier ] != e[e_pos_self]){
                 found_flag = false;
-                e_pos_thier++;
+                //std::cout << "turned to false in 3" << e_pos_thier << e_pos_self << std::endl;
+                //e_pos_thier++;
                 break;
               }
+              e_pos_thier++;
             }
             e_pos_self++;
             k++;
           }
-
+          if (found_flag == true) return retval;
         }
-        if (found_flag == true) return retval;
+        //if (found_flag == true) return retval;
       }
+      /////////////////////////////////////////////////////////////////////////////////////////
+      if (_size > 4){
+        for (int m =0 ; m < (_size - 4);m++){
+          retval = 0;
+          found_flag = false;
+          e_pos_self =0;
+          e_pos_thier =0;
+          if (first == e[m] ){//and  ( pos >= i)) {
+            //std::cout << "found first in e[m]" << std::endl;
+            retval = m+4;
+            if (v._size == 1)return retval;
+            found_flag = true;
+            for ( j = m+1,  k =1; k< 4; j++,k++){
+              if(k >= v._size ) break;
+              if (((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF) != e[j] ){//k starts from 1 
+                found_flag = false;
+                char sge = ((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF); 
+                //std::cout << sge << "is not " << e[j] << std::endl;
+                //std::cout << "false in 1" << k << std::endl ;
+                break;
+              }
+            }
+            e_pos_self = j;
+            while(k < v._size){
+            	k++;
+              if (k < 4){
+                if(((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF)  != e[e_pos_self]) {
+
+                  found_flag = false;
+                  break;
+                }
+              } else {
+                if (v.e[e_pos_thier ] != e[e_pos_self]){
+                  found_flag = false;
+                  
+                  break;
+                }
+                e_pos_thier++;
+              }
+              e_pos_self++;
+              
+            }
+            if (found_flag == true) return retval;
+          }
+        }
+      }/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
       //if you havent found the string at this point and this string is < 4 chaars then find returns -1
       //if((_size < 4 ) and (found_flag == false)) return -1;
+      //std::cout << "here" << std::endl;
       return -1;
     } else {
       std::string my_string = this->to_s();
-      std::string their_string = v.to_s ();
+      std::string their_string = v.to_s();
       return my_string.find(their_string);
     }
-
-
   }
   
   std::size_t find(char c, std::size_t pos = 0) const;
@@ -478,16 +585,38 @@ public:
   std::size_t rfind(const char *s, std::size_t pos, std::size_t n) const;
   std::size_t rfind(const char *s, std::size_t pos = 0) const;
 
-  static str concat(const str &a, const str &b) { return a.append(b); }
-  
+
+
+  // concat implementation options
+  // 1) add directly to strVec behind a (O(b) and depends on current size of strMap)
+  //    a) find end of strVec pos with ptr_or_start
+  //    b) add b to it
+  //    c) Careful! Need to push everything else back
+  //    d) MUST modify the strMap for all strings that have ptr_or_start 
+  //       After *this's ptr_or_start
+  // 2) create a new string and directly add into strVec (O(a+b))
+  //    -> The only thing here is that it's kind of copies ctor logic
+  //    0) use ctor 0 to make object
+  //    a) add a strMap entry
+  //    b) find end of strVec, then directly add on to vec
+  // 3) Easy way -> worst runtime, easiest to code 
+  //    > Currently implemented
+  static str concat(const str &a, const str &b) { 
+    return a.append(b);
+  }
+
   static str concat(std::string_view a, const str &b) {
     mmap_lib::str temp(a);
     return temp.append(b); 
   }
 
-  static str concat(const str &a, std::string_view b) { return a.append(b); }
-  
-  static str concat(const str &a, int v) { return a.append(v); }
+  static str concat(const str &a, std::string_view b) {
+    return a.append(b);
+  }
+
+  static str concat(const str &a, int v) {
+    return a.append(v);
+  }
 
   str append(const str &b) const {
     std::string start = this->to_s();
@@ -503,17 +632,31 @@ public:
     std::string hold = std::to_string(b);
     return this->append(mmap_lib::str(hold));
   }
-
-  std::vector<str> split(const char chr);  // used as a tokenizing func, return vector of pstr's
+  
+  // used as a tokenizing func, return vector of pstr's
+  std::vector<str> split(const char chr) {  
+    std::vector<str> vec;
+    std::string hold;
+    for (auto i = 0; i < _size; ++i) {
+      if ((*this)[i] == chr) {
+        vec.push_back(mmap_lib::str(hold));
+        hold.clear();
+      } else {
+        hold += (*this)[i];
+      }
+    }
+  }
 
   bool is_i() const{ 
     if (_size < 14) {
-      char first = ((ptr_or_start >> (8 * (_size -1))) & 0xFF);
+      int temp = (_size >= 4) ? 3 : (_size-1);
+      char first = (ptr_or_start >> (8 * (temp))) & 0xFF;
+      //char first = ((ptr_or_start >> (8 * (_size -1))) & 0xFF);
       if (first !='-' and( first <'0' or first > '9')) {
         return false;
       }
       for (int i= 1; i<(_size>4?4:_size);i++){
-        switch ((ptr_or_start >> (8 * (3 - i))) & 0xFF){
+        switch ((ptr_or_start >> (8 * (temp - i))) & 0xFF){
           case '0'...'9':
             break;
           default:
@@ -555,7 +698,8 @@ public:
       }
     }
     return true;
-  } 
+  }
+
 
   int64_t to_i() const{  // convert to integer
     if(this->is_i()){
@@ -566,8 +710,10 @@ public:
     }
     std::cout << "The input is not an integer " << std::endl;
   } 
-  
-  std::string to_s() const{  // convert to string
+
+
+
+  std::string to_s() const{  // convert to string    
     std::string out;
     for (auto i = 0; i < _size; ++i) {
       out += (*this)[i];
@@ -575,18 +721,23 @@ public:
     return out;
   }
 
+  // get the str AFTER the last instance of chr inside *this
+  // EX)
+  // str h(helloworldworld)
+  // h.get_str_after_last('l') = "d"
   str get_str_after_last(const char chr) const;
+
+
   str get_str_after_first(const char chr) const;
 
   str get_str_before_last(const char chr) const;
   str get_str_before_first(const char chr) const;
-  
-  
+ 
   str substr(size_t start) const {
     return this->substr(start, _size-start);
   }
 
-  str substr(size_t start, size_t end) const {   
+  str substr(size_t start, size_t end) const { 
     std::string hold;
     // if *this is empty, or start indx out of range => return empty pstr
     if ((_size == 0) || (start > (_size-1))) {
@@ -599,9 +750,10 @@ public:
       hold += (*this)[i];
     }
     return mmap_lib::str(hold);
-  } 
+  }    
 
 };
+
 
 // For static string_map
 mmap_lib::map<std::string_view, uint32_t> str::string_map2;
