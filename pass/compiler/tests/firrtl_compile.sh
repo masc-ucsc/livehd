@@ -25,7 +25,7 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine 
+  pts='Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine 
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
@@ -33,14 +33,10 @@ if [ $# -eq 0 ]; then
   # pts='VecShiftRegister'
   # pts='Cell_alone'
   # pts='SingleEvenFilter'
-  # pts='SubModule'
-  # pts='BundleConnect'
-  # pts='Adder4'
-  # pts='Xor6Thread2'
-  # pts='XorSelfThread1'
-  # pts='Accumulator'
-  # pts='PlusAnd'      // issue: first element of Vector is not ended with _0
-  # pts='Mux4'
+  # pts='Adder4 XorSelfThread1 Xor6Thread2'
+  # pts='BundleConnect Mux4 SubModule'
+  # pts='BundleConnect '
+  # pts='PlusAnd'      # issue: first element of Vector is not ended with _0
   # pts='Test1'
 
 else
@@ -128,7 +124,7 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
+    ${LGSHELL} "lgraph.open name:${pt} hier:true |> inou.cgen.verilog"
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
     ret_val=$?
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
@@ -152,9 +148,9 @@ firrtl_test() {
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
-    if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
-        python3 ${POST_IO_RENAME} "${pt}.v"
-    fi
+    # if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
+    #     python3 ${POST_IO_RENAME} "${pt}.v"
+    # fi
 
     ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
     ret_val=$?

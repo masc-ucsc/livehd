@@ -1024,10 +1024,16 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
   auto flattened_str  = FlattenExpression(ln, parent_node, expr);
   auto alter_full_str = get_full_name(flattened_str, false);  // Note: I put false here so if reg I get the "#"
 
+
+
   if (alter_full_str[0] == '$') {
-    flattened_str = absl::StrCat("$inp_", flattened_str);
+    // flattened_str = absl::StrCat("$inp_", flattened_str);
+    flattened_str = absl::StrCat("$", flattened_str);
+    fmt::print("DEBUG0 input_name:{}\n", flattened_str);
   } else if (alter_full_str[0] == '%') {
-    flattened_str = absl::StrCat("%out_", flattened_str);
+    // flattened_str = absl::StrCat("%out_", flattened_str);
+    flattened_str = absl::StrCat("%", flattened_str);
+    fmt::print("DEBUG0 output_name:{}\n", flattened_str);
   } else if (alter_full_str[0] == '#') {
     if (is_rhs) {
       flattened_str = absl::StrCat("#", flattened_str, ".__q_pin");
@@ -1072,9 +1078,11 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
 
     if (first_field_name == "io") {
       if (dir == 1) {  // PORT_DIRECTION_IN
-        flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
+        // flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
+        flattened_str = absl::StrCat("itup_", inst_name, ".io.", str_without_inst_and_io);
       } else if (dir == 2) {
-        flattened_str = absl::StrCat("otup_", inst_name, ".out_io.", str_without_inst_and_io);
+        // flattened_str = absl::StrCat("otup_", inst_name, ".out_io.", str_without_inst_and_io);
+        flattened_str = absl::StrCat("otup_", inst_name, ".io.", str_without_inst_and_io);
       } else {
         Pass::error("direction unknown of {}\n", flattened_str);
         I(false);
@@ -1281,20 +1289,21 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_IN) {
       input_names.insert(port_name);
       /* if (port_name.find_first_of("[.") != std::string::npos) { */
-      if (port_name.find(".") != std::string::npos) {
-        full_port_name = absl::StrCat("$inp_", port_name);
-      } else {
-        full_port_name = absl::StrCat("$", port_name);
-      }
-
+      // if (port_name.find(".") != std::string::npos) {
+      //   full_port_name = absl::StrCat("$inp_", port_name);
+      // } else {
+      //   full_port_name = absl::StrCat("$", port_name);
+      // }
+      full_port_name = absl::StrCat("$", port_name);
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
       output_names.insert(port_name);
       /* if (port_name.find_first_of("[.") != std::string::npos) { */
-      if (port_name.find(".") != std::string::npos) {
-        full_port_name = absl::StrCat("%out_", port_name);
-      } else {
-        full_port_name = absl::StrCat("%", port_name);
-      }
+      // if (port_name.find(".") != std::string::npos) {
+      //   full_port_name = absl::StrCat("%out_", port_name);
+      // } else {
+      //   full_port_name = absl::StrCat("%", port_name);
+      // }
+      full_port_name = absl::StrCat("%", port_name);
       // note: create output bits attr_set at the end of lnast to avoid firrtl_bits interference problem
       output_name2port_info.insert_or_assign(full_port_name, std::make_tuple(parent_node, port_sign, port_bits));
     } else {
