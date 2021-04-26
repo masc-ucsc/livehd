@@ -148,9 +148,9 @@ firrtl_test() {
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
-    # if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
-    #     python3 ${POST_IO_RENAME} "${pt}.v"
-    # fi
+    if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
+        python3 ${POST_IO_RENAME} "${pt}.v"
+    fi
 
     ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
     ret_val=$?
