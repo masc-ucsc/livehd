@@ -44,8 +44,8 @@ enum class Ntype_op : uint8_t {
   Fflop,  // Fluid flop
 
   Sub,    // Sub module instance
-  Const,  // Constant
   //------------------END PIPELINED (break LOOPS)
+  Const,  // Constant
 
   // High Level Lgraph constructs
 

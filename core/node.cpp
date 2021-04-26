@@ -98,6 +98,34 @@ Node::Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
+Node::Node(Lgraph *_g, const Compact_flat &comp)
+    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+  I(nid);
+  auto *lib = _g->ref_library();
+  top_g = lib->try_find_lgraph(comp.lgid);
+  I(top_g);
+  current_g = top_g;
+  I(top_g);
+
+  I(current_g->is_valid_node(nid));
+}
+
+Node::Node(std::string_view path, const Compact_flat &comp)
+    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+  I(nid);
+  top_g = Graph_library::try_find_lgraph(path, comp.lgid);
+  I(top_g);
+  current_g = top_g;
+  I(top_g);
+
+  I(current_g->is_valid_node(nid));
+}
+
+Node::Compact_flat Node::get_compact_flat() const {
+  I(!is_invalid());
+  return Compact_flat(current_g->get_lgid(), nid);
+}
+
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
