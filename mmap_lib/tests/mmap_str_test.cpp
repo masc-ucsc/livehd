@@ -1,3 +1,4 @@
+
 #include "mmap_str.hpp"
 
 #include <functional>
@@ -64,6 +65,8 @@ public:
   // wrapper for .at() since vectors are private
   std::string s_get(int i) { return str_bank.at(i); }
   std::string n_get(int i) { return num_bank.at(i); }
+  std::string nu_get(int i) { return no_underscore.at(i); }
+  std::string nd_get(int i) { return no_dash.at(i); }
 };
 
 
@@ -444,7 +447,31 @@ TEST_F(Mmap_str_test, substr) {
 
 
 TEST_F(Mmap_str_test, split) {
-
+  std::vector<mmap_lib::str> ref;
+  std::vector<mmap_lib::str> hold;
+  std::string longg;
+  
+  uint8_t iter = 0, sum = 0;
+  for (auto i = 0; i < RNDN; ++i) {
+    while (iter == 0) { // while iter is 0 at beginning, make sure its not
+      iter = 1 + (rand() % 10); // between 1 and 10
+      // adjusting iter so we don't exceed RNDN
+      if ((sum + iter) > RNDN) { iter = iter - ((sum + iter) - RNDN); }
+      sum += iter; // add to sum to compare
+    }
+    ref.push_back(mmap_lib::str(nu_get(i))); // add to ref
+    longg += nu_get(i); // add to long
+    --iter;
+    if (iter == 0) {
+      mmap_lib::str tt(longg);
+      hold = tt.split('_');
+      EXPECT_EQ(ref, hold);
+      if (sum == RNDN) { break; }
+      else { ref.clear(); longg.clear(); hold.clear(); }
+    } else {
+      longg += '_';
+    } 
+  }
 }
 
 
@@ -454,3 +481,4 @@ int main(int argc, char **argv) {
   return RUN_ALL_TESTS();
 }
 #endif
+
