@@ -297,7 +297,7 @@ public:
   constexpr bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
   constexpr char operator[](std::size_t pos) const {
-    if (pos >= _size) { throw std::out_of_range(""); }
+    if (pos >= _size) { throw std::out_of_range("[] operator out of range."); }
     if (_size < 14) {
       if (pos < 4) {
         uint8_t mx = posShifter(_size);
@@ -372,131 +372,82 @@ public:
   }
 
   std::size_t find(const str &v, std::size_t pos = 0) const{
-    if (v._size >_size) return -1;
-    //if size ==vsize and == is true return 0 else return -1
-    if (_size<14){
-      int vtemp = (v._size >=4 ) ? 3 : (v._size -1);
-      int temp = (_size >=4 ) ? 3 : (_size -1);
-      char first = ((v.ptr_or_start >> (8 * (vtemp))) & 0xFF);//different ways
-      //std::cout << "first char is :" << first << std::endl;
-      size_t retval = 0;
-      bool found_flag = false;
-      int i,j,k;
-      int e_pos_self =0;
-      int e_pos_thier =0;
-      for (  i =0; i <4 ; i++){
-        retval = 0;
-        found_flag = false;
-        e_pos_self =0;
-        e_pos_thier =0;
-        if ((first == ((ptr_or_start >> (8 * (temp - i))) & 0xFF)) ){//and  ( pos >= i)) {
-          //std::cout << "found first " << i << std::endl;
-          retval = i;
-          if (v._size ==1 ) return retval;
-          found_flag = true;
-          if (v._size == 1)return retval;
-          for ( j = i+1,  k =1; j< 4; j++,k++){
-            if (k >= v._size ) break;
-            if (((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF) != ((ptr_or_start >> (8 * (temp - j))) & 0xFF)){//k starts from 1 
-              //std::cout << "turned to false in 1" << std::endl;
-              found_flag = false;
-              break;
-            }
-          }
-          if (found_flag == false) continue;
-          while(k < v._size){
-            //k++;
-            if (k < 4){
-              //std::cout << "did i make it here " << std::endl;
-              if(((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF)  != e[e_pos_self]) {
-
-                found_flag = false;
-                //std::cout << "turned to false in 2" << std::endl;
-                break;
-              }
-            } else {
-              if (v.e[e_pos_thier ] != e[e_pos_self]){
-                found_flag = false;
-                //std::cout << "turned to false in 3" << e_pos_thier << e_pos_self << std::endl;
-                //e_pos_thier++;
-                break;
-              }
-              e_pos_thier++;
-            }
-            e_pos_self++;
-            k++;
-          }
-          if (found_flag == true) return retval;
+    char first = v[0];
+    for (size_t i = ((pos == 0) ? 0 : pos); i< _size ; i++){
+      if ((first == (*this)[i]) and ((i+ v._size) <= _size)){
+        for (size_t j = i, k =0; j < i+ v._size ;j++,k++){
+           if ((*this)[j] != v[k]) break;
+           if (j == (i + v._size -1)) return i;
         }
-        //if (found_flag == true) return retval;
       }
-      /////////////////////////////////////////////////////////////////////////////////////////
-      if (_size > 4){
-        for (int m =0 ; m < (_size - 4);m++){
-          retval = 0;
-          found_flag = false;
-          e_pos_self =0;
-          e_pos_thier =0;
-          if (first == e[m] ){//and  ( pos >= i)) {
-            //std::cout << "found first in e[m]" << std::endl;
-            retval = m+4;
-            if (v._size == 1)return retval;
-            found_flag = true;
-            for ( j = m+1,  k =1; k< 4; j++,k++){
-              if(k >= v._size ) break;
-              if (((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF) != e[j] ){//k starts from 1 
-                found_flag = false;
-                char sge = ((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF); 
-                //std::cout << sge << "is not " << e[j] << std::endl;
-                //std::cout << "false in 1" << k << std::endl ;
-                break;
-              }
-            }
-            e_pos_self = j;
-            while(k < v._size){
-            	k++;
-              if (k < 4){
-                if(((v.ptr_or_start >> (8 * (vtemp - k))) & 0xFF)  != e[e_pos_self]) {
-
-                  found_flag = false;
-                  break;
-                }
-              } else {
-                if (v.e[e_pos_thier ] != e[e_pos_self]){
-                  found_flag = false;
-                  
-                  break;
-                }
-                e_pos_thier++;
-              }
-              e_pos_self++;
-              
-            }
-            if (found_flag == true) return retval;
-          }
-        }
-      }/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////*/
-      //if you havent found the string at this point and this string is < 4 chaars then find returns -1
-      //if((_size < 4 ) and (found_flag == false)) return -1;
-      //std::cout << "here" << std::endl;
-      return -1;
-    } else {
-      std::string my_string = this->to_s();
-      std::string their_string = v.to_s();
-      return my_string.find(their_string);
     }
+    return -1;
   }
   
-  std::size_t find(char c, std::size_t pos = 0) const;
+                  
+  std::size_t find(char c, std::size_t pos = 0) const{
+    for (size_t i =0; i<_size;i++){
+      if ((*this)[i] == c) return i;
+    }
+    return -1;
+  }
+
   template <std::size_t N>
   constexpr std::size_t find(const char (&s)[N], std::size_t pos = 0) {
     return find(str(s), pos);
   }
 
-  std::size_t rfind(const str &v, std::size_t pos = 0) const;
-  std::size_t rfind(char c, std::size_t pos = 0) const;
-  std::size_t rfind(const char *s, std::size_t pos, std::size_t n) const;
-  std::size_t rfind(const char *s, std::size_t pos = 0) const;
+
+  //last occurance
+  std::size_t rfind(const str &v, std::size_t pos = 0) const {
+    if (v._size > _size ) return -1;
+    std::string mine = this->to_s();
+    std::string their = v.to_s ();
+    return mine.rfind(their);
+#if 0
+    if (v._size == 0) return -1;
+    char first = v[0];
+    size_t retval=-1;
+    for (size_t i = ((pos == 0) ? 0 : pos); i< _size ; i++){
+      if (first == (*this)[i]){
+        for (size_t j = i, k =1; j < i+ v._size ;j++,k++){
+           if ((*this)[j] != v[k]) break;
+           if (j == (i + v._size -1)) retval = i;
+        }
+      }
+    }
+    return retval;
+
+
+    char first = v[0];
+    size_t retvalue = -1;
+    for (size_t i = (_size - v._size); i< _size ; i--){
+      if (first == (*this)[i]){
+        for (size_t j = i, k =1; j < i+ v._size ;j++,k++){
+           if ((*this)[j] != v[k]) break;
+           if (j == (i + v._size -1)){
+            if (pos< i) return -1;
+            return i;
+           } 
+        }
+      }
+    }
+    return -1; 
+#endif 
+  }
+
+  std::size_t rfind(char c, std::size_t pos = 0) const{
+    size_t returnval = -1;
+    for (size_t i =0; i<_size;i++){
+      if ((*this)[i] == c) returnval = i;
+    }
+    return returnval;
+  }
+
+  template <std::size_t N>
+  constexpr std::size_t rfind(const char (&s)[N], std::size_t pos = 0) {
+    return rfind(str(s),pos);
+  }
 
   // concat implementation options
   // 1) add directly to strVec behind a (O(b) and depends on current size of strMap)
@@ -589,7 +540,6 @@ public:
     if (_size < 14) {
       int temp = (_size >= 4) ? 3 : (_size-1);
       char first = (ptr_or_start >> (8 * (temp))) & 0xFF;
-      //char first = ((ptr_or_start >> (8 * (_size -1))) & 0xFF);
       if (first !='-' and( first <'0' or first > '9')) {
         return false;
       }
@@ -641,14 +591,12 @@ public:
 
   int64_t to_i() const{  // convert to integer
     if(this->is_i()){
-      //std::cout << "The input is an integer " << std::endl;
       std::string temp = this->to_s();
-      //std::cout << "The string is  " << _size << std::endl;
       return stoi(temp);
+    } else {
+      return 0;
     }
-    std::cout << "The input is not an integer " << std::endl;
   } 
-
 
 
   std::string to_s() const{  // convert to string    
@@ -658,193 +606,41 @@ public:
   }
 
   str get_str_after_last(const char chr) const{
-#if 1
     size_t val = this->rfind(chr);
     std::string out;
-    
-    if (val != -1){
-          if (_size <= 13 ){
-          //adding charactors from ptr_or_start based on the size of the string
-          if (val <= 3)
-          for (int i =val; i<((_size>4) ? 4: _size); i++){
-            int temp = (_size >= 4) ? 3 : (_size-1); 
-            out += (ptr_or_start >> (8 * (temp-i))) & 0xFF;
-            //std::cout << "The out is  " << out << std::endl;
-          }
-          //if there are any characotrs in e, we add them as well
-          if(_size>4){
-            for(int i = ((val <=3) ? 0:val) ; i< (_size-4); i++){
-              out += e[i];
-            }
-          } 
-        } else{
-          //adding the first two charactors
-          if (val <=1)
-          for (int i =val; i< 2; i++){
-            out += e[i];
-          }
-          //adding the middle section of the string from string vector
-          if (val < (_size-8) ){ 
-          for (int j = 2,i = ptr_or_start; i < (ptr_or_start + _size - 10); j++,i++) {   
-             if (j>= val ) out += string_vector.at(i);
-          }
-          }
-          //adding the last 8 charactors
-          for (int j =(_size -8), i = 2; i<10; j++,i++){
-            if (j>= val ) out += e[i];
-          }
-
-        }
-        return str(out);
+    if (val >= (_size - 1)) return str(out);
+    for (size_t i = val+1; i< _size; i++){
+      out += (*this)[i];
     }
-    //i dont know what to return if we cant find chr 
-#endif
+    return str(out);
   }
+  
   str get_str_after_first(const char chr) const{
-    #if 1
     size_t val = this->find(chr);
     std::string out;
-    
-    if (val != -1){
-          if (_size <= 13 ){
-          //adding charactors from ptr_or_start based on the size of the string
-          if (val <= 3)
-          for (int i =val; i<((_size>4) ? 4: _size); i++){
-            int temp = (_size >= 4) ? 3 : (_size-1); 
-            out += (ptr_or_start >> (8 * (temp-i))) & 0xFF;
-            //std::cout << "The out is  " << out << std::endl;
-          }
-          //if there are any characotrs in e, we add them as well
-          if(_size>4){
-            for(int i = ((val <=3) ? 0:val) ; i< (_size-4); i++){
-              out += e[i];
-            }
-          } 
-        } else{
-          //adding the first two charactors
-          if (val <=1)
-          for (int i =val; i< 2; i++){
-            out += e[i];
-          }
-          //adding the middle section of the string from string vector
-          if (val < (_size-8) ){ 
-          for (int j = 2, i = ptr_or_start; i < (ptr_or_start + _size - 10); j++,i++) {   
-             if (j>= val ) out += string_vector.at(i);
-          }
-          }
-          //adding the last 8 charactors
-          for (int j =(_size -8), i = 2; i<10; j++,i++){
-            if (j>= val ) out += e[i];
-          }
-
-        }
-        return str(out);
+    if (val >= (_size - 1)) return str(out);
+    for (size_t i = val+1; i< _size; i++){
+      out += (*this)[i];
     }
-    //i dont know what to return if we cant find chr
-   #endif 
+    return str(out);
   }
 
   str get_str_before_last(const char chr) const{
-    #if 1 
     size_t val = this->rfind(chr);
-    //if (val ==0 ) return;
     std::string out;
-     if (val ==0 ) return str(out);
-    size_t counter =0;
-    if (val != -1){
-    	if (_size <= 13 ){
-      //adding charactors from ptr_or_start based on the size of the string
-		      for (int i =0; i<((_size>4) ? 4: _size); i++){
-		      	counter++;
-		        int temp = (_size >= 4) ? 3 : (_size-1); 
-		        out += (ptr_or_start >> (8 * (temp-i))) & 0xFF;
-		        if(val == counter) return str(out);
-		        //std::cout << "The out is  " << out << std::endl;
-		      }
-		      //if there are any characotrs in e, we add them as well
-		      if(_size>4){
-		        for(int i =0 ; i< (_size-4); i++){
-		        	counter++;
-		        	out += e[i];
-		        	if(val == counter) return str(out);
-		        }
-		      } 
-    } else{
-	      //adding the first two charactors
-	      for (int i =0; i< 2; i++){
-	      	counter++;
-	        out += e[i];
-	        if(val == counter) return str(out);
-	      }
-	      //adding the middle section of the string from string vector
-	      for (int i = ptr_or_start; i < (ptr_or_start + _size - 10); i++) {   
-	        counter++;
-	        out += string_vector.at(i);
-	        if(val == counter) return str(out);
-	      }
-	      //adding the last 8 charactors
-	      for (int i = 2; i<10; i++){
-	      	counter++;
-	        out += e[i];
-	        if(val == counter) return str(out);
-	      }
-
+    for (size_t i = 0; i< val; i++){
+      out += (*this)[i];
     }
-        return str(out);
-    }
-    //i dont know what to return if we cant find chr
-   #endif 
+    return str(out);
   }
+  
   str get_str_before_first(const char chr) const{
-    #if 1
     size_t val = this->find(chr);
-    //if (val ==0 ) return;
     std::string out;
-    if (val ==0 ) return str(out);
-    size_t counter =0;
-    if (val != -1){
-    	if (_size <= 13 ){
-      //adding charactors from ptr_or_start based on the size of the string
-		      for (int i =0; i<((_size>4) ? 4: _size); i++){
-		      	counter++;
-		        int temp = (_size >= 4) ? 3 : (_size-1); 
-		        out += (ptr_or_start >> (8 * (temp-i))) & 0xFF;
-		        if(val == counter) return str(out);
-		        //std::cout << "The out is  " << out << std::endl;
-		      }
-		      //if there are any characotrs in e, we add them as well
-		      if(_size>4){
-		        for(int i =0 ; i< (_size-4); i++){
-		        	counter++;
-		        	out += e[i];
-		        	if(val == counter) return str(out);
-		        }
-		      } 
-    } else{
-	      //adding the first two charactors
-	      for (int i =0; i< 2; i++){
-	      	counter++;
-	        out += e[i];
-	        if(val == counter) return str(out);
-	      }
-	      //adding the middle section of the string from string vector
-	      for (int i = ptr_or_start; i < (ptr_or_start + _size - 10); i++) {   
-	        counter++;
-	        out += string_vector.at(i);
-	        if(val == counter) return str(out);
-	      }
-	      //adding the last 8 charactors
-	      for (int i = 2; i<10; i++){
-	      	counter++;
-	        out += e[i];
-	        if(val == counter) return str(out);
-	      }
-
+    for (size_t i = 0; i< val; i++){
+      out += (*this)[i];
     }
-        return str(out);
-    }
-    //i dont know what to return if we cant find chr
-   #endif 
+    return str(out);
   }
  
   str substr(size_t start) const {
@@ -859,7 +655,6 @@ public:
     return mmap_lib::str(hold);
   }    
 
-  void test_cpp() const;
 };
 
 
