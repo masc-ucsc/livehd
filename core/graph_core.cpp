@@ -59,9 +59,9 @@ void Graph_core::Entry16::set_type(uint8_t type){
 
 uint8_t Graph_core::get_type(const Index_id master_root_id) const{
    const Entry16 *return_type = reinterpret_cast<const Entry16*>(table.data());
-   //if(return_type[master_root_id].is_master_root() == false){
-   //  return -1;
-   //}
+   if(return_type[master_root_id].is_master_root() == false){
+     return -1;
+   }
    return return_type[master_root_id].get_type();
 }
 
@@ -111,13 +111,13 @@ bool Graph_core::is_master_root(const Index_id master_root_id){
    //
    //USE AN ENUM INSTEAD OF BOOL?
 
-   // if(table.size() <= (master_root_id >> 2)){ //check the condition and on ln 76
+   if(table.size() <= (master_root_id >> 2)){ //check the condition and on ln 76
 
      const Entry16 *boolNode = reinterpret_cast<const Entry16*>(table.data());
      return boolNode[master_root_id].is_master_root();
-   //}else{
-     //return false;
-   //}
+   }else{
+     return false;
+   }
 }
 /*  Create a master_root node
  *  set the boolean value of the node to 1
