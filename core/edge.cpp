@@ -22,24 +22,24 @@ XEdge::XEdge(const Node_pin &src_, const Node_pin &dst_) : driver(src_), sink(ds
   I(sink.is_sink());
   I(driver.is_driver());
 
-  I(driver.get_top_Lgraph() == sink.get_top_Lgraph());
+  I(driver.get_top_lgraph() == sink.get_top_lgraph());
 }
 
 void XEdge::del_edge() {
-  I(driver.get_class_Lgraph() == sink.get_class_Lgraph());
+  I(driver.get_class_lgraph() == sink.get_class_lgraph());
 
-  driver.get_class_Lgraph()->del_edge(driver, sink);
+  driver.get_class_lgraph()->del_edge(driver, sink);
 }
 
 void XEdge::del_edge(Node_pin &dpin, Node_pin &spin) {
-  I(dpin.get_class_Lgraph() == spin.get_class_Lgraph());
+  I(dpin.get_class_lgraph() == spin.get_class_lgraph());
 
   I(dpin.is_driver());
   I(spin.is_sink());
 
-  dpin.get_class_Lgraph()->del_edge(dpin, spin);
+  dpin.get_class_lgraph()->del_edge(dpin, spin);
 }
 
-void XEdge::add_edge() { driver.get_class_Lgraph()->add_edge(driver, sink); }
+void XEdge::add_edge() { driver.get_class_lgraph()->add_edge(driver, sink); }
 
-void XEdge::add_edge(uint32_t bits) { driver.get_class_Lgraph()->add_edge(driver, sink, bits); }
+void XEdge::add_edge(uint32_t bits) { driver.get_class_lgraph()->add_edge(driver, sink, bits); }

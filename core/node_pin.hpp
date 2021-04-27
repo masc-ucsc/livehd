@@ -296,8 +296,8 @@ public:
     return Compact_class_driver(get_root_idx());
   }
 
-  Lgraph *        get_top_Lgraph() const { return top_g; };
-  Lgraph *        get_class_Lgraph() const { return current_g; };
+  Lgraph *        get_top_lgraph() const { return top_g; };
+  Lgraph *        get_class_lgraph() const { return current_g; };
   Lgraph *        get_lg() const { return current_g; };
   Hierarchy_index get_hidx() const { return hidx; };
 

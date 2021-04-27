@@ -40,7 +40,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {
     if (firbits_iters > 10) 
       Pass::error("FIRBITS cannot converge within 10 iterations!\n");
 #ifndef NDEBUG
-    fmt::print("FIRBITS Iteration:{}\n", firbits_iters);
+    fmt::print("\nFIRBITS Iteration:{}\n", firbits_iters);
 #endif
     lg->regenerate_htree();  // called bottom up, and the hierarchy may have been unfinished before
     firbits_wait_flop = false;
@@ -477,6 +477,7 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges, FB
     if (it == fbmap.end()) {
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_hidx() == node.get_hidx()) {
+        fmt::print("DEBUG1: bits\n");
         firbits_wait_flop = true;
         return;
       }
@@ -504,6 +505,8 @@ void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
     if (it == fbmap.end()) {
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_hidx() == node.get_hidx()) {
+      // if (e.driver.get_class_lgraph() == node.get_class_lgraph()) {
+        fmt::print("DEBUG1: cat node:{}\n", node.debug_name());
         firbits_wait_flop = true;
         return;
       }

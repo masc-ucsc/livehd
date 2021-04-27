@@ -968,7 +968,7 @@ void Bitwidth::process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it)
 void Bitwidth::set_graph_boundary(const Node_pin &dpin, Node_pin &spin) {
   I(hier);  // do not call unless hierarchy is set
 
-  if (dpin.get_class_Lgraph() == spin.get_class_Lgraph())
+  if (dpin.get_class_lgraph() == spin.get_class_lgraph())
     return;
 
   I(dpin.get_hidx() != spin.get_hidx());

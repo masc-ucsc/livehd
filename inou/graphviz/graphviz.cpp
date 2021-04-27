@@ -120,8 +120,8 @@ void Graphviz::do_hierarchy(Lgraph *g) {
     Node h_inp(g, hidx, Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n",
-                 e.driver.get_class_Lgraph()->get_name(),
-                 e.sink.get_class_Lgraph()->get_name(),
+                 e.driver.get_class_lgraph()->get_name(),
+                 e.sink.get_class_lgraph()->get_name(),
                  (int)hidx.level,
                  (int)hidx.pos);
 
@@ -133,10 +133,10 @@ void Graphviz::do_hierarchy(Lgraph *g) {
       added.insert(p);
 
       data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
-                          graphviz_legalize_name(e.driver.get_class_Lgraph()->get_name()),
+                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
                           (int)e.driver.get_hidx().level,
                           (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_Lgraph()->get_name()),
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
                           (int)e.sink.get_hidx().level,
                           (int)e.sink.get_hidx().pos);
     }
@@ -144,8 +144,8 @@ void Graphviz::do_hierarchy(Lgraph *g) {
     Node h_out(g, hidx, Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
       fmt::print("edge from:{} to:{} level:{} pos:{}\n",
-                 e.driver.get_class_Lgraph()->get_name(),
-                 e.sink.get_class_Lgraph()->get_name(),
+                 e.driver.get_class_lgraph()->get_name(),
+                 e.sink.get_class_lgraph()->get_name(),
                  (int)hidx.level,
                  (int)hidx.pos);
 
@@ -157,10 +157,10 @@ void Graphviz::do_hierarchy(Lgraph *g) {
       added.insert(p);
 
       data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
-                          graphviz_legalize_name(e.driver.get_class_Lgraph()->get_name()),
+                          graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
                           (int)e.driver.get_hidx().level,
                           (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_Lgraph()->get_name()),
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
                           (int)e.sink.get_hidx().level,
                           (int)e.sink.get_hidx().pos);
     }

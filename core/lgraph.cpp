@@ -514,7 +514,7 @@ XEdge_iterator Lgraph::out_edges_ordered_reverse(const Node &node) const {
 
 XEdge_iterator Lgraph::out_edges(const Node_pin &dpin) const {
   I(dpin.is_driver());
-  I(dpin.get_class_Lgraph() == this);
+  I(dpin.get_class_lgraph() == this);
 
   XEdge_iterator xiter;
 
@@ -526,7 +526,7 @@ XEdge_iterator Lgraph::out_edges(const Node_pin &dpin) const {
     std::vector<Node_pin> pin_list;  // NOTE: insert in pin_list because the mmap can dissapaear if touching other nodes
     for (i = 0, redge = node_internal[idx2].get_output_begin(); i < n; i++, redge += redge->next_node_inc()) {
       I(redge->get_self_idx() == idx2);
-      auto spin = redge->get_inp_pin(dpin.get_top_Lgraph(), dpin.get_class_Lgraph(), dpin.get_hidx(), idx2);
+      auto spin = redge->get_inp_pin(dpin.get_top_lgraph(), dpin.get_class_lgraph(), dpin.get_hidx(), idx2);
       pin_list.emplace_back(spin);
     }
 
@@ -548,7 +548,7 @@ XEdge_iterator Lgraph::out_edges(const Node_pin &dpin) const {
 
 XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
   I(spin.is_sink() || spin.is_graph_input());
-  I(spin.get_class_Lgraph() == this);
+  I(spin.get_class_lgraph() == this);
 
   XEdge_iterator xiter;
 
@@ -560,7 +560,7 @@ XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
     std::vector<Node_pin> pin_list;  // NOTE: insert in pin_list because the mmap can dissapaear if touching other nodes
     for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
       I(redge->get_self_idx() == idx2);
-      auto dpin = redge->get_out_pin(spin.get_top_Lgraph(), spin.get_class_Lgraph(), spin.get_hidx(), idx2);
+      auto dpin = redge->get_out_pin(spin.get_top_lgraph(), spin.get_class_lgraph(), spin.get_hidx(), idx2);
       pin_list.emplace_back(dpin);
     }
 
@@ -585,7 +585,7 @@ XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
 Node_pin_iterator Lgraph::inp_driver(const Node_pin &spin) const {
   I(!spin.is_invalid());
   I(spin.is_sink());
-  I(spin.get_class_Lgraph() == this);
+  I(spin.get_class_lgraph() == this);
 
   Node_pin_iterator piter;
 
@@ -597,7 +597,7 @@ Node_pin_iterator Lgraph::inp_driver(const Node_pin &spin) const {
     std::vector<Node_pin> pin_list;  // NOTE: insert in pin_list because the mmap can dissapaear if touching other nodes
     for (i = 0, redge = node_internal[idx2].get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
       I(redge->get_self_idx() == idx2);
-      auto dpin = redge->get_out_pin(spin.get_top_Lgraph(), spin.get_class_Lgraph(), spin.get_hidx(), idx2);
+      auto dpin = redge->get_out_pin(spin.get_top_lgraph(), spin.get_class_lgraph(), spin.get_hidx(), idx2);
       pin_list.emplace_back(dpin);
     }
 
@@ -920,9 +920,9 @@ bool Lgraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   // likely to find it early starting from idx. Start from idx, and go back to
   // start (nid) again once at the end. If idx again, then it is not anywhere.
 
-  GI(!spin.is_invalid(), dpin.get_class_Lgraph() == dpin.get_top_Lgraph());
-  GI(!spin.is_invalid(), spin.get_class_Lgraph() == spin.get_top_Lgraph());
-  GI(!spin.is_invalid(), spin.get_class_Lgraph() == dpin.get_top_Lgraph());
+  GI(!spin.is_invalid(), dpin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!spin.is_invalid(), spin.get_class_lgraph() == spin.get_top_lgraph());
+  GI(!spin.is_invalid(), spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   node_internal.ref(dpin.get_root_idx())->clear_full_hint();
 
@@ -979,9 +979,9 @@ bool Lgraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
   // likely to find it early starting from idx. Start from idx, and go back to
   // start (nid) again once at the end. If idx again, then it is not anywhere.
 
-  GI(!dpin.is_invalid(), dpin.get_class_Lgraph() == dpin.get_top_Lgraph());
-  GI(!dpin.is_invalid(), spin.get_class_Lgraph() == spin.get_top_Lgraph());
-  GI(!dpin.is_invalid(), spin.get_class_Lgraph() == dpin.get_top_Lgraph());
+  GI(!dpin.is_invalid(), dpin.get_class_lgraph() == dpin.get_top_lgraph());
+  GI(!dpin.is_invalid(), spin.get_class_lgraph() == spin.get_top_lgraph());
+  GI(!dpin.is_invalid(), spin.get_class_lgraph() == dpin.get_top_lgraph());
 
   Index_id idx2         = spin.get_idx();
   auto *   node_int_ptr = node_internal.ref(idx2);
@@ -1031,7 +1031,7 @@ void Lgraph::del_edge(const Node_pin &dpin, const Node_pin &spin) {
   I(dpin.is_driver());
   I(spin.is_sink());
 
-  I(spin.get_top_Lgraph() == dpin.get_top_Lgraph());
+  I(spin.get_top_lgraph() == dpin.get_top_lgraph());
 
   bool found = del_edge_driver_int(dpin, spin);
   if (!found)
@@ -1148,7 +1148,7 @@ Sub_node *Lgraph::ref_self_sub_node() { return library->ref_sub(get_lgid()); }
 void Lgraph::trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin) {
   I(dpin.is_hierarchical());
   I(dpin.is_driver());
-  I(spin.is_invalid() || dpin.get_top_Lgraph() == spin.get_top_Lgraph());
+  I(spin.is_invalid() || dpin.get_top_lgraph() == spin.get_top_lgraph());
 
   if (dpin.is_graph_input() && dpin.is_down_node()) {
     auto up_pin = dpin.get_up_pin();
@@ -1203,7 +1203,7 @@ void Lgraph::trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, con
 void Lgraph::add_edge(const Node_pin &dpin, const Node_pin &spin) {
   I(dpin.is_driver());
   I(spin.is_sink());
-  I(spin.get_top_Lgraph() == dpin.get_top_Lgraph());
+  I(spin.get_top_lgraph() == dpin.get_top_lgraph());
 
   add_edge_int(spin.get_root_idx(), spin.get_pid(), dpin.get_root_idx(), dpin.get_pid());
 }

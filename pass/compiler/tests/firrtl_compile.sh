@@ -38,6 +38,7 @@ if [ $# -eq 0 ]; then
   # pts='BundleConnect '
   # pts='PlusAnd'      # issue: first element of Vector is not ended with _0
   # pts='Test1'
+  # pts='Adder4'
 
 else
   file=$(basename $1)

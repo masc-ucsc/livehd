@@ -38,7 +38,7 @@ RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *module, const Node_pin &pin) 
     // fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
     return module->addWire(module->uniquify(name), pin.get_bits());
   } else {
-    return module->addWire(next_id(pin.get_class_Lgraph()), pin.get_bits());
+    return module->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
   }
 }
 

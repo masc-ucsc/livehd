@@ -155,7 +155,7 @@ static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int 
 
   Node_pin dpin;
 
-  auto *lg = wide_dpin.get_class_Lgraph();
+  auto *lg = wide_dpin.get_class_lgraph();
 
   if (is_signed) {
     // Pick(a,width,offset, false):
@@ -425,7 +425,7 @@ static void connect_all_inputs(const Node_pin &spin, const RTLIL::Cell *cell) {
     if (is_yosys_output(conn.first.c_str()))
       continue;  // Just go over the inputs
 
-    spin.connect_driver(create_pick_concat_dpin(spin.get_class_Lgraph(), ss, is_signed));
+    spin.connect_driver(create_pick_concat_dpin(spin.get_class_lgraph(), ss, is_signed));
   }
 }
 
