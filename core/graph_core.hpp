@@ -54,14 +54,15 @@ public:
 class Graph_core {
 protected:
   class __attribute__((packed)) Entry64 {  // AKA Overflow Entry
+  protected:
     uint8_t edge_storage[64 - 1];
     uint8_t last_byte;
 
-  protected:
+  public:
     constexpr Entry64() : edge_storage{0,},last_byte(0) {
     }
     void set_input() { last_byte |= 0x80; }   // set 8th bit
-    void set_output() { last_byte &= 0x7F; }  // clear 8th bit
+    void set_output() { last_byte &= 0x7F; }  // clear 8th bit 
 
     constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
@@ -86,6 +87,7 @@ protected:
     }
     void set_master_root();
     void set_master();
+
     void set_type(uint8_t type);
 
     constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
@@ -96,6 +98,11 @@ protected:
     constexpr bool is_master_root() const { return master_root; }
 
     constexpr uint8_t  get_type() const { return pid_bits_or_type; }
+
+    constexpr uint8_t  test_master_root() const { return master_root; }
+
+    uint8_t insert_edge(uint8_t rel_index);
+
     constexpr uint32_t get_pid() const {
       if (is_master_root())
         return 0;
@@ -140,8 +147,10 @@ public:
   Index_iter out_ids(const Index_id s);  // Iterate over the out edges of s (*it is Index_id)
   Index_iter inp_ids(const Index_id s);  // Iterate over the inp edges of s
 
+  uint8_t test_master_root(const Index_id master_root_id) const;
+
   uint8_t get_type(const Index_id master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_id master_root_id);
+  void    set_type(const Index_id master_root_id, uint8_t type);
 
   Port_ID get_pid(const Index_id master_root_id) const;  // pid for master or 0 for master_root
 
@@ -149,6 +158,8 @@ public:
   Index_id create_master_root(uint8_t type);
   // Create a master and point to master root m
   Index_id create_master(const Index_id master_root_id, const Port_ID pid);
+
+  bool is_master_root(const Index_id master_root_id);
   // Delete node s, all related edges and masters (if master root)
   void del(const Index_id s);
 };
