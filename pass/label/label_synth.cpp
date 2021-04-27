@@ -174,13 +174,13 @@ void Label_synth::label(Lgraph *g) {
     node.set_color(it.second);
   }
 
-#if 1
-  //dump();
+  if (verbose) {
+    //dump();
 
-  for(auto &it:flat_node2id) {
-    Node node(g, it.first);
-    fmt::print(":{} node:{}\n", it.second, node.debug_name());
+    for(auto &it:flat_node2id) {
+      Node node(g, it.first);
+      fmt::print(":{} node:{}\n", it.second, node.debug_name());
+    }
   }
-#endif
 }
 
