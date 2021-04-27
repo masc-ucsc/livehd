@@ -400,40 +400,17 @@ public:
 
   //last occurance
   std::size_t rfind(const str &v, std::size_t pos = 0) const {
-    if (v._size > _size ) return -1;
-    std::string mine = this->to_s();
-    std::string their = v.to_s ();
-    return mine.rfind(their);
-#if 0
-    if (v._size == 0) return -1;
-    char first = v[0];
-    size_t retval=-1;
-    for (size_t i = ((pos == 0) ? 0 : pos); i< _size ; i++){
-      if (first == (*this)[i]){
-        for (size_t j = i, k =1; j < i+ v._size ;j++,k++){
+     char first = v[0];
+     size_t retvalue =-1;
+    for (size_t i = ((pos == 0) ? 0 :pos ); i< _size ; i++){
+      if ((first == (*this)[i]) and ((i+ v._size) <= _size)){
+        for (size_t j = i, k =0; j < i+ v._size ;j++,k++){
            if ((*this)[j] != v[k]) break;
-           if (j == (i + v._size -1)) retval = i;
+           if (j == (i + v._size -1)) retvalue = i;
         }
       }
     }
-    return retval;
-
-
-    char first = v[0];
-    size_t retvalue = -1;
-    for (size_t i = (_size - v._size); i< _size ; i--){
-      if (first == (*this)[i]){
-        for (size_t j = i, k =1; j < i+ v._size ;j++,k++){
-           if ((*this)[j] != v[k]) break;
-           if (j == (i + v._size -1)){
-            if (pos< i) return -1;
-            return i;
-           } 
-        }
-      }
-    }
-    return -1; 
-#endif 
+    return retvalue; 
   }
 
   std::size_t rfind(char c, std::size_t pos = 0) const{
