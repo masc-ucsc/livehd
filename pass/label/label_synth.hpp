@@ -14,6 +14,7 @@ class Label_synth {
 private:
   const bool verbose;
   const bool hier;
+	bool synth;
 
   int last_free_id;
   int collapse_set_min;
@@ -32,7 +33,7 @@ private:
 public:
   void label(Lgraph *g);
 
-  Label_synth(bool _verbose, bool _hier);
+  Label_synth(bool _verbose, bool _hier, std::string_view alg);
 
   void dump() const;
 };

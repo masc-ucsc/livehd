@@ -6,8 +6,16 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
-Label_synth::Label_synth(bool _verbose, bool _hier) : verbose(_verbose), hier(_hier) { (void)verbose; }
+Label_synth::Label_synth(bool _verbose, bool _hier, std::string_view alg) : verbose(_verbose), hier(_hier) {
 
+	if (alg =="pipe") {
+		synth = false;
+	}else if (alg == "synth") {
+		synth = true;
+	}else{
+		Pass::error("unknown algorithm {} for pass.label.synth", alg);
+	}
+}
 
 int Label_synth::get_free_id() {
   return last_free_id++;
@@ -27,7 +35,7 @@ void Label_synth::set_id(const Node &node, int id) {
 
 void Label_synth::mark_ids(Lgraph *g) {
 
-#if 0
+#if 1
   // Do we cluster inputs? (FIXME: option)
   g->each_graph_input([&](const Node_pin &pin) {
     auto id = get_free_id();
@@ -44,6 +52,15 @@ void Label_synth::mark_ids(Lgraph *g) {
       continue;
     if (node.is_type_const())
       continue; // consts do not need to create new IDs
+
+		if (synth) {
+			auto op = node.get_type_op();
+			if (op == Ntype_op::Mult || op == Ntype_op::Div)
+				continue;
+			auto b = node.get_driver_pin().get_bits();
+			if (op == Ntype_op::Sum && b > 8)
+				continue;
+		}
 
     int id = 0;
     auto it = flat_node2id.find(node.get_compact_flat());
@@ -157,8 +174,8 @@ void Label_synth::label(Lgraph *g) {
     node.set_color(it.second);
   }
 
-#if 0
-  dump();
+#if 1
+  //dump();
 
   for(auto &it:flat_node2id) {
     Node node(g, it.first);

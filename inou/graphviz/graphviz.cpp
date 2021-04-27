@@ -14,6 +14,29 @@ Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(
   (void)_bits;
 }
 
+void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
+
+  std::string file;
+  if (dot_postfix == "")
+    file = absl::StrCat(odir, "/", name, ".dot");
+  else
+    file = absl::StrCat(odir, "/", name, ".", dot_postfix, ".dot");
+
+  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  if (fd < 0) {
+    Pass::error("inou.graphviz unable to create {}", file);
+    return;
+  }
+  size_t sz = write(fd, data.c_str(), data.size());
+  if (sz != data.size()) {
+    Pass::error("inou.graphviz unexpected write missmatch");
+    return;
+  }
+
+  close(fd);
+}
+
+
 void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose) {
   std::string dp_pid, sp_pid;
   if (verbose) {
@@ -145,37 +168,66 @@ void Graphviz::do_hierarchy(Lgraph *g) {
 
   data += "\n}\n";
 
-  std::string file = absl::StrCat(odir, "/", g->get_name(), "_hier.dot");
-  int         fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-  if (fd < 0) {
-    Pass::error("inou.graphviz.do_hierarchy unable to create {}", file);
-    return;
-  }
-  size_t sz = write(fd, data.c_str(), data.size());
-  if (sz != data.size()) {
-    Pass::error("inou.graphviz.do_hierarchy unexpected write missmatch");
-    return;
-  }
-  close(fd);
+	save_graph(g->get_name(), ".hier", data);
 }
 
 void Graphviz::create_color_map(Lgraph *lg) {
 
   std::set<int> colors_used;
+	absl::flat_hash_map<int, int> color2size;
+
+	float max_size = 1;
   for(auto node:lg->fast()) {
-    if (node.has_color()) {
-      colors_used.insert(node.get_color());
-    }
+    if (!node.has_color())
+			continue;
+
+		auto c = node.get_color();
+		colors_used.insert(c);
+		auto sz = color2size[c]++;
+		if (sz>max_size)
+			max_size = sz;
   }
+
+  std::string data = "digraph {\n";
 
   color2rgb.clear();
-  int i = 1;
   for(auto c:colors_used) {
-    RGB color(i);
+		auto sz = color2size[c];
+    RGB color(sz/max_size);
     color2rgb[c] = color.to_s();
-    ++i;
+		data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", c, sz, color.to_s());
   }
 
+	absl::flat_hash_set<uint64_t> edges; // hackish graph
+  for(auto node:lg->fast()) {
+    if (!node.has_color())
+			continue;
+
+		auto c = node.get_color();
+		for(auto e:node.out_edges()) {
+			auto snode = e.sink.get_node();
+			if (!snode.has_color())
+				continue;
+			auto sc = snode.get_color();
+			if (sc==c)
+				continue;
+
+			uint64_t edge = c;
+			edge <<=32;
+			edge  |=sc;
+
+			if (edges.contains(edge))
+				continue;
+
+			data += fmt::format(" c{}->c{};\n", c, sc);
+
+			edges.insert(edge);
+		}
+  }
+
+  data += "}\n";
+
+	save_graph(lg->get_name(), "color_map", data);
 }
 
 void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
@@ -250,26 +302,11 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
 
   data += "}\n";
 
-  std::string file;
-  if (dot_postfix == "")
-    file = absl::StrCat(odir, "/", g->get_name(), ".dot");
-  else
-    file = absl::StrCat(odir, "/", g->get_name(), ".", dot_postfix, ".dot");
-
-  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-  if (fd < 0) {
-    Pass::error("inou.graphviz unable to create {}", file);
-    return;
-  }
-  size_t sz = write(fd, data.c_str(), data.size());
-  if (sz != data.size()) {
-    Pass::error("inou.graphviz unexpected write missmatch");
-    return;
-  }
-  close(fd);
+	save_graph(g->get_name(), dot_postfix, data);
 }
 
 void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix) {
+	(void)dot_postfix;
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder()) {
@@ -304,23 +341,5 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_
 
   data += "}\n";
 
-  auto f2 = lnast->get_top_module_name();
-
-  std::string file;
-  if (dot_postfix == "")
-    file = absl::StrCat(odir, "/", f2, ".lnast.dot");
-  else
-    file = absl::StrCat(odir, "/", f2, ".lnast", ".", dot_postfix, ".dot");
-
-  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-  if (fd < 0) {
-    Pass::error("inou.graphviz_lnast unable to create {}", file);
-    return;
-  }
-  size_t sz = write(fd, data.c_str(), data.size());
-  if (sz != data.size()) {
-    Pass::error("inou.graphviz_lnast unexpected write missmatch");
-    return;
-  }
-  close(fd);
+	save_graph(lnast->get_top_module_name(), "lnast", data);
 }

@@ -33,6 +33,7 @@ void Pass_label::setup() {
 
   Eprp_method m2("pass.label.synth", "Label a graph with synthesis boundaries", &Pass_label::label_synth);
   m2.add_label_optional("hier", "hierarchical traversal/labeling", "false");
+  m2.add_label_optional("alg", "algorithm (pipe, synth)", "pipe");
   m2.add_label_optional("verbose", "verbose statistics and information", "false");
   register_pass(m2);
 
@@ -55,7 +56,9 @@ void Pass_label::label_mincut(Eprp_var &var) {
 void Pass_label::label_synth(Eprp_var &var) {
   Pass_label pp(var);
 
-  Label_synth p(pp.verbose, pp.hier);
+  auto alg_txt = var.get("alg");
+
+  Label_synth p(pp.verbose, pp.hier, alg_txt);
 
   for (const auto &l : var.lgs) {
     p.label(l);

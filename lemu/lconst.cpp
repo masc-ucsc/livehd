@@ -635,7 +635,7 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
     return *this;
 
   if (has_unknowns()) {
-    auto qmarks = to_string();
+    auto qmarks = to_pyrope();
     qmarks.append(amount, '0');
     return Lconst(qmarks);
   }
@@ -650,7 +650,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
     return *this;
 
   if (is_string()) {
-    auto qmarks = to_string();
+    auto qmarks = to_pyrope();
     auto s      = qmarks.substr(amount);
     return Lconst(s);
   }

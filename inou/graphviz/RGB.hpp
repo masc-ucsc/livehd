@@ -25,11 +25,7 @@ protected:
   }
 
 public:
-  RGB(int i) {
-    float x= 1;
-    if (i)
-      x= 1.0/i;
-
+  RGB(float x) { // 0..1 range
     if (x <= 0.5) {
       r = upramp(x, 5/8.0, 1/4.0);
       g = upramp(x, 1/8.0, 1/4.0);
