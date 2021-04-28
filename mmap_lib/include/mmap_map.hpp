@@ -643,6 +643,7 @@ private:
   }
 
   bool gc_txt_done(void* base, bool force_recycle) const {
+    (void)base;
     if (iter_cntr && !force_recycle)
       return true;  // abort
 
@@ -668,8 +669,8 @@ private:
     return total;
   }
 
-  size_t calc_num_entries(size_t mmap_size) const {
-    size_t total = mmap_size - (3 + 2) * sizeof(uint64_t) - sizeof(uint64_t);
+  size_t calc_num_entries(size_t m_size) const {
+    size_t total = m_size - (3 + 2) * sizeof(uint64_t) - sizeof(uint64_t);
     auto   n     = total / (sizeof(Node) + sizeof(uint8_t));
     return n - 1;
   }
@@ -807,7 +808,7 @@ private:
     mmap_txt_base                 = reinterpret_cast<uint64_t*>(base);
   }
 
-  __attribute__((inline)) void reload() const {
+  void reload() const {
     if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
       assert(mmap_base == nullptr);
       assert(mmap_fd < 0);
@@ -958,6 +959,7 @@ private:
     // don't need to check max num elements
     if (*mMaxNumElementsAllowed == 0) {
       bool ok = try_increase_info();
+      (void)ok;
       assert(ok);
     }
 
@@ -1381,7 +1383,6 @@ private:
     }
 
     uint64_t*    old_mmap_base = mmap_base;
-    const size_t old_mmap_size = mmap_size;
 
     Node* const          oldKeyVals = mKeyVals;
     uint8_t const* const oldInfo    = mInfo;

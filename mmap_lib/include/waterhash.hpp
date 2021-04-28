@@ -18,17 +18,17 @@ static inline constexpr uint64_t _watermum(const uint64_t A, const uint64_t B) {
   return r - (r >> 32);
 }
 
-static inline constexpr uint64_t _waterr08(const uint8_t *p) {
+static inline uint64_t _waterr08(const uint8_t *p) {
   uint8_t v = 0;
   memcpy(&v, p, 1);
   return v;
 }
-static inline constexpr uint64_t _waterr16(const uint8_t *p) {
+static inline uint64_t _waterr16(const uint8_t *p) {
   uint16_t v = 0;
   memcpy(&v, p, 2);
   return v;
 }
-static inline constexpr uint64_t _waterr32(const uint8_t *p) {
+static inline uint64_t _waterr32(const uint8_t *p) {
   uint32_t v = 0;
   memcpy(&v, p, 4);
   return v;

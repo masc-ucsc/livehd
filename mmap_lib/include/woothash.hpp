@@ -21,29 +21,29 @@ static inline constexpr uint64_t _wootmum(const uint64_t A, const uint64_t B) {
   return r - (r >> 32);
 }
 
-static inline constexpr uint64_t _wootr08(const uint8_t *p) {
+static inline uint64_t _wootr08(const uint8_t *p) {
   uint8_t v = 0;
   memcpy(&v, p, 1);
   return v;
 }
-static inline constexpr uint64_t _wootr16(const uint8_t *p) {
+static inline uint64_t _wootr16(const uint8_t *p) {
   uint16_t v = 0;
   memcpy(&v, p, 2);
   return v;
 }
-static inline constexpr uint64_t _wootr32(const uint8_t *p) {
+static inline uint64_t _wootr32(const uint8_t *p) {
   uint32_t v = 0;
   memcpy(&v, p, 4);
   return v;
 }
-static inline constexpr uint64_t _wootr64(const uint8_t *p) {
+static inline uint64_t _wootr64(const uint8_t *p) {
   uint64_t v = 0;
   memcpy(&v, p, 8);
   return v;
 }
-static inline constexpr uint64_t __wootr64(const uint8_t *p) { return (_wootr32(p) << 32) | _wootr32(p + 4); }
+static inline uint64_t __wootr64(const uint8_t *p) { return (_wootr32(p) << 32) | _wootr32(p + 4); }
 
-static inline constexpr uint64_t woothash64(const void *key, uint64_t len,
+static inline uint64_t woothash64(const void *key, uint64_t len,
                                             uint64_t seed = 1021) {  // 1021 is a small prime easy const
   const uint8_t *p = (const uint8_t *)key;
   uint64_t       a = seed ^ _wootp4;

@@ -1,10 +1,14 @@
+
+#include <vector>
+#include <type_traits>
+
 #include "fmt/format.h"
 #include "iassert.hpp"
-#include <vector>
+
 #include "lrand.hpp"
 #include "lbench.hpp"
 #include "flat_hash_map.hpp"
-#include <type_traits>
+
 #include "mmap_str.hpp"
 #include "mmap_map.hpp"
 
@@ -327,8 +331,68 @@ void pstr_isI(){
   printf("passed(%02d/%02d), failed(%02d/%02d)\n", p, p+f, f, p+f);
 }
 
+void bench_str_cmp() {
+
+  {
+    Lbench b("bench_str_cmp");
+
+    Lrand_range<char>     ch(1,127);
+    Lrand_range<uint16_t> sz(1,400);
+
+    std::vector<mmap_lib::str> v;
+    for(auto i=0u;i<1e4;++i) {
+      auto s = sz.any();
+      mmap_lib::str str;
+      for(auto j=0;j<s;++j) {
+        str.append(ch.any());
+      }
+      v.emplace_back(str);
+    }
+
+    int conta=0;
+    for(auto i=0u;i<1e4;++i) {
+      for(auto j=0u;j<1e4;++j) {
+        if (v[i] == v[j])
+          conta++;
+      }
+    }
+
+    fmt::print("bench_str_cmp conta:{}\n",conta);
+  }
+
+  {
+    Lbench b("bench_string_cmp");
+
+    Lrand_range<char>     ch(1,127);
+    Lrand_range<uint16_t> sz(1,400);
+
+    std::vector<mmap_lib::str> v;
+    for(auto i=0u;i<1e4;++i) {
+      auto s = sz.any();
+      std::string str;
+      for(auto j=0;j<s;++j) {
+        str.append(1,ch.any());
+      }
+      v.emplace_back(str);
+    }
+
+    int conta=0;
+    for(auto i=0u;i<1e4;++i) {
+      for(auto j=0u;j<1e4;++j) {
+        if (v[i] == v[j])
+          conta++;
+      }
+    }
+
+    fmt::print("bench_string_cmp conta:{}\n",conta);
+  }
+}
 
 int main(int argc, char **argv) {
+  bench_str_cmp();
+
+  return 0; // FIXME: strang behaviour if this is uncommented
+
   #if CTOR_TESTS
   mmap_pstr_ctor_tests();
   #endif

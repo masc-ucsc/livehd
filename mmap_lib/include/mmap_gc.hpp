@@ -79,8 +79,8 @@ protected:
       sorted.emplace_back(it.second);
     }
 
-    int n_recycle_fds   = may_recycle_fds == 1 ? 1 : may_recycle_fds / 2;
-    int n_recycle_mmaps = may_recycle_mmaps == 1 ? 1 : may_recycle_mmaps / 2;
+    size_t n_recycle_fds   = may_recycle_fds == 1 ? 1 : may_recycle_fds / 2;
+    size_t n_recycle_mmaps = may_recycle_mmaps == 1 ? 1 : may_recycle_mmaps / 2;
 
     if (n_open_fds < n_max_fds && may_recycle_fds > 4)
       n_recycle_fds = may_recycle_fds / 4;
@@ -99,7 +99,7 @@ protected:
     if (MMAP_LIB_UNLIKELY(mmap_gc_entry::global_age > 32768)) {  // infrequent but enough for coverage/testing
       mmap_gc_entry::global_age = sorted.size() + 1;
       int age                   = 1;
-      for (const auto e : sorted) {
+      for (const auto &e : sorted) {
         auto it        = mmap_gc_pool.find(e.base);
         it->second.age = age++;
       }
@@ -119,7 +119,7 @@ protected:
 #endif
 
     int n_gc = 0;
-    for (const auto e : sorted) {
+    for (const auto &e : sorted) {
       if (n_recycle_fds == 0 && n_recycle_mmaps == 0)
         break;
       auto it = mmap_gc_pool.find(e.base);
@@ -134,12 +134,13 @@ protected:
       }
     }
     if (n_gc == 0) {  // try with force
-      for (const auto e : sorted) {
+      for (const auto &e : sorted) {
         if (n_recycle_fds == 0 && n_recycle_mmaps == 0)
           break;
         auto it = mmap_gc_pool.find(e.base);
         assert(it != mmap_gc_pool.end());
         bool done = mmap_gc::recycle_int(it, true);  // force (do not give an option)
+        (void)done;
         assert(done);
         if (e.base)
           n_recycle_mmaps--;
@@ -230,7 +231,7 @@ protected:
       exit(-3);
     }
     /* LCOV_EXCL_STOP */
-    if (s.st_size <= size) {
+    if (s.st_size <= static_cast<int>(size)) {
       int ret = ::ftruncate(fd, size);
       /* LCOV_EXCL_START */
       if (ret < 0) {
@@ -328,6 +329,7 @@ public:
     assert(it != mmap_gc_pool.end());
 
     bool done = recycle_int(it, true);
+    (void)done;
     // auto entry = it->second;
     // std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
     assert(done);  // Do not call recycle and then deny it!!!!

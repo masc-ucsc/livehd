@@ -5,6 +5,7 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "headers",
+    srcs = glob(["include/*.cpp"]),
     hdrs = glob(["include/*.hpp"]),
     copts = COPTS,
     includes = ["include"],
