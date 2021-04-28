@@ -30,15 +30,15 @@ if [ $# -eq 0 ]; then
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
   Decrementer Counter RegXor'
-  # pts='VecShiftRegister'
 
-  # issue: /foo.bar.a mismatch with foo_bar_a in hierarchical design
+  # issue: \foo.bar.a mismatch with foo_bar_a in hierarchical design
   # pts='Mux4 SubModule SingleEvenFilter Adder4 XorSelfThread1 Xor6Thread2' 
 
+  # pts='BundleConnect '   # issue: bits TupAdd doesn't converted to attribute set
+  # pts='VecShiftRegister' # tuple-register, cprop
 
-  # pts='BundleConnect ' # issue: bits attribute missing
   # pts='PlusAnd'        # issue: first element of Vector is not ended with _0
-  # pts='Test1'          # issue: run-time index
+  # pts='Test1'          # issue: run-time vector index
   # pts='Adder4'
 
 else
