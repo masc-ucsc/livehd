@@ -675,4 +675,6 @@ public:
   }
 };
 
+mmap_lib::map<std::string_view, uint32_t> str::string_map2;
+
 }  // namespace mmap_lib
