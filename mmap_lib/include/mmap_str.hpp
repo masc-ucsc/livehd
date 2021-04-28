@@ -399,13 +399,17 @@ public:
 
 
   //last occurance
+  // atatatatatatat at
   std::size_t rfind(const str &v, std::size_t pos = 0) const {
      char first = v[0];
      size_t retvalue =-1;
-    for (size_t i = ((pos == 0) ? 0 :pos ); i< _size ; i++){
+    for (int i = (_size - v._size); i >= 0 ; i--){
+      //std::cout << "i is :" << i << std::endl;
       if ((first == (*this)[i]) and ((i+ v._size) <= _size)){
-        for (size_t j = i, k =0; j < i+ v._size ;j++,k++){
-           if ((*this)[j] != v[k]) break;
+        if (v._size == 1) return i;
+        for (size_t j = i, k =0; k<v._size, j < i+ v._size ;j++,k++){
+         // std::cout << "J is :" << (*this)[j]  << V[k]; 
+          if ((*this)[j] != v[k]) break;
            if (j == (i + v._size -1)) retvalue = i;
         }
       }
@@ -426,20 +430,6 @@ public:
     return rfind(str(s),pos);
   }
 
-  // concat implementation options
-  // 1) add directly to strVec behind a (O(b) and depends on current size of strMap)
-  //    a) find end of strVec pos with ptr_or_start
-  //    b) add b to it
-  //    c) Careful! Need to push everything else back
-  //    d) MUST modify the strMap for all strings that have ptr_or_start 
-  //       After *this's ptr_or_start
-  // 2) create a new string and directly add into strVec (O(a+b))
-  //    -> The only thing here is that it's kind of copies ctor logic
-  //    0) use ctor 0 to make object
-  //    a) add a strMap entry
-  //    b) find end of strVec, then directly add on to vec
-  // 3) Easy way -> worst runtime, easiest to code 
-  //    > Currently implemented
   static str concat(const str &a, const str &b) { 
     return a.append(b);
   }
