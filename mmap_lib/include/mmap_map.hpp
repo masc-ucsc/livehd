@@ -1053,6 +1053,7 @@ public:
       struct stat sb;
       if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
         int e = mkdir(mmap_path.c_str(), 0755);
+        (void)e;
         assert(e >= 0);
       }
     }

@@ -88,7 +88,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {
 
 void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
   I(node.is_sink_connected("din"));
-  auto qpin    = node.get_driver_pin();
   // auto it_qpin = fbmap.find(qpin.get_compact_flat());
 
   auto d_dpin    = node.get_sink_pin("din").get_driver_pin();
@@ -101,10 +100,11 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
     return;
   } else {
 
-    #ifndef NDEBUG
-      fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
-      fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
-    #endif
+#ifndef NDEBUG
+    auto qpin    = node.get_driver_pin();
+    fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
+    fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
+#endif
 
     firbits_issues = true;
     return;
