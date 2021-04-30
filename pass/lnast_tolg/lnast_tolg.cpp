@@ -420,11 +420,11 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
       return;
     }
 
-    auto tup_add        = lg->create_node(Ntype_op::TupAdd);
     auto fp_dnode       = lg->create_node_const(Lconst(fp));
     auto field_pos_dpin = fp_dnode.setup_driver_pin();
     auto value_dpin     = setup_ref_node_dpin(lg, tup_child);
 
+    auto tup_add        = lg->create_node(Ntype_op::TupAdd);
     auto field_pos_spin = tup_add.setup_sink_pin("position");    // field position is unknown before tuple resolving
     auto value_spin     = tup_add.setup_sink_pin("value");       // value
 
@@ -613,19 +613,21 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       else
         flattened_inp = name2dpin[full_inp_hier_name];
 
-      //(2) create attr_set node for input
-      //auto aset_node = lg->create_node(Ntype_op::AttrSet);
+      // Create pos and value before TupAdd to preserve topographical order
+
+      auto af_dpin = setup_field_dpin(lg, lnast->get_vname(child));
+
+      auto const_lnidx = lnast->get_sibling_next(child);
+      auto av_dpin     = setup_ref_node_dpin(lg, const_lnidx);
+
       auto aset_node = lg->create_node(Ntype_op::TupAdd);
       auto vn_spin   = aset_node.setup_sink_pin("tuple_name");   // variable name
       auto af_spin   = aset_node.setup_sink_pin("position");  // attribute field
       auto av_spin   = aset_node.setup_sink_pin("value");  // attribute value
 
       flattened_inp.connect_sink(vn_spin);
-      auto af_dpin = setup_field_dpin(lg, lnast->get_vname(child));
       af_dpin.connect_sink(af_spin);
 
-      auto const_lnidx = lnast->get_sibling_next(child);
-      auto av_dpin     = setup_ref_node_dpin(lg, const_lnidx);
       av_dpin.connect(av_spin);
       auto aset_dpin                = aset_node.setup_driver_pin("Y");
       name2dpin[full_inp_hier_name] = aset_dpin;
@@ -646,17 +648,18 @@ void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin,
     return;
 
   auto tup_name  = full_inp_hier_name.substr(0, pos);
+  auto name_dpin = setup_tuple_ref(lg, tup_name);
+  auto pos_dpin  = lg->create_node_const(Lconst(last_subname)).setup_driver_pin();
+
   auto ta_node   = lg->create_node(Ntype_op::TupAdd);
   auto pos_spin  = ta_node.setup_sink_pin("position");
   auto val_spin  = ta_node.setup_sink_pin("value");
 
-  auto name_dpin = setup_tuple_ref(lg, tup_name);
   if (!name_dpin.is_invalid()) {
     auto name_spin = ta_node.setup_sink_pin("tuple_name");
     name_dpin.connect_sink(name_spin);
   }
 
-  auto pos_dpin = lg->create_node_const(Lconst(last_subname)).setup_driver_pin();
   pos_dpin.connect_sink(pos_spin);
   val_dpin.connect(val_spin);
   auto ta_dpin = ta_node.setup_driver_pin();
@@ -665,6 +668,11 @@ void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin,
 }
 
 void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta) {
+  // FIXME: This code breaks the topographical order in the Lgraph. It creates
+  // first the TupAdd and then the constants for it. It will create more
+  // efficient Lgraphs if the constants/inputs are created first, and then the
+  // TupAdd is created
+
   if (is_hier_inp_bits_set(lnidx_ta)) {
     process_hier_inp_bits_set(lg, lnidx_ta);
     return;
@@ -681,15 +689,15 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        tup_vname = lnast->get_vname(c0_ta);
       auto        subs      = lnast->get_subs(c0_ta);
 
+      // exclude invalid scalar->tuple cases
+      auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
+
       auto tup_add = lg->create_node(Ntype_op::TupAdd);
       auto tn_dpin = setup_ta_ref_previous_ssa(lg, tup_vname, subs);
       if (!tn_dpin.is_invalid()) {
         auto tn_spin = tup_add.setup_sink_pin("tuple_name");
         tn_dpin.connect_sink(tn_spin);
       }
-
-      // exclude invalid scalar->tuple cases
-      auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
 
       // name2dpin[tup_sname] = tup_add.setup_driver_pin();
       name2dpin.insert_or_assign(tup_sname, tup_add.setup_driver_pin());

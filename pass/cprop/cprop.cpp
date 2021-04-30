@@ -1454,7 +1454,7 @@ void Cprop::scalar_pass(Lgraph *lg) {
       continue;
     }
 
-    fmt::print("scalar node:{}\n", node.debug_name());
+    //fmt::print("scalar node:{}\n", node.debug_name());
 
     auto inp_edges_ordered = node.inp_edges_ordered();
 
@@ -1493,7 +1493,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
       if (op!=Ntype_op::Get_mask && (op<Ntype_op::Mux || op==Ntype_op::Const))
         continue;
 
-      fmt::print("tuple  node:{}\n", node.debug_name());
+      //fmt::print("tuple  node:{}\n", node.debug_name());
 
       I(op!=Ntype_op::IO); // no IOs in fwd iterator
 

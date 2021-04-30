@@ -321,6 +321,7 @@ Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
 }
 
 Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
+Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bits)); }
 
 Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
 

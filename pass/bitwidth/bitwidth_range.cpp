@@ -8,18 +8,15 @@
 #include "likely.hpp"
 
 Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
-  if (val == 0)
-    return Lconst(0);
-
   if (!overflow) {
     return Lconst(val);
   }
 
-  if (val > 0) {
-    return Lconst(1).lsh_op(val) - 1;
+  if (val >= 0) {
+    return Lconst::get_mask_value(val);
   }
 
-  return Lconst(0) - (Lconst(1).lsh_op(-val));
+  return Lconst::get_neg_mask_value(-val); // Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
 Bitwidth_range::Bitwidth_range(const Lconst &val) {

@@ -96,6 +96,7 @@ public:
   [[nodiscard]] int get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
+  [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
 
   [[nodiscard]] Lconst get_mask_op() const;

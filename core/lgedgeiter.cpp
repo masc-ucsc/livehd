@@ -179,9 +179,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
     if (is_topo_sorted) {
       current_node.update(next_node);
       return;
-    } else {
-      unvisited.insert(next_node.get_compact());
     }
+    unvisited.insert(next_node.get_compact());
   }
 
   if (current_node.is_invalid()) {
