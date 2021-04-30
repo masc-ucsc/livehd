@@ -29,9 +29,10 @@ if [ $# -eq 0 ]; then
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter RegXor'
+  Decrementer Counter RegXor Mux4'
 
   # issue: \foo.bar.a mismatch with foo_bar_a in hierarchical design
+  # pts='BundleConnect'
   # pts='Mux4 SubModule SingleEvenFilter Adder4 XorSelfThread1 Xor6Thread2' 
 
   # pts='BundleConnect '   # issue: bits TupAdd doesn't converted to attribute set
@@ -126,7 +127,9 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    ${LGSHELL} "lgraph.open name:${pt} hier:true |> inou.cgen.verilog"
+    rm -rf tmp_firrtl
+    ${LGSHELL} "lgraph.open name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
+    cat tmp_firrtl/*.v >${pt}.v
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
     ret_val=$?
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"

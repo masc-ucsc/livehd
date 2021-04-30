@@ -96,7 +96,6 @@ void Firmap::clone_edges(Node &node, PinMap &pinmap) {
     auto old_dpin = old_spin.get_driver_pin();
     auto it       = pinmap.find(old_spin);
     if (it == pinmap.end()) {  // e.g. fir_tail has two inputs, but only e1 need to be mapped
-      I(old_spin != node.setup_sink_pin("e1"));
       continue;
     }
 
@@ -762,12 +761,20 @@ void Firmap::clone_subgraph_node(Node &old_node_subg, Lgraph *new_lg, PinMap &pi
     auto old_io_name = old_io_pin->name;
     if (old_io_pin->is_input()) {
       Node_pin new_spin;
+#if 1
+      if (!new_sub->has_pin(old_io_name)) {
+        // Maybe the pin got deleted
+        continue;
+      }
+      new_spin = new_node_subg.setup_sink_pin(old_io_name);
+#else
       if (!new_sub->has_pin(old_io_name)) {
         new_sub->add_input_pin(old_io_name, Port_invalid);
         new_spin = new_node_subg.setup_sink_pin(old_io_name);
       } else {
         new_spin = new_node_subg.setup_sink_pin(old_io_name);
       }
+#endif
 
       // map the old_sub sink_pins
       auto old_spin = old_node_subg.setup_sink_pin(old_io_name);
@@ -778,12 +785,19 @@ void Firmap::clone_subgraph_node(Node &old_node_subg, Lgraph *new_lg, PinMap &pi
     // handle old_io_pin->is_output()
     I(old_io_pin->is_output());
     Node_pin new_dpin;
+#if 1
+    if (!new_sub->has_pin(old_io_name)) {
+      continue;
+    }
+    new_dpin = new_node_subg.setup_driver_pin(old_io_name);
+#else
     if (!new_sub->has_pin(old_io_name)) {
       new_sub->add_output_pin(old_io_name, Port_invalid);
       new_dpin = new_node_subg.setup_driver_pin(old_io_name);
     } else {
       new_dpin = new_node_subg.setup_driver_pin(old_io_name);
     }
+#endif
     auto old_dpin = old_node_subg.setup_driver_pin(old_io_name);
     pinmap.insert_or_assign(old_dpin, new_dpin);
   }

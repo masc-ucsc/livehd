@@ -78,6 +78,7 @@ protected:
 
   void scalar_pass(Lgraph *orig);
   void tuple_pass(Lgraph *orig);
+  void clean_io(Lgraph *orig);
 public:
   Cprop(bool _hier);
 

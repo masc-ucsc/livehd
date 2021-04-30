@@ -1620,11 +1620,46 @@ void Cprop::tuple_pass(Lgraph *lg) {
   }
 }
 
+void Cprop::clean_io(Lgraph *lg) {
+  // Remove IOs that are undriven (this is a bit controversial, but to be
+  // consistent with FIRRTL for LEC)
+  //
+  // TODO: Maybe a cprop option (preserve_io) unset by default
+
+  auto *sub=lg->ref_self_sub_node();
+
+  lg->each_graph_input([&sub](Node_pin &dpin) {
+    if (dpin.is_connected())
+      return;
+
+    auto pid = dpin.get_pid();
+
+    dpin.del();
+
+    if (sub->has_instance_pin(pid))
+      sub->del_pin(pid);
+  });
+
+  lg->each_graph_output([&sub](Node_pin &dpin) {
+    auto spin = dpin.change_to_sink_from_graph_out_driver();
+    if (spin.is_connected())
+      return;
+
+    auto pid = dpin.get_pid();
+
+    dpin.del();
+
+    if (sub->has_instance_pin(pid))
+      sub->del_pin(pid);
+  });
+}
+
 void Cprop::do_trans(Lgraph *lg) {
   Lbench b("pass.cprop");
 
   scalar_pass(lg);
   tuple_pass(lg);
+  // clean_io(lg);
 }
 
 void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> tup) {

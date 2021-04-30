@@ -66,9 +66,17 @@ void Lcompiler::prp_thread_local_cprop_bitwidth(Lgraph *lg, Cprop &cp, Bitwidth 
   bw.do_trans(lg);
   gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void();
 
+#if 0
   fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-1)\n", lg->get_name());
   bw.do_trans(lg);
   gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void();
+#endif
+
+#if 0
+  fmt::print("------------------------ Local Copy-Prop ({})-------------------- (C-1)\n", lg->get_name());
+  cp.do_trans(lg);
+  gviz ? gv.do_from_lgraph(lg, "local.cprop-ed-1") : void();
+#endif
 }
 
 void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
@@ -103,9 +111,17 @@ void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void();
 
+#if 0
     fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-1)\n", lg->get_name());
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void();
+#endif
+
+#if 0
+    fmt::print("------------------------ Local Copy-Propagation ({})-------------------- (C-1)\n", lg->get_name());
+    cp.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed-1") : void();
+#endif
   }
 
   std::lock_guard<std::mutex>guard(lgs_mutex);
@@ -215,9 +231,19 @@ void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgrap
 
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
   bw.do_trans(new_lg);
+
+#if 0
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", new_lg->get_name());
   bw.do_trans(new_lg);
-  
+#endif
+
+#if 0
+  // FIXME: Why doing a cprop makes the code fail?
+  fmt::print("---------------- Local Cprop-Inference ({}) ----------- (C-1)\n", new_lg->get_name());
+  Cprop    cp(false);
+  cp.do_trans(new_lg);
+#endif
+
   gviz ? gv.do_from_lgraph(new_lg, "") : void();
 
   mapped_lgs.emplace_back(new_lg);
