@@ -725,7 +725,7 @@ const bool tree<X>::delete_leaf(const Tree_index &child) {
   // std::cout << "PTR STACK.parent: " << pointers_stack[child.level][child.pos >> 2].parent << std::endl;
   // std::cout << "PTR STACK.next_sibling: " << pointers_stack[child.level][child.pos >> 2].next_sibling << std::endl;
 
-  data_stack[child.level][child.pos] = "";
+  // data_stack[child.level][child.pos] = "";
   // data_stack[child.level].erase(data_stack[child.level].begin() + child.pos);
 
   pointers_stack[child.level][child.pos >> 2].first_child[child.pos & 3] = -1;
