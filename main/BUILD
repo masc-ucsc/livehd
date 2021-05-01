@@ -44,6 +44,7 @@ cc_binary(
         "//pass/lnast_fromlg:pass_lnast_fromlg",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/lnastfmt:pass_lnastfmt",
+        "//pass/lnastopt:pass_lnastopt",
         "//pass/mockturtle:pass_mockturtle",
         "//pass/punch:pass_punch",
         "//pass/sample:pass_sample",

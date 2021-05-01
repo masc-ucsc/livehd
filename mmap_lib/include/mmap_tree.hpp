@@ -527,12 +527,14 @@ public:
     return Tree_depth_preorder_iterator(start_index, this);
   }
 
-  Tree_depth_postorder_iterator depth_postorder(const Tree_index &start_index) const {
-    return Tree_depth_postorder_iterator(start_index, this);
-  }
-
   Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(Tree_index::root(), this); }
-  Tree_depth_postorder_iterator depth_postorder() const { return Tree_depth_postorder_iterator(Tree_index::root(), this); }
+  Tree_depth_postorder_iterator depth_postorder() const {
+    auto last_child = Tree_index::root();
+    while(!is_leaf(last_child)) {
+      last_child = get_first_child(last_child);
+    }
+    return Tree_depth_postorder_iterator(last_child, this);
+  }
 
   Tree_sibling_iterator siblings(const Tree_index &start_index) const { return Tree_sibling_iterator(start_index, this); }
   Tree_sibling_iterator children(const Tree_index &start_index) const {
@@ -978,34 +980,18 @@ const Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const
 
 template <typename X>
 const Tree_index tree<X>::get_depth_postorder_next(const Tree_index &child) const {
-  if (child.level >= (int)pointers_stack.size())
-    return invalid_index();
-  if ((child.pos >> 2) < (int)pointers_stack[child.level].size())
-    return invalid_index();
-
-  auto fc = get_first_child_pos(child);
-  if (fc != -1) {
-    return Tree_index(child.level + 1, fc);
+  auto next_child = get_sibling_next(child);
+  if (!next_child.is_invalid()) {
+    while(!is_leaf(next_child)) {
+      next_child = get_first_child(next_child);
+    }
+    return next_child;
   }
+  if (is_root(child))
+    return invalid_index();
 
-  // I(is_leaf(child));
-
-  auto next = get_sibling_next(child);
-  if (!next.is_invalid()) {
-    return next;
-  }
-
-  // It was leaf, without more siblings. Go to parent with sibling
   auto parent = get_parent(child);
-  while (!parent.is_root()) {
-    auto parent_next = get_sibling_next(parent);
-    if (!parent_next.is_invalid())
-      return parent_next;
-
-    parent = get_parent(parent);
-  }
-
-  return invalid_index();
+  return parent;
 }
 
 template <typename X>
