@@ -526,7 +526,10 @@ void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &s
     if (tup->has_dpin(it.first->name)) {
       auto sub_spin = sub_node.setup_sink_pin_raw(it.second);
       if (!sub_spin.is_connected()) {
-        auto dpin = tup->get_dpin(it.first->name);
+
+        XEdge_iterator out_edges; // Empty list
+        auto dpin = expand_data_and_attributes(tup_node, it.first->name, out_edges, tup);
+        I(!dpin.is_invalid());
         sub_spin.connect_driver(dpin);
       }
     } else {
@@ -1357,6 +1360,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
       node.setup_sink_pin("name").del();
 
       auto out_edges_list = node.out_edges();
+      I(!out_edges_list.empty());
       auto new_dpin = expand_data_and_attributes(node, "", out_edges_list, it->second);
 
       for(auto &e:new_dpin.out_edges()) {
@@ -1373,7 +1377,8 @@ void Cprop::reconnect_tuple_get(Node &node) {
 
   if (it->second->is_trivial_scalar()) {
     auto out_edges_list = node.out_edges();
-    expand_data_and_attributes(node, "", out_edges_list, it->second);
+    if (!out_edges_list.empty())
+      expand_data_and_attributes(node, "", out_edges_list, it->second);
   }
 }
 
@@ -1381,10 +1386,6 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
   I(!hier);
   I(node_tup);
   I(node_tup->is_correct());
-  I(node_tup->is_scalar());
-
-  if (pending_out_edges.empty())
-    return invalid_pin;
 
   auto value_dpin = node_tup->get_dpin(key_name);
 
