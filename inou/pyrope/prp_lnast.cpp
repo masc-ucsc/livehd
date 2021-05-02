@@ -1213,13 +1213,22 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
     ast_nxt_idx = ast->get_sibling_next(ast_nxt_idx);  // go to the next element
   }
 
-  // create sel node
-  auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_select());
-
   // create the LHS temporary variable
   auto retnode = get_lnast_temp_ref();
 
-  lnast->add_child(idx_sel_root, retnode);
+#if 1
+  mmap_lib::Tree_index idx_sel_root;
+  if (in_lhs) {
+    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_add());
+  }else{
+    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_get());
+    lnast->add_child(idx_sel_root, retnode);
+  }
+#else
+    auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_select());
+#endif
+
+
 
   // add the identifier of the tuple being selected
   lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
@@ -1227,6 +1236,10 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
   // add all the select indexes
   for (auto node : index_nodes) {
     lnast->add_child(idx_sel_root, node);
+  }
+  if (in_lhs) {
+    lnast->add_child(idx_sel_root, in_lhs_rhs_node);
+    in_lhs_rhs_node = retnode;
   }
 
   return retnode;
