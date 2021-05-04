@@ -1,23 +1,12 @@
-$reset.__ubits = 1
-$cond.__ubits = 1
-$inp.__ubits = 16
-%out.__ubits = 16
+$io.ins.__ubits = 4
+%io.out.__ubits = 4
 
+delays.__reset = 0
+delays = delays.__create_flop
+delays_q = delays
+delays.1.__ubits = 4
 
-// OPT1: say coding style that setting flop attr before you create the flop
-// OPT2: atomic prp_library: #x = create_flop (bits = 16, reset = 0, init = 99);
-#x.__ubits = 16
-#x.__reset = 0
-#x = #x.__create_flop
-x_q = #x
+delays[0] = $io.ins
+delays[1] = delays_q[0]
 
-if ($cond) {
-  if ($inp > x_q) {
-    #x = $inp
-  } else {
-    #x = (x_q - 1) & 0xFFFF
-  }
-}
-
-%out = x_q
-
+%io.out = delays_q[1]

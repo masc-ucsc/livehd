@@ -1799,6 +1799,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
         if (wire_node.is_type(Ntype_op::Or)) {
           wire_node.set_type(Ntype_op::TupAdd);  // change wire_node type from Or_Op to dummy TupAdd_Op
           wire_spin = wire_node.setup_sink_pin("tuple_name");
+        } else if (wire_node.is_type(Ntype_op::TupAdd)) {
+          wire_spin = wire_node.setup_sink_pin("tuple_name");
         } else {
           I(wire_node.is_type(Ntype_op::Flop));
           wire_spin = wire_node.setup_sink_pin("din");
