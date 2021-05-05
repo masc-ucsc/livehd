@@ -175,6 +175,15 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   struct stat sb;
   fstat(memblock_fd, &sb);
 
+  token_list.clear();
+  buffer_name = filename;
+
+  if (sb.st_size==0) {
+    memblock = std::string_view("");
+    parser_warn("file {} seems empty. Nothing to parse", filename);
+    return;
+  }
+
   char *b = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, memblock_fd, 0);
   if (b == MAP_FAILED) {
     parser_error("parse mmap failed for file {} with size {}", filename, sb.st_size);
@@ -182,9 +191,6 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   }
 
   memblock    = std::string_view(b, sb.st_size);
-  buffer_name = filename;
-
-  token_list.clear();
 }
 
 void Elab_scanner::parse_setup() {

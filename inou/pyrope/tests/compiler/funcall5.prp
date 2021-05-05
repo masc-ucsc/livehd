@@ -1,4 +1,4 @@
-sum5 = ::{
+sum5 = ||{
   // case I: basic
   // %out = $itup.a + $itup.b + $c
 

@@ -1,12 +1,12 @@
-add = ::{ 
+add = ||{ 
   $a + $b 
 }
 
-sub = ::{ 
+sub = ||{ 
   $a - $b 
 }
 
-dowork = ::{
+dowork = ||{
  %o = $fun($a,$b)
 }
 

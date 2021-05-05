@@ -1,0 +1,5 @@
+
+$a.__ubits = 4
+
+// ugly popcount
+x = $a@(0) + $a@(1) + $a@(2) + $a@(3)

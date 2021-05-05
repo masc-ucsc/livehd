@@ -18,8 +18,10 @@ Lnast::~Lnast() {
   if (memblock_fd == -1)
     return;
 
-  int ok = ::munmap((void *)memblock.data(), memblock.size());
-  I(ok == 0);
+  if (memblock.size()) {
+    int ok = ::munmap((void *)memblock.data(), memblock.size());
+    I(ok == 0);
+  }
   close(memblock_fd);
 
   memblock    = "";

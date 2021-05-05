@@ -19,6 +19,9 @@ uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
   INIT_FUNCTION("rule_start.");
 
   eat_comments();
+  if (scan_is_end())
+    return true;
+
   base_token = scan_token() - 1;
   if (!CHECK_RULE(&Prp::rule_code_blocks)) {
     RULE_FAILED("Failed rule_start.\n");

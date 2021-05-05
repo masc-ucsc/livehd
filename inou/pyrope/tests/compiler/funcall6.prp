@@ -1,4 +1,4 @@
-sum6 = ::{
+sum6 = ||{
   %total = 0
   for i in $ {
     %total = %total + i

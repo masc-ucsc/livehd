@@ -1,0 +1,14 @@
+
+fun1 = ||{ return $a+1 }
+fun2 = ||{ return $a+2 }
+
+x = 1+1+1
+
+fun = 0 // for scope
+if x == 3 {
+  fun = fun1
+}else{
+  fun = fun2
+}
+
+%out = fun(a=33)

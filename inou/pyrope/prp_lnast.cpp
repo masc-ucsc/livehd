@@ -226,6 +226,8 @@ void Prp_lnast::translate_code_blocks(mmap_lib::Tree_index idx_start_ast, mmap_l
     return;
 
   auto nxt_idx_ast = ast->get_child(idx_start_ast);
+  if (nxt_idx_ast.is_invalid())
+    return;
 
   if (ast->get_data(nxt_idx_ast).rule_id == Prp_rule_code_blocks)
     nxt_idx_ast = ast->get_child(nxt_idx_ast);
