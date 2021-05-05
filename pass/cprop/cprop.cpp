@@ -534,7 +534,7 @@ void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &s
       }
     } else {
       Pass::info("could not find IO {} in graph {}", it.first->name, sub.get_name());
-      tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
+      //tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
     }
   }
 
@@ -1374,7 +1374,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
     }
   }
 
-  if (!node_tup) {
+  if (!node_tup || tuple_issues) {
     return;
   }
 
@@ -1546,7 +1546,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
   if (!tuple_found)
     return;
 
-  for(auto iter=0;iter<4;++iter) {
+  for(auto iter=0;iter<6;++iter) {
     tuple_issues = iter==0; // First iter may not be correct if there are flops or subgraphs
     for (auto node:lg->forward(hier)) {
       if (tuple_done.contains(node.get_compact()))
@@ -1722,6 +1722,10 @@ void Cprop::do_trans(Lgraph *lg) {
 
   scalar_pass(lg);
   tuple_pass(lg);
+  if (tuple_found && !tuple_issues) {
+    scalar_pass(lg);
+    tuple_pass(lg);
+  }
   // clean_io(lg);
 }
 
