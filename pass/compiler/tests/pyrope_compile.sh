@@ -21,6 +21,7 @@ firrtl_gcd_3bits nested_if firrtl_tail3 counter_nested_if tuple_nested1 tuple_em
 tuple_reg tuple_reg2 tuple_nested2 get_mask1'
 
 # pts='pp'
+# pts='pp2'
 # pts='vector'
 # pts='vector2'
 # pts='hier_tuple_nested_if8'  # LNAST_TO failure
