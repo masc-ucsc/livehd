@@ -1653,8 +1653,8 @@ private:
   mutable uint64_t* mMaxNumElementsAllowed;
   mutable InfoType* mInfoInc;
   mutable InfoType* mInfoHashShift;
-  const std::string mmap_name;
   const std::string mmap_path;
+  const std::string mmap_name;
   mutable int       mmap_fd       = -1;
   mutable size_t    mmap_size     = 0;
   mutable uint64_t* mmap_base     = 0;

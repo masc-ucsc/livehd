@@ -13,6 +13,7 @@
 
 namespace mmap_lib {
 
+//template<X>
 class str {
 protected:
   // Keeping the code constexpr for small strings (not long) requires templates (A challenge but reasonable).
