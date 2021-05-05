@@ -694,13 +694,16 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
 
     // 3rd: TupAdd/AttSet a.b.c.d __tmp
     in_lhs_rhs_node = tmp_node;
+    in_lhs_sel_root = idx_nxt_ln;
   } else {
     // Just TupAdd/AttrSet a.b.c.d rhs_node
 
     in_lhs_rhs_node = rhs_node;
+    in_lhs_sel_root = idx_nxt_ln;
   }
   I(!in_lhs);
   in_lhs = true;
+  in_lhs_sel_root = mmap_lib::Tree_index();
   // first thing, create the lhs if it is an expression
   auto lhs_node = eval_rule(idx_lhs_ast, idx_start_ln);
   I(in_lhs);
@@ -1228,8 +1231,6 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
     auto idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_select());
 #endif
 
-
-
   // add the identifier of the tuple being selected
   lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(ast->get_child(idx_start_ast)).token_entry)));
 
@@ -1240,6 +1241,7 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
   if (in_lhs) {
     lnast->add_child(idx_sel_root, in_lhs_rhs_node);
     in_lhs_rhs_node = retnode;
+    in_lhs_sel_root = idx_sel_root;
   }
 
   return retnode;
@@ -1620,35 +1622,42 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
   if (select_fields.size()>1)
     is_attr = false; // treat as tuple foo.bar.__attr = 3 or x = foo.bar.__attr
 
-#if 0
-  idx_dot_root   = lnast->add_child(cur_stmts, Lnast_node::create_select());
-#else
-  if (in_lhs && is_attr) {
-    // idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_attr_set());
-    idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
-  } else if (!in_lhs && is_attr) {
+  if (in_lhs) {
+    if (in_lhs_sel_root.is_invalid()) {
+      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
+    }
+  } else if (is_attr) { // rhs
     auto field = select_fields[0].token.get_text();
     if (select_fields.size()==1 && (field=="__create_flop" || field=="__last_value")) {
       idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_attr_get());
     }else{
       idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
     }
-  } else if (in_lhs && !is_attr) {
-    idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
-  } else if (!in_lhs && !is_attr) {
+  } else {
+    I(!is_attr); // rhs
     idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
-  }else{
-    I(false);
   }
-#endif
 
   if (in_lhs) {
-    // TupAdd a.b.c.d rhs_node
-    lnast->add_child(idx_dot_root, accessed_el);
-    for (auto &lnode : select_fields) {
-      lnast->add_child(idx_dot_root, lnode);
+    if (in_lhs_sel_root.is_invalid()) {
+      // TupAdd a.b.c.d rhs_node
+      lnast->add_child(idx_dot_root, accessed_el);
+      for (auto &lnode : select_fields) {
+        lnast->add_child(idx_dot_root, lnode);
+      }
+      lnast->add_child(idx_dot_root, in_lhs_rhs_node);
+    }else{
+      // Last child is the value to copy. Must be preserved as last child
+      auto last_child_idx  = lnast->get_last_child(in_lhs_sel_root);
+      auto last_child_node = lnast->get_data(last_child_idx);
+
+      lnast->set_data(last_child_idx, select_fields[0]);
+      select_fields.emplace_back(last_child_node);
+
+      for(auto i=1u;i<select_fields.size();++i) {
+        lnast->add_child(in_lhs_sel_root, select_fields[i]);
+      }
     }
-    lnast->add_child(idx_dot_root, in_lhs_rhs_node);
 
     Lnast_node invalid;
     return invalid;

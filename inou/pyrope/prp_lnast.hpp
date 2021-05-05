@@ -10,8 +10,9 @@ class Prp_lnast : public Prp {
 protected:
   std::unique_ptr<Lnast> lnast;  // translate the AST to lnAST
 
-  bool       in_lhs;
-  Lnast_node in_lhs_rhs_node;
+  bool                 in_lhs;
+  Lnast_node           in_lhs_rhs_node;
+  mmap_lib::Tree_index in_lhs_sel_root;
 
   mmap_lib::Tree_index cur_stmts = mmap_lib::Tree_index(-1, -1);
 

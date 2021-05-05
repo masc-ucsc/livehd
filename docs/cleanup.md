@@ -42,6 +42,19 @@ for b in @[8,1:3,2] { // 1,2,3,8   iterations (bitmask order)
 for b in (8,1:3,2)  { // 8,1,2,3,2 iterations (ordered tuple)
 ```
 
+Allow tuples directly in brackets, no need for unnecessary parenthesis.
+
+Currently, this is a compile error (parser)
+```
+xx = delay[1,2] 
+```
+It requires this:
+```
+xx = delay[(1,2)] 
+```
+
+Option 2 may be fine, but option 1 should be the same
+
 ### Attr/Tup
 
 * Do not chain tuples without need (lnast.cpp). TupAdd/Get can handle position like foo.bar.xxx
