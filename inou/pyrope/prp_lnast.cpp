@@ -1569,7 +1569,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
       auto idx_attribute      = ast->get_child(idx_nxt_ast);
       auto idx_attribute_node = ast->get_data(idx_attribute);
 
-      I(idx_attribute_node.rule_id == Prp_rule_reference);
+      I(idx_attribute_node.rule_id == Prp_rule_reference || idx_attribute_node.rule_id == Prp_rule_numerical_constant);
       accessed_attribute = Lnast_node::create_const(get_token(idx_attribute_node.token_entry));
       // if assertion fails: else accessed_attribute = eval_rule(idx_attribute, idx_start_ln);
       select_fields.emplace_back(accessed_attribute);
