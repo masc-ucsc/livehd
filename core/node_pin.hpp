@@ -357,6 +357,9 @@ public:
   }
   void del();  // del self and all connections
 
+  Node create(Ntype_op op) const; // create a new node, keep same hierarchy
+  Node create_const(const Lconst &value) const; // create a new node, keep same hierarchy
+
   void connect_sink(const Node_pin &dst) const;
   void connect_sink(const Node &dst) const;
   void connect_driver(const Node_pin &dst) const;

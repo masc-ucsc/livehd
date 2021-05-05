@@ -162,6 +162,20 @@ Node_pin_iterator Node_pin::inp_driver() const {
   return current_g->inp_driver(*this);
 }
 
+Node Node_pin::create(Ntype_op op) const {
+  auto node  = current_g->create_node(op);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
+}
+
+Node Node_pin::create_const(const Lconst &value) const {
+  auto node  = current_g->create_node_const(value);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
+}
+
 void Node_pin::del_sink(Node_pin &spin) {
   I(spin.is_sink());
   I(is_driver());

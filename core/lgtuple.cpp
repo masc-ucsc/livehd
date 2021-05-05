@@ -632,7 +632,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   // garbage later.
   //
   // Only TupGet for a root attr can be because they will be converted to AttrGet
-  if(dpin.get_node().is_type_tup()) {
+  if(!dpin.is_invalid() && dpin.get_node().is_type_tup()) {
     auto pos_spin = dpin.get_node().get_sink_pin("position");
     I(pos_spin.is_connected());
     I(pos_spin.get_driver_pin().is_type_const());
@@ -741,6 +741,7 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
 Node_pin Lgtuple::flatten() const {
   // a_dpin = (tup[0]|(tup[1]<<tup[0].__sbits)|(tup[2]<<(tup[0..1].__sbits)|.....)
 
+  I(is_correct()); // Do not call flatten for incorrect tuples of tuples with issues (invalid dpin)
   Node_pin a_dpin;
   bool all_const=true;
 
@@ -751,6 +752,9 @@ Node_pin Lgtuple::flatten() const {
       continue;
 
     a_dpin = e.second;
+    if (e.second.is_invalid())
+      return invalid_dpin;
+
     if (!e.second.is_type_const()) {
       all_const = false;
       break;
@@ -854,8 +858,7 @@ bool Lgtuple::concat(const Node_pin &dpin) {
   return true;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
-                                           const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
+std::tuple<std::shared_ptr<Lgtuple>,bool> Lgtuple::get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
   I(tup_list.size() > 1);  // nothing to merge?
 
   // 1st
@@ -879,17 +882,19 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     for (const auto &e : tup->get_map()) {
       auto it = key_entries.find(e.first);
       if (it == key_entries.end()) {
-        if (first_iter || is_attribute(e.first))
+        if (first_iter || is_attribute(e.first)) {
           key_entries.emplace(e.first, e.second);  // There can be replicates like :0:a, a, 0
-        else
+        }else{
           key_entries.emplace(e.first, invalid_dpin);  // There can be replicates like :0:a, a, 0
-      }else if (!it->second.is_invalid() && e.second != it->second) {
-        it->second.invalidate();
+        }
+      }else if (!it->second.is_invalid()) {
+        if (e.second.is_invalid() || e.second != it->second) {
+          it->second.invalidate();
+        }
       }
     }
     first_iter = false;
   }
-
 
   for (auto it : key_entries) {
     bool found = false;
@@ -904,7 +909,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
             e.second = it.second;
           }else if (it.second.is_invalid()) {
             // keep e.second
-          }else if (it.second != e.second) { // both valid but different
+          }else if (it.second != e.second) { // bocanth valid but different
             e.second.invalidate();
           }
         }else if (e.second != it.second) { // Non-attributes invalidate
@@ -921,8 +926,30 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
   if (fixing_tup->key_map.empty() || (fixing_tup->key_map.size()==1 && fixing_tup->key_map[0].first == "0") ) {
     // Either nothing or key == ""
-    return nullptr;
+    return std::tuple(nullptr, false);
   }
+
+  for (const auto &e : fixing_tup->get_map()) {
+    if (is_attribute(e.first))
+      continue; // Attributes can not from different paths
+
+    for (const auto &tup : tup_list) {
+      if (!tup->has_dpin(e.first)) {
+        return std::tuple(fixing_tup, true); // No need to connect (still pending iterations)
+      }
+      auto dpin = tup->get_dpin(e.first);
+      if (dpin.is_invalid()) {
+        return std::tuple(fixing_tup, true); // No need to connect (still pending iterations)
+      }
+    }
+  }
+
+  return std::tuple(fixing_tup, false);
+}
+
+std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
+
+  I(is_correct());
 
   // 2nd
   //
@@ -955,14 +982,18 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     }
   }
 
+  std::vector<Node::Compact> mux_list;
+
   bool mux_node_reused = false;
-  for (auto e_index = 0u; e_index < fixing_tup->key_map.size(); ++e_index) {
-    auto &e = fixing_tup->key_map[e_index];
+  for (auto e_index = 0u; e_index < key_map.size(); ++e_index) {
+    auto &e = key_map[e_index];
     if (!e.second.is_invalid()) {  // No need to create mux
       continue;
     }
-    if (!fixing_tup->is_correct())
-      continue; // Do not create muxes if there are issues (but propagate fields that all inputs agree
+
+    if (is_attribute(e.first)) {
+      continue;
+    }
 
     Node node;
     if (mux_node_reused) {
@@ -977,12 +1008,36 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       node            = mux_node;
       mux_node_reused = true;
     }
+    mux_list.emplace_back(node.get_compact());
 
     for (auto i = 0u; i < tup_list.size(); ++i) {
       Node_pin dpin;
       if (tup_list[i]->has_dpin(e.first)) {
         dpin = tup_list[i]->get_dpin(e.first);
         I(!dpin.is_invalid());
+
+        if (dpin.is_graph_io()) {
+          // NOTE: all the pins but the IOs should have the constraints already.
+          // This Attr could be set always but slower and redundant
+          for(auto &attr_it:tup_list[i]->get_level_attributes(e.first)) {
+            if (Ntype::is_valid_sink(Ntype_op::Flop, attr_it.first.substr(2)))
+              continue; // Do not create attr for flop config (handled in cprop directly)
+
+            fmt::print("adding attr:{}\n", attr_it.first);
+            attr_it.second.get_node().dump();
+
+            auto attr_node = dpin.create(Ntype_op::AttrSet);
+            {
+              auto key_dpin = dpin.create_const(Lconst::string(attr_it.first)).setup_driver_pin();
+              attr_node.setup_sink_pin("field").connect_driver(key_dpin);
+            }
+            {
+              attr_node.setup_sink_pin("value").connect_driver(attr_it.second);
+            }
+            attr_node.setup_sink_pin("name").connect_driver(dpin);
+            dpin = attr_node.setup_driver_pin("Y");
+          }
+        }
       } else {
         dpin = mux_input_dpins[i + 1];
       }
@@ -992,11 +1047,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
     e.second = node.setup_driver_pin();
   }
 
-  return fixing_tup;
+  return mux_list;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
-  I(flop.is_type(Ntype_op::Flop));
+std::tuple<std::string_view, bool> Lgtuple::get_flop_name(const Node &flop) const {
 
   bool        first_flop = true;
   std::string_view flop_root_name;
@@ -1012,6 +1066,71 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
     flop_root_name = name;
   }
 
+  return std::tuple(flop_root_name, first_flop);
+}
+
+std::tuple<std::shared_ptr<Lgtuple>,bool> Lgtuple::get_flop_tup(Node &flop) const {
+  I(flop.is_type(Ntype_op::Flop));
+
+  auto [flop_root_name, first_flop] = get_flop_name(flop);
+
+  std::shared_ptr<Lgtuple> ret_tup = std::make_shared<Lgtuple>(flop_root_name);
+  bool pending_iterations = false;
+
+  if (!is_correct()) {
+    ret_tup->set_issue();
+    pending_iterations = true;
+  }
+
+  auto *lg   = flop.get_class_lgraph();
+
+  bool scalar = is_scalar();
+
+  for (auto &e : key_map) {
+    if (e.second.is_invalid()) {
+      pending_iterations = true;
+    }
+    if (is_attribute(e.first))
+      continue;
+
+    auto cname = scalar? get_canonical_name(e.first) : e.first;
+
+    std::string new_flop_name;
+    if(cname.empty())
+      new_flop_name = flop_root_name;
+    else
+      new_flop_name = absl::StrCat(flop_root_name, ".", cname);
+
+    auto  dpin = Node_pin::find_driver_pin(lg, new_flop_name);
+
+    if (!dpin.is_invalid()) {
+      auto node = dpin.get_node();
+      if (node == flop)
+        first_flop = false;
+    }else if (first_flop) {
+      dpin = flop.setup_driver_pin();
+      dpin.reset_name(new_flop_name);
+      first_flop = false;
+    } else {
+      I(!e.first.empty()); // "" should be the first in sort, so always first_flop
+
+      dpin = flop.create(Ntype_op::Flop).setup_driver_pin();
+      dpin.set_name(new_flop_name);
+    }
+
+    ret_tup->key_map.emplace_back(e.first, dpin);
+  }
+
+  return std::tuple(ret_tup, pending_iterations);
+}
+
+std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
+
+  I(is_correct());
+
+  auto [flop_root_name, first_flop] = get_flop_name(flop);
+  (void)first_flop;
+
   std::shared_ptr<Lgtuple> ret_tup;
 
   std::sort(key_map.begin(), key_map.end(), tuple_sort); // mutable (no semantic check. Just faster to process)
@@ -1021,8 +1140,11 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   std::vector<Node> all_flops;
   std::vector<std::pair<std::string, Node_pin>> all_flop_attrs;
 
+  bool scalar = is_scalar();
+
   for (auto &e : key_map) {
-    auto cname = get_canonical_name(e.first);
+    auto cname = scalar? get_canonical_name(e.first) : e.first;
+
     std::string new_flop_name;
     if(cname.empty())
       new_flop_name = flop_root_name;
@@ -1074,9 +1196,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         }
       }
 
-      auto attr_node = lg->create_node(Ntype_op::AttrSet);
+      auto attr_node = flop_node.create(Ntype_op::AttrSet);
       {
-        auto key_dpin = lg->create_node_const(attr).setup_driver_pin();
+        auto key_dpin = flop_node.create_const(Lconst::string(attr)).setup_driver_pin();
         attr_node.setup_sink_pin("field").connect_driver(key_dpin);
       }
       {
@@ -1094,51 +1216,51 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       flop_din.connect_driver(attr_node.setup_driver_pin("Y"));
       continue;
     }
-    Node node;
 
     auto  dpin = Node_pin::find_driver_pin(lg, new_flop_name);
-    if (!is_correct()) {
-      node       = flop;
-      first_flop = false;
-    }else if (!dpin.is_invalid()) {
+#if 1
+    I(!dpin.is_invalid()); // get_flop_tup ran first, so it should be there
+    auto node = dpin.get_node();
+#else
+    Node node;
+    if (!dpin.is_invalid()) {
       node = dpin.get_node();
       if (node == flop)
         first_flop = false;
-    }else if (first_flop) {
-      I(first_flop);
-      flop.setup_driver_pin().reset_name(new_flop_name);
-      node       = flop;
-      first_flop = false;
-    } else {
-      I(!e.first.empty()); // "" should be the first in sort, so always first_flop
+    }else {
+      if (first_flop) {
+        I(first_flop);
+        flop.setup_driver_pin().reset_name(new_flop_name);
+        node       = flop;
+        first_flop = false;
+      } else {
+        I(!e.first.empty()); // "" should be the first in sort, so always first_flop
 
-      node = lg->create_node(Ntype_op::Flop);
-      node.setup_driver_pin().set_name(new_flop_name);
-      // Just clone the Flop fields/attributes
-      for (const auto &e2 : flop.inp_edges()) {
-        if (e2.sink.get_pin_name() == "din")
-          continue;
-        auto spin = node.setup_sink_pin(e2.sink.get_pin_name());
-        spin.connect_driver(e2.driver);
+        node = lg->create_node(Ntype_op::Flop);
+        node.setup_driver_pin().set_name(new_flop_name);
+        // Just clone the Flop fields/attributes
+        for (const auto &e2 : flop.inp_edges()) {
+          if (e2.sink.get_pin_name() == "din")
+            continue;
+          auto spin = node.setup_sink_pin(e2.sink.get_pin_name());
+          spin.connect_driver(e2.driver);
+        }
       }
     }
+#endif
 
-    if (is_correct()) {
-      all_flops.emplace_back(node);
+    all_flops.emplace_back(node);
 
-      reconnect_flop_if_needed(node, new_flop_name, e.second);
-    }
+    I(!e.second.is_invalid());
+    reconnect_flop_if_needed(node, new_flop_name, e.second);
 
     if (!ret_tup) {
       ret_tup = std::make_shared<Lgtuple>(flop_root_name);
-      if (!is_correct())
-        ret_tup->set_issue();
     }
-    ret_tup->key_map.emplace_back(e.first, node.setup_driver_pin());
+    ret_tup->key_map.emplace_back(e.first, dpin); // node.setup_driver_pin());
   }
 
-  if (!ret_tup->is_correct())
-    return ret_tup;
+  I(ret_tup->is_correct());
 
   std::sort(all_flop_attrs.begin(), all_flop_attrs.end(), tuple_sort); // mutable (no semantic check. Just faster to process)
 

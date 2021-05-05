@@ -74,7 +74,7 @@ protected:
   static std::string to_string(Number num);
 
   const Number &get_num() const { return num; }
-  Lconst        adjust(const Number &res_num, const Lconst &o) const;
+  void          adjust(const Lconst &o);
 
 public:
   using Container = std::vector<unsigned char>;

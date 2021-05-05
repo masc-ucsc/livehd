@@ -48,6 +48,8 @@ protected:
   void        add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
   static void reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin);
 
+  std::tuple<std::string_view, bool> get_flop_name(const Node &flop) const;
+
 public:
   Lgtuple(std::string_view _name) : name(_name), correct(true) {}
 
@@ -57,9 +59,11 @@ public:
 
   std::string_view get_name() const { return name; }
 
-  static std::shared_ptr<Lgtuple> make_mux(Node &mux_node, Node_pin &sel_dpin,
-                                           const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
-  std::shared_ptr<Lgtuple>        make_flop(Node &flop) const;
+  static std::tuple<std::shared_ptr<Lgtuple>,bool> get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  std::vector<Node::Compact> make_mux(Node &mux_node, Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+
+  std::tuple<std::shared_ptr<Lgtuple>,bool>  get_flop_tup(Node &flop) const;
+  std::shared_ptr<Lgtuple>                   make_flop(Node &flop) const;
 
   bool is_correct() const { return correct; }
   void set_issue() const {

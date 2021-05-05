@@ -23,6 +23,7 @@ protected:
   absl::flat_hash_map<std::string, std::pair<std::string, Node_pin>> reg_attr_map;
   absl::flat_hash_map<std::string, std::vector<Node_pin>>            reg_name2sink_pins;
   absl::flat_hash_set<Node::Compact>                                 dont_touch;
+  absl::flat_hash_set<Node::Compact>                                 tuple_done;
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple const> > get_value(const Node &node) const;
 

@@ -309,15 +309,10 @@ void Lconst::dump() const {
     fmt::print("num:{} bits:{}\n", num.str(), bits);
 }
 
-Lconst Lconst::adjust(const Number &res_num, const Lconst &o) const {
-  // explicit kept if both explicit and agree
-  bool res_explicit_str;
-  if (bits==0) // It can be empty
-    res_explicit_str = o.explicit_str;
-  else
-    res_explicit_str = explicit_str && o.explicit_str;
+void Lconst::adjust(const Lconst &o) {
 
-  return Lconst(res_explicit_str, calc_num_bits(res_num), res_num);
+  explicit_str = o.explicit_str && (bits==0 || explicit_str);
+  bits         = calc_num_bits(num);
 }
 
 Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
@@ -553,9 +548,11 @@ Lconst Lconst::add_op(const Lconst &o) const {
     return Lconst(absl::StrCat("0b", result));
   }
 
-  Number res_num = get_num() + o.get_num();
+  Lconst res;
+  res.num = get_num() + o.get_num();
+  res.adjust(o);
 
-  return adjust(res_num, o);
+  return res;
 }
 
 Lconst Lconst::concat_op(const Lconst &o) const {
@@ -598,9 +595,11 @@ Lconst Lconst::mult_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num() * o.get_num();
+  Lconst res;
+  res.num = get_num() * o.get_num();
+  res.adjust(o);
 
-  return adjust(res_num, o);
+  return res;
 }
 
 Lconst Lconst::div_op(const Lconst &o) const {
@@ -612,9 +611,11 @@ Lconst Lconst::div_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num() / o.get_num();
+  Lconst res;
+  res.num = get_num() / o.get_num();
+  res.adjust(o);
 
-  return adjust(res_num, o);
+  return res;
 }
 
 Lconst Lconst::sub_op(const Lconst &o) const {
@@ -626,9 +627,11 @@ Lconst Lconst::sub_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num() - o.get_num();
+  Lconst res;
+  res.num = get_num() - o.get_num();
+  res.adjust(o);
 
-  return adjust(res_num, o);
+  return res;
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
@@ -699,9 +702,11 @@ Lconst Lconst::or_op(const Lconst &o) const {
     return Lconst(qmarks);
   }
 
-  Number res_num = get_num() | o.get_num();
+  Lconst res;
+  res.num = get_num() | o.get_num();
+  res.adjust(o);
 
-  return adjust(res_num, o);
+  return res;
 }
 
 Lconst Lconst::not_op() const {
@@ -746,9 +751,12 @@ Lconst Lconst::and_op(const Lconst &o) const {
     qmarks.append(res_bits, '?');
     return Lconst(qmarks);
   }
-  Number res_num = get_num() & o.get_num();
 
-  return adjust(res_num, o);
+  Lconst res;
+  res.num = get_num() & o.get_num();
+  res.adjust(o);
+
+  return res;
 }
 
 int Lconst::eq_op(const Lconst &o) const {
