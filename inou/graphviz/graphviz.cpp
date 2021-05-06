@@ -66,8 +66,6 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
 
   if (node.get_type_op() == Ntype_op::Const)
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-  else if (node.get_type_op() == Ntype_op::TupRef)
-    data += fmt::format(" {}->{}[label=<({},{}):<font color=\"#0000ff\">{}</font>>];\n", dn_name, sn_name, dp_pid, sp_pid, dp_name);
   else if (node.get_type_op() == Ntype_op::TupAdd)
     data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
                         dn_name,

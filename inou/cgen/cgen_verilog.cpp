@@ -280,8 +280,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Const) {
     final_expr = node.get_type_const().to_verilog();
-  } else if (op == Ntype_op::TupRef || op == Ntype_op::TupAdd || op == Ntype_op::TupGet
-             || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
+  } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
                 node.debug_name(),

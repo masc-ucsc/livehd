@@ -287,7 +287,7 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
   auto opd1_ntype = opd1_node.get_type_op();
 
   Node_pin opr_spin;
-  if (is_tup_asg || opd1_ntype == Ntype_op::TupAdd || opd1_ntype == Ntype_op::TupRef) {
+  if (is_tup_asg || opd1_ntype == Ntype_op::TupAdd) {
     opr_spin = setup_tuple_assignment(lg, lnidx_assign);
   } else if (opd1_ntype == Ntype_op::AttrSet) {
     opr_spin = setup_node_assign_and_lhs(lg, lnidx_assign);
@@ -809,23 +809,13 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
 
   static Node_pin invalid_dpin;
   return invalid_dpin;
-#if 0
-  auto dpin           = lg->create_node_const(Lconst(ref_name)).setup_driver_pin();
-  name2dpin[ref_name] = dpin;
-  return dpin;
-#endif
 }
 
 Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view ref_vname, int16_t subs) {
   (void)lg; // FIXME: remove arg
   if (subs == 0) {
     auto ref_name = absl::StrCat(ref_vname, "_", subs);
-#if 0
-    auto dpin     = lg->create_node(Ntype_op::TupRef).setup_driver_pin();
-    dpin.set_name(ref_name);
-#else
     Node_pin dpin; // invalid_dpin
-#endif
     name2dpin[ref_name] = dpin;
     return dpin;
   }
@@ -1033,22 +1023,6 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
     node_dpin.set_name(name.substr(0, name.size() - 2));
     name2dpin[name] = node_dpin;
     return node_dpin;
-  // } else if (is_register(name)) {
-  //   // note-I: the register is first appear at the rhs! Create a floating Or to represent this reg
-  //   // later, this Or should be driven by the reg q-pin at the end of program sequence
-  //   // note-II: in the case that the Or is driven by a reg TA chain, change Or -> assignment TA
-  //   // FIXME->sh: I think the Or node here could generate the Register directly and mimic what 
-  //   // attr_get __create_flop is doing. i.e. create register and let d-pin drivern by the largest
-  //   // SSA in the end of lnast_tolg pass
-  //   auto wire_or_node = lg->create_node(Ntype_op::Or);
-  //   node_dpin         = wire_or_node.setup_driver_pin();
-  //   node_dpin.set_name(name);
-  //   name2dpin[name] = node_dpin;
-
-  //   driver_var2wire_nodes[vname].push_back(wire_or_node);
-  //   if (!is_tmp_var(vname))
-  //     setup_dpin_ssa(node_dpin, vname, 0);  // FIXME->sh: do we really need this?
-  //   return node_dpin;
   } else if (is_err_var_undefined(name)) {
     node_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin("Y");
   } else if (is_bool_true(name)) {
@@ -1718,7 +1692,7 @@ void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint1
 
 void Lnast_tolg::create_out_ta(Lgraph *lg, std::string_view field_name, Node_pin &val_dpin) {
   auto tup_add = lg->create_node(Ntype_op::TupAdd);
-  auto tn_dpin = setup_tuple_ref(lg, "%");  // might come from TupRef or TupAdd
+  auto tn_dpin = setup_tuple_ref(lg, "%");  // might come from TupAdd
   if (!tn_dpin.is_invalid()) {
     auto tn_spin = tup_add.setup_sink_pin("tuple_name");
     tn_dpin.connect_sink(tn_spin);
