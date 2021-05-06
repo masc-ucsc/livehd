@@ -8,10 +8,33 @@
 #include "lgraph.hpp"
 #include "likely.hpp"
 
-static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
-  return lhs.first < rhs.first;
+// Custom sort, to make _ ordered first. This helps to get attributes first which helps to speedup some algorithms in lgtuple
+static bool inline compare_less(char c1, char c2) {
+  // return (std::tolower(c1) < std::tolower(c2));
+  return (c1 == '_' || c1 < c2 ) && c2!='_';
 }
 
+static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
+  //return lhs.first < rhs.first;
+
+  auto l     = lhs.first.begin();
+  auto l_end = lhs.first.end();
+  auto r     = rhs.first.begin();
+  auto r_end = rhs.first.end();
+
+  while (l!=l_end && r!=r_end) {
+    if (*l != *r) {
+      auto v = compare_less(*l, *r);
+      return v;
+    }
+    ++l;
+    ++r;
+  }
+
+  auto v = lhs.first.size() <= rhs.first.size(); // l == l_end; // longest
+
+  return v;
+}
 
 std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
   I(a[a_pos] == ':');
@@ -349,34 +372,6 @@ void Lgtuple::reconnect_flop_if_needed(Node &flop, const std::string &flop_name,
   s_din.connect_driver(dpin);
 }
 
-#if 0
-int Lgtuple::get_next_free_pos(const std::string &match) const {
-  int next_tup_pos = 0;
-
-  for (auto &it : key_map) {
-		auto math_pos = match_first_partial(match, it.first);
-		if (match_pos != match.size()) // not full match
-			continue;
-
-    int v = 0;
-
-    auto last_level = get_last_level(it.first);
-		if (last_level[0] == ':')
-			last_level = last_level.substr(1);
-
-    if (std::isdigit(last_level[0])) {
-			std::from_chars(last_level.data(), last_level.data() + last_level.size(), v);
-
-			if (v >= next_tup_pos) {
-				next_tup_pos = v + 1;
-			}
-		}
-  }
-
-  return next_tup_pos;
-}
-#endif
-
 int Lgtuple::get_first_level_pos(std::string_view key) {
   if (key.empty())
     return -1;
@@ -562,6 +557,10 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
 }
 
 void Lgtuple::del(std::string_view key) {
+  if (is_root_attribute(key)) {
+    return;
+  }
+
   if (key.empty()) {
     key_map.clear();
     return;
@@ -645,10 +644,10 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   }
 #endif
 
-  bool ordered = is_ordered();
+  //bool ordered = is_ordered();
 
   std::string uncanonical_key{key};
-  if (ordered) {
+  if (is_scalar()) {
     if (key.empty()) {
       uncanonical_key = "0";
     }else if (key.substr(0, 2) == "__" && key[3] != '_') {
@@ -660,28 +659,6 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   auto fixed_key = learn_fix(uncanonical_key);
 
   del(key);
-
-  auto key_pos = get_first_level_pos(fixed_key);
-  if (ordered && key_pos<0) {
-    if (!is_trivial_scalar()) {
-      dump();
-      Lgraph::info("Adding a non-ordered field:{} to tuple which is ordered and non trivial (deleting fields)", key);
-      set_issue();
-    }
-    Key_map_type new_map;
-
-    for(auto &e:key_map) {
-      if (!is_root_attribute(e.first))
-        continue;
-      auto attr = get_last_level(e.first);
-      if (!Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2)))
-        continue;
-
-      new_map.emplace_back(attr, e.second);
-    }
-
-    key_map.swap(new_map);
-  }
 
   key_map.emplace_back(fixed_key, dpin);
 }
@@ -814,19 +791,6 @@ Node_pin Lgtuple::flatten() const {
 
 bool Lgtuple::concat(const Node_pin &dpin) {
   if (key_map.size() == 1 && key_map[0].first.empty()) {
-#if 0
-    // Not right to concat
-    if (key_map[0].second.is_type_const() && dpin.is_type_const()) {
-      auto v1 = key_map[0].second.get_node().get_type_const();
-      auto v2 = dpin.get_node().get_type_const();
-
-      auto res = v2.concat_op(v1);
-
-      auto new_dpin = dpin.get_lg()->create_node_const(res).setup_driver_pin();
-      key_map[0].second = new_dpin;
-      return true;
-    }
-#endif
     key_map[0].first = "0";
     key_map.emplace_back("1", dpin);
     return true;
@@ -1218,36 +1182,8 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
     }
 
     auto  dpin = Node_pin::find_driver_pin(lg, new_flop_name);
-#if 1
     I(!dpin.is_invalid()); // get_flop_tup ran first, so it should be there
     auto node = dpin.get_node();
-#else
-    Node node;
-    if (!dpin.is_invalid()) {
-      node = dpin.get_node();
-      if (node == flop)
-        first_flop = false;
-    }else {
-      if (first_flop) {
-        I(first_flop);
-        flop.setup_driver_pin().reset_name(new_flop_name);
-        node       = flop;
-        first_flop = false;
-      } else {
-        I(!e.first.empty()); // "" should be the first in sort, so always first_flop
-
-        node = lg->create_node(Ntype_op::Flop);
-        node.setup_driver_pin().set_name(new_flop_name);
-        // Just clone the Flop fields/attributes
-        for (const auto &e2 : flop.inp_edges()) {
-          if (e2.sink.get_pin_name() == "din")
-            continue;
-          auto spin = node.setup_sink_pin(e2.sink.get_pin_name());
-          spin.connect_driver(e2.driver);
-        }
-      }
-    }
-#endif
 
     all_flops.emplace_back(node);
 

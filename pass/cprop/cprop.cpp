@@ -1556,7 +1556,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
       if (op!=Ntype_op::Get_mask && (op<Ntype_op::Mux || op==Ntype_op::Const))
         continue;
 
-      fmt::print("tuple  node:{}\n", node.debug_name());
+      // fmt::print("tuple  node:{}\n", node.debug_name());
 
       I(op!=Ntype_op::IO); // no IOs in fwd iterator
 
