@@ -996,10 +996,12 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
 
       auto parent_ntype = parent_node.get_type_op();
       auto val_spin     = node.setup_sink_pin("value");
+      auto tn_spin      = node.setup_sink_pin("tuple_name");
 
       if (parent_ntype == Ntype_op::Or) {
         return create_scalar_access_tg(lg, it->second);
-      } else if (parent_ntype == Ntype_op::TupRef && val_spin.is_connected()) {
+      } else if (!tn_spin.is_connected() && val_spin.is_connected()) {
+        // it's head of tuple-chain
         // case: the tuple has only one pos sink pin connected and being used
         // to an operator -> it's still a scalar -> create TG to fetch field 0
         // note: if the field is connected, it cannot be viewed as scalar so
@@ -1019,7 +1021,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
     ;
   } else if (is_input(name)) {
     // later the node_type should change to TupGet and connected to $
-    node_dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();
+    node_dpin = lg->create_node(Ntype_op::Or).setup_driver_pin();
     node_dpin.set_name(name.substr(0, name.size() - 2));
     name2dpin[name] = node_dpin;
     return node_dpin;
@@ -1730,8 +1732,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     auto dpin = node.get_driver_pin("Y");
 
     // connect hier-tuple-inputs and scalar input from the unified input $
-    if (ntype == Ntype_op::TupRef && is_input(dpin.get_name())) {
-      node.set_type(Ntype_op::TupGet);  // change node semantic: TupRef -> TupGet
+    if (ntype == Ntype_op::Or && is_input(dpin.get_name())) {
+      node.set_type(Ntype_op::TupGet);  // change node semantic: Or -> TupGet
       auto tn_spin = node.setup_sink_pin("tuple_name");
       auto tn_dpin = name2dpin["$"];
       tn_dpin.connect_sink(tn_spin);

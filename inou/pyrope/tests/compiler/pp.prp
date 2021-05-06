@@ -7,7 +7,7 @@ delays = delays.__create_flop
 delays.__reset = 0  // shared across all delays flops
 delays_q = delays
 
-//delays.0.__ubits = 4  // uncomment this and wrong LG before cprop (not sure why)
+delays.0.__ubits = 4  // uncomment this and wrong LG before cprop (not sure why)
 delays.1.__ubits = 4   // uncomment this and the LG before cprop looks wrong (value that goes to delays[1] flop din)
 
 if $io.load {
