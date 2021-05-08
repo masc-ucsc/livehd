@@ -390,11 +390,17 @@ int Lgtuple::get_first_level_pos(std::string_view key) {
 }
 
 std::string_view Lgtuple::get_first_level_name(std::string_view key) {
-  if (key.size()>0 && key[0] != ':')
-    return key;
+  auto dot_pos = key.find('.');
+  if (key.size()>0 && key[0] != ':') {
+    if (dot_pos == std::string::npos)
+      return key;
+    return key.substr(0, dot_pos);
+  }
 
   auto n = key.substr(1).find(':');
-  return key.substr(1+1+n);
+  if (dot_pos == std::string::npos)
+    return key.substr(1+1+n);
+  return key.substr(1+1+n, dot_pos-1-1-n);
 }
 
 std::string_view Lgtuple::get_canonical_name(std::string_view key) {

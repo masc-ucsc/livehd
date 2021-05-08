@@ -126,6 +126,10 @@ Node::Compact_flat Node::get_compact_flat() const {
   return Compact_flat(current_g->get_lgid(), nid);
 }
 
+Graph_library *Node::ref_library() const {
+  return current_g->ref_library();
+}
+
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
@@ -460,6 +464,7 @@ Node_pin_iterator Node::inp_connected_pins() const { return current_g->inp_conne
 Node_pin_iterator Node::out_connected_pins() const { return current_g->out_connected_pins(*this); }
 
 Node_pin_iterator Node::inp_drivers() const { return current_g->inp_drivers(*this); }
+Node_pin_iterator Node::out_sinks() const { return current_g->out_sinks(*this); }
 
 void Node::del_node() {
   current_g->del_node(*this);

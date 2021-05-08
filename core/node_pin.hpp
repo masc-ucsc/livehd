@@ -342,7 +342,8 @@ public:
 
   Node              get_driver_node() const;  // common 0 or 1 driver case
   Node_pin          get_driver_pin() const;   // common 0 or 1 driver case
-  Node_pin_iterator inp_driver() const;       // handle 0 to inf driver case
+  Node_pin_iterator inp_drivers() const;
+  Node_pin_iterator out_sinks() const;
 
   void del_driver(Node_pin &dst);
   void del_sink(Node_pin &dst);

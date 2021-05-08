@@ -44,12 +44,13 @@ protected:
 
   void try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(const Node &node);
-  void try_connect_sub_inputs(Node &node);
 
   // Tuple methods
-  std::shared_ptr<Lgtuple const> find_lgtuple(Node_pin up_dpin) const;
-  std::shared_ptr<Lgtuple const> find_lgtuple(Node up_node) const;
+  std::shared_ptr<Lgtuple const> find_lgtuple(const Node_pin &up_dpin) const;
+  std::shared_ptr<Lgtuple const> find_lgtuple(const Node &up_node) const;
 
+  void  reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype);
+  void  reconnect_tuple_sub(Node &node);
   void  reconnect_tuple_add(Node &node);
   void  reconnect_tuple_get(Node &node);
 

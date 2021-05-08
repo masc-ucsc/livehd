@@ -23,6 +23,12 @@ void Lgraph_Node_Type::clear() {
 void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
   I(node_internal[nid].is_master_root());
 
+  auto type = node_internal[nid].get_type();
+  if (type==Ntype_op::Sub)
+    subid_map.erase(Node::Compact_class(nid));
+  else if (type==Ntype_op::LUT)
+    lut_map.erase(Node::Compact_class(nid));
+
   node_internal.ref(nid)->set_type(op);
 }
 

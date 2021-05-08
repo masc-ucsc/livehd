@@ -14,10 +14,13 @@ Ntype::_init::_init() {
       sink_pid2name[i][op] = "invalid";
     }
 
+    int n_sinks=0;
     for (int pid = 0; pid < 12; ++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid")
         continue;
+
+      ++n_sinks;
 
       assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == -1
              || sink_name2pid[pin_name[0]][op] == pid);  // No double assign
@@ -30,6 +33,13 @@ Ntype::_init::_init() {
       sink_name2pid[pin_name[0]][op] = pid;
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
       assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
+    }
+
+    if (n_sinks==1) {
+      ntype2single_input[op] = true;
+      I(sink_pid2name[0][op] != "invalid");
+    }else{
+      ntype2single_input[op] = false;
     }
 
     int pid;

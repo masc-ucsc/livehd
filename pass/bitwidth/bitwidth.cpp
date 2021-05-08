@@ -973,7 +973,7 @@ void Bitwidth::set_graph_boundary(const Node_pin &dpin, Node_pin &spin) {
 
   I(dpin.get_hidx() != spin.get_hidx());
   auto same_level_spin = spin.get_non_hierarchical();
-  for (auto dpin2: same_level_spin.inp_driver()) {
+  for (auto dpin2: same_level_spin.inp_drivers()) {
     dpin2.set_size(dpin);
   }
 

@@ -395,7 +395,7 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
 
 FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   auto h_spin      = e.sink.get_hierarchical();
-  auto driver_list = h_spin.inp_driver();
+  auto driver_list = h_spin.inp_drivers();
   I(driver_list.size() == 1);
   auto h_dpin = driver_list[0];
 

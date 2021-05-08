@@ -80,6 +80,7 @@ protected:
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
   inline static std::array<std::array<char, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>            sink_name2pid;
   inline static std::array<std::array<std::string_view, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11> sink_pid2name;
+  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                             ntype2single_input;
 
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
 
@@ -193,6 +194,8 @@ public:
     }
     return is_unlimited_driver(op);
   }
+
+  static inline constexpr bool is_single_sink(Ntype_op op) { return ntype2single_input[static_cast<int>(op)]; }
 
   static std::string_view get_name(Ntype_op op) { return cell_name[static_cast<size_t>(op)]; }
 

@@ -212,6 +212,7 @@ public:
   Lgraph *get_top_lgraph() const { return top_g; }
   Lgraph *get_class_lgraph() const { return current_g; }
   Lgraph *get_lg() const { return current_g; }  // To handle hierarchical API
+  Graph_library *ref_library() const;
 
   Index_id        get_nid() const { return nid; }
   Hierarchy_index get_hidx() const { return hidx; }
@@ -357,6 +358,7 @@ public:
   XEdge_iterator inp_edges_ordered_reverse() const;  // Slower than inp_edges, but edges ordered by sink.pid
 
   Node_pin_iterator inp_drivers() const;
+  Node_pin_iterator out_sinks() const;
 
   bool is_graph_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool is_graph_input() const { return nid == Hardcoded_input_nid; }

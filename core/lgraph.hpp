@@ -49,6 +49,7 @@ protected:
   Node_pin_iterator inp_connected_pins(const Node &node) const;
 
   Node_pin_iterator inp_drivers(const Node &node) const;
+  Node_pin_iterator out_sinks(const Node &node) const;
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;
@@ -62,7 +63,8 @@ protected:
   XEdge_iterator out_edges(const Node_pin &pin) const;
   XEdge_iterator inp_edges(const Node_pin &pin) const;
 
-  Node_pin_iterator inp_driver(const Node_pin &spin) const;  // 1 or 0 drivers allowed for correct graphs
+  Node_pin_iterator inp_drivers(const Node_pin &spin) const;
+  Node_pin_iterator out_sinks(const Node_pin &dpin) const;
 
   bool has_outputs(const Node &node) const;
   bool has_inputs(const Node &node) const;

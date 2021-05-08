@@ -577,32 +577,6 @@ void Cprop::try_connect_lgcpp(const Node &node) {
 #endif
 }
 
-void Cprop::try_connect_sub_inputs(Node &node) {
-  I(!hier);
-
-  const auto &sub = node.get_type_sub_node();
-
-  Node_pin dollar_spin;
-  for (auto &spin : node.inp_connected_pins()) {
-    const auto &io_pin = sub.get_io_pin_from_instance_pid(spin.get_pid());
-    if (io_pin.name == "$") {
-      dollar_spin = spin;
-    } else if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
-      Pass::error("graph {} connects to subgraph {} and the inputs have changed. Recompile {}",
-                  node.get_class_lgraph()->get_name(),
-                  sub.get_name(),
-                  node.get_class_lgraph()->get_name());
-    }
-  }
-
-  if (!dollar_spin.is_invalid()) {
-    auto parent_node = dollar_spin.get_driver_node();
-    auto it2         = node2tuple.find(parent_node.get_compact());
-    if (it2 != node2tuple.end()) {
-      try_connect_tuple_to_sub(it2->second, node, parent_node);
-    }
-  }
-}
 
 
 std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node) const {
@@ -921,7 +895,25 @@ void Cprop::tuple_get_mask_mut(Node &node) {
 }
 
 void Cprop::tuple_subgraph(const Node &node) {
-  if (!node.is_type_sub_present()) {
+  const auto &sub = node.get_type_sub_node();
+  auto *sub_lg = node.ref_library()->try_find_lgraph(sub.get_lgid());
+  if (sub_lg == nullptr || sub_lg->is_empty()) {
+
+    std::string sub_name{sub.get_name()};
+    if (sub_name.size()>2 && sub_name.substr(0,2) == "__") {
+      auto cell_name = sub_name.substr(2);
+      auto cell_ntype = Ntype::get_op(cell_name);
+      if (cell_ntype!=Ntype_op::Invalid) {
+        if (cell_ntype == Ntype_op::Sub) {
+          node.dump();
+          Pass::error("Structural Lgraph does not allow sub graphs as node");
+        }
+        I(Ntype::is_single_driver_per_pin(cell_ntype)); // FIXME for memories
+        // OUTPUT is scalar for everything but memories
+        return; // reconnect_sub_as_cell when no issues pending
+      }
+    }
+
     // Still a blackbox, not much to do
     for (const auto &e : node.inp_edges()) {
       auto parent_node = e.driver.get_node();
@@ -939,7 +931,6 @@ void Cprop::tuple_subgraph(const Node &node) {
   if (it2!=node2tuple.end())
     return;
 
-  const auto &sub = node.get_type_sub_node();
   std::string method;
   if (node.has_name()) {
     method = node.get_name();
@@ -1327,7 +1318,7 @@ void Cprop::scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered) {
   node.setup_sink_pin("a").connect_driver(parent_wire_dpin);
 }
 
-std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) const {
+std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(const Node_pin &up_dpin) const {
   auto up_node = up_dpin.get_node();
 
   auto ptup_it = node2tuple.find(up_node.get_compact());
@@ -1339,7 +1330,7 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node_pin up_dpin) const {
   return nullptr;
 }
 
-std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node up_node) const {
+std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(const Node &up_node) const {
   auto ptup_it = node2tuple.find(up_node.get_compact());
   if (ptup_it != node2tuple.end()) {
     I(!up_node.is_type_const());
@@ -1347,6 +1338,109 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(Node up_node) const {
   }
 
   return nullptr;
+}
+
+void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
+  if (!node.is_sink_connected("$"))
+    return;
+
+  auto input_spin = node.get_sink_pin("$");
+  auto input_dpin = input_spin.get_driver_pin();
+  auto tup = find_lgtuple(input_dpin);
+
+  // 1st. Reconnect output (all cells but memory/sub have single output at pin 0)
+  node.set_type(cell_ntype);
+
+  I(cell_ntype != Ntype_op::Sub); // structural is not allowed with subs
+  if (cell_ntype == Ntype_op::Memory) {
+    I(false); // this is the only cell with multiple outputs to handle
+  }
+  auto sink_list = node.out_sinks();
+  if (!sink_list.empty()) {
+    for(auto &dp:node.out_connected_pins()) {
+      dp.del();
+    }
+
+    for(auto &sp:sink_list) {
+      // single sink pins map to zero always
+      node.setup_driver_pin_raw(0).connect_sink(sp);
+    }
+  }
+
+  // 2nd. Reconnect inputs
+  if (tup) {
+    input_spin.del();
+
+    for(const auto &e:tup->get_map()) {
+      auto pin_name = Lgtuple::get_first_level_name(e.first);
+      auto pin_pid  = Ntype::get_sink_pid(cell_ntype, pin_name);
+      if (pin_pid<0) {
+        Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
+        return;
+      }
+
+      auto spin = node.setup_sink_pin_raw(pin_pid);
+      if (spin.is_connected() && Ntype::is_single_driver_per_pin(cell_ntype)) {
+        Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
+        return;
+      }
+      spin.connect_driver(e.second);
+    }
+  }else{
+    // Possible direct connect if there is a single pin
+    auto driver_list = input_spin.inp_drivers();
+    input_spin.del();
+    if (!Ntype::is_single_sink(cell_ntype)) {
+      Pass::error("node:{} with cell:{} can have multiple sinks, but none selected", node.debug_name(), Ntype::get_name(cell_ntype));
+      return;
+    }
+    if (driver_list.size()>1 && Ntype::is_single_driver_per_pin(cell_ntype)) {
+      auto pin_name = Ntype::get_sink_name(cell_ntype, 0);
+      Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
+      return;
+    }
+    auto spin = node.setup_sink_pin_raw(0);
+    for(auto &dp:driver_list) {
+      spin.connect_driver(dp);
+    }
+  }
+}
+
+void Cprop::reconnect_tuple_sub(Node &node) {
+  I(!hier);
+
+  const auto &sub = node.get_type_sub_node();
+
+  std::string sub_name{sub.get_name()};
+  if (sub_name.size()>2 && sub_name.substr(0,2) == "__") {
+    auto cell_name = sub_name.substr(2);
+    auto cell_ntype = Ntype::get_op(cell_name);
+    if (cell_ntype!=Ntype_op::Invalid) {
+      reconnect_sub_as_cell(node, cell_ntype);
+      return;
+    }
+  }
+
+  Node_pin dollar_spin;
+  for (auto &spin : node.inp_connected_pins()) {
+    const auto &io_pin = sub.get_io_pin_from_instance_pid(spin.get_pid());
+    if (io_pin.name == "$") {
+      dollar_spin = spin;
+    } else if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
+      Pass::error("graph {} connects to subgraph {} and the inputs have changed. Recompile {}",
+                  node.get_class_lgraph()->get_name(),
+                  sub.get_name(),
+                  node.get_class_lgraph()->get_name());
+    }
+  }
+
+  if (!dollar_spin.is_invalid()) {
+    auto parent_node = dollar_spin.get_driver_node();
+    auto it2         = node2tuple.find(parent_node.get_compact());
+    if (it2 != node2tuple.end()) {
+      try_connect_tuple_to_sub(it2->second, node, parent_node);
+    }
+  }
 }
 
 void Cprop::reconnect_tuple_add(Node &node) {
@@ -1622,7 +1716,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
     }else if (op == Ntype_op::TupGet) {
       reconnect_tuple_get(node);
     } else if (op == Ntype_op::Sub) {
-      try_connect_sub_inputs(node);
+      reconnect_tuple_sub(node);
     } else if (op == Ntype_op::Flop) {
 
       {

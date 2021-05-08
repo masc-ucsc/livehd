@@ -150,16 +150,21 @@ Node_pin Node_pin::get_driver_pin() const {
   if (is_invalid())
     return *this;
   I(is_sink() || is_graph_output());
-  auto piter = current_g->inp_driver(*this);
+  auto piter = current_g->inp_drivers(*this);
   if (piter.empty())
     return Node_pin();   // disconnected driver
   I(piter.size() == 1);  // If there can be many drivers, use the inp_driver iterator
   return piter.back();
 }
 
-Node_pin_iterator Node_pin::inp_driver() const {
+Node_pin_iterator Node_pin::inp_drivers() const {
   I(is_sink() || is_graph_output());
-  return current_g->inp_driver(*this);
+  return current_g->inp_drivers(*this);
+}
+
+Node_pin_iterator Node_pin::out_sinks() const {
+  I(is_driver());
+  return current_g->out_sinks(*this);
 }
 
 Node Node_pin::create(Ntype_op op) const {
@@ -528,14 +533,14 @@ bool Node_pin::is_connected() const {
 
 bool Node_pin::is_connected(const Node_pin &pin) const {
   if (pin.is_driver()) {
-    for (auto &other : inp_driver()) {
+    for (auto &other : inp_drivers()) {
       if (other == pin)
         return true;
     }
     return false;
   }
   if (likely(is_driver())) {  // sink can not be connected to another sink
-    for (auto &other : pin.inp_driver()) {
+    for (auto &other : pin.inp_drivers()) {
       if (other == *this)
         return true;
     }

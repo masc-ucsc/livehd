@@ -582,7 +582,7 @@ XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
   return xiter;
 }
 
-Node_pin_iterator Lgraph::inp_driver(const Node_pin &spin) const {
+Node_pin_iterator Lgraph::inp_drivers(const Node_pin &spin) const {
   I(!spin.is_invalid());
   I(spin.is_sink());
   I(spin.get_class_lgraph() == this);
@@ -611,6 +611,35 @@ Node_pin_iterator Lgraph::inp_driver(const Node_pin &spin) const {
 
     return true;  // continue the iterations
   });
+
+  return piter;
+}
+
+Node_pin_iterator Lgraph::out_sinks(const Node_pin &dpin) const {
+  // NOTE: Not very efficient. Hopefully with Graph_core, we can do faster/better
+  I(!dpin.is_invalid());
+  I(dpin.is_driver());
+  I(dpin.get_class_lgraph() == this);
+
+  Node_pin_iterator piter;
+  for(auto e:dpin.get_node().out_edges()) {
+    if (e.driver != dpin)
+      continue;
+    piter.emplace_back(e.sink);
+  }
+
+  return piter;
+}
+
+Node_pin_iterator Lgraph::out_sinks(const Node &node) const {
+  // NOTE: Not very efficient. Hopefully with Graph_core, we can do faster/better
+  I(!node.is_invalid());
+  I(node.get_class_lgraph() == this);
+
+  Node_pin_iterator piter;
+  for(auto e:node.out_edges()) {
+    piter.emplace_back(e.sink);
+  }
 
   return piter;
 }
