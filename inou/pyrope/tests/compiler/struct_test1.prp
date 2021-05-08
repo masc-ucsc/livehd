@@ -1,0 +1,10 @@
+
+$to_add.__sbits = 3
+$to_sub.__sbits = 2
+
+tmp = __sum(A=(1,5,$to_add),B=(2,$to_sub))
+
+tmp2 = __not(tmp)
+tmp3 = __xor((tmp2, -1)) // same as NOT
+
+%total = tmp3

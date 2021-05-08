@@ -908,8 +908,6 @@ void Cprop::tuple_subgraph(const Node &node) {
           node.dump();
           Pass::error("Structural Lgraph does not allow sub graphs as node");
         }
-        I(Ntype::is_single_driver_per_pin(cell_ntype)); // FIXME for memories
-        // OUTPUT is scalar for everything but memories
         return; // reconnect_sub_as_cell when no issues pending
       }
     }
@@ -1372,12 +1370,19 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
     input_spin.del();
 
     for(const auto &e:tup->get_map()) {
-      auto pin_name = Lgtuple::get_first_level_name(e.first);
-      auto pin_pid  = Ntype::get_sink_pid(cell_ntype, pin_name);
-      if (pin_pid<0) {
-        Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
-        return;
-      }
+			std::string_view pin_name;
+			int pin_pid=0;
+			if (Ntype::is_single_sink(cell_ntype)) {
+				pin_pid  = 0;
+				pin_name = Ntype::get_sink_name(cell_ntype, 0);
+			}else{
+				pin_name = Lgtuple::get_first_level_name(e.first);
+				pin_pid  = Ntype::get_sink_pid(cell_ntype, pin_name);
+				if (pin_pid<0) {
+					Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
+					return;
+				}
+			}
 
       auto spin = node.setup_sink_pin_raw(pin_pid);
       if (spin.is_connected() && Ntype::is_single_driver_per_pin(cell_ntype)) {
