@@ -43,8 +43,10 @@ void Gioc::do_trans(Lgraph *lg) {
     I(node.out_edges().size() == 1);
     node.inp_edges().begin()->del_edge();
     auto sub_outsink_ta_node = node.out_edges().begin()->sink.get_node();
+    (void)sub_outsink_ta_node;
     node.out_edges().begin()->del_edge();
-    sub_outsink_ta_node.set_type(Ntype_op::TupRef);  // change type from TA to TRef to have a valid chain
+    I(false); // TupRef is gone
+    // sub_outsink_ta_node.set_type(Ntype_op::TupRef);  // change type from TA to TRef to have a valid chain
 
     subgraph_io_connection(lg, sub, arg_tup_name, ret_name, node);
     reconnect_the_tgs_from_unified_out(ret_name);
@@ -227,7 +229,8 @@ Node_pin Gioc::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
     return dpin;
   }
 
-  dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();
+  I(false); // TupRef is gone
+  // dpin = lg->create_node(Ntype_op::TupRef).setup_driver_pin();
   dpin.set_name(ref_name);
   name2dpin[ref_name] = dpin;
   return dpin;

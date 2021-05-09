@@ -54,7 +54,6 @@ enum class Ntype_op : uint8_t {
 
   TupAdd,
   TupGet,
-  TupRef,
 
   AttrSet,
   AttrGet,
@@ -99,7 +98,7 @@ public:
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
-    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet && op != Ntype_op::TupRef
+    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet 
            && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr && op != Ntype_op::Invalid
            && op != Ntype_op::Last_invalid;
   }
