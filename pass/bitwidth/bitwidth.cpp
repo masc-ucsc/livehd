@@ -697,8 +697,8 @@ void Bitwidth::process_attr_get(Node &node) {
     return;
   }
 
-  I(node.is_sink_connected("name"));
-  auto dpin_val = node.get_sink_pin("name").get_driver_pin();
+  I(node.is_sink_connected("parent"));
+  auto dpin_val = node.get_sink_pin("parent").get_driver_pin();
 
   auto it = flat_bwmap.find(dpin_val.get_compact_flat());
   if (it == flat_bwmap.end()) {
@@ -732,9 +732,9 @@ void Bitwidth::process_attr_get(Node &node) {
 // lhs := rhs
 void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   I(node_dp.is_sink_connected("value"));
-  I(node_dp.is_sink_connected("name"));
+  I(node_dp.is_sink_connected("parent"));
 
-  auto dpin_lhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_lhs = node_dp.get_sink_pin("parent").get_driver_pin();
   auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
   auto it = flat_bwmap.find(dpin_lhs.get_compact_flat());
@@ -795,8 +795,8 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   Bitwidth_range bw(0);
   bool           parent_pending = true;
 
-  if (node_attr.is_sink_connected("name")) {
-    auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+  if (node_attr.is_sink_connected("parent")) {
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     auto it           = flat_bwmap.find(through_dpin.get_compact_flat());
     if (it != flat_bwmap.end()) {
       bw             = it->second;
@@ -845,8 +845,8 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   }
 
   // upwards propagate for one step node_attr, most graph input BW are handled here
-  if (parent_pending && node_attr.is_sink_connected("name")) {
-    auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+  if (parent_pending && node_attr.is_sink_connected("parent")) {
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     flat_bwmap.insert_or_assign(through_dpin.get_compact_flat(), bw);
     // bw.dump();
   }
@@ -857,7 +857,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
   I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_string().find("__ubits") != std::string::npos);
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
-  auto name_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+  auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
   if (name_dpin.is_invalid()) {
     return;
   }
@@ -900,9 +900,9 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
-  I(node_attr.is_sink_connected("name"));
+  I(node_attr.is_sink_connected("parent"));
   bool parent_data_pending = false;
-  auto data_dpin           = node_attr.get_sink_pin("name").get_driver_pin();
+  auto data_dpin           = node_attr.get_sink_pin("parent").get_driver_pin();
 
   I(node_attr.is_sink_connected("chain"));
   auto parent_attr_dpin = node_attr.get_sink_pin("chain").get_driver_pin();
@@ -918,7 +918,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   auto parent_attr_it = flat_bwmap.find(parent_attr_dpin.get_compact_flat());
   if (parent_attr_it == flat_bwmap.end()) {
 #ifndef NDEBUG
-    fmt::print("attr_set propagate flat_bwmap to AttrSet name:{}\n", dpin_name);
+    fmt::print("attr_set propagate flat_bwmap to AttrSet parent:{}\n", dpin_name);
 #endif
     not_finished = true;
     return;
@@ -1207,7 +1207,7 @@ void Bitwidth::try_delete_attr_node(Node &node) {
   }
 
   if (attr == Attr::Set_dp_assign) {
-    auto dpin_lhs = node.get_sink_pin("name").get_driver_pin();
+    auto dpin_lhs = node.get_sink_pin("parent").get_driver_pin();
     auto dpin_rhs = node.get_sink_pin("value").get_driver_pin();
     auto it1      = flat_bwmap.find(dpin_lhs.get_compact_flat());
     auto it2      = flat_bwmap.find(dpin_rhs.get_compact_flat());
@@ -1250,8 +1250,8 @@ void Bitwidth::try_delete_attr_node(Node &node) {
   }
 
   // auto node_non_hier = node.get_non_hierarchical();
-  if (node.is_sink_connected("name")) {
-    auto data_dpin = node.get_sink_pin("name").get_driver_pin();
+  if (node.is_sink_connected("parent")) {
+    auto data_dpin = node.get_sink_pin("parent").get_driver_pin();
 
     for (auto e : node.out_edges()) {
       if (e.driver.get_pid() == 0) {  // No chain pin

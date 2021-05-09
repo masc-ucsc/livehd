@@ -40,7 +40,7 @@ void Cprop::add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &
     return;
   }
 
-  auto pos_spin = dpin.get_node().get_sink_pin("position");
+  auto pos_spin = dpin.get_node().get_sink_pin("field");
   I(pos_spin.is_connected());
   if (!pos_spin.get_driver_pin().is_type_const()) {
     tup->set_issue();
@@ -577,8 +577,8 @@ void Cprop::try_connect_lgcpp(const Node &node) {
 
 std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node) const {
   std::string key_name;
-  if (node.is_sink_connected("position")) {
-    auto node2 = node.get_sink_pin("position").get_driver_node();
+  if (node.is_sink_connected("field")) {
+    auto node2 = node.get_sink_pin("field").get_driver_node();
     if (node2.is_type_const()) {
       key_name = node2.get_type_const().to_string();
     }
@@ -588,7 +588,7 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node)
   if (node.setup_driver_pin("Y").has_name()) {
     tup_name = node.setup_driver_pin("Y").get_name();
   } else {
-    auto spin = node.get_sink_pin("tuple_name");
+    auto spin = node.get_sink_pin("parent");
     if (spin.is_connected()) {
       auto dpin = spin.get_driver_pin();
       if (dpin.has_name())
@@ -848,7 +848,7 @@ void Cprop::tuple_get_mask_mut(Node &node) {
 
           auto bits_node = node.create(Ntype_op::AttrGet);
           bits_node.setup_sink_pin("field").connect_driver(node.create_const(Lconst::string("__sbits")));
-          bits_node.setup_sink_pin("name").connect_driver(a_spin.get_driver_pin());
+          bits_node.setup_sink_pin("parent").connect_driver(a_spin.get_driver_pin());
 
           auto tmp_node = node.create(Ntype_op::Sum);
           tmp_node.setup_sink_pin("A").connect_driver(bits_node);
@@ -893,6 +893,7 @@ void Cprop::tuple_get_mask_mut(Node &node) {
 
 void Cprop::tuple_subgraph(const Node &node) {
   const auto &sub    = node.get_type_sub_node();
+
   auto *      sub_lg = node.ref_library()->try_find_lgraph(sub.get_lgid());
   if (sub_lg == nullptr || sub_lg->is_empty()) {
     std::string sub_name{sub.get_name()};
@@ -905,7 +906,34 @@ void Cprop::tuple_subgraph(const Node &node) {
           Pass::error("Structural Lgraph does not allow sub graphs as node");
         }
         auto node_tup = std::make_shared<Lgtuple>(sub_name);
-        node_tup->add(node.setup_driver_pin_raw(0));
+        if (cell_ntype == Ntype_op::Memory) {
+#if 1
+          I(false);
+#else
+          auto n_ports = 0;
+          auto node_input_spin = node.get_sink_pin("%");
+          if (node_input_spin.is_connected()) {
+            auto parent_node = node_input_spin.get_driver_node();
+            auto parent_tup  = find_lgtuple(parent_node);
+            if (parent_tup) {
+              auto mode_dpin = parent_tup->get("mode");
+              if (!mode_dpin.is_invalid()) {
+                if (mode_dpin.is_type_const()) {
+                  Pass::info("Memory {} mode must be a compile time constant", node.debug_name());
+                }else{
+                }
+              }
+            }
+            //auto mode_tup = tup->get_sub_tuple("mode");
+          }
+
+          if (n_ports==0) {
+            node_tup->set_issue();
+          }
+#endif
+        }else{
+          node_tup->add(node.setup_driver_pin_raw(0));
+        }
         node2tuple[node.get_compact()] = node_tup;
         return;  // reconnect_sub_as_cell when no issues pending
       }
@@ -971,7 +999,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
   Node_pin                       parent_dpin;
   std::shared_ptr<Lgtuple const> parent_tup;
   {
-    auto parent_spin = node.get_sink_pin("tuple_name");
+    auto parent_spin = node.get_sink_pin("parent");
     if (parent_spin.is_connected()) {
       parent_dpin     = parent_spin.get_driver_pin();
       parent_tup      = find_lgtuple(parent_dpin);
@@ -1044,7 +1072,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
     } else if (parent_is_a_sub) {
       node_tup = std::make_shared<Lgtuple>(tup_name);
 
-      auto parent_node = node.get_sink_pin("tuple_name").get_driver_node();
+      auto parent_node = node.get_sink_pin("parent").get_driver_node();
       I(parent_node.is_type_sub());
 
       const auto &sub = parent_node.get_type_sub_node();
@@ -1081,7 +1109,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
 }
 
 bool Cprop::tuple_tuple_get(const Node &node) {
-  auto parent_dpin          = node.get_sink_pin("tuple_name").get_driver_pin();
+  auto parent_dpin          = node.get_sink_pin("parent").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
 
@@ -1096,8 +1124,8 @@ bool Cprop::tuple_tuple_get(const Node &node) {
   }
 
   if (key_name.empty()) {
-    if (node.is_sink_connected("position") && node_tup) {
-      auto field_node  = node.get_sink_pin("position").get_driver_node();
+    if (node.is_sink_connected("field") && node_tup) {
+      auto field_node  = node.get_sink_pin("field").get_driver_node();
       auto fieldtup_it = node2tuple.find(field_node.get_compact());
       if (fieldtup_it != node2tuple.end()) {
         I(node_tup->is_correct());
@@ -1208,7 +1236,7 @@ void Cprop::tuple_attr_set(const Node &node) {
     return;
   }
 
-  auto                     name_spin = node.get_sink_pin("name");
+  auto                     name_spin = node.get_sink_pin("parent");
   std::shared_ptr<Lgtuple> node_tup;
   if (name_spin.is_connected()) {
     auto name_tup = find_lgtuple(name_spin.get_driver_node());
@@ -1340,6 +1368,8 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 
   I(cell_ntype != Ntype_op::Sub);  // structural is not allowed with subs
   if (cell_ntype == Ntype_op::Memory) {
+    // auto mode_tup = tup->get_sub_tuple("mode");
+    
     I(false);  // this is the only cell with multiple outputs to handle
   }
   auto sink_list = node.out_sinks();
@@ -1458,7 +1488,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
-  auto pos_spin = node.get_sink_pin("position");
+  auto pos_spin = node.get_sink_pin("field");
   if (!pos_spin.is_invalid()) {
     auto pos_dpin = pos_spin.get_driver_pin();
     if (pos_dpin.is_type_const()) {
@@ -1520,7 +1550,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
     node.set_type(Ntype_op::AttrGet);
 
     if (it != node2tuple.end()) {
-      node.setup_sink_pin("name").del();
+      node.setup_sink_pin("parent").del();
 
       auto out_edges_list = node.out_edges();
       I(!out_edges_list.empty());
@@ -1531,7 +1561,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
         e.del_edge();
       }
 
-      node.setup_sink_pin("name").connect_driver(new_dpin);
+      node.setup_sink_pin("parent").connect_driver(new_dpin);
     }
 
     return;
@@ -1568,7 +1598,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
     use_tup->add(attr, it.second);
 
     auto attr_node = node.create(Ntype_op::AttrSet);
-    auto an_spin   = attr_node.setup_sink_pin("name");
+    auto an_spin   = attr_node.setup_sink_pin("parent");
     auto af_spin   = attr_node.setup_sink_pin("field");
     auto av_spin   = attr_node.setup_sink_pin("value");
 

@@ -436,7 +436,7 @@ void Firmap::map_node_fir_not(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
       // semantic wrong, hence, we add an Or_op with MSB(1) to avoid problem
       auto parent_node = e.driver.get_node();
       bool cond1       = parent_node.get_type_op() == Ntype_op::AttrSet;
-      bool cond2       = cond1 && parent_node.setup_sink_pin("name").get_driver_pin().is_graph_input();
+      bool cond2       = cond1 && parent_node.setup_sink_pin("parent").get_driver_pin().is_graph_input();
       if (cond2 && !e1_sign) {
         auto new_node_or    = new_lg->create_node(Ntype_op::Or);
         auto new_node_const = new_lg->create_node_const(Lconst(1UL) << Lconst(e1_bits));

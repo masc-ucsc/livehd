@@ -637,7 +637,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   //
   // Only TupGet for a root attr can be because they will be converted to AttrGet
   if (!dpin.is_invalid() && dpin.get_node().is_type_tup()) {
-    auto pos_spin = dpin.get_node().get_sink_pin("position");
+    auto pos_spin = dpin.get_node().get_sink_pin("field");
     I(pos_spin.is_connected());
     I(pos_spin.get_driver_pin().is_type_const());
     auto v = pos_spin.get_driver_pin().get_type_const().to_string();
@@ -769,7 +769,7 @@ Node_pin Lgtuple::flatten() const {
 
     auto attr_node = result_node.create(Ntype_op::AttrGet);
     attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string("__sbits")));
-    attr_node.setup_sink_pin("name").connect_driver(e.second);
+    attr_node.setup_sink_pin("parent").connect_driver(e.second);
 
     Node to_or_node;
     if (bit_chain.is_invalid()) {
@@ -1001,7 +1001,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
               attr_node.setup_sink_pin("field").connect_driver(key_dpin);
             }
             { attr_node.setup_sink_pin("value").connect_driver(attr_it.second); }
-            attr_node.setup_sink_pin("name").connect_driver(dpin);
+            attr_node.setup_sink_pin("parent").connect_driver(dpin);
             dpin = attr_node.setup_driver_pin("Y");
           }
         }
@@ -1175,7 +1175,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         Lgraph::info("flop:{} seems disconnected. May be fine or intentional but strange", new_flop_name);
       } else {
         XEdge::del_edge(flop_din_driver, flop_din);
-        attr_node.setup_sink_pin("name").connect_driver(flop_din_driver);
+        attr_node.setup_sink_pin("parent").connect_driver(flop_din_driver);
       }
 
       flop_din.connect_driver(attr_node.setup_driver_pin("Y"));

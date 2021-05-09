@@ -158,7 +158,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         case 7: return "latency";
         case 8: return "wmask";
         case 9: return "size";
-        case 10: return "mode";
+        case 10: return "mode"; // mode mask (0b1100 2 reads/2writes). (0b10 -> 1 write, 1 read), (0b0, ROM or  read only) MSB must be 1 (write
         default: return "invalid";
       }
       break;
@@ -212,23 +212,22 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::TupAdd:
       switch (pid) {
-        case 0: return "tuple_name";  // tuple name
+        case 0: return "parent";  // tuple name
         case 4: return "value";
-        case 5: return "position";  // position of tuple field
+        case 5: return "field";  // position of tuple field
         default: return "invalid";
       }
       break;
     case Ntype_op::TupGet:
       switch (pid) {
-        case 0: return "tuple_name";
-        case 5: return "position";  // SAME as AttrGet field to avoid rewire
+        case 0: return "parent";
+        case 5: return "field";  // SAME as AttrGet field to avoid rewire
         default: return "invalid";
       }
       break;
     case Ntype_op::AttrSet:
       switch (pid) {
-        case 0: return "name";  // variable name
-        case 2: return "chain";
+        case 0: return "parent";
         case 4: return "value";
         case 5: return "field";
         default: return "invalid";
@@ -236,7 +235,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::AttrGet:
       switch (pid) {
-        case 0: return "name";  // variable name
+        case 0: return "parent";
         case 5: return "field";
         default: return "invalid";
       }

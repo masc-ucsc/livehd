@@ -163,8 +163,8 @@ void Firmap::analysis_lg_attr_set(Node &node, FBMap &fbmap) {
 // from firrtl front-end, the only possible attr_set_propagate will happen is the variable pre-declaration before mux, so the
 // attr_propagate could just follow the chain fbits
 void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
-  I(node_attr.is_sink_connected("name"));
-  I(node_attr.is_sink_connected("chain"));
+  I(node_attr.is_sink_connected("parent"));
+  I(false); // Chain is not longer in use. When is this called?
   auto parent_attr_dpin = node_attr.get_sink_pin("chain").get_driver_pin();
 
   auto parent_attr_it = fbmap.find(parent_attr_dpin.get_compact_flat());
@@ -206,8 +206,8 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   bool        parent_pending   = false;
   bool        is_set_graph_inp = false;
   bool        has_through_dpin = false;
-  if (node_attr.is_sink_connected("name")) {
-    auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+  if (node_attr.is_sink_connected("parent")) {
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     is_set_graph_inp  = through_dpin.is_graph_input();
     auto it           = fbmap.find(through_dpin.get_compact_flat());
     if (it != fbmap.end()) {
@@ -261,13 +261,13 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
 
   // upwards propagate for one step node_attr, most graph input bits are set here
   if (parent_pending) {
-    auto through_dpin = node_attr.get_sink_pin("name").get_driver_pin();
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     fbmap.insert_or_assign(through_dpin.get_compact_flat(), fb);
   }
 }
 
 void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
-  auto dpin_lhs = node_dp.get_sink_pin("name").get_driver_pin();
+  auto dpin_lhs = node_dp.get_sink_pin("parent").get_driver_pin();
   auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
   auto        it = fbmap.find(dpin_lhs.get_compact_flat());
