@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "absl/container/flat_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "mmap_map.hpp"
@@ -7,8 +8,6 @@
 #include "node_pin.hpp"
 #include "sub_node.hpp"
 #include "thread_pool.hpp"
-
-#include "absl/container/flat_hash_map.h"
 
 void Lgraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid)
@@ -198,8 +197,7 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
   }
 }
 
-void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited,
-                                      const std::function<void(Lgraph *lg_sub)> fn) {
+void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> fn) {
   const auto &m = get_down_nodes_map();
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
@@ -228,21 +226,20 @@ void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn) {
-
   std::unordered_map<uint32_t, int> visited;
 
   std::vector<Lgraph *> next_round;
 
   const auto &href = get_htree();
 
-  href.each_bottom_up_fast([this, &href, &visited,&next_round](const Hierarchy_index &hidx, const Hierarchy_data &data) {
+  href.each_bottom_up_fast([this, &href, &visited, &next_round](const Hierarchy_index &hidx, const Hierarchy_data &data) {
     auto it = visited.find(data.lgid);
     if (it != visited.end())
       return;
     if (unlikely(hidx.is_root()))
       return;
 
-    I(href.is_leaf(hidx)); // Otherwise, it will be not visited
+    I(href.is_leaf(hidx));  // Otherwise, it will be not visited
     visited[data.lgid] = 0;
 
     auto *lg = Lgraph::open(path, data.lgid);
@@ -250,17 +247,17 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
       next_round.emplace_back(lg);
 
     auto index = href.get_parent(hidx);
-    int level = 0;
-    while(!index.is_root()) {
+    int  level = 0;
+    while (!index.is_root()) {
       const auto index_lgid = href.get_data(index).lgid;
 
       const auto it2 = visited.find(index_lgid);
       if (it2 == visited.end()) {
         visited[index_lgid] = level;
-      }else{
-        if (it2->second>level) {
+      } else {
+        if (it2->second > level) {
           level = it2->second;
-        }else{
+        } else {
           it2->second = level;
         }
       }
@@ -269,7 +266,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     }
   });
 
-  for(auto *lg:next_round) {
+  for (auto *lg : next_round) {
     thread_pool.add(fn, lg);
     // fn(lg); // can be in parallel
     visited.erase(lg->get_lgid());
@@ -277,11 +274,11 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
   if (!next_round.empty())
     thread_pool.wait_all();
 
-  int level=0;
-  while(!visited.empty()) {
+  int level = 0;
+  while (!visited.empty()) {
     next_round.clear();
     auto it = visited.begin();
-    while(it!=visited.end()) {
+    while (it != visited.end()) {
       if (it->second > level) {
         ++it;
         continue;
@@ -294,13 +291,11 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
       it = visited.erase(it);
     }
     ++level;
-    for(auto *lg:next_round) {
+    for (auto *lg : next_round) {
       thread_pool.add(fn, lg);
-      //fn(lg); // can be in parallel
+      // fn(lg); // can be in parallel
     }
     if (!next_round.empty())
       thread_pool.wait_all();
   }
 }
-
-

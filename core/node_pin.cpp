@@ -241,17 +241,11 @@ void Node_pin::set_bits(uint32_t bits) {
   current_g->set_bits(get_root_idx(), bits);
 }
 
-void Node_pin::set_unsign() {
-  Ann_node_pin_unsign::ref(get_lg())->set(get_compact_driver(), true);
-}
+void Node_pin::set_unsign() { Ann_node_pin_unsign::ref(get_lg())->set(get_compact_driver(), true); }
 
-void Node_pin::set_sign() {
-  Ann_node_pin_unsign::ref(get_lg())->erase(get_compact_driver());
-}
+void Node_pin::set_sign() { Ann_node_pin_unsign::ref(get_lg())->erase(get_compact_driver()); }
 
-bool Node_pin::is_unsign() const {
-  return Ann_node_pin_unsign::ref(top_g)->has(get_compact_driver()) ? true : false;
-}
+bool Node_pin::is_unsign() const { return Ann_node_pin_unsign::ref(top_g)->has(get_compact_driver()) ? true : false; }
 
 std::string_view Node_pin::get_type_sub_pin_name() const {
   const auto node = get_node();
@@ -374,7 +368,10 @@ std::string Node_pin::debug_name() const {
       if (is_sink()) {
         name = Ntype::get_sink_name(node.get_type_op(), pid);
       } else {
-        name = Ntype::get_driver_name(node.get_type_op(), pid);
+        if (Ntype::is_multi_driver(node.get_type_op()))
+          name = std::to_string(pid);
+        else
+          name = "Y";
       }
     }
   }
@@ -479,7 +476,7 @@ std::string_view Node_pin::get_pin_name() const {
     return get_type_sub_pin_name();
 
   if (is_driver())
-    return Ntype::get_driver_name(op, pid);
+    return Ntype::get_driver_name(op);
 
   return Ntype::get_sink_name(op, pid);
 }

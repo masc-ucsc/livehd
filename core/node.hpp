@@ -91,8 +91,8 @@ public:
 
   class __attribute__((packed)) Compact_flat {
   protected:
-    uint32_t     lgid;
-    uint64_t     nid : Index_bits;
+    uint32_t lgid;
+    uint64_t nid : Index_bits;
 
     friend class Lgraph;
     friend class Lgraph_Node_Type;
@@ -117,9 +117,7 @@ public:
 
     constexpr bool is_invalid() const { return nid == 0; }
 
-    constexpr bool operator==(const Compact_flat &other) const {
-      return nid == other.nid && lgid == other.lgid;
-    }
+    constexpr bool operator==(const Compact_flat &other) const { return nid == other.nid && lgid == other.lgid; }
     constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
 
     template <typename H>
@@ -203,15 +201,15 @@ public:
 
   inline Compact get_compact() const { return Compact(hidx, nid); }
 
-  Compact_flat   get_compact_flat() const;
+  Compact_flat         get_compact_flat() const;
   inline Compact_class get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
     return Compact_class(nid);
   }
 
-  Lgraph *get_top_lgraph() const { return top_g; }
-  Lgraph *get_class_lgraph() const { return current_g; }
-  Lgraph *get_lg() const { return current_g; }  // To handle hierarchical API
+  Lgraph *       get_top_lgraph() const { return top_g; }
+  Lgraph *       get_class_lgraph() const { return current_g; }
+  Lgraph *       get_lg() const { return current_g; }  // To handle hierarchical API
   Graph_library *ref_library() const;
 
   Index_id        get_nid() const { return nid; }
@@ -236,9 +234,7 @@ public:
     if (unlikely(is_type_sub())) {
       return get_driver_pin_slow(pname);
     }
-    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
-    if (pid)
-      return get_driver_pin_raw(pid);
+    I(!Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);  // could be invalid if not setup
   }
   Node_pin get_sink_pin_slow(std::string_view pname) const;
@@ -258,9 +254,7 @@ public:
     if (unlikely(is_type_sub())) {
       return setup_driver_pin_slow(pname);
     }
-    auto pid = Ntype::get_driver_pid(get_type_op(), pname);
-    if (pid)
-      return setup_driver_pin_raw(pid);
+    I(!Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
   }
   Node_pin setup_driver_pin_raw(Port_ID pid) const;
@@ -366,8 +360,8 @@ public:
 
   void del_node();
 
-  Node create(Ntype_op op) const; // create a new node, keep same hierarchy
-  Node create_const(const Lconst &value) const; // create a new node, keep same hierarchy
+  Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
+  Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;

@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "cell.hpp"
+
 #include "iassert.hpp"
 
 Ntype::_init Ntype::_static_initializer;
@@ -14,7 +15,7 @@ Ntype::_init::_init() {
       sink_pid2name[i][op] = "invalid";
     }
 
-    int n_sinks=0;
+    int n_sinks = 0;
     for (int pid = 0; pid < 12; ++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
       if (pin_name.empty() || pin_name == "invalid")
@@ -29,7 +30,7 @@ Ntype::_init::_init() {
 
       auto [it, inserted] = name2pid.insert({std::string(pin_name), pid});
       if (!inserted) {
-        I(it->second == pid); // same name should always have same PID
+        I(it->second == pid);  // same name should always have same PID
       }
 
       if (is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
@@ -40,10 +41,10 @@ Ntype::_init::_init() {
       assert(pin_name == Ntype::get_sink_name(static_cast<Ntype_op>(op), pid));
     }
 
-    if (n_sinks==1) {
+    if (n_sinks == 1) {
       ntype2single_input[op] = true;
       I(sink_pid2name[0][op] != "invalid");
-    }else{
+    } else {
       ntype2single_input[op] = false;
     }
 
@@ -213,14 +214,14 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch (pid) {
         case 0: return "tuple_name";  // tuple name
         case 4: return "value";
-        case 5: return "position";    // position of tuple field
+        case 5: return "position";  // position of tuple field
         default: return "invalid";
       }
       break;
     case Ntype_op::TupGet:
       switch (pid) {
         case 0: return "tuple_name";
-        case 5: return "position";   // SAME as AttrGet field to avoid rewire
+        case 5: return "position";  // SAME as AttrGet field to avoid rewire
         default: return "invalid";
       }
       break;
@@ -249,7 +250,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
 
 bool Ntype::has_sink(Ntype_op op, std::string_view str) {
   auto it = name2pid.find(str);
-  if (it==name2pid.end()) {
+  if (it == name2pid.end()) {
     if (std::isdigit(str[0]) && is_unlimited_sink(op))
       return true;
 
@@ -258,7 +259,6 @@ bool Ntype::has_sink(Ntype_op op, std::string_view str) {
 
   return sink_pid2name[it->second][static_cast<int>(op)] == str;
 }
-
 
 #ifdef NDEBUG
 // asserts break the constexpr check

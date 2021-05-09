@@ -10,7 +10,7 @@ Node_tree::Node_tree(Lgraph* root_arg)
     : mmap_lib::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
-  absl::flat_hash_set<Hierarchy_index> hidx_used;
+  absl::flat_hash_set<Hierarchy_index>                      hidx_used;
   std::function<void(Lgraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](Lgraph* lg, Hierarchy_index hidx, Tree_index tidx) {
     auto ht = root->ref_htree();
 

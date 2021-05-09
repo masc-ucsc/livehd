@@ -24,11 +24,11 @@ private:
 protected:
   using Key_map_type = std::vector<std::pair<std::string, Node_pin>>;
 
-  const std::string      name;
+  const std::string name;
 
   // correct mark as mutable to do not allow tup updates, just to mark the
   // tuple as incorrect (not allow to mark correct once it is incorrect)
-  mutable bool correct;
+  mutable bool           correct;
   static inline Node_pin invalid_dpin;
 
   mutable Key_map_type key_map;
@@ -59,16 +59,15 @@ public:
 
   std::string_view get_name() const { return name; }
 
-  static std::tuple<std::shared_ptr<Lgtuple>,bool> get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
-  std::vector<Node::Compact> make_mux(Node &mux_node, Node_pin &sel_dpin, const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  static std::tuple<std::shared_ptr<Lgtuple>, bool> get_mux_tup(const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
+  std::vector<Node::Compact>                        make_mux(Node &mux_node, Node_pin &sel_dpin,
+                                                             const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
-  std::tuple<std::shared_ptr<Lgtuple>,bool>  get_flop_tup(Node &flop) const;
+  std::tuple<std::shared_ptr<Lgtuple>, bool> get_flop_tup(Node &flop) const;
   std::shared_ptr<Lgtuple>                   make_flop(Node &flop) const;
 
   bool is_correct() const { return correct; }
-  void set_issue() const {
-    correct = false;
-  }
+  void set_issue() const { correct = false; }
 
   bool has_dpin(std::string_view key) const;
   bool has_dpin() const { return has_dpin(""); }
@@ -129,8 +128,8 @@ public:
 
   void add(const Node_pin &dpin) { return add("", dpin); }
 
-  bool concat(const std::shared_ptr<Lgtuple const> tup2);
-  bool concat(const Node_pin &dpin);
+  bool     concat(const std::shared_ptr<Lgtuple const> tup2);
+  bool     concat(const Node_pin &dpin);
   Node_pin flatten() const;
 
   /// Get all the attributes (__bits) in the same tuple level
@@ -138,7 +137,7 @@ public:
 
   const Key_map_type &get_map() const { return key_map; }
 
-  std::string get_scalar_name() const; // empty if not scalar
+  std::string get_scalar_name() const;  // empty if not scalar
 
   bool is_empty() const { return (key_map.empty()); }
 

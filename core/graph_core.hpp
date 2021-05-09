@@ -62,7 +62,7 @@ protected:
     constexpr Entry64() : edge_storage{0,},last_byte(0) {
     }
     void set_input() { last_byte |= 0x80; }   // set 8th bit
-    void set_output() { last_byte &= 0x7F; }  // clear 8th bit 
+    void set_output() { last_byte &= 0x7F; }  // clear 8th bit
 
     constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
@@ -97,9 +97,9 @@ protected:
     constexpr bool is_sink_set() const { return sink_set; }
     constexpr bool is_master_root() const { return master_root; }
 
-    constexpr uint8_t  get_type() const { return pid_bits_or_type; }
+    constexpr uint8_t get_type() const { return pid_bits_or_type; }
 
-    constexpr uint8_t  test_master_root() const { return master_root; }
+    constexpr uint8_t test_master_root() const { return master_root; }
 
     uint8_t insert_edge(uint8_t rel_index);
 

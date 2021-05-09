@@ -149,13 +149,13 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
 
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
       if (!visit_sub || !next_node.is_type_sub_present()) {
-        continue; // Keep it for linear_last_phase
+        continue;  // Keep it for linear_last_phase
       }
     }
 
     bool is_topo_sorted = true;
-    if (!next_node.is_type_loop_first()) { // NOTE: !next_node.has_inputs() may be nicer but a bit slower
-      for (const auto &edge : next_node.inp_edges()) { // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
+    if (!next_node.is_type_loop_first()) {              // NOTE: !next_node.has_inputs() may be nicer but a bit slower
+      for (const auto &edge : next_node.inp_edges()) {  // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
         auto driver_node = edge.driver.get_node();
 
         if (driver_node.is_graph_input())
@@ -185,8 +185,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
 
   if (current_node.is_invalid()) {
     linear_first_phase = false;
-    I(linear_last_phase==false);
-    global_it    = top->fast(visit_sub).begin();
+    I(linear_last_phase == false);
+    global_it = top->fast(visit_sub).begin();
   }
 }
 
@@ -281,8 +281,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
     if (global_it.is_invalid()) {
       current_node.invalidate();
       linear_last_phase = true;
-      I(linear_first_phase==false);
-      global_it    = top->fast(visit_sub).begin();
+      I(linear_first_phase == false);
+      global_it = top->fast(visit_sub).begin();
       return;
     }
 
@@ -316,7 +316,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
     }
   }
 
-  I(!current_node.is_invalid()); // method not called if empty, so something must be here
+  I(!current_node.is_invalid());  // method not called if empty, so something must be here
   I(current_node.get_class_lgraph()->is_valid_node(current_node.get_nid()));
 }
 

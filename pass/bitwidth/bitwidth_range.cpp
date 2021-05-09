@@ -1,10 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "bitwidth_range.hpp"
 
 #include "fmt/format.h"
 #include "iassert.hpp"
-
-#include "bitwidth_range.hpp"
 #include "likely.hpp"
 
 Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
@@ -16,7 +15,7 @@ Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
     return Lconst::get_mask_value(val);
   }
 
-  return Lconst::get_neg_mask_value(-val); // Lconst(0) - (Lconst(1).lsh_op(-val));
+  return Lconst::get_neg_mask_value(-val);  // Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
 Bitwidth_range::Bitwidth_range(const Lconst &val) {
@@ -82,7 +81,6 @@ void Bitwidth_range::set_narrower_range(const Lconst &min_val, const Lconst &max
 }
 
 void Bitwidth_range::set_wider_range(const Bitwidth_range &bw) {
-
   if (likely(!bw.is_overflow() && !is_overflow())) {
     max = std::max(max, bw.max);
     min = std::min(min, bw.min);
@@ -91,12 +89,12 @@ void Bitwidth_range::set_wider_range(const Bitwidth_range &bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max>l_max)
+  if (n_max > l_max)
     l_max = n_max;
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min<l_min)
+  if (n_min < l_min)
     l_min = n_min;
 
   set_range(l_min, l_max);

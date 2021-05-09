@@ -622,7 +622,7 @@ Node_pin_iterator Lgraph::out_sinks(const Node_pin &dpin) const {
   I(dpin.get_class_lgraph() == this);
 
   Node_pin_iterator piter;
-  for(auto e:dpin.get_node().out_edges()) {
+  for (auto e : dpin.get_node().out_edges()) {
     if (e.driver != dpin)
       continue;
     piter.emplace_back(e.sink);
@@ -637,7 +637,7 @@ Node_pin_iterator Lgraph::out_sinks(const Node &node) const {
   I(node.get_class_lgraph() == this);
 
   Node_pin_iterator piter;
-  for(auto e:node.out_edges()) {
+  for (auto e : node.out_edges()) {
     piter.emplace_back(e.sink);
   }
 
@@ -1296,7 +1296,6 @@ void Lgraph::dump() {
 
   fmt::print("\n");
   each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {
-
     fmt::print("  sub lgraph name:{}\n", sub_lg->get_name());
 
     return true;

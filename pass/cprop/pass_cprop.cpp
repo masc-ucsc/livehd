@@ -28,7 +28,7 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
   else
     gioc = false;
 
-  (void)gioc; // not used now
+  (void)gioc;  // not used now
 }
 
 void Pass_cprop::optimize(Eprp_var &var) {
