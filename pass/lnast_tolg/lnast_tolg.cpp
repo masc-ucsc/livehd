@@ -602,16 +602,19 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
       full_inp_hier_name = lnast->get_vname(c0_ta).substr(1);
+      // full_inp_hier_name     = lnast->get_sname(c0_ta);
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
       full_inp_hier_name = absl::StrCat(full_inp_hier_name, ".", lnast->get_vname(child));
+      // full_inp_hier_name     = absl::StrCat(full_inp_hier_name,     ".", lnast->get_vname(child));
     } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
       Node_pin flattened_inp;
-      if (!lg->has_graph_input(full_inp_hier_name))
+      if (!lg->has_graph_input(full_inp_hier_name)) {
         flattened_inp = lg->add_graph_input(full_inp_hier_name, Port_invalid, 0);
-      else
+      } else {
         flattened_inp = name2dpin[full_inp_hier_name];
+      }
 
       // Create pos and value before TupAdd to preserve topographical order
 
@@ -1499,23 +1502,22 @@ void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx
 void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   auto c0_fc     = lnast->get_first_child(lnidx_fc);
   auto func_name = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto cn_fc     = lnast->get_last_child(lnidx_fc);
+  auto cn_fc_sname = lnast->get_sname(cn_fc);
   if (func_name.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
     process_direct_op_connection(lg, lnidx_fc);
     return;
   }
 
   auto ret_name     = lnast->get_sname(c0_fc);
-  auto arg_tup_name = lnast->get_sname(lnast->get_last_child(lnidx_fc));
-
-#if 0
-  std::string func_name = (std::string)func_name_tmp;
-  if (lg->get_name().find("__firrtl_") != std::string::npos) {
-    func_name = absl::StrCat("__firrtl_", func_name_tmp);
-  }
-#endif
+  std::string arg_tup_name;
+  if (is_input(cn_fc_sname))
+    arg_tup_name = lnast->get_vname(cn_fc).substr(1);
+  else 
+    arg_tup_name = cn_fc_sname;
 
   std::unique_lock<std::mutex> guard(lgs_mutex);
-  auto *                       library = Graph_library::instance(path);
+  auto * library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
 #ifndef NDEBUG
     if (func_name.substr(0,2) != "__")
@@ -1908,12 +1910,13 @@ void Lnast_tolg::create_ginp_as_runtime_idx(Lgraph *lg, std::string_view hier_na
 
   // (3) create graph_input and connect to cur_tg position sink pin
   Node_pin ginp;
-  if (!lg->has_graph_input(hier_name))
+  if (!lg->has_graph_input(hier_name)) {
     ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
-  else if (name2dpin.find(hier_name) != name2dpin.end())
+  } else if (name2dpin.find(hier_name) != name2dpin.end()) {
     ginp = name2dpin[hier_name];
-  else
+  } else {
     ginp = lg->get_graph_input(hier_name);
+  }
 
   auto pos_spin = cur_tg.setup_sink_pin("position");
   ginp.connect_sink(pos_spin);
@@ -1977,12 +1980,13 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
 
   if (is_leaf) {
     Node_pin ginp;
-    if (!lg->has_graph_input(hier_name))
+    if (!lg->has_graph_input(hier_name)) {
       ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
-    else if (name2dpin.find(hier_name) != name2dpin.end())
+    } else if (name2dpin.find(hier_name) != name2dpin.end()) {
       ginp = name2dpin[hier_name];
-    else
+    } else {
       ginp = lg->get_graph_input(hier_name);
+    }
 
     inp2leaf_tg_spins[ginp].emplace_back(cur_node_spin);
 
