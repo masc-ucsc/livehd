@@ -112,13 +112,14 @@ void Bitwidth::process_flop(Node &node) {
     }
   }
 
+  auto dpin = node.setup_driver_pin();
   if (a_constrain_found) {
     Bitwidth_range bw(min_val, max_val);
     for(auto &cpin:flop_cpins) {
       adjust_bw(cpin, bw);
     }
+    flat_bwmap.insert_or_assign(dpin.get_compact_flat(), bw);
   }else{
-    auto dpin = node.setup_driver_pin();
     debug_unconstrained_msg(node, dpin);
     not_finished = true;
   }

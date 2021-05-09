@@ -909,7 +909,7 @@ void Cprop::tuple_subgraph(const Node &node) {
           Pass::error("Structural Lgraph does not allow sub graphs as node");
         }
         auto node_tup = std::make_shared<Lgtuple>(sub_name);
-        node_tup->add(node.setup_driver_pin("%"));
+        node_tup->add(node.setup_driver_pin_raw(0));
         node2tuple[node.get_compact()] = node_tup;
         return; // reconnect_sub_as_cell when no issues pending
       }
@@ -1373,8 +1373,9 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
     input_spin.del();
 
     for(const auto &e:tup->get_map()) {
-      if (Lgtuple::is_attribute(e.first))
+      if (Lgtuple::is_attribute(e.first)) {
         continue;
+      }
 
 			std::string_view pin_name;
 			int pin_pid=0;
@@ -1396,7 +1397,10 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
         Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
         return;
       }
-      spin.connect_driver(e.second);
+      XEdge_iterator out_edges; // Empty list
+      auto dpin = expand_data_and_attributes(node, e.first, out_edges, tup);
+      I(!dpin.is_invalid());
+      spin.connect_driver(dpin); // e.second);
     }
   }else{
     // Possible direct connect if there is a single pin

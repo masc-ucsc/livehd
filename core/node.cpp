@@ -323,8 +323,10 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
   if (is_type_sub()) {
     Lg_type_id  sub_lgid = current_g->get_type_sub(nid);
     const auto &sub      = current_g->get_library().get_sub(sub_lgid);
-    I(sub.has_instance_pin(pid));
-    I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
+    if (pid!=0 || sub.get_name().substr(0,2) != "__") { // Do no check to pid for __NAME
+      I(sub.has_instance_pin(pid));
+      I(sub.is_output_from_instance_pid(pid), "ERROR: An input can not be a driver pin");
+    }
   } else {
     I(Ntype::has_driver(get_type_op(), pid));
   }

@@ -150,6 +150,20 @@ Lconst::Lconst(std::string_view orig_txt) {
 
   std::string_view txt{orig_txt};
 
+  // Special cases
+  if (strncasecmp(txt.data(), "true", txt.size())==0) {
+    explicit_str = false;
+    bits = 1;
+    num  = -1;
+    return;
+  }else if (strncasecmp(txt.data(), "false", txt.size())==0) {
+    explicit_str = false;
+    bits = 1;
+    num  = 0;
+    return;
+  }
+
+  // default conversion
   if (!txt.empty() && txt[0] == '_') {
     auto txt2 = skip_underscores(txt);
 
