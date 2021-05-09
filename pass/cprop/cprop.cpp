@@ -908,6 +908,9 @@ void Cprop::tuple_subgraph(const Node &node) {
           node.dump();
           Pass::error("Structural Lgraph does not allow sub graphs as node");
         }
+        auto node_tup = std::make_shared<Lgtuple>(sub_name);
+        node_tup->add(node.setup_driver_pin("%"));
+        node2tuple[node.get_compact()] = node_tup;
         return; // reconnect_sub_as_cell when no issues pending
       }
     }
@@ -1370,6 +1373,9 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
     input_spin.del();
 
     for(const auto &e:tup->get_map()) {
+      if (Lgtuple::is_attribute(e.first))
+        continue;
+
 			std::string_view pin_name;
 			int pin_pid=0;
 			if (Ntype::is_single_sink(cell_ntype)) {
@@ -1377,11 +1383,12 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 				pin_name = Ntype::get_sink_name(cell_ntype, 0);
 			}else{
 				pin_name = Lgtuple::get_first_level_name(e.first);
-				pin_pid  = Ntype::get_sink_pid(cell_ntype, pin_name);
-				if (pin_pid<0) {
+				if (!Ntype::has_sink(cell_ntype, pin_name)) {
 					Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist", node.debug_name(), Ntype::get_name(cell_ntype), pin_name);
 					return;
 				}
+				pin_pid  = Ntype::get_sink_pid(cell_ntype, pin_name);
+        I(pin_pid>=0);
 			}
 
       auto spin = node.setup_sink_pin_raw(pin_pid);
@@ -1457,7 +1464,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
     if (pos_dpin.is_type_const()) {
       auto field = pos_dpin.get_type_const().to_string();
       if (Lgtuple::is_root_attribute(field)) {
-        if (!Ntype::is_valid_sink(Ntype_op::Flop, field.substr(2)) && field!="__fdef") {
+        if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field!="__fdef") {
           node.set_type(Ntype_op::AttrSet);
         }
       }
@@ -1551,7 +1558,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
   for (auto it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));
     auto attr = Lgtuple::get_last_level(it.first);
-    if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2)))
+    if (Ntype::has_sink(Ntype_op::Flop, attr.substr(2)))
       continue; // Do not create attr for flop config (handled in cprop directly)
 
     if (!use_tup) {

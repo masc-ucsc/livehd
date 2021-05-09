@@ -1518,7 +1518,8 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   auto *                       library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
 #ifndef NDEBUG
-    fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
+    if (func_name.substr(0,2) != "__")
+      fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
 #endif
     Node      subg_node;
     Sub_node *sub;

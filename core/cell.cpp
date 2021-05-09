@@ -27,6 +27,11 @@ Ntype::_init::_init() {
 
       sink_pid2name[pid][op] = pin_name;
 
+      auto [it, inserted] = name2pid.insert({std::string(pin_name), pid});
+      if (!inserted) {
+        I(it->second == pid); // same name should always have same PID
+      }
+
       if (is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
         continue;
 
@@ -171,22 +176,21 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::Latch:
       switch (pid) {
-        case 0:
-          return "posclk";
           // No 1 to keep din at pos 3 (a,b,c)
         case 3: return "din";
         case 4: return "enable";
+        case 6: return "posclk";
         default: return "invalid";
       }
       break;
     case Ntype_op::Fflop:  // Fluid-flop
       switch (pid) {
-        case 0: return "reset";
+        case 0: return "valid";
         case 1: return "initial";  // reset value
         case 2: return "clock";
         case 3: return "din";
-        case 4: return "valid";
         case 5: return "stop";  // stop from next cycle
+        case 7: return "reset";
         default: return "invalid";
       }
       break;
@@ -243,17 +247,18 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
   return "invalid";
 }
 
-bool Ntype::is_valid_sink(Ntype_op op, std::string_view name) {
-
-  I(op<Ntype_op::Last_invalid);
-
-  for (auto i = 0u; i < sink_pid2name.size(); ++i) {
-    if (sink_pid2name[i][static_cast<int>(op)] == name)
+bool Ntype::has_sink(Ntype_op op, std::string_view str) {
+  auto it = name2pid.find(str);
+  if (it==name2pid.end()) {
+    if (std::isdigit(str[0]) && is_unlimited_sink(op))
       return true;
+
+    return false;
   }
 
-  return false;
+  return sink_pid2name[it->second][static_cast<int>(op)] == str;
 }
+
 
 #ifdef NDEBUG
 // asserts break the constexpr check

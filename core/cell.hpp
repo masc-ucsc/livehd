@@ -81,6 +81,7 @@ protected:
   inline static std::array<std::array<char, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>            sink_name2pid;
   inline static std::array<std::array<std::string_view, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11> sink_pid2name;
   inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                             ntype2single_input;
+  inline static absl::flat_hash_map<std::string, int>                                                          name2pid;
 
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
 
@@ -115,7 +116,6 @@ public:
     return c[0] >= 'a' && c[0] <= 'z';
   }
 
-  // Carefully crafted call so that it is solved at compile time most of the time
   static inline constexpr int get_sink_pid(Ntype_op op, std::string_view str) {
     auto c = str[0];
     // Common case speedup
@@ -161,12 +161,13 @@ public:
     assert(name != "invalid");
     return name;
   }
+
+  static bool has_sink(Ntype_op op, std::string_view str);
   static inline constexpr bool has_sink(Ntype_op op, int pid) {
     if (pid > 10)
       return is_unlimited_sink(op);
     return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
   }
-  static bool is_valid_sink(Ntype_op op, std::string_view name);
 
   static inline constexpr int get_driver_pid(Ntype_op op, std::string_view str) {
     if (__builtin_expect(str == "Y", 1)) {  // likely case

@@ -990,7 +990,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
           // NOTE: all the pins but the IOs should have the constraints already.
           // This Attr could be set always but slower and redundant
           for(auto &attr_it:tup_list[i]->get_level_attributes(e.first)) {
-            if (Ntype::is_valid_sink(Ntype_op::Flop, attr_it.first.substr(2)))
+            if (Ntype::has_sink(Ntype_op::Flop, attr_it.first.substr(2)))
               continue; // Do not create attr for flop config (handled in cprop directly)
 
             fmt::print("adding attr:{}\n", attr_it.first);
@@ -1126,7 +1126,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       // does not exist, in which case, nothing to do)
 
       auto attr          = get_last_level(cname);
-      if (Ntype::is_valid_sink(Ntype_op::Flop, attr.substr(2))) {
+      if (Ntype::has_sink(Ntype_op::Flop, attr.substr(2))) {
         if (!is_root_attribute(cname)) {
           dump();
           Lgraph::info("found attribute:{} which is not root for a flop:{}\n", attr, new_flop_name);
