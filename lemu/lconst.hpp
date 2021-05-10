@@ -124,6 +124,7 @@ public:
   bool is_power2() const { return ((num - 1) & (num)) == 0; }
 
   Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
+  size_t popcount() const;
 
   bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
   int64_t to_i() const;                                         // must fit in int or exception raised

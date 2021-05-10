@@ -907,30 +907,42 @@ void Cprop::tuple_subgraph(const Node &node) {
         }
         auto node_tup = std::make_shared<Lgtuple>(sub_name);
         if (cell_ntype == Ntype_op::Memory) {
-#if 1
-          I(false);
-#else
-          auto n_ports = 0;
-          auto node_input_spin = node.get_sink_pin("%");
+          auto n_ports    = 0u;
+          auto n_rd_ports = 0u;
+          auto node_input_spin = node.get_sink_pin("$");
           if (node_input_spin.is_connected()) {
             auto parent_node = node_input_spin.get_driver_node();
             auto parent_tup  = find_lgtuple(parent_node);
             if (parent_tup) {
-              auto mode_dpin = parent_tup->get("mode");
-              if (!mode_dpin.is_invalid()) {
-                if (mode_dpin.is_type_const()) {
-                  Pass::info("Memory {} mode must be a compile time constant", node.debug_name());
-                }else{
+              for(const auto &e:parent_tup->get_map()) {
+                if (Lgtuple::is_attribute(e.first))
+                  continue;
+
+                auto l = Lgtuple::get_first_level_name(e.first);
+                if (strncasecmp(l.data(), "addr", l.size())==0) {
+                  ++n_ports;
+                }else if (strncasecmp(l.data(), "mode", l.size())==0) {
+                  if (!e.second.is_type_const())
+                    continue; // Maybe later
+
+                  auto v = e.second.get_type_const();
+                  if (!v.is_i()) {
+                    Pass::error("Memory {} mode:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
+                  }
+                  n_rd_ports = v.popcount();
                 }
               }
             }
-            //auto mode_tup = tup->get_sub_tuple("mode");
           }
-
-          if (n_ports==0) {
+          if (n_ports==0 || n_rd_ports==0) {
+            Pass::info("Memory {} still can not figure out ports. (Maybe more iterations)", node.debug_name());
             node_tup->set_issue();
+          }else{
+            fmt::print("found a memory {} with {} rd ports\n", node.debug_name(), n_rd_ports);
+            for(auto i=0u;i<n_rd_ports;++i) {
+              node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
+            }
           }
-#endif
         }else{
           node_tup->add(node.setup_driver_pin_raw(0));
         }
@@ -1368,19 +1380,18 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 
   I(cell_ntype != Ntype_op::Sub);  // structural is not allowed with subs
   if (cell_ntype == Ntype_op::Memory) {
-    // auto mode_tup = tup->get_sub_tuple("mode");
-    
-    I(false);  // this is the only cell with multiple outputs to handle
-  }
-  auto sink_list = node.out_sinks();
-  if (!sink_list.empty()) {
-    for (auto &dp : node.out_connected_pins()) {
-      dp.del();
-    }
+    // memories should have the outputs already connected
+  }else{
+    auto sink_list = node.out_sinks();
+    if (!sink_list.empty()) {
+      for (auto &dp : node.out_connected_pins()) {
+        dp.del();
+      }
 
-    for (auto &sp : sink_list) {
-      // single sink pins map to zero always
-      node.setup_driver_pin_raw(0).connect_sink(sp);
+      for (auto &sp : sink_list) {
+        // single sink pins map to zero always
+        node.setup_driver_pin_raw(0).connect_sink(sp);
+      }
     }
   }
 

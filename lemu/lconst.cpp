@@ -872,6 +872,21 @@ std::string Lconst::to_pyrope() const {
   return str;
 }
 
+size_t Lconst::popcount() const {
+  I(!is_string());
+
+  auto popcount = 0;
+  auto i = boost::multiprecision::lsb(num);
+  const auto end = boost::multiprecision::msb(num);
+  for (; i <= end; ++i) {
+    if (boost::multiprecision::bit_test(num,i) != 0) {
+      ++popcount;
+    }
+  }
+
+  return popcount;
+}
+
 std::string Lconst::to_firrtl() const {
   /*Note->hunter: FIRRTL-Proto requires the string output
    * here is a decimal value (no 0x or 0d allowed. Only #).
