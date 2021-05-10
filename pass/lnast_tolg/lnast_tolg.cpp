@@ -577,6 +577,24 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
   }
 }
 
+
+bool Lnast_tolg::is_tuple_struct_ta(const Lnast_nid &lnidx_ta) {
+  auto c0_name = lnast->get_vname(lnast->get_first_child(lnidx_ta));
+  if (c0_name.substr(0,3) != "___")
+    return false;
+
+  // auto ta_sibling = lnast->get_sibling_next(lnidx_ta);
+  // auto ta_sibling_ntype = lnast->get_data(ta_sibling).type;
+  
+  // if (!ta_sibling_ntype.is_assign())
+  //   return false;
+
+  // I(c0_name == lnast->get_name(lnast->get_last_child(ta_sibling)));
+  return true;
+}
+
+
+
 bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
   for (const auto &child : lnast->children(lnidx_ta)) {
     if (child == lnast->get_first_child(lnidx_ta)) {
@@ -678,6 +696,11 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
 
   if (is_hier_inp_bits_set(lnidx_ta)) {
     process_hier_inp_bits_set(lg, lnidx_ta);
+    return;
+  }
+
+  if (is_tuple_struct_ta(lnidx_ta)) {
+    process_ast_tuple_struct(lg, lnidx_ta);
     return;
   }
 

@@ -122,6 +122,7 @@ protected:
   bool check_is_attrset_ta(Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign(Node node) { return !node.setup_sink_pin("value").is_connected(); };
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
+  bool is_tuple_struct_ta(const Lnast_nid &lnidx_ta);
 
   // firrtl related
   void process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc);

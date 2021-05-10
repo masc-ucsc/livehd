@@ -858,7 +858,8 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
         if (tuple_nodes.size() == 1) {
           return eval_bit_selection_notation(idx_tup_el_next, tuple_nodes[0][2]);
         }
-        auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple());
+        // auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple()); //DEBUG
+        auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple_add());
         lnast->add_child(idx_tuple_root, retnode);
         add_tuple_nodes(idx_tuple_root, tuple_nodes);
 
@@ -918,7 +919,8 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
     return tuple_nodes[0][2];
   }
 
-  auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple());
+  // auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple()); //DEBUG
+  auto idx_tuple_root = lnast->add_child(idx_start_ln, Lnast_node::create_tuple_add());
   lnast->add_child(idx_tuple_root, retnode);
   add_tuple_nodes(idx_tuple_root, tuple_nodes);
 
@@ -1129,7 +1131,8 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
     } else {
       // overloaded operator case
       // first, create the tuple for the function call
-      auto idx_args_tuple = lnast->add_child(cur_stmts, Lnast_node::create_tuple());
+      // auto idx_args_tuple = lnast->add_child(cur_stmts, Lnast_node::create_tuple()); //DEBUG
+      auto idx_args_tuple = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
       // create the tuple lhs variable
       auto lhs_tuple = get_lnast_temp_ref();
 
