@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test") # @unused
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
