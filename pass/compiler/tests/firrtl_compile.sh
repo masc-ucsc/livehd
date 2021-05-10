@@ -25,18 +25,13 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine
+  pts='VecShiftRegister Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch VendingMachine
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
   Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule SingleEvenFilter Xor6Thread2'
 
-  # issue: bits TupAdd doesn't converted to attribute set
-  # pts='XorSelfThread1'
-
-  # issue: tuple-register, cprop
-  # pts='VecShiftRegister'
-
+  # pts='XorSelfThread1' # issue: bits TupAdd doesn't converted to attribute set
   # pts='PlusAnd'        # issue: first element of Vector is not ended with _0
   # pts='Test1'          # issue: run-time vector index
   # pts='Adder4'

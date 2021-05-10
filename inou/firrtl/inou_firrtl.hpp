@@ -45,7 +45,7 @@ protected:
   void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id,
                           Lnast_nid &parent_node);  // const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
   void setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
-  void setup_register_bist_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
+  void setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement &stmt);
   void InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
   void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);

@@ -304,7 +304,6 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
 }
 
 void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix) {
-	(void)dot_postfix;
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder()) {
@@ -339,5 +338,9 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_
 
   data += "}\n";
 
-	save_graph(lnast->get_top_module_name(), "lnast", data);
+  if (!dot_postfix.empty()) {
+    save_graph(lnast->get_top_module_name(), absl::StrCat("lnast", ".", dot_postfix), data);
+  } else {
+    save_graph(lnast->get_top_module_name(), "lnast", data);
+  }
 }

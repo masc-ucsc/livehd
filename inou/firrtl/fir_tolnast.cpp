@@ -71,16 +71,23 @@ std::string_view Inou_firrtl::create_dummy_expr_node_var(Lnast& lnast) {
 /* Determine if 'term' refers to any IO/reg/etc... If it does,
  * add the appropriate symbol or (in case of a register on RHS)
  * create a DOT node to access the correct value. */
-// std::string Inou_firrtl::get_full_name(Lnast& lnast, Lnast_nid& parent_node, const std::string& term, const bool is_rhs) {
 std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rhs) {
+  std::string term2 = term;
+  std::string term_rest = "";
+  auto pos = term.find_first_of(".");
+  if (pos != std::string::npos) {
+    term2 = term.substr(0, pos);
+    term_rest = term.substr(pos);
+  } 
+
   if (input_names.count(term)) {
     return absl::StrCat("$", term);
   } else if (output_names.count(term)) {
     return absl::StrCat("%", term);
-  // } else if (register_names.count(term)) {
-  } else if (reg2qpin.count(term)) {
+  } else if (reg2qpin.count(term2)) { // check if the register exists
+    I(reg2qpin[term2].substr(0,3) == "_#_");
     if (is_rhs) {
-      return reg2qpin[term];
+      return absl::StrCat(reg2qpin[term2], term_rest);
     } else {
       return absl::StrCat("#", term);
     }
@@ -244,13 +251,13 @@ void Inou_firrtl::setup_register_bits(Lnast& lnast, const firrtl::FirrtlPB_Type&
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
       auto reg_bits = get_bit_count(type);
-      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, false);
+      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, false);
       async_rst_names.insert(id.substr(1));
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {
       auto reg_bits = get_bit_count(type);
-      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, true);
+      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, true);
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: {
@@ -260,12 +267,12 @@ void Inou_firrtl::setup_register_bits(Lnast& lnast, const firrtl::FirrtlPB_Type&
     default: {
       /* UInt Analog Reset Types*/
       auto reg_bits = get_bit_count(type);
-      setup_register_bist_scalar(lnast, id, reg_bits, parent_node, false);
+      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, false);
     }
   }
 }
 
-void Inou_firrtl::setup_register_bist_scalar(Lnast& lnast, const std::string& _id, uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
+void Inou_firrtl::setup_register_bits_scalar(Lnast& lnast, const std::string& _id, uint32_t bitwidth, Lnast_nid& parent_node, bool is_signed) {
   // Specify __bits, if bitwidth is explicit
   if (bitwidth > 0) {
     std::string id{_id};
@@ -1019,24 +1026,26 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
  * means we may need more than one DOT and/or SELECT node.
  * NOTE: This return the first child of the last DOT/SELECT node made. */
 
+//FIXME:sh-> rewrite a clean code later
 std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB_Expression expr, Lnast_nid& parent_node,
                                                const bool is_rhs) {
   auto flattened_str  = FlattenExpression(ln, parent_node, expr);
-  auto alter_full_str = get_full_name(flattened_str, false);  // Note: I put false here so if reg I get the "#"
-
+  auto alter_full_str = get_full_name(flattened_str, is_rhs);  
 
 
   if (alter_full_str[0] == '$') {
     // flattened_str = absl::StrCat("$inp_", flattened_str);
     flattened_str = absl::StrCat("$", flattened_str);
-    fmt::print("DEBUG0 input_name:{}\n", flattened_str);
   } else if (alter_full_str[0] == '%') {
     // flattened_str = absl::StrCat("%out_", flattened_str);
     flattened_str = absl::StrCat("%", flattened_str);
-    fmt::print("DEBUG0 output_name:{}\n", flattened_str);
+  } else if (alter_full_str.substr(0, 3) == "_#_") { // note: use _#_ to judge is a reg_qpin without split_hier_name again
+    I(is_rhs);
+    flattened_str = alter_full_str; 
   } else if (alter_full_str[0] == '#') {
     if (is_rhs) {
-      flattened_str = absl::StrCat("#", flattened_str, ".__q_pin");
+      I(false);
+      flattened_str = alter_full_str.substr(1); 
     } else {
       flattened_str = absl::StrCat("#", flattened_str);
     }
@@ -1149,9 +1158,10 @@ void Inou_firrtl::split_hier_name(std::string_view                              
   }
 }
 
-/* Given a string with "."s and "["s in it, this
- * function will be able to deconstruct it into
- * DOT and SELECT nodes in an LNAST. */
+// note: Given a string with "."s and "["s in it, this
+// function will be able to deconstruct it into
+// DOT and SELECT nodes in an LNAST. 
+// note: "#" prefix need to be ready if the full_name is a register 
 std::string_view Inou_firrtl::CreateSelectsFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name) {
   I((full_name.find(".") != std::string::npos));
 
@@ -1466,7 +1476,6 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
 
         // If port type was INFER, then we can perform inference here.
         PortDirInference((std::string)rhs_str, mem_name, true);
-
         rhs_str = CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", mem_name, ".", rhs_str, ".__data"));
       } else {
         rhs_str = lnast.add_string(get_full_name(rhs_expr.reference().id(), true));
@@ -1684,7 +1693,7 @@ void Inou_firrtl::declare_register(Lnast &lnast, Lnast_nid &parent_node, const f
 
 
 void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
-  auto flop_qpin_var = lnast.add_string(absl::StrCat("_._", stmt.register_().id(), "_q"));
+  auto flop_qpin_var = lnast.add_string(absl::StrCat("_#_", stmt.register_().id(), "_q"));
   auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
   lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(absl::StrCat("#", stmt.register_().id()))));
