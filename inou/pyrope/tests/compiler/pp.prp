@@ -1,3 +1,7 @@
+
 $to_add.__sbits = 3
-tmp = __not($to_add)
+$to_sub.__sbits = 2
+tmp = __sum(A=(1,5,$to_add),B=(2,$to_sub))
+tmp = __not(tmp)
+tmp = __xor((tmp, -1)) // same as NOT
 %total = tmp
