@@ -29,9 +29,8 @@ if [ $# -eq 0 ]; then
   Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier AddNot
   GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule SingleEvenFilter Xor6Thread2 XorSelfThread1'
+  Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd'
 
-  # pts='PlusAnd'        # issue: first element of Vector is not ended with _0
   # pts='Test1'          # issue: run-time vector index
   # pts='Adder4'
 
