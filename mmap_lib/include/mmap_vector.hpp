@@ -151,6 +151,8 @@ protected:
   const std::string mmap_name;
 
   bool gc_done(void *base, bool force_recycle) const {
+    (void)base;
+    (void)force_recycle;
     assert(base == mmap_base);
 
     if (mmap_fd >= 0 && *entries_size == 0) {
