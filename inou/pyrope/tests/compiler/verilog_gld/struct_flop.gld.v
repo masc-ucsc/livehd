@@ -1,4 +1,4 @@
-module pp(
+module struct_flop(
    input signed [2:0] a
   ,input signed clk2
   ,input signed enable

@@ -136,6 +136,7 @@ public:
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;
 
   const Key_map_type &get_map() const { return key_map; }
+  const Key_map_type &get_sort_map() const;
 
   std::string get_scalar_name() const;  // empty if not scalar
 

@@ -104,6 +104,22 @@ void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
   }
 }
 
+void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
+  (void)buffer;
+
+  for(auto &e:node.inp_edges()) {
+    (void)e;
+    I(false); // FIXME:
+#if 0
+    auto dpin_d = node.get_sink_pin("din").get_driver_pin();
+    auto dpin_q = node.get_driver_pin();
+
+    std::string pin_name  = dpin_q.get_wire_name();
+    const auto  name_next = get_scaped_name(std::string(pin_name) + "_next");
+#endif
+  }
+}
+
 void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
   auto ordered_inp = node.inp_edges_ordered();
   I(ordered_inp.size() > 2);  // at least 0 + 1 + 2
@@ -420,10 +436,10 @@ void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
   });
 
   for (auto node : lg->fast()) {
-    if (!node.is_type_flop())
-      continue;
-
-    process_flop(buffer, node);
+    if (node.is_type_flop())
+      process_flop(buffer, node);
+    else if (node.is_type(Ntype_op::Memory))
+      process_memory(buffer, node);
   }
 }
 

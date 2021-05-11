@@ -33,7 +33,7 @@ Ntype::_init::_init() {
         I(it->second == pid);  // same name should always have same PID
       }
 
-      if (is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
+      if (static_cast<Ntype_op>(op)!= Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
         continue;
 
       sink_name2pid[pin_name[0]][op] = pid;
@@ -152,7 +152,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         case 1: return "bits";    // comptime x 1
         case 2: return "clock";   // runtime  x 1 or n_ports
         case 3: return "data_in"; // runtime  x n_wr_ports
-        case 4: return "enable";  // runtime  x 1
+        case 4: return "enable";  // runtime  x n_ports
         case 5: return "fwd";     // comptime x n_rd_ports
         case 6: return "posclk";  // comptime x 1
         case 7: return "latency"; // comptime x n_ports

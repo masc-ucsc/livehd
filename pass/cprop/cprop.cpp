@@ -1399,7 +1399,7 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
   if (tup) {
     input_spin.del();
 
-    for (const auto &e : tup->get_map()) {
+    for (const auto &e : tup->get_sort_map()) {
       if (Lgtuple::is_attribute(e.first)) {
         continue;
       }
@@ -1424,11 +1424,18 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 
       auto spin = node.setup_sink_pin_raw(pin_pid);
       if (spin.is_connected() && Ntype::is_single_driver_per_pin(cell_ntype)) {
-        Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers",
-                    node.debug_name(),
-                    Ntype::get_name(cell_ntype),
-                    pin_name);
-        return;
+        if (cell_ntype != Ntype_op::Memory) {
+          Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers",
+              node.debug_name(),
+              Ntype::get_name(cell_ntype),
+              pin_name);
+          return;
+        }
+        int delta_pid=0;
+        do{
+          delta_pid += 11;
+          spin = node.setup_sink_pin_raw(pin_pid + delta_pid);
+        }while(spin.is_connected());
       }
       XEdge_iterator out_edges;  // Empty list
       auto           dpin = expand_data_and_attributes(node, e.first, out_edges, tup);

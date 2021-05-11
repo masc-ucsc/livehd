@@ -68,7 +68,7 @@ protected:
   inline static constexpr std::string_view cell_name[] = {
       "invalid", "sum",   "mult", "div",   "and",     "or",      "xor",     "ror",      "not",      "get_mask",    "set_mask",
       "sext",    "lt",    "gt",   "eq",    "shl",     "sra",     "lut",     "mux",      "io",       "memory",      "flop",
-      "latch",   "fflop", "sub",  "const", "tup_add", "tup_get", "tup_ref", "attr_set", "attr_get", "compile_err", "last_invalid"};
+      "latch",   "fflop", "sub",  "const", "tup_add", "tup_get", "attr_set", "attr_get", "compile_err", "last_invalid"};
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 
@@ -104,7 +104,7 @@ public:
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
-    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Mux || op == Ntype_op::CompileErr;
+    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux || op == Ntype_op::CompileErr;
   }
   static inline constexpr bool is_unlimited_driver(Ntype_op op) { return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO; }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
@@ -135,7 +135,7 @@ public:
       return 1;
     }
 
-    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1, 0)) {  // unlikely case
+    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && std::isdigit(str[0]), 0)) {  // unlikely case
       int pid = 0;
       for (auto ch : str) {
         assert(ch >= '0' && ch <= '9');

@@ -613,12 +613,12 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
     if (it.first.empty()) {
       add(key, it.second);
     } else {
-      std::string key2{get_canonical_name(it.first)};  // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
-
       if (is_attribute(key) && is_attribute(it.first)) {
         Lgraph::info("ignoring nested attribute {} with {}", key, it.first);
         continue;
       }
+
+      std::string key2{get_canonical_name(it.first)};  // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
 
       if (key2.empty())
         key2 = key;
@@ -652,20 +652,68 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   // bool ordered = is_ordered();
 
   std::string uncanonical_key{key};
+	bool pending_adjust = false;
   if (is_scalar()) {
     if (key.empty()) {
       uncanonical_key = "0";
-    } else if (key.substr(0, 2) == "__" && key[3] != '_') {
+    } else if (key.substr(0, 2) == "__" && key[3] != '_') { // is_root_attribute BUT not with 0.__xxx
       uncanonical_key = absl::StrCat("0.", key);
     }
-  }
+	}else{
+		pending_adjust = true;
+	}
 
   // fixed_key can have name too like :0:foo.__max while uncanonical_key is 0.__max
   auto fixed_key = learn_fix(uncanonical_key);
 
   del(key);
 
+	if (pending_adjust) {
+		// NOTE: If the tuple had something like:
+		// a.b.foo.__xxx = 1
+		// a.c = 2
+		// AND if a.c.xx is added. It should become
+		// a.b.foo = 1
+		// a.c.0 = 2     <---- CHANGE
+		// a.c.xx...
+		// AND if a.b.foo.1.bar is added. It should become
+		// a.b.foo.0.__xxx = 1 <---- CHANGE
+		// a.c.0 = 2
+		// a.c.xx...
+		// a.b.foo.1.bar ....
+
+		std::string_view key_part{fixed_key};
+		if (is_attribute(fixed_key)) {
+			key_part = get_all_but_last_level(fixed_key);
+		}
+		for(auto &e:key_map) {
+			std::string_view fpart{e.first};
+			std::string_view lpart;
+			if (is_attribute(e.first)) {
+				fpart = get_all_but_last_level(e.first);
+				lpart = get_last_level(e.first);
+			}
+
+			if (fpart.size() >= key_part.size())
+				continue;
+
+			// NOTE: full match foo.bar == foo not foo.bar == fo match
+			if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0,fpart.size())) {
+				if (lpart.empty())
+					e.first = absl::StrCat(fpart, ".0");
+				else
+					e.first = absl::StrCat(fpart, ".0.", lpart);
+				if (e.first == fixed_key) {
+					e.second = dpin;
+					return;
+				}
+			}
+		}
+	}
+
   key_map.emplace_back(fixed_key, dpin);
+
+	dump();
 }
 
 bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
@@ -792,6 +840,11 @@ Node_pin Lgtuple::flatten() const {
   }
 
   return result_node.setup_driver_pin();
+}
+
+const Lgtuple::Key_map_type &Lgtuple::get_sort_map() const {
+  std::sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
+  return key_map;
 }
 
 bool Lgtuple::concat(const Node_pin &dpin) {
