@@ -579,9 +579,17 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
 
 
 bool Lnast_tolg::is_tuple_struct_ta(const Lnast_nid &lnidx_ta) {
-  auto c0_name = lnast->get_vname(lnast->get_first_child(lnidx_ta));
-  if (c0_name.substr(0,3) != "___")
-    return false;
+  for (const auto &child : lnast->children(lnidx_ta)) {
+    if (child == lnast->get_first_child(lnidx_ta)) {
+        continue;
+    } else if (lnast->get_data(child).type.is_assign()) {
+        return true;
+    }
+  }
+
+  // auto c0_name = lnast->get_vname(lnast->get_first_child(lnidx_ta));
+  // if (c0_name.substr(0,3) != "___")
+  //   return false;
 
   // auto ta_sibling = lnast->get_sibling_next(lnidx_ta);
   // auto ta_sibling_ntype = lnast->get_data(ta_sibling).type;
@@ -590,7 +598,7 @@ bool Lnast_tolg::is_tuple_struct_ta(const Lnast_nid &lnidx_ta) {
   //   return false;
 
   // I(c0_name == lnast->get_name(lnast->get_last_child(ta_sibling)));
-  return true;
+  return false;
 }
 
 
