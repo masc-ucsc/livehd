@@ -550,7 +550,7 @@ void bench_str_cmp() {
     Lbench b("bench_str_cmp");
 
     Lrand_range<char>     ch(33, 126);
-    Lrand_range<uint16_t> sz(1, 50);
+    Lrand_range<uint16_t> sz(1, 30);
 
     std::vector<mmap_lib::str> v;
    
@@ -574,13 +574,14 @@ void bench_str_cmp() {
 
     fmt::print("bench_str_cmp conta:{}\n", conta);
     mmap_lib::str::clear_map();    
+    mmap_lib::str::clear_vector();    
   }
 
   {
     Lbench b("bench_string_cmp");
 
     Lrand_range<char>     ch(33, 126);
-    Lrand_range<uint16_t> sz(1, 50);
+    Lrand_range<uint16_t> sz(1, 30);
 
     std::vector<mmap_lib::str> v;
     for (auto i = 0u; i < 1e4; ++i) {

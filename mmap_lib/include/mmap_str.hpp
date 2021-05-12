@@ -9,7 +9,7 @@
 #include <string_view>
 
 #include "mmap_map.hpp"
-//#include "mmap_vector.hpp"
+#include "mmap_vector.hpp"
 
 namespace mmap_lib {
 
@@ -36,9 +36,9 @@ protected:
   // The only drawback is that to compute size, it needs to iterate over the e
   // field, but asking size is not a common operation in LiveHD
 
-  uint32_t             ptr_or_start;  // 4 chars if _size < 14, is a ptr to string_vector otherwise
-  std::array<char, 10> e;             // last 10 chars ending the string, or first 2 + last 8 chars of string
-  uint16_t             _size;         // 2 bytes
+  uint32_t             ptr_or_start;  // 4 chars if _size < 14, ptr to string_vector otherwise
+  std::array<char, 10> e;             // last 10 chars of string, or first 2 + last 8 of string
+  uint16_t             _size;         // string length
   constexpr bool       is_digit(char c) const { return c >= '0' && c <= '9'; }
   constexpr uint8_t    posShifter(uint8_t s) const { return s < 4 ? (s - 1) : 3; }
   constexpr uint8_t    posStopper(uint8_t s) const { return s < 4 ? s : 4; }
@@ -49,11 +49,11 @@ protected:
 public:
   // TODO: Make vector of persistent maps
   static mmap_lib::map<std::string_view, uint32_t> string_map2;
+  static std::array<mmap_lib::map<std::string_view, uint32_t>, 4> string_deck;
 
   // FIXME: Change this for a mmap_lib::vector<int> string_vector("lgdb","global_str_vector");
-  //static mmap_lib::vector<int> string_vector;  // ptr_or_start points here!
-  inline static std::vector<int> string_vector;
-
+  //inline static std::vector<int> string_vector;
+  static mmap_lib::vector<int> string_vector2;  // ptr_or_start points here!
 
   str() : ptr_or_start(0), e{0}, _size(0) {}        // constructor 0 (empty obj)
   str(char c) : ptr_or_start(0), e{0}, _size(1) {   // constructor 0.5 (single char)
@@ -85,12 +85,31 @@ public:
   std::pair<int, int> insertfind(const char *string_to_check, uint32_t size) {
     std::string_view sv(string_to_check);
     auto it = string_map2.find(sv.substr(0, size)); 
+    
+    //--------------
+    auto it_pst = string_deck[0].find(sv.substr(0, size));
+    //--------------
+
     if (it == string_map2.end()) { 
       //<std::string_view, uint32_t(position in vec)> string_map2
-      string_map2.set(sv.substr(0, size), string_vector.size());
+      string_map2.set(sv.substr(0, size), string_vector2.size());
+      
+      //-------------
+      string_deck[0].set(sv.substr(0, size), string_vector2.size());
+      //-------------
+
       return std::make_pair(0, -1);
     } else {
-      return std::make_pair(string_map2.get(it), size); 
+      
+      std::pair<int, int> foo;
+      foo = std::make_pair(string_map2.get(it), size); 
+      
+      //--------------
+      std::pair<int, int> bar;
+      bar = std::make_pair(string_deck[0].get(it_pst), size);
+      //-------------
+
+      return foo;
       // pair is (ptr_or_start, size of string)
     }
     return std::make_pair(string_map2.get(it), size);
@@ -116,9 +135,9 @@ public:
       ptr_or_start = pair.first;
     } else {
       for (int i = 0; i < _size - 10; i++) {
-        string_vector.emplace_back(long_str[i]);
+        string_vector2.emplace_back(long_str[i]);
       }
-      ptr_or_start = string_vector.size() - (_size - 10);
+      ptr_or_start = string_vector2.size() - (_size - 10);
     }
   }
 
@@ -175,15 +194,21 @@ public:
         ptr_or_start = pair.first;
       } else {
         for (int i = 0; i < _size - 10; i++) {
-          string_vector.emplace_back(long_str[i]);
+          string_vector2.emplace_back(long_str[i]);
         }
-        ptr_or_start = string_vector.size() - (_size - 10);
+        ptr_or_start = string_vector2.size() - (_size - 10);
       }
     }
-    
-    //print_string();
-
   }
+
+#if 1
+  void test_svec2() { 
+    string_vector2.emplace_back(22);
+    //std::cout << "strVec2 size: " << string_vector2.size() << std::endl; 
+  }
+#endif
+
+
 
   //=========Printing==============
   void print_PoS() const {
@@ -210,8 +235,8 @@ public:
 
   void print_StrVec() const {
     std::cout << "StrVec{ ";
-    for (auto i = string_vector.begin(); i != string_vector.end(); ++i) {
-      std::cout << char(*i) << " ";
+    for (auto i = string_vector2.begin(); i != string_vector2.end(); ++i) {
+      std::cout << static_cast<char>(*i) << " ";
     }
     std::cout << "}" << std::endl;
   }
@@ -241,14 +266,14 @@ public:
       
       //std::cout << "e.size() is: " << e.size() << "\n";
 
-      //std::cout << char(e[0]) << char(e[1]);
+      std::cout << char(e[0]) << char(e[1]);
 
       //std::cout << "_size - 10 is: " << _size - 10 << std::endl;
       //std::cout << "ptr_or_start is: " << ptr_or_start << std::endl;
       //std::cout << "strVec size is: " << string_vector.size() << std::endl;
 
       for (auto i = 0; i < _size - 10; ++i) {
-        std::cout << static_cast<char>(string_vector.at(i + ptr_or_start));
+        std::cout << static_cast<char>(string_vector2[i + ptr_or_start]);
       }
 
       //std::cout << "who\n";
@@ -262,7 +287,7 @@ public:
   //=================================
 
   static void clear_map() { string_map2.clear(); }
-  //void clear_vector() { string_vector.clear(); }
+  static void clear_vector() { string_vector2.clear(); }
   
   [[nodiscard]] constexpr std::size_t size() const { return _size; }
   [[nodiscard]] constexpr std::size_t length() const { return _size; }
@@ -291,7 +316,7 @@ public:
       auto j = 2;  // rhs[2 .. _size - 8] --> the long part
       // for loop range: (ptr_or_start) .. (ptr_or_start + _size-10)
       for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {
-        if (string_vector[i] != rhs[j]) {
+        if (string_vector2[i] != rhs[j]) {
           return false;
         }
         j = j < _size - 8 ? j + 1 : j;
@@ -368,7 +393,7 @@ public:
       } else if (pos >= static_cast<size_t>(_size - 8)) {
         return e[l8(_size, pos)];
       } else {
-        return string_vector[mid(ptr_or_start, pos)];
+        return string_vector2[mid(ptr_or_start, pos)];
       }
     }
   }
@@ -560,9 +585,12 @@ public:
           for (; i < _size + b._size - 2; ++i) {
             e[e_indx++] = b[b_indx++];
           }
-        } else if (b._size < 8) {
+          e[0] = (*this)[0];
+          e[1] = (*this)[1];
+          
+        } else if (b._size < 8) { 
           auto i = 0;
-          for (; i < _size + b._size - 10; ++i) {
+          for (; i < _size + b._size - 10; ++i) { 
             full[i] = (*this)[indx++];
           }
           for (; i < _size + b._size - 2; ++i) {
@@ -572,6 +600,9 @@ public:
               e[e_indx++] = b[b_indx++];
             }
           }
+          e[0] = (*this)[0];
+          e[1] = (*this)[1];
+        
         } else if (b._size == 8) {
           auto i = 0;
           for (; i < _size + b._size - 10; ++i) {
@@ -580,6 +611,8 @@ public:
           for (; i < _size + b._size - 2; ++i) {
             e[e_indx++] = b[b_indx++];
           }
+          e[0] = (*this)[0];
+          e[1] = (*this)[1];
         }
 
         std::pair<int, int> ret = insertfind(full, _size + b._size - 10);  
@@ -587,23 +620,20 @@ public:
           ptr_or_start = ret.first;
         } else {
           for (int i = 0; i < _size + b._size - 10; i++) {
-            string_vector.emplace_back(full[i]);
+            string_vector2.emplace_back(full[i]);
           }
-          ptr_or_start = string_vector.size() - (_size + b._size - 10);
+          ptr_or_start = string_vector2.size() - (_size + b._size - 10);
         }        
-
-        e[0] = (*this)[0];
-        e[1] = (*this)[1];
       }
     } else {
-      if ((ptr_or_start + (_size-10)) == string_vector.size()) {  // last one inserted
+      if ((ptr_or_start + (_size-10)) == string_vector2.size()) {  // last one inserted
         for (auto k = 0; k < b._size; ++k) {
           if (b._size >= 8) {
             for (auto i = 2; i < 10; ++i) {
-              string_vector.emplace_back(e[i]);
+              string_vector2.emplace_back(e[i]);
             }
             for (auto i = 0; i < b._size - 8; ++i) {
-              string_vector.emplace_back(b[i]);
+              string_vector2.emplace_back(b[i]);
             }
             for (auto i = b._size - 8, j = 2; i < b._size; ++i, ++j) {
               if (j == 10)
@@ -612,8 +642,8 @@ public:
             }
           } else {  // b._size < 8
             for (auto i = 2; i < b._size + 2; ++i) {
-              string_vector.emplace_back(e[i]);
-            }  // put e to vec
+              string_vector2.emplace_back(e[i]);
+            } 
             auto i = 2;
             for (; i < b._size + 2; ++i) {
               e[i] = e[i + b._size];
@@ -622,13 +652,12 @@ public:
               if (i == 10)
                 break;
               e[i] = b[j];
-            }  // put b in e
+            } 
           }
         }
         std::string full_str = this->to_s();  // n
         full_str += b.to_s();                 // m
-        const char *full_string = (full_str.substr(2,_size + b._size -10)).c_str();
-        insertfind(full_string, _size + b._size - 10);
+        insertfind((full_str.substr(2,_size + b._size -10)).data(), _size + b._size - 10);
       } else {
         std::string start = this->to_s();  // n 
         start += b.to_s();  // m
@@ -646,10 +675,6 @@ public:
   str append(std::string_view b) { return append(mmap_lib::str(b)); }
 
   str append(char c) {
-    // std::cout << "single char append" << std::endl;
-
-    // printf("Checking c: %c\n", c);
-
     mmap_lib::str h(c);
     return append(h);
   }
@@ -715,7 +740,7 @@ public:
         }
       }
       for (int i = ptr_or_start; i < _size - 10; i++) {
-        switch (static_cast<int>(string_vector[i])) {
+        switch (static_cast<int>(string_vector2[i])) {
           case '0' ... '9': break;
           default: return false; break;
         }
