@@ -11,6 +11,7 @@
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
+#include "err_tracker.hpp"
 
 using Token_id = uint8_t;
 
@@ -216,15 +217,18 @@ public:
 
   template <typename S, typename... Args>
   void scan_error(const S &format, Args &&...args) const {
+    err_tracker::err_logger(fmt::format(format, args...));
     scan_error_int(fmt::format(format, args...));
   }
   template <typename S, typename... Args>
   void scan_warn(const S &format, Args &&...args) const {
+    err_tracker::err_logger(fmt::format(format, args...));
     scan_warn_int(fmt::format(format, args...));
   }
 
   template <typename S, typename... Args>
   void parser_error(const S &format, Args &&...args) const {
+    err_tracker::err_logger(fmt::format(format, args...));
     parser_error_int(fmt::format(format, args...));
   }
   template <typename S, typename... Args>

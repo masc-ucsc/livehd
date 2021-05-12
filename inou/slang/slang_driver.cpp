@@ -627,6 +627,7 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     (void)e;
     throw;
 #else
+    err_tracker::err_logger("internal compiler error: {}\n", e.what());
     Pass::error("internal compiler error: {}\n", e.what());
     return 4;
 #endif
@@ -638,6 +639,7 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
   (void)e;
   throw;
 #else
+  err_tracker::err_logger("{}\n", e.what());
   Pass::error("{}\n", e.what());
   return 5;
 #endif

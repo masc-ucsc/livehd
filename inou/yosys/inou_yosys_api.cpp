@@ -100,6 +100,7 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
     try {
       Yosys::Pass::call(&design, cmd);
     } catch (...) {
+      err_tracker::err_logger("inou.yosys cmd:{} failed\n", cmd);
       error("inou.yosys cmd:{} failed\n", cmd);
     }
   }

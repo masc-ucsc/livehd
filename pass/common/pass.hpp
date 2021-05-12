@@ -10,6 +10,7 @@
 #include "fmt/format.h"
 #include "graph_library.hpp"
 #include "iassert.hpp"
+#include "err_tracker.hpp"
 
 class Pass {
 protected:
@@ -50,18 +51,21 @@ public:
   template <typename... Args>
   static void error(const char *format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
+    err_tracker::err_logger(tmp.data());
     error(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void warn(std::string_view format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
+    err_tracker::err_logger(tmp.data());
     eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
   }
 
   template <typename... Args>
   static void info(std::string_view format, const Args &...args) {
     auto tmp = fmt::format(format, args...);
+    err_tracker::err_logger(tmp.data());
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
   }
 

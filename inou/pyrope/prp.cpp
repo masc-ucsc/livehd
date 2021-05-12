@@ -8,7 +8,7 @@
 #include <iostream>
 
 #include "fmt/format.h"
-
+#include "err_tracker.hpp"
 inline void Prp::eat_comments() {
   while (scan_is_token(Token_id_comment)) {
     scan_next();
@@ -1860,6 +1860,7 @@ void Prp::elaborate() {
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
     ast_dump(mmap_lib::Tree_index::root());
     fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
+    err_tracker::err_logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   } else {
     fmt::print("\nParsing SUCCESSFUL!\n");

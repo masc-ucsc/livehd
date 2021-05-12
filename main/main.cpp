@@ -524,12 +524,14 @@ int main(int argc, char** argv) {
         continue;
       }
     } catch (const std::runtime_error& re) {
+      err_tracker::err_logger("ERROR: {}", re.what());
       fmt::print("ERROR: {}", re.what());
 #ifndef NDEBUG
       fmt::print(" (std::runtime_error)");
 #endif
       fmt::print("\ncommand aborted...\n");
     } catch (const std::exception& ex) {
+      err_tracker::err_logger("ERROR: {}", ex.what());
       fmt::print("ERROR: {}", ex.what());
 #ifndef NDEBUG
       fmt::print(" (std::exception)");
