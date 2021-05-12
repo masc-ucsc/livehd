@@ -20,7 +20,7 @@
 void test_sview(const char * ts) {
   std::cout << "> Test Case: str(\"" << ts << "\")" << std::endl;
   mmap_lib::str test11(ts);
-  std::cout << "  "; test11.print_PoS(); 
+  std::cout << "  "; test11.print_PoS();
   std::cout << "  "; test11.print_e();
   std::cout << "  "; test11.print_StrMap();
   std::cout << "  "; test11.print_StrVec();
@@ -486,14 +486,14 @@ void pstr_starts_with() {
   r += test_starts_with(whole3, spec4, true);
   ++t;  // fixed
 
-#if 0  
+#if 0
   mmap_lib::str whole("foobar");
   std::string_view front1("foo");
   std::string_view front2("bar");
   std::string_view same("foobar");
   std::string_view one("f");
   std::string_view two("g");
-  
+
   r += test_starts_with(whole, front1, true); ++t;
   r += test_starts_with(whole, front2, false); ++t;
   r += test_starts_with(whole, same, true); ++t;
@@ -516,7 +516,7 @@ void pstr_starts_with() {
   r += test_starts_with(whole2, three, true); ++t;
   r += test_starts_with(whole2, four, true); ++t;
   r += test_starts_with(whole2, empty, true); ++t;
-  
+
   mmap_lib::str whole3("--this_var_will_be_very_long_for_testing_12345");
   std::string_view front5("--this_var");
   std::string_view front6("--this_var_wi");
@@ -526,7 +526,7 @@ void pstr_starts_with() {
   std::string_view almost2("--this_var_will_be_very_long_for_testing_12346");
   std::string_view five("-");
   std::string_view six("balalalalalalalalala");
-  
+
   // long vs short
   r += test_starts_with(whole3, front5, true); ++t; //fixed
   // long vs short(13)
@@ -545,7 +545,8 @@ void pstr_starts_with() {
   printf("passed(%02d/%02d), failed(%02d/%02d)\n", r, t, t - r, t);
 }
 
-void bench_str_cmp() { 
+#define STR_SIZE 1e5
+void bench_str_cmp() {
   {
     Lbench b("bench_str_cmp");
 
@@ -553,8 +554,8 @@ void bench_str_cmp() {
     Lrand_range<uint16_t> sz(1, 30);
 
     std::vector<mmap_lib::str> v;
-   
-    for (auto i = 0u; i < 1e4; ++i) {
+
+    for (auto i = 0u; i < STR_SIZE; ++i) {
       auto          s = sz.any();
       mmap_lib::str tmp;
       for (auto j = 0; j < s; ++j) {
@@ -563,19 +564,21 @@ void bench_str_cmp() {
       v.emplace_back(tmp);
     }
 
-   
+
     int conta = 0;
-    for (auto i = 0u; i < 1e4; ++i) {
-      for (auto j = 0u; j < 1e4; ++j) {
+    for (auto i = 0u; i < STR_SIZE; ++i) {
+      for (auto j = 0u; j < STR_SIZE; ++j) {
         if (v[i] == v[j])
           conta++;
       }
     }
 
     fmt::print("bench_str_cmp conta:{}\n", conta);
-    mmap_lib::str::clear_map();    
-    mmap_lib::str::clear_vector();    
+    mmap_lib::str::clear_map();
+    mmap_lib::str::clear_vector();
   }
+
+  return;
 
   {
     Lbench b("bench_string_cmp");
@@ -584,7 +587,7 @@ void bench_str_cmp() {
     Lrand_range<uint16_t> sz(1, 30);
 
     std::vector<mmap_lib::str> v;
-    for (auto i = 0u; i < 1e4; ++i) {
+    for (auto i = 0u; i < STR_SIZE; ++i) {
       auto        s = sz.any();
       std::string str;
       for (auto j = 0; j < s; ++j) {
@@ -594,8 +597,8 @@ void bench_str_cmp() {
     }
 
     int conta = 0;
-    for (auto i = 0u; i < 1e4; ++i) {
-      for (auto j = 0u; j < 1e4; ++j) {
+    for (auto i = 0u; i < STR_SIZE; ++i) {
+      for (auto j = 0u; j < STR_SIZE; ++j) {
         if (v[i] == v[j])
           conta++;
       }
@@ -608,6 +611,7 @@ void bench_str_cmp() {
 int main(int argc, char** argv) {
 #if BENCH
   bench_str_cmp();
+  return 0;
 #endif
 
 #if CTOR_TESTS
