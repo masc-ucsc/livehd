@@ -295,85 +295,23 @@ public:
   [[nodiscard]] constexpr bool        empty() const { return 0 == _size; }
 
   template <std::size_t N>
-  constexpr bool operator==(const char (&rhs)[N]) const {
-    auto rhs_size = N - 1;
-    if (_size != rhs_size) {
-      return false;
-    } 
-    if (_size < 14) { // SHORT
-      return str(rhs) == *this;
-    } else if (_size >= 14) { // LONG
-      if (e[0] != rhs[0] || e[1] != rhs[1]) {
-        return false;
-      } 
-      uint8_t idx = 8;
-      for (auto i = 2; i < 10; ++i) {
-        if (e[i] != rhs[rhs_size - idx--]) {
-          return false;
-        } 
-      }
-
-      auto j = 2;  // rhs[2 .. _size - 8] --> the long part
-      // for loop range: (ptr_or_start) .. (ptr_or_start + _size-10)
-      for (auto i = ptr_or_start; i < (ptr_or_start + _size - 10); ++i) {
-        if (string_vector2[i] != rhs[j]) {
-          return false;
-        }
-        j = j < _size - 8 ? j + 1 : j;
-      }
-      return true;
-    }
-    return false;
+  bool operator==(const char (&rhs)[N]) const {
+    return (*this == str(rhs));
   }
 
   // const char* and std::string will go through this one
   // implicit conversion from const char* --> string_view
-  constexpr bool operator==(std::string_view rhs) const {
-    auto rhs_size = rhs.size();
-    if (_size != rhs_size) {
-      return false;
-    }
-    if (_size < 14) { // SHORT
-      return str(rhs) == *this;
-    } else if (_size >= 14) {  // LONG
-      if (e[0] != rhs.at(0) || e[1] != rhs.at(1)) {
-        return false;
-      } 
-      uint8_t idx = 8;
-      for (auto i = 2; i < 10; ++i) {
-        if (e[i] != rhs.at(rhs_size - idx--)) {
-          return false;
-        } 
-      }
-      // return if rhs w/out first two and last eight is in string_map2
-      return !(string_map2.find(rhs.substr(2, rhs_size - 10)) == string_map2.end());
-    }
-    return false;
+  bool operator==(std::string_view rhs) const {
+    return (*this == str(rhs));
   }
 
   constexpr bool operator==(const str &rhs) const {
-#if 0
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
     const uint64_t *a = (const uint64_t *)(this);
     const uint64_t *b = (const uint64_t *)(&rhs);
 #pragma GCC diagnostic pop
     return a[0] == b[0] && a[1] == b[1]; // 16byte compare
-    //return memcmp(static_cast<const void *>(this), static_cast<const void *>(&rhs), sizeof(rhs))==0;
-#else
-    if (_size == 0 && rhs._size == 0) {
-      return true;
-    }
-    if (_size != rhs._size) {
-      return false;
-    }
-    for (auto i = 0u; i < e.size(); ++i) {  // e[]
-      if (e[i] != rhs.e[i]) {
-        return false;
-      }
-    }
-    return (ptr_or_start == rhs.ptr_or_start);  // p_o_s
-#endif
   }
 
   constexpr bool operator!=(const str &rhs) const { return !(*this == rhs); }
