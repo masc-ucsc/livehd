@@ -25,15 +25,20 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-	pts='VecShiftRegister Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2
-	VendingMachineSwitch VendingMachine Trivial Tail TrivialArith NotAnd Shifts
-	Darken HiLoMultiplier AddNot GCD_3bits Test3 Register RegisterSimple Parity
-	ResetShiftRegister SimpleALU ByteSelector Test2 MaxN Max2 Flop
-	EnableShiftRegister LogShifter Decrementer Counter RegXor Mux4 Adder4
-	BundleConnect SubModule SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd'
+  pts='VecShiftRegister Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2
+  VendingMachineSwitch VendingMachine Trivial Tail TrivialArith NotAnd Shifts
+  Darken HiLoMultiplier AddNot GCD_3bits Test3 Register RegisterSimple Parity
+  ResetShiftRegister SimpleALU ByteSelector Test2 MaxN Max2 Flop
+  EnableShiftRegister LogShifter Decrementer Counter RegXor Mux4 Adder4
+  BundleConnect SubModule SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
+  # issue1: run-time vector index
+  # pts='Test1 VecSearch Mul'                 
 
-  # pts='Test1'          # issue: run-time vector index
-  # pts='Adder4'
+  # issue2: io_state_0 index _0 missing
+  # pts='Life'                  
+
+  # issue3: __initial with another tuple, debug with vec_shift_register_param.prp
+  # pts='VecShiftRegisterParam VecShiftRegisterSimple' 
 
 else
   file=$(basename $1)
@@ -60,16 +65,6 @@ else
     exit 1
   fi
 fi
-
-pts_wait_verilog_large_mux_code_gen='Mul Test6 Test1'
-
-# pts='Test1'
-# pts='Life'
-# pts='VecShiftRegisterParam'
-# pts='VecShiftRegisterSimple '
-# pts='VecSearch '
-# pts='Flop'
-# pts='VecShiftRegister '
 
 
 
@@ -122,6 +117,7 @@ firrtl_test() {
 
     rm -rf tmp_firrtl
     ${LGSHELL} "lgraph.open name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
+    # ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog odir:tmp_firrtl"
     cat tmp_firrtl/*.v >${pt}.v
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
     ret_val=$?
@@ -150,7 +146,7 @@ firrtl_test() {
         python3 ${POST_IO_RENAME} "${pt}.v"
     fi
 
-    ${LGCHECK} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
+    ${LGCHECK} --top=${pt} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
     ret_val=$?
     if [ $ret_val -eq 0 ]; then
       echo "Successfully pass LEC!"

@@ -1702,7 +1702,7 @@ void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, con
 }
 
 void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, const std::string &reg_raw_name, const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite) {
-  // __reset/__init on the tuple_register root
+  // __reset/__initial on the tuple_register root
   auto acc_name_reset = CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset"));
   bool tied0_reset = false;
   auto resete_case = resete.expression_case();
@@ -1738,8 +1738,8 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
     auto acc_name_init = CreateSelectsFromStr(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"));
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(acc_name_init)));
-    // std::string_view ref_str = inite.reference().id();
-    auto ref_str = get_full_name(resete.reference().id(), true);
+    std::string_view ref_str = inite.reference().id();
+    // auto ref_str = get_full_name(inite.reference().id(), true);
     lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(ref_str)));
   }
 }
