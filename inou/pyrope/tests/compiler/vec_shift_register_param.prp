@@ -1,0 +1,40 @@
+$clock.__sbits = 1
+$reset.__ubits = 1
+// $io.in.__ubits = 4  // parse error??
+$io.inp.__ubits = 4
+%io.out.__ubits = 4
+
+_T.0 = 0;
+_T.1 = 0;
+_T.2 = 0;
+_T.3 = 0;
+_T.4 = 0;
+_T.5 = 0;
+_T.6 = 0;
+_T.7 = 0;
+
+#delays.0.__ubits = 4
+#delays.1.__ubits = 4
+#delays.2.__ubits = 4
+#delays.3.__ubits = 4
+#delays.4.__ubits = 4
+#delays.5.__ubits = 4
+#delays.6.__ubits = 4
+#delays.7.__ubits = 4
+
+#delays.__reset = $reset
+#delays.__initial = _T
+#delays  = #delays.__create_flop
+delays_q = #delays
+
+#delays.7 = delays_q.6
+#delays.6 = delays_q.5
+#delays.5 = delays_q.4
+#delays.4 = delays_q.3
+#delays.3 = delays_q.2
+#delays.2 = delays_q.1
+#delays.1 = delays_q.0
+#delays.0 = $io.inp
+%io.out   = delays_q.7
+
+

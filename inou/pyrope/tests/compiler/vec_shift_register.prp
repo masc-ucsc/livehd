@@ -1,0 +1,25 @@
+$clock.__sbits = 1
+$reset.__ubits = 1
+$io.ins.0.__ubits = 4
+$io.ins.1.__ubits = 4
+$io.load.__ubits = 1
+$io.shift.__ubits = 1
+
+%io.out.__ubits = 4    // This is redundant, inferred at compile time
+delays.0.__ubits = 4   // uncomment this and wrong LG before cprop (not sure why)
+delays.1.__ubits = 4   // uncomment this and the LG before cprop looks wrong (value that goes to delays[1] flop din)
+delays.__reset = 0     // shared across all delays flops
+delays = delays.__create_flop
+delays_q = delays
+
+if $io.load {
+  delays[0] = $io.ins[0]
+  delays[1] = $io.ins[1]
+} else {
+  if ($io.shift) {
+    delays[0] = $io.ins[0]
+    delays[1] = delays_q[0]
+  }  
+} 
+
+%io.out = delays_q[1]
