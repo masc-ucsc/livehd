@@ -4,6 +4,7 @@
 #include <cassert>
 #include <string_view>
 #include <vector>
+#include <algorithm>
 
 #include "lgraph_base_core.hpp"
 
@@ -55,11 +56,11 @@ class Graph_core {
 protected:
   class __attribute__((packed)) Entry64 {  // AKA Overflow Entry
   protected:
-    uint8_t edge_storage[64 - 1];
-    uint8_t last_byte;
+    //uint8_t edge_storage[64 - 1];
+    //uint8_t last_byte;
 
   public:
-    constexpr Entry64() : edge_storage{0,},last_byte(0) {
+    constexpr Entry64() : edge_storage{0,},last_byte(0), overflow_next(0), creator_pointer(0) {
     }
     void set_input() { last_byte |= 0x80; }   // set 8th bit
     void set_output() { last_byte &= 0x7F; }  // clear 8th bit
@@ -70,20 +71,30 @@ protected:
     void fill_out(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
     bool try_add_driver(Index_id id);                // return false if there was no space
     bool try_add_sink(Index_id id);                  // return false if there was no space
+    uint8_t insert_edge(Index_id insert_id);
+    uint8_t delete_edge();
+    uint8_t edge_storage[64 - 1];
+    uint8_t last_byte;
+    uint8_t overflow_next : 6;
+    uint8_t creator_pointer;
   };
 
   class __attribute__((packed)) Entry16 {  // AKA master or master_root entry
-  protected:
+  //protected:
+    //uint8_t  edge_storage[16 - 5];
+    //uint16_t edge_storate_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
+  public:
     uint8_t  edge_storage[16 - 5];
     uint16_t edge_storate_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
-  public:
+
     uint8_t pid_bits_or_type : 6;  // type in master_root, 6 pid bits in master
     uint8_t driver_set : 1;
     uint8_t sink_set : 1;     // different from inp_mask!=0 because bidirectional edges
     uint8_t ptrs;             // master_next in master_root (master_prev in master) and overflow_next
     uint8_t inp_mask : 7;     // 7bits inp_mask (8 or 0b111 means not used)
     uint8_t master_root : 1;  // for speed good to remember root vs master (pid==0?)
-    constexpr Entry16() : edge_storage{0,}, edge_storate_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0) {
+    uint8_t overflow_next : 4;
+    constexpr Entry16() : edge_storage{0,}, edge_storate_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0), overflow_next(0) {
     }
     void set_master_root();
     void set_master();
@@ -102,6 +113,8 @@ protected:
     constexpr uint8_t test_master_root() const { return master_root; }
 
     uint8_t insert_edge(uint8_t rel_index);
+    uint8_t delete_edge(uint8_t rel_index);
+    uint8_t binary_search(uint8_t i, uint8_t j, uint8_t rel_index);
 
     constexpr uint32_t get_pid() const {
       if (is_master_root())
@@ -123,13 +136,17 @@ protected:
   };
 
   std::vector<Entry64> table;  // to be replaced by mmap_lib::vector once it works
-  std::vector<Entry16> table16;
 
-  Index_id next16_free;  // Pointer to 12byte free chunks
-  Index_id next64_free;  // Pointer to 48byte free chunks
+  Index_id next16_free;  // Pointer to 16byte free chunks
+  Index_id next64_free;  // Pointer to 64byte free chunks
 
 public:
+
   Graph_core(std::string_view path, std::string_view name);
+
+  uint8_t check_overflow_index(Index_id overflow_index, uint8_t type);
+
+
   void add_edge(const Index_id sink_id, const Index_id driver_id);  // Add edge from s->d and d->s
   void del_edge(const Index_id sink_id, const Index_id driver_id);  // Remove both s->d and d->s
 
