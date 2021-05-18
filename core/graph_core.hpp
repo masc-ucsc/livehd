@@ -73,7 +73,7 @@ protected:
     bool try_add_sink(Index_id id);                  // return false if there was no space
     uint8_t insert_edge(Index_id insert_id);
     uint8_t delete_edge();
-    uint8_t edge_storage[64 - 1];
+    uint8_t edge_storage[64];
     uint8_t last_byte;
     uint8_t overflow_next : 6;
     uint8_t creator_pointer;
