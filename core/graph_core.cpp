@@ -213,12 +213,14 @@ uint8_t Graph_core::Entry16::delete_edge(uint8_t rel_index){
  */
 
 uint8_t Graph_core::Entry64::insert_edge(Index_id insert_id){
-
-   if(edge_storage[63] != 0){ //overflow is full
-
-     for (int i = 0; i < 64; ++i){       // loop through to see if any edge > insert edge
-       if(insert_id < edge_storage[i]){  // if a greater edge is found
-         auto temp = edge_storage[63];   // get the last element
+   // overflow is full
+   if(last_byte() != 0){
+     // loop through to see if any edge > insert edge
+     for (unsigned long i = 0; i < sizeof(edge_storage); ++i){
+       // if a greater edge is found
+       if(insert_id < edge_storage[i]) {
+         // get the last element
+         auto temp = last_byte();
          delete_edge();                  // remove that edge from the edge
          insert_edge(insert_id);         // now that edge storage is not empty we can insert
          return temp;                    // return temp to add_edge to make a new overflow
@@ -256,7 +258,7 @@ uint8_t Graph_core::Entry64::insert_edge(Index_id insert_id){
 
 ///*
 uint8_t Graph_core::Entry64::delete_edge(){
-   for(int i = 63; i >= 0; --i){
+   for(int i = sizeof(edge_storage) - 1; i >= 0; --i){
      if(edge_storage[i] != 0){
        edge_storage[i] = 0;
        return 0; // success
@@ -358,7 +360,7 @@ void Graph_core::add_edge(const Index_id sink_id, const Index_id driver_id){
 uint8_t Graph_core::check_overflow_index(Index_id overflow_index, uint8_t type){
    uint8_t correct_overflow = overflow_index;
 
-   while(table[correct_overflow].last_byte != type){ //check whether the type of the overflow is wrong
+   while(table[correct_overflow].last_byte() != type){ //check whether the type of the overflow is wrong
      //if wrong
      if(table[correct_overflow].overflow_next == 0x7){ // check if the next pointer is null
        return 0; // no other overflow and wrong type
