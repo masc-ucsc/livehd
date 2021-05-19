@@ -55,15 +55,13 @@ public:
 class Graph_core {
 protected:
   class __attribute__((packed)) Entry64 {  // AKA Overflow Entry
-  protected:
-    //uint8_t edge_storage[64 - 1];
-    //uint8_t last_byte;
 
   public:
-    constexpr Entry64() : edge_storage{0,},last_byte(0), overflow_next(0), creator_pointer(0) {
+    constexpr Entry64() : edge_storage{0,}, overflow_next(0), creator_pointer(0) {
+      last_byte() = 0;
     }
-    void set_input() { last_byte |= 0x80; }   // set 8th bit
-    void set_output() { last_byte &= 0x7F; }  // clear 8th bit
+    void set_input() { last_byte() |= 0x80; }   // set 8th bit
+    void set_output() { last_byte() &= 0x7F; }  // clear 8th bit
 
     constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
@@ -73,8 +71,16 @@ protected:
     bool try_add_sink(Index_id id);                  // return false if there was no space
     uint8_t insert_edge(Index_id insert_id);
     uint8_t delete_edge();
+
+    constexpr uint8_t& last_byte() {
+      return edge_storage[sizeof(edge_storage) - 1];
+    }
+
+    constexpr uint8_t last_byte() const {
+      return edge_storage[sizeof(edge_storage) - 1];
+    }
+
     uint8_t edge_storage[64];
-    uint8_t last_byte;
     uint8_t overflow_next : 6;
     uint8_t creator_pointer;
   };
