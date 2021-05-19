@@ -73,6 +73,7 @@ TEST_F(VTest1, interface) {
 void test_throw() {
   std::string test2_verilog = "";
 
+  mkdir("lgdb", 0755);
   mkdir("lgdb/noaccess_dir", 0000);
 
   Chunkify_verilog chunker("lgdb/noaccess_dir");
