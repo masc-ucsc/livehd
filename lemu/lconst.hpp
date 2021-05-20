@@ -88,6 +88,9 @@ public:
   Lconst();
 
   static Lconst string(std::string_view txt);
+  static Lconst unknown(Bits_t nbits);
+  static Lconst unknown_positive(Bits_t nbits);
+  static Lconst unknown_negative(Bits_t nbits);
 
   Container serialize() const;
   uint64_t  hash() const;
@@ -118,7 +121,16 @@ public:
   [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
   bool has_unknowns() const { return explicit_str && bits < calc_num_bits(num); }
-  bool is_negative() const { return num < 0; }
+  bool is_negative() const {
+    if (!explicit_str)
+      return num < 0;
+
+    if (!has_unknowns())
+      return false;
+
+    uint8_t msb = static_cast<uint8_t>(num);
+    return (msb == '1');
+  }
   bool is_string() const { return explicit_str && (bits & 0x7) == 0 && bits >= calc_num_bits(num); }
   bool is_mask() const { return ((num + 1) & (num)) == 0; }
   bool is_power2() const { return ((num - 1) & (num)) == 0; }

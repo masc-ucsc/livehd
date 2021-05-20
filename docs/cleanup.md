@@ -87,3 +87,15 @@ the attr fields gets generated as AttrSet/Get only when TupAdd/Get uses that att
 ### lnast-ssa
 * Clean up analysis based on dot, now the lnast should contains select [] only.
 * Modify fir_tolnast to generate select-only lnast tuple.
+
+### lconst
+
+The lconst implementation of "has_unknowns" is not very efficient. It uses a
+string to represent things like 0b?0?.  It may be more efficient to have 2
+Numbers. The current num and unk_num. If the bit is set to 1, the bit is
+unknown.  This binary representation allows for faster operations with uknowns
+(it should not be frequent, but it can happen).
+
+In C++ generated simulation, the computation can be 2 or 4 bit logic. Inside
+LGraph/LNAST, the computation is always 4 bit logic.
+

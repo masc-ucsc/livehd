@@ -1420,3 +1420,50 @@ TEST_F(Lconst_test, lconst_set_bits) {
 
   EXPECT_EQ(src.set_mask_op(Lconst("-17"), Lconst(0xabcd)), Lconst(0xabcF));
 }
+
+TEST_F(Lconst_test, lconst_sign) {
+
+  {
+    auto neg1 = Lconst("-123");
+    auto pos1 = Lconst("43");
+    auto pos2 = pos1.mult_op(Lconst("0b?"));
+    auto neg2 = Lconst(-1).mult_op(Lconst("0b?")); // neg * pos -> neg
+    auto pos3 = neg2.mult_op(neg1);
+    auto neg3 = pos3.mult_op(neg2);
+
+    EXPECT_TRUE(!pos1.is_negative());
+    EXPECT_TRUE(!pos2.is_negative());
+    EXPECT_TRUE(!pos3.is_negative());
+    EXPECT_TRUE( neg1.is_negative());
+    EXPECT_TRUE( neg2.is_negative());
+    EXPECT_TRUE( neg3.is_negative());
+  }
+
+  {
+    auto pos1 = Lconst(-123).and_op(Lconst("0b??0??"));
+
+    EXPECT_TRUE(!pos1.is_negative());
+    auto zero = pos1.rsh_op(2).and_op(1);
+    EXPECT_EQ(zero, Lconst(0));
+  }
+
+  {
+    auto neg1 = Lconst(-123).div_op(Lconst("0b??0??"));
+    auto neg2 = Lconst("0b??0??").div_op(-2);
+    auto pos1 = Lconst( 47).div_op(Lconst("0b?0?"));
+    auto pos2 = Lconst("0b??0??").div_op( 3);
+
+    EXPECT_TRUE(!pos1.is_negative());
+    EXPECT_TRUE(!pos2.is_negative());
+    EXPECT_TRUE( neg1.is_negative());
+    EXPECT_TRUE( neg2.is_negative());
+
+    auto pos3 = neg1.div_op(3122000); // 0
+    EXPECT_TRUE(!pos3.is_negative());
+
+    auto zero = Lconst("0b????").div_op(16); // 0
+    EXPECT_EQ(zero, Lconst(0));
+  }
+
+}
+

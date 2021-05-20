@@ -46,7 +46,7 @@ Bits_t Lconst::read_bits(std::string_view txt) {
 
 Lconst::Container Lconst::serialize() const {
   Container     v;
-  unsigned char c = (explicit_str ? 0x10 : 0) | (is_negative() ? 0x01 : 0);
+  unsigned char c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   v.emplace_back(c);
   v.emplace_back(bits >> 16);
   v.emplace_back(bits >> 8);
@@ -59,7 +59,7 @@ Lconst::Container Lconst::serialize() const {
 
 uint64_t Lconst::hash() const {
   std::vector<uint64_t> v;
-  uint64_t              c = (explicit_str ? 0x10 : 0) | (is_negative() ? 0x01 : 0);
+  uint64_t              c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   c                       = (c << 32) | bits;
   v.emplace_back(c);
 
@@ -134,6 +134,54 @@ Lconst Lconst::string(std::string_view orig_txt) {
 
   lc.bits         = orig_txt.size() * 8;
   lc.explicit_str = true;
+
+  return lc;
+}
+
+Lconst Lconst::unknown(Bits_t nbits) {
+  Lconst lc;
+
+  for(Bits_t i=0u;i<nbits;++i) {
+    lc.num  <<=8;
+    lc.num   |= '?';
+  }
+  lc.bits         = nbits;  // 0sb?>>>
+  if (nbits>0)
+    lc.explicit_str = true;
+
+  return lc;
+}
+
+Lconst Lconst::unknown_positive(Bits_t nbits) {
+  Lconst lc;
+
+  for(Bits_t i=0u;i<nbits-1;++i) {
+    lc.num  <<=8;
+    lc.num   |= '?';
+  }
+  lc.bits         = nbits;  // 0sb?>>>
+  if (nbits>1) {
+    lc.num        <<=8;
+    lc.num         |= '0';
+    lc.explicit_str = true;
+  }
+
+  return lc;
+}
+
+Lconst Lconst::unknown_negative(Bits_t nbits) {
+  Lconst lc;
+
+  for(Bits_t i=0u;i<nbits-1;++i) {
+    lc.num  <<=8;
+    lc.num   |= '?';
+  }
+  lc.bits         = nbits;  // 0sb?>>>
+  if (nbits>1) {
+    lc.num        <<=8;
+    lc.num         |= '1';
+    lc.explicit_str = true;
+  }
 
   return lc;
 }
@@ -602,11 +650,16 @@ Lconst Lconst::concat_op(const Lconst &o) const {
 
 Lconst Lconst::mult_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    auto max_bits = bits * o.bits;
+    throw std::runtime_error(fmt::format("ERROR: {}*{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
-    std::string qmarks("0b");
-    qmarks.append(max_bits, '?');
-    return Lconst(qmarks);
+    return Lconst::unknown(0);
+  }
+  if (has_unknowns() || o.has_unknowns()) {
+    auto n1 = is_negative()?-1:1;
+    auto n2 = o.is_negative()?-1:1;
+    if (n1*n2<0)
+      return Lconst::unknown_negative(get_bits()+o.get_bits());
+    return Lconst::unknown_positive(get_bits()+o.get_bits());
   }
 
   Lconst res;
@@ -618,11 +671,30 @@ Lconst Lconst::mult_op(const Lconst &o) const {
 
 Lconst Lconst::div_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    auto max_bits = bits * o.bits;
+    throw std::runtime_error(fmt::format("ERROR: {}/{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
-    std::string qmarks("0b");
-    qmarks.append(max_bits, '?');
-    return Lconst(qmarks);
+    return Lconst::unknown(0);
+  }
+
+  if (o.get_num()==0) {
+    if (is_negative())
+      return Lconst::unknown_negative(2);
+    return Lconst::unknown_positive(2);
+  }
+  if (has_unknowns() || o.has_unknowns()) {
+    auto n1 = is_negative()?-1:1;
+    auto n2 = o.is_negative()?-1:1;
+
+    int b = get_bits();
+    if (!o.has_unknowns()) {
+      b -= o.get_bits();
+      if (b<=0)
+        return Lconst(0);
+    }
+
+    if (n1*n2<0)
+      return Lconst::unknown_negative(b);
+    return Lconst::unknown_positive(b);
   }
 
   Lconst res;
@@ -634,11 +706,9 @@ Lconst Lconst::div_op(const Lconst &o) const {
 
 Lconst Lconst::sub_op(const Lconst &o) const {
   if (is_string() || o.is_string()) {
-    auto max_bits = std::max(bits, o.bits);
+    throw std::runtime_error(fmt::format("ERROR: {}-{} not allowed because one is a string\n", to_pyrope(), o.to_pyrope()));
 
-    std::string qmarks("0b");
-    qmarks.append(max_bits, '?');
-    return Lconst(qmarks);
+    return Lconst::unknown(0);
   }
 
   Lconst res;
