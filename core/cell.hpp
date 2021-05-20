@@ -173,7 +173,7 @@ public:
       return 0;
     }
     assert(std::isdigit(pin_name[0]));
-    int x;
+    int x=0;
     std::from_chars(pin_name.data(), pin_name.data() + pin_name.size(), x);
     return x;
   }
