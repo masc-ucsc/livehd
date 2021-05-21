@@ -18,9 +18,10 @@ scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if
 hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5
 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail firrtl_gcd_3bits
 nested_if firrtl_tail3 counter_nested_if tuple_empty_attr tuple_reg tuple_reg2
-struct_flop tuple_nested1 tuple_nested2 get_mask1 counter_mix'
+struct_flop tuple_nested1 tuple_nested2 get_mask1 counter_mix '
 
-# pts='vec_shift_register_param' 
+# vec_shift_register_param'
+
 # pts='pp'
 # pts='pp2'
 # pts='vector'

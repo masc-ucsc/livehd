@@ -371,6 +371,12 @@ bool Node::is_type_flop() const {
   return op == Ntype_op::Flop || op == Ntype_op::Fflop;
 }
 
+bool Node::is_type_register() const {
+  auto op = get_type_op();
+
+  return op==Ntype_op::Flop || op==Ntype_op::Fflop || op==Ntype_op::Memory || op==Ntype_op::Latch;
+}
+
 bool Node::is_type_tup() const {
   auto op = get_type_op();
 

@@ -352,8 +352,13 @@ void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup
     return;
   }
 
+  bool root = is_root_attribute(key);
   for (auto &ent : tup->key_map) {
-    key_map.emplace_back(absl::StrCat(key, ".", ent.first), ent.second);
+    if (root) {
+      key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
+    }else{
+      key_map.emplace_back(absl::StrCat(key, ".", ent.first), ent.second);
+    }
   }
 }
 
@@ -609,6 +614,8 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 
   correct = correct && tup->correct;
 
+  bool root_key = is_root_attribute(key);
+
   for (const auto &it : tup->key_map) {
     if (it.first.empty()) {
       add(key, it.second);
@@ -620,10 +627,15 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 
       std::string key2{get_canonical_name(it.first)};  // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
 
-      if (key2.empty())
+      if (key2.empty()) {
         key2 = key;
-      else
-        key2 = absl::StrCat(key, ".", key2);
+      }else{
+        if (root_key) {
+          key2 = absl::StrCat(key2, ".", key);
+        }else{
+          key2 = absl::StrCat(key, ".", key2);
+        }
+      }
 
       add(key2, it.second);
     }
@@ -1169,17 +1181,15 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
     else
       new_flop_name = absl::StrCat(flop_root_name, ".", cname);
 
-    if (is_attribute(cname)) {
+    auto attr = get_attribute(cname);
+    if (!attr.empty()) {
       // key_map is sorted. The field before the tuple must be created (or it
       // does not exist, in which case, nothing to do)
 
-      auto attr = get_last_level(cname);
+      I(is_root_attribute(get_last_level(attr))); // Anything like __initial.3 should become 3.__initial
       if (Ntype::has_sink(Ntype_op::Flop, attr.substr(2))) {
-        if (!is_root_attribute(cname)) {
-          dump();
-          Lgraph::info("found attribute:{} which is not root for a flop:{}\n", attr, new_flop_name);
-        }
         auto pin_name = get_all_but_last_level(cname);
+
         if (pin_name == "0") {
           auto dpin = get_dpin(pin_name);
           if (!dpin.is_invalid() && dpin.get_node().is_type_flop()) {

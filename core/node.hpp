@@ -308,6 +308,7 @@ public:
   bool             is_type_const() const;
   bool             is_type_attr() const;
   bool             is_type_flop() const;
+  bool             is_type_register() const; // Flop/Latch/Memory
   bool             is_type_tup() const;
   bool             is_type_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool             is_type_loop_first() const { return Ntype::is_loop_first(get_type_op()); }

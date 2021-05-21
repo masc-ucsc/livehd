@@ -314,6 +314,7 @@ public:
   bool   is_type_const() const;
   bool   is_type_tup() const;
   bool   is_type_flop() const;
+  bool   is_type_register() const;
   bool   is_type(const Ntype_op op) const;
   Lconst get_type_const() const;
 

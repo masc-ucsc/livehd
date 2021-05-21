@@ -42,15 +42,16 @@ void Cprop::add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &
 
   auto pos_spin = dpin.get_node().get_sink_pin("field");
   I(pos_spin.is_connected());
-  if (!pos_spin.get_driver_pin().is_type_const()) {
-    tup->set_issue();
-    tuple_issues = true;
-  } else {
-    auto v = pos_spin.get_driver_pin().get_type_const().to_string();
+  auto pos_dpin = pos_spin.get_driver_pin();
+  if (pos_dpin.is_type_const()) {
+    auto v = pos_dpin.get_type_const().to_string();
     if (!Lgtuple::is_root_attribute(v)) {
       tup->set_issue();
       tuple_issues = true;
     }
+  } else {
+    tup->set_issue();
+    tuple_issues = true;
   }
   tup->add(key, dpin);
 }
@@ -695,12 +696,14 @@ void Cprop::tuple_flop_mut(Node &node) {
   if (din_it == node2tuple.end())
     return;
 
-  if (!din_it->second->is_correct()) {
+  auto din_tup = din_it->second;
+
+  if (!din_tup->is_correct()) {
     I(tuple_issues);
-    din_it->second->dump();
+    din_tup->dump();
     fmt::print("flop:{} tuple:{} has issues (this may be OK with more iterations)\n",
                node.debug_name(),
-               din_it->second->get_name());
+               din_tup->get_name());
     return;
   }
 
@@ -708,7 +711,7 @@ void Cprop::tuple_flop_mut(Node &node) {
   if (node_it != node2tuple.end())
     return;
 
-  auto [flop_tup, pending_iterations] = din_it->second->get_flop_tup(node);
+  auto [flop_tup, pending_iterations] = din_tup->get_flop_tup(node);
   if (!tuple_issues && pending_iterations) {
     Pass::info("flop:{} has pending iterations to get all inputs as tuple", node.debug_name());
     if (flop_tup) {
@@ -723,7 +726,7 @@ void Cprop::tuple_flop_mut(Node &node) {
   if (tuple_issues || !flop_tup)
     return;
 
-  flop_tup = din_it->second->make_flop(node);
+  flop_tup = din_tup->make_flop(node);
   I(flop_tup);
   node2tuple[node.get_compact()] = flop_tup;
 
@@ -1164,7 +1167,7 @@ bool Cprop::tuple_tuple_get(const Node &node) {
   }
 
   if (!node_tup) {
-    if (key_name == "0") {
+    if (key_name == "0" || parent_dpin.is_type_register()) {
       auto self_tup = std::make_shared<Lgtuple>(tup_name);
       self_tup->add(parent_dpin);
       node2tuple[node.get_compact()] = self_tup;

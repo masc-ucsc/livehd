@@ -107,6 +107,25 @@ public:
     return false;
   }
 
+  static std::string_view get_attribute(std::string_view key) {
+    if (is_root_attribute(key))
+      return key;
+
+    auto it = key.find(".__");
+    if (it != std::string::npos) {
+      if (key[it + 3] != '_')
+        return key.substr(it+1);
+    }
+
+    auto it2 = key.find(":__");
+    if (it2 != std::string::npos) {
+      if (key[it2 + 3] != '_')
+        return key.substr(it2+1);
+    }
+
+    return "";
+  }
+
   std::string learn_fix(std::string_view key);
 
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
