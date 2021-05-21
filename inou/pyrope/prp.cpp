@@ -165,9 +165,11 @@ uint8_t Prp::rule_for_in_notation(std::list<std::tuple<Rule_id, Token_entry>> &p
   if (!CHECK_RULE(&Prp::rule_identifier)) {
     RULE_FAILED("Failed rule_for_in_notation; couldn't find an identifier.\n");
   }
-  if (!SCAN_IS_TOKEN(Pyrope_id_in, Prp_rule_for_in_notation)) {
+
+  if (scan_text() != "in" || !SCAN_IS_TOKEN(Token_id_alnum, Prp_rule_for_in_notation)) {
     RULE_FAILED("Failed rule_for_in_notation; couldn't find an in token.\n");
   }
+
   if (!(CHECK_RULE(&Prp::rule_range_notation) || CHECK_RULE(&Prp::rule_fcall_explicit) || CHECK_RULE(&Prp::rule_tuple_notation))) {
     RULE_FAILED("Failed rule_for_in_notation; couldn't find either an fcall_explicit or a tuple_notation.\n");
   }
@@ -838,12 +840,10 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &p
                      Pyrope_id_xor,
                      Token_id_same,
                      Token_id_diff,
-                     Pyrope_id_is,
                      Token_id_le,
                      Token_id_ge,
                      Token_id_lt,
                      Token_id_gt,
-                     Pyrope_id_in,
                      Token_id_xor,
                      Token_id_and,
                      Token_id_or};
@@ -1262,7 +1262,7 @@ uint8_t Prp::rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>
   PRINT_DBG_AST("The assignment operator token is: ");
   dump_token();
 #endif
-  Token_id toks[] = {Token_id_eq, Pyrope_id_as, Token_id_coloneq};
+  Token_id toks[] = {Token_id_eq, Token_id_coloneq};
   if (SCAN_IS_TOKENS(toks, 3, Prp_rule_assignment_operator)) {
     RULE_SUCCESS("Matched rule_assignment_operator; found an single token operator.\n", Prp_rule_assignment_operator);
   }
@@ -1413,7 +1413,7 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
     if (eos) {
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
     }
-    Token_id toks[] = {Token_id_le, Token_id_ge, Token_id_lt, Token_id_gt, Token_id_same, Token_id_diff, Pyrope_id_is};
+    Token_id toks[] = {Token_id_le, Token_id_ge, Token_id_lt, Token_id_gt, Token_id_same, Token_id_diff};
     if (SCAN_IS_TOKENS(toks, 7, Prp_rule_relational_expression)) {
       check_ws();
       if (!CHECK_RULE(&Prp::rule_additive_expression)) {
@@ -1742,9 +1742,9 @@ uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list
   INIT_FUNCTION("rule_keyword");
 
   Token_id toks[]
-      = {Pyrope_id_TRUE, Pyrope_id_true,  Pyrope_id_FALSE, Pyrope_id_false, Pyrope_id_if,     Pyrope_id_as,    Pyrope_id_else,
-         Pyrope_id_elif, Pyrope_id_is,    Pyrope_id_and,   Pyrope_id_or,    Pyrope_id_xor,    Pyrope_id_until, Pyrope_id_default,
-         Pyrope_id_try,  Pyrope_id_punch, Pyrope_id_in,    Pyrope_id_for,   Pyrope_id_unique, Pyrope_id_when};
+      = {Pyrope_id_TRUE, Pyrope_id_true,  Pyrope_id_FALSE, Pyrope_id_false, Pyrope_id_if,     Pyrope_id_else,
+         Pyrope_id_elif, Pyrope_id_and,   Pyrope_id_or,    Pyrope_id_xor,    Pyrope_id_until, Pyrope_id_default,
+         Pyrope_id_try,  Pyrope_id_punch, Pyrope_id_for,   Pyrope_id_unique, Pyrope_id_when};
 
   if (SCAN_IS_TOKENS(toks, 20)) {
     RULE_SUCCESS("Matched rule_keyword.\n", Prp_rule_keyword);
@@ -1904,11 +1904,8 @@ void Prp::gen_ws_map() {
   ws_map[Token_id_comma]      = (false << 8) + true;
   ws_map[Token_id_ob]         = (false << 8) + true;
   ws_map[Token_id_cb]         = (true << 8) + false;
-  ws_map[Pyrope_id_is]        = (false << 8) + true;
   ws_map[Token_id_diff]       = (false << 8) + true;
   ws_map[Token_id_eq]         = (false << 8) + true;
-  ws_map[Pyrope_id_as]        = (false << 8) + true;
-  ws_map[Pyrope_id_in]        = (true << 8) + true;
   ws_map[Pyrope_id_by]        = (true << 8) + true;
   ws_map[Pyrope_id_if]        = (false << 8) + true;
   ws_map[Pyrope_id_unique]    = (false << 8) + true;
@@ -2060,6 +2057,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
 #ifdef DEBUG_AST
   print_loc_list(loc_list);
 #endif
+#if 0
   auto cur_token = scan_token();
   if (cur_token != 1) {
     if (get_token_pos() > (cur_pos + scan_text(cur_token - 1).size())) {
@@ -2067,6 +2065,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
       return false;
     }
   }
+#endif
   if (scan_line() == cur_line) {
     if (rid != Prp_invalid) {
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));

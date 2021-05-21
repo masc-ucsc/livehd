@@ -161,8 +161,6 @@ constexpr Token_id Pyrope_id_return = 133;
 constexpr Token_id Pyrope_id_unique = 134;
 constexpr Token_id Pyrope_id_when   = 135;
 // type
-constexpr Token_id Pyrope_id_as = 136;
-constexpr Token_id Pyrope_id_is = 137;
 // Debug
 constexpr Token_id Pyrope_id_c         = 153;
 constexpr Token_id Pyrope_id_assertion = 138;
@@ -177,7 +175,6 @@ constexpr Token_id Pyrope_id_not = 144;
 constexpr Token_id Pyrope_id_intersect = 145;
 constexpr Token_id Pyrope_id_union     = 145;
 constexpr Token_id Pyrope_id_until     = 146;
-constexpr Token_id Pyrope_id_in        = 147;
 constexpr Token_id Pyrope_id_by        = 148;
 // new
 constexpr Token_id Pyrope_id_try   = 149;
@@ -331,9 +328,6 @@ public:
     pyrope_keyword["then"]   = Pyrope_id_then;
     pyrope_keyword["try"]    = Pyrope_id_try;
 
-    pyrope_keyword["as"] = Pyrope_id_as;
-    pyrope_keyword["is"] = Pyrope_id_is;
-
     pyrope_keyword["and"] = Pyrope_id_and;
     pyrope_keyword["or"]  = Pyrope_id_or;
     pyrope_keyword["not"] = Pyrope_id_not;
@@ -348,7 +342,6 @@ public:
     pyrope_keyword["intersect"] = Pyrope_id_intersect;
     pyrope_keyword["union"]     = Pyrope_id_union;
     pyrope_keyword["until"]     = Pyrope_id_until;
-    pyrope_keyword["in"]        = Pyrope_id_in;
     pyrope_keyword["by"]        = Pyrope_id_by;
     // pyrope_keyword["punch"]     = Pyrope_id_punch;
 
