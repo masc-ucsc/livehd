@@ -82,8 +82,8 @@ public:
   static bool is_root_attribute(std::string_view key) {
     if (key.substr(0, 2) == "__" && key[3] != '_')
       return true;
-    if (key.substr(0, 4) == "0.__" && key[5] != '_')
-      return true;
+//    if (key.substr(0, 4) == "0.__" && key[5] != '_')
+//      return true;
 
     return false;
   }
