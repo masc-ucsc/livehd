@@ -79,6 +79,7 @@ public:
   }
 
   static void sync(const Lgraph *lg) {
+    return; // FIXME: Why does this create a deadlock/livelock with OPT only??? (not needed beyond asan, but it should not happen)
     if (last_lg == lg) {
       last_lg   = nullptr;
       last_attr = nullptr;
