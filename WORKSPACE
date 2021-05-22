@@ -92,9 +92,9 @@ rules_proto_toolchains()
 # abseil-cpp
 http_archive(
     name = "com_google_absl",
-    sha256 = "8400c511d64eb4d26f92c5ec72535ebd0f843067515244e8b50817b0786427f9",
-    strip_prefix = "abseil-cpp-c512f118dde6ffd51cb7d8ac8804bbaf4d266c3a",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/c512f118dde6ffd51cb7d8ac8804bbaf4d266c3a.zip"],
+    sha256 = "441db7c09a0565376ecacf0085b2d4c2bbedde6115d7773551bc116212c2a8d6",
+    strip_prefix = "abseil-cpp-20210324.1",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20210324.1.tar.gz"],
 )
 
 # Google Test

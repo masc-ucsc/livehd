@@ -35,10 +35,6 @@ jobs:
           path: /home/runner/.cache/bazel
           key: bazel-gcc-instrumented
 
-      - run: sudo apt install -y build-essential
-      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
-      - run: sudo chmod +x /usr/local/bin/bazel
-
       - name: Print the list of targets
         run: bazel query --output label_kind //...
 
@@ -58,20 +54,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: Mount Bazel cache
-        uses: actions/cache@v2
-        with:
-          path: /home/runner/.cache/bazel
-          key: bazel-clang-11
-
-      - name: Install Clang
+      - name: Configure LLVM
+        id: configure_llvm
         run: |
-          ubuntu_codename=`lsb_release -c | cut -f2`
-          wget https://apt.llvm.org/llvm-snapshot.gpg.key
-          sudo apt-key add llvm-snapshot.gpg.key
-          sudo add-apt-repository "deb http://apt.llvm.org/$ubuntu_codename/ llvm-toolchain-$ubuntu_codename-$LLVM_VERSION main"
-          sudo apt-get update
-          sudo apt-get install -y clang-$LLVM_VERSION llvm-$LLVM_VERSION lld-$LLVM_VERSION
+          sudo apt-get autoremove -y libgcc-11-dev gcc-11 || true
           sudo ln -sf /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
           sudo ln -sf /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
           sudo ln -sf /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
@@ -80,11 +66,15 @@ jobs:
           sudo ln -sf /usr/bin/llvm-objdump-$LLVM_VERSION /usr/bin/llvm-objdump
           sudo ln -sf /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
           sudo ln -sf /usr/bin/llvm-config-$LLVM_VERSION /usr/bin/llvm-config
+          echo ::set-output name=clang_hash::`find /usr/lib/clang/$LLVM_VERSION/include/ -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d " " -f 1`
+          echo ::set-output name=llvm_hash::`find /usr/lib/llvm-$LLVM_VERSION/include/ -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d " " -f 1`
         env:
-          LLVM_VERSION: 11
+          LLVM_VERSION: 12
 
-      - run: sudo apt install -y build-essential
-      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
-      - run: sudo chmod +x /usr/local/bin/bazel
+      - name: Mount Bazel cache
+        uses: actions/cache@v2
+        with:
+          path: /home/runner/.cache/bazel
+          key: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}
 
       - run: bazel ${{ matrix.action }} --config=clang --test_tag_filters=-fixme --test_output=all -s //...
