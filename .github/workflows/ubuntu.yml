@@ -62,16 +62,10 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /home/runner/.cache/bazel
-          key: bazel-clang-11
+          key: bazel-clang-12
 
-      - name: Install Clang
+      - name: Configure LLVM
         run: |
-          ubuntu_codename=`lsb_release -c | cut -f2`
-          wget https://apt.llvm.org/llvm-snapshot.gpg.key
-          sudo apt-key add llvm-snapshot.gpg.key
-          sudo add-apt-repository "deb http://apt.llvm.org/$ubuntu_codename/ llvm-toolchain-$ubuntu_codename-$LLVM_VERSION main"
-          sudo apt-get update
-          sudo apt-get install -y clang-$LLVM_VERSION llvm-$LLVM_VERSION lld-$LLVM_VERSION
           sudo ln -sf /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
           sudo ln -sf /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
           sudo ln -sf /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
@@ -81,7 +75,7 @@ jobs:
           sudo ln -sf /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
           sudo ln -sf /usr/bin/llvm-config-$LLVM_VERSION /usr/bin/llvm-config
         env:
-          LLVM_VERSION: 11
+          LLVM_VERSION: 12
 
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
