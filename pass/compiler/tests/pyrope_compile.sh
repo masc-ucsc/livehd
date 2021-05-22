@@ -205,11 +205,11 @@ Pyrope_compile_hier () {
 }
 
 rm -rf ./lgdb
-Pyrope_compile "$pts"
-rm -rf ./lgdb
 Pyrope_compile_hier "$pts_hier1"
 rm -rf ./lgdb
 Pyrope_compile_hier "$pts_hier2"
+rm -rf ./lgdb
+Pyrope_compile "$pts"
 
 # Do not remove verilog, I tend to have tests cases in homedirectory
 # rm -f *.v

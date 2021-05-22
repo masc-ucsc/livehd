@@ -17,24 +17,24 @@ module DynamicMemorySearch(
   reg [3:0] list [0:7]; // @[DynamicMemorySearch.scala 32:19]
   wire [3:0] list_memVal_data; // @[DynamicMemorySearch.scala 32:19]
   wire [2:0] list_memVal_addr; // @[DynamicMemorySearch.scala 32:19]
-  wire [3:0] list__T_4_data; // @[DynamicMemorySearch.scala 32:19]
-  wire [2:0] list__T_4_addr; // @[DynamicMemorySearch.scala 32:19]
-  wire  list__T_4_mask; // @[DynamicMemorySearch.scala 32:19]
-  wire  list__T_4_en; // @[DynamicMemorySearch.scala 32:19]
+  wire [3:0] list_MPORT_data; // @[DynamicMemorySearch.scala 32:19]
+  wire [2:0] list_MPORT_addr; // @[DynamicMemorySearch.scala 32:19]
+  wire  list_MPORT_mask; // @[DynamicMemorySearch.scala 32:19]
+  wire  list_MPORT_en; // @[DynamicMemorySearch.scala 32:19]
   reg [2:0] index; // @[DynamicMemorySearch.scala 30:23]
   wire  done = ~io_en & (list_memVal_data == io_data | index == 3'h7); // @[DynamicMemorySearch.scala 35:23]
-  wire [2:0] _T_7 = index + 3'h1; // @[DynamicMemorySearch.scala 42:20]
+  wire [2:0] _index_T_1 = index + 3'h1; // @[DynamicMemorySearch.scala 42:20]
   assign list_memVal_addr = index;
   assign list_memVal_data = list[list_memVal_addr]; // @[DynamicMemorySearch.scala 32:19]
-  assign list__T_4_data = io_data;
-  assign list__T_4_addr = io_wrAddr;
-  assign list__T_4_mask = 1'h1;
-  assign list__T_4_en = io_isWr;
+  assign list_MPORT_data = io_data;
+  assign list_MPORT_addr = io_wrAddr;
+  assign list_MPORT_mask = 1'h1;
+  assign list_MPORT_en = io_isWr;
   assign io_target = index; // @[DynamicMemorySearch.scala 45:13]
   assign io_done = ~io_en & (list_memVal_data == io_data | index == 3'h7); // @[DynamicMemorySearch.scala 35:23]
   always @(posedge clock) begin
-    if(list__T_4_en & list__T_4_mask) begin
-      list[list__T_4_addr] <= list__T_4_data; // @[DynamicMemorySearch.scala 32:19]
+    if(list_MPORT_en & list_MPORT_mask) begin
+      list[list_MPORT_addr] <= list_MPORT_data; // @[DynamicMemorySearch.scala 32:19]
     end
     if (reset) begin // @[DynamicMemorySearch.scala 30:23]
       index <= 3'h0; // @[DynamicMemorySearch.scala 30:23]
@@ -42,7 +42,7 @@ module DynamicMemorySearch(
       if (io_en) begin // @[DynamicMemorySearch.scala 39:23]
         index <= 3'h0; // @[DynamicMemorySearch.scala 40:11]
       end else if (~done) begin // @[DynamicMemorySearch.scala 41:34]
-        index <= _T_7; // @[DynamicMemorySearch.scala 42:11]
+        index <= _index_T_1; // @[DynamicMemorySearch.scala 42:11]
       end
     end
   end

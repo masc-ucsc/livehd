@@ -28,12 +28,13 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='VecShiftRegister Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2
-  VendingMachineSwitch VendingMachine Trivial Tail TrivialArith NotAnd Shifts
-  Darken HiLoMultiplier AddNot GCD_3bits Test3 Register RegisterSimple Parity
-  ResetShiftRegister SimpleALU ByteSelector Test2 MaxN Max2 Flop
-  EnableShiftRegister LogShifter Decrementer Counter RegXor Mux4 Adder4
-  BundleConnect SubModule SingleEvenFilter Xor6Thread2'
+  pts='VecShiftRegisterSimple VecShiftRegisterParam VecShiftRegister Cell_alone
+  Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch
+  VendingMachine Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier
+  AddNot GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
+  SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
+  Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule
+  SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
 
   # issue: bits TupAdd doesn't converted to attribute set
   # pts='XorSelfThread1'
@@ -182,15 +183,15 @@ firrtl_test "$pts"
 
 #!/bin/bash
 
-pts='reg_bits_set bits_rhs reg__q_pin scalar_tuple
-hier_tuple_io hier_tuple3 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2
-hier_tuple lhs_wire tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2
-counter lhs_wire adder_stage capricious_bits4 capricious_bits
-logic capricious_bits2 scalar_reg_out_pre_declare firrtl_tail2
-hier_tuple_nested_if hier_tuple_nested_if3 hier_tuple_nested_if4
-hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
-firrtl_gcd_3bits nested_if firrtl_tail3 counter_nested_if tuple_nested1 tuple_empty_attr
-tuple_reg tuple_reg2 tuple_nested2 get_mask1'
+pts='reg_bits_set bits_rhs reg__q_pin scalar_tuple hier_tuple_io hier_tuple3
+hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 hier_tuple lhs_wire
+tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter lhs_wire
+adder_stage capricious_bits4 capricious_bits logic capricious_bits2
+scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if
+hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5
+hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail firrtl_gcd_3bits
+nested_if firrtl_tail3 counter_nested_if tuple_empty_attr tuple_reg tuple_reg2
+struct_flop tuple_nested1 tuple_nested2 get_mask1 counter_mix vec_shift_register_param'
 
 
 

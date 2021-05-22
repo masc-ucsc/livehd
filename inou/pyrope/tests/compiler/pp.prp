@@ -3,6 +3,9 @@ cell1 = ||{
 }
 tmp = $a+0 // Comment this and it fails
 // tmp = $a // unomment this and it fails
-tmp = cell1(in=$a).out
+
+tuple = (in = $a);
+
+tmp = cell1(tuple).out
 tmp = cell1(in=tmp).out
 %out = tmp
