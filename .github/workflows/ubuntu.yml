@@ -57,6 +57,7 @@ jobs:
       - name: Configure LLVM
         id: configure_llvm
         run: |
+          sudo apt-get autoremove -y libgcc-11-dev gcc-11 || true
           sudo ln -sf /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
           sudo ln -sf /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
           sudo ln -sf /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
