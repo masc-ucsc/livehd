@@ -1352,37 +1352,38 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
   auto idx_pipe_maybe = ast->get_sibling_next(idx_fcall_args);
 
   if (!idx_pipe_maybe.is_invalid()) {
-    PRINT_DBG_LN("We found a function pipe.\n");
-    // we have a pipe
-    auto idx_next_fcall = ast->get_last_child(idx_pipe_maybe);
+    auto rid = ast->get_data(idx_pipe_maybe).rule_id;
+    if (rid == Prp_rule_function_pipe) {
+      PRINT_DBG_LN("We found a function pipe.\n");
+      // we have a pipe
+      auto idx_next_fcall = ast->get_last_child(idx_pipe_maybe);
 
-    // add the LHS of the function call
-    Lnast_node intermediate_lhs;
-    bool       is_assign_expr = root_rid == Prp_rule_assignment_expression;
-    if (is_assign_expr) {
-      // need to add a temporary node anyway
-      intermediate_lhs = get_lnast_temp_ref();
+      // add the LHS of the function call
+      Lnast_node intermediate_lhs;
+      bool       is_assign_expr = root_rid == Prp_rule_assignment_expression;
+      if (is_assign_expr) {
+        // need to add a temporary node anyway
+        intermediate_lhs = get_lnast_temp_ref();
 
-      lnast->add_child(idx_fcall_root, intermediate_lhs);
-    } else {
-      lnast->add_child(idx_fcall_root, lhs_node);
-    }
-
-    // add the name of the function
-    lnast->add_child(idx_fcall_root, func_name);
-
-    // add the argument tuple
-    lnast->add_child(idx_fcall_root, arg_lhs);
-
-    if (idx_next_fcall.is_invalid()) {
-      idx_next_fcall = ast->get_sibling_next(idx_pipe_maybe);
-      if (idx_next_fcall.is_invalid()) {
-        return lhs_node;
+        lnast->add_child(idx_fcall_root, intermediate_lhs);
+      } else {
+        lnast->add_child(idx_fcall_root, lhs_node);
       }
-      I(ast->get_data(idx_next_fcall).rule_id == Prp_rule_fcall_explicit);
-    }
 
-    if (ast->get_data(idx_next_fcall).rule_id == Prp_rule_fcall_explicit) {
+      // add the name of the function
+      lnast->add_child(idx_fcall_root, func_name);
+
+      // add the argument tuple
+      lnast->add_child(idx_fcall_root, arg_lhs);
+
+      if (idx_next_fcall.is_invalid()) {
+        idx_next_fcall = ast->get_sibling_next(idx_pipe_maybe);
+        if (idx_next_fcall.is_invalid()) {
+          return lhs_node;
+        }
+        I(ast->get_data(idx_next_fcall).rule_id == Prp_rule_fcall_explicit);
+      }
+
       if (is_assign_expr) {
         return eval_fcall_explicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), intermediate_lhs, lhs_node);
       } else if (name_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid) {
@@ -1390,25 +1391,31 @@ Lnast_node Prp_lnast::eval_fcall_explicit(mmap_lib::Tree_index idx_start_ast, mm
       } else {
         return eval_fcall_explicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), lhs_node);
       }
-    } else {  // hopefully can't be anything else than implicit
-      if (is_assign_expr) {
-        return eval_fcall_implicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), intermediate_lhs, lhs_node);
-      } else if (name_node.type.get_raw_ntype() != Lnast_ntype::Lnast_ntype_invalid) {
-        return eval_fcall_implicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), lhs_node, name_node);
-      } else {
-        return eval_fcall_implicit(idx_next_fcall, idx_start_ln, ast->invalid_index(), lhs_node);
-      }
+    }
+    if (rid == Prp_rule_fcall_explicit) {
+      auto idx_after_fcall = ast->get_sibling_next(idx_pipe_maybe);
+      const auto &data = ast->get_data(idx_after_fcall);
+      I(data.rule_id == Prp_rule_reference);  // fcall(x,y).foo  "foo"
+
+      auto fcall_ret = get_lnast_temp_ref();
+      lnast->add_child(idx_fcall_root, fcall_ret);
+      lnast->add_child(idx_fcall_root, func_name);
+      lnast->add_child(idx_fcall_root, arg_lhs);
+
+      auto idx_tup_get = lnast->add_child(cur_stmts, Lnast_node::create_tuple_get());
+      lnast->add_child(idx_tup_get, lhs_node);
+      lnast->add_child(idx_tup_get, fcall_ret);
+      lnast->add_child(idx_tup_get, Lnast_node::create_const(get_token(data.token_entry)));
+
+      return lhs_node;
+    }else{
+      I(false); // FIXME
     }
   }
 
-  // add the LHS of the function call
-  lnast->add_child(idx_fcall_root, lhs_node);
-
-  // add the name of the function
-  lnast->add_child(idx_fcall_root, func_name);
-
-  // add the argument tuple
-  lnast->add_child(idx_fcall_root, arg_lhs);
+  lnast->add_child(idx_fcall_root, lhs_node); // add the LHS of the function call
+  lnast->add_child(idx_fcall_root, func_name); // add the name of the function
+  lnast->add_child(idx_fcall_root, arg_lhs); // add the argument tuple
 
   return lhs_node;
 }
