@@ -40,29 +40,12 @@ $ lldb ./bazel-bin/main/lgshell
 ```
 Note that breakpoint locations may not resolve until lgshell is started and the relevant LGraph libraries are loaded.
 
-Sometimes the failure is yosys/lgraph bridge. In this case, you need to debug yosys directly:
-```
-$ lldb ./bazel-bin/main/lgshell
-(lldb) b -r . -s ./bazel-bin/inou/yosys/liblgraph_yosys.so
-(lldb) r
-```
 ## Address Sanitizer
 
 LiveHD has the option to run it with address sanitizer to detect memory leaks.
 
 ```
 $ bazel build -c dbg --config asan //...
-```
-
-An issue is that YOSYS needs the libasan.a linked against statically. To enable this, you must edit the tools/linkso.bzl
-from:
-
-```
-  args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
-```
-to:
-```
-  args = [output.path] + [compiler_executable] + [ar_executable] + [f.path for f in src_libs2] + ["-Wl,-Bstatic"] + ["-lstdc++", "-lasan"] + ["-Wl,-Bdynamic"] + ["-lrt", "-lgcov", "-lpthread"]
 ```
 
 ## Debugging a broken Docker image

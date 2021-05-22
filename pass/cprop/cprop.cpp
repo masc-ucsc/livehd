@@ -993,14 +993,6 @@ void Cprop::tuple_subgraph(const Node &node) {
     I(dpin == node.get_driver_pin(it.first->name));
 
     node_tup->add(pin_name, dpin);
-
-    if (it.first->name == "%") {
-      auto dpin2 = node.get_driver_pin("%");
-      if (!dpin2.is_invalid() && dpin.is_connected()) {
-        sub.dump();
-        fmt::print("subgraph:{} outputs are connected to %, expand to tuple or hier\n", sub.get_name());
-      }
-    }
   }
 
   node2tuple[node.get_compact()] = node_tup;
@@ -1945,6 +1937,8 @@ void Cprop::bwd_del_node(Node &node) {
   std::deque<Node>                   potential;
 
   for (const auto &e : node.inp_edges()) {
+    if (e.driver.is_graph_io())
+      continue;
     // if (potential_set.contains(node.get_compact()))
     if (potential_set.contains(e.driver.get_node().get_compact()))
       continue;

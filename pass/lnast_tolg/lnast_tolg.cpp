@@ -595,7 +595,7 @@ bool Lnast_tolg::is_tuple_struct_ta(const Lnast_nid &lnidx_ta) {
   return true;
   // auto ta_sibling = lnast->get_sibling_next(lnidx_ta);
   // auto ta_sibling_ntype = lnast->get_data(ta_sibling).type;
-  
+
   // if (!ta_sibling_ntype.is_assign())
   //   return false;
 
@@ -1230,7 +1230,7 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
         auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
         if (!flop_din_driver_pin.is_invalid() ) { // flop has some previous attribute set
           flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
-          // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later 
+          // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
           auto driver_vname = lnast->get_vname(c1_aget);
           I(vname2tuple_head.find(driver_vname) != vname2tuple_head.end());
           auto tup_head_node = vname2tuple_head[driver_vname];
@@ -1245,7 +1245,7 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
           Pass::error("attribute {} must be the last in the entry {}\n", vname2, attr_field);
         }
         return;
-      } 
+      }
 
       if (vname2 == "__last_value") {
         Node wire_node;
@@ -1545,16 +1545,13 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   std::string arg_tup_name;
   if (is_input(cn_fc_sname))
     arg_tup_name = lnast->get_vname(cn_fc).substr(1);
-  else 
+  else
     arg_tup_name = cn_fc_sname;
 
   std::unique_lock<std::mutex> guard(lgs_mutex);
   auto * library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
-#ifndef NDEBUG
-    if (func_name.substr(0,2) != "__")
-      fmt::print("function {} defined in separated prp file, query lgdb\n", func_name);
-#endif
+
     Node      subg_node;
     Sub_node *sub;
     if (library->has_name(func_name)) {
@@ -1601,7 +1598,7 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   }
 
   // FIXME->sh: for the inlined function, we should also just connect to %/$ only?
-  fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
+  //fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
   auto ta_func_def = name2dpin[func_name].get_node();
   I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
   I(ta_func_def.setup_sink_pin("value").get_driver_node().get_type_op() == Ntype_op::Const);
@@ -1821,12 +1818,12 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       } else {
         I(wire_node != dpin_largest_ssa.get_node());
         if (wire_node.is_type(Ntype_op::Or)) {
-          wire_spin = wire_node.setup_sink_pin("A");  
+          wire_spin = wire_node.setup_sink_pin("A");
         } else if (wire_node.is_type(Ntype_op::Flop)) {
-          wire_spin = wire_node.setup_sink_pin("din");  
+          wire_spin = wire_node.setup_sink_pin("din");
         } else {
           I(wire_node.is_type(Ntype_op::TupAdd));
-          wire_spin = wire_node.setup_sink_pin("parent");  
+          wire_spin = wire_node.setup_sink_pin("parent");
         }
       }
       dpin_largest_ssa.connect_sink(wire_spin);

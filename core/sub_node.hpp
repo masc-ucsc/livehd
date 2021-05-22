@@ -212,7 +212,11 @@ public:
 
   bool has_pin(std::string_view io_name) const {
     I(lgid);
-    return name2id.find(io_name) != name2id.end();
+    const auto it = name2id.find(io_name);
+    if (it == name2id.end())
+      return false;
+
+    return !io_pins[it->second].is_invalid(); // It could be deleted and name preserved to remap to the same pin again in the future
   }
   bool has_graph_pos_pin(Port_ID graph_pos) const {
     I(lgid);

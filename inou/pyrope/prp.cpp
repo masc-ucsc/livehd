@@ -848,7 +848,7 @@ uint8_t Prp::rule_not_in_implicit(std::list<std::tuple<Rule_id, Token_entry>> &p
                      Token_id_and,
                      Token_id_or};
 
-  if (SCAN_IS_TOKENS(toks, 17)) {
+  if (SCAN_IS_TOKENS(toks, 15)) {
     RULE_SUCCESS("Matched rule_not_in_implicit; found a single character token.\n", Prp_rule_not_in_implicit);
   }
 
@@ -1263,7 +1263,7 @@ uint8_t Prp::rule_assignment_operator(std::list<std::tuple<Rule_id, Token_entry>
   dump_token();
 #endif
   Token_id toks[] = {Token_id_eq, Token_id_coloneq};
-  if (SCAN_IS_TOKENS(toks, 3, Prp_rule_assignment_operator)) {
+  if (SCAN_IS_TOKENS(toks, 2, Prp_rule_assignment_operator)) {
     RULE_SUCCESS("Matched rule_assignment_operator; found an single token operator.\n", Prp_rule_assignment_operator);
   }
 
@@ -1414,7 +1414,7 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
       loc_list.push_back(std::tuple<Rule_id, Token_entry>(Prp_rule_sentinel, 1));
     }
     Token_id toks[] = {Token_id_le, Token_id_ge, Token_id_lt, Token_id_gt, Token_id_same, Token_id_diff};
-    if (SCAN_IS_TOKENS(toks, 7, Prp_rule_relational_expression)) {
+    if (SCAN_IS_TOKENS(toks, 6, Prp_rule_relational_expression)) {
       check_ws();
       if (!CHECK_RULE(&Prp::rule_additive_expression)) {
         RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n");
@@ -1746,7 +1746,7 @@ uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list
          Pyrope_id_elif, Pyrope_id_and,   Pyrope_id_or,    Pyrope_id_xor,    Pyrope_id_until, Pyrope_id_default,
          Pyrope_id_try,  Pyrope_id_punch, Pyrope_id_for,   Pyrope_id_unique, Pyrope_id_when};
 
-  if (SCAN_IS_TOKENS(toks, 20)) {
+  if (SCAN_IS_TOKENS(toks, 17)) {
     RULE_SUCCESS("Matched rule_keyword.\n", Prp_rule_keyword);
   }
 
