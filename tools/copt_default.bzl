@@ -6,6 +6,7 @@ COPTS = [
     "-Wall",
     "-Wextra",
     "-Werror",
+    "-Wno-error=deprecated-copy", # abseil/abseil-cpp#948
     "-Wno-unknown-pragmas",
     "-Wunused",
     "-Wshadow",
