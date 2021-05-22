@@ -1,10 +1,8 @@
-
-xx = (a=1, b=$inp, 3)
-
-// xx = (1, 2, 3)
-yy.1.2 = 3    
-
-
-
-
-%data_read = xx
+cell1 = ||{
+  %out = $in
+}
+tmp = $a+0 // Comment this and it fails
+// tmp = $a // unomment this and it fails
+tmp = cell1(in=$a).out
+tmp = cell1(in=tmp).out
+%out = tmp

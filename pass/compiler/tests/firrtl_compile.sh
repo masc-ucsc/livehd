@@ -25,20 +25,20 @@ if [ $# -eq 0 ]; then
   # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
 
-  pts='VecShiftRegister Cell_alone Accumulator Coverage LFSR16 TrivialAdd Test2
-  VendingMachineSwitch VendingMachine Trivial Tail TrivialArith NotAnd Shifts
-  Darken HiLoMultiplier AddNot GCD_3bits Test3 Register RegisterSimple Parity
-  ResetShiftRegister SimpleALU ByteSelector Test2 MaxN Max2 Flop
-  EnableShiftRegister LogShifter Decrementer Counter RegXor Mux4 Adder4
-  BundleConnect SubModule SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
+  pts='VecShiftRegisterSimple VecShiftRegisterParam VecShiftRegister Cell_alone
+  Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch
+  VendingMachine Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier
+  AddNot GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
+  SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
+  Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule
+  SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
+
   # issue1: run-time vector index
   # pts='Test1 VecSearch Mul'                 
 
   # issue2: io_state_0 index _0 missing
   # pts='Life'                  
 
-  # issue3: __initial with another tuple, debug with vec_shift_register_param.prp
-  # pts='VecShiftRegisterParam VecShiftRegisterSimple' 
 
 else
   file=$(basename $1)
