@@ -191,7 +191,7 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   }
 
   memblock    = std::string_view(b, sb.st_size);
-  err_tracker::sot_log("{}\n", memblock);
+  err_tracker::sot_log("{}\n", memblock);//this is the correct(original) version
   buffer_name = filename;
 
   token_list.clear();
