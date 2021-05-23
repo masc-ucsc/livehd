@@ -21,7 +21,7 @@ bool Eprp::rule_path(std::string &path) {
   do {
     absl::StrAppend(&path, scan_text());
 
-    ast->add(Eprp_rule_path, scan_token());
+    ast->add(Eprp_rule_path, scan_token_entry());
 
     bool ok = scan_next();
     if (!ok)
@@ -44,7 +44,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 
   auto label = scan_text();
 
-  ast->add(Eprp_rule_label_path, scan_token());
+  ast->add(Eprp_rule_label_path, scan_token_entry());
 
   scan_next();  // Skip alnum token
   scan_next();  // Skip colon token
@@ -80,7 +80,7 @@ bool Eprp::rule_reg(bool first) {
     return false;
 
   std::string var{scan_text()};
-  ast->add(Eprp_rule_reg, scan_token());
+  ast->add(Eprp_rule_reg, scan_token_entry());
   if (first) {  // First in line #a |> ...
     if (variables.find(var) == variables.end()) {
       scan_error("variable {} is empty", var);
@@ -107,7 +107,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
 
   do {
     absl::StrAppend(&path, scan_text());  // Add the Token_id_alnum
-    ast->add(Eprp_rule_cmd_line, scan_token());
+    ast->add(Eprp_rule_cmd_line, scan_token_entry());
 
     bool ok1 = scan_next();
     if (!ok1)
@@ -117,7 +117,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
       break;
 
     absl::StrAppend(&path, scan_text());  // Add the Token_id_dot
-    ast->add(Eprp_rule_cmd_line, scan_token());
+    ast->add(Eprp_rule_cmd_line, scan_token_entry());
 
     bool ok2 = scan_next();
     if (!ok2)

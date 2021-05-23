@@ -54,7 +54,7 @@ public:
         auto    rid_int = std::atoi(val.c_str());
         Rule_id rid     = static_cast<Rule_id>(rid_int);
 
-        ast->add(rid, scan_token());
+        ast->add(rid, scan_token_entry());
       } else {
         EXPECT_TRUE(false);  // What cmd??
       }

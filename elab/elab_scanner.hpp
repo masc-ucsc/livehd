@@ -254,10 +254,16 @@ public:
     return false;
   }
 
-  Token_entry scan_token() const {
+  Token_entry scan_token_entry() const {
     I(scanner_pos != 0);
     I(scanner_pos < token_list.size());
     return scanner_pos;
+  }
+
+  Token_id scan_token_id() const {
+    I(scanner_pos != 0);
+    I(scanner_pos < token_list.size());
+    return token_list[scanner_pos].tok;
   }
 
   std::string_view scan_prev_text() const {
@@ -301,7 +307,7 @@ public:
   std::string_view scan_text() const { return token_list[scanner_pos].get_text(); }
   uint32_t         scan_line() const;
 
-  size_t get_token_pos() const { return token_list[scan_token()].pos1; }
+  size_t get_token_pos() const { return token_list[scan_token_entry()].pos1; }
 
   bool scan_is_prev_token(Token_id tok) const {
     if (scanner_pos == 0)

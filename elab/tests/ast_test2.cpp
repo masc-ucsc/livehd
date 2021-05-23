@@ -24,7 +24,7 @@ public:
     ast = std::make_unique<Ast_parser>(get_memblock(), test_rule);
 
     ast->down();
-    ast->add(test_rule_identifier, scan_token());
+    ast->add(test_rule_identifier, scan_token_entry());
     ast->up(test_rule_identifier);
 
     ast_handler();

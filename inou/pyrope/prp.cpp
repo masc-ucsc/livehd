@@ -22,7 +22,7 @@ uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
   if (scan_is_end())
     return true;
 
-  base_token = scan_token() - 1;
+  base_token = scan_token_entry() - 1;
   if (!CHECK_RULE(&Prp::rule_code_blocks)) {
     RULE_FAILED("Failed rule_start.\n");
   }
@@ -1245,7 +1245,7 @@ uint8_t Prp::rule_string_constant(std::list<std::tuple<Rule_id, Token_entry>> &p
         next = false;
       } else {  // WARNING: unfortunately, since we cannot easily make SCAN_IS_TOKEN match and add any token to the list, we need
                 // this extra code here.
-        loc_list.push_back(std::make_tuple(Prp_rule_string_constant, scan_token()));
+        loc_list.push_back(std::make_tuple(Prp_rule_string_constant, scan_token_entry()));
         sub_cnt++;
         consume_token();
       }
@@ -2019,7 +2019,7 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
 }
 
 bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
-  // PRINT_DBG_AST("Checking  token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+  // PRINT_DBG_AST("Checking  token {} from rule {}.\n", scan_text(scan_token_entry()), rule_id_to_string(rid));
   if (tok != TOKEN_ID_ANY) {
     if (!scan_is_token(tok))
       return false;
@@ -2042,7 +2042,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   if (ws_map.find(tok) != ws_map.end()) {
     allowed_ws_after  = ws_map[tok];
     allowed_ws_before = (ws_map[tok] >> 8);
-    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {
@@ -2059,7 +2059,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   print_loc_list(loc_list);
 #endif
 #if 0
-  auto cur_token = scan_token();
+  auto cur_token = scan_token_entry();
   if (cur_token != 1) {
     if (get_token_pos() > (cur_pos + scan_text(cur_token - 1).size())) {
       cur_line = start_line;
@@ -2069,11 +2069,11 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
 #endif
   if (scan_line() == cur_line) {
     if (rid != Prp_invalid) {
-      loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token_entry()));
       (*sub_cnt)++;
       PRINT_DBG_AST("chk_and_consume: incremented sub_cnt to {}\n", *sub_cnt);
     }
-    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token_entry()), rule_id_to_string(rid));
     cur_pos = get_token_pos();
     if (tokens_consumed >= term_token) {
       term_token++;
@@ -2138,7 +2138,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   if (ws_map.find(toks[i]) != ws_map.end()) {
     allowed_ws_after  = ws_map[toks[i]];
     allowed_ws_before = (ws_map[toks[i]] >> 8);
-    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {
@@ -2154,7 +2154,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
 #ifdef DEBUG_AST
   print_loc_list(loc_list);
 #endif
-  auto cur_token = scan_token();
+  auto cur_token = scan_token_entry();
   if (cur_token != 1) {
     if (get_token_pos() > (cur_pos + scan_text(cur_token - 1).size())) {
       cur_line = start_line;
@@ -2163,11 +2163,11 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   }
   if (scan_line() == cur_line) {
     if (rid != Prp_invalid) {
-      loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token()));
+      loc_list.push_back(std::tuple<Rule_id, Token_entry>(rid, scan_token_entry()));
       (*sub_cnt)++;
       PRINT_DBG_AST("chk_and_consume_options: incremented sub_cnt to {}\n", *sub_cnt);
     }
-    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token()), rule_id_to_string(rid));
+    PRINT_DBG_AST("Consuming token {} from rule {}.\n", scan_text(scan_token_entry()), rule_id_to_string(rid));
     cur_pos = get_token_pos();
     if (tokens_consumed >= term_token) {
       term_token++;
