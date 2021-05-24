@@ -2,8 +2,6 @@
 
 #include "firmap.hpp"
 
-#include <bits/stdint-uintn.h>
-
 #include <algorithm>
 #include <cmath>
 #include <vector>
