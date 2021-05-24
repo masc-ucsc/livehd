@@ -34,7 +34,6 @@ if [ $# -eq 0 ]; then
   SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
 
 
-
   # issue1: run-time vector index
   # pts='Test1 VecSearch Mul'                 
 
