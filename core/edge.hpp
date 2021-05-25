@@ -25,11 +25,12 @@ public:
     Compact() : driver_idx(0), pad1(0), sink_idx(0), pad2(0) {}
 
     Compact &operator=(const Compact &obj) {
-      I(this != &obj);
-      driver_hidx = obj.driver_hidx;
-      driver_idx  = obj.driver_idx;
-      sink_hidx   = obj.sink_hidx;
-      sink_idx    = obj.sink_idx;
+      if (this != &obj) {
+        driver_hidx = obj.driver_hidx;
+        driver_idx  = obj.driver_idx;
+        sink_hidx   = obj.sink_hidx;
+        sink_idx    = obj.sink_idx;
+      };
 
       return *this;
     }

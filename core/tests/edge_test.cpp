@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <random>
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
@@ -301,7 +303,7 @@ TEST_F(Edge_test, overflow_delete) {
     all_edges.push_back(b.first);
   }
 
-  std::random_shuffle(all_edges.begin(), all_edges.end());
+  std::shuffle(all_edges.begin(), all_edges.end(), std::knuth_b());
 
   for (auto &e : all_edges) {
     XEdge edge(g, e);
@@ -370,7 +372,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
     all_edges.push_back(b.first);
   }
 
-  std::random_shuffle(all_edges.begin(), all_edges.end());
+  std::shuffle(all_edges.begin(), all_edges.end(), std::knuth_b());
 
   {
     Lbench bench("core.EDGE_overflow_delete_del_edge");
