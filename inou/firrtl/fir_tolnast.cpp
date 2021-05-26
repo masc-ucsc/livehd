@@ -521,7 +521,7 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
  * a nested-scope but then used outside of that scope, I have
  * to go into any nested scope and pull all of the memory out.
  * NOTE: This is a pre-traversal and looks only for memories. */
-void Inou_firrtl::PreCheckForMem(Lnast& lnast, Lnast_nid& stmt_node, const firrtl::FirrtlPB_Statement& stmt) {
+void Inou_firrtl::PreCheckForMem(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& stmt_node) {
   switch (stmt.statement_case()) {
     case firrtl::FirrtlPB_Statement::kMemory: {
       memory_names.insert(stmt.memory().id());
@@ -530,6 +530,8 @@ void Inou_firrtl::PreCheckForMem(Lnast& lnast, Lnast_nid& stmt_node, const firrt
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {
       memory_names.insert(stmt.cmemory().id());
+      fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
+      fmt::print("DEBUG0 cmemory sync_read:{}\n", stmt.cmemory().sync_read());
       InitCMemory(lnast, stmt_node, stmt.cmemory());
       break;
     }
@@ -539,10 +541,10 @@ void Inou_firrtl::PreCheckForMem(Lnast& lnast, Lnast_nid& stmt_node, const firrt
     }
     case firrtl::FirrtlPB_Statement::kWhen: {
       for (int i = 0; i < stmt.when().consequent_size(); i++) {
-        PreCheckForMem(lnast, stmt_node, stmt.when().consequent(i));
+        PreCheckForMem(lnast, stmt.when().consequent(i), stmt_node);
       }
       for (int j = 0; j < stmt.when().otherwise_size(); j++) {
-        PreCheckForMem(lnast, stmt_node, stmt.when().otherwise(j));
+        PreCheckForMem(lnast, stmt.when().otherwise(j), stmt_node);
       }
       break;
     }
@@ -1298,24 +1300,10 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
     std::string full_port_name;
     if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_IN) {
       input_names.insert(port_name);
-      /* if (port_name.find_first_of("[.") != std::string::npos) { */
-      // if (port_name.find(".") != std::string::npos) {
-      //   full_port_name = absl::StrCat("$inp_", port_name);
-      // } else {
-      //   full_port_name = absl::StrCat("$", port_name);
-      // }
       full_port_name = absl::StrCat("$", port_name);
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
       output_names.insert(port_name);
-      /* if (port_name.find_first_of("[.") != std::string::npos) { */
-      // if (port_name.find(".") != std::string::npos) {
-      //   full_port_name = absl::StrCat("%out_", port_name);
-      // } else {
-      //   full_port_name = absl::StrCat("%", port_name);
-      // }
       full_port_name = absl::StrCat("%", port_name);
-      // note: create output bits attr_set at the end of lnast to avoid firrtl_bits interference problem
-      output_name2port_info.insert_or_assign(full_port_name, std::make_tuple(parent_node, port_sign, port_bits));
     } else {
       Pass::error("Found IO port {} specified with unknown direction in Protobuf message.", port_name);
     }
@@ -1999,30 +1987,14 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
   // Iterate over statements of the module.
   for (int j = 0; j < user_module.statement_size(); j++) {
     const firrtl::FirrtlPB_Statement& stmt = user_module.statement(j);
-    PreCheckForMem(*lnast, idx_stmts, stmt);
+    PreCheckForMem(*lnast, stmt, idx_stmts);
     ListStatementInfo(*lnast, stmt, idx_stmts);
   }
-
-  // deprecated the reset insertion for the highest proority. 
-  // RegResetInitialization(*lnast, idx_stmts);
 
   PerformLateMemAssigns(*lnast, idx_stmts);
   var.add(std::move(lnast));
 }
 
-// insert the reset initialization logic, which should be the highest priority and insert in the end
-// void Inou_firrtl::RegResetInitialization(Lnast& lnast, Lnast_nid& idx_stmts) {
-//   for (auto const& [reg_name, expr_pair] : reg_name2rst_init_expr) {
-//     auto resete = expr_pair.first;
-//     auto inite  = expr_pair.second;
-//     /* auto init_expr_str = lnast->add_string(ReturnExprString(*lnast, inite, idx_stmts, true)); */
-//     auto reset_expr_str = lnast.add_string(ReturnExprString(lnast, resete, idx_stmts, true));
-//     auto idx_mux_if     = lnast.add_child(idx_stmts, Lnast_node::create_if());
-//     lnast.add_child(idx_mux_if, Lnast_node::create_ref(reset_expr_str));  // from the firrtl spec, it's always reset high
-//     auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
-//     InitialExprAdd(lnast, inite, idx_stmt_tr, reg_name);
-//   }
-// }
 
 void Inou_firrtl::ListModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& module, const std::string& file_name) {
   if (module.has_external_module()) {
@@ -2072,7 +2044,6 @@ Sub_node Inou_firrtl::AddModToLibrary(Eprp_var& var, const std::string& mod_name
 
   auto* library = Graph_library::instance(fpath);
   auto& sub     = library->reset_sub(mod_name, file_name);
-  // FIXME->sh: also add %/$ ?
   return sub;
 }
 
@@ -2246,7 +2217,6 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
     dangling_ports_map.clear();
     late_assign_ports.clear();
     reg_name2rst_init_expr.clear();
-    output_name2port_info.clear();
 
     ListModuleInfo(var, circuit.module(i), file_name);
   }

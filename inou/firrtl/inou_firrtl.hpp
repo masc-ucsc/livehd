@@ -46,7 +46,7 @@ protected:
                           Lnast_nid &parent_node);  // const firrtl::FirrtlPB_Statement_Wire& expr, Lnast_nid& parent_node);
   void setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
   void setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
-  void PreCheckForMem(Lnast &lnast, Lnast_nid &stmt_node, const firrtl::FirrtlPB_Statement &stmt);
+  void PreCheckForMem(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &stmt_node);
   void InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
   void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
   void HandleMemPortPre(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
@@ -197,7 +197,6 @@ private:
   absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
-  absl::flat_hash_map<std::string, std::tuple<Lnast_nid, bool, uint32_t>>                               output_name2port_info;
 
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;

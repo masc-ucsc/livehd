@@ -8,7 +8,7 @@ flop_q = __flop(clock=$clk2, din=tmp.__last_value, posclk=false) // negedge flop
 tmp = flop_q
 if $load {
   tmp = $a
-}elif $enable {
+} elif $enable {
   tmp := tmp + 1
 }
 
