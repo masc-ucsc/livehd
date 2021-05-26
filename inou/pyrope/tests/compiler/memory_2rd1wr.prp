@@ -1,0 +1,29 @@
+
+
+// Simple 2rd+1wr memory (RF type)
+// matches inou/yosys/tests/long_regfile2r1w.v
+
+// This bits sizes are not needed because the memory has bits/size
+//$raddr0.__sbits = 4 // 16 entries
+//$raddr1.__sbits = 4 // 16 entries
+//$wraddr.__sbits = 4 // 16 entries
+//$we0.__sbits = 1
+//$din0.__sbits = 3
+
+mem.addr    = ($raddr0, $raddr1, $wraddr)
+mem.bits    = 3
+mem.size    = 16
+mem.clock   = $clk
+mem.data_in = (0, 0, $din0)
+mem.enable  = (1, 1, $we0)
+
+mem.fwd     = true
+mem.latency = (1, 1, 1)
+mem.wmask   = -1
+mem.mode    = 0b011
+
+res = __memory(mem)
+
+%q0 = res.0
+%q1 = res.1
+
