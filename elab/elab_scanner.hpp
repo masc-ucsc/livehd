@@ -110,6 +110,7 @@ public:
     tok = new_tok;
 
     auto new_len = text.size() + t2.text.size();
+    pos2 = pos2 + 1;
     text         = std::string_view{text.data(), new_len};
   }
 
@@ -117,6 +118,7 @@ public:
     I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
 
     auto new_len = text.size() + t2.text.size();
+    pos2 = pos2 + 1;
     text         = std::string_view{text.data(), new_len};
   }
 
