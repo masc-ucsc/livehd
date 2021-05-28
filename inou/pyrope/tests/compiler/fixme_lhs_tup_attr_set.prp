@@ -1,0 +1,16 @@
+
+a = (x=1,y=2)
+
+tmp = a@() // {1,2} -> {0b01,0b010} -> 0b010_01 -> 9
+
+%out1 = tmp
+
+tmp2 = a
+tmp2 := 0b011_10  // x = 3, b = -2
+
+// FIXME: the lhs could be a tuple (way to rebuild a tuple from bit fields (sizes must be known)
+// In verilog {x,y} = const
+// Current error:
+// inline:0:21 error: node:n22_attr_set_lgpp has := assign with a tuple in lhs, only scalars allowed
+
+%out2 = tmp2.x + tmp2.y // 1

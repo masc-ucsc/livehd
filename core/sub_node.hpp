@@ -311,12 +311,11 @@ public:
   }
 
   bool is_input(std::string_view io_name) const {
-    if (!has_pin(io_name))
+    const auto it = name2id.find(io_name);
+    if (it == name2id.end())
       return false;
 
-    auto instance_pid = name2id.at(io_name);
-    I(io_pins[instance_pid].name == io_name);
-    return (io_pins.at(instance_pid).dir == Direction::Input);
+    return io_pins[it->second].is_input();
   }
 
   bool is_output_from_instance_pid(Port_ID instance_pid) const {
@@ -330,12 +329,11 @@ public:
   }
 
   bool is_output(std::string_view io_name) const {
-    if (!has_pin(io_name))
+    const auto it = name2id.find(io_name);
+    if (it == name2id.end())
       return false;
 
-    auto instance_pid = name2id.at(io_name);
-    I(io_pins[instance_pid].name == io_name);
-    return (io_pins[instance_pid].dir == Direction::Output);
+    return io_pins[it->second].is_output();
   }
 
   void add_phys_pin(std::string_view io_name, const Tech_pin &ppin) {

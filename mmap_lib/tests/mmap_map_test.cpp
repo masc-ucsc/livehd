@@ -145,6 +145,34 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 TEST_F(Setup_mmap_map_test, string_key) {
   Lrand<int> rng;
 
+#if 0
+  {
+    mmap_lib::map<std::string_view, uint32_t> map;
+
+    map.set("foo", 3);
+    map.has("foo");
+    map.get("foo") -> 3
+    it = map.find("foo");
+    map.get_key(it)
+
+    //--------------
+
+    // Create new string
+    auto it = map.find("bar");
+    if (it == map.end()) { // hello is not there
+      auto it = map.set("bar", 0);
+    }else{
+      auto pos = it->first; // position
+      auto sv = map.get_key(pstr.pos); // size of the original insertion (bar == 3) bars
+      std::string_view sv2(sv.data(), pstr.size);
+    }
+
+    // pos -> string_view
+    auto sv = map.get_sview(pos);
+
+  }
+#endif
+
   for (int n = 0; n < 4; ++n) {
     mmap_lib::map<std::string_view, uint32_t> map;
     map.clear();

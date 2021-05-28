@@ -1447,6 +1447,10 @@ private:
 
     assert(txt.size() < 40000);  // OK to go bigger but likely bug
 
+    // vector: mmap_txt_base is the pointer to the string vector
+    // pos[0] = size_vector
+    // [size_vector=120, (5,'hello'), (3,bar), 0 0 0 ]
+
     auto insert_point = mmap_txt_base[0] + 1;
     if (mmap_txt_size <= (8 * insert_point + 8 * txt.size())) {
       auto new_size = mmap_txt_size * 2;
