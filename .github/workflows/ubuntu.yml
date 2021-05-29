@@ -15,7 +15,8 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /home/runner/.cache/bazel
-          key: bazel-gcc
+          key: bazel-gcc-${{ github.sha }}
+          restore-keys: bazel-gcc
 
       - run: sudo apt install -y build-essential
       - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
@@ -33,7 +34,8 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /home/runner/.cache/bazel
-          key: bazel-gcc-instrumented
+          key: bazel-gcc-instrumented-${{ github.sha }}
+          restore-keys: bazel-gcc-instrumented
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
@@ -75,6 +77,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: /home/runner/.cache/bazel
-          key: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}
+          key: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}-${{ github.sha }}
+          restore-keys: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}
 
       - run: bazel ${{ matrix.action }} --config=clang --test_tag_filters=-fixme --test_output=all -s //...
