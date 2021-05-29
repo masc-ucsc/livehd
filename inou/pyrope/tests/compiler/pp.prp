@@ -1,11 +1,5 @@
-cell1 = ||{
-  %out = $in
-}
-tmp = $a+0 // Comment this and it fails
-// tmp = $a // unomment this and it fails
+foo = ();
 
-tuple = (in = $a);
-
-tmp = cell1(tuple).out
-tmp = cell1(in=tmp).out
-%out = tmp
+foo.1 = 3
+foo.2 = 5
+%out = foo.2

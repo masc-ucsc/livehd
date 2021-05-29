@@ -1,5 +1,3 @@
-
-
 // Simple 2rd+1wr memory (RF type)
 // matches inou/yosys/tests/long_regfile2r1w.v
 
@@ -20,7 +18,7 @@ mem.enable  = (1, 1, $we0)
 mem.fwd     = true
 mem.latency = (1, 1, 1)
 mem.wmask   = -1
-mem.mode    = 0b011
+mem.mode    = 0b011 // pos0 = 1 -> read, pos2 = 0 - > write
 
 res = __memory(mem)
 
