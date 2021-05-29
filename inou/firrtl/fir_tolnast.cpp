@@ -1111,6 +1111,11 @@ std::string_view Inou_firrtl::HandleBundVecAcc(Lnast& ln, const firrtl::FirrtlPB
       flattened_str = absl::StrCat("#", flattened_str);
     }
   } else if (memory_names.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
+    // Todo:
+    // (1) at the mport statement, record the mport to a set
+    // (2) here check if the first hier-name is a mport declared before
+    // (3) check WR/RD based on is_rhs 
+    // (4) hanlde MPORT usage based on wr/rd 
     // We found an access to some memory port.
     auto per1       = alter_full_str.find(".");
     auto per2       = alter_full_str.find(".", per1 + 1);
