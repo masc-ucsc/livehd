@@ -198,6 +198,10 @@ private:
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
+  absl::flat_hash_map<std::string, uint8_t> mem2port_cnt;
+
+
+
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;
   uint32_t seq_cnt;
