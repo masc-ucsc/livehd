@@ -713,6 +713,11 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
+  // empty ta, handle as tuple_struct
+  if (lnast->get_first_child(lnidx_ta) == lnast->get_last_child(lnidx_ta)) {
+    process_ast_tuple_struct(lg, lnidx_ta);
+    return;
+  }
   absl::flat_hash_map<int, Node>        ta_map;
   absl::flat_hash_map<int, std::string> ta_name;
   int                                   i = 0;

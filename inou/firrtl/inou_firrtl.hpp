@@ -50,7 +50,7 @@ protected:
   void InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
   void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
   void HandleMemPortPre(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void HandleMemPort(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
+  void HandleMport(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
   void PortDirInference(const std::string &port_name, const std::string &mem_name, const bool is_rhs);
   void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
@@ -198,7 +198,9 @@ private:
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
-  absl::flat_hash_map<std::string, uint8_t> mem2port_cnt;
+  absl::flat_hash_map<std::string, int8_t>      mem2port_cnt;
+  absl::flat_hash_map<std::string, int8_t>      mem2enable_bitvec;
+  absl::flat_hash_map<std::string, std::string> mport2mem;
 
 
 
