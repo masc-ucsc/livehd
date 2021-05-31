@@ -62,14 +62,11 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
 }
 
 std::string Cgen_verilog::get_append_to_name(const std::string &name, std::string_view ext) const {
-  std::string name_next;
   if (name[0] == '\\') {
-    name_next = name.substr(0, name.size() - 1) + std::string(ext);
-  } else {
-    name_next = name + std::string(ext);
+    return absl::StrCat("\\", ext, name.substr(1, name.size() - 1), " ");
   }
 
-  return name_next;
+  return absl::StrCat(ext, name);
 }
 
 std::string Cgen_verilog::get_expression(const Node_pin &dpin) const {
@@ -102,7 +99,7 @@ void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
   auto dpin_q = node.get_driver_pin();
 
   std::string pin_name  = dpin_q.get_wire_name();
-  const auto  name_next = get_scaped_name(std::string(pin_name) + "_next");
+  const auto  name_next = get_scaped_name(absl::StrCat("___next_",std::string(pin_name)));
 
   if (dpin_d.is_invalid()) {
     absl::StrAppend(&buffer, "  ", name_next, " = 'hx; // disconnected flop\n");
@@ -624,7 +621,7 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
 
     // FIXME: HERE if flop is output, do not create flop
     const auto name      = get_scaped_name(pin_name);
-    const auto name_next = get_scaped_name(std::string(pin_name) + "_next");
+    const auto name_next = get_scaped_name(absl::StrCat("___next_", std::string(pin_name)));
 
     std::string edge = "posedge";
     if (node.get_sink_pin("posclk").is_connected()) {
@@ -719,7 +716,7 @@ void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std
   }
 
   if (dpin.is_type_flop()) {
-    auto name_next = get_append_to_name(name, "_next ");
+    auto name_next = get_append_to_name(name, "___next_");
 
     if (bits <= 0) {
       absl::StrAppend(&buffer, reg_str, name_next, ";\n");
@@ -765,9 +762,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
     if (op == Ntype_op::Mux) {
       // mux needs name, but it can also has a vector to avoid ifs
       if (node.get_num_inp_edges() > 3 && false) {
-        auto name_sel = get_append_to_name(name, "_sel");
-
-        // FIXME: mux2vector.emplace(node.get_compact_class(), name_sel);
+        auto name_sel = get_append_to_name(name, "___sel_");
 
         absl::StrAppend(&buffer, "reg signed [", node.get_driver_pin().get_bits() - 1, ":0] ", name_sel, ";\n");
       }
@@ -785,7 +780,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
       auto final_expr = node.get_type_const().to_verilog();
       pin2expr.emplace(node.get_driver_pin().get_compact_class(), final_expr);
     } else if (op == Ntype_op::Get_mask) {
-      name         = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
+      name         = get_scaped_name(absl::StrCat("___unsign_", node.get_sink_pin("a").get_wire_name()));
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
       {
         // Force the "a" pin in get_mask to be a variable (yosys fails otherwise)
