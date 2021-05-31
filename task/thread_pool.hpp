@@ -40,7 +40,10 @@ inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
 }
 
 class Thread_pool {
-  std::vector<std::thread> threads;
+  static inline std::vector<std::thread> threads;
+  static inline std::atomic_flag booting_lock = ATOMIC_FLAG_INIT;
+  static inline std::atomic<bool> started_lock;
+
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
 #else
@@ -56,17 +59,16 @@ class Thread_pool {
   std::mutex              queue_mutex;
 
   void task() {
-    static std::atomic_flag lock = ATOMIC_FLAG_INIT;
-
-    if (!lock.test_and_set(std::memory_order_acquire)) {
-      for (unsigned i = 1; i < thread_count; ++i) threads.push_back(std::thread([this] { this->task(); }));
+    if (!booting_lock.test_and_set(std::memory_order_acquire)) {
+      for (unsigned i = 1; i < thread_count; ++i) {
+        threads.push_back(std::thread([this] { this->task(); }));
+      }
+      started_lock = true;
     }
 
     while (!finishing) {
-      // while(!queue.empty()) {
       next_job()();
       jobs_left.fetch_sub(1, std::memory_order_relaxed);
-      //}
     }
   }
 
@@ -112,6 +114,8 @@ public:
       jobs_left(0)
       , finishing(false) {
 
+    started_lock = false;
+
     thread_count = _thread_count;
     size_t lim   = (std::thread::hardware_concurrency() - 1);  // -1 for calling thread
 
@@ -125,13 +129,14 @@ public:
     threads.push_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
 
-  ~Thread_pool() {
+  virtual ~Thread_pool() {
+    while(!started_lock)
+      ; // The exit could be before we even booting the threads (uff)
+
     wait_all();
 
-    {
-      std::lock_guard<std::mutex> lock(queue_mutex);
-      finishing = true;
-    }
+    finishing = true;
+
     job_available_var.notify_all();
 
     for (auto &x : threads)
