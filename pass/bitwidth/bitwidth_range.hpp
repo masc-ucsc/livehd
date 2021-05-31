@@ -85,6 +85,12 @@ public:
   void   set_sbits_range(Bits_t size);
   void   set_ubits_range(Bits_t size);
   Bits_t get_sbits() const;
+  Lconst get_range() const {
+    if (overflow) {
+      return (Lconst(1)<<get_sbits());
+    }
+    return Lconst(max-min+1);
+  }
   Lconst get_max() const { return to_lconst(overflow, max); };
   Lconst get_min() const { return to_lconst(overflow, min); };
   int    get_raw_max() const { return max; };

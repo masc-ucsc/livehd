@@ -687,7 +687,9 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
 }
 
 void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned) {
-  
+  if (dpin.is_type_const())
+    return; // No point for constants
+
   auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), name});
   if (!replaced)
     return;

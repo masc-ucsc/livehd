@@ -1,8 +1,7 @@
 // Simple 1rd+1wr memory (rd 0 cycles, wr 1 cycle)
 
 $rd_addr.__sbits = 8 // 256 entries
-$wr_addr.__sbits = 8 // 256 entries (should match rd_addr
-
+$wr_addr.__sbits = 8 // same as rd_addr
 
 rd_a.__sbits = 8
 rd_a := $rd_addr + 32
@@ -17,20 +16,18 @@ wr_data := wr_data + 1
 
 mem.addr    = addr_ports
 mem.bits    = 32
-// mem.clock   = $my_ram_clock // shared by both ports
+// mem.size inferred (256 entries)
+mem.clock   = $my_ram_clock // shared by both ports
 mem.din     = (0, wr_data_q)
 mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
 
 // mem.fwd     = false default value is false
 mem.latency  = (0, 1)
-    
-mem.wmask    = -1 // no wmask, all bits always written
-mem.mode     = 0b01 // port 0 rd, port 1 wr -> 0b01
 
-mem like memory interface
+mem.wensize = 1 // no wmask, all bits always written
+mem.rdport = (true,false) // port 0 rd, port 1 wr
 
 res = __memory(mem)
 
-%out = res.0
 %out = res.0
 

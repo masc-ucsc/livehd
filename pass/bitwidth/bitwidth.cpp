@@ -382,7 +382,7 @@ void Bitwidth::process_memory(Node &node) {
         Pass::error("memory {} input pin:{} has {} bits but memory only has {} bits", node.debug_name(), dpin.debug_name(), it->second.get_sbits(), mem_bits);
         return;
       }
-    }else if (!mem_din_bits_missing) {
+    }else if (!mem_din_bits_missing && mem_bits!=mem_din_bits) {
 
       Pass::info("memory {} requests {} bits, but only {} needed (optimizing)", node.debug_name(), mem_bits, mem_din_bits);
       mem_bits = mem_din_bits;
@@ -407,7 +407,12 @@ void Bitwidth::process_memory(Node &node) {
         if (it==flat_bwmap.end())
           continue;
 
-        auto sz = (it->second.get_max() - it->second.get_min()).to_i();
+        if (!it->second.get_range().is_i()) {
+          Pass::error("memory {} size {} exceeds limit", it->second.get_range().to_pyrope());
+          return;
+        }
+
+        auto sz = it->second.get_range().to_i();
         new_mem_size = std::max(sz, new_mem_size);
 
         if (sz > mem_size && mem_size!=0) {
@@ -427,9 +432,12 @@ void Bitwidth::process_memory(Node &node) {
     }
 
     if (new_mem_size && (mem_size==0 || mem_size>new_mem_size)) {
-      Pass::info("memory {} size requested {} but only {} needed (optimizing)", node.debug_name(), mem_size, new_mem_size);
-      if (mem_size)
+      if (mem_size) {
         node.setup_sink_pin("size").del(); // disconnect old const
+        Pass::info("memory {} size requested {} but only {} needed (optimizing)", node.debug_name(), mem_size, new_mem_size);
+      }else{
+        Pass::info("memory {} inferring size of {}", node.debug_name(), new_mem_size);
+      }
       mem_size = new_mem_size;
       auto node_const = node.create_const(mem_size);
       node.setup_sink_pin("size").connect_driver(node_const);
