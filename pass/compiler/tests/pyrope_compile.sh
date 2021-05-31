@@ -20,9 +20,9 @@ hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail firrtl_gcd_3bits
 nested_if firrtl_tail3 counter_nested_if tuple_empty_attr tuple_reg tuple_reg2
 struct_flop tuple_nested1 tuple_nested2 get_mask1 counter_mix vec_shift_register_param'
 
-pts='lhs_wire2'
+# pts='lhs_wire2'
 # pts='memory_1rd1wr'
-pts='pp'
+# pts='pp'
 # pts='pp2'
 # pts='vector'
 # pts='vector2'

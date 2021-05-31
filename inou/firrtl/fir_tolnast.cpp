@@ -185,6 +185,7 @@ uint32_t Inou_firrtl::get_bit_count(const firrtl::FirrtlPB_Type type) {
 void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type, const std::string& id, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
+      //Todo: also initialize variable to zero
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         init_wire_dots(lnast,
                        type.bundle_type().field(i).type(),
@@ -204,14 +205,25 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
-      auto wire_bits = get_bit_count(type);
-      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
-      async_rst_names.insert(id);
+      // auto wire_bits = get_bit_count(type);
+      // create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
+      // async_rst_names.insert(id);
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {  // signed
+      auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
+      lnast.add_child(idx_asg_wire, Lnast_node::create_ref(lnast.add_string(id)));
+      lnast.add_child(idx_asg_wire, Lnast_node::create_const(lnast.add_string(std::to_string(0))));
       auto wire_bits = get_bit_count(type);
       create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, true);
+      break;
+    }
+    case firrtl::FirrtlPB_Type::kUintType: {  // unsigned
+      auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
+      lnast.add_child(idx_asg_wire, Lnast_node::create_ref(lnast.add_string(id)));
+      lnast.add_child(idx_asg_wire, Lnast_node::create_const(lnast.add_string(std::to_string(0))));
+      auto wire_bits = get_bit_count(type);
+      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
       break;
     }
     case firrtl::FirrtlPB_Type::kClockType: {
@@ -466,7 +478,7 @@ void Inou_firrtl::InitMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl:
 
   // To save space in LNAST, only specify __bits info for 0th element of Mem.
   /* init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, "[0]"), parent_node); */
-  init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, ".0"), parent_node);
+  // init_wire_dots(lnast, mem.type(), absl::StrCat(mem_name, ".0"), parent_node);
 }
 
 /* CMemory is Chirrtl's version of FIRRTL Memory (where a cmemory statement
@@ -1819,11 +1831,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       // FIXME->sh: 1/25/2021, we don't need to specify bits for wires as in FIRRTL 
       // we could propagate the necessary information from inputs/reg
       // init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node); 
-
-      auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
-      lnast.add_child(idx_asg_wire, Lnast_node::create_ref(lnast.add_string(stmt.wire().id())));
-      std::string_view wire_default_value = "0";
-      lnast.add_child(idx_asg_wire, Lnast_node::create_const(lnast.add_string(wire_default_value)));
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register

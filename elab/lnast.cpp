@@ -801,7 +801,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 
   // handle statement lhs
   if (type.is_assign() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple()
-      || type.is_tuple_concat()) {
+      || type.is_tuple_concat() || type.is_tuple_get()) {
     auto lhs_nid  = get_first_child(opr_nid);
     auto lhs_name = get_name(lhs_nid);
 
