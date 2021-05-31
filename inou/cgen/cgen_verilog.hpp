@@ -19,6 +19,7 @@ private:
 
   inline static absl::flat_hash_set< std::string>       reserved_keyword;
 
+  static std::string get_wire_or_const(const Node_pin &dpin);
   static std::string get_scaped_name(std::string_view wire_name);
   static std::string get_scaped_name(const std::string &name) {
     std::string_view name_sv{name};

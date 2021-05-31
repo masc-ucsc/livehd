@@ -33,6 +33,13 @@ Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_ver
   }
 }
 
+std::string Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
+  if (dpin.is_type_const())
+    return dpin.get_type_const().to_verilog();
+
+  return get_scaped_name(dpin.get_wire_name());
+}
+
 std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   if (name[0] == '%') {
     if (name[1] == '.') {
@@ -248,31 +255,31 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
 
   first_entry=true;
   if (single_clock) {
-    absl::StrAppend(&buffer, ".clock(", get_scaped_name(base_clock_dpin.get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, ".clock(", get_wire_or_const(base_clock_dpin), ")\n");
     first_entry = false;
   }
 
   for(auto i=0;i<n_rd_ports;++i) {
-    absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(i), "(", get_scaped_name(rd_addr_dpin[i].get_wire_name())  , ")\n");
+    absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(i), "(", get_wire_or_const(rd_addr_dpin[i])  , ")\n");
     first_entry=false;
 
-    absl::StrAppend(&buffer, ",.rd_enable_", std::to_string(i), "(", get_scaped_name(rd_enable_dpin[i].get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, ",.rd_enable_", std::to_string(i), "(", get_wire_or_const(rd_enable_dpin[i]), ")\n");
     if (!single_clock) {
-      absl::StrAppend(&buffer, ",.rd_clock_", std::to_string(i), "(", get_scaped_name(rd_clock_dpin[i].get_wire_name()), ")\n");
+      absl::StrAppend(&buffer, ",.rd_clock_", std::to_string(i), "(", get_wire_or_const(rd_clock_dpin[i]), ")\n");
     }
     auto dout_dpin = node.setup_driver_pin_raw(i); // rd data out
-    absl::StrAppend(&buffer, ",.rd_dout_", std::to_string(i), "(", get_scaped_name(dout_dpin.get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, ",.rd_dout_", std::to_string(i), "(", get_wire_or_const(dout_dpin), ")\n");
   }
 
   for(auto i=0;i<n_wr_ports;++i) {
-    absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(i), "(", get_scaped_name(wr_addr_dpin  [i].get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(i), "(", get_wire_or_const(wr_addr_dpin[i]), ")\n");
     first_entry=false;
 
-    absl::StrAppend(&buffer, ",.wr_enable_", std::to_string(i), "(", get_scaped_name(wr_enable_dpin[i].get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, ",.wr_enable_", std::to_string(i), "(", get_wire_or_const(wr_enable_dpin[i]), ")\n");
     if (!single_clock) {
-      absl::StrAppend(&buffer, ",.wr_clock_", std::to_string(i), "(", get_scaped_name(wr_clock_dpin[i].get_wire_name()), ")\n");
+      absl::StrAppend(&buffer, ",.wr_clock_", std::to_string(i), "(", get_wire_or_const(wr_clock_dpin[i]), ")\n");
     }
-    absl::StrAppend(&buffer, ",.wr_din_"   , std::to_string(i), "(", get_scaped_name(wr_din_dpin   [i].get_wire_name()), ")\n");
+    absl::StrAppend(&buffer, ",.wr_din_"   , std::to_string(i), "(", get_wire_or_const(wr_din_dpin   [i]), ")\n");
   }
 
   absl::StrAppend(&buffer, ");\n");
@@ -453,7 +460,8 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     // TODO: If val_expr min>=0, then >> is OK
     final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Const) {
-    final_expr = node.get_type_const().to_verilog();
+    // final_expr = node.get_type_const().to_verilog();
+    return; // Done before at create_locals
   } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
@@ -559,12 +567,8 @@ void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
           dpin.invalidate();
       }
       if (!dpin.is_invalid()) {
-        if (first_entry) {
-          absl::StrAppend(&buffer, ".", io_pin.name, "(", get_scaped_name(dpin.get_wire_name()), ")\n");
-          first_entry = false;
-        } else {
-          absl::StrAppend(&buffer, ",.", io_pin.name, "(", get_scaped_name(dpin.get_wire_name()), ")\n");
-        }
+        absl::StrAppend(&buffer, first_entry?"":",", ".", io_pin.name, "(", get_wire_or_const(dpin), ")\n");
+        first_entry = false;
       }
     }
 
@@ -687,8 +691,9 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
 }
 
 void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned) {
-  if (dpin.is_type_const())
+  if (dpin.is_type_const()) {
     return; // No point for constants
+  }
 
   auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), name});
   if (!replaced)
@@ -776,6 +781,9 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
       }
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
+    } else if (op == Ntype_op::Const) {
+      auto final_expr = node.get_type_const().to_verilog();
+      pin2expr.emplace(node.get_driver_pin().get_compact_class(), final_expr);
     } else if (op == Ntype_op::Get_mask) {
       name         = get_scaped_name(node.get_sink_pin("a").get_wire_name() + "_unsign");
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
@@ -793,7 +801,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
 
       if (n_out < 2)
         continue;
-    }
+    } 
 
     add_to_pin2var(buffer, dpin, name, out_unsigned);
   }
@@ -847,24 +855,27 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
     append_to_file(filename, fd, buffer);
   }
 
+  // BEGIN PARALLEL BLOCK 1
   {
     std::string buffer;
-    create_locals(buffer, lg);  // pin2var & mux2vector adds
+    create_locals(buffer, lg);  // pin2expr, pin2var & mux2vector adds
     append_to_file(filename, fd, buffer);
   }
 
   {
     std::string buffer;
-    create_memories(buffer, lg);  // pin2var & mux2vector reads
+    create_memories(buffer, lg);  // no local access
     append_to_file(filename, fd, buffer);
   }
 
   {
     std::string buffer;
-    create_subs(buffer, lg);  // pin2var & mux2vector reads
+    create_subs(buffer, lg);  // no local access
     append_to_file(filename, fd, buffer);
   }
+  // END PARALLEL BLOCK 1
 
+  // BEGIN PARALLEL BLOCK 2
   {
     std::string buffer;
     create_combinational(buffer, lg);  // pin2expr adds, reads pin2var & mux2vector
@@ -892,6 +903,7 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
     create_registers(buffer, lg);  // reads pin2var
     append_to_file(filename, fd, buffer);
   }
+  // BEGIN PARALLEL BLOCK 2
 
   append_to_file(filename, fd, "endmodule\n");
 }
