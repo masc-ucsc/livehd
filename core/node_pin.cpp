@@ -420,10 +420,7 @@ std::string Node_pin::get_wire_name() const {
   if (name.empty())
     name = "t";
 
-  absl::StrAppend(&name, "_pin", std::to_string(get_root_idx()));
-  if (pid != 0) {
-    absl::StrAppend(&name, "_", get_pin_name());
-  }
+  absl::StrAppend(&name, "_pin", std::to_string(get_root_idx()), "_", std::to_string(pid));
 
   return name;
 }

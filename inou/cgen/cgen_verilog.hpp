@@ -36,6 +36,7 @@ private:
   void process_simple_node(std::string &buffer, Node &node);
 
   void create_module_io(std::string &buffer, Lgraph *lg);
+  void create_memories(std::string &buffer, Lgraph *lg);
   void create_subs(std::string &buffer, Lgraph *lg);
   void create_combinational(std::string &buffer, Lgraph *lg);
   void create_outputs(std::string &buffer, Lgraph *lg);

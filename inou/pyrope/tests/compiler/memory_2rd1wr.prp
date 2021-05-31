@@ -1,3 +1,5 @@
+
+
 // Simple 2rd+1wr memory (RF type)
 // matches inou/yosys/tests/long_regfile2r1w.v
 
@@ -12,13 +14,13 @@ mem.addr    = ($raddr0, $raddr1, $wraddr)
 mem.bits    = 3
 mem.size    = 16
 mem.clock   = $clk
-mem.data_in = (0, 0, $din0)
+mem.din     = (0, 0, $din0)
 mem.enable  = (1, 1, $we0)
 
 mem.fwd     = true
 mem.latency = (1, 1, 1)
-mem.wmask   = -1
-mem.mode    = 0b011 // pos0 = 1 -> read, pos2 = 0 - > write
+mem.wensize = 1 // 1 we bit (no write mask)
+mem.rdport  = (-1,1,0) // 0 WR, !=0 -> RD
 
 res = __memory(mem)
 

@@ -131,6 +131,7 @@ public:
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '1');
   }
+  bool is_false() const { return num==0; }
   bool is_string() const { return explicit_str && (bits & 0x7) == 0 && bits >= calc_num_bits(num); }
   bool is_mask() const { return ((num + 1) & (num)) == 0; }
   bool is_power2() const { return ((num - 1) & (num)) == 0; }

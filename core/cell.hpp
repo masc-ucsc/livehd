@@ -154,7 +154,7 @@ public:
 
   static inline constexpr std::string_view get_sink_name(Ntype_op op, int pid) {
     if (pid > 10)
-      return "x";
+      pid = pid % 11; // wrap names around for multi inputs like memory cell
 
     auto name = sink_pid2name[pid][static_cast<std::size_t>(op)];
     assert(name != "invalid");

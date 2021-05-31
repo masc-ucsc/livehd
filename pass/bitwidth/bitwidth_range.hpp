@@ -70,6 +70,13 @@ public:
   Bitwidth_range(const Lconst &value);
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
 
+  Bitwidth_range(const int64_t min_val, const int64_t max_val) {
+    I(min_val<=max_val);
+    min      = min_val;
+    max      = max_val;
+    overflow = false;
+  }
+
   void set_narrower_range(const Lconst &min_val, const Lconst &max_val);
   void set_wider_range(const Bitwidth_range &bw);
   void set_range(const Lconst &min_val, const Lconst &max_val);

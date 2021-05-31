@@ -924,20 +924,23 @@ void Cprop::tuple_subgraph(const Node &node) {
                 auto l = Lgtuple::get_first_level_name(e.first);
                 if (strncasecmp(l.data(), "addr", l.size())==0) {
                   ++n_ports;
-                }else if (strncasecmp(l.data(), "mode", l.size())==0) {
-                  if (!e.second.is_type_const())
+                }else if (strncasecmp(l.data(), "rdport", l.size())==0) {
+                  if (!e.second.is_type_const()) {
+                    node_tup->set_issue();
                     continue; // Maybe later
+                  }
 
                   auto v = e.second.get_type_const();
                   if (!v.is_i()) {
-                    Pass::error("Memory {} mode:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
+                    Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
                   }
-                  n_rd_ports = v.popcount();
+                  if (!v.is_false())
+                    ++n_rd_ports;
                 }
               }
             }
           }
-          if (n_ports==0 || n_rd_ports==0) {
+          if (n_ports==0 || n_rd_ports<=0 || !node_tup->is_correct()) {
             Pass::info("Memory {} still can not figure out ports. (Maybe more iterations)", node.debug_name());
             node_tup->set_issue();
           }else{

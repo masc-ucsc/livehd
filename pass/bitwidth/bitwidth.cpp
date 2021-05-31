@@ -298,6 +298,183 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
 }
 
+void Bitwidth::process_memory(Node &node) {
+
+  int64_t mem_size     = 0;
+  Bits_t mem_bits      = 0;
+  Bits_t mem_din_bits  = 0;
+  bool   mem_din_bits_missing = false;
+  Bits_t mem_addr_bits = 0;
+  bool   mem_addr_bits_missing = false;
+  std::vector<Node_pin> din_drivers;
+  std::vector<Node_pin> addr_drivers;
+  {
+    for(const auto &e:node.inp_edges_ordered()) {
+      auto n = e.sink.get_pin_name();
+      if (n == "clock") {
+        auto it = flat_bwmap.find(e.driver.get_compact_flat());
+        if (it==flat_bwmap.end()) {
+          Bitwidth_range clock_bw;
+          clock_bw.set_sbits_range(1);
+          flat_bwmap.insert({e.driver.get_compact_flat(), clock_bw});
+
+          discovered_some_backward_nodes_try_again = true;
+        }
+      }else if (n == "din" || n == "addr") {
+        auto it = flat_bwmap.find(e.driver.get_compact_flat());
+        Bits_t dbits = 0;
+        if (it!=flat_bwmap.end()) {
+          dbits = it->second.get_sbits();
+        }else{
+          if (n=="din")
+            mem_din_bits_missing = true;
+          else
+            mem_addr_bits_missing = true;
+        }
+
+        if (n=="din") {
+          mem_din_bits = std::max(dbits, mem_din_bits);
+          din_drivers.emplace_back(e.driver);
+        }else{
+          I(n=="addr");
+          mem_addr_bits = std::max(dbits, mem_addr_bits);
+          addr_drivers.emplace_back(e.driver);
+        }
+
+      }else if (n == "bits" || n == "size") {
+        auto val = e.driver.get_type_const();
+        if (!e.driver.is_type_const()) {
+          node.dump();
+          Pass::error("Memory node:{} has {} connected to a non-constant pin:{}", node.debug_name(), n, e.driver.debug_name());
+          return;
+        }
+        if (!val.is_i()) {
+          node.dump();
+          Pass::error("Memory node:{} has {} connected to a non-integer value of {}", node.debug_name(), n, val.to_pyrope());
+          return;
+        }
+        auto v = val.to_i();
+        if (n == "bits") {
+          mem_bits = v;
+        }else{
+          I(n=="size");
+          mem_size = v;
+        }
+      }
+    }
+
+    fmt::print("Memory {} has bits:{} (din bits:{}) and size:{} (addr size:{})\n"
+        , node.debug_name()
+        , mem_bits, mem_din_bits
+        , mem_size, (1UL<<mem_addr_bits));
+  }
+
+  if (mem_bits && mem_din_bits) {
+    if (mem_bits < mem_din_bits) { // Compile error ahead (overflow in inputs)
+      for(auto &dpin:din_drivers) {
+        auto it = flat_bwmap.find(dpin.get_compact_flat());
+        if (it==flat_bwmap.end())
+          continue;
+
+        if (it->second.get_sbits() <= mem_bits)
+          continue;
+
+        Pass::error("memory {} input pin:{} has {} bits but memory only has {} bits", node.debug_name(), dpin.debug_name(), it->second.get_sbits(), mem_bits);
+        return;
+      }
+    }else if (!mem_din_bits_missing) {
+
+      Pass::info("memory {} requests {} bits, but only {} needed (optimizing)", node.debug_name(), mem_bits, mem_din_bits);
+      mem_bits = mem_din_bits;
+
+      node.setup_sink_pin("bits").del(); // disconnect old const
+      auto node_const = node.create_const(mem_bits);
+      node.setup_sink_pin("bits").connect_driver(node_const);
+    }
+  }else if (mem_din_bits && !mem_din_bits_missing) {
+    I(mem_bits==0);
+    mem_bits = mem_din_bits; // inferring size
+    auto node_const = node.create_const(mem_bits);
+    node.setup_sink_pin("bits").connect_driver(node_const);
+  }
+
+  {
+    int64_t new_mem_size=0;
+
+    if (!mem_addr_bits_missing) {
+      for(const auto &dpin:addr_drivers) {
+        auto it = flat_bwmap.find(dpin.get_compact_flat());
+        if (it==flat_bwmap.end())
+          continue;
+
+        auto sz = (it->second.get_max() - it->second.get_min()).to_i();
+        new_mem_size = std::max(sz, new_mem_size);
+
+        if (sz > mem_size && mem_size!=0) {
+          Pass::error("memory {} input pin:{} needs from {} to {} but memory only has {} entries"
+              ,node.debug_name()
+              ,dpin.debug_name()
+              ,it->second.get_max().to_pyrope()
+              ,it->second.get_min().to_pyrope()
+              ,mem_size);
+          return;
+        }
+      }
+    }
+    if (new_mem_size==0 && mem_size==0) {
+      not_finished = true;
+      Pass::info("memory {} could not infer memory size (trying again)", node.debug_name());
+    }
+
+    if (new_mem_size && (mem_size==0 || mem_size>new_mem_size)) {
+      Pass::info("memory {} size requested {} but only {} needed (optimizing)", node.debug_name(), mem_size, new_mem_size);
+      if (mem_size)
+        node.setup_sink_pin("size").del(); // disconnect old const
+      mem_size = new_mem_size;
+      auto node_const = node.create_const(mem_size);
+      node.setup_sink_pin("size").connect_driver(node_const);
+    }
+
+    if (mem_size && mem_addr_bits_missing) {
+      Bitwidth_range addr_bw(-mem_size/2-1,mem_size/2);
+      auto addr_sbits = addr_bw.get_sbits();
+      for(auto &dpin:addr_drivers) {
+        auto it = flat_bwmap.find(dpin.get_compact_flat());
+        if (it != flat_bwmap.end()) {
+          I(it->second.get_sbits() <= addr_sbits);; // error already detected in last iteration
+        }else{
+          flat_bwmap.insert({dpin.get_compact_flat(), addr_bw});
+          discovered_some_backward_nodes_try_again = true;
+        }
+      }
+    }
+  }
+
+  if (mem_bits==0) {
+    Pass::info("memory {} could not infer the entry size in bits (trying again)", node.debug_name());
+    not_finished = true;
+    return;
+  }
+
+  Bitwidth_range data_bw;
+  data_bw.set_sbits_range(mem_bits);
+  for(auto &dpin:din_drivers) {
+    auto it = flat_bwmap.find(dpin.get_compact_flat());
+    if (it != flat_bwmap.end()) {
+      I(it->second.get_sbits() <= mem_bits); // error already reported
+    }else{
+      flat_bwmap.insert({dpin.get_compact_flat(), data_bw});
+    }
+  }
+
+  Bitwidth_range bw_din;
+  bw_din.set_sbits_range(mem_bits);
+
+  for(auto dpin:node.out_connected_pins()) {
+    adjust_bw(dpin, bw_din);
+  }
+}
+
 void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());  // Dangling sum??? (delete)
 
@@ -879,7 +1056,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
     }
     if (ntposs.is_invalid()) {
       ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Get_mask);
-      ntposs.setup_sink_pin("mask").connect_driver(node_attr.get_class_lgraph()->create_node_const(mask));
+      ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));
       ntposs.setup_sink_pin("a").connect_driver(name_dpin);
     }
 
@@ -1064,6 +1241,8 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         process_attr_set(node, fwd_it);
       } else if (op == Ntype_op::AttrGet) {
         process_attr_get(node);
+      } else if (op == Ntype_op::Memory) {
+        process_memory(node);
       } else if (op == Ntype_op::Sum) {
         process_sum(node, inp_edges);
       } else if (op == Ntype_op::Mult) {
@@ -1101,6 +1280,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
           set_graph_boundary(e.driver, e.sink);
         }
       }
+
     }  // end of lg->forward()
 
     // set bits for graph input and output
@@ -1228,7 +1408,7 @@ void Bitwidth::try_delete_attr_node(Node &node) {
       auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
 
       auto mask_const   = (Lconst(1UL) << Lconst(bw_lhs_bits)) - 1;
-      auto all_one_node = node.get_class_lgraph()->create_node_const(mask_const);
+      auto all_one_node = node.create_const(mask_const);
       auto all_one_dpin = all_one_node.setup_driver_pin();
 
       // Note: I set the unsigned k-bits (max, min) for the mask

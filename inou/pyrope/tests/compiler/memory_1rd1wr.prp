@@ -18,7 +18,7 @@ wr_data := wr_data + 1
 mem.addr    = addr_ports
 mem.bits    = 32
 // mem.clock   = $my_ram_clock // shared by both ports
-mem.data_in = (0, wr_data_q)
+mem.din     = (0, wr_data_q)
 mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
 
 // mem.fwd     = false default value is false

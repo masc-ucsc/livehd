@@ -107,17 +107,175 @@ void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
 void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
   (void)buffer;
 
-  for(auto &e:node.inp_edges()) {
-    (void)e;
-    I(false); // FIXME:
-#if 0
-    auto dpin_d = node.get_sink_pin("din").get_driver_pin();
-    auto dpin_q = node.get_driver_pin();
+  auto iname = get_scaped_name(node.default_instance_name());
 
-    std::string pin_name  = dpin_q.get_wire_name();
-    const auto  name_next = get_scaped_name(std::string(pin_name) + "_next");
-#endif
+  int n_rd_ports=0;
+  int n_wr_ports=0;
+
+  // WARNING: The read_vector must be computed first, to have know if the
+  // addr/din/... are read/writes ahead (traverse out of order)
+  std::vector<std::pair<bool,int>> port_vector; // first == read, second == port_id
+  {
+    auto rdport_pid = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
+    while(true) {
+      auto spin = node.get_sink_pin_raw(rdport_pid);
+      if (spin.is_invalid())
+        break;
+
+      auto dnode = spin.get_driver_node();
+      if (!dnode.is_type_const()) {
+        Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), dnode.debug_name());
+        return;
+      }
+      if (dnode.get_type_const().is_false()) {
+        port_vector.emplace_back(false, n_wr_ports);
+        ++n_wr_ports;
+      }else{
+        port_vector.emplace_back(true, n_rd_ports);
+        ++n_rd_ports;
+      }
+
+      rdport_pid += 11;
+    }
   }
+
+  std::string parameters;
+
+  std::vector<Node_pin> rd_addr_dpin(n_rd_ports);
+  std::vector<Node_pin> rd_enable_dpin(n_rd_ports);
+  std::vector<Node_pin> rd_clock_dpin(n_rd_ports);
+
+  std::vector<Node_pin> wr_addr_dpin(n_wr_ports);
+  std::vector<Node_pin> wr_enable_dpin(n_wr_ports);
+  std::vector<Node_pin> wr_din_dpin(n_wr_ports);
+  std::vector<Node_pin> wr_clock_dpin(n_wr_ports);
+
+  bool first_entry=true;
+  for(auto e:node.inp_edges()) {
+    auto pin_name = e.sink.get_pin_name();
+
+    auto port_id = e.sink.get_pid() / 11;
+
+    bool rd_port  = port_vector[port_id].first;
+    bool pos_port = port_vector[port_id].second;
+
+    if (pin_name == "bits") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant for bits not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      auto v = e.driver.get_type_const().to_verilog();
+      absl::StrAppend(&parameters, first_entry?"":" ,", ".BITS(", v, ")");
+      first_entry=false;
+    }else if (pin_name == "size") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant for size not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      auto v = e.driver.get_type_const().to_verilog();
+      absl::StrAppend(&parameters, first_entry?"":" ,",".SIZE(", v, ")");
+      first_entry=false;
+    }else if (pin_name == "latency") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant for latency not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      auto v = e.driver.get_type_const().to_verilog();
+      absl::StrAppend(&parameters, first_entry?"":" ,",".LATENCY_", std::to_string(port_id), "(", v, ")");
+      first_entry=false;
+    }else if (pin_name == "wensize") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant for wensize not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      auto v = e.driver.get_type_const().to_verilog();
+      absl::StrAppend(&parameters, first_entry?"":" ,",".WENSIZE", "(", v, ")");
+      first_entry=false;
+    }else if (pin_name == "fwd") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant for fwd not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      auto v = e.driver.get_type_const().to_verilog();
+      absl::StrAppend(&parameters, first_entry?"":" ,",".FWD", "(", v, ")");
+      first_entry=false;
+    }else if (pin_name == "clock") {
+      if (rd_port)
+        rd_clock_dpin[pos_port] = e.driver;
+      else
+        wr_clock_dpin[pos_port] = e.driver;
+    }else if (pin_name == "addr") {
+      if (rd_port)
+        rd_addr_dpin[pos_port] = e.driver;
+      else
+        wr_addr_dpin[pos_port] = e.driver;
+    }else if (pin_name == "enable") {
+      if (rd_port)
+        rd_enable_dpin[pos_port] = e.driver;
+      else
+        wr_enable_dpin[pos_port] = e.driver;
+    }else if (pin_name == "din") {
+      if (!rd_port)
+        wr_din_dpin[pos_port] = e.driver;
+    }
+  }
+
+  bool single_clock = true;
+  Node_pin base_clock_dpin;
+  {
+    if (rd_clock_dpin[0].is_invalid())
+      base_clock_dpin = wr_clock_dpin[0];
+    else
+      base_clock_dpin = rd_clock_dpin[0];
+
+    for(auto &dpin:rd_clock_dpin) { // set default clock, Possible to have clock=clk which means all share same clock
+      if (dpin.is_invalid()) {
+        dpin = base_clock_dpin;
+        continue;
+      }
+      if (dpin != base_clock_dpin)
+        single_clock = false;
+    }
+  }
+  if (base_clock_dpin.is_invalid()) {
+    Pass::error("memory {} should have a clock pin", node.debug_name());
+    return;
+  }
+
+  absl::StrAppend(&buffer
+      ,"cgen_memory_", single_clock? "":"multiclock_", std::to_string(n_rd_ports), "rd_", std::to_string(n_wr_ports), "wr " // name
+      ," #(", parameters, ") ", iname, "(\n"); // rest
+
+  first_entry=true;
+  if (single_clock) {
+    absl::StrAppend(&buffer, ".clock(", get_scaped_name(base_clock_dpin.get_wire_name()), ")\n");
+    first_entry = false;
+  }
+
+  for(auto i=0;i<n_rd_ports;++i) {
+    absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(i), "(", get_scaped_name(rd_addr_dpin[i].get_wire_name())  , ")\n");
+    first_entry=false;
+
+    absl::StrAppend(&buffer, ",.rd_enable_", std::to_string(i), "(", get_scaped_name(rd_enable_dpin[i].get_wire_name()), ")\n");
+    if (!single_clock) {
+      absl::StrAppend(&buffer, ",.rd_clock_", std::to_string(i), "(", get_scaped_name(rd_clock_dpin[i].get_wire_name()), ")\n");
+    }
+    auto dout_dpin = node.setup_driver_pin_raw(i); // rd data out
+    absl::StrAppend(&buffer, ",.rd_dout_", std::to_string(i), "(", get_scaped_name(dout_dpin.get_wire_name()), ")\n");
+  }
+
+  for(auto i=0;i<n_wr_ports;++i) {
+    absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(i), "(", get_scaped_name(wr_addr_dpin  [i].get_wire_name()), ")\n");
+    first_entry=false;
+
+    absl::StrAppend(&buffer, ",.wr_enable_", std::to_string(i), "(", get_scaped_name(wr_enable_dpin[i].get_wire_name()), ")\n");
+    if (!single_clock) {
+      absl::StrAppend(&buffer, ",.wr_clock_", std::to_string(i), "(", get_scaped_name(wr_clock_dpin[i].get_wire_name()), ")\n");
+    }
+    absl::StrAppend(&buffer, ",.wr_din_"   , std::to_string(i), "(", get_scaped_name(wr_din_dpin   [i].get_wire_name()), ")\n");
+  }
+
+  absl::StrAppend(&buffer, ");\n");
 }
 
 void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
@@ -370,6 +528,16 @@ void Cgen_verilog::create_module_io(std::string &buffer, Lgraph *lg) {
   absl::StrAppend(&buffer, ");\n");
 }
 
+void Cgen_verilog::create_memories(std::string &buffer, Lgraph *lg) {
+  for(auto node:lg->fast()) {
+    auto op = node.get_type_op();
+    if (op!=Ntype_op::Memory)
+      continue;
+
+    process_memory(buffer, node);
+  }
+}
+
 void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
   lg->each_local_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
     (void)lgid;
@@ -438,8 +606,6 @@ void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
   for (auto node : lg->fast()) {
     if (node.is_type_flop())
       process_flop(buffer, node);
-    else if (node.is_type(Ntype_op::Memory))
-      process_memory(buffer, node);
   }
 }
 
@@ -565,7 +731,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
     auto op = node.get_type_op();
 
     if (Ntype::is_multi_driver(op)) {
-      if (op == Ntype_op::Sub) {
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
         for (auto &e : node.inp_edges()) {
           auto name2 = get_scaped_name(e.driver.get_wire_name());
           add_to_pin2var(buffer, e.driver, name2, e.driver.is_unsign());
@@ -682,6 +848,12 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
   {
     std::string buffer;
     create_locals(buffer, lg);  // pin2var & mux2vector adds
+    append_to_file(filename, fd, buffer);
+  }
+
+  {
+    std::string buffer;
+    create_memories(buffer, lg);  // pin2var & mux2vector reads
     append_to_file(filename, fd, buffer);
   }
 

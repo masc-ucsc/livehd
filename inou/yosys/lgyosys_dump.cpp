@@ -202,7 +202,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *module, Node &node) {
   auto *clk_wire   = get_wire(clock_dpin);
 
   auto *addr_wire    = get_wire(addr_dpin);
-  auto *data_in_wire = get_wire(node.get_sink_pin("data_in").get_driver_pin());
+  auto *data_in_wire = get_wire(node.get_sink_pin("din").get_driver_pin());
   auto *enable_wire  = get_wire(node.get_sink_pin("enable").get_driver_pin());
   int   nrd          = 0;
   int   nwr          = 0;
