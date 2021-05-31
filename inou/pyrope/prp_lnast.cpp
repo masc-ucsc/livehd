@@ -915,7 +915,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const mmap_lib::Tree_index &idx_s
     tuple_nodes.emplace_back(nodes);
   }
 
-  if (tuple_nodes.size() == 1) {
+  if (tuple_nodes.size() == 1 && tuple_nodes[0][1].is_invalid()) {
     return tuple_nodes[0][2];
   }
 
