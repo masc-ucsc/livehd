@@ -1565,17 +1565,21 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
 
       // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve this problem, we use dp_assign to avoid this
       //       problem when lhs is a pre-defined circuit component (not ___tmp variable)
-      Lnast_nid idx_asg;
 
       if (lhs_str.substr(0, 1) == "_") {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+        lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
       } else {
-        idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
-        // idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-      }
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+        lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
 
-      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
-      lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+        // // create another dummy assignment of lhs to avoid bitwidth attr_bit_set->attr_dp propagation problem
+        // auto idx_asg2 = lnast.add_child(parent_node, Lnast_node::create_assign());
+        // lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(lhs_str)));
+        // lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(lhs_str)));
+      }
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
@@ -1830,7 +1834,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     case firrtl::FirrtlPB_Statement::kWire: {  // Wire
       // FIXME->sh: 1/25/2021, we don't need to specify bits for wires as in FIRRTL 
       // we could propagate the necessary information from inputs/reg
-      // init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node); 
+      init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node); 
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {  // Register

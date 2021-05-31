@@ -50,7 +50,7 @@ protected:
   void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
   void process_attr_set_propagate(Node &node);
   void process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
-  void insert_tposs_nodes(Node &node_attr, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it);
+  void insert_tposs_nodes(Node &node_attr, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it, const Bitwidth_range &bw);
 
   void garbage_collect_support_structures(XEdge_iterator &inp_edges);
   void set_graph_boundary(const Node_pin &dpin, Node_pin &spin);

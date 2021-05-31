@@ -923,6 +923,15 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
   auto it = flat_bwmap.find(dpin_lhs.get_compact_flat());
+  fmt::print("DEBUG0 lhs_node:{}\n", dpin_lhs.get_node().debug_name());
+  fmt::print("DEBUG0 lhs:{}\n", dpin_lhs.debug_name());
+  fmt::print("DEBUG0 lhs_bits:{}\n", it->second.get_sbits());
+
+  // fmt::print("DEBUG1 self:{}\n", node_dp.get_driver_pin().debug_name());
+  // auto it3 = flat_bwmap.find(node_dp.get_driver_pin().get_compact_flat());
+  // fmt::print("DEBUG1 self bw_bits:{}\n", it3->second.get_sbits());
+
+
   if (it == flat_bwmap.end()) {
 #ifndef NDEBUG
     fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
@@ -936,6 +945,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   }
 
   auto it2 = flat_bwmap.find(dpin_rhs.get_compact_flat());
+  fmt::print("DEBUG0 rhs:{}\n", it2->second.get_sbits());
   if (it2 == flat_bwmap.end()) {
 #ifndef NDEBUG
     fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
@@ -946,6 +956,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
 }
 
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
+  fmt::print("DEBUG attr_node:{}\n", node_attr.debug_name());
   I(node_attr.is_sink_connected("field"));
 
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
@@ -1001,9 +1012,12 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
                     bw.get_sbits(),
                     val.to_i());
 
-      if (parent_pending)
-        bw.set_ubits_range(val.to_i());
-      insert_tposs_nodes(node_attr, val.to_i(), fwd_it);
+      // if (parent_pending) {
+      //   bw.set_ubits_range(val.to_i());
+      // }
+      bw.set_ubits_range(val.to_i());
+      bw.dump();
+      insert_tposs_nodes(node_attr, val.to_i(), fwd_it, bw);
     } else {  // Attr::Set_sbits
       if (bw.get_sbits() > (val.to_i()))
         Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}sbits\n",
@@ -1012,8 +1026,9 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
                     bw.get_sbits(),
                     val.to_i());
 
-      if (parent_pending)
+      if (parent_pending) {
         bw.set_sbits_range(val.to_i());
+      }
     }
   } else if (attr == Attr::Set_max) {
     I(false);  // FIXME: todo
@@ -1035,10 +1050,13 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
     flat_bwmap.insert_or_assign(through_dpin.get_compact_flat(), bw);
     // bw.dump();
   }
+
+  // also set bw for attr_bits_node in case some future lhs dp_assign depends on the attr_bits_node
+  flat_bwmap.insert_or_assign(node_attr.get_driver_pin().get_compact_flat(), bw);
 }
 
 // insert tposs after attr node when ubits
-void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
+void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it, const Bitwidth_range &bw) {
   I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_string().find("__ubits") != std::string::npos);
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
@@ -1067,6 +1085,9 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
       ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));
       ntposs.setup_sink_pin("a").connect_driver(name_dpin);
     }
+    flat_bwmap.insert_or_assign(ntposs.setup_driver_pin().get_compact_flat(), bw);
+    fmt::print("DEBUGN   e.sink:{}\n", e.sink.debug_name());
+    fmt::print("DEBUGN+1 bw:{}\n", bw.get_sbits());
 
     ntposs.setup_driver_pin().connect_sink(e.sink);
     e.del_edge();
@@ -1074,6 +1095,8 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
 
   if (!ntposs.is_invalid())
     fwd_it.add_node(ntposs);  // add once the edges are added
+
+
 }
 
 void Bitwidth::process_attr_set_propagate(Node &node_attr) {
