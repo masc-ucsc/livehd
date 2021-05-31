@@ -40,9 +40,9 @@ inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
 }
 
 class Thread_pool {
-  static inline std::vector<std::thread> threads;
-  static inline std::atomic_flag booting_lock = ATOMIC_FLAG_INIT;
-  static inline std::atomic<bool> started_lock;
+  std::vector<std::thread> threads;
+  std::atomic_flag booting_lock = ATOMIC_FLAG_INIT;
+  std::atomic<bool> started_lock;
 
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
