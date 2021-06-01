@@ -12,8 +12,6 @@
 #include "lgedgeiter.hpp"
 #include "lrand.hpp"
 
-using testing::HasSubstr;
-
 class Setup_lgraph : public ::testing::Test {
 protected:
   std::map<std::string, int> name2pos;

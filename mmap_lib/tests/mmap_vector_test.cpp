@@ -9,8 +9,6 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-using testing::HasSubstr;
-
 class Setup_map_test : public ::testing::Test {
 protected:
   void SetUp() override {}

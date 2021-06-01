@@ -11,8 +11,6 @@
 #include "lrand.hpp"
 #include "mmap_bimap.hpp"
 
-using testing::HasSubstr;
-
 class Setup_mmap_map_test : public ::testing::Test {
 protected:
   void SetUp() override {}

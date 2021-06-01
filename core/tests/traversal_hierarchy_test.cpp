@@ -11,8 +11,6 @@
 #include "lrand.hpp"
 #include "mmap_tree.hpp"
 
-using testing::HasSubstr;
-
 class Tree_lgdb_setup : public ::testing::Test {
 protected:
   struct Node_data {
@@ -176,7 +174,7 @@ protected:
       }
     }
 
-    lg_root->get_library().each_Lgraph([this](Lg_type_id lgid, std::string_view name) {
+    lg_root->get_library().each_lgraph([this](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
       Lgraph *lg = Lgraph::open(lg_root->get_path(), name);
       I(lg);

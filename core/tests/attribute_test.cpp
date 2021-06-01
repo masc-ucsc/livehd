@@ -13,8 +13,6 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 
-using testing::HasSubstr;
-
 unsigned int rseed = 123;
 
 class Setup_attr_test : public ::testing::Test {

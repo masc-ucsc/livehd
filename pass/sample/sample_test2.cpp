@@ -10,8 +10,6 @@
 #include "lgraph.hpp"
 #include "pass_sample.hpp"
 
-using testing::HasSubstr;
-
 class SampleMainTest : public ::testing::Test {
 protected:
   void SetUp() override {}
