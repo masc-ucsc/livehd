@@ -23,10 +23,6 @@ cc_library(
 cc_test(
     name = "sat_opt_test1",
     srcs = ["sat_opt_test1.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
     deps = [
         ":pass_sat_opt",
         "@com_google_googletest//:gtest_main",

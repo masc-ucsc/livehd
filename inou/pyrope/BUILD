@@ -65,7 +65,6 @@ cc_test(
     srcs = ["tests/prp_unit_test.cpp"],
     tags = [
         "fixme",
-        "flaky",
     ],
     deps = [
         ":inou_pyrope",

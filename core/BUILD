@@ -54,10 +54,6 @@ cc_test(
 cc_test(
     name = "traversal_hierarchy_test",
     srcs = ["tests/traversal_hierarchy_test.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
     deps = [
         ":tree_lgdb_test",
     ],
