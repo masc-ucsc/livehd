@@ -28,8 +28,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "@yosys//:kernel",
-        "@yosys//:version",
+        "@at_clifford_yosys//:kernel",
+        "@at_clifford_yosys//:version",
         "@mustache//:headers",
     ],
     #alwayslink=1,

@@ -1,27 +1,20 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_hdl//dependency_support/org_gnu_bison:bison.bzl", "genyacc")
 
 licenses(["notice"])  # Apache License 2.0
 
-genrule(
-    name = "defyy",
-    srcs = ["def.y"],
-    outs = [
-        "def.tab.cpp",
-        "def.tab.hpp",
-    ],
-    cmd = "M4=$(M4) $(BISON) --defines=$(location def.tab.hpp) --output-file=$(location def.tab.cpp) $<",
-    # "--name-prefix=xxx",
-    toolchains = [
-        "@rules_bison//bison:current_bison_toolchain",
-        "@rules_m4//m4:current_m4_toolchain",
-    ],
+genyacc(
+    name = "def_y",
+    src = "def.y",
+    header_out = "def.tab.hpp",
+    source_out = "def.tab.cpp",
 )
 
 cc_library(
     name = "def",
-    srcs = [":defyy"] + glob(["*.cpp"]),
+    srcs = [":def_y"] + glob(["*.cpp"]),
     hdrs = glob(["*.hpp"]) + ["lex.h"],
     copts = [
         "-w",
