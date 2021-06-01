@@ -1,5 +1,5 @@
-x.__bits = 5
-y.__bits = 3
+x.__ubits = 5
+y.__ubits = 3
 
 x = 2
 y = 7

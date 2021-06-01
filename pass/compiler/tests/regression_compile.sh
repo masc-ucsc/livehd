@@ -29,7 +29,7 @@ if [ $# -eq 0 ]; then
   FIRRTL_LEVEL='hi'
 
   pts='VecShiftRegisterSimple VecShiftRegisterParam VecShiftRegister Cell_alone
-  Accumulator Coverage LFSR16 TrivialAdd Test2 VendingMachineSwitch
+  Accumulator Coverage LFSR16 TrivialAdd VendingMachineSwitch
   VendingMachine Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier
   AddNot GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector Test2 MaxN Max2 Flop EnableShiftRegister LogShifter
