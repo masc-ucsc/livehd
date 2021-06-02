@@ -73,6 +73,11 @@ https://github.com/olofk/fusesoc
 https://github.com/azukaar/GuPM
 https://github.com/pnpm/pnpm
 
+Some simpler/different goals but interesting to see:
+https://github.com/buildinspace/peru
+https://github.com/poacpm/poac
+https://medium.com/@sdboyer/so-you-want-to-write-a-package-manager-4ae9c17d9527
+https://github.com/olofk/edalize
 
 Things that lhd is not:
 
