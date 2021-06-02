@@ -20,6 +20,72 @@ small tasks that are not enough for a thesis/project, but great to help.
 
 Open projects are potential MS thesis/projects.
 
+## Package Manager
+
+Create a cargo like package to interact with LiveHD shell.
+
+Sample commands:
+
+```
+lhd new prp:my_new_package  # equiv to cargo new
+lhd test                # equiv to cargo test
+lhd build               # equiv to cargo build
+lhd run                 # equiv to cargo build
+lhd run --bin top       # similar to cargo, but pick top             
+lhd bench --bench xxx   # similar to cargo
+...
+```
+
+A difference from cargo is that cargo reads just rust. lhd reads verilog,
+pyrope, CHISEL. This means that some passes like "lhd new" must specify the
+languages to generate.
+
+CHISEL may need a build.bst to generate the chirrtl pb needed by livehd.
+
+The lhd.toml is somewhat similar to cargo. The package fields could be the
+same, the version and dependance (relative or github). For the moment, there is
+no "lhd package server" but the idea is to build one.
+
+Ideally, there are packages for tools like chipyard boom/rocket. Then, adding a
+dependence we bring the code.
+
+The dependences are like in cargo, inside the target directory. The source is
+copied there and compiled.  Since LiveHD allows hierarchies, we can use two
+subpackages with different versions. E.g: we can have a rocket version 1.1 in
+top and a package (controller) can depend on rocket 1.0 (this should be fine).
+
+* Allow to have pyrope/verilog/chisel libraries (adder, multipler, corex....) as packages
+* Allow to specify a specific library/packages with SemVer
+* It would be neat if it can generate bazel scripts to run tests, compile 
+* It should allow to specify versions on software and toolchains
+
+There lhd.toml specifies sources, tests, dependences....
+
+There is a default livehd translation, but it may be interesting to have a
+concept of "toolchain" so that different packages could go through different
+tool chains. In the extreme, I can see an adder requiring livehd v1.0 and
+another module needing livehd 1.3 to compile.
+
+Some feedback is to look at things like:
+
+https://doc.rust-lang.org/cargo/index.html
+https://github.com/olofk/fusesoc
+https://github.com/azukaar/GuPM
+https://github.com/pnpm/pnpm
+
+
+Things that lhd is not:
+
+* It is not a build/make/bazel alternative. It tracks repos, but it has a
+  "toolchain" to decide/select how to run the tools. E.g: lhd run may create a
+makefile and call "make run", but this is hidden.
+
+* It does not have tons of options. The options are in toolchains that can be
+  configured (not in the lhd.toml that should be quite minimal). The default is
+that everything should run in the LiveHD toolchain, but it can be extended to
+provide new toolchains.
+
+
 ## New Compressed Graph Core
 
 Lgraph uses a 32byte nodes and it is able to use large (absolute), short(delta)
@@ -846,14 +912,6 @@ SLATE entry.
 Point to some of the unit tests using the API, and create. Feel free to create
 trivial examples that run with unit tests as sample of usage.
 
-## Setup gupm for Pyrope and LiveHD
-
-https://github.com/azukaar/GuPM
-
-* Create pyrope repo for gupm
-* Allow to have pyrope libraries (adder, multipler, corex....) as packages
-* Allow to specify a specific lgraph library
-* Allow to specify passes/commands in lgraph
 
 ## Lgraph and LNAST check pass
 
