@@ -40,6 +40,8 @@ if [ $# -eq 0 ]; then
   # issue2: io_state_0 index _0 missing
   # pts='Life'                  
 
+  # issue3: memory
+  # pts='Router SmemStruct MaskedSmemStruct'
 
 else
   file=$(basename $1)
