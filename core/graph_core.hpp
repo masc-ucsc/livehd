@@ -4,7 +4,6 @@
 #include <cassert>
 #include <string_view>
 #include <vector>
-#include <algorithm>
 
 #include "lgraph_base_core.hpp"
 
@@ -18,11 +17,11 @@ public:
   class Fast_iter {
   private:
     Graph_core *gc;
-    Index_id    id;
+    uint32_t    id;
     // May need to add extra data here
 
   public:
-    constexpr Fast_iter(Graph_core *_gc, const Index_id _id) : gc(_gc), id(_id) {}
+    constexpr Fast_iter(Graph_core *_gc, uint32_t _id) : gc(_gc), id(_id) {}
     constexpr Fast_iter(const Fast_iter &it) : gc(it.gc), id(it.id) {}
 
     constexpr Fast_iter &operator=(const Fast_iter &it) {
@@ -42,7 +41,7 @@ public:
       return id == other.id;
     }
 
-    constexpr Index_id operator*() const { return id; }
+    constexpr uint32_t operator*() const { return id; }
   };
 
   Index_iter() = delete;
@@ -54,135 +53,232 @@ public:
 
 class Graph_core {
 protected:
-  class __attribute__((packed)) Entry64 {  // AKA Overflow Entry
-
+  class __attribute__((packed)) Overflow_entry {
+  protected:
+    void extract_all(uint32_t self_id, std::vector<uint32_t> &expanded);
   public:
-    constexpr Entry64() : edge_storage{0,}, overflow_next(0), creator_pointer(0) {
-      last_byte() = 0;
-    }
-    void set_input() { last_byte() |= 0x80; }   // set 8th bit
-    void set_output() { last_byte() &= 0x7F; }  // clear 8th bit
-
-    constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
-
-    void fill_inp(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
-    void fill_out(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
-    bool try_add_driver(Index_id id);                // return false if there was no space
-    bool try_add_sink(Index_id id);                  // return false if there was no space
-    uint8_t insert_edge(Index_id insert_id);
-    uint8_t delete_edge();
-
-    constexpr uint8_t& last_byte() {
-      return edge_storage[sizeof(edge_storage) - 1];
+    Overflow_entry() { clear(); }
+    void clear() {
+      bzero(this, sizeof(Overflow_entry));  // set zero everything
+      overflow_node = 1;
     }
 
-    constexpr uint8_t last_byte() const {
-      return edge_storage[sizeof(edge_storage) - 1];
-    }
+    void readjust_edges(uint32_t overflow_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
 
-    uint8_t edge_storage[64];
-    uint8_t overflow_next : 6;
-    uint8_t creator_pointer;
+    static inline constexpr size_t sedge0_size=11;
+    static inline constexpr size_t sedge1_size=12;
+    static inline constexpr size_t max_edges=sedge0_size+sedge1_size+3;
+
+    // BEGIN cache line
+    uint8_t overflow_node : 1;     // Overflow or not overflow node
+    uint8_t master_root_node : 1;  // master_root or just master
+    uint8_t inputs : 1;
+    uint8_t sedge0_full:1; // not used now
+    uint8_t sedge1_full:1; // not used now
+    uint8_t padding:3;
+
+    uint8_t n_edges;   // 0 to 18 (50 in compress)
+
+    int16_t  sedge0[sedge0_size]; // between ledge_min..ledge1
+
+    // 4 byte aligned
+    uint32_t overflow_next_id;
+    uint32_t ledge_min;
+
+    // 2nd half cache line (bytes 32:63)
+    uint32_t ledge1;
+    uint32_t ledge_max;
+
+    int16_t  sedge1[sedge1_size]; // between ledge1..ledge_max
+
+    uint32_t get_overflow_id() const { return overflow_next_id; }
   };
 
-  class __attribute__((packed)) Entry16 {  // AKA master or master_root entry
-  //protected:
-    //uint8_t  edge_storage[16 - 5];
-    //uint16_t edge_storate_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
+  class __attribute__((packed)) Master_entry {  // AKA master or master_root entry
   public:
-    uint8_t  edge_storage[16 - 5];
-    uint16_t edge_storate_or_pid_bits;  // edge_store in master_root, 16 pid bits in master
+    static inline constexpr size_t Num_sedges=6;
 
-    uint8_t pid_bits_or_type : 6;  // type in master_root, 6 pid bits in master
-    uint8_t driver_set : 1;
-    uint8_t sink_set : 1;     // different from inp_mask!=0 because bidirectional edges
-    uint8_t ptrs;             // master_next in master_root (master_prev in master) and overflow_next
-    uint8_t inp_mask : 7;     // 7bits inp_mask (8 or 0b111 means not used)
-    uint8_t master_root : 1;  // for speed good to remember root vs master (pid==0?)
-    uint8_t overflow_next : 4;
-    constexpr Entry16() : edge_storage{0,}, edge_storate_or_pid_bits(0), pid_bits_or_type(0), driver_set(0), sink_set(0), ptrs(0xFF), inp_mask(0), master_root(0), overflow_next(0) {
+    // CTRL: Byte 0:1
+    uint8_t overflow_node : 1;     // Overflow or not overflow node
+    uint8_t master_root_node : 1;  // master_root or just master
+    uint16_t inp_mask : 9;          // are the edges input or output edges
+    uint8_t n_outputs : 4;
+    uint8_t overflow_link : 1;  // When set, ledge_min points to overflow
+    // CTRL: Byte 2
+    uint8_t lpid_or_type;  // type in master_root, pid bits in master
+    // CTRL: Byte 3:5
+    uint32_t bits : 24;
+    // SEDGE: Byte 6:7 (special case)
+    int16_t sedge2_or_pid;  // edge_store in master_root, 16 pid bits in master
+    // LEDGE: Byte  8:11
+    uint32_t ledge0_or_prev;  // prev pointer (only for master)
+    // LEDGE: Byte 12:15
+    uint32_t ledge1_or_overflow;
+    // LEDGE: Byte 16:19
+    uint32_t next_ptr;  // next pointer (master or master_root)
+    // SEDGE: Byte 20:31
+    int16_t sedge[Num_sedges];
+
+    Master_entry() { clear(); }
+
+    void clear() {
+      bzero(this, sizeof(Master_entry));  // set zero everything
     }
-    void set_master_root();
-    void set_master();
 
-    void set_type(uint8_t type);
+    void readjust_edges(uint32_t self_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
+    bool insert_sedge(int16_t rel_id, bool out);
+    bool insert_ledge(uint32_t id, bool out);
+    bool delete_edge(uint32_t self_id, uint32_t id);
 
-    constexpr Index_id get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
-    constexpr Index_id get_next() const;      // returns the next Entry16 that is master, zero if none
+    bool is_master() const { return !master_root_node; }
+    bool is_master_root() const { return master_root_node; }
 
-    constexpr bool is_driver_set() const { return driver_set; }
-    constexpr bool is_sink_set() const { return sink_set; }
-    constexpr bool is_master_root() const { return master_root; }
+    void set_overflow(uint32_t oid) {
+      I(!overflow_node);
+      overflow_node = 1;
+      I(ledge1_or_overflow == 0);
+      ledge1_or_overflow = oid;
+    }
 
-    constexpr uint8_t get_type() const { return pid_bits_or_type; }
+    Bits_t get_bits() const { return bits; }
+    void   set_bits(Bits_t b) { bits = b; }
 
-    constexpr uint8_t test_master_root() const { return master_root; }
+    uint8_t get_type() const { return lpid_or_type; }
+    void    set_type(uint8_t type) { lpid_or_type = type; }
 
-    uint8_t insert_edge(uint8_t rel_index);
-    uint8_t delete_edge(uint8_t rel_index);
-    uint8_t binary_search(uint8_t i, uint8_t j, uint8_t rel_index);
+    constexpr uint32_t get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
-    constexpr uint32_t get_pid() const {
+    uint32_t remove_free_next() {
+      auto tmp       = ledge0_or_prev;
+      ledge0_or_prev = 0;
+      return tmp;
+    }
+    void insert_free_next(uint32_t ptr) {
+      clear();
+      ledge0_or_prev = ptr;
+    }
+
+    uint32_t get_prev_ptr() const {
+      I(is_master());
+      return ledge0_or_prev;
+    }
+
+    bool has_edges() const { return overflow_link || n_outputs || inp_mask; }
+
+    bool     has_overflow() const { return overflow_link; }
+    uint32_t get_overflow_id() const {
+      if (overflow_link)
+        return ledge1_or_overflow;
+      return 0;
+    }
+
+    void set_pid(const Port_ID pid) {
+      I(!master_root_node);
+      lpid_or_type  = static_cast<uint8_t>(pid);  // 8bits
+      sedge2_or_pid = pid >> 8;                   // upper 16bits
+    }
+
+    uint32_t get_pid() const {
       if (is_master_root())
         return 0;
 
-      uint32_t pid = pid_bits_or_type;
-      pid <<= 16;
-      pid |= edge_storate_or_pid_bits;
+      uint32_t pid = sedge2_or_pid;
+      pid <<= 8;
+      pid |= lpid_or_type;
 
-      return pid;  // 22 bits PID
+      return pid;
     }
-
-    constexpr Index_id get_master_root() const;  // ptr to master root (zero if itself is root)
-
-    void fill_inp(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
-    void fill_out(std::vector<Index_id> &ev) const;  // fill the list of edges to ev (requires expand)
-    bool try_add_driver(Index_id id);                // return false if there was no space
-    bool try_add_sink(Index_id id);                  // return false if there was no space
   };
 
-  std::vector<Entry64> table;  // to be replaced by mmap_lib::vector once it works
+  std::vector<Master_entry> table;  // to be replaced by mmap_lib::vector once it works
 
-  Index_id next16_free;  // Pointer to 16byte free chunks
-  Index_id next64_free;  // Pointer to 64byte free chunks
+  uint32_t free_master_id;
+  uint32_t free_overflow_id;
+
+  uint32_t allocate_overflow();
+
+  void add_edge_int(uint32_t self_id, uint32_t other_id, bool out);
+  void del_edge_int(uint32_t self_id, uint32_t other_id, bool out);
 
 public:
-
   Graph_core(std::string_view path, std::string_view name);
 
-  uint8_t check_overflow_index(Index_id overflow_index, uint8_t type);
+  uint8_t get_type(uint32_t id) const {
+    I(id && id < table.size());
+    I(table[id].is_master_root());
+    return table[id].get_type();
+  }
 
+  void set_type(uint32_t id, uint8_t type) {
+    I(id && id < table.size());
+    I(table[id].is_master_root());
+    table[id].set_type(type);
+  }
 
-  void add_edge(const Index_id sink_id, const Index_id driver_id);  // Add edge from s->d and d->s
-  void del_edge(const Index_id sink_id, const Index_id driver_id);  // Remove both s->d and d->s
+  Port_ID get_pid(uint32_t id) const {
+    I(!is_invalid(id));
+    return table[id].get_pid();
+  }
+
+  void set_bits(uint32_t id, Bits_t bits) {
+    I(id && id < table.size());
+    table[id].set_bits(bits);
+  }
+  Bits_t get_bits(uint32_t id) {
+    I(id && id < table.size());
+    return table[id].get_bits();
+  }
+
+  bool is_invalid(uint32_t id) const {
+    if (id == 0 || table.size()<=id)
+      return true;
+
+    return table[id].overflow_node; // overflow set in deleted nodes
+  }
+
+  bool is_master_root(uint32_t id) const {
+    I(id && id < table.size());
+    return table[id].is_master_root();
+  }
+  bool is_master(uint32_t id) const {
+    I(id && id < table.size());
+    return table[id].is_master();
+  }
+
+  uint32_t create_master_root();
+  uint32_t create_master(uint32_t master_root_id, const Port_ID pid);
+
+  uint32_t get_master_root(uint32_t id) {
+    I(!is_invalid(id));
+
+    if (table[id].is_master_root())
+      return id;
+
+    return table[id].get_prev_ptr();
+  }
+
+  void add_edge(uint32_t driver_id, uint32_t sink_id) {
+    add_edge_int(driver_id, sink_id, true);
+    add_edge_int(sink_id, driver_id, false);
+  }
+
+  void del_edge(uint32_t driver_id, uint32_t sink_id) {
+    del_edge_int(driver_id, sink_id, true);
+    del_edge_int(sink_id, driver_id, false);
+  }
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const std::vector<Index_id> get_setup_drivers(const Index_id master_root_id) const;  // the drivers set for master_root_id
-  const std::vector<Index_id> get_setup_sinks(const Index_id master_root_id) const;    // the sinks set for master_root_id
+  const std::vector<uint32_t> get_setup_drivers(uint32_t master_root_id) const;  // the drivers set for master_root_id
+  const std::vector<uint32_t> get_setup_sinks(uint32_t master_root_id) const;    // the sinks set for master_root_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
-  //   // traversing
-  Index_id fast_next(Index_id start);  // faster iterator returning all the master_root Index_id (0 if last)
+  uint32_t fast_next(uint32_t start);
 
-  // Unlike get_setup_drivers, this returns all the drivers/sinks that reach
-  // the s index. This can be a large list, so it is not a short vector but an
-  // iterator.
-  Index_iter out_ids(const Index_id s);  // Iterate over the out edges of s (*it is Index_id)
-  Index_iter inp_ids(const Index_id s);  // Iterate over the inp edges of s
+  Index_iter out_ids(uint32_t id);  // Iterate over the out edges of s (*it is uint32_t)
+  Index_iter inp_ids(uint32_t id);  // Iterate over the inp edges of s
 
-  uint8_t test_master_root(const Index_id master_root_id) const;
-
-  uint8_t get_type(const Index_id master_root_id) const;  // set/get type on the master_root id (s or pointed by s)
-  void    set_type(const Index_id master_root_id, uint8_t type);
-
-  Port_ID get_pid(const Index_id master_root_id) const;  // pid for master or 0 for master_root
-
-  // Create a master root node
-  Index_id create_master_root(uint8_t type);
-  // Create a master and point to master root m
-  Index_id create_master(const Index_id master_root_id, const Port_ID pid);
-
-  bool is_master_root(const Index_id master_root_id);
-  // Delete node s, all related edges and masters (if master root)
-  void del(const Index_id s);
+  // Delete edges and node itself (master or master_root. If master_root, delete masters too)
+  void del(uint32_t id);
+  // Delete edges (master or master_root)
+  void del_edges(uint32_t id);
 };

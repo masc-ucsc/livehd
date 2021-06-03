@@ -30,81 +30,60 @@ protected:
   }
 };
 
-TEST_F(Setup_graph_core, bench_compress) {
-  uint32_t dest[8];
+TEST_F(Setup_graph_core, trivial_ops) {
 
-  Lrand<uint32_t> r;
+  Lrand<int> rnum;
+  Lrand<bool> rbool;
 
-  uint32_t *mem = (uint32_t *)alloca(8 * 32 * 10000);
+  Graph_core gc("lgdb_graph_core_test","trivial_ops");
 
-  for (int i = 0; i < 32 * 10000; i = i + 31) {
-    mem[i] = r.max(300);
-  }
+  EXPECT_TRUE(gc.is_invalid(0));
+  EXPECT_TRUE(gc.is_invalid(33));
+  EXPECT_TRUE(gc.is_invalid(30));
 
-  {
-    Lbench   b("core.GRAPH_CORE_bench_compress");
-    uint32_t carry = 0;
-    for (int j = 0; j < 1000; ++j) {
-      for (int i = 0; i < 32 * 10000; i = i + 4) {
-        __uint128_t *v = (__uint128_t *)(&mem[i]);
-        expand_master_root_0(dest, *v, carry);
-        carry += dest[7];
-      }
+  std::vector<uint32_t> master_id;
+  std::vector<uint32_t> master_root_id;
+
+  auto mid = gc.create_master_root();
+  EXPECT_NE(mid, 0);
+  EXPECT_FALSE(gc.is_invalid(mid));
+  EXPECT_FALSE(gc.is_master(mid));
+  EXPECT_TRUE (gc.is_master_root(mid));
+
+  for(int i=0;i<200;++i) {
+    if (rbool.any()) {
+      auto id = gc.create_master(mid, master_id.size()+1);
+      EXPECT_NE(id, 0);
+      EXPECT_FALSE(gc.is_invalid(id));
+      EXPECT_TRUE(gc.is_master(id));
+      EXPECT_FALSE(gc.is_master_root(id));
+      master_id.emplace_back(id);
+    }else{
+      auto id = gc.create_master_root();
+      EXPECT_NE(id, 0);
+      EXPECT_FALSE(gc.is_invalid(id));
+      EXPECT_FALSE(gc.is_master(id));
+      EXPECT_TRUE (gc.is_master_root(id));
+      master_root_id.emplace_back(id);
     }
-
-    fmt::print("carry {} for 80M calls\n", carry);
   }
+
+  for(auto i=0u;i<master_id.size();++i) {
+    auto id = master_id[i];
+    EXPECT_NE(id, 0);
+    EXPECT_FALSE(gc.is_invalid(id));
+    EXPECT_TRUE(gc.is_master(id));
+    EXPECT_FALSE(gc.is_master_root(id));
+    EXPECT_EQ(gc.get_master_root(id), mid);
+    EXPECT_EQ(gc.get_pid(id), i+1);
+  }
+
+  for(auto id:master_root_id) {
+    EXPECT_NE(id, 0);
+    EXPECT_FALSE(gc.is_invalid(id));
+    EXPECT_FALSE(gc.is_master(id));
+    EXPECT_TRUE (gc.is_master_root(id));
+  }
+
 }
 
-TEST_F(Setup_graph_core, shallow_tree) {
-  Lbench b("core.GRAPH_CORE_shallow_tree");
-
-  Graph_core c1("lgdb_gc", "shallow_tree");
-
-  unordered_map<int, int> testing_root;
-
-  // I am testing master_root in this case
-  // the uncommented line is the one that is testing is_master_root()
-  // I am comparing is_master_root and 1 because we know it is a master root node
-  // I have master root bit set to 1 indicating it is a master root
-  // There is an inconsistency in the output of the test however
-
-  // I wrote the second test for that reason which is testing set_master_root()
-  // This function is also producing inconsistent output as well and I am not sure why
-  // any help is much appreciated
-
-
-///*
-  for(int i = 0; i < 5; i++){
-    auto instruction_type = (rand() % 100) + 1;
-    auto root_id = c1.create_master_root(instruction_type);
-    testing_root[root_id] = instruction_type;
-
-    //EXPECT_EQ(c1.test_master_root(root_id), 1); // check if set to master_root properly
-    EXPECT_EQ(c1.is_master_root(root_id), 1); // is it a master_root
-
-
-    // need to get first two working before worrying about these
-    //EXPECT_EQ(c1.get_pid(root_id), 0); // what is the pid of the node
-    //EXPECT_EQ(instruction_type, c1.get_type(root_id)); //check if Index_id's match
-    //EXPECT_EQ(root_id << 2, root_id * 4);
-  }
-//*/
-
-
-/*
-  unordered_map<int, int> testing_master;
-
-  for(int i = 0; i < 5; i++){
-    auto pid = (rand() % 300) + 1;
-    auto instruction_type_master = (rand() % 100) + 1001;
-    auto master_id = c1.create_master(instruction_type_master, pid);
-    testing_master[master_id] = instruction_type_master;
-
-    EXPECT_EQ(instruction_type_master, c1.get_type(master_id)); // check if Index_id's match up
-    //EXPECT_EQ(c1.test_master_root(master_id), 0); // check if set to master properly
-    //EXPECT_EQ(c1.is_master_root(master_id), false); // is it a master_root
-    //EXPECT_EQ(c1.get_pid(master_id), pid); // what is the pid of the node
-  }
-//*/
-}
