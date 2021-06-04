@@ -143,9 +143,9 @@ http_archive(
 
 http_archive(
     name = "rules_hdl",
-    sha256 = "d76e41410f55596548efc18ec5ba6f947d4f8fafa64907904c787808dab3d00e",
-    strip_prefix = "bazel_rules_hdl-6214284faee7b4951c8f626c54dd1828f08cdd9d",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/6214284faee7b4951c8f626c54dd1828f08cdd9d.zip",
+    sha256 = "49956ac228faed57b783a971a6035d4251d26cc405ddc11bc489fbe3b013807e",
+    strip_prefix = "bazel_rules_hdl-ce51c902d25122977c8437f89bb146c4a83fc7e6",
+    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/ce51c902d25122977c8437f89bb146c4a83fc7e6.zip",
 )
 
 load("@rules_hdl//toolchains/cpython:cpython_toolchain.bzl", "register_cpython_repository")
