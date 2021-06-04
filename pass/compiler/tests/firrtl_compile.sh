@@ -41,7 +41,12 @@ if [ $# -eq 0 ]; then
   # pts='Life'                  
 
   # issue3: memory
-  # pts='Router SmemStruct MaskedSmemStruct'
+  # pts='Smem SmemStruct MaskedSmem MaskedSmemStruct Router ListBuffer'
+
+  # issue4: IO not begin with named io
+  # pts='IntXbar'
+
+  # issue5: partial connect
 
 else
   file=$(basename $1)

@@ -1,7 +1,15 @@
-// tmp = (foo = 4)
-tmp.foo = 4
+foo_mem_din = ()
+// foo_mem_din.0.x = 0;
+// foo_mem_din.0.y = 0;
 
-fetch = 0
-fetch = tmp.foo
+bar = (x = 22, y = 33)
+%out = 0
+if ($en) {
+  mport.x = bar.x
+  mport.y = bar.y
+  foo_mem_din.0 = mport
+}
 
-%out = fetch
+
+  mem.din.3. = foo_mem_din.0.x
+

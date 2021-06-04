@@ -11,7 +11,8 @@
 //$din0.__sbits = 3
 
 mem.addr    = ($raddr0, $raddr1, $wraddr)
-mem.bits    = 3
+// mem.bits    = 3
+mem.bits    = 4
 mem.size    = 16
 mem.clock   = $clk
 mem.din     = (0, 0, $din0)
@@ -19,8 +20,9 @@ mem.enable  = (1, 1, $we0)
 
 mem.fwd     = true
 mem.latency = (1, 1, 1)
-mem.wensize = 1 // 1 we bit (no write mask)
+mem.wensize = 2 // 1 we bit (no write mask)
 mem.rdport  = (-1,1,0) // 0 WR, !=0 -> RD
+// mem.rdport  = (1, 1, 0) // 0 WR, !=0 -> RD
 
 res = __memory(mem)
 
