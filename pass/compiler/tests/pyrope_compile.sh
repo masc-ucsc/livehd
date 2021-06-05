@@ -22,7 +22,7 @@ struct_flop tuple_nested1 tuple_nested2 get_mask1 counter_mix vec_shift_register
 
 # pts='lhs_wire2'
 # pts='memory_1rd1wr'
-pts='pp'
+# pts='pp'
 # pts='pp2'
 # pts='vector'
 # pts='vector2'

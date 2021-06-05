@@ -53,8 +53,10 @@ protected:
   void PortDirInference(const std::string &port_name, const std::string &mem_name, const bool is_rhs);
   void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
+  void split_hier_name(std::string_view full_name, std::vector<std::string_view>& hier_subnames);
   void set_leaf_type(std::string_view subname, std::string_view hier_name, size_t prev,
                      std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
+  void collect_memory_data_struct_hierarchy(const std::string& mem_name, const firrtl::FirrtlPB_Type& type_in, const std::string &hier_fields_concats);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                        const std::string &lhs_of_asg);
@@ -198,9 +200,11 @@ private:
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
   absl::flat_hash_map<std::string, int8_t>      mem2port_cnt;
-  absl::flat_hash_map<std::string, int8_t>      mem2enable_bitvec;
+  absl::flat_hash_map<std::string, int8_t>      mem2wensize;
+  absl::flat_hash_map<std::string, uint8_t>     mem2rd_latency;
   absl::flat_hash_map<std::string, std::string> mport2mem;
-
+  absl::flat_hash_map<std::string, Lnast_nid>   mem2initial_idx;
+  absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
 
 
   uint32_t dummy_expr_node_cnt;

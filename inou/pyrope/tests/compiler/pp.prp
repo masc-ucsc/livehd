@@ -1,15 +1,15 @@
 foo_mem_din = ()
-// foo_mem_din.0.x = 0;
-// foo_mem_din.0.y = 0;
-
 bar = (x = 22, y = 33)
-%out = 0
-if ($en) {
-  mport.x = bar.x
-  mport.y = bar.y
-  foo_mem_din.0 = mport
+if (true) {
+  foo_mem_din.0.x = 0
+  foo_mem_din.0.y = 0
 }
 
+if ($en) {
+  foo_mem_din.0 = mport.__last_value
+  mport.x = bar.x
+  mport.y = bar.y
+}
 
-  mem.din.3. = foo_mem_din.0.x
+%out = foo_mem_din.0.x
 
