@@ -1,0 +1,12 @@
+diff --git src/map/fpga/fpgaTruth.c src/map/fpga/fpgaTruth.c
+index 2965f9f6..5b0b5790 100644
+--- src/map/fpga/fpgaTruth.c
++++ src/map/fpga/fpgaTruth.c
+@@ -17,6 +17,7 @@
+ ***********************************************************************/
+ 
+ #include "fpgaInt.h"
++#include "bdd/cudd/cuddInt.h"
+ #include "bdd/cudd/cudd.h"
+ 
+ ABC_NAMESPACE_IMPL_START
