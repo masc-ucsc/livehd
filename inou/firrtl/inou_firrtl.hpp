@@ -177,6 +177,7 @@ private:
   absl::flat_hash_set<std::string> register_names;
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> async_rst_names;
+  absl::flat_hash_set<std::string> mport_usage_visited;
 
   // Maps a register name to its q_pin
   absl::flat_hash_map<std::string, std::string> reg2qpin;
@@ -189,21 +190,14 @@ private:
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t, bool>>> mod_to_io_map;
   // Map used by external modules to indicate parameters names + values.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
-  // Map name of memory to tuple of (__fwd true/false, read latency, write latency)
-  absl::flat_hash_map<std::string, std::tuple<bool, std::string_view, std::string_view>> mem_props_map;
-  // Map of memory port ids made in Memory Port statements to memory block name.
-  absl::flat_hash_map<std::string, std::string> dangling_ports_map;
-  // Map which holds all of the ports that need late assigns (and their direction).
-  enum MPORT_DIR { READ, WRITE, READ_WRITE, READP, WRITEP, READ_WRITEP, READI, WRITEI, READ_WRITEI, INFER };
-  absl::flat_hash_map<std::string, MPORT_DIR> late_assign_ports;
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
-  absl::flat_hash_map<std::string, int8_t>      mem2port_cnt;
-  absl::flat_hash_map<std::string, int8_t>      mem2wensize;
-  absl::flat_hash_map<std::string, uint8_t>     mem2rd_latency;
-  absl::flat_hash_map<std::string, std::string> mport2mem;
-  absl::flat_hash_map<std::string, Lnast_nid>   mem2initial_idx;
+  absl::flat_hash_map<std::string, int8_t>                   mem2port_cnt;
+  absl::flat_hash_map<std::string, int8_t>                   mem2wensize;
+  absl::flat_hash_map<std::string, uint8_t>                  mem2rd_latency;
+  absl::flat_hash_map<std::string, Lnast_nid>                mem2initial_idx;
+  absl::flat_hash_map<std::string, std::string>              mport2mem;
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
 
 
