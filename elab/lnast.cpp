@@ -1290,7 +1290,7 @@ void Lnast::dump() const {
     for (int i = 0; i < it.level; ++i) 
       indent += "    ";
 
-    fmt::print("{} {} {:<8} {}\n", it.level, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text());
+    fmt::print("{} {} {:<8} {}_{}\n", it.level, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text(), node.subs);
   }
 }
 
