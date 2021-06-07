@@ -22,8 +22,6 @@
 
 using namespace std;
 
-using testing::HasSubstr;
-
 class Setup_graph_core : public ::testing::Test {
 protected:
   void SetUp() override {}

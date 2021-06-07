@@ -13,8 +13,6 @@
 #include "mmap_tree.hpp"
 #include "tree_lgdb_setup.hpp"
 
-using testing::HasSubstr;
-
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {

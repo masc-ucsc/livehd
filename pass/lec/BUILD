@@ -25,10 +25,6 @@ cc_library(
 cc_test(
     name = "lec_test1",
     srcs = ["lec_test1.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
     deps = [
         ":pass_lec",
         "@com_google_googletest//:gtest_main",

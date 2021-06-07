@@ -10,8 +10,6 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
-using testing::HasSubstr;
-
 unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {

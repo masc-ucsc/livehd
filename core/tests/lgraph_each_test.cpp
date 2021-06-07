@@ -11,8 +11,6 @@
 #include "node_pin.hpp"
 #include "lrand.hpp"
 
-using testing::HasSubstr;
-
 unsigned int rseed = 123;
 
 class Setup_graphs_test : public ::testing::Test {

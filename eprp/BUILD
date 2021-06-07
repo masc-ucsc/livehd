@@ -23,10 +23,6 @@ cc_library(
 cc_test(
     name = "eprp_test",
     srcs = ["tests/eprp_test.cpp"],
-    tags = [
-        "fixme",
-        "flaky",
-    ],
     deps = [
         ":eprp",
         "@com_google_absl//absl/strings",

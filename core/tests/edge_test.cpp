@@ -10,8 +10,6 @@
 #include "lrand.hpp"
 #include "mmap_map.hpp"
 
-using testing::HasSubstr;
-
 class Edge_test : public ::testing::Test {
 protected:
   Lgraph *  g;

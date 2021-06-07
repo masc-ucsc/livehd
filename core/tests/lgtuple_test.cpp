@@ -11,8 +11,6 @@
 #include "lgraph.hpp"
 #include "lrand.hpp"
 
-using testing::HasSubstr;
-
 class Lgtuple_test : public ::testing::Test {
 protected:
   std::vector<Node_pin> dpin;

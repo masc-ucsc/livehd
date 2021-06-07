@@ -15,8 +15,6 @@
 #endif
 #endif
 
-using testing::HasSubstr;
-
 class Setup_mmap_gc_test : public ::testing::Test {
 protected:
   void SetUp() override {}
