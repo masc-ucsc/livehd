@@ -78,6 +78,7 @@ cc_test(
     #tags = ["fixme"],
     deps = [
         ":core",
+        "@boost//:graph",
         "@com_google_googletest//:gtest_main",
     ],
 )

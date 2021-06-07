@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "boost/graph/adjacency_list.hpp"
+#include "boost/graph/graph_utility.hpp"
+
 #include "gmock/gmock.h"
 #include "graph_core_compress.hpp"
 #include "gtest/gtest.h"
@@ -141,7 +144,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert) {
   }
   gc.add_edge(nodes[0],m3); // add in reverse order
 
-  gc.dump(m1);
+  //gc.dump(m1);
 
   EXPECT_EQ(gc.get_num_pin_inputs(m1),0);
   EXPECT_EQ(gc.get_num_pin_outputs(m1),300); // --
@@ -149,4 +152,39 @@ TEST_F(Setup_graph_core, trivial_ops_insert) {
   EXPECT_EQ(gc.get_num_pin_outputs(m2),0);
   EXPECT_EQ(gc.get_num_pin_inputs(m3),300); // --
   EXPECT_EQ(gc.get_num_pin_outputs(m3),0);
+}
+
+TEST_F(Setup_graph_core, bench_against_boost) {
+
+  { // test1
+    Lbench b("test1_boost_insert_1K");
+
+    boost::adjacency_list< boost::listS, boost::vecS, boost::bidirectionalS, boost::no_property,
+      boost::property< boost::edge_name_t, std::string > >
+        g; // create a boost mutable (adjecency_list)
+
+    auto m1 = boost::add_vertex(g);
+    for(auto i=0u;i<10'000;++i) {
+      auto m = boost::add_vertex(g);
+      boost::add_edge(m1, m, g);
+    }
+
+    EXPECT_EQ(boost::out_degree(m1, g),10000);
+  }
+
+  { // test1
+    Lbench b("test1_gc_insert_1K");
+
+    Graph_core gc("lgdb_graph_core_test","bench_test1");
+
+    auto m1 = gc.create_node();
+
+    for(auto i=0u;i<10'000;++i) {
+      auto m = gc.create_node();
+      gc.add_edge(m1, m);
+    }
+
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),10000);
+  }
+
 }
