@@ -60,7 +60,7 @@ protected:
     Overflow_entry() { clear(); }
     void clear() {
       bzero(this, sizeof(Overflow_entry));  // set zero everything
-      overflow_node = 1;
+      overflow_vertex = 1;
     }
 
     void readjust_edges(uint32_t overflow_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
@@ -70,8 +70,8 @@ protected:
     static inline constexpr size_t max_edges=sedge0_size+sedge1_size+3;
 
     // BEGIN cache line
-    uint8_t overflow_node : 1;     // Overflow or not overflow node
-    uint8_t master_root_node : 1;  // master_root or just master
+    uint8_t overflow_vertex : 1;     // Overflow or not overflow node
+    uint8_t node_vertex : 1;  // node or just pin
     uint8_t inputs : 1;
     uint8_t sedge0_full:1; // not used now
     uint8_t sedge1_full:1; // not used now
@@ -92,30 +92,38 @@ protected:
     int16_t  sedge1[sedge1_size]; // between ledge1..ledge_max
 
     uint32_t get_overflow_id() const { return overflow_next_id; }
+
+    std::pair<size_t, size_t> get_num_local_edges() const {
+      if (inputs)
+        return std::pair(n_edges,0);
+      return std::pair(0,n_edges);
+    }
+
+    void dump(uint32_t self_id) const;
   };
 
-  class __attribute__((packed)) Master_entry {  // AKA master or master_root entry
+  class __attribute__((packed)) Master_entry {  // AKA pin or node entry
   public:
     static inline constexpr size_t Num_sedges=6;
 
     // CTRL: Byte 0:1
-    uint8_t overflow_node : 1;     // Overflow or not overflow node
-    uint8_t master_root_node : 1;  // master_root or just master
-    uint16_t inp_mask : 9;          // are the edges input or output edges
+    uint8_t overflow_vertex : 1;  // Overflow or not overflow node
+    uint8_t node_vertex : 1;      // node or just pin
+    uint16_t inp_mask : 9;        // are the edges input or output edges
     uint8_t n_outputs : 4;
-    uint8_t overflow_link : 1;  // When set, ledge_min points to overflow
+    uint8_t overflow_link : 1;    // When set, ledge_min points to overflow
     // CTRL: Byte 2
-    uint8_t lpid_or_type;  // type in master_root, pid bits in master
+    uint8_t lpid_or_type;         // type in node, pid bits in pin
     // CTRL: Byte 3:5
     uint32_t bits : 24;
     // SEDGE: Byte 6:7 (special case)
-    int16_t sedge2_or_pid;  // edge_store in master_root, 16 pid bits in master
+    int16_t sedge2_or_pid;  // edge_store in node, 16 pid bits in pin
     // LEDGE: Byte  8:11
-    uint32_t ledge0_or_prev;  // prev pointer (only for master)
+    uint32_t ledge0_or_prev;  // prev pointer (only for pin)
     // LEDGE: Byte 12:15
     uint32_t ledge1_or_overflow;
     // LEDGE: Byte 16:19
-    uint32_t next_ptr;  // next pointer (master or master_root)
+    uint32_t next_ptr;  // next pointer (pin or node)
     // SEDGE: Byte 20:31
     int16_t sedge[Num_sedges];
 
@@ -130,12 +138,12 @@ protected:
     bool insert_ledge(uint32_t id, bool out);
     bool delete_edge(uint32_t self_id, uint32_t id);
 
-    bool is_master() const { return !master_root_node; }
-    bool is_master_root() const { return master_root_node; }
+    bool is_pin() const { return !node_vertex; }
+    bool is_node() const { return node_vertex; }
 
     void set_overflow(uint32_t oid) {
-      I(!overflow_node);
-      overflow_node = 1;
+      I(!overflow_link);
+      overflow_link = 1;
       I(ledge1_or_overflow == 0);
       ledge1_or_overflow = oid;
     }
@@ -159,8 +167,13 @@ protected:
     }
 
     uint32_t get_prev_ptr() const {
-      I(is_master());
+      I(is_pin());
       return ledge0_or_prev;
+    }
+
+    std::pair<size_t, size_t> get_num_local_edges() const {
+      auto n_inp = __builtin_popcount(inp_mask);
+      return std::pair(n_inp, n_outputs);
     }
 
     bool has_edges() const { return overflow_link || n_outputs || inp_mask; }
@@ -173,13 +186,13 @@ protected:
     }
 
     void set_pid(const Port_ID pid) {
-      I(!master_root_node);
+      I(!node_vertex);
       lpid_or_type  = static_cast<uint8_t>(pid);  // 8bits
       sedge2_or_pid = pid >> 8;                   // upper 16bits
     }
 
     uint32_t get_pid() const {
-      if (is_master_root())
+      if (is_node())
         return 0;
 
       uint32_t pid = sedge2_or_pid;
@@ -188,6 +201,8 @@ protected:
 
       return pid;
     }
+
+    void dump(uint32_t self_id) const;
   };
 
   std::vector<Master_entry> table;  // to be replaced by mmap_lib::vector once it works
@@ -200,18 +215,31 @@ protected:
   void add_edge_int(uint32_t self_id, uint32_t other_id, bool out);
   void del_edge_int(uint32_t self_id, uint32_t other_id, bool out);
 
+  Overflow_entry *ref_overflow(uint32_t id) {
+    I((id+1)<table.size()); // overflow uses 2 entries in table
+    I(table[id].overflow_vertex);
+
+    return (Overflow_entry *)&table[id];
+  }
+  const Overflow_entry *ref_overflow(uint32_t id) const {
+    I((id+1)<table.size()); // overflow uses 2 entries in table
+    I(table[id].overflow_vertex);
+
+    return (const Overflow_entry *)&table[id];
+  }
+
 public:
   Graph_core(std::string_view path, std::string_view name);
 
   uint8_t get_type(uint32_t id) const {
     I(id && id < table.size());
-    I(table[id].is_master_root());
+    I(table[id].is_node());
     return table[id].get_type();
   }
 
   void set_type(uint32_t id, uint8_t type) {
     I(id && id < table.size());
-    I(table[id].is_master_root());
+    I(table[id].is_node());
     table[id].set_type(type);
   }
 
@@ -233,29 +261,39 @@ public:
     if (id == 0 || table.size()<=id)
       return true;
 
-    return table[id].overflow_node; // overflow set in deleted nodes
+    return table[id].overflow_vertex; // overflow set in deleted nodes
   }
 
-  bool is_master_root(uint32_t id) const {
+  bool is_node(uint32_t id) const {
     I(id && id < table.size());
-    return table[id].is_master_root();
+    return table[id].is_node();
   }
-  bool is_master(uint32_t id) const {
+  bool is_pin(uint32_t id) const {
     I(id && id < table.size());
-    return table[id].is_master();
+    return table[id].is_pin();
   }
 
-  uint32_t create_master_root();
-  uint32_t create_master(uint32_t master_root_id, const Port_ID pid);
+  uint32_t create_node();
+  uint32_t create_pin(uint32_t node_id, const Port_ID pid);
 
-  uint32_t get_master_root(uint32_t id) {
+  uint32_t get_node(uint32_t id) {
     I(!is_invalid(id));
 
-    if (table[id].is_master_root())
+    if (table[id].is_node())
       return id;
 
     return table[id].get_prev_ptr();
   }
+
+  bool has_edges(uint32_t id) const {
+    I(!is_invalid(id));
+    return table[id].has_edges();
+  }
+
+  std::pair<size_t, size_t> get_num_pin_edges(uint32_t id) const;
+
+  size_t get_num_pin_outputs(uint32_t id) const { return get_num_pin_edges(id).second; }
+  size_t get_num_pin_inputs(uint32_t id) const { return get_num_pin_edges(id).first; }
 
   void add_edge(uint32_t driver_id, uint32_t sink_id) {
     add_edge_int(driver_id, sink_id, true);
@@ -268,17 +306,23 @@ public:
   }
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const std::vector<uint32_t> get_setup_drivers(uint32_t master_root_id) const;  // the drivers set for master_root_id
-  const std::vector<uint32_t> get_setup_sinks(uint32_t master_root_id) const;    // the sinks set for master_root_id
+  const std::vector<uint32_t> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
+  const std::vector<uint32_t> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
   uint32_t fast_next(uint32_t start);
 
-  Index_iter out_ids(uint32_t id);  // Iterate over the out edges of s (*it is uint32_t)
-  Index_iter inp_ids(uint32_t id);  // Iterate over the inp edges of s
+  Index_iter node_out_ids(uint32_t id);  // Iterate over the out edges of s (*it is uint32_t)
+  Index_iter node_inp_ids(uint32_t id);  // Iterate over the inp edges of s
 
-  // Delete edges and node itself (master or master_root. If master_root, delete masters too)
-  void del(uint32_t id);
-  // Delete edges (master or master_root)
+  // delete all the pins and edges in the node
+  void del_node(uint32_t id);
+
+  // Delete edges and pin itself (if pin is node, then it is kept as empty because pins need a node)
+  void del_pin(uint32_t id);
+
+  // Delete edges between pins
   void del_edges(uint32_t id);
+
+  void dump(uint32_t id) const;
 };

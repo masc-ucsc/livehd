@@ -18,7 +18,7 @@ void Graph_core::Master_entry::readjust_edges(uint32_t self_id, std::vector<uint
     }
     sedge[i] = 0;
   }
-  if (is_master_root() && sedge2_or_pid) {
+  if (is_node() && sedge2_or_pid) {
     if (inp_mask & (1 << Num_sedges)) {
       pending_inp.emplace_back(self_id + sedge2_or_pid);
     } else {
@@ -27,7 +27,7 @@ void Graph_core::Master_entry::readjust_edges(uint32_t self_id, std::vector<uint
     sedge2_or_pid = 0;
   }
 
-  if (is_master_root() && ledge0_or_prev) {
+  if (is_node() && ledge0_or_prev) {
     uint32_t tmp = ledge0_or_prev;
     ledge0_or_prev = 0;
     if (inp_mask & (1 << (Num_sedges+1))) {
@@ -60,19 +60,22 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
     }
     return true;
   }
-  if (is_master_root() && sedge2_or_pid == 0) {
+
+  if (is_node() && sedge2_or_pid == 0) {
     sedge2_or_pid = rel_id;
     if (out) {
       ++n_outputs;
     } else {
       inp_mask |= (1 << Num_sedges);
     }
+    return true;
   }
+
   return false;
 }
 
 bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
-  if (is_master_root() && ledge0_or_prev == 0) {
+  if (is_node() && ledge0_or_prev == 0) {
     ledge0_or_prev = id;
     if (out) {
       ++n_outputs;
@@ -156,92 +159,144 @@ void Graph_core::Overflow_entry::readjust_edges(uint32_t overflow_id, std::vecto
 
   std::vector<uint32_t> *pending=nullptr;
 
+  if (n_edges==0) {
+    inputs = !pending_inp.empty();
+  }
   if (inputs) {
     pending = &pending_inp;
   }else{
     pending = &pending_out;
   }
-  if (pending->empty())
+  if (pending->empty()) {
+    I(n_edges); // if n_edges==0, it should insert, and either inp/out should have edges
     return;
-
-  auto id = pending->back();
+  }
 
   // First populate the 3 ledges
-  if (n_edges<=2) { //0, 1, 2
-    I(ledge_max);
-    if (ledge_max<id) {
-      ledge_min = ledge1;
-      ledge1 = ledge_max;
-      ledge_max = id;
-    }else if (ledge1<id){
-      ledge_min = ledge1;
-      ledge1 = id;
-    }else{
-      ledge_min = id;
-    }
-    ++n_edges;
+  if (ledge_min==0) {
+    ledge_min = pending->back();
+    I(ledge1==0);
+    I(ledge_max==0);
     pending->pop_back();
-    return;
+    ++n_edges;
+    if (pending->empty())
+      return;
+  }
+  if (ledge_max==0) {
+    ledge_max = pending->back();
+    pending->pop_back();
+    ++n_edges;
+    I(ledge1==0);
+    if (ledge_max<ledge_min) {
+      auto tmp  = ledge_min;
+      ledge_min = ledge_max;
+      ledge_max = tmp;
+    }
+    if (pending->empty())
+      return;
+  }
+  if (ledge1==0) {
+    ledge1 = pending->back();
+    if (ledge_max<ledge1) {
+      auto tmp  = ledge1;
+      ledge1    = ledge_max;
+      ledge_max = tmp;
+    }else if (ledge_min>ledge1) {
+      auto tmp  = ledge1;
+      ledge1    = ledge_min;
+      ledge_min = tmp;
+    }
+    pending->pop_back();
+    ++n_edges;
+    if (pending->empty())
+      return;
   }
 
   // TODO: Add the most common cases to avoid the large/slow expand case
 
   extract_all(overflow_id, *pending);
 
-  auto pos=0u;
-  uint32_t last_id=0;
-  while(!pending->empty()) {
-    if (pos==0) {
-      ledge_min = pending->back();
-      last_id = ledge_min;
-      pending->pop_back();
-      ++n_edges;
-      continue;
-    }
+  I(ledge_min == 0);
+  I(ledge1    == 0);
+  I(ledge_max == 0);
 
-    int32_t rel_id = last_id - pending->back();
-    bool short_rel = INT32_MIN > rel_id && rel_id < INT32_MAX;
+  auto pos         = 0u;
+  uint32_t last_id = 0;
+
+  {
+    // First is easy to insert, just ledge_min
+    ledge_min = pending->back();
+    last_id = ledge_min;
+    pending->pop_back();
+    ++n_edges;
+    ++pos;
+  }
+
+  while(pending->size()>2) {
+
+    int32_t rel_id = pending->back() - last_id;
+    bool short_rel = INT16_MIN < rel_id && rel_id < INT16_MAX;
     if (pos<(1+sedge0_size)) {
       if (short_rel) {
-        sedge0[pos-11] = short_rel;
+        sedge0[pos-1] = rel_id;
         ++pos;
       }else{
         ledge1 = pending->back();
         pos = 1+1+sedge0_size;
       }
+      last_id = pending->back();
       pending->pop_back();
       ++n_edges;
       continue;
     }
 
     if (pos == (1+sedge0_size)) {
-      ledge1 = pending->back();
+      I(ledge1==0);
+      ledge1  = pending->back();
       last_id = ledge1;
+
+      ++pos;
+
       pending->pop_back();
       ++n_edges;
       continue;
     }
 
     if (pos<(1+sedge0_size+1+sedge1_size)) {
-      if (short_rel) {
-        sedge1[pos-11] = short_rel;
-        ++pos;
-      }else{
+      if (!short_rel) {
         ledge_max = pending->back();
-        pos = 1+1+sedge0_size+1+sedge1_size;
+        pending->pop_back();
+        ++n_edges;
+        return;
       }
+
+      sedge1[pos-(1+sedge0_size+1)] = rel_id;
+      ++pos;
+      last_id = pending->back();
       pending->pop_back();
       ++n_edges;
       continue;
     }
 
     if (pos==(1+sedge0_size+1+sedge1_size)) {
-      ledge1 = pending->back();
-      last_id = ledge1;
+      ledge_max = pending->back();
       pending->pop_back();
       ++n_edges;
       return;
     }
+  }
+
+  I(ledge_max==0);
+  if (ledge1==0) {
+    I(pending->size()==2);
+    ledge1    = (*pending)[1];
+    ledge_max = (*pending)[0];
+    pending->clear();
+    n_edges+=2;
+  }else{
+    ledge_max = pending->back();
+    pending->pop_back();
+    ++n_edges;
   }
 }
 
@@ -258,15 +313,15 @@ uint32_t Graph_core::allocate_overflow() {
   }
 
   Overflow_entry *ent    = (Overflow_entry *)&table[oid];
-  ent->overflow_node = 1;
+  ent->overflow_vertex = 1;
 
   return oid;
 }
 
 void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
-  Master_entry &ent       = table[self_id];
-  int32_t      rel_index = self_id - other_id;
-  bool         short_rel = INT32_MIN > rel_index && rel_index < INT32_MAX;
+  Master_entry &ent      = table[self_id];
+  int32_t      rel_index = other_id - self_id;
+  bool         short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
 
   if (short_rel) {
     bool ok = ent.insert_sedge(static_cast<int16_t>(rel_index), out);
@@ -298,22 +353,29 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   if (overflow_id == 0) {
     I(ent.ledge1_or_overflow == 0);
     overflow_id = allocate_overflow();
-    ent.set_overflow(overflow_id);
+    // Can not use ent, allocate_overflow can change pointers
+    table[self_id].set_overflow(overflow_id);
   }
   I(overflow_id);
 
   while (true) {
-    auto *ref_overflow = (Overflow_entry *)&table[overflow_id];
-    I(ref_overflow);
-    ref_overflow->readjust_edges(overflow_id, pending_inp, pending_out);
+    auto *over_ptr = ref_overflow(overflow_id);
+    I(over_ptr);
+    over_ptr->readjust_edges(overflow_id, pending_inp, pending_out);
 
     if (pending_inp.empty() && pending_out.empty())
       return;
 
-    overflow_id           = ref_overflow->get_overflow_id();
+    over_ptr = ref_overflow(overflow_id); // readjust_edges can change the table (move it), so must recompute
+    auto tmp_id = overflow_id;
+    I(tmp_id);
+
+    overflow_id           = over_ptr->get_overflow_id();
     if (overflow_id == 0) {
-      overflow_id                    = allocate_overflow();
-      ref_overflow->overflow_next_id = overflow_id;
+      overflow_id                = allocate_overflow();
+
+      // readjust_edges can change the table (move it), so must recompute
+      ref_overflow(tmp_id)->overflow_next_id = overflow_id;
     }
   }
 }
@@ -330,19 +392,19 @@ Graph_core::Graph_core(std::string_view path, std::string_view name) {
   (void)name;
 
   table.emplace_back(); // Reserve entry 0 as is_invalid
-  table[0].overflow_node = true; // mark invalid type
+  table[0].overflow_vertex = true; // mark invalid type
 
   free_master_id = 0;
   free_overflow_id = 0;
 }
 
-/*  Create a master_root node
+/*  Create a node node
  *
  *  @params uint8_t type
  *  @returns uint32_t of the node
  */
 
-uint32_t Graph_core::create_master_root() {
+uint32_t Graph_core::create_node() {
   uint32_t id;
 
   if (free_master_id) {
@@ -352,40 +414,39 @@ uint32_t Graph_core::create_master_root() {
     id = table.size();
     table.emplace_back();
   }
-  I(!table[id].has_edges() && table[id].master_root_node == 0);  // initialized to zero
+  I(!table[id].has_edges() && table[id].node_vertex == 0);  // initialized to zero
 
-  table[id].master_root_node = 1;
+  table[id].node_vertex = 1;
 
   return id;
 }
 
-/*  Create a master and point to master root m
+/*  Create a pin and point to pin root m
  *
- *  @params const Index_ID master_root_id, const Port_ID pid
+ *  @params const Index_ID node_id, const Port_ID pid
  *  @returns Index_ID of the node
  */
 
-uint32_t Graph_core::create_master(const uint32_t master_root_id, const Port_ID pid) {
-  I(master_root_id && master_root_id < table.size());
+uint32_t Graph_core::create_pin(const uint32_t node_id, const Port_ID pid) {
+  I(node_id && node_id < table.size());
 
-  auto  id         = create_master_root();
-  auto &master_ent = table[id];
+  auto  id      = create_node();
+  auto &pin_ent = table[id];
 
-  master_ent.master_root_node  = 0;
-  master_ent.ledge0_or_prev     = master_root_id;
-  master_ent.set_pid(pid);
+  pin_ent.node_vertex    = 0;
+  pin_ent.ledge0_or_prev = node_id;
+  pin_ent.set_pid(pid);
 
-  auto &root_ent = table[master_root_id];
-  I(root_ent.is_master_root());
+  auto &root_ent = table[node_id];
+  I(root_ent.is_node());
 
   if (root_ent.next_ptr == 0) {
-    root_ent.next_ptr = id;  // easy case, first master
+    root_ent.next_ptr = id;  // easy case, first pin
     return id;
   }
 
-  // Insert master in pid order (easier search)
-
-  auto prev_ptr = master_root_id;
+  // Insert pin in pid order (easier search)
+  auto prev_ptr = node_id;
   auto ptr      = root_ent.next_ptr;
   while (ptr && table[ptr].get_pid() > pid) {
     prev_ptr = ptr;
@@ -398,4 +459,97 @@ uint32_t Graph_core::create_master(const uint32_t master_root_id, const Port_ID 
   table[id].next_ptr       = insert_ptr;
 
   return id;
+}
+
+std::pair<size_t, size_t> Graph_core::get_num_pin_edges(uint32_t id) const {
+  I(!is_invalid(id));
+
+  size_t t_inp = 0;
+  size_t t_out = 0;
+
+  {
+    auto [l_inp, l_out] = table[id].get_num_local_edges();
+    t_inp += l_inp;
+    t_out += l_out;
+  }
+
+  auto over_id = table[id].get_overflow_id();
+  while (over_id) {
+    auto *over_ptr = ref_overflow(over_id);
+    auto [l_inp, l_out] = over_ptr->get_num_local_edges();
+    t_inp += l_inp;
+    t_out += l_out;
+
+    over_id = over_ptr->get_overflow_id();
+  }
+
+  return std::pair(t_inp, t_out);
+}
+
+void Graph_core::Master_entry::dump(uint32_t self_id) const {
+
+  const auto [n_i,n_o] = get_num_local_edges();
+
+  if (node_vertex) {
+    fmt::print("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n", self_id, bits, n_i, n_o, next_ptr, get_overflow_id());
+  }else{
+    fmt::print("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n", self_id, get_pid(), bits, n_i, n_o, next_ptr, get_overflow_id(), ledge0_or_prev);
+  }
+
+  fmt::print("  edges:");
+  for(auto i=0u;i<Num_sedges;++i) {
+    if (sedge[i])
+      fmt::print(" {}",self_id+sedge[i]);
+  }
+  if (node_vertex && sedge2_or_pid) {
+    fmt::print(" {}", self_id+sedge2_or_pid);
+  }
+  if (node_vertex && ledge0_or_prev) {
+    fmt::print(" {}", ledge0_or_prev);
+  }
+  if (!overflow_link && ledge1_or_overflow) {
+    fmt::print(" {}", ledge1_or_overflow);
+  }
+  fmt::print("\n");
+}
+
+void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
+
+  fmt::print("  over:{} {} n_edges:{} next_id:{}\n", self_id, inputs?"inp":"out", n_edges, overflow_next_id);
+
+  fmt::print("    edges:");
+  if (ledge_min)
+    fmt::print(" min:{}", ledge_min);
+
+  auto last_id = ledge_min;
+  for(auto i=0u;i<sedge0_size;++i) {
+    if (sedge0[i])
+      fmt::print(" f{}",last_id+sedge0[i]);
+    last_id = last_id + sedge0[i];
+  }
+  if (ledge1) {
+    fmt::print(" ledge1:{}", ledge1);
+    last_id = ledge1;
+  }
+  for(auto i=0u;i<sedge1_size;++i) {
+    if (sedge1[i])
+      fmt::print(" s{}",last_id+sedge1[i]);
+    last_id = last_id + sedge1[i];
+  }
+  if (ledge_max)
+    fmt::print(" max:{}", ledge_max);
+  fmt::print("\n");
+}
+
+void Graph_core::dump(uint32_t id) const {
+  I(!is_invalid(id));
+
+  table[id].dump(id);
+
+  auto over_id = table[id].get_overflow_id();
+  while (over_id) {
+    auto *over_ptr = ref_overflow(over_id);
+    over_ptr->dump(over_id);
+    over_id = over_ptr->get_overflow_id();
+  }
 }
