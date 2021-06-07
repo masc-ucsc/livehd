@@ -45,12 +45,6 @@ protected:
   void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);  
   void setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
   void setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
-  void PreCheckForMem(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &stmt_node);
-  void InitMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_Memory &mem);
-  void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
-  void HandleMemPortPre(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void HandleMport(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void PortDirInference(const std::string &port_name, const std::string &mem_name, const bool is_rhs);
   void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
   void split_hier_name(std::string_view full_name, std::vector<std::string_view>& hier_subnames);
@@ -86,6 +80,10 @@ protected:
                                     const bool is_rhs);
   std::string_view CreateSelectsFromStr(Lnast &ln, Lnast_nid &parent_node, const std::string &flattened_str);
   std::string      FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  void InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
+  void HandleMportDeclaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
+  void HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const std::string &mport_name);
+  void HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const std::string &mport_name);
 
   // void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
 

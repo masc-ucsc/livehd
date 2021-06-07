@@ -1,4 +1,4 @@
-module MaskedReadWriteSmem(
+module MaskedSmem(
   input        clock,
   input        reset,
   input        io_enable,
@@ -33,94 +33,94 @@ module MaskedReadWriteSmem(
   reg [31:0] _RAND_10;
   reg [31:0] _RAND_11;
 `endif // RANDOMIZE_REG_INIT
-  reg [7:0] mem_0 [0:1023]; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_0_MPORT_1_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_0_MPORT_1_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_0_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_0_MPORT_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_0_MPORT_mask; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_0_MPORT_en; // @[MaskedReadWriteSmem.scala 16:24]
+  reg [7:0] mem_0 [0:1023]; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_0_MPORT_1_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_0_MPORT_1_addr; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_0_MPORT_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_0_MPORT_addr; // @[MaskedSmem.scala 16:24]
+  wire  mem_0_MPORT_mask; // @[MaskedSmem.scala 16:24]
+  wire  mem_0_MPORT_en; // @[MaskedSmem.scala 16:24]
   reg  mem_0_MPORT_1_en_pipe_0;
   reg [9:0] mem_0_MPORT_1_addr_pipe_0;
-  reg [7:0] mem_1 [0:1023]; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_1_MPORT_1_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_1_MPORT_1_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_1_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_1_MPORT_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_1_MPORT_mask; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_1_MPORT_en; // @[MaskedReadWriteSmem.scala 16:24]
+  reg [7:0] mem_1 [0:1023]; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_1_MPORT_1_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_1_MPORT_1_addr; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_1_MPORT_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_1_MPORT_addr; // @[MaskedSmem.scala 16:24]
+  wire  mem_1_MPORT_mask; // @[MaskedSmem.scala 16:24]
+  wire  mem_1_MPORT_en; // @[MaskedSmem.scala 16:24]
   reg  mem_1_MPORT_1_en_pipe_0;
   reg [9:0] mem_1_MPORT_1_addr_pipe_0;
-  reg [7:0] mem_2 [0:1023]; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_2_MPORT_1_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_2_MPORT_1_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_2_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_2_MPORT_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_2_MPORT_mask; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_2_MPORT_en; // @[MaskedReadWriteSmem.scala 16:24]
+  reg [7:0] mem_2 [0:1023]; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_2_MPORT_1_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_2_MPORT_1_addr; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_2_MPORT_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_2_MPORT_addr; // @[MaskedSmem.scala 16:24]
+  wire  mem_2_MPORT_mask; // @[MaskedSmem.scala 16:24]
+  wire  mem_2_MPORT_en; // @[MaskedSmem.scala 16:24]
   reg  mem_2_MPORT_1_en_pipe_0;
   reg [9:0] mem_2_MPORT_1_addr_pipe_0;
-  reg [7:0] mem_3 [0:1023]; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_3_MPORT_1_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_3_MPORT_1_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [7:0] mem_3_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
-  wire [9:0] mem_3_MPORT_addr; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_3_MPORT_mask; // @[MaskedReadWriteSmem.scala 16:24]
-  wire  mem_3_MPORT_en; // @[MaskedReadWriteSmem.scala 16:24]
+  reg [7:0] mem_3 [0:1023]; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_3_MPORT_1_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_3_MPORT_1_addr; // @[MaskedSmem.scala 16:24]
+  wire [7:0] mem_3_MPORT_data; // @[MaskedSmem.scala 16:24]
+  wire [9:0] mem_3_MPORT_addr; // @[MaskedSmem.scala 16:24]
+  wire  mem_3_MPORT_mask; // @[MaskedSmem.scala 16:24]
+  wire  mem_3_MPORT_en; // @[MaskedSmem.scala 16:24]
   reg  mem_3_MPORT_1_en_pipe_0;
   reg [9:0] mem_3_MPORT_1_addr_pipe_0;
   assign mem_0_MPORT_1_addr = mem_0_MPORT_1_addr_pipe_0;
-  assign mem_0_MPORT_1_data = mem_0[mem_0_MPORT_1_addr]; // @[MaskedReadWriteSmem.scala 16:24]
+  assign mem_0_MPORT_1_data = mem_0[mem_0_MPORT_1_addr]; // @[MaskedSmem.scala 16:24]
   assign mem_0_MPORT_data = io_dataIn_0;
   assign mem_0_MPORT_addr = io_addr;
   assign mem_0_MPORT_mask = io_mask_0;
   assign mem_0_MPORT_en = 1'h1;
   assign mem_1_MPORT_1_addr = mem_1_MPORT_1_addr_pipe_0;
-  assign mem_1_MPORT_1_data = mem_1[mem_1_MPORT_1_addr]; // @[MaskedReadWriteSmem.scala 16:24]
+  assign mem_1_MPORT_1_data = mem_1[mem_1_MPORT_1_addr]; // @[MaskedSmem.scala 16:24]
   assign mem_1_MPORT_data = io_dataIn_1;
   assign mem_1_MPORT_addr = io_addr;
   assign mem_1_MPORT_mask = io_mask_1;
   assign mem_1_MPORT_en = 1'h1;
   assign mem_2_MPORT_1_addr = mem_2_MPORT_1_addr_pipe_0;
-  assign mem_2_MPORT_1_data = mem_2[mem_2_MPORT_1_addr]; // @[MaskedReadWriteSmem.scala 16:24]
+  assign mem_2_MPORT_1_data = mem_2[mem_2_MPORT_1_addr]; // @[MaskedSmem.scala 16:24]
   assign mem_2_MPORT_data = io_dataIn_2;
   assign mem_2_MPORT_addr = io_addr;
   assign mem_2_MPORT_mask = io_mask_2;
   assign mem_2_MPORT_en = 1'h1;
   assign mem_3_MPORT_1_addr = mem_3_MPORT_1_addr_pipe_0;
-  assign mem_3_MPORT_1_data = mem_3[mem_3_MPORT_1_addr]; // @[MaskedReadWriteSmem.scala 16:24]
+  assign mem_3_MPORT_1_data = mem_3[mem_3_MPORT_1_addr]; // @[MaskedSmem.scala 16:24]
   assign mem_3_MPORT_data = io_dataIn_3;
   assign mem_3_MPORT_addr = io_addr;
   assign mem_3_MPORT_mask = io_mask_3;
   assign mem_3_MPORT_en = 1'h1;
-  assign io_dataOut_0 = mem_0_MPORT_1_data; // @[MaskedReadWriteSmem.scala 19:14]
-  assign io_dataOut_1 = mem_1_MPORT_1_data; // @[MaskedReadWriteSmem.scala 19:14]
-  assign io_dataOut_2 = mem_2_MPORT_1_data; // @[MaskedReadWriteSmem.scala 19:14]
-  assign io_dataOut_3 = mem_3_MPORT_1_data; // @[MaskedReadWriteSmem.scala 19:14]
+  assign io_dataOut_0 = mem_0_MPORT_1_data; // @[MaskedSmem.scala 19:14]
+  assign io_dataOut_1 = mem_1_MPORT_1_data; // @[MaskedSmem.scala 19:14]
+  assign io_dataOut_2 = mem_2_MPORT_1_data; // @[MaskedSmem.scala 19:14]
+  assign io_dataOut_3 = mem_3_MPORT_1_data; // @[MaskedSmem.scala 19:14]
   always @(posedge clock) begin
     if(mem_0_MPORT_en & mem_0_MPORT_mask) begin
-      mem_0[mem_0_MPORT_addr] <= mem_0_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
+      mem_0[mem_0_MPORT_addr] <= mem_0_MPORT_data; // @[MaskedSmem.scala 16:24]
     end
     mem_0_MPORT_1_en_pipe_0 <= io_enable;
     if (io_enable) begin
       mem_0_MPORT_1_addr_pipe_0 <= io_addr;
     end
     if(mem_1_MPORT_en & mem_1_MPORT_mask) begin
-      mem_1[mem_1_MPORT_addr] <= mem_1_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
+      mem_1[mem_1_MPORT_addr] <= mem_1_MPORT_data; // @[MaskedSmem.scala 16:24]
     end
     mem_1_MPORT_1_en_pipe_0 <= io_enable;
     if (io_enable) begin
       mem_1_MPORT_1_addr_pipe_0 <= io_addr;
     end
     if(mem_2_MPORT_en & mem_2_MPORT_mask) begin
-      mem_2[mem_2_MPORT_addr] <= mem_2_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
+      mem_2[mem_2_MPORT_addr] <= mem_2_MPORT_data; // @[MaskedSmem.scala 16:24]
     end
     mem_2_MPORT_1_en_pipe_0 <= io_enable;
     if (io_enable) begin
       mem_2_MPORT_1_addr_pipe_0 <= io_addr;
     end
     if(mem_3_MPORT_en & mem_3_MPORT_mask) begin
-      mem_3[mem_3_MPORT_addr] <= mem_3_MPORT_data; // @[MaskedReadWriteSmem.scala 16:24]
+      mem_3[mem_3_MPORT_addr] <= mem_3_MPORT_data; // @[MaskedSmem.scala 16:24]
     end
     mem_3_MPORT_1_en_pipe_0 <= io_enable;
     if (io_enable) begin
