@@ -680,17 +680,39 @@ public:
   // str created from this function will be same template as original str
   str substr(size_t start) const { return substr(start, _size - start); }
 
-  str substr(size_t start, size_t end) const {
-    if (_size == 0 || start > static_cast<size_t>(_size - 1)) {
+  str substr(size_t start, size_t step) const {
+    if (_size == 0 || start > static_cast<size_t>(_size - 1) || step == 0) {
       return mmap_lib::str<map_id>();
     }
-    std::string hold;
-    size_t      adj_end = (end > (_size - start)) ? (_size - start) : end;  // adjusting end for overflow
-    for (auto i = start; i < (start + adj_end); ++i) {
-      hold += (*this)[i];
+
+    size_t as = (step > (_size - start)) ? (_size - start) : step; // adjusting end
+    size_t sm8 = static_cast<size_t>(_size - 8);
+    char hold[as+1];
+    hold[as] = '\0';
+    
+    if (_size <= 13 || as == 1) { //SHORT, or single access
+      for (size_t i = start; i < (start + as); ++i) {
+        hold[i - start] = (*this)[i];
+      }  
+    } else if (_size > 13 && as > 1) { //LONG and multi access
+      if (start < 2 && (as + start) <= 2) { // only want first 2
+        hold[0] = e[0];
+        hold[1] = e[1];
+      } else if (start >= 2 && start < sm8 && as+start <= sm8) { //middle
+        return mmap_lib::str<map_id>(map_cref().get_sview(ptr_or_start).substr(start-2, as));
+      } else if (start >= sm8 && as + start <= _size) { // last 8
+        for (size_t k = 0; k + start < (start + as); ++k) {
+          hold[k] = e[l8(_size, k + start)];
+        }
+      } else {
+        for (size_t i = start, j = 0; i < (start + as); ++i, ++j) {
+          hold[j] = (*this)[i];
+        }
+      }
     }
     return mmap_lib::str<map_id>(hold);
   }
+
 
 };
 
