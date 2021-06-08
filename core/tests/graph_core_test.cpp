@@ -270,8 +270,8 @@ TEST_F(Setup_graph_core, bench_boost) {
 
     Lbench b("test1_boost_insert_" + std::to_string(sz));
 
-    boost::adjacency_list< boost::listS, boost::vecS, boost::bidirectionalS, boost::no_property,
-      boost::property< boost::edge_name_t, std::string > >
+    boost::adjacency_list< boost::vecS, boost::vecS, boost::bidirectionalS, boost::no_property,
+      boost::no_property >
         g; // create a boost mutable (adjecency_list)
 
     auto m1 = boost::add_vertex(g);
@@ -288,8 +288,8 @@ TEST_F(Setup_graph_core, bench_boost) {
 
     Lbench b("test2_boost_insert_" + std::to_string(sz));
 
-    boost::adjacency_list< boost::listS, boost::vecS, boost::bidirectionalS, boost::no_property,
-      boost::property< boost::edge_name_t, std::string > >
+    boost::adjacency_list< boost::vecS, boost::vecS, boost::bidirectionalS, boost::no_property,
+      boost::no_property >
         g; // create a boost mutable (adjecency_list)
 
     auto m1 = boost::add_vertex(g);
@@ -328,8 +328,6 @@ TEST_F(Setup_graph_core, bench_gc) {
 
     EXPECT_EQ(gc.get_num_pin_outputs(m1),sz);
   }
-
-  return;
 
   for(auto sz=100u;sz<100'000;sz=sz*10)
   { // test2
