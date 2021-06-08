@@ -265,7 +265,9 @@ TEST_F(Setup_graph_core, delete_edge) {
 
 TEST_F(Setup_graph_core, bench_against_boost) {
 
+  for(auto sz=100u;sz<100'000;sz=sz*10)
   { // test1
+
     Lbench b("test1_boost_insert_1K");
 
     boost::adjacency_list< boost::listS, boost::vecS, boost::bidirectionalS, boost::no_property,
@@ -273,14 +275,15 @@ TEST_F(Setup_graph_core, bench_against_boost) {
         g; // create a boost mutable (adjecency_list)
 
     auto m1 = boost::add_vertex(g);
-    for(auto i=0u;i<10'000;++i) {
+    for(auto i=0u;i<sz;++i) {
       auto m = boost::add_vertex(g);
       boost::add_edge(m1, m, g);
     }
 
-    EXPECT_EQ(boost::out_degree(m1, g),10000);
+    EXPECT_EQ(boost::out_degree(m1, g),sz);
   }
 
+  for(auto sz=100u;sz<100'000;sz=sz*10)
   { // test1
     Lbench b("test1_gc_insert_1K");
 
@@ -288,11 +291,60 @@ TEST_F(Setup_graph_core, bench_against_boost) {
 
     auto m1 = gc.create_node();
 
-    for(auto i=0u;i<10'000;++i) {
+    for(auto i=0u;i<sz;++i) {
       auto m = gc.create_node();
       gc.add_edge(m1, m);
     }
 
-    EXPECT_EQ(gc.get_num_pin_outputs(m1),10000);
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),sz);
+  }
+
+  for(auto sz=100u;sz<100'000;sz=sz*10)
+  { // test2
+    Lbench b("test2_boost_insert_1K");
+
+    boost::adjacency_list< boost::listS, boost::vecS, boost::bidirectionalS, boost::no_property,
+      boost::property< boost::edge_name_t, std::string > >
+        g; // create a boost mutable (adjecency_list)
+
+    auto m1 = boost::add_vertex(g);
+    std::vector<uint32_t> nodes;
+    for(auto i=0u;i<sz;++i) {
+      auto m = boost::add_vertex(g);
+      nodes.emplace_back(m);
+      boost::add_edge(m1, m, g);
+    }
+
+    EXPECT_EQ(boost::out_degree(m1, g),sz);
+
+    for(const auto &m:nodes) {
+      boost::remove_edge(m1, m, g);
+    }
+
+    EXPECT_EQ(boost::out_degree(m1, g),0);
+  }
+
+  for(auto sz=100u;sz<100'000;sz=sz*10)
+  { // test2
+    Lbench b("test2_gc_insert_1K");
+
+    Graph_core gc("lgdb_graph_core_test","bench_test1");
+
+    auto m1 = gc.create_node();
+
+    std::vector<uint32_t> nodes;
+    for(auto i=0u;i<sz;++i) {
+      auto m = gc.create_node();
+      nodes.emplace_back(m);
+      gc.add_edge(m1, m);
+    }
+
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),sz);
+
+    for(const auto &m:nodes) {
+      gc.del_edge(m1, m);
+    }
+
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),0);
   }
 }
