@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "boost/container/static_vector.hpp"
+
 #include <cassert>
 #include <string_view>
 #include <vector>
@@ -55,8 +57,9 @@ class Graph_core {
 protected:
   class __attribute__((packed)) Overflow_entry {
   protected:
-    void extract_all(std::vector<uint32_t> &expanded);
+    void extract_all(boost::container::static_vector<uint32_t,40> &expanded);
     bool delete_edge_rebalance_ledges(uint32_t other_id);
+
   public:
     Overflow_entry() { clear(); }
     void clear() {
@@ -64,25 +67,25 @@ protected:
       overflow_vertex = 1;
     }
 
-    void readjust_edges(std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
+    void readjust_edges(boost::container::static_vector<uint32_t,40> &pending_inp, boost::container::static_vector<uint32_t,40> &pending_out);
 
     bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
 
-    static inline constexpr size_t sedge0_size=11;
-    static inline constexpr size_t sedge1_size=12;
-    static inline constexpr size_t max_edges=sedge0_size+sedge1_size+3;
+    static inline constexpr size_t sedge0_size = 11;
+    static inline constexpr size_t sedge1_size = 12;
+    static inline constexpr size_t max_edges   = sedge0_size + sedge1_size + 3;
 
     // BEGIN cache line
-    uint8_t overflow_vertex : 1;     // Overflow or not overflow node
-    uint8_t node_vertex : 1;  // node or just pin
+    uint8_t overflow_vertex : 1;  // Overflow or not overflow node
+    uint8_t node_vertex : 1;      // node or just pin
     uint8_t inputs : 1;
-    uint8_t sedge0_full:1; // not used now
-    uint8_t sedge1_full:1; // not used now
-    uint8_t padding:3;
+    uint8_t sedge0_full : 1;  // not used now
+    uint8_t sedge1_full : 1;  // not used now
+    uint8_t padding : 3;
 
-    uint8_t n_edges;   // 0 to 18 (50 in compress)
+    uint8_t n_edges;  // 0 to 18 (50 in compress)
 
-    int16_t  sedge0[sedge0_size]; // between ledge_min..ledge1
+    int16_t sedge0[sedge0_size];  // between ledge_min..ledge1
 
     // 4 byte aligned
     uint32_t overflow_next_id;
@@ -92,16 +95,16 @@ protected:
     uint32_t ledge1;
     uint32_t ledge_max;
 
-    int16_t  sedge1[sedge1_size]; // between ledge1..ledge_max
+    int16_t sedge1[sedge1_size];  // between ledge1..ledge_max
 
     uint32_t get_overflow_id() const { return overflow_next_id; }
 
-    bool has_local_edges() const { return n_edges>0; }
+    bool has_local_edges() const { return n_edges > 0; }
 
     std::pair<size_t, size_t> get_num_local_edges() const {
       if (inputs)
-        return std::pair(n_edges,0);
-      return std::pair(0,n_edges);
+        return std::pair(n_edges, 0);
+      return std::pair(0, n_edges);
     }
 
     void dump(uint32_t self_id) const;
@@ -109,16 +112,16 @@ protected:
 
   class __attribute__((packed)) Master_entry {  // AKA pin or node entry
   public:
-    static inline constexpr size_t Num_sedges=6;
+    static inline constexpr size_t Num_sedges = 6;
 
     // CTRL: Byte 0:1
-    uint8_t overflow_vertex : 1;  // Overflow or not overflow node
-    uint8_t node_vertex : 1;      // node or just pin
-    uint16_t inp_mask : 9;        // are the edges input or output edges
-    uint8_t n_outputs : 4;
-    uint8_t overflow_link : 1;    // When set, ledge_min points to overflow
+    uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
+    uint8_t  node_vertex : 1;      // node or just pin
+    uint16_t inp_mask : 9;         // are the edges input or output edges
+    uint8_t  n_outputs : 4;
+    uint8_t  overflow_link : 1;  // When set, ledge_min points to overflow
     // CTRL: Byte 2
-    uint8_t lpid_or_type;         // type in node, pid bits in pin
+    uint8_t lpid_or_type;  // type in node, pid bits in pin
     // CTRL: Byte 3:5
     uint32_t bits : 24;
     // SEDGE: Byte 6:7 (special case)
@@ -138,7 +141,7 @@ protected:
       bzero(this, sizeof(Master_entry));  // set zero everything
     }
 
-    void readjust_edges(uint32_t self_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
+    void readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t,40> &pending_inp, boost::container::static_vector<uint32_t,40> &pending_out);
     bool insert_sedge(int16_t rel_id, bool out);
     bool insert_ledge(uint32_t id, bool out);
     bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
@@ -221,13 +224,15 @@ protected:
   void del_edge_int(uint32_t self_id, uint32_t other_id, bool out);
 
   Overflow_entry *ref_overflow(uint32_t id) {
-    I((id+1)<table.size()); // overflow uses 2 entries in table
+#if 0
+    I((id + 1) < table.size());  // overflow uses 2 entries in table
     I(table[id].overflow_vertex);
+#endif
 
     return (Overflow_entry *)&table[id];
   }
   const Overflow_entry *ref_overflow(uint32_t id) const {
-    I((id+1)<table.size()); // overflow uses 2 entries in table
+    I((id + 1) < table.size());  // overflow uses 2 entries in table
     I(table[id].overflow_vertex);
 
     return (const Overflow_entry *)&table[id];
@@ -263,10 +268,10 @@ public:
   }
 
   bool is_invalid(uint32_t id) const {
-    if (id == 0 || table.size()<=id)
+    if (id == 0 || table.size() <= id)
       return true;
 
-    return table[id].overflow_vertex; // overflow set in deleted nodes
+    return table[id].overflow_vertex;  // overflow set in deleted nodes
   }
 
   bool is_node(uint32_t id) const {
@@ -311,8 +316,8 @@ public:
   }
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const std::vector<uint32_t> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
-  const std::vector<uint32_t> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
+  const boost::container::static_vector<uint32_t,40> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
+  const boost::container::static_vector<uint32_t,40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
   uint32_t fast_next(uint32_t start);
