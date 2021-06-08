@@ -9,18 +9,9 @@
 #include "boost/graph/graph_utility.hpp"
 
 #include "gmock/gmock.h"
-#include "graph_core_compress.hpp"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
 #include "lrand.hpp"
-
-#include <stdlib.h>
-#include <time.h>
-#include <unordered_map>
-#include <iostream>
-
-
-using namespace std;
 
 class Setup_graph_core : public ::testing::Test {
 protected:
@@ -87,8 +78,47 @@ TEST_F(Setup_graph_core, trivial_ops) {
   }
 }
 
+TEST_F(Setup_graph_core, trivial_ops_insert1) {
+  Graph_core gc("lgdb_graph_core_test","trivial_ops_insert");
 
-TEST_F(Setup_graph_core, trivial_ops_insert) {
+  auto m1 = gc.create_node();
+
+  std::vector<uint32_t> nodes;
+
+  for(auto i=0u;i<1'000;++i) {
+    auto m = gc.create_node();
+    nodes.emplace_back(m);
+  }
+  std::random_shuffle(nodes.begin(), nodes.end());
+
+  auto n=0u;
+  for(const auto &m:nodes) {
+    gc.add_edge(m1, m);
+    //fmt::print("ADDING {}\n",m);
+    //gc.dump(m1);
+    ++n;
+    EXPECT_EQ(gc.get_num_pin_outputs(m1), n);
+    EXPECT_EQ(gc.get_num_pin_inputs(m)  , 1);
+  }
+
+  auto m2 = gc.create_node();
+  auto m3 = gc.create_node();
+
+  for(auto i=0u;i<1'000;++i) {
+    auto m = gc.create_node();
+    gc.add_edge(m2, m);
+    gc.add_edge(m, m3);
+    //fmt::print("ADDING {}\n",m);
+    //gc.dump(m2);
+    ++n;
+    EXPECT_EQ(gc.get_num_pin_outputs(m2), i+1);
+    EXPECT_EQ(gc.get_num_pin_inputs(m3),  i+1);
+    EXPECT_EQ(gc.get_num_pin_inputs(m),   1);
+    EXPECT_EQ(gc.get_num_pin_outputs(m),  1);
+  }
+}
+
+TEST_F(Setup_graph_core, trivial_ops_insert2) {
 
   Graph_core gc("lgdb_graph_core_test","trivial_ops_insert");
 
@@ -121,20 +151,22 @@ TEST_F(Setup_graph_core, trivial_ops_insert) {
   EXPECT_EQ(gc.get_num_pin_outputs(m3),0);
 
   std::vector<uint32_t> nodes;
-  for(auto i=0;i<150;++i) {
+  for(auto i=0;i<149;++i) {
     auto m = gc.create_node();
     nodes.emplace_back(m);
     gc.add_edge(m1,m);
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),i+2); // --
   }
 
   for(auto i=0;i<70000;++i) { // lots of nodes to force long edges
     gc.create_node();
   }
 
-  for(auto i=0;i<149;++i) {
+  for(auto i=0;i<150;++i) {
     auto m = gc.create_node();
     nodes.emplace_back(m);
     gc.add_edge(m1,m);
+    EXPECT_EQ(gc.get_num_pin_outputs(m1),i+151); // --
   }
 
   for(auto i=nodes.size()-1;i>0;--i) {
@@ -150,6 +182,85 @@ TEST_F(Setup_graph_core, trivial_ops_insert) {
   EXPECT_EQ(gc.get_num_pin_outputs(m2),0);
   EXPECT_EQ(gc.get_num_pin_inputs(m3),300); // --
   EXPECT_EQ(gc.get_num_pin_outputs(m3),0);
+}
+
+TEST_F(Setup_graph_core, delete_edge) {
+
+  Graph_core gc("lgdb_graph_core_test","delete_edge");
+
+  auto m1 = gc.create_node();
+  auto m2 = gc.create_node();
+
+  EXPECT_EQ(gc.get_num_pin_outputs(m1),0);
+  EXPECT_EQ(gc.get_num_pin_inputs(m2) ,0);
+
+  gc.add_edge(m1,m2);
+
+  EXPECT_EQ(gc.get_num_pin_outputs(m1),1);
+  EXPECT_EQ(gc.get_num_pin_inputs(m2) ,1);
+
+  gc.del_edge(m1,m2);
+
+  EXPECT_EQ(gc.get_num_pin_outputs(m1),0);
+  EXPECT_EQ(gc.get_num_pin_inputs(m2) ,0);
+
+  Lrand<bool> rbool;
+
+  std::vector<uint32_t> nodes;
+  for(auto i=0;i<20000;++i) {
+    auto m = gc.create_node();
+    nodes.emplace_back(m);
+  }
+  std::random_shuffle(nodes.begin(), nodes.end());
+
+  std::vector<uint32_t> sink_nodes;
+  std::vector<uint32_t> driver_nodes;
+  for(const auto &m:nodes) {
+    if (rbool.any()) {
+      sink_nodes.emplace_back(m);
+      gc.add_edge(m1,m);
+    }else{
+      driver_nodes.emplace_back(m);
+      gc.add_edge(m,m1);
+    }
+  }
+
+  EXPECT_EQ(gc.get_num_pin_outputs(m1),   sink_nodes.size());
+  EXPECT_EQ(gc.get_num_pin_inputs (m1), driver_nodes.size());
+
+#if 1
+  std::random_shuffle(  sink_nodes.begin(),   sink_nodes.end());
+  std::random_shuffle(driver_nodes.begin(), driver_nodes.end());
+
+  //gc.dump(m1);
+
+  while(true) {
+    if (sink_nodes.empty() && driver_nodes.empty())
+      break;
+
+    auto do_sink = rbool.any() && !sink_nodes.empty();
+
+    if (do_sink || driver_nodes.empty()) {
+      auto m = sink_nodes.back();
+      sink_nodes.pop_back();
+      //fmt::print("DELETING sink node:{}\n", m);
+      gc.del_edge(m1,m);
+      //gc.dump(m1);
+    }else{
+      I(!driver_nodes.empty());
+      auto m = driver_nodes.back();
+      driver_nodes.pop_back();
+      //fmt::print("DELETING driver node:{}\n", m);
+      gc.del_edge(m,m1);
+      //gc.dump(m1);
+    }
+    //EXPECT_EQ(gc.get_num_pin_outputs(m1),   sink_nodes.size());
+    //EXPECT_EQ(gc.get_num_pin_inputs (m1), driver_nodes.size());
+  }
+
+  EXPECT_EQ(gc.get_num_pin_outputs(m1), 0);
+  EXPECT_EQ(gc.get_num_pin_inputs (m1), 0);
+#endif
 }
 
 TEST_F(Setup_graph_core, bench_against_boost) {
@@ -184,5 +295,4 @@ TEST_F(Setup_graph_core, bench_against_boost) {
 
     EXPECT_EQ(gc.get_num_pin_outputs(m1),10000);
   }
-
 }

@@ -55,7 +55,8 @@ class Graph_core {
 protected:
   class __attribute__((packed)) Overflow_entry {
   protected:
-    void extract_all(uint32_t self_id, std::vector<uint32_t> &expanded);
+    void extract_all(std::vector<uint32_t> &expanded);
+    bool delete_edge_rebalance_ledges(uint32_t other_id);
   public:
     Overflow_entry() { clear(); }
     void clear() {
@@ -63,7 +64,9 @@ protected:
       overflow_vertex = 1;
     }
 
-    void readjust_edges(uint32_t overflow_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
+    void readjust_edges(std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
+
+    bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
 
     static inline constexpr size_t sedge0_size=11;
     static inline constexpr size_t sedge1_size=12;
@@ -92,6 +95,8 @@ protected:
     int16_t  sedge1[sedge1_size]; // between ledge1..ledge_max
 
     uint32_t get_overflow_id() const { return overflow_next_id; }
+
+    bool has_local_edges() const { return n_edges>0; }
 
     std::pair<size_t, size_t> get_num_local_edges() const {
       if (inputs)
@@ -136,7 +141,7 @@ protected:
     void readjust_edges(uint32_t self_id, std::vector<uint32_t> &pending_inp, std::vector<uint32_t> &pending_out);
     bool insert_sedge(int16_t rel_id, bool out);
     bool insert_ledge(uint32_t id, bool out);
-    bool delete_edge(uint32_t self_id, uint32_t id);
+    bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
 
     bool is_pin() const { return !node_vertex; }
     bool is_node() const { return node_vertex; }
