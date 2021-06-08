@@ -11,6 +11,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
+#include "lgraph.hpp"
 #include "lrand.hpp"
 
 class Setup_graph_core : public ::testing::Test {
@@ -263,9 +264,14 @@ TEST_F(Setup_graph_core, delete_edge) {
 #endif
 }
 
+// For benchmarking
+//#define BENCH_SIZE 1'000'000u
+// FOR testing (not benchmarking)
+#define BENCH_SIZE 100'000u
+
 TEST_F(Setup_graph_core, bench_boost) {
 
-  for(auto sz=100u;sz<100'000;sz=sz*10)
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
   { // test1
 
     Lbench b("test1_boost_insert_" + std::to_string(sz));
@@ -283,10 +289,10 @@ TEST_F(Setup_graph_core, bench_boost) {
     EXPECT_EQ(boost::out_degree(m1, g),sz);
   }
 
-  for(auto sz=100u;sz<100'000;sz=sz*10)
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
   { // test2
 
-    Lbench b("test2_boost_insert_" + std::to_string(sz));
+    Lbench b("test2_boost_delete_" + std::to_string(sz));
 
     boost::adjacency_list< boost::vecS, boost::vecS, boost::bidirectionalS, boost::no_property,
       boost::no_property >
@@ -309,12 +315,33 @@ TEST_F(Setup_graph_core, bench_boost) {
     EXPECT_EQ(boost::out_degree(m1, g),0);
   }
 
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  { // test1
+
+    Lbench b("test1_boost_chain_" + std::to_string(sz));
+
+    boost::adjacency_list< boost::vecS, boost::vecS, boost::bidirectionalS, boost::no_property,
+      boost::no_property >
+        g; // create a boost mutable (adjecency_list)
+
+    auto m_first = boost::add_vertex(g);
+    auto m1      = m_first;
+
+    for(auto i=0u;i<sz;++i) {
+      auto m = boost::add_vertex(g);
+      boost::add_edge(m1, m, g);
+      m1 = m;
+    }
+
+    EXPECT_EQ(boost::out_degree(m_first, g),1);
+    EXPECT_EQ(boost::in_degree(m1, g),1);
+  }
 }
 
 TEST_F(Setup_graph_core, bench_gc) {
 
-  for(auto sz=100u;sz<100'000;sz=sz*10)
-  { // test1
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  {
     Lbench b("test1_gc_insert_" + std::to_string(sz));
 
     Graph_core gc("lgdb_graph_core_test","bench_test1");
@@ -329,9 +356,9 @@ TEST_F(Setup_graph_core, bench_gc) {
     EXPECT_EQ(gc.get_num_pin_outputs(m1),sz);
   }
 
-  for(auto sz=100u;sz<100'000;sz=sz*10)
-  { // test2
-    Lbench b("test2_gc_insert_" + std::to_string(sz));
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  {
+    Lbench b("test2_gc_delete_" + std::to_string(sz));
 
     Graph_core gc("lgdb_graph_core_test","bench_test1");
 
@@ -352,4 +379,75 @@ TEST_F(Setup_graph_core, bench_gc) {
 
     EXPECT_EQ(gc.get_num_pin_outputs(m1),0);
   }
+
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  {
+    Lbench b("test1_gc_chain_" + std::to_string(sz));
+
+    Graph_core gc("lgdb_graph_core_test","bench_test2");
+
+    auto m_first = gc.create_node();
+    auto m1 = m_first;
+
+    for(auto i=0u;i<sz;++i) {
+      auto m = gc.create_node();
+      gc.add_edge(m1, m);
+      m1 = m;
+    }
+
+    EXPECT_EQ(gc.get_num_pin_outputs(m_first),1);
+    EXPECT_EQ(gc.get_num_pin_inputs(m1),1);
+  }
 }
+
+TEST_F(Setup_graph_core, bench_lgraph) {
+
+  // This is to show the full Lgraph overhead (it should be close to Graph_core
+  // once it replaced node_internal)
+
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  {
+    Lbench b("test1_lg_insert_" + std::to_string(sz));
+
+    auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");
+
+    auto m1 = lg->create_node(Ntype_op::CompileErr); // CompileErr to allow arbitrary edges without checks
+    auto p1 = m1.get_driver_pin();
+
+    for(auto i=0u;i<sz;++i) {
+      auto m = lg->create_node(Ntype_op::CompileErr); // CompileErr to allow arbitrary edges without checks
+
+      lg->add_edge(p1, m.get_sink_pin());
+    }
+
+    EXPECT_EQ(m1.get_num_out_edges(),sz);
+  }
+
+  for(auto sz=100u;sz<BENCH_SIZE;sz=sz*10)
+  {
+    Lbench b("test2_lg_delete_" + std::to_string(sz));
+
+    auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");
+
+    auto m1 = lg->create_node(Ntype_op::CompileErr); // CompileErr to allow arbitrary edges without checks
+    auto p1 = m1.get_driver_pin();
+
+    std::vector<Node_pin> pins;
+    for(auto i=0u;i<sz;++i) {
+      auto m = lg->create_node(Ntype_op::CompileErr); // CompileErr to allow arbitrary edges without checks
+      auto p = m.get_sink_pin();
+      pins.emplace_back(p);
+      lg->add_edge(p1, p);
+    }
+
+    EXPECT_EQ(m1.get_num_out_edges(),sz);
+
+    for(auto &p:pins) {
+      p1.del(p);
+    }
+
+    EXPECT_EQ(m1.get_num_out_edges(),0);
+  }
+
+}
+

@@ -69,7 +69,7 @@ protected:
 
     void readjust_edges(boost::container::static_vector<uint32_t,40> &pending_inp, boost::container::static_vector<uint32_t,40> &pending_out);
 
-    bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
+    bool delete_edge(uint32_t other_id, bool out);
 
     static inline constexpr size_t sedge0_size = 11;
     static inline constexpr size_t sedge1_size = 12;
@@ -106,6 +106,8 @@ protected:
         return std::pair(n_edges, 0);
       return std::pair(0, n_edges);
     }
+
+    bool is_full() const { return n_edges == max_edges; }
 
     void dump(uint32_t self_id) const;
   };

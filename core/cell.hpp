@@ -94,7 +94,7 @@ public:
 
   static inline constexpr bool is_multi_sink(Ntype_op op) {
     return op != Ntype_op::Mult && op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror
-           && op != Ntype_op::Not;
+           && op != Ntype_op::Not && op != Ntype_op::CompileErr;
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {

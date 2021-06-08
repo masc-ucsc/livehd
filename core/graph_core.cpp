@@ -516,13 +516,9 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
   return true;
 }
 
-bool Graph_core::Overflow_entry::delete_edge(uint32_t self_id, uint32_t other_id, bool out) {
-  (void)self_id;
+bool Graph_core::Overflow_entry::delete_edge(uint32_t other_id, bool out) {
 
-  if (inputs == out)
-    return false;
-
-  if (other_id < ledge_min || (other_id > ledge_max && ledge_max))
+  if (likely(inputs == out || other_id < ledge_min || (other_id > ledge_max && ledge_max)))
     return false;
 
   bool done = delete_edge_rebalance_ledges(other_id);
@@ -625,22 +621,95 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   }
   I(overflow_id);
 
+  std::vector<uint32_t> add_to_end;
+  uint32_t prev_over_id = 0;
+
   while (true) {
     auto *over_ptr = ref_overflow(overflow_id);
     I(over_ptr);
-    if (over_ptr->n_edges < Overflow_entry::max_edges) {
-      over_ptr->readjust_edges(pending_inp, pending_out);
 
-      if (pending_inp.empty() && pending_out.empty())
-        return;
+    if (over_ptr->is_full()) { // There was no space. The rest are full
+			auto new_over_id = allocate_overflow();
+      if (prev_over_id) {
+        // Before: A(nonfull) -> prev(nonfull)       ->         over (full) -> B(full)
+        // After : A(nonfull) -> prev(nonfull) -> new(empty) -> over (full) -> B(full)
+        ref_overflow(prev_over_id)->overflow_next_id = new_over_id;
+      }else{
+        // Before: master     ->    over(full) -> B(full)
+        // After : master -> new -> over(full) -> B(full)
+        I(table[self_id].ledge1_or_overflow == overflow_id);
+        table[self_id].ledge1_or_overflow = new_over_id;
+      }
+      over_ptr = ref_overflow(new_over_id);
+      over_ptr->overflow_next_id  = overflow_id;
+      overflow_id = new_over_id;
     }
 
-    auto prev_overflow_id = overflow_id;
-    overflow_id = over_ptr->get_overflow_id();
+    I(over_ptr->n_edges < Overflow_entry::max_edges);
+    over_ptr->readjust_edges(pending_inp, pending_out);
+
+    if (over_ptr->is_full()) { // Move to the end. Where fulls start
+      auto next_id            = over_ptr->get_overflow_id();
+      bool should_move_to_end = true;
+      if (next_id==0 || ref_overflow(next_id)->is_full()) {
+        // No need to move, if it is the last or next is full
+        should_move_to_end = false;
+      }
+
+      if (should_move_to_end) {
+        if (prev_over_id) {
+          // Before: A(nonfull) -> prev(nonfull) -> over (full) -> next(nonfull)
+          // After : A(nonfull) -> prev(nonfull)                -> next(nonfull)
+          ref_overflow(prev_over_id)->overflow_next_id = next_id;
+        }else{
+          // Before: master(??) -> over (full) -> next(nonfull)
+          // After : master(??)                -> next(nonfull)
+          table[self_id].ledge1_or_overflow = next_id;
+        }
+        // Add to pending and chain as needed
+        if (!add_to_end.empty()) {
+          ref_overflow(add_to_end.back())->overflow_next_id = overflow_id;
+        }
+        add_to_end.emplace_back(overflow_id);
+        overflow_id = next_id;
+        if (!pending_inp.empty() || !pending_out.empty()) {
+          // prev_over_id did not change
+          over_ptr = ref_overflow(next_id);
+          continue;
+        }
+      }
+    }
+
+    if (pending_inp.empty() && pending_out.empty()) {
+      if (add_to_end.empty())
+        return; // Nothing to do
+
+      // Find the last or the first empty (start with overflow_id)
+      // enqueue the add_to_end
+      uint32_t next_id = overflow_id;
+      uint32_t last_id = 0;
+      while (true) {
+        last_id = next_id;
+        next_id = over_ptr->get_overflow_id();
+        if (next_id==0)
+          break;
+        over_ptr = ref_overflow(next_id);
+        if (over_ptr->is_full())
+          break;
+      }
+
+      ref_overflow(last_id)->overflow_next_id = add_to_end.front();
+      ref_overflow(add_to_end.back())->overflow_next_id = next_id;
+
+      return;
+    }
+
+    prev_over_id = overflow_id;
+    overflow_id  = over_ptr->get_overflow_id();
     if (overflow_id == 0) {
 			overflow_id = allocate_overflow();
       // readjust_edges can change the table (move it), so must recompute
-      ref_overflow(prev_overflow_id)->overflow_next_id = overflow_id;
+      ref_overflow(prev_over_id)->overflow_next_id = overflow_id;
     }
   }
 }
@@ -654,9 +723,20 @@ void Graph_core::del_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   Overflow_entry *prev_ptr = nullptr;
   while (over_id) {
     auto *over_ptr = ref_overflow(over_id);
-    bool  done2    = over_ptr->delete_edge(over_id, other_id, out);
+    bool  done2    = over_ptr->delete_edge(other_id, out);
     if (done2) {
       if (over_ptr->has_local_edges()) {
+        if (prev_ptr==nullptr)
+          return;
+
+        if (!prev_ptr->is_full())
+          return;
+
+        // If prev is full, move to first position (fulls must be at the end)
+        prev_ptr->overflow_next_id = over_ptr->get_overflow_id();
+        auto tmp_id = table[self_id].get_overflow_id();
+        table[self_id].ledge1_or_overflow = over_id;
+        over_ptr->overflow_next_id = tmp_id;
         return;
       }
       if (prev_ptr) {
