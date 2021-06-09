@@ -1,3 +1,7 @@
+foo.bar.baz.__ubits = 5
+
+
+
 foo_mem_din = ()
 bar = (x = 22, y = 33)
 if (true) {
@@ -5,11 +9,20 @@ if (true) {
   foo_mem_din.0.y = 0
 }
 
+
+
 if ($en) {
   foo_mem_din.0 = mport.__last_value
   mport.x = bar.x
   mport.y = bar.y
 }
 
-%out = foo_mem_din.0.x
 
+
+if (true) {
+  a = bar.y
+}
+
+
+%out = foo_mem_din.0.x
+%out2 = a

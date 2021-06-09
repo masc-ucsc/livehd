@@ -14,10 +14,12 @@ wr_data_q = wr_data
 
 wr_data := wr_data + 1
 
+res = __memory(mem.__last_value)
 mem.addr    = addr_ports
 mem.bits    = 32
 // mem.size inferred (256 entries)
 mem.clock   = $my_ram_clock // shared by both ports
+%out2 = res.0
 mem.din     = (0, wr_data_q)
 mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
 
@@ -27,7 +29,7 @@ mem.latency  = (0, 1)
 mem.wensize = 1 // no wmask, all bits always written
 mem.rdport = (true,false) // port 0 rd, port 1 wr
 
-res = __memory(mem)
+res.0.__ubits = 32
 
 %out = res.0
 

@@ -2,6 +2,7 @@
 #pragma once
 
 // External package includes
+#include <cstdint>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-compare"
@@ -84,6 +85,8 @@ protected:
   void HandleMportDeclaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
   void HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const std::string &mport_name);
   void HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const std::string &mport_name);
+  void InitMemDin(Lnast &lnast, const std::string &mem_name, std::string_view port_cnt_str);
+  void InitMemRes(Lnast &lnast, const std::string &mem_name, std::string_view port_cnt_str);
 
   // void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
 
@@ -197,6 +200,7 @@ private:
   absl::flat_hash_map<std::string, Lnast_nid>                mem2initial_idx;
   absl::flat_hash_map<std::string, std::string>              mport2mem;
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
+  // absl::flat_hash_map<std::string, absl::flat_hash_map<std::vector<std::string>, uint16_t>> mem2din_fields2bits;
 
 
   uint32_t dummy_expr_node_cnt;

@@ -784,7 +784,17 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   if (type.is_select())
     I(false);
 
-  if (type.is_tuple()) {
+
+  bool the_ta_is_tuple_struct = false;
+  if (type.is_tuple_add()) {
+    auto first_child = get_first_child(opr_nid);
+    auto second_child = get_sibling_next(first_child);
+    if (!second_child.is_invalid() && get_type(second_child).is_assign())
+      the_ta_is_tuple_struct = true;
+  }
+
+
+  if (type.is_tuple() || the_ta_is_tuple_struct) {
     for (auto itr_opd : children(opr_nid)) {
       if (itr_opd == get_first_child(opr_nid))
         continue;
@@ -800,8 +810,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   }
 
   // handle statement lhs
-  if (type.is_assign() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple()
-      || type.is_tuple_concat() || type.is_tuple_get()) {
+  if (type.is_assign() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple() || type.is_tuple_concat() || type.is_tuple_get()) {
     auto lhs_nid  = get_first_child(opr_nid);
     auto lhs_name = get_name(lhs_nid);
 
