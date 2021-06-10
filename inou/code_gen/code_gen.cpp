@@ -111,6 +111,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_tuple(curr_index);
     } else if (curr_node_type.is_select() || curr_node_type.is_tuple_add() || curr_node_type.is_attr_get()) {
       do_select(curr_index, "selc");
+    } else if (curr_node_type.is_attr_set()) {
+      Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
     } else if (curr_node_type.is_tuple_get()) {
       do_select(curr_index, "tuple_get");
     } else if (curr_node_type.is_func_def()) {
