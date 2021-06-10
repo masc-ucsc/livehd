@@ -452,6 +452,34 @@ std::string_view Lgtuple::get_all_but_last_level(std::string_view key) {
   return "";
 }
 
+std::pair<Port_ID, std::string_view> Lgtuple::convert_key_to_io(std::string_view key) {
+
+  if (key[0] == '$' || key[0] == '%') {
+    key = key.substr(1);
+  }
+  if (key[0] == '.')
+    key = key.substr(1);
+
+  if (key[0] != ':') {
+    return std::pair(Port_invalid, key);
+  }
+  key = key.substr(1);
+
+  if (!std::isdigit(key[0])) {
+    Lgraph::error("name should have digit after position specified :digits: not {}\n", key);
+  }
+
+  auto n = key.find_first_of(':');
+  if (n == std::string::npos) {
+    Lgraph::error("name should have a format like :digits:name not {}\n", key);
+  }
+
+  int x = 0;
+  std::from_chars(key.data(), key.data() + n, x);
+
+  return std::pair(static_cast<Port_ID>(x), key.substr(n + 1));
+}
+
 std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
   auto n = key.find_first_of('.');
   if (n != std::string::npos) {

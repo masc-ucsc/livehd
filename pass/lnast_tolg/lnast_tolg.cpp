@@ -624,11 +624,15 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
 //          into a TA-chain for the future possible access.
 void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta) {
   std::string full_inp_hier_name;
+  Port_ID io_pos = Port_invalid;
+
   for (const auto &child : lnast->children(lnidx_ta)) {
     if (child == lnast->get_first_child(lnidx_ta)) {
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
-      full_inp_hier_name = lnast->get_vname(c0_ta).substr(1);
+      std::tie(io_pos, full_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
+
+      // full_inp_hier_name = lnast->get_vname(c0_ta).substr(1);
       // full_inp_hier_name     = lnast->get_sname(c0_ta);
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
@@ -638,7 +642,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       //(1) create flattened input
       Node_pin flattened_inp;
       if (!lg->has_graph_input(full_inp_hier_name)) {
-        flattened_inp = lg->add_graph_input(full_inp_hier_name, Port_invalid, 0);
+        flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, 0);
       } else {
         flattened_inp = name2dpin[full_inp_hier_name];
       }

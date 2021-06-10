@@ -108,6 +108,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
   new_lnast(def.name);
 
   symbol.resolvePortConnections();
+  auto decl_pos = 0u;
   for (const auto &p : symbol.body.getPortList()) {
     if (p->kind == slang::SymbolKind::Port) {
       const auto &port = p->as<slang::PortSymbol>();
@@ -116,17 +117,15 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
       std::string_view var_name;
       if (port.direction == slang::ArgumentDirection::In) {
-        var_name = create_lnast(absl::StrCat("$", port.name));
+        var_name = create_lnast(absl::StrCat("$.:", decl_pos, ":", port.name));
         net2attr.emplace(port.name, Net_attr::Input);
       } else {
-        var_name = create_lnast(absl::StrCat("%", port.name));
+        var_name = create_lnast(absl::StrCat("%.:", decl_pos, ":", port.name));
         net2attr.emplace(port.name, Net_attr::Output);
       }
 
       create_declare_bits_stmts(var_name, port.getType().isSigned(), port.getType().getBitWidth());
-#ifndef NDEBUG
-      fmt::print("TODO: set declaration position\n");
-#endif
+      ++decl_pos;
 
     } else if (p->kind == slang::SymbolKind::InterfacePort) {
       const auto &port = p->as<slang::InterfacePortSymbol>();

@@ -71,6 +71,8 @@ public:
   bool has_dpin(std::string_view key) const;
   bool has_dpin() const { return has_dpin(""); }
 
+  static std::pair<Port_ID, std::string_view> convert_key_to_io(std::string_view key);
+
   static int              get_first_level_pos(std::string_view key);
   static std::string_view get_first_level_name(std::string_view key);
   static std::string_view get_canonical_name(std::string_view key);
