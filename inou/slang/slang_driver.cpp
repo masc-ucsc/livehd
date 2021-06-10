@@ -4,7 +4,7 @@
 //
 // File is under the MIT license; see LICENSE for details
 //------------------------------------------------------------------------------
-//
+
 #ifndef NDEBUG
 // Slang includes need this or seg-fault at run-time
 #define DEBUG
@@ -16,6 +16,7 @@
 #include "slang/compilation/Compilation.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
+#include "slang/diagnostics/LookupDiags.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
 #include "slang/parsing/Preprocessor.h"
 #include "slang/symbols/ASTSerializer.h"
@@ -40,8 +41,7 @@
 
 using namespace slang;
 
-// commented because it's unused right now - ok to uncomment if used
-// static constexpr auto noteColor = fmt::terminal_color::bright_black;
+static constexpr auto noteColor      = fmt::terminal_color::bright_black;
 static constexpr auto warningColor   = fmt::terminal_color::bright_yellow;
 static constexpr auto errorColor     = fmt::terminal_color::bright_red;
 static constexpr auto highlightColor = fmt::terminal_color::bright_green;
@@ -75,7 +75,7 @@ bool runPreprocessor(SourceManager& sourceManager, const Bag& options, const std
     }
   }
 
-  fmt::print("{}\n", output.str());
+  OS::print("{}\n", output.str());
   return true;
 }
 
@@ -103,7 +103,7 @@ void printMacros(SourceManager& sourceManager, const Bag& options, const std::ve
       printer.print(*macro->formalArguments);
     printer.print(macro->body);
 
-    fmt::print("{}\n", printer.str());
+    OS::print("{}\n", printer.str());
   }
 }
 
@@ -116,12 +116,22 @@ SourceBuffer readSource(SourceManager& sourceManager, const std::string& file) {
 }
 
 bool loadAllSources(Compilation& compilation, SourceManager& sourceManager, const std::vector<SourceBuffer>& buffers,
-                    const Bag& options, bool singleUnit, const std::vector<std::string>& libraryFiles,
+                    const Bag& options, bool singleUnit, bool onlyLint, const std::vector<std::string>& libraryFiles,
                     const std::vector<std::string>& libDirs, const std::vector<std::string>& libExts) {
   if (singleUnit) {
-    compilation.addSyntaxTree(SyntaxTree::fromBuffers(buffers, sourceManager, options));
+    auto tree = SyntaxTree::fromBuffers(buffers, sourceManager, options);
+    if (onlyLint)
+      tree->isLibrary = true;
+
+    compilation.addSyntaxTree(tree);
   } else {
-    for (const SourceBuffer& buffer : buffers) compilation.addSyntaxTree(SyntaxTree::fromBuffer(buffer, sourceManager, options));
+    for (const SourceBuffer& buffer : buffers) {
+      auto tree = SyntaxTree::fromBuffer(buffer, sourceManager, options);
+      if (onlyLint)
+        tree->isLibrary = true;
+
+      compilation.addSyntaxTree(tree);
+    }
   }
 
   bool ok = true;
@@ -230,16 +240,13 @@ public:
     diagEngine.addClient(diagClient);
   }
 
-  void setDiagnosticOptions(const std::vector<std::string>& warningOptions, uint32_t errorLimit, bool ignoreUnknownModules,
-                            bool showColors) {
+  void setDiagnosticOptions(const std::vector<std::string>& warningOptions, bool ignoreUnknownModules, bool allowUseBeforeDeclare) {
     Diagnostics optionDiags = diagEngine.setWarningOptions(warningOptions);
     Diagnostics pragmaDiags = diagEngine.setMappingsFromPragmas();
-    diagEngine.setErrorLimit(errorLimit);
-
     if (ignoreUnknownModules)
       diagEngine.setSeverity(diag::UnknownModule, DiagnosticSeverity::Ignored);
-
-    diagClient->setColorsEnabled(showColors);
+    if (allowUseBeforeDeclare)
+      diagEngine.setSeverity(diag::UsedBeforeDeclared, DiagnosticSeverity::Ignored);
 
     for (auto& diag : optionDiags) diagEngine.issue(diag);
 
@@ -253,9 +260,9 @@ public:
 #ifndef FUZZ_TARGET
       auto topInstances = compilation.getRoot().topInstances;
       if (!quiet && !topInstances.empty()) {
-        fmt::print(fg(warningColor), "Top level design units:\n");
-        for (auto inst : topInstances) fmt::print("    {}\n", inst->name);
-        fmt::print("\n");
+        OS::print("Top level design units:\n");
+        for (auto inst : topInstances) OS::print("    {}\n", inst->name);
+        OS::print("\n");
       }
 #endif
 
@@ -266,22 +273,22 @@ public:
 
 #ifndef FUZZ_TARGET
     std::string diagStr = diagClient->getString();
-    fmt::print("slang: {}", diagStr);
+    OS::print("{}", diagStr);
 
     if (!quiet && !onlyParse) {
       if (diagStr.size() > 1)
-        fmt::print("\n");
+        OS::print("\n");
 
       if (succeeded)
-        fmt::print(fg(highlightColor), "Build succeeded: ");
+        OS::print("Build succeeded: ");
       else
-        fmt::print(fg(errorColor), "Build failed: ");
+        OS::print("Build failed: ");
 
-      fmt::print("{} error{}, {} warning{}\n",
-                 diagEngine.getNumErrors(),
-                 diagEngine.getNumErrors() == 1 ? "" : "s",
-                 diagEngine.getNumWarnings(),
-                 diagEngine.getNumWarnings() == 1 ? "" : "s");
+      OS::print("{} error{}, {} warning{}\n",
+                diagEngine.getNumErrors(),
+                diagEngine.getNumErrors() == 1 ? "" : "s",
+                diagEngine.getNumWarnings(),
+                diagEngine.getNumWarnings() == 1 ? "" : "s");
     }
 #endif
 
@@ -339,9 +346,11 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
   optional<bool> onlyPreprocess;
   optional<bool> onlyParse;
   optional<bool> onlyMacros;
+  optional<bool> onlyLint;
   cmdLine.add("-E,--preprocess", onlyPreprocess, "Only run the preprocessor (and print preprocessed files to stdout)");
   cmdLine.add("--macros-only", onlyMacros, "Print a list of found macros and exit");
   cmdLine.add("--parse-only", onlyParse, "Stop after parsing input files, don't perform elaboration or type checking");
+  cmdLine.add("--lint-only", onlyLint, "Only perform linting of code, don't try to elaborate a full hierarchy");
 
   // Include paths
   std::vector<std::string> includeDirs;
@@ -429,7 +438,15 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
 
   // Diagnostics control
   optional<bool>           colorDiags;
+  optional<bool>           diagColumn;
+  optional<bool>           diagLocation;
+  optional<bool>           diagSourceLine;
+  optional<bool>           diagOptionName;
+  optional<bool>           diagIncludeStack;
+  optional<bool>           diagMacroExpansion;
+  optional<bool>           diagHierarchy;
   optional<bool>           ignoreUnknownModules;
+  optional<bool>           allowUseBeforeDeclare;
   optional<uint32_t>       errorLimit;
   std::vector<std::string> warningOptions;
   cmdLine.add("-W", warningOptions, "Control the specified warning", "<warning>");
@@ -438,6 +455,13 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
               "Always print diagnostics in color."
               "If this option is unset, colors will be enabled if a color-capable "
               "terminal is detected.");
+  cmdLine.add("--diag-column", diagColumn, "Show column numbers in diagnostic output.");
+  cmdLine.add("--diag-location", diagLocation, "Show location information in diagnostic output.");
+  cmdLine.add("--diag-source", diagSourceLine, "Show source line or caret info in diagnostic output.");
+  cmdLine.add("--diag-option", diagOptionName, "Show option names in diagnostic output.");
+  cmdLine.add("--diag-include-stack", diagIncludeStack, "Show include stacks in diagnostic output.");
+  cmdLine.add("--diag-macro-expansion", diagMacroExpansion, "Show macro expansion backtraces in diagnostic output.");
+  cmdLine.add("--diag-hierarchy", diagHierarchy, "Show hierarchy locations in diagnostic output.");
   cmdLine.add("--error-limit",
               errorLimit,
               "Limit on the number of errors that will be printed. Setting this to zero will "
@@ -447,6 +471,9 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
               ignoreUnknownModules,
               "Don't issue an error for instantiations of unknown modules, "
               "interface, and programs.");
+  cmdLine.add("--allow-use-before-declare",
+              allowUseBeforeDeclare,
+              "Don't issue an error for use of names before their declarations.");
 
   // File list
   optional<bool>           singleUnit;
@@ -473,12 +500,12 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
   }
 
   if (showHelp == true) {
-    fmt::print("{}", cmdLine.getHelpText("slang SystemVerilog compiler"));
+    OS::print("{}", cmdLine.getHelpText("slang SystemVerilog compiler"));
     return 0;
   }
 
   if (showVersion == true) {
-    fmt::print("slang version {}.{}.{}\n", VersionInfo::getMajor(), VersionInfo::getMinor(), VersionInfo::getRevision());
+    OS::print("slang version {}.{}.{}\n", VersionInfo::getMajor(), VersionInfo::getMinor(), VersionInfo::getRevision());
     return 0;
   }
 
@@ -488,10 +515,11 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
   else
     showColors = !suppressColorsStderr && OS::fileSupportsColors(stderr);
 
-  if (showColors)
+  if (showColors) {
     OS::setStderrColorsEnabled(true);
-  if (!suppressColorsStdout && OS::fileSupportsColors(stdout))
-    OS::setStdoutColorsEnabled(true);
+    if (!suppressColorsStdout && OS::fileSupportsColors(stdout))
+      OS::setStdoutColorsEnabled(true);
+  }
 
   bool          anyErrors = false;
   SourceManager sourceManager;
@@ -542,6 +570,12 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     coptions.maxConstexprBacktrace = *maxConstexprBacktrace;
   if (errorLimit.has_value())
     coptions.errorLimit = *errorLimit * 2;
+  if (astJsonFile)
+    coptions.disableInstanceCaching = true;
+  if (onlyLint == true) {
+    coptions.suppressUnused = true;
+    coptions.lintMode       = true;
+  }
 
   for (auto& name : topModules) coptions.topModules.emplace(name);
   for (auto& opt : paramOverrides) coptions.paramOverrides.emplace_back(opt);
@@ -584,7 +618,7 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     return 3;
   }
 
-  if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() > 1) {
+  if (onlyParse.has_value() + onlyPreprocess.has_value() + onlyMacros.has_value() + onlyLint.has_value() > 1) {
     Pass::error("can only specify one of --preprocess, --macros-only, --parse-only");
     return 4;
   }
@@ -596,12 +630,36 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
       printMacros(sourceManager, options, buffers);
     } else {
       Compilation compilation(options);
-      anyErrors = !loadAllSources(compilation, sourceManager, buffers, options, singleUnit == true, libraryFiles, libDirs, libExts);
+      anyErrors = !loadAllSources(compilation,
+                                  sourceManager,
+                                  buffers,
+                                  options,
+                                  singleUnit == true,
+                                  onlyLint == true,
+                                  libraryFiles,
+                                  libDirs,
+                                  libExts);
+
+      if (onlyLint == true)
+        ignoreUnknownModules = true;
 
       Compiler compiler(compilation);
       compiler.quiet     = quiet == true;
       compiler.onlyParse = onlyParse == true;
-      compiler.setDiagnosticOptions(warningOptions, errorLimit.value_or(20), ignoreUnknownModules == true, showColors);
+
+      auto& diag = *compiler.diagClient;
+      diag.showColors(showColors);
+      diag.showColumn(diagColumn.value_or(true));
+      diag.showLocation(diagLocation.value_or(true));
+      diag.showSourceLine(diagSourceLine.value_or(true));
+      diag.showOptionName(diagOptionName.value_or(true));
+      diag.showIncludeStack(diagIncludeStack.value_or(true));
+      diag.showMacroExpansion(diagMacroExpansion.value_or(true));
+      diag.showHierarchyInstance(diagHierarchy.value_or(true));
+
+      compiler.diagEngine.setErrorLimit(errorLimit.value_or(20));
+      compiler.setDiagnosticOptions(warningOptions, ignoreUnknownModules == true, allowUseBeforeDeclare == true);
+
       anyErrors |= !compiler.run();
 
       if (astJsonFile) {
@@ -610,10 +668,6 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
 
       if (!anyErrors) {
         Slang_tree::process_root(compilation.getRoot());
-#if 0
-              Lnast_visitor lnast_visitor(compilation, 0, 0);
-              compilation.getRoot().visit(lnast_visitor);
-#endif
       }
 
 #if defined(INCLUDE_SIM)
@@ -627,7 +681,6 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
     (void)e;
     throw;
 #else
-    err_tracker::err_logger("internal compiler error: {}\n", e.what());
     Pass::error("internal compiler error: {}\n", e.what());
     return 4;
 #endif
@@ -639,7 +692,6 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
   (void)e;
   throw;
 #else
-  err_tracker::err_logger("{}\n", e.what());
   Pass::error("{}\n", e.what());
   return 5;
 #endif
@@ -700,7 +752,13 @@ void writeToFile(string_view fileName, string_view contents) {
   }
 }
 
+#ifndef FUZZ_TARGET
+#if 1
 int slang_main(int argc, char** argv) { return driverMain(argc, argv, false, false); }
+#else
+int main(int argc, char** argv) { return driverMain(argc, argv, false, false); }
+#endif
+#endif
 
 #endif
 
