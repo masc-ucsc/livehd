@@ -220,18 +220,12 @@ public:
 #pragma GCC diagnostic pop
       return a[0] == b[0] && a[1] == b[1];  // 16byte compare
     } else {
-      //FIXME: cross template compare
-      // compare first 2
       for (uint8_t i = 0; i < 10; ++i) {
         if (e[i] != rhs.get_e(i)) {
           return false;
         }
       }
-      if (map_cref().get_sview(ptr_or_start) == rhs.map_cref().get_sview(rhs.get_pos())) {
-        return true;
-      } else {
-        return false;
-      }
+      return map_cref().get_sview(ptr_or_start) == rhs.map_cref().get_sview(rhs.get_pos());
     }
   }
   
@@ -277,13 +271,12 @@ public:
         }
       } else {
         return map_cref().get_sview(ptr_or_start)[pos - 2];
-        //return vec_cref()[mid(ptr_or_start, pos)];
       }
     }
   }
 
   template<int m_id>
-  bool starts_with(str<m_id> st) const {
+  bool starts_with(str<m_id> &st) const {
     if (st.size() > _size) {
       return false;
     } else if (st.size() == _size) {
@@ -352,9 +345,6 @@ public:
     }
     return true;
   }
-
-  // will use the string_view function
-  bool ends_with(std::string en) const { return ends_with(std::string_view(en.c_str())); }
 
   template<int m_id>
   std::size_t find(const str<m_id> &v, std::size_t pos = 0) const {
