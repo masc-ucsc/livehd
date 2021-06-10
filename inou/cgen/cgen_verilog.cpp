@@ -118,50 +118,26 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
 
   // WARNING: The read_vector must be computed first, to have know if the
   // addr/din/... are read/writes ahead (traverse out of order)
-  std::vector<std::pair<bool,int>> port_vector; // first == read, second == port_id
-  {
-    auto rdport_pid = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
-    while(true) {
-      auto spin = node.get_sink_pin_raw(rdport_pid);
-      if (spin.is_invalid())
-        break;
 
-      auto dnode = spin.get_driver_node();
-      if (!dnode.is_type_const()) {
-        Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), dnode.debug_name());
-        return;
-      }
-      if (dnode.get_type_const().is_false()) {
-        port_vector.emplace_back(false, n_wr_ports);
-        ++n_wr_ports;
-      }else{
-        port_vector.emplace_back(true, n_rd_ports);
-        ++n_rd_ports;
-      }
-
-      rdport_pid += 11;
-    }
-  }
+  struct Port_field {
+    bool rdport;
+    Node_pin enable;
+    Node_pin addr;
+    Node_pin clock;
+    Node_pin din; // only for write port
+  };
+  std::vector<Port_field> port_vector; // first == read, second == port_id
 
   std::string parameters;
-
-  std::vector<Node_pin> rd_addr_dpin(n_rd_ports);
-  std::vector<Node_pin> rd_enable_dpin(n_rd_ports);
-  std::vector<Node_pin> rd_clock_dpin(n_rd_ports);
-
-  std::vector<Node_pin> wr_addr_dpin(n_wr_ports);
-  std::vector<Node_pin> wr_enable_dpin(n_wr_ports);
-  std::vector<Node_pin> wr_din_dpin(n_wr_ports);
-  std::vector<Node_pin> wr_clock_dpin(n_wr_ports);
 
   bool first_entry=true;
   for(auto e:node.inp_edges()) {
     auto pin_name = e.sink.get_pin_name();
 
-    auto port_id = e.sink.get_pid() / 11;
+    size_t port_id = e.sink.get_pid() / 11;
 
-    bool rd_port  = port_vector[port_id].first;
-    bool pos_port = port_vector[port_id].second;
+    if (port_vector.size()<=port_id)
+      port_vector.resize(1+port_id);
 
     if (pin_name == "bits") {
       if (!e.driver.is_type_const()) {
@@ -204,35 +180,34 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
       absl::StrAppend(&parameters, first_entry?"":" ,",".FWD", "(", v, ")");
       first_entry=false;
     }else if (pin_name == "clock") {
-      if (rd_port)
-        rd_clock_dpin[pos_port] = e.driver;
-      else
-        wr_clock_dpin[pos_port] = e.driver;
+      port_vector[port_id].clock = e.driver;
     }else if (pin_name == "addr") {
-      if (rd_port)
-        rd_addr_dpin[pos_port] = e.driver;
-      else
-        wr_addr_dpin[pos_port] = e.driver;
+      port_vector[port_id].addr  = e.driver;
     }else if (pin_name == "enable") {
-      if (rd_port)
-        rd_enable_dpin[pos_port] = e.driver;
-      else
-        wr_enable_dpin[pos_port] = e.driver;
+      port_vector[port_id].enable  = e.driver;
     }else if (pin_name == "din") {
-      if (!rd_port)
-        wr_din_dpin[pos_port] = e.driver;
+      port_vector[port_id].din  = e.driver;
+    }else if (pin_name == "rdport") {
+      if (!e.driver.is_type_const()) {
+        Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), e.driver.get_node().debug_name());
+        return;
+      }
+      bool rdport = !e.driver.get_type_const().is_false();
+      port_vector[port_id].rdport = rdport;
+
+      if (rdport) {
+        ++n_rd_ports;
+      }else{
+        ++n_wr_ports;
+      }
     }
   }
 
   bool single_clock = true;
-  Node_pin base_clock_dpin;
+  Node_pin base_clock_dpin = port_vector[0].clock;
   {
-    if (rd_clock_dpin[0].is_invalid())
-      base_clock_dpin = wr_clock_dpin[0];
-    else
-      base_clock_dpin = rd_clock_dpin[0];
-
-    for(auto &dpin:rd_clock_dpin) { // set default clock, Possible to have clock=clk which means all share same clock
+    for(auto &p:port_vector) {
+      auto &dpin = p.clock;
       if (dpin.is_invalid()) {
         dpin = base_clock_dpin;
         continue;
@@ -256,27 +231,49 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
     first_entry = false;
   }
 
-  for(auto i=0;i<n_rd_ports;++i) {
-    absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(i), "(", get_wire_or_const(rd_addr_dpin[i])  , ")\n");
-    first_entry=false;
+  {
+    auto n_rd_pos = 0;
+    auto n_wr_pos = 0;
+    auto n_pos = 0;
+    for(auto &p:port_vector) {
+      if (p.rdport) {
+        if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
+          node.dump();
+          Pass::error("memory {} read port is not correctly configured\n", node.debug_name());
+        }
+        absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(n_rd_pos), "(", get_wire_or_const(p.addr)  , ")\n");
+        first_entry=false;
 
-    absl::StrAppend(&buffer, ",.rd_enable_", std::to_string(i), "(", get_wire_or_const(rd_enable_dpin[i]), ")\n");
-    if (!single_clock) {
-      absl::StrAppend(&buffer, ",.rd_clock_", std::to_string(i), "(", get_wire_or_const(rd_clock_dpin[i]), ")\n");
+        auto id = std::to_string(n_rd_pos);
+
+        absl::StrAppend(&buffer, ",.rd_enable_", id, "(", get_wire_or_const(p.din), ")\n");
+        if (!single_clock) {
+          absl::StrAppend(&buffer, ",.rd_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
+        }
+        auto dout_dpin = node.setup_driver_pin_raw(n_pos); // rd data out
+        absl::StrAppend(&buffer, ",.rd_dout_", id, "(", get_wire_or_const(dout_dpin), ")\n");
+        ++n_rd_pos;
+      }else{
+        if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
+          node.dump();
+          Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
+        }
+        absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(n_wr_pos), "(", get_wire_or_const(p.addr), ")\n");
+        first_entry=false;
+
+        auto id = std::to_string(n_wr_pos);
+
+        absl::StrAppend(&buffer, ",.wr_enable_", id, "(", get_wire_or_const(p.enable), ")\n");
+        if (!single_clock) {
+          absl::StrAppend(&buffer, ",.wr_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
+        }
+        absl::StrAppend(&buffer, ",.wr_din_"   , id, "(", get_wire_or_const(p.din), ")\n");
+        ++n_wr_pos;
+      }
+      ++n_pos;
     }
-    auto dout_dpin = node.setup_driver_pin_raw(i); // rd data out
-    absl::StrAppend(&buffer, ",.rd_dout_", std::to_string(i), "(", get_wire_or_const(dout_dpin), ")\n");
-  }
-
-  for(auto i=0;i<n_wr_ports;++i) {
-    absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(i), "(", get_wire_or_const(wr_addr_dpin[i]), ")\n");
-    first_entry=false;
-
-    absl::StrAppend(&buffer, ",.wr_enable_", std::to_string(i), "(", get_wire_or_const(wr_enable_dpin[i]), ")\n");
-    if (!single_clock) {
-      absl::StrAppend(&buffer, ",.wr_clock_", std::to_string(i), "(", get_wire_or_const(wr_clock_dpin[i]), ")\n");
-    }
-    absl::StrAppend(&buffer, ",.wr_din_"   , std::to_string(i), "(", get_wire_or_const(wr_din_dpin   [i]), ")\n");
+    I(n_rd_pos == n_rd_ports);
+    I(n_wr_pos == n_wr_ports);
   }
 
   absl::StrAppend(&buffer, ");\n");
