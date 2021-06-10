@@ -7,6 +7,15 @@ Create a source_map out of the Token_list
 
 mmap_lib::tree should support move operators like doCreate in mmap_lib::map. Implement it.
 
+### mmap_lib separate repository (ucsc-masc/mmap_lib?)
+
+mmap_lib could be a separate repo by itself. Other may use it and help to improve LiveHD even for non synthesis projects.
+
+Besides moving mmap_lib, we may want:
+
+* Create the mmap_tree2 because the current mmap_tree is not persistent
+* Move the graph_core out of core to mmap_graph
+
 ### Pyrope parser
 
 There are some bugs on the pyrope parser when dealing with ranges. This works:
