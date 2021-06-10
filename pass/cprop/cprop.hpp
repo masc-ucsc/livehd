@@ -16,6 +16,9 @@ private:
 
   inline static Node_pin invalid_pin;  // just for speed
 
+  void connect_clock_pin_if_needed(Node &node);
+  void connect_reset_pin_if_needed(Node &node);
+
 protected:
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple const>> node2tuple;  // node to the most up-to-dated tuple chain
   absl::flat_hash_map<std::string_view, Node_pin>                    oname2dpin;
