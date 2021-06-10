@@ -909,6 +909,7 @@ void Cprop::tuple_subgraph(const Node &node) {
           Pass::error("Structural Lgraph does not allow sub graphs as node");
         }
         auto node_tup = std::make_shared<Lgtuple>(sub_name);
+        std::vector<bool> read_map;
         if (cell_ntype == Ntype_op::Memory) {
           auto n_ports    = 0u;
           auto n_rd_ports = 0u;
@@ -934,8 +935,12 @@ void Cprop::tuple_subgraph(const Node &node) {
                   if (!v.is_i()) {
                     Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
                   }
-                  if (!v.is_false())
+                  if (v.is_false()) {
+                    read_map.emplace_back(false);
+                  }else{
+                    read_map.emplace_back(true);
                     ++n_rd_ports;
+                  }
                 }
               }
             }
@@ -944,10 +949,14 @@ void Cprop::tuple_subgraph(const Node &node) {
             Pass::info("Memory {} still can not figure out ports. (Maybe more iterations)", node.debug_name());
             node_tup->set_issue();
           }else{
-            fmt::print("found a memory {} with {} rd ports\n", node.debug_name(), n_rd_ports);
-            for(auto i=0u;i<n_rd_ports;++i) {
-              node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
+            fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
+            for(auto i=0u;i<read_map.size();++i) {
+              if (read_map[i]) {
+                fmt::print(" {}",i);
+                node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
+              }
             }
+            fmt::print("\n");
           }
         }else{
           node_tup->add(node.setup_driver_pin_raw(0));
