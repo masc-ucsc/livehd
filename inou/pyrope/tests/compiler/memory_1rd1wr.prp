@@ -6,7 +6,33 @@ $wr_addr.__sbits = 8 // same as rd_addr
 rd_a.__sbits = 8
 rd_a := $rd_addr + 32
 
-addr_ports = (rd_a, $wr_addr)
+// addr_ports = (rd_a, $wr_addr)
+
+// wr_data.__sbits = 32
+// wr_data = wr_data.__create_flop
+// wr_data_q = wr_data
+
+// wr_data := wr_data + 1
+
+// res = __memory(mem.__last_value)
+// mem.addr    = addr_ports
+// mem.bits    = 32
+// // mem.size inferred (256 entries)
+// mem.clock   = $my_ram_clock // shared by both ports
+// mem.din     = (0, wr_data_q)
+// mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
+
+// // mem.fwd     = false default value is false
+// mem.latency  = (0, 1)
+
+// mem.wensize = 1 // no wmask, all bits always written
+// mem.rdport = (true,false) // port 0 rd, port 1 wr
+
+// res.0.__ubits = 32
+
+// %out = res.0
+
+addr_ports = ($wr_addr, rd_a)
 
 wr_data.__sbits = 32
 wr_data = wr_data.__create_flop
@@ -19,17 +45,16 @@ mem.addr    = addr_ports
 mem.bits    = 32
 // mem.size inferred (256 entries)
 mem.clock   = $my_ram_clock // shared by both ports
-%out2 = res.0
-mem.din     = (0, wr_data_q)
-mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
+mem.din     = (wr_data_q, 0)
+mem.enable  = (wr_data_q & 1, 1)  // rd_enable always, wr_enable on odd data
 
 // mem.fwd     = false default value is false
-mem.latency  = (0, 1)
+mem.latency  = (1, 0)
 
 mem.wensize = 1 // no wmask, all bits always written
-mem.rdport = (true,false) // port 0 rd, port 1 wr
+mem.rdport = (false, true) // port 0 rd, port 1 wr
 
-res.0.__ubits = 32
+res.1.__ubits = 32
 
-%out = res.0
+%out = res.1
 

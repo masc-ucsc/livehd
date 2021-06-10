@@ -1762,7 +1762,6 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
           HandleWrMportUsage(lnast, parent_node, lhs_str);
         }
 
-        fmt::print("DEBUG6 lhs_str:{}\n", lhs_str);
         InitialExprAdd(lnast, rhs_expr, parent_node, lhs_str);
       }
       break;

@@ -47,6 +47,9 @@ if [ $# -eq 0 ]; then
 
   # issue5: partial connect
 
+  # issue6: multi-threaded
+  # pts='SingleEvenFilter'
+
 else
   file=$(basename $1)
   if [ "${file#*.}" == "hi.pb" ]; then

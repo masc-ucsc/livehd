@@ -83,7 +83,7 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 #else
   compiler.do_fir_lnast2lgraph(var.lnasts);
   compiler.do_cprop();
-  compiler.do_firbits();
+  // compiler.do_firbits();
   // compiler.do_firmap_bitwidth();
 #endif
 }
