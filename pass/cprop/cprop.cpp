@@ -654,7 +654,7 @@ void Cprop::tuple_mux_mut(Node &node) {
     node2tuple[node.get_compact()] = tup;
   }
 
-  if (tuple_issues)
+  if (tup==nullptr && tuple_issues)
     return;
 
   if (pending_iterations) {
@@ -667,9 +667,11 @@ void Cprop::tuple_mux_mut(Node &node) {
   }
 
   if (!tup) {
-    tuple_done.insert(node.get_compact());
+    if (!tuple_issues)
+      tuple_done.insert(node.get_compact());
     return;
   }
+  I(tup->is_correct());
 
   auto cmux_list                 = tup->make_mux(node, sel_dpin, tup_list);
   node2tuple[node.get_compact()] = tup;

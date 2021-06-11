@@ -647,6 +647,8 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
 
   bool root_key = is_root_attribute(key);
 
+  bool tup_scalar = tup->is_scalar();
+
   for (const auto &it : tup->key_map) {
     if (it.first.empty()) {
       add(key, it.second);
@@ -659,7 +661,11 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
       std::string key2{get_canonical_name(it.first)};  // Remove 0.0.0.xxxx and xxx.0.0.0 if it exists
 
       if (key2.empty()) {
-        key2 = key;
+        if (tup_scalar || root_key) {
+          key2 = key;
+        }else{
+          key2 = absl::StrCat(key, ".0");
+        }
       }else{
         if (root_key) {
           key2 = absl::StrCat(key2, ".", key);
