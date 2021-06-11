@@ -71,6 +71,7 @@ protected:
   bool tuple_tuple_get(const Node &node);
   void tuple_attr_set(const Node &node);
 
+  bool scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered);
   void scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // io construction
