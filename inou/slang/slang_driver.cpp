@@ -41,10 +41,10 @@
 
 using namespace slang;
 
-static constexpr auto noteColor      = fmt::terminal_color::bright_black;
-static constexpr auto warningColor   = fmt::terminal_color::bright_yellow;
-static constexpr auto errorColor     = fmt::terminal_color::bright_red;
-static constexpr auto highlightColor = fmt::terminal_color::bright_green;
+#define noteColor      fmt::terminal_color::bright_black;
+#define warningColor   fmt::terminal_color::bright_yellow;
+#define errorColor     fmt::terminal_color::bright_red;
+#define highlightColor fmt::terminal_color::bright_green;
 
 void writeToFile(string_view fileName, string_view contents);
 
