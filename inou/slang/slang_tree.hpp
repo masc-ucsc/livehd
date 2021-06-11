@@ -39,6 +39,7 @@ protected:
   std::string_view create_lnast(const std::string& val);
   std::string_view create_lnast(std::string_view val);
   std::string_view create_lnast_var(std::string_view val);
+  std::string_view create_lnast_lhs_var(std::string_view val);
 
   void new_lnast(std::string_view name);
 

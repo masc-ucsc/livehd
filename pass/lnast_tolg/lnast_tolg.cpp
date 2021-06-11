@@ -1116,6 +1116,9 @@ Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
 }
 
 Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
+#if 0
+  return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
+#else
   if (const_str.find("bits") == std::string_view::npos)
     return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 
@@ -1124,6 +1127,7 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
   auto lg_fir_const_node = lg->create_node_sub("__fir_const");
   lg_fir_const_node.setup_driver_pin("Y").set_name(const_str);
   return lg_fir_const_node.setup_driver_pin("Y");
+#endif
 }
 
 void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset) {

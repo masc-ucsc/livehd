@@ -34,9 +34,37 @@ std::string_view Slang_tree::create_lnast_var(std::string_view val) {
   std::string_view var_name;
 
   const auto &it = net2attr.find(val);
-  if (it == net2attr.end())
-    return lnast->add_string(val);
+  if (it == net2attr.end()) { // OOPS, use before assignment
+    auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
+    auto tmp_var = create_lnast_tmp();
+    lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
+    lnast->add_child(idx_dot, Lnast_node::create_ref(val));
+    lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
 
+    return tmp_var;
+  }
+
+  if (it->second == Net_attr::Input) {
+    var_name = lnast->add_string(absl::StrCat("$", val));
+  } else if (it->second == Net_attr::Output) {
+    var_name = lnast->add_string(absl::StrCat("%", val));
+  } else if (it->second == Net_attr::Register) {
+    var_name = lnast->add_string(absl::StrCat("#", val));
+  } else {
+    var_name = lnast->add_string(val);
+  }
+
+  return var_name;
+}
+
+std::string_view Slang_tree::create_lnast_lhs_var(std::string_view val) {
+
+  const auto &it = net2attr.find(val);
+  if (it == net2attr.end()) {
+    return val;
+  }
+
+  std::string_view var_name;
   if (it->second == Net_attr::Input) {
     var_name = lnast->add_string(absl::StrCat("$", val));
   } else if (it->second == Net_attr::Output) {
@@ -225,21 +253,29 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
 
   if (lhs.kind == slang::ExpressionKind::NamedValue) {
     const auto &var = lhs.as<slang::NamedValueExpression>();
-    var_name        = create_lnast_var(var.symbol.name);
+    var_name        = create_lnast_lhs_var(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
   } else if (lhs.kind == slang::ExpressionKind::ElementSelect) {
+    const auto &es = lhs.as<slang::ElementSelectExpression>();
+    I(es.value().kind == slang::ExpressionKind::NamedValue);
+
+    const auto &var = es.value().as<slang::NamedValueExpression>();
+    var_name        = create_lnast_lhs_var(var.symbol.name);
+
+    dest_max_bit = process_expression(es.selector());
+    dest_min_bit = dest_max_bit;
+
     dest_var_sign = false;
-    dest_var_bits = 0;
-    I(false);  // FIXME:
+    dest_var_bits = 1;
   } else {
     I(lhs.kind == slang::ExpressionKind::RangeSelect);
     const auto &rs = lhs.as<slang::RangeSelectExpression>();
     I(rs.value().kind == slang::ExpressionKind::NamedValue);
 
     const auto &var = rs.value().as<slang::NamedValueExpression>();
-    var_name        = create_lnast_var(var.symbol.name);
+    var_name        = create_lnast_lhs_var(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -511,20 +547,14 @@ void Slang_tree::create_assign_stmts(std::string_view lhs_var, std::string_view 
 }
 
 void Slang_tree::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
-  auto tmp_var = create_lnast_tmp();
-
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_select());
-  lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
   lnast->add_child(idx_dot, Lnast_node::create_ref(a_var));
-
   if (is_signed) {
     lnast->add_child(idx_dot, Lnast_node::create_const("__sbits"));
   } else {
     lnast->add_child(idx_dot, Lnast_node::create_const("__ubits"));
   }
-  auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
-  lnast->add_child(idx_assign, Lnast_node::create_ref(tmp_var));
-  lnast->add_child(idx_assign, Lnast_node::create_const(create_lnast(bits)));
+  lnast->add_child(idx_dot, Lnast_node::create_const(create_lnast(bits)));
 }
 
 std::string_view Slang_tree::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
