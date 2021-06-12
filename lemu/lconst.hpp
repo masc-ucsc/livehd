@@ -96,7 +96,7 @@ public:
   uint64_t  hash() const;
 
   void dump() const;
-  [[nodiscard]] int get_trailing_zeroes() const;
+  [[nodiscard]] size_t get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
   [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
@@ -181,5 +181,5 @@ public:
   bool operator>(const Lconst &other) const { return num > other.num; }
   bool operator>=(const Lconst &other) const { return num >= other.num; }
 
-  Number get_raw_num() const { return num; }  // for debugging mostly
+  const Number get_raw_num() const { return num; } // FOR DEBUG ONLY
 };

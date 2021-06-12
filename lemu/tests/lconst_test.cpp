@@ -1401,24 +1401,46 @@ TEST_F(Lconst_test, lconst_get_bits) {
 }
 
 TEST_F(Lconst_test, lconst_set_bits) {
+
+  {
+    auto tmp1 = Lconst("0xfeef").get_mask_op(Lconst("0xFF")); // 0xEF
+    auto tmp2 = Lconst("0xfe0F").set_mask_op(Lconst("0xFF"), tmp1); // 0xfeef
+    EXPECT_EQ(tmp1, Lconst(0xef));
+    EXPECT_EQ(tmp2, Lconst(0xfeef));
+  }
+
   auto src = Lconst("0xFFF");
 
-  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0xabc)), Lconst("0xfbf"));
-  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0x3abc)), Lconst("0xfbf"));
-  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0xbc)), Lconst("0xfbf"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0xabc)) , Lconst("0xfcf"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0F0"), Lconst(0x3abc)), Lconst("0xfcf"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0x0FF"), Lconst(0xabc)) , Lconst("0xfbc"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0xF0F"), Lconst(0xabc)) , Lconst("0xbFc"));
+  EXPECT_EQ(src.set_mask_op(Lconst("0xF0F"), Lconst(0xa))   , Lconst("0x0Fa"));
 
-  src.set_mask_op(Lconst("-1"), Lconst(0x3abc)).dump();
-  Lconst(0x3abc).dump();
+  // base  is 0
+  // mask  is      111..11_0_1111 (-17)
+  // value is  0b1_1111_1110_1111
+  // res   is 0b11_1111_1100_1111
+  EXPECT_EQ(Lconst(     0).set_mask_op(Lconst("-17"), Lconst(0x1FEF)), Lconst(0x3FCF));
+
+  // base  is              1_0000
+  // mask  is      111..11_0_1111 (-17)
+  // value is  0b1_1111_1110_1111
+  // res   is 0b11_1111_1101_1111
+  Lconst(  0x10).set_mask_op(Lconst("-17"), Lconst(0x1FEF)).dump();
+  EXPECT_EQ(Lconst(  0x10).set_mask_op(Lconst("-17"), Lconst(0x1FEF)), Lconst(0x3FDF));
+
+  src.set_mask_op(Lconst("-1"), Lconst(0x3abcd)).dump();
 
   EXPECT_EQ(src.set_mask_op(Lconst("-1"), Lconst(0x3abc)), Lconst(0x3abc));
   EXPECT_EQ(src.set_mask_op(Lconst("-1"), Lconst(0xa)), Lconst(0xa));
 
-  src.set_mask_op(Lconst("-17"), Lconst(0xabcd)).dump();
-  Lconst(0xabcf).dump();
-  Lconst("-17").dump();
-  fmt::print("yosys:{}\n", Lconst("-17").to_yosys());
-
-  EXPECT_EQ(src.set_mask_op(Lconst("-17"), Lconst(0xabcd)), Lconst(0xabcF));
+  // base  is                xxxx_010x
+  // mask  is           111..1111_0001 (-15)
+  // value is   0b1_1011_1100_110    1
+  // res   is    0b1101_1110_0110_0101
+  Lconst(0x15).set_mask_op(Lconst("-15"), Lconst(0x1bcd)).dump();
+  EXPECT_EQ(Lconst(0x14).set_mask_op(Lconst("-15"), Lconst(0x1bcd)), Lconst(0xde65));
 }
 
 TEST_F(Lconst_test, lconst_sign) {

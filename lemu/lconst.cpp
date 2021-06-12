@@ -382,11 +382,15 @@ Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bi
 
 Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
 
-int Lconst::get_trailing_zeroes() const {
+size_t Lconst::get_trailing_zeroes() const {
 
   if (num==0)
     return 0;
 
+  if (num>0)
+    return boost::multiprecision::lsb(num);
+  return boost::multiprecision::lsb(-num);
+#if 0
   Number tmp = num;
   int conta = 0;
   while ((tmp & 1)==0) {
@@ -395,6 +399,7 @@ int Lconst::get_trailing_zeroes() const {
   }
 
   return conta;
+#endif
 }
 
 Lconst Lconst::get_mask_op() const {
@@ -489,15 +494,17 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   return string(str);
 }
 
-// set_bits(0xFFF, 0xF, 0xa) -> 0xFFa
-// set_bits(0xFFF, -16, 0xa) -> 0x0aF
-// set_bits(0xFFF, -16, -1)  -> -1
-// set_bits(0xFF0, 0xF, -1)  -> -16 == 0b11111...111_0000
-// set_bits(foo, -1, bar)  -> bar
-// set_bits(foo, -2, bar)  -> (bar& (~1)) | (foo&1)
-// set_bits(foo,  0, bar)  -> foo
-// set_bits(foo,  1, bar)  -> (bar&1) | (bar&(-1))
-// set_bits(foo, a, bar)  -> set_bits(bar, 1-a, foo)
+// set_mask(0xFFF, 0xF, 0xa) -> 0xFFa
+// set_mask(0xFFF, -16, 0xa) -> 0x0aF
+// set_mask(0xFFF, -16, -1)  -> -1
+// set_mask(0xFF0, 0xF, -1)  -> -16 == 0b11111...111_0000
+// set_mask(foo, -1, bar)  -> bar
+// set_mask(foo, -2, bar)  -> (bar& (~1)) | (foo&1)
+// set_mask(foo,  0, bar)  -> foo
+// set_mask(foo,  1, bar)  -> (bar&1) | (bar&(-1))
+// set_mask(foo, a, bar)  -> set_mask(bar, 1-a, foo)
+//
+// set_mask(foo ^ (rand & bar_mask), bar_mask, get_mask(foo, bar_mask)) == foo
 
 Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   if (unlikely(mask.is_string())) {
@@ -505,39 +512,43 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
         fmt::format("ERROR: no string in mask get_bits({},{},{})", to_pyrope(), mask.to_pyrope(), value.to_pyrope()));
   }
 
-  I(!mask.has_unknowns() && !has_unknowns());  // FIXME: this should work (just someone else could do it?)
-
-  Lconst mask_pos;
-
-  Number mask_pos_num;
-
-  auto   max_bits   = std::max(value.get_bits(), get_bits());
-  Number i_mask_num = Number(1) << (max_bits - 1);
-
-  auto a = value.get_num();
-  auto b = get_num();
-  if (mask < 0) {
-    mask_pos = mask.not_op();
-
-    mask_pos_num = mask_pos.get_num();
-    for (auto i = mask_pos.get_bits() - 1; i < max_bits; ++i) {
-      mask_pos_num = mask_pos_num | (Number(1) << i);
-    }
-  } else {
-    mask_pos = mask;
-
-    mask_pos_num = mask_pos.get_num();
+  if (mask == Lconst(0)) {
+    return *this; // no mask, just copy this
+  }
+  if (mask == Lconst(-1)) {
+    return value; // all ones mask, just copy value
   }
 
-  Number res_num = 0;
+  I(!mask.has_unknowns() && !has_unknowns());  // FIXME: this should work (just someone else could do it?)
 
-  while (i_mask_num) {
-    if (i_mask_num & mask_pos_num) {
-      res_num = res_num | (i_mask_num & a);
-    } else {
-      res_num = res_num | (i_mask_num & b);
+  auto mask_min = mask.get_trailing_zeroes();
+  auto mask_max = mask.get_bits();
+
+  auto res_num = get_num();
+
+  // If base, and value are positive
+  auto value_pos    = 0u;
+  auto mask_num     = mask.get_num();
+  bool mask_on_zero = mask.is_negative();
+  if (mask.is_negative()) {
+    mask_num = mask.not_op().get_num();
+  }
+  for(auto i=mask_min;i<mask_max;++i) {
+    if ((boost::multiprecision::bit_test(mask_num, i)?true:false) == mask_on_zero)
+      continue;
+
+    if (boost::multiprecision::bit_test(value.num, value_pos)) {
+      bit_set(res_num, i);
+    }else{
+      bit_unset(res_num, i);
     }
-    i_mask_num >>= 1;
+    ++value_pos;
+  }
+
+  if (mask.is_negative()) {
+    auto res_value = (value.num>>value_pos)<<mask_max; // clear used bits, get in position
+    res_num &= (Number(1)<<mask_max)-1; // clear upper result_bits to use res_value left
+    res_num |= res_value;
   }
 
   return Lconst(false, calc_num_bits(res_num), res_num);
