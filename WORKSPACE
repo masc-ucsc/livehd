@@ -59,7 +59,7 @@ new_git_repository(
 new_git_repository(
     name = "yosys",
     build_file = "BUILD.yosys",  # relative to external path
-    commit = "de79978372c1953e295fa262444cb0a28a246c5f",  # Sep 24, 2020
+    commit = "438bcc68c0859057e4d3f521d1c865d2a9d90e15",  # June 11, 2021
     patches = ["//external:patch.yosys"],
     remote = "https://github.com/YosysHQ/yosys.git",
     shallow_since = "1600877724 -0700",
