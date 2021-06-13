@@ -1439,8 +1439,26 @@ TEST_F(Lconst_test, lconst_set_bits) {
   // mask  is           111..1111_0001 (-15)
   // value is   0b1_1011_1100_110    1
   // res   is    0b1101_1110_0110_0101
-  Lconst(0x15).set_mask_op(Lconst("-15"), Lconst(0x1bcd)).dump();
+  Lconst(0x14).set_mask_op(Lconst("-15"), Lconst(0x1bcd)).dump();
   EXPECT_EQ(Lconst(0x14).set_mask_op(Lconst("-15"), Lconst(0x1bcd)), Lconst(0xde65));
+
+#if 0
+  // FIXME: This should work
+
+  // base  is           111..1110_0100 (-28)
+  // mask  is           111..1111_0001 (-15)
+  // value is   0b1_1011_1100_110    1
+  // res   is    0b1101_1110_0110_0101
+  Lconst(-28).set_mask_op(Lconst("-15"), Lconst(0x1bcd)).dump();
+  EXPECT_EQ(Lconst(-28).set_mask_op(Lconst("-15"), Lconst(0x1bcd)), Lconst(0xde65));
+
+  // base  is           111..1111_1110 (-2)
+  // mask  is           111..1111_0001 (-15)
+  // value is   0b1_1011_1100_110    1
+  // res   is    0b1101_1110_0110_1110
+  Lconst(-2).set_mask_op(Lconst("-15"), Lconst(0x1bcd)).dump();
+  EXPECT_EQ(Lconst(-2).set_mask_op(Lconst("-15"), Lconst(0x1bcd)), Lconst(0xde6d));
+#endif
 }
 
 TEST_F(Lconst_test, lconst_sign) {

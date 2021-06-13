@@ -10,7 +10,7 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3 '
 
 
-pts='hier_tuple reg_bits_set bits_rhs reg__q_pin scalar_tuple hier_tuple_io hier_tuple3
+pts='hier_tuple reg_bits_set bits_rhs reg__q_pin hier_tuple_io hier_tuple3
 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 lhs_wire
 tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter lhs_wire
 adder_stage capricious_bits4 logic capricious_bits2
@@ -20,6 +20,8 @@ hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail firrtl_gcd_3bits
 nested_if firrtl_tail3 counter_nested_if tuple_empty_attr tuple_reg tuple_reg2
 struct_flop tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param capricious_bits'
 
+#FIXME:
+#pts = 'scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts ='counter_mix'  
 # pts='lhs_wire2'

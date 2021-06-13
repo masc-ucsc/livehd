@@ -259,6 +259,12 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
         opr_node.setup_sink_pin("mask").connect_driver(opds[1]);
       }
     } break;
+    case Ntype_op::Set_mask: {
+      I(opds.size()==3);
+      opr_node.setup_sink_pin("a").connect_driver(opds[0]);
+      opr_node.setup_sink_pin("mask").connect_driver(opds[1]);
+      opr_node.setup_sink_pin("value").connect_driver(opds[2]);
+    } break;
     case Ntype_op::Div:
     case Ntype_op::SHL:
     case Ntype_op::Sext:
@@ -267,6 +273,7 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
       lg->add_edge(opds[0], opr_node.setup_sink_pin("a"));
       lg->add_edge(opds[1], opr_node.setup_sink_pin("b"));
     } break;
+
     default: {
       I(opr_node.get_type_op() != Ntype_op::Mux);
       I(opr_node.get_type_op() != Ntype_op::Flop);
@@ -1702,6 +1709,7 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_shl]       = Ntype_op::SHL;
 
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_get_mask] = Ntype_op::Get_mask;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_set_mask] = Ntype_op::Set_mask;
 
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_sext] = Ntype_op::Sext;
   // FIXME->sh: to be extended ...

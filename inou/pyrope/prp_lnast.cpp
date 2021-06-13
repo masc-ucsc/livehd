@@ -710,26 +710,15 @@ void Prp_lnast::eval_assignment_expression(mmap_lib::Tree_index idx_start_ast, m
   auto lhs_node = eval_rule(idx_lhs_ast, idx_start_ln);
   I(in_lhs);
   in_lhs = false;
-  if (!lhs_node.is_invalid() && lhs_node.token.get_text() != in_lhs_rhs_node.token.get_text()) {
+  if (!lhs_node.is_invalid() && !in_lhs_sel_root.is_invalid()) {
+    const auto &d = lnast->get_data(in_lhs_sel_root);
+    if (d.type.is_set_mask()) // Why not the is_tup_add too??
+      lnast->add_child(in_lhs_sel_root, in_lhs_rhs_node);
+  }else if (!lhs_node.is_invalid() && lhs_node.token.get_text() != in_lhs_rhs_node.token.get_text()) {
     auto idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign());
     lnast->add_child(idx_assign, lhs_node);
     lnast->add_child(idx_assign, in_lhs_rhs_node);
   }
-#if 0
-  // finally, create the assign node itself, which is also a child of subtree root
-  mmap_lib::Tree_index idx_assign;
-  if (scan_text(ast->get_data(idx_assign_op).token_entry) == ":=") {
-    idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_dp_assign());
-  } else {
-    idx_assign = lnast->add_child(idx_nxt_ln, Lnast_node::create_assign());
-  }
-  lnast->add_child(idx_assign, lhs_node);
-
-  if (!rhs_is_leaf || is_op_assign)
-    lnast->add_child(idx_assign, rhs_node);
-  else
-    lnast->add_child(idx_assign, eval_rule(rhs_ast, idx_assign));
-#endif
 }
 
 Lnast_node Prp_lnast::eval_tuple(const mmap_lib::Tree_index &idx_start_ast, const mmap_lib::Tree_index &idx_start_ln,
@@ -1708,32 +1697,48 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   if (!select_expr_idx.is_invalid()) {
     bool close_parenthesis = get_token(ast->get_data(select_expr_idx).token_entry).tok == Token_id_cp;
     if (!close_parenthesis) {
+      auto tmp   = in_lhs;
+      in_lhs     = false; // foo@(x.b)  the x.b is not a tup_add
+
       sel_rhs    = eval_tuple(select_expr_idx, idx_nxt_ln);
+
+      in_lhs     = tmp;;
       sel_exists = true;
     }
   }
 
+  Lnast_node retnode;
+  Lnast_node src_var; // tmp or lhs_var
+
+  if (lhs_node.is_invalid()) {
+    src_var = Lnast_node::create_ref(get_token(ast->get_data(lhs_var_idx).token_entry));
+  } else {
+    src_var = lhs_node;
+  }
+
   // create bit select node
+  mmap_lib::Tree_index idx_sel_root;
   Lnast_node lr_bits_node;
   if (in_lhs) {
+    if (!in_lhs_sel_root.is_invalid()) {
+      // FIXME: current pyrope parser does not translate well BUT it is valid
+      // foo@(1:3)@(1) = 1 // same as foo@(2) = 1
+      Pass::error("FIXME: pyrope parser does not handle nested bit set in lhs");
+    }
+
     lr_bits_node = Lnast_node::create_set_mask();
+    idx_sel_root = lnast->add_child(idx_nxt_ln, lr_bits_node);
+    retnode      = src_var;
+
+    in_lhs_sel_root = idx_sel_root;
   } else {
     lr_bits_node = Lnast_node::create_get_mask();
+    idx_sel_root = lnast->add_child(idx_nxt_ln, lr_bits_node);
+    retnode      = get_lnast_temp_ref();
   }
-  auto idx_sel_root = lnast->add_child(idx_nxt_ln, lr_bits_node);
-
-  // create the LHS temporary variable
-  auto lnast_temp = get_temp_string();
-  auto retnode    = Lnast_node::create_ref(lnast->add_string(lnast_temp));
 
   lnast->add_child(idx_sel_root, retnode);
-
-  // add the identifier of the register being selected
-  if (lhs_node.is_invalid()) {
-    lnast->add_child(idx_sel_root, Lnast_node::create_ref(get_token(ast->get_data(lhs_var_idx).token_entry)));
-  } else {
-    lnast->add_child(idx_sel_root, lhs_node);
-  }
+  lnast->add_child(idx_sel_root, src_var);
 
   // add the rhs value of the select expression
   if (sel_exists) {

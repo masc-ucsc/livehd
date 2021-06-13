@@ -41,10 +41,8 @@ struct Lnast_node {
   int16_t     subs;  // ssa subscript
 
   constexpr Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
-
-  Lnast_node(Lnast_ntype _type) : type(_type), subs(0) { I(!type.is_invalid()); }
-
-  Lnast_node(Lnast_ntype _type, const Etoken &_token) : type(_type), token(_token), subs(0) { I(!type.is_invalid()); }
+  constexpr Lnast_node(Lnast_ntype _type) : type(_type), subs(0) { }
+  constexpr Lnast_node(Lnast_ntype _type, const Etoken &_token) : type(_type), token(_token), subs(0) { }
 
   Lnast_node(Lnast_ntype _type, const Etoken &_token, int16_t _subs) : type(_type), token(_token), subs(_subs) {
     I(!type.is_invalid());
@@ -147,9 +145,6 @@ private:
   void      resolve_ssa_lhs_subs(const Lnast_nid &psts_nid);
   void      resolve_ssa_rhs_subs(const Lnast_nid &psts_nid);
   void      opr_lhs_merge(const Lnast_nid &psts_nid);
-  void      insert_tg_q_pin_fetch(const Lnast_nid &opr_nid);
-  void      collect_reg_hier_name_tup(const Lnast_nid &opr_nid);
-  void      collect_reg_hier_name_ta(const Lnast_nid &opr_nid);
   void      update_global_lhs_ssa_cnt_table(const Lnast_nid &target_nid);
   void      respect_latest_global_lhs_ssa(const Lnast_nid &target_nid);
   int8_t    check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key);

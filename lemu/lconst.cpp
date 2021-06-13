@@ -527,6 +527,8 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   auto res_num = get_num();
 
   // If base, and value are positive
+  I(!is_negative());  // FIXME: Not tested
+  I(!value.is_negative()); // FIXME: Not tested
   auto value_pos    = 0u;
   auto mask_num     = mask.get_num();
   bool mask_on_zero = mask.is_negative();
