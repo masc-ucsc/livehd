@@ -327,12 +327,25 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       if (!(op == Ntype_op::Sum && edge_it2[0].sink.get_pin_name() == "B"))
         collapse_forward_always_pin0(node, edge_it2);
     }
-  } else if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
+  } else if (op == Ntype_op::SRA) {
     auto amt_node = inp_edges_ordered[1].driver.get_node();
     I(amt_node == node.get_sink_pin("b").get_driver_node());
 
     if (amt_node.is_type_const() && amt_node.get_type_const() == 0) {
       collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
+    }
+  } else if (op == Ntype_op::SHL) {
+    if (inp_edges_ordered.size() == 2) {
+      auto amt_node = inp_edges_ordered[1].driver.get_node();
+      I(amt_node == node.get_sink_pin("B").get_driver_node());
+
+      if (amt_node.is_type_const() && amt_node.get_type_const() == 0) {
+        collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
+      }
+    }else{
+      // res = val << (B.0, B.1, B.2)
+      // res = (val <<B.0) | (val<<B.1) | (val<<B.2)
+      fmt::print("FIXME: OPT the inputs in B if they are constants\n");
     }
   }
 }
@@ -342,11 +355,14 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
   auto op = node.get_type_op();
   if (op == Ntype_op::SHL) {
     Lconst val = node.get_sink_pin("a").get_driver_node().get_type_const();
-    Lconst amt = node.get_sink_pin("b").get_driver_node().get_type_const();
 
-    Lconst result = val << amt;
+    Lconst result(0);
 
-    TRACE(fmt::print("cprop: shl to {} ({}<<{})\n", result.to_pyrope(), val.to_pyrope(), amt.to_pyrope()));
+    for(auto &amt_dpin:node.get_sink_pin("B").inp_drivers()) {
+      Lconst amt = amt_dpin.get_type_const();
+
+      result = result.or_op(val << amt);
+    }
 
     replace_node(node, result);
   } else if (op == Ntype_op::Get_mask) {
@@ -602,6 +618,27 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node)
   }
 
   return std::make_tuple(tup_name, key_name);
+}
+
+void Cprop::tuple_shl_mut(Node &node) {
+  // SHL can have a tuple in B port. E.g: 1<<(2,3). Any data pin gets expanded directly
+  auto spin_amount = node.get_sink_pin("B");
+
+  for(auto &dpin:spin_amount.inp_drivers()) {
+    auto tup = find_lgtuple(dpin);
+    if (tup==nullptr)
+      continue;
+    if (!tup->is_correct() || tuple_issues) // conservative in expansion
+      continue;
+
+    XEdge::del_edge(dpin, spin_amount);
+    for(auto e:tup->get_map()) {
+      if (Lgtuple::is_attribute(e.first))
+        continue;
+
+      spin_amount.connect_driver(e.second);
+    }
+  }
 }
 
 void Cprop::tuple_mux_mut(Node &node) {
@@ -1619,7 +1656,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(node_tup, sub_node, node);
     } else if (sink_type == Ntype_op::Get_mask || sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux
-               || sink_type == Ntype_op::TupGet) {
+               || sink_type == Ntype_op::TupGet || sink_type == Ntype_op::SHL) {
     } else {
       pending_out_edges.emplace_back(e);
     }
@@ -1835,6 +1872,8 @@ void Cprop::tuple_pass(Lgraph *lg) {
 #ifndef NDEBUG
         fmt::print("cprop FIXME node:{} (similar to flop)\n", node.debug_name());
 #endif
+      } else if (op == Ntype_op::SHL) {
+        tuple_shl_mut(node);
       } else if (op == Ntype_op::Flop) {
         tuple_flop_mut(node);
       } else if (op == Ntype_op::Sub) {

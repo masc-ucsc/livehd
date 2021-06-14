@@ -305,7 +305,7 @@ void Firmap::map_node_fir_cat(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
 
       auto e2_bits        = it->second.get_bits();
       auto new_node_const = new_lg->create_node_const(e2_bits);
-      new_node_const.setup_driver_pin().connect_sink(new_node_shl.setup_sink_pin("b"));  // e2.fbits -> shl
+      new_node_const.setup_driver_pin().connect_sink(new_node_shl.setup_sink_pin("B"));  // e2.fbits -> shl
       pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A"));                  // e2 -> or
     }
   }
@@ -507,7 +507,7 @@ void Firmap::map_node_fir_dshl(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
     if (old_spin == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(old_spin, new_node_shl.setup_sink_pin("a"));
     } else {  // e2
-      pinmap.insert_or_assign(old_spin, new_node_shl.setup_sink_pin("b"));
+      pinmap.insert_or_assign(old_spin, new_node_shl.setup_sink_pin("B"));
     }
   }
 
@@ -522,7 +522,7 @@ void Firmap::map_node_fir_shl(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
     if (old_spin == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("a"));
     } else {
-      pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("b"));
+      pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("B"));
     }
   }
 

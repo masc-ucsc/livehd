@@ -61,6 +61,7 @@ protected:
                                       std::shared_ptr<Lgtuple const> node_tup);
 
   // handle tuple issues but allowed to "mutate" the node
+  void tuple_shl_mut(Node &node);
   void tuple_mux_mut(Node &node);
   void tuple_flop_mut(Node &node);
   void tuple_get_mask_mut(Node &node);

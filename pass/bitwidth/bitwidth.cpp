@@ -184,10 +184,8 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 2);
 
   auto a_dpin = node.get_sink_pin("a").get_driver_pin();
-  auto n_dpin = node.get_sink_pin("b").get_driver_pin();
+  auto a_it   = flat_bwmap.find(a_dpin.get_compact_flat());
 
-  auto a_it = flat_bwmap.find(a_dpin.get_compact_flat());
-  auto n_it = flat_bwmap.find(n_dpin.get_compact_flat());
 
   Bitwidth_range a_bw(0);
   if (a_it == flat_bwmap.end()) {
@@ -199,17 +197,24 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
   }
 
   Bitwidth_range n_bw(0);
-  if (n_it == flat_bwmap.end()) {
-    debug_unconstrained_msg(node, n_dpin);
-    not_finished = true;
-    return;
-  } else {
-    n_bw = n_it->second;
-  }
 
-  if (a_bw.get_sbits() == 0 || n_bw.get_sbits() == 0) {
-    debug_unconstrained_msg(node, a_bw.get_sbits() == 0 ? a_dpin : n_dpin);
-    return;
+  for(auto &n_dpin:node.get_sink_pin("B").inp_drivers()) {
+
+    auto n_it = flat_bwmap.find(n_dpin.get_compact_flat());
+
+    if (unlikely(n_it == flat_bwmap.end())) {
+      debug_unconstrained_msg(node, n_dpin);
+      not_finished = true;
+      return;
+    }
+
+    if (unlikely(!n_it->second.is_always_positive())) {
+      node.dump();
+      n_it->second.dump();
+      Pass::error("node {} can be negative and feeds a SHL (only positive allowed)", n_dpin.get_node().debug_name());
+    }
+
+    n_bw.set_wider_range(n_it->second);
   }
 
   auto           max     = a_bw.get_max();

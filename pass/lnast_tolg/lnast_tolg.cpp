@@ -266,12 +266,16 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
       opr_node.setup_sink_pin("value").connect_driver(opds[2]);
     } break;
     case Ntype_op::Div:
-    case Ntype_op::SHL:
     case Ntype_op::Sext:
     case Ntype_op::SRA: {
       I(opds.size() == 2);  // val<<amount
       lg->add_edge(opds[0], opr_node.setup_sink_pin("a"));
       lg->add_edge(opds[1], opr_node.setup_sink_pin("b"));
+    } break;
+    case Ntype_op::SHL: {
+      I(opds.size() == 2);  // val<<amount
+      lg->add_edge(opds[0], opr_node.setup_sink_pin("a"));
+      lg->add_edge(opds[1], opr_node.setup_sink_pin("B"));
     } break;
 
     default: {
