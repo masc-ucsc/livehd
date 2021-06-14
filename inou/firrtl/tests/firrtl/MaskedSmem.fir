@@ -27,6 +27,7 @@ circuit MaskedSmem :
       node _T_1 = bits(_T, 9, 0) @[MaskedSmem.scala 19:25]
       read mport MPORT_1 = mem[_T_1], clock @[MaskedSmem.scala 19:25]
       skip @[MaskedSmem.scala 19:25]
+
     io.dataOut[0] <= MPORT_1[0] @[MaskedSmem.scala 19:14]
     io.dataOut[1] <= MPORT_1[1] @[MaskedSmem.scala 19:14]
     io.dataOut[2] <= MPORT_1[2] @[MaskedSmem.scala 19:14]
