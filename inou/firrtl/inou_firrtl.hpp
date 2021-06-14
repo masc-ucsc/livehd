@@ -101,7 +101,7 @@ protected:
   std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs, const Lnast_node value_node=Lnast_node::create_invalid());
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
-  void PerformLateMemAssigns(Lnast &lnast, Lnast_nid &parent_node);
+  void FinalMemInterfaceAssign(Lnast &lnast, Lnast_nid &parent_node);
 
   void     PopulateAllModsIO(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, const std::string &file_name);
   void     AddPortToMap(const std::string &mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
@@ -194,13 +194,15 @@ private:
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
-  absl::flat_hash_map<std::string, int8_t>                   mem2port_cnt;
-  absl::flat_hash_map<std::string, int8_t>                   mem2wensize;
+  absl::flat_hash_map<std::string, uint8_t>                  mem2port_cnt;
+  absl::flat_hash_map<std::string, uint8_t>                  mem2wensize;
   absl::flat_hash_map<std::string, uint8_t>                  mem2rd_latency;
   absl::flat_hash_map<std::string, Lnast_nid>                mem2initial_idx;
   absl::flat_hash_map<std::string, std::string>              mport2mem;
+  absl::flat_hash_map<std::string, uint8_t>                  mem2one_wr_mport;
+  // mem -> <(rd_port_name1,1), (rd_port_name_foo, 7)>
+  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports; 
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
-  // absl::flat_hash_map<std::string, absl::flat_hash_map<std::vector<std::string>, uint16_t>> mem2din_fields2bits;
 
 
   uint32_t dummy_expr_node_cnt;

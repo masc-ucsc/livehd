@@ -24,6 +24,7 @@ struct_flop tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param capri
 #pts = 'scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts ='counter_mix'  
+
 # pts='lhs_wire2'
 # pts='memory_1rd1wr'
 # pts='pp'
