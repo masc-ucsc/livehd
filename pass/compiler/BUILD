@@ -40,6 +40,21 @@ sh_test(
 )
 
 sh_test(
+    name = "pyrope2pyrope_compile",
+    srcs = ["tests/pyrope2pyrope_compile.sh"],
+    data = [
+        "//inou/pyrope:pyrope_tests",
+        "//main:lgshell",
+    ],
+    tags = [
+        "fixme",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+)
+
+sh_test(
     name = "firrtl_compile",
     srcs = ["tests/firrtl_compile.sh"],
     data = [

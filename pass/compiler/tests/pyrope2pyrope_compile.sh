@@ -24,7 +24,6 @@ struct_flop tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param capri
 #pts = 'scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts ='counter_mix'  
-
 # pts='lhs_wire2'
 # pts='memory_1rd1wr'
 # pts='pp'
@@ -54,13 +53,12 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
-
-Pyrope_compile () {
+Pyrope_compile_HL_LN () {
   echo ""
   echo ""
   echo ""
   echo "===================================================="
-  echo "Pyrope Full Compilation"
+  echo "Pyrope Full Compilation to check high level LN generation (code_gen)"
   echo "===================================================="
 
 
@@ -71,11 +69,20 @@ Pyrope_compile () {
         exit 1
     fi
 
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt}"
-    #${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler top:${pt}"
+    #PRP->LN->(code_gen)-> PRP
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> inou.code_gen.prp odir:tmp_prp"
+
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.prp!"
+      exit $ret_val
+    fi
+    #code_gen PRP -> LN -> LG
+    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt}"
+    #${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler top:${pt}"
+    ret_val=$?
+    if [ $ret_val -ne 0 ]; then
+      echo "ERROR: could not compile with pattern: tmp_prp/${pt}.prp!"
       exit $ret_val
     fi
   done #end of for
@@ -124,13 +131,12 @@ Pyrope_compile () {
   done
 }
 
-
-Pyrope_compile_hier () {
+Pyrope_compile_hier_HL_LN () {
   echo ""
   echo ""
   echo ""
   echo "===================================================="
-  echo "Hierarchical Pyrope Full Compilation"
+  echo "Hierarchical Pyrope Full Compilation to check high level LN generation (code_gen)"
   echo "===================================================="
 
   declare pts_concat
@@ -158,7 +164,8 @@ Pyrope_compile_hier () {
   done
 
 
-  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  ${LGSHELL} "inou.pyrope files:${pts_concat} |> inou.code_gen.prp odir:tmp_prp"
+  ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${top_module}"
   #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
@@ -214,17 +221,17 @@ Pyrope_compile_hier () {
   fi
 }
 
+#rm -rf ./lgdb
+#Pyrope_compile_hier_HL_LN "$pts_hier1"
+#rm -rf ./lgdb
+#Pyrope_compile_hier_HL_LN "$pts_hier2"
 rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier "$pts_hier2"
-rm -rf ./lgdb
-Pyrope_compile "$pts"
-
-# Do not remove verilog, I tend to have tests cases in homedirectory
-# rm -f *.v
-# rm -f ./*.dot
-# rm -f ./lgcheck*
-# rm -f ./*.tcl
- rm -f logger_*.log
+Pyrope_compile_HL_LN "$pts"
+ 
+rm -f *.v
+rm -f ./*.dot
+rm -f ./lgcheck*
+rm -f ./*.tcl
+rm -f logger_*.log
+rm -rf ./tmp_prp/
 
