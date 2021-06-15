@@ -1181,9 +1181,9 @@ void Lnast::dump() const {
       indent += "    ";
 
     if (node.type.is_ref()) { //only ref need/have ssa info
-      fmt::print("({},{}) {} {:<8} {}({})\n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text(), node.subs);
+      fmt::print("({:<1},{:<4}) {} {:<8} {}({})\n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text(), node.subs);
     } else {
-      fmt::print("({},{}) {} {:<8} {}    \n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text());
+      fmt::print("({:<1},{:<4}) {} {:<8} {}    \n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text());
     }
   }
 }
