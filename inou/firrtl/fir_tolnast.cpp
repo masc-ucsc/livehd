@@ -952,6 +952,7 @@ void Inou_firrtl::HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
   fmt::print("DEBUG2 rd_mport:{}\n", mport_name);
   auto mem_name = mport2mem[mport_name];
   auto mem_port_str = lnast.add_string(std::to_string(mem2port_cnt[mem_name]));
+  fmt::print("DEBUG4 rd port cnt:{}\n", mem_port_str);
 
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
@@ -1006,29 +1007,51 @@ void Inou_firrtl::HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
   auto port_cnt_str = lnast.add_string(std::to_string(port_cnt));
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
+    auto &idx_initialize_stmts = mem2initial_idx[mem_name];
     mem2one_wr_mport.insert_or_assign(mem_name, port_cnt);
 
     mport_usage_visited.insert(mport_name);
-    auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    auto idx_ta_mlat = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_latency"))));
     lnast.add_child(idx_ta_mlat, Lnast_node::create_const(port_cnt_str));
     lnast.add_child(idx_ta_mlat, Lnast_node::create_const(lnast.add_string(std::to_string(1)))); // wr latency must be 1
 
-    auto idx_ta_mrdport = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    auto idx_ta_mrdport = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_rdport"))));
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(port_cnt_str));
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(lnast.add_string(std::string("false"))));
 
-    auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
+    auto idx_attr_get = lnast.add_child(idx_initialize_stmts, Lnast_node::create_attr_get());
     auto mport_last_value = create_tmp_var(lnast);
     lnast.add_child(idx_attr_get, Lnast_node::create_ref(mport_last_value));
     lnast.add_child(idx_attr_get, Lnast_node::create_ref(lnast.add_string(mport_name)));
     lnast.add_child(idx_attr_get, Lnast_node::create_const(lnast.add_string(std::string("__last_value"))));
 
-    auto idx_ta_mdin = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    auto idx_ta_mdin = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
     lnast.add_child(idx_ta_mdin, Lnast_node::create_const(port_cnt_str));
     lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(mport_last_value));
+    // mport_usage_visited.insert(mport_name);
+    // auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    // lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_latency"))));
+    // lnast.add_child(idx_ta_mlat, Lnast_node::create_const(port_cnt_str));
+    // lnast.add_child(idx_ta_mlat, Lnast_node::create_const(lnast.add_string(std::to_string(1)))); // wr latency must be 1
+
+    // auto idx_ta_mrdport = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_rdport"))));
+    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(port_cnt_str));
+    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(lnast.add_string(std::string("false"))));
+
+    // auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
+    // auto mport_last_value = create_tmp_var(lnast);
+    // lnast.add_child(idx_attr_get, Lnast_node::create_ref(mport_last_value));
+    // lnast.add_child(idx_attr_get, Lnast_node::create_ref(lnast.add_string(mport_name)));
+    // lnast.add_child(idx_attr_get, Lnast_node::create_const(lnast.add_string(std::string("__last_value"))));
+
+    // auto idx_ta_mdin = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    // lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
+    // lnast.add_child(idx_ta_mdin, Lnast_node::create_const(port_cnt_str));
+    // lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(mport_last_value));
   }
   
   auto it2 = mport2mask_bitvec.find(mport_name);
@@ -1855,9 +1878,9 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
     auto &idx_initialize_stmts = mem2initial_idx[mem_name];
 
     for (auto &it: mem2rd_mports[mem_name]) {
-      auto &mport_name       = it.first;
-      auto &cnt_of_rd_mport  = it.second;
-      auto &one_of_wr_mport_cnt = mem2one_wr_mport[mem_name];
+      auto mport_name       = it.first;
+      auto cnt_of_rd_mport  = it.second;
+      auto one_of_wr_mport_cnt = mem2one_wr_mport[mem_name];
 
       auto idx_tg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
       auto temp_var_name = create_tmp_var(lnast);
@@ -1870,7 +1893,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
       lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
 
 
-      // FIXME->sh: might need get the __last_value
+      // FIXME->sh: might need get the __last_value?
       auto idx_tg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
       auto temp_var_name2 = create_tmp_var(lnast);
       lnast.add_child(idx_tg2, Lnast_node::create_ref(temp_var_name2));
@@ -1883,8 +1906,9 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
     }
 
 
-    std::vector<std::string_view> tmp_flattened_fields_per_port;
-    for (int pcnt = 0; pcnt < mem2port_cnt[mem_name]; pcnt++) {
+    std::vector<std::string> tmp_flattened_fields_per_port;
+    for (int pcnt = 0; pcnt <= mem2port_cnt[mem_name]; pcnt++) {
+      fmt::print("DEBUG3 @port_cnt:{}\n", pcnt);
       auto gmask_tmp_var_str = create_tmp_var(lnast);
       auto tg_tmp_var_str    = create_tmp_var(lnast);
       auto ta_tmp_var_str    = create_tmp_var(lnast);
@@ -1902,11 +1926,13 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
       lnast.add_child(idx_gmask, Lnast_node::create_ref(ta_tmp_var_str));
       tmp_flattened_fields_per_port.emplace_back(gmask_tmp_var_str);
     }
-    //todo: din = (tmp0, tmp1, ..., tmp_pcnt)
+    //note:  __F33 = (tmp0, tmp1, ..., tmp_pcnt); din = __F33
     auto idx_final_mem_din_ta = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto final_ta_tmp_var_str = create_tmp_var(lnast);
     lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(final_ta_tmp_var_str));
+
     for (uint8_t i = 0; i < tmp_flattened_fields_per_port.size(); i++) {
+      fmt::print("DEBUG5 i:{}\n", i);
       lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(lnast.add_string(tmp_flattened_fields_per_port.at(i))));
     }
 
