@@ -199,10 +199,13 @@ private:
   absl::flat_hash_map<std::string, uint8_t>                  mem2rd_latency;
   absl::flat_hash_map<std::string, Lnast_nid>                mem2initial_idx;
   absl::flat_hash_map<std::string, std::string>              mport2mem;
+  // control how many bits should be shifted at the bit-vector for masked mem_wr_enable
+  absl::flat_hash_map<std::string, uint32_t>                 mport2mask_bitvec; 
+  absl::flat_hash_map<std::string, uint8_t>                  mport2mask_cnt; 
   absl::flat_hash_map<std::string, uint8_t>                  mem2one_wr_mport;
+  absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
   // mem -> <(rd_port_name1,1), (rd_port_name_foo, 7)>
   absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports; 
-  absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
 
 
   uint32_t dummy_expr_node_cnt;

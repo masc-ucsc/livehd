@@ -421,9 +421,13 @@ void Inou_firrtl::HandleMportDeclaration(Lnast& lnast, Lnast_nid& parent_node, c
   lnast.add_child(idx_ta_maddr, Lnast_node::create_const(port_cnt_str));
   lnast.add_child(idx_ta_maddr, Lnast_node::create_ref(adr_str));
 
+  
+  // note: because any port might be declared inside a subscope but be used at upper scope, at the time you see a mport 
+  //       declaration, you must specify the port enable signal, even it's a masked write port. For the maksed write, a 
+  //       bit-vector wr_enable will be handled at the HandleWrMportUsage()
   auto idx_ta_men = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(idx_ta_men, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_enable"))));
-  lnast.add_child(idx_ta_men, Lnast_node::create_const(lnast.add_string(std::to_string(mem2port_cnt[mem_name]))));
+  lnast.add_child(idx_ta_men, Lnast_node::create_const(port_cnt_str));
   lnast.add_child(idx_ta_men, Lnast_node::create_const(lnast.add_string(std::to_string(1))));
 
 
@@ -459,9 +463,16 @@ void Inou_firrtl::HandleMportDeclaration(Lnast& lnast, Lnast_nid& parent_node, c
   if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
     // only need to initialize mem_res[rd_port] when you are sure it's a read mport
     InitMemRes(lnast, mem_name, port_cnt_str);
+    // FIXME->sh:
+    // if you already know it's a read mport,  you should let mport = mem_res[rd_port] here, or the mem_port_cnt might duplicately count
+    // one more port_cnt, see the cases from ListBuffer.fir (search push_tail). 
   } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // noly need to initialize mem_din[wr_port] when you are sure it's a write mport
     InitMemDin(lnast, mem_name, port_cnt_str);
+    I(mport2mask_bitvec.find(mport.id()) == mport2mask_bitvec.end());
+    I(mport2mask_cnt.find(mport.id()) == mport2mask_cnt.end());
+    mport2mask_bitvec.insert_or_assign(mport.id(), 1);
+    mport2mask_cnt.insert_or_assign(mport.id(), 0);
   } else {
     // need to initialize both mem_din[wr_port] mem_res[res_port] when you are not sure the port type
     InitMemRes(lnast, mem_name, port_cnt_str);
@@ -991,8 +1002,8 @@ void Inou_firrtl::HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
 void Inou_firrtl::HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const std::string &mport_name) {
   fmt::print("DEBUG2 wr_mport:{}\n", mport_name);
   auto mem_name = mport2mem[mport_name];
-  auto port_cnt = mem2port_cnt[mem_name];
-  auto port_cnt_str = lnast.add_string(std::to_string(mem2port_cnt[mem_name]));
+  auto port_cnt = mem2port_cnt[mem_name]; 
+  auto port_cnt_str = lnast.add_string(std::to_string(port_cnt));
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
     mem2one_wr_mport.insert_or_assign(mem_name, port_cnt);
@@ -1017,7 +1028,24 @@ void Inou_firrtl::HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
     auto idx_ta_mdin = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
     lnast.add_child(idx_ta_mdin, Lnast_node::create_const(port_cnt_str));
-    lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(mport_last_value)));
+    lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(mport_last_value));
+  }
+  
+  auto it2 = mport2mask_bitvec.find(mport_name);
+  if (it2 != mport2mask_bitvec.end()) {
+  
+    auto bitvec = mport2mask_bitvec[mport_name];
+    auto shtamt = mport2mask_cnt[mport_name];
+    bitvec = bitvec | 1<<shtamt;
+
+
+    auto idx_ta_men = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    lnast.add_child(idx_ta_men, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_enable"))));
+    lnast.add_child(idx_ta_men, Lnast_node::create_const(port_cnt_str));
+    lnast.add_child(idx_ta_men, Lnast_node::create_const(lnast.add_string(std::to_string(bitvec))));
+    
+    mport2mask_bitvec[mport_name] = bitvec;
+    mport2mask_cnt[mport_name]++;
   }
 }
 
@@ -1835,7 +1863,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
       auto temp_var_name = create_tmp_var(lnast);
       lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
       lnast.add_child(idx_tg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
-      lnast.add_child(idx_tg, Lnast_node::create_const(std::to_string(one_of_wr_mport_cnt)));
+      lnast.add_child(idx_tg, Lnast_node::create_const(lnast.add_string(std::to_string(one_of_wr_mport_cnt))));
 
       auto idx_asg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign());
       lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(mport_name)));
@@ -1847,7 +1875,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
       auto temp_var_name2 = create_tmp_var(lnast);
       lnast.add_child(idx_tg2, Lnast_node::create_ref(temp_var_name2));
       lnast.add_child(idx_tg2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_res"))));
-      lnast.add_child(idx_tg2, Lnast_node::create_const(std::to_string(cnt_of_rd_mport)));
+      lnast.add_child(idx_tg2, Lnast_node::create_const(lnast.add_string(std::to_string(cnt_of_rd_mport))));
 
       auto idx_asg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_dp_assign());
       lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(mport_name)));
