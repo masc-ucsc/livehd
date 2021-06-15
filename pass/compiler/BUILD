@@ -11,7 +11,6 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        # "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
         "//pass/gioc:pass_gioc",
         "//pass/bitwidth:pass_bitwidth",
@@ -19,6 +18,7 @@ cc_library(
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/common:pass",
         "//inou/graphviz:inou_graphviz",
+        "//inou/yosys:yosys2",
     ],
     alwayslink = True,
 )

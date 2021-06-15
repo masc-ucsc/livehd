@@ -956,9 +956,6 @@ void Inou_firrtl::HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(mem_port_str));
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(lnast.add_string(std::string("true"))));
 
-    // let RdMport = foo_mem_res[port]
-    I(mem2initial_idx.find(mem_name) != mem2initial_idx.end());
-    auto &idx_initialize_stmts = mem2initial_idx[mem_name];
 
     auto it2 = mem2rd_mports.find(mem_name);
     if (it2 == mem2rd_mports.end()) {
@@ -976,15 +973,18 @@ void Inou_firrtl::HandleRdMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
     //       but the wr_port are not necessary happened before rd_mport
 
 
-    auto idx_tg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
-    auto temp_var_name = create_tmp_var(lnast);
-    lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
-    lnast.add_child(idx_tg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_res"))));
-    lnast.add_child(idx_tg, Lnast_node::create_const(mem_port_str));
+    // deprecated
+    // I(mem2initial_idx.find(mem_name) != mem2initial_idx.end());
+    // auto &idx_initialize_stmts = mem2initial_idx[mem_name];
+    // auto idx_tg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
+    // auto temp_var_name = create_tmp_var(lnast);
+    // lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
+    // lnast.add_child(idx_tg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_res"))));
+    // lnast.add_child(idx_tg, Lnast_node::create_const(mem_port_str));
 
-    auto idx_asg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign());
-    lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(mport_name)));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+    // auto idx_asg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign());
+    // lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(mport_name)));
+    // lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
   }
 }
 
@@ -1824,18 +1824,35 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
 void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) {
   for (auto &mem_name : memory_names) {
     // try to recover tuplpe field from the mem_din
-    // auto &idx_initialize_stmts = mem2initial_idx[mem_name];
+    auto &idx_initialize_stmts = mem2initial_idx[mem_name];
 
-    // for (auto &it: mem2rd_mports[mem_name]) {
-    //   // auto &mport_name = it.first;
-    //   // auto &mport_cnt  = it.second;
-    //   auto &one_of_wr_mport_cnt = mem2one_wr_mport[mem_name];
-    //   auto idx_tg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
-    //   auto temp_var_name = create_tmp_var(lnast);
-    //   lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
-    //   lnast.add_child(idx_tg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
-    //   lnast.add_child(idx_tg, Lnast_node::create_const(std::to_string(one_of_wr_mport_cnt)));
-    // }
+    for (auto &it: mem2rd_mports[mem_name]) {
+      auto &mport_name       = it.first;
+      auto &cnt_of_rd_mport  = it.second;
+      auto &one_of_wr_mport_cnt = mem2one_wr_mport[mem_name];
+
+      auto idx_tg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
+      auto temp_var_name = create_tmp_var(lnast);
+      lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
+      lnast.add_child(idx_tg, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
+      lnast.add_child(idx_tg, Lnast_node::create_const(std::to_string(one_of_wr_mport_cnt)));
+
+      auto idx_asg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign());
+      lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(mport_name)));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+
+
+      // FIXME->sh: might need get the __last_value
+      auto idx_tg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
+      auto temp_var_name2 = create_tmp_var(lnast);
+      lnast.add_child(idx_tg2, Lnast_node::create_ref(temp_var_name2));
+      lnast.add_child(idx_tg2, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_res"))));
+      lnast.add_child(idx_tg2, Lnast_node::create_const(std::to_string(cnt_of_rd_mport)));
+
+      auto idx_asg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_dp_assign());
+      lnast.add_child(idx_asg2, Lnast_node::create_ref(lnast.add_string(mport_name)));
+      lnast.add_child(idx_asg2, Lnast_node::create_ref(temp_var_name2));
+    }
 
 
     std::vector<std::string_view> tmp_flattened_fields_per_port;
