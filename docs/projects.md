@@ -90,125 +90,6 @@ makefile and call "make run", but this is hidden.
 that everything should run in the LiveHD toolchain, but it can be extended to
 provide new toolchains.
 
-
-## New Compressed Graph Core
-
-Lgraph uses a 32byte nodes and it is able to use large (absolute), short(delta)
-edges (idx). Now, that we run many graphs, we have seen that "on average" most
-Node Pins have just 2-4 edges (including input/output), but some pins (clock,
-IOs, or ruduction gates) could have hundreds of edges. The idea is to create a
-new Graph_core class to replace the some of the functionality spread across
-lgedge and lgraph. Like Lgraph, Graph_core should use the mmap_lib::vector for
-storage.
-
-
-We do not use a typical CSR because insertions/deletions are very frequent.
-Also important, the Index_ID returned after creation must be stable (can not
-change due to surounding addition/deletions) and it should be stable across
-program executions (load/un-load with mmaps).
-
-
-The current Lgraph node uses around 34 bytes per Node_pin. This implementation
-should be around 18 bytes per node. The state of the art (not fast
-insert/delete) compressed graphs can reach 10 bits per edge vs the expected
-40bits per edge (18bytes/3+edges). So there is still room for improvement, but
-we should not sacrifice speed, insertion/deletion, bidirectional, and Index_ID
-stability.
-
-Functions that need to be faster than currently. All these ops should have at most O(n_edges/32+n_pins).
-* del_edge
-* del_pin
-* del_node
-* get_num_inputs
-* get_num_outputs
-
-Some characteristic that we want:
-
-* Use 16 bytes most of the time for node and node_pin entries (2-4 edges + next is typical)
-* ID 0 is reserved to indicated free/unused
-* Cluster nodes (and node_pins) in continuous sequence of 64 entries. This
-  helps the locality/utilization of other structures. This means that nodes
-  (master_root) can be 1,2,3,4...63, and master can not be 5,6, (64..127 is OK).
-  Same for overflow but since overflow is 4x bigger, it is just 16 continuous
-  overflow IDs.
-* It may be possible to fit in 12 bytes, but the 64 continuous alignment favors 16 bytes
-* IDs should be stable. This means that once assigned, can not be "moved" or "reused" unless deleted.
-* Since master/master_root are clustered in 64 entries. The iterator should leverage this for speed.
-* master/master_root/overflow are grouped in 1KByte entries (64x16 master/master_root or 16x64 overflow)
-
-* The iterator needs to know where are the master/master_root chunks. There is a control table (1KByte)
-each 1MByte (the first 64 entries in the mmap/vector are control table). The control table indicates
-the following 1023 (1023-1) entries if they belong to master/master_root/overflow/free
-
-Graph_core has 4 node types in storage: master, master_root, overflow, and free
-
-master_root (16bytes): This is the entry (ID) for the Node and Node_pin when PID is 0. It has the following fields:
-
-* edge_storage: simple-8b variation
-* type 6bits: the node type (2 bit
-* master_next 4bits: It is the pointer to the next master node in same cell.
-  The ptr is to the edge list. If 0xF, no next
-* overflow_next 4bits: Similar to master_next but points to an overflow edge
-  node for when too many edges exists. If 0xF no overflow
-* inp_mask 8bits: input mask. The edge_list are input/output edges relative the
-  this node IDX.
-* driver_set (1bit)
-* sink_set (1bit)
-
-master (16bytes): This is the entry (ID) for Node_pins with PID>0. It has the following fields:
-
-* edge_storage: same as master_root with 2 byte less (pid space)
-* pid_xtra (14 bits): PID for the Node_pin.
-* driver_set (1bit)
-* sink_set (1bit)
-* master_prev 4bits: It is the pointer to the master node. It must be populated
-  (0xF makes no sense)
-* overflow_next 4bits: Similar to master_root overflow_next pointer
-* inp_mask 8bits: Similar to master_root inp_mask
-
-overflow (64bytes): This is overflow edge list for either inputs or outputs (not both).
-
-* edge_storage (63 bytes): Using a varintgb compression or simple8b variation.
-* overflow_next 6bits: Similar to master_root overflow_next pointer. Used when
-  this overflow is not large enough.
-* all_inputs 1bits: true when all the edge list are input edges, false when all
-  the edge lists are output edges.
-
-
-control (1024Bytes);
-
-* bitmap for present master  (1024 entries or 128bytes)
-* bitmap for present master_root  (1024 entries or 128bytes)
-* bitmap for present overflow  (128bytes)
-
-
-free (16 or 64 bytes): This is just an empty node that keeps the link list of free nodes
-
-* ptr_next (4 byte): incompressed pointer to the next free block of same size
-* chunk64 1bit: set to true for 64bytes chunks
-
-
-The overflow (and free 48bytes) are always 48byte aligned. As a result, a chunk
-of 48 bytes is either 4 master/master_root/free12 or 1 chunk of 48bytes. This
-allows faster iteration for the fast pass. The last bit in the 48byte chunk
-indicates if it is a 48 or a 12byte chunk (1 means 48byte). To distinguish
-between master and master_root we use the root field.
-
-The vbyte may be an option, but a simple-8b encoding variation optimized for our common deltas.
-
-master: (11 bytes 88bits) (2 ctrl bits in lower bit)
-3: 2x32+22   (3)
-2: 4x16+22   (5)
-1: 4x15+2x13 (6)
-0: 5x12+2x13 (7)
-
-
-master_root: (13 bytes or 104bits -2 code)
-3: 2x32+2x19  (4)
-2: 3x21+20+19 (5)
-1: 4x16+2x19  (6)
-0: 4x15+3x14  (7)
-
 ## mmap_lib projects
 
 * mmap_vset finish
@@ -612,18 +493,6 @@ Main features:
 * The new OpenDB from OpenRoad is a good backend (ASIC) bridge that we may want to build.
 * Through OpenDB we can leverage full ASIC synthesis and tools like OpenSTA
 
-## Pyrope to LNAST (Kenneth Mayer)
-
-Create a elab parser for Pyrope and create LNAST nodes
-
-Dependence: none
-
-Main features:
-* Implement Pyrope ELAB custom parser
-* Error/warning friendly (clang class quality)
-* Very fast parser
-* Translate to LNAST
-
 ## SAT/SMT type checking for Pyrope
 
 Use a SMT solver to constraint all the types. Use the SMT to find valid bits for each variable and check that it is "satisfiable"
@@ -718,17 +587,6 @@ Dependence: Rapidwright
 Main features:
 * Create a bridge to/from Lgraph and nextpntr (json)
 
-## simdjson
-
-Migrate out of rapidjson to simdjson.
-
-Dependence: none
-
-Main requirements:
-
-* Use https://github.com/simdjson/simdjson/tree/master/singleheader instead of rapidjson
-* Create a json dump compatible with yosys json dump to interface with netlistsvg, yosys, and nextpnr
-
 ## Cloud
 
 Main requirements:
@@ -822,56 +680,11 @@ The goal is to use Mockturtle (https://github.com/lsils/mockturtle) with LiveHD.
     * Barrell shifters with not trivial shifts (1-2 bits) selectable at run-time
     * memories, luts
 
-# Past Projects
-
-## ABC (Yunxun Qiu)
-
-Integrate ABC with Lgraph. The interface use the C-API, bit the file dump format.
-
-## FIRRTL 2 LNAST (Hunter Coffman)
-
-There is an ongoing effort to bring from frontends to LNAST. This is a frontend/backend
-project ot interface with high level FIRRTL.
-
-Dependence: none
-
-Main features:
-
-* Bridge between high level FIRRTL and Lgraph using LNAST (to/from FIRRTL translation)
-* Ideally handle "high level FIRRTL" Then, we can read out of CHISEL.
-* Benchmark is rocketchip and BOOM
-* How to handle annotations? (unclear at the moment if we need this)
-
-
 # Open Medium Size Tasks (not MS project/thesis)
 
 This is a list of small tasks. Each should take 1-3 weeks to implement. These
 are not thesis/projects but good ideas to get to know the setup and help, and they
 can evolve for undergraduate senior design.
-
-## mmap_lib sview delete
-
-The mmap_lib used strings for mmap_map and mmap_bimap. The current version
-appends the string to an mmap. It should have a counter to garbage collect the
-mmap entry once nobody uses it. This means that it needs to track
-create/delete. Maybe a mmap_map tracking sviews.
-
-For the bimap, the sview is replicated for both directions. Again, the refactor
-should share the sview across the two mmap_maps.
-
-## mmap_lib set optimized for lgraph
-
-Most lgraph have consecutive (or just 1-3 skip) node ids. Several algorithms
-use sets. Currently, we use the absl::flat_hash_set. This has a high overhead
-(store hash+xtra is around 8 bytes per entry) for when a simple bit enough if
-the set is dense (consecutive nids).
-
-We can not use dense arrays because we have the hierarchy which creates "gaps".
-A potential "good enough" solution is to use the mmap_lib map but store 64
-(8bytes) consecutive bit vector. This means that the index hash is (xx>>5) and
-the lower bits (xx&0x1F) are used to select the bit in the map entry. This
-amortizes the map entry costs over several "likely consecutive" entries in the
-map.
 
 ## mmap_lib::vector erase (pop_back)
 
@@ -893,7 +706,7 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 ## lgshell perf summary
 
 * Record the time (and perf stats) for each lgshell command executed.
-* Print the statistics when clossing the lgshell
+* Print the statistics when closing the lgshell
 
 ## Query shell (not lgshell) to query graphs
 
@@ -916,7 +729,6 @@ SLATE entry.
 
 Point to some of the unit tests using the API, and create. Feel free to create
 trivial examples that run with unit tests as sample of usage.
-
 
 ## Lgraph and LNAST check pass
 
@@ -1027,23 +839,6 @@ Main features:
 
 # Summer Intern Projects (2-3 months)
 
-## Migrate many of the rules to bazel_rules_hdl
-
-Bazel rules HDL is a new repo to have HDL bazel rules. LiveHD has many
-rules/packages like yosys, boolector, cryptominsat, mockturtle... THe idea is
-to get these outside at bazel_rules_hdl so that they can be used by other
-external projects. As the packages get exported, it will require to understand
-bazel and changes in toolchains.
-
-https://github.com/mithro/bazel_rules_hdl
-
-## Random CHISEL/Verilog/Pyrope generator
-
-Create a python/ruby/C++ program that generates pseudo-random programs in
-several languages (CHISEL/Verilog/Pyrope). The idea is that the same program
-can be implemented in multiple ways but all should have the same result
-(simulation and LEC).
-
 ## Iterators
 
 We have fast/forward with and without hierarchy. Several improvements can
@@ -1081,15 +876,6 @@ from the leave nodes. If all the bits can be inferred given the inputs, the
 module should have no bitwidth. In that case the bitwidth can be inferred from
 outside.
 
-
-## LiveHD gRPC client
-
-Leverage the gRPC client in liveHD to allow the submission of work to remote servers.
-
-Once we can submit gRPC from inside LiveHD, we should have to re-structure the
-pass API to have a gRPC call for each of the main steps.
-
-
 ## LNAST Opt
 
 In LiveHD, LGraph has the cprop pass that performs constant folding, copy
@@ -1101,7 +887,4 @@ elimination in LNAST. There are several reasons:
 
 * Doing code simplification early (LNAST is the earliest) reduces workload/steps in successive passes.
 * The simulation saves checkpoints, a LNAST Opt without dead code elimination would be useful to create the intermediate values for debugging.
-
-
-
 
