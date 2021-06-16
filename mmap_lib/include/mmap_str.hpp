@@ -579,14 +579,12 @@ public:
 
   template<int m_id>
   static str concat(str<m_id> &a, std::string_view b) { 
-    str<map_id> temp(a.to_s() + b);  
-    return temp;
+    return a.append(b);
   }
 
   template<int m_id>
   static str concat(str<m_id> &a, int v) { 
-    str<map_id> temp(a.to_s() + std::to_string(v));
-    return temp;
+    return a.append(v);
   }
 
 
