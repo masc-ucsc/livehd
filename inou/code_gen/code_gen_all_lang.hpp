@@ -71,12 +71,16 @@ public:
   std::string_view select_init(const std::string &select_type) const {
     if (select_type == "bit")
       return "[[";
+    else if (select_type == "tuple_add")
+      return "(";
     else
       return "[";
   }
   std::string_view select_end(const std::string &select_type) const {
     if (select_type == "bit")
       return "]]";
+    else if (select_type == "tuple_add")
+      return ")";
     else
       return "]";
   }

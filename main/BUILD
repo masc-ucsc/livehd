@@ -118,6 +118,9 @@ cc_test(
     ],
     linkopts = ["-lutil"],
     local = 1,  # Weird fork error due to forkpty otherwise
+    tags = [
+        "fixme",
+    ],
     deps = [
         ":tmt",
         "@com_google_googletest//:gtest_main",

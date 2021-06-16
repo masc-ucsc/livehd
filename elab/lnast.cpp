@@ -1180,10 +1180,10 @@ void Lnast::dump() const {
     for (int i = 0; i < it.level; ++i)
       indent += "    ";
 
-    if (node.type.is_ref()) { //only ref need/have ssa info
-      fmt::print("({},{}) {} {:<8} {}({})\n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text(), node.subs);
+    if (node.type.is_ref() && node.token.get_text().substr(0,3) != "___") { //only ref need/have ssa info, exclude tmp variable case
+      fmt::print("({:<1},{:<6}) {} {:<8} {}___{}\n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text(), node.subs);
     } else {
-      fmt::print("({},{}) {} {:<8} {}    \n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text());
+      fmt::print("({:<1},{:<6}) {} {:<8} {}    \n", it.level, it.pos, indent, absl::StrCat(node.type.to_s(), ":"), node.token.get_text());
     }
   }
 }

@@ -31,31 +31,32 @@ if (true) {
   mem_enable.0  = 0
   mem_latency.0 = 0
   mem_rdport.0  = true  
-  mem_din.0.0     = 0
-  mem_din.0.1     = 0
-  mem_din.0.2     = 0
-  mem_din.0.3     = 0
+  mem_din.0.0   = 0
+  mem_din.0.1   = 0
+  mem_din.0.2   = 0
+  mem_din.0.3   = 0
+  mem_latency.0 = 1
+  mem_rdport.0  = false
+  F4            = MPORT.__last_value
+  mem_din.0     = F4
 
-  mem_clock         = $clock 
-  mem_addr.1        = 0
-  mem_enable.1      = 0
-  mem_latency.1     = 0
-  mem_rdport.1      = true
+  mem_clock           = $clock 
+  mem_addr.1          = 0
+  mem_enable.1        = 0
+  mem_latency.1       = 0
+  mem_rdport.1        = true
   mem_res.1.0.__ubits = 8
   mem_res.1.1.__ubits = 8
   mem_res.1.2.__ubits = 8
   mem_res.1.3.__ubits = 8
   
   //din struct recovery
-  F16               = mem_din.0  
-  dataOut_MPORT     = F16
+  F16                 = mem_din.0  
+  dataOut_MPORT       = F16
 
-  F17               = mem_res.1
-  dataOut_MPORT     := F17
+  F17                 = mem_res.1
+  dataOut_MPORT       := F17
 }
-
-
-
 
 
 
@@ -68,15 +69,7 @@ mem_enable.0  = 1
 F2 = $io.mask.0
 
 if (F2) {
-    // FIXME: should added at mem_initialization?
     F3 = $io.dataIn.0
-    mem_latency.0 = 1
-    mem_rdport.0  = false
-    F4 = MPORT.__last_value
-    mem_din.0 = F4
-    // FIXME: should added at mem_initialization?
-    // but really? maybe the wrmport is driven by a local value, not driven by the io_input.....???
-    // not a problem, these are really initialization statements
     mem_enable.0 = 1 
     MPORT.0 = F3
 }
