@@ -67,7 +67,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
       l->addComponentCluster(subl->getName(),
                              count,
                              subl->getArea(),
-                             8.0, // TODO: guessing on valid AR range here
+                             8.0,  // TODO: guessing on valid AR range here
                              1.0);
     } else {
       l->addComponent(subl, count);

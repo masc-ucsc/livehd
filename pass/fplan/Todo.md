@@ -8,6 +8,15 @@ Plan:
     - otherwise, use some other method to generate an initial floorplan (SA)
     - this initial floorplan is used to generate hints for the placer (it would be really cool if the floorplanner itself used some of the same hints!)
 
+    B* SA FP:
+     - write operations
+     - write SA
+     - test!
+
+     - handle soft modules
+     - handle pre-placed modules
+     - handle rectilinear modules?
+
 3. Find out what kind of hint information needs to be provided to pnr algorithm and pass it on
 4. Work on creating methods for automatic hint insertion
     - better hints (place near here, put in this section, block divide design around here, put anchor points here, etc)

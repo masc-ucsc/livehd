@@ -17,6 +17,12 @@ void annLayout::addComponent(FPObject* comp, int count) {
   FPContainer::addComponent(comp, count);
 }
 
+bool annLayout::insert_obj(size_t idx) {
+  
+
+  return true;
+}
+
 bool annLayout::layout(FPOptimization opt, double targetAR) {
   (void)opt;
 
@@ -25,10 +31,11 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
   float maxHeight = sqrt(area / abs(targetAR));
   float maxWidth  = area / maxHeight;
 
-  if (getComponentCount() == 0) {
+  if (getComponentCount() < 2) {
     return true;
   }
 
+  // run super simple grid optimization pass to collapse repeated nodes into grids if possible
   int gcd = getComponent(0)->getCount();
   for (size_t i = 1; i < getComponentCount(); i++) {
     gcd = GCD(gcd, getComponent(i)->getCount());
@@ -50,32 +57,37 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
     initLayout = grid;
   }
 
-  bool correct = initLayout->layout(AspectRatio, targetAR);
-  if (!correct) {
-    return false;
-  }
-  
-  FPObject* root = nullptr;
-  for (size_t i = 0; i < getComponentCount(); i++) {
-	FPObject* comp = getComponent(i);
-	assert(comp->valid());
-	if (comp->getX() == 0 && comp->getY() == 0) {
+  // floorplan everything in a horizontal row
+  // (very likely not legal in terms of this module's AR, but easy to create B* from)
+  float currX = 0.0f;
+  for (size_t i = 0; i < initLayout->getComponentCount(); i++) {
+    FPObject* comp = initLayout->getComponent(i);
+
+    bool success = comp->layout(opt, (comp->getMaxAR() - comp->getMinAR()) / 2.0f);
+    assert(success);
+
+    comp->setX(currX);
+    comp->setY(0);
+
+    currX += comp->getWidth();
+
+    assert(comp->valid());
+
+    horiz.nodes.emplace_back(*comp);
+    size_t last_idx = horiz.nodes.size() - 1;
+    if (i > 0) {
+      horiz.nodes[last_idx - 1].left_idx = last_idx;
+    }
+
+    if (comp->getX() == 0 && comp->getY() == 0) {
       fmt::print("root object: {}\n", comp->getName());
-	  root = comp;
-	  break;
-	}
+      horiz.root_idx = i;
+    }
   }
 
-  assert(root);
-  horiz.setRoot(*root);
+  vert.cont.emplace_back(getComponent(getComponentCount() - 1));
 
-  //vert.setRoot(*root);
-
-  // TODO: construct horizontal B*-tree with a random (but legal) floorplan
-  // for each object: find the (bottom) object to the right of it, construct that
-  // if nothing to the right (or done), do leftmost node above it
-
-  // TODO: set area?
+  // TODO: perform SA algorithm
 
   return true;
 }

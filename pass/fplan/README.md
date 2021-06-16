@@ -17,7 +17,7 @@ livehd> pass.fplan.write_range
 livehd> pass.fplan.analyzefp top:hier_test nodes:dump
 
 # set a hint for a given node instance
-livehd> pass.fplan.analyzefp top:hier_test nodes:i_lgmid1_hidx2_20_nid8 hint:Top
+livehd> pass.fplan.analyzefp top:hier_test nodes:i_lgmid1_hidx2_20_nid8 hint:Left
 
 # generate a floorplan at the node level and write it to livehd/floorplan.flp
 livehd> lgraph.open name:hier_test |> pass.fplan.makefp traversal:hier_lg dest:file
