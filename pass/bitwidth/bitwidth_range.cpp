@@ -72,12 +72,24 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
 
 Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { set_range(min_val, max_val); }
 
-void Bitwidth_range::set_narrower_range(const Lconst &min_val, const Lconst &max_val) {
-  if (max_val.is_i() && min_val.is_i()) {
-    I(max >= max_val.to_i());
-    I(min <= min_val.to_i());
+void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
+  if (likely(!bw.is_overflow() && !is_overflow())) {
+    max = std::min(max, bw.max);
+    min = std::max(min, bw.min);
+    return;
   }
-  set_range(min_val, max_val);
+
+  auto l_max = get_max();
+  auto n_max = bw.get_max();
+  if (n_max < l_max)
+    l_max = n_max;
+
+  auto l_min = get_min();
+  auto n_min = bw.get_min();
+  if (n_min > l_min)
+    l_min = n_min;
+
+  set_range(l_min, l_max);
 }
 
 void Bitwidth_range::set_wider_range(const Bitwidth_range &bw) {

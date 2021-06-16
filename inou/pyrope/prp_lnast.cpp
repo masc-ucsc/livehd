@@ -1726,23 +1726,41 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
       Pass::error("FIXME: pyrope parser does not handle nested bit set in lhs");
     }
 
-    lr_bits_node = Lnast_node::create_set_mask();
-    idx_sel_root = lnast->add_child(idx_nxt_ln, lr_bits_node);
+    mmap_lib::Tree_index idx_shl_root;
+    Lnast_node shl_node;
+    if (sel_exists) {
+      idx_shl_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_shl());
+      shl_node     = get_lnast_temp_ref();
+    }
+    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_set_mask());
+
     retnode      = src_var;
 
     in_lhs_sel_root = idx_sel_root;
+
+    lnast->add_child(idx_sel_root, retnode);
+    lnast->add_child(idx_sel_root, src_var);
+
+    // add the rhs value of the select expression
+    if (sel_exists) {
+      lnast->add_child(idx_shl_root, shl_node);
+      lnast->add_child(idx_shl_root, Lnast_node::create_const("1"));
+      lnast->add_child(idx_shl_root, sel_rhs);
+
+      lnast->add_child(idx_sel_root, shl_node);
+    }
   } else {
     lr_bits_node = Lnast_node::create_get_mask();
     idx_sel_root = lnast->add_child(idx_nxt_ln, lr_bits_node);
     retnode      = get_lnast_temp_ref();
-  }
 
-  lnast->add_child(idx_sel_root, retnode);
-  lnast->add_child(idx_sel_root, src_var);
+    lnast->add_child(idx_sel_root, retnode);
+    lnast->add_child(idx_sel_root, src_var);
 
-  // add the rhs value of the select expression
-  if (sel_exists) {
-    lnast->add_child(idx_sel_root, sel_rhs);
+    // add the rhs value of the select expression
+    if (sel_exists) {
+      lnast->add_child(idx_sel_root, sel_rhs);
+    }
   }
 
   auto another_child = ast->get_child(select_expr_idx);

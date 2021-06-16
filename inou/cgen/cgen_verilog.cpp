@@ -368,6 +368,72 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto lhs   = get_expression(node.get_sink_pin("a").get_driver_pin());
     final_expr = absl::StrCat("~", lhs);
 
+  } else if (op == Ntype_op::Set_mask) {
+    auto a_dpin     = node.get_sink_pin("a").get_driver_pin();
+    auto mask_dpin  = node.get_sink_pin("mask").get_driver_pin();
+    auto value_dpin = node.get_sink_pin("value").get_driver_pin();
+    auto a         = get_expression(a_dpin);
+    auto value     = get_expression(value_dpin);
+
+    I(mask_dpin.is_type_const()); // Do we want to support this? (not easy)
+
+    auto v = mask_dpin.get_type_const();
+
+    bool clean = false;
+    if (v == Lconst(-1)) { //replace all bits with value
+      final_expr = value;
+      clean = true;
+    }else if (v == Lconst(0)) { //nothing to do
+      final_expr = a;
+      clean = true;
+    }else if (v.is_mask() && v>0) { // {a[a.bits-1:(a.bits-m.bits),value[m.bits-1:0]}
+      auto abits = a_dpin.get_bits();
+      auto mbits = v.get_bits()-1; // positive mask (v>0)
+      auto vbits = value_dpin.get_bits();
+
+      std::string expanded_a_txt;
+      if (a_dpin.is_type_const()) {
+        auto a_val = a_dpin.get_type_const();
+        a_val = a_val.rsh_op(mbits);
+        expanded_a_txt = a_val.to_verilog();
+      }else{
+        expanded_a_txt = absl::StrCat(a, "[", abits - 1, ":", mbits, "]");
+      }
+
+      std::string expanded_value_txt;
+      if (vbits==mbits) {
+        expanded_value_txt = value;
+      }else if (vbits>mbits) {
+        expanded_value_txt = absl::StrCat(value, "[", mbits-1,":0]");
+      }else{ // sign-extend value to match mbits
+        expanded_value_txt = absl::StrCat("{", mbits-vbits, "{", value, "[", mbits-1, "]}", value, "[", mbits-1,":0]}");
+      }
+
+      if (abits>mbits)
+        final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
+      else
+        final_expr = expanded_value_txt;
+
+      clean = true;
+    }else if (v>0) {
+      auto trail_zeroes=v.get_trailing_zeroes();
+      if (trail_zeroes>0) {
+        auto v2 = v.rsh_op(trail_zeroes);
+        if (v2.is_mask()) {
+          clean = true;
+          auto abits = a_dpin.get_bits();
+          auto mbits = v.get_bits()-1;
+
+          if (abits>=(mbits+trail_zeroes))
+            final_expr = absl::StrCat("{", a, "[", abits - 1, ":", mbits+trail_zeroes, "],", value, "[", mbits-1,":0]", a, "[", trail_zeroes, ":0]}");
+          else
+            final_expr = absl::StrCat("{", value, "[", mbits-1,":0]", a, "[", trail_zeroes, ":0]}");
+        }
+      }
+    }
+    if (!clean) {
+      I(false); // FIXME. Iterate all the bits, create mask and decide
+    }
   } else if (op == Ntype_op::Get_mask) {
 #if 0
     const std::string src = get_expression(node.get_sink_pin("a").get_driver_pin());

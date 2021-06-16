@@ -77,8 +77,12 @@ public:
     overflow = false;
   }
 
-  void set_narrower_range(const Lconst &min_val, const Lconst &max_val);
+  void set_narrower_range(const Bitwidth_range &bw);
+  void set_narrower_range(const Lconst &min_val, const Lconst &max_val) { set_narrower_range(Bitwidth_range(min_val, max_val)); }
+
   void set_wider_range(const Bitwidth_range &bw);
+  void set_wider_range(const Lconst &min_val, const Lconst &max_val) { set_wider_range(Bitwidth_range(min_val, max_val)); }
+
   void set_range(const Lconst &min_val, const Lconst &max_val);
 
   bool   is_overflow() const { return overflow; };
