@@ -222,9 +222,9 @@ rm -rf ./lgdb
 Pyrope_compile "$pts"
 
 # Do not remove verilog, I tend to have tests cases in homedirectory
- rm -f *.v
- rm -f ./*.dot
- rm -f ./lgcheck*
- rm -f ./*.tcl
+# rm -f *.v
+# rm -f ./*.dot
+# rm -f ./lgcheck*
+# rm -f ./*.tcl
  rm -f logger_*.log
 
