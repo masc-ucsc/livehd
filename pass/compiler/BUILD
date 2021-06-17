@@ -46,9 +46,9 @@ sh_test(
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
-    tags = [
-        "fixme",
-    ],
+   # tags = [
+   #     "fixme",
+   # ],
     deps = [
         "//inou/yosys:scripts",
     ],
