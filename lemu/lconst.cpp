@@ -402,6 +402,48 @@ size_t Lconst::get_trailing_zeroes() const {
 #endif
 }
 
+Lconst Lconst::sext_op(Bits_t ebits) const {
+  I(!is_string()); // FIXME: handle 0b0??
+
+  if (ebits>=bits)
+    return *this;
+
+  // boost keeps an unsigned + sign, so must get correct bits
+  Number num_2s = num;
+  if (num<0) {
+    num_2s = (-num)+2;
+  }
+
+  bool msb_set = boost::multiprecision::bit_test(num_2s, ebits);
+
+  if (ebits==0) {
+    if (msb_set)
+      return Lconst(-1);
+    return Lconst(0);
+  }
+
+  Number res_num;
+  if (msb_set) { // negative number
+    // remove leading ones
+    auto pos = ebits-1;
+    while(boost::multiprecision::bit_test(num_2s, pos)) {
+      if (pos==0)
+        return Lconst(-1);
+      --pos;
+    }
+    res_num = (num_2s & ((Number(1)<<pos)-1)) - (Number(1)<<(pos+1));
+    I(res_num<0);
+  }else{
+    res_num = num_2s & ((Number(1)<<ebits)-1);
+    I(res_num>=0);
+  }
+
+  auto v=Lconst(false, calc_num_bits(res_num), res_num);
+  v.dump();
+
+  return v;
+}
+
 Lconst Lconst::get_mask_op() const {
   if (unlikely(is_string())) {
     return Lconst(explicit_str, bits, num);
@@ -957,6 +999,9 @@ std::string Lconst::to_pyrope() const {
 
 size_t Lconst::popcount() const {
   I(!is_string());
+
+  if (num==0)
+    return 0;
 
   auto popcount = 0;
   auto i = boost::multiprecision::lsb(num);

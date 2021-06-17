@@ -1,0 +1,31 @@
+
+c = 0x2F
+$a_2.__sbits = 2
+c@(0) = $a_2 // %out_c1
+%out_c1 = c ^ c.__sbits
+
+c = 0x2F
+$a_2.__sbits = 2
+c@(1,0) = $a_2 // %out_c2
+%out_c2 = c ^ c.__sbits
+
+c = 0x2F
+$a_4.__sbits = 4
+c@(0) = $a_4 // %out_c3
+%out_c3 = c ^ c.__sbits // To also check bit computation
+
+c = 0x2F
+$a_4.__sbits = 4
+c@() = $a_4 // %out_c4
+%out_c4 = c ^ c.__sbits // To also check bit computation
+
+c = 0x2F
+$a_4.__sbits = 4
+c@(3,2,1) = $a_4 // %out_c4
+%out_c5 = c ^ c.__sbits // To also check bit computation
+
+
+// FIXME: a[b.c].d = 3
+
+// FIXME: %out = $a@(b)@(c)
+// OK: %out = $a@(b@(c))

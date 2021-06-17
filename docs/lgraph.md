@@ -701,8 +701,20 @@ created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
 Verilog treats all the inputs as unsigned if any of them is unsigned. LGraph treats all the inputs as signed all the time.
 
 
+### SHL_op
 
-### ShiftRigt_op
+Shift Left performs the typical shift left when there is a single amount
+(`a<<amt`). The allow supports multiple left shift amounts. In this case the
+shift left is used to build one hot encoding mask.  (`1<<(1,2) ==
+(1<<1)|(1<<2)`)
+
+
+The result for when there are not amounts (`a<<()`) is `-1`. Notice that this
+is not ZERO but -1. The -1 means that all the bits are set. The reason is that
+when there are no offsets in the onehot encoding, the default functionality is
+to select all the bit masks, and hence -1.
+
+### SRA_op
 
 Logical or sign extension shift right.
 

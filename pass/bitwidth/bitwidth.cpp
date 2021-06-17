@@ -568,20 +568,49 @@ void Bitwidth::process_set_mask(Node &node) {
     value_bw = it2->second;
   }
 
-  size_t n_zeroes_in_mask;
-  if (mask.is_negative()) { // Keep full value bits and shift left as much as mask zeroes
-    auto not_mask = mask.not_op();
-    I(!not_mask.is_negative());
-    n_zeroes_in_mask = not_mask.popcount();
-  }else{
-    n_zeroes_in_mask = mask.get_trailing_zeroes(); // mask_affects_sign, so -1
-  }
-  auto max_val = value_bw.get_max().lsh_op(n_zeroes_in_mask);
-  auto min_val = value_bw.get_min().lsh_op(n_zeroes_in_mask);
+	if (mask == Lconst(-1)) { // Just pick all the bits from value
+		adjust_bw(node.get_driver_pin(), value_bw);
+		return;
+	}
+	if (mask == Lconst(0)) { // just do not pick anything and keep "a"
+		adjust_bw(node.get_driver_pin(), bw);
+		return;
+	}
 
-  bw.set_wider_range(min_val, max_val);
+  auto max_val = value_bw.get_max();
+  auto min_val = value_bw.get_min();
+	{
+		auto mask_bits = mask.get_bits();
+		if (!mask.is_negative()) { // drop upper bits from value if non negative mask
+			if (mask_bits<max_val.get_bits()) {
+				max_val = max_val.rsh_op(max_val.get_bits()-mask_bits);
+			}
+			if (mask_bits<min_val.get_bits()) {
+				min_val = min_val.rsh_op(min_val.get_bits()-mask_bits);
+			}
+		}
+	}
+	{
+		size_t n_zeroes_in_mask;
+		if (mask.is_negative()) { // Keep full value bits and shift left as much as mask zeroes
+			auto not_mask = mask.not_op();
+			I(!not_mask.is_negative());
+			n_zeroes_in_mask = not_mask.popcount();
 
-  adjust_bw(node.get_driver_pin(), bw);
+		}else{
+			n_zeroes_in_mask = mask.get_trailing_zeroes(); // mask_affects_sign, so -1
+		}
+
+		max_val = max_val.lsh_op(n_zeroes_in_mask);
+		min_val = min_val.lsh_op(n_zeroes_in_mask);
+	}
+
+	if (mask.is_negative()) {
+		adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
+	}else{
+		bw.set_wider_range(min_val, max_val);
+		adjust_bw(node.get_driver_pin(), bw);
+	}
 }
 
 void Bitwidth::process_get_mask(Node &node) {

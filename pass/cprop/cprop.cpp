@@ -358,13 +358,19 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     Lconst result(0);
 
+    bool zero_shifts = true;
     for(auto &amt_dpin:node.get_sink_pin("B").inp_drivers()) {
       Lconst amt = amt_dpin.get_type_const();
 
       result = result.or_op(val << amt);
+      zero_shifts = false;
     }
 
-    replace_node(node, result);
+    if (zero_shifts)
+      replace_node(node, Lconst(-1));
+    else
+      replace_node(node, result);
+
   } else if (op == Ntype_op::Get_mask) {
     Lconst val       = node.get_sink_pin("a").get_driver_node().get_type_const();
     auto   mask_spin = node.get_sink_pin("mask");
@@ -630,6 +636,14 @@ void Cprop::tuple_shl_mut(Node &node) {
       continue;
     if (!tup->is_correct() || tuple_issues) // conservative in expansion
       continue;
+
+#if 0
+    if (tup->is_empty()) {
+      auto const_dpin = node.create_const(-1).setup_driver_pin();
+      collapse_forward_for_pin(node, const_dpin);
+      return;
+    }
+#endif
 
     XEdge::del_edge(dpin, spin_amount);
     for(auto e:tup->get_map()) {
@@ -1855,7 +1869,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
         continue;
 
       auto op = node.get_type_op();
-      if (op != Ntype_op::Get_mask && (op < Ntype_op::Mux || op == Ntype_op::Const))
+      if (op != Ntype_op::Get_mask && op != Ntype_op::SHL && (op < Ntype_op::Mux || op == Ntype_op::Const))
         continue;
 
       // fmt::print("tuple  node:{}\n", node.debug_name());

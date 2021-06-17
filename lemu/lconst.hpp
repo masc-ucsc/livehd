@@ -102,6 +102,7 @@ public:
   [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
 
+  [[nodiscard]] Lconst sext_op(Bits_t bits) const;
   [[nodiscard]] Lconst get_mask_op() const;
   [[nodiscard]] Lconst get_mask_op(const Lconst &pos) const;
   [[nodiscard]] Lconst set_mask_op(const Lconst &pos, const Lconst &val) const;

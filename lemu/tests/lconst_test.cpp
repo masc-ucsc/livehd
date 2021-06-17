@@ -1504,6 +1504,33 @@ TEST_F(Lconst_test, lconst_sign) {
     auto zero = Lconst("0b????").div_op(16); // 0
     EXPECT_EQ(zero, Lconst(0));
   }
+}
 
+TEST_F(Lconst_test, lconst_sext) {
+  Lconst c_255(255);
+
+  EXPECT_EQ(Lconst(-3).sext_op(1), Lconst( 1)); // 0sb01  == 1
+
+  for(auto i=0u;i<8;++i) {
+    EXPECT_EQ(c_255.sext_op(i), Lconst(-1));
+  }
+  for(auto i=8u;i<16;++i) {
+    EXPECT_EQ(c_255.sext_op(i), c_255);
+  }
+
+  EXPECT_EQ(Lconst("0b10101").sext_op(0), Lconst(-1      ));
+  EXPECT_EQ(Lconst("0b10101").sext_op(1), Lconst("0b1"   ));
+  EXPECT_EQ(Lconst("0b10101").sext_op(2), Lconst(-3      )); // 0sb101   == -3
+  EXPECT_EQ(Lconst("0b10101").sext_op(3), Lconst("0b0101")); // 0sb101   == -3
+  EXPECT_EQ(Lconst("0b10101").sext_op(4), Lconst(-11     )); // 0sb10101 == -11
+
+  EXPECT_EQ(Lconst(-3).sext_op(0), Lconst(-1)); // 0sb1   == -1
+  EXPECT_EQ(Lconst(-3).sext_op(1), Lconst( 1)); // 0sb01  == 1
+  EXPECT_EQ(Lconst(-3).sext_op(2), Lconst(-3)); // 0sb101 == -3
+  EXPECT_EQ(Lconst(-3).sext_op(3), Lconst(-3)); // 0sb1101 == -3
+  EXPECT_EQ(Lconst(-3).sext_op(4), Lconst(-3)); // 0sb11101 == -3
+
+  EXPECT_EQ(Lconst("0b10111").sext_op(3), Lconst(7)); // 0sb0111 == 7
+  EXPECT_EQ(Lconst("0b10111").sext_op(2), Lconst(-1)); // 0sb111 == -1
 }
 
