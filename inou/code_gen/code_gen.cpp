@@ -428,6 +428,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
   auto curr_index = lnast->get_first_child(if_node_index);
   int  node_num   = 0;
 
+  bool if_closed = false;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     node_num++;
@@ -450,6 +451,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
         indendation--;
         if (!prev_was_cond) {
           absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
+          if_closed = true;
         }
       }
     } else {
@@ -468,7 +470,7 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-  if (node_num <= 2)
+  if (node_num <= 2 || !if_closed)
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->end_if_or_else());
 }
 
@@ -539,7 +541,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index) {
 
     // TODO:check if ref is const type (used for masking) or not
     if ((std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end())
-        && (lnast_to->is_unsigned(std::string(op_str_vect[i - 1])))) {
+        && (lnast_to->is_unsigned(op_str_vect[i - 1]))) {
       fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
       auto bw_num = Lconst(ref);  //(int)log2(ref)+1;
       fmt::print("{}\n", bw_num.get_bits());
@@ -736,7 +738,8 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
   // do not treat like dot operator
 
     assert(sel_str_vect.size() >= 3);
-    auto        key   = std::string_view(sel_str_vect.front());
+    auto        key   = sel_str_vect.front();
+    if (is_temp_var(key)) {
     std::string value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
 
     auto i = 2u;
@@ -757,12 +760,11 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
     }
     absl::StrAppend(&value, lnast_to->select_end(select_type));
 
-    if (is_temp_var(key)) {
       // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
       ref_map.insert(std::pair<std::string, std::string>(key, value));
     } else {
       //fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
-      do_dot(select_node_index);
+      do_dot(select_node_index);//FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
     }
   } else if (has_DblUndrScor(sel_str_vect.back()) || has_DblUndrScor(*(sel_str_vect.rbegin()+1))) {    // treat like dot operator
     do_dot(select_node_index);                   // TODO: pass the vector also, no need to calc it again!
