@@ -13,15 +13,15 @@ pts_after_micro='hier_tuple4 tuple_reg3 '
 pts='hier_tuple reg_bits_set reg__q_pin hier_tuple_io hier_tuple3
 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 lhs_wire
 tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter lhs_wire
-adder_stage capricious_bits4 logic capricious_bits2
-scalar_reg_out_pre_declare firrtl_tail2 
+adder_stage capricious_bits4 logic capricious_bits2 tuple_reg 
+scalar_reg_out_pre_declare firrtl_tail2 firrtl_tail firrtl_gcd_3bits 
 hier_tuple_nested_if3 hier_tuple_nested_if hier_tuple_nested_if4 
 hier_tuple_nested_if6 hier_tuple_nested_if7 
 nested_if counter_nested_if tuple_empty_attr tuple_reg2
-tuple_nested1 capricious_bits'
+tuple_nested1 capricious_bits firrtl_tail3 struct_flop '
 
 #FIXME: fails because of code_gen.prp(code gen prp cannot be converted to LN)
-#pts = ' firrtl_tail firrtl_gcd_3bits firrtl_tail3 tuple_reg struct_flop tuple_nested2 get_mask1 vec_shift_register_param  '
+#pts = ' tuple_nested2 get_mask1 vec_shift_register_param  '
 #FIXME: fails LEC coz of code_gen?
 #pts = 'bits_rhs  hier_tuple_nested_if5       '
 

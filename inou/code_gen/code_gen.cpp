@@ -745,36 +745,41 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
 
   } else if (select_type == "tuple_add"){ 
   // do not treat like dot operator
-
-    assert(sel_str_vect.size() >= 3);
     auto        key   = sel_str_vect.front();
-    if (is_temp_var(key)) {
-    std::string value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
-
-    auto i = 2u;
-    if (i == sel_str_vect.size()) {
-      absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
-    }
-    while (i < sel_str_vect.size()) {
-      absl::StrAppend(&value, "," );
-      auto ref = sel_str_vect[i];
-
-      auto map_it = ref_map.find(ref);
-      if (map_it != ref_map.end()) {
-        ref = map_it->second;
-      }
-
-      absl::StrAppend(&value, lnast_to->ref_name(ref));
-      i++;
-    }
-    absl::StrAppend(&value, lnast_to->select_end(select_type));
-
-      // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
-      ref_map.insert(std::pair<std::string, std::string>(key, value));
+    if (sel_str_vect.size()==1) {
+      //example: tmp = index@()  : from tuple_nested2.prp
+      ref_map.insert(std::pair<std::string, std::string>(key, "()"));
     } else {
-      //fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
-      do_dot(select_node_index, select_type);//FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
+      assert(sel_str_vect.size() >= 3);
+      if (is_temp_var(key)) {
+      std::string value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
+  
+      auto i = 2u;
+      if (i == sel_str_vect.size()) {
+        absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
+      }
+      while (i < sel_str_vect.size()) {
+        absl::StrAppend(&value, "," );
+        auto ref = sel_str_vect[i];
+  
+        auto map_it = ref_map.find(ref);
+        if (map_it != ref_map.end()) {
+          ref = map_it->second;
+        }
+  
+        absl::StrAppend(&value, lnast_to->ref_name(ref));
+        i++;
+      }
+      absl::StrAppend(&value, lnast_to->select_end(select_type));
+  
+        // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
+        ref_map.insert(std::pair<std::string, std::string>(key, value));
+      } else {
+        //fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
+        do_dot(select_node_index, select_type);//FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
+      }
     }
+
   } else if (has_DblUndrScor(sel_str_vect.back()) || has_DblUndrScor(*(sel_str_vect.rbegin()+1))) {    // treat like dot operator
     do_dot(select_node_index, select_type);                   // TODO: pass the vector also, no need to calc it again!
   } else if (is_pos_int(sel_str_vect.back())) {  // do not treat like dot operator
