@@ -608,7 +608,7 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
 //-------------------------------------------------------------------------------------
 // processing dot operator
 // best testing case: cfg/tests/ring.prp
-void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
+void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const std::string& select_type) {
   fmt::print("node:dot\n");
 
   auto  curr_index = lnast->get_first_child(dot_node_index);
@@ -638,7 +638,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   if(add_to_ref_map) { i = 1u;}
   std::string value;
   // const auto& dot_node_data = lnast->get_data(dot_node_index);
-  while ((i < dot_str_vect.size() && is_temp_var(key)) || (i < (dot_str_vect.size()-1) && !is_temp_var(key))) { //condition set as per if.prp and adder_stage.prp test cases. To accomodate attr_get and tuple_add.
+  while ((select_type=="tuple_add" && i < (dot_str_vect.size()-1) && is_temp_var(key)) || (i < dot_str_vect.size() && is_temp_var(key) && select_type=="selc") || (i < (dot_str_vect.size()-1) && !is_temp_var(key))) { //condition set as per if.prp and adder_stage.prp test cases. To accomodate attr_get and tuple_add.
     auto ref    = dot_str_vect[i];
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -665,12 +665,21 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index) {
   value.pop_back();
 
   if (is_temp_var(key)) {
-    // ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(value)));
-    // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p or
-    // reg
-    auto ref_map_inst_succ = ref_map.insert(std::pair<std::string, std::string>(key, value));
-    I(ref_map_inst_succ.second,
-      "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
+    if(select_type=="tuple_add"){
+    auto map_it = ref_map.find(key);
+    if (map_it != ref_map.end()) {
+      key = map_it->second;
+    } else I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
+
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(value), " = ", key, "\n");
+    } else {
+      // ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name(value)));
+      // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p or
+      // reg
+      auto ref_map_inst_succ = ref_map.insert(std::pair<std::string, std::string>(key, value));
+      I(ref_map_inst_succ.second,
+        "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
+    }
   } else {
     absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(value), " = ", key, "\n");
   }
@@ -734,7 +743,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
       fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS TUPLE_GET -----!!\n");
     }
 
-  } else if (select_type == "tuple_add"){ //&& is_pos_int(sel_str_vect.back()) ) {
+  } else if (select_type == "tuple_add"){ 
   // do not treat like dot operator
 
     assert(sel_str_vect.size() >= 3);
@@ -764,10 +773,10 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
       ref_map.insert(std::pair<std::string, std::string>(key, value));
     } else {
       //fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
-      do_dot(select_node_index);//FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
+      do_dot(select_node_index, select_type);//FIXME: you can pass sel_str_vec here so that do_dot does not calc it again!
     }
   } else if (has_DblUndrScor(sel_str_vect.back()) || has_DblUndrScor(*(sel_str_vect.rbegin()+1))) {    // treat like dot operator
-    do_dot(select_node_index);                   // TODO: pass the vector also, no need to calc it again!
+    do_dot(select_node_index, select_type);                   // TODO: pass the vector also, no need to calc it again!
   } else if (is_pos_int(sel_str_vect.back())) {  // do not treat like dot operator
 
     if (select_type == "bit") {
@@ -799,7 +808,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
       ref_map.insert(std::pair<std::string_view, std::string>(key, value));
     } else {
       fmt::print("ERROR:\n\t\t------CHECK THE NODE TYPE IN THIS {} -----!!\n", select_type);
-      do_dot(select_node_index);
+      do_dot(select_node_index, select_type);
     }
   } else {
     I(false, "Unexpected node. Please check.");
