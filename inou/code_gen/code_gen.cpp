@@ -211,10 +211,12 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
                               //   assign: 
                               //       const: __range_begin
                               //       const: 0
-            if(ref.find("range_begin") != std::string::npos) {
+            if(key.find("range_begin") != std::string::npos) {
               hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
-            } else if(ref.find("range_end") != std::string::npos) {
-              hier_tup_vec.emplace_back(absl::StrCat( ":", lnast_to->ref_name(ref)));
+            } else if(key.find("range_end") != std::string::npos) {
+              std::string vec_replacement = absl::StrCat( hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
+              hier_tup_vec.pop_back();
+              hier_tup_vec.emplace_back(vec_replacement);
             }
           } else {
             hier_tup_vec.emplace_back(absl::StrCat(lnast_to->ref_name(key_sec),
@@ -241,10 +243,12 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
                           //   assign: 
                           //       const: __range_begin
                           //       const: 0
-        if(ref.find("range_begin") != std::string::npos) {
+        if(key.find("range_begin") != std::string::npos) {
           hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
-        } else if(ref.find("range_end") != std::string::npos) {
-          hier_tup_vec.emplace_back(absl::StrCat( ":", lnast_to->ref_name(ref)));
+        } else if(key.find("range_end") != std::string::npos) {
+          std::string vec_replacement = absl::StrCat( hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
+          hier_tup_vec.pop_back();
+          hier_tup_vec.emplace_back(vec_replacement);
         }
       } else {
         hier_tup_vec.emplace_back(absl::StrCat(lnast_to->assign_node_strt(),
@@ -827,14 +831,14 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const st
       //example: tmp = index@()  : from tuple_nested2.prp
       ref_map.insert(std::pair<std::string, std::string>(key, "()"));
     } else {
-      assert(sel_str_vect.size() >= 3);
+      assert(sel_str_vect.size() >= 2);
       if (is_temp_var(key)) {
       std::string value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
   
       auto i = 2u;
-      if (i == sel_str_vect.size()) {
-        absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
-      }
+      //if (i == sel_str_vect.size()) {
+      //  absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
+      //}
       while (i < sel_str_vect.size()) {
         absl::StrAppend(&value, "," );
         auto ref = sel_str_vect[i];
