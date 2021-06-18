@@ -207,11 +207,22 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
         if(hier_tup_assign){
           //fmt::print("hier_tup_assign is {} for hier_tup_vec: {}", hier_tup_assign, hier_tup_vec);
           //hier_tup_vec.push_back("str");
-          hier_tup_vec.emplace_back(absl::StrCat(lnast_to->ref_name(key_sec),
+          if(has_DblUndrScor(lnast_to->ref_name(key_sec)) ) {
+                              //   assign: 
+                              //       const: __range_begin
+                              //       const: 0
+            if(ref.find("range_begin") != std::string::npos) {
+              hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
+            } else if(ref.find("range_end") != std::string::npos) {
+              hier_tup_vec.emplace_back(absl::StrCat( ":", lnast_to->ref_name(ref)));
+            }
+          } else {
+            hier_tup_vec.emplace_back(absl::StrCat(lnast_to->ref_name(key_sec),
                         " ",
                         lnast_to->debug_name_lang(assign_node_data.type),
                         " ",
                         lnast_to->ref_name(ref)));
+          }
         } else {
           absl::StrAppend(&buffer_to_print,
                         indent(),
@@ -226,12 +237,23 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
     }
   } else {
     if(hier_tup_assign){
-      hier_tup_vec.emplace_back(absl::StrCat(lnast_to->assign_node_strt(),
-                    lnast_to->ref_name(key),
-                    " ",
-                    lnast_to->debug_name_lang(assign_node_data.type),
-                    " ",
-                    lnast_to->ref_name(ref)));
+      if(has_DblUndrScor(lnast_to->ref_name(key)) ) {
+                          //   assign: 
+                          //       const: __range_begin
+                          //       const: 0
+        if(ref.find("range_begin") != std::string::npos) {
+          hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
+        } else if(ref.find("range_end") != std::string::npos) {
+          hier_tup_vec.emplace_back(absl::StrCat( ":", lnast_to->ref_name(ref)));
+        }
+      } else {
+        hier_tup_vec.emplace_back(absl::StrCat(lnast_to->assign_node_strt(),
+                lnast_to->ref_name(key),
+                " ",
+                lnast_to->debug_name_lang(assign_node_data.type),
+                " ",
+                lnast_to->ref_name(ref)));
+      }
     } else {
       absl::StrAppend(&buffer_to_print,
                     indent(),
@@ -1020,6 +1042,7 @@ bool Code_gen::is_temp_var(std::string test_string) { return (test_string.find("
 //-------------------------------------------------------------------------------------
 // check if the node has "__"
 bool Code_gen::has_DblUndrScor(std::string_view test_string) { return (test_string.find("__") == 0); }
+bool Code_gen::has_DblUndrScor(std::string test_string) { return (test_string.find("__") == 0); }
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(std::string_view test_string) {

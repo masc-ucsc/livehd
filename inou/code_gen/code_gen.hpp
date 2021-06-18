@@ -48,6 +48,7 @@ public:
   bool        is_temp_var(std::string_view test_string);      // can go to private/protected section!?
   bool        is_temp_var(std::string test_string);      // can go to private/protected section!?
   bool        has_DblUndrScor(std::string_view test_string);  // can go to private/protected section!?
+  bool        has_DblUndrScor(std::string test_string);  // can go to private/protected section!?
   // std::string_view get_node_name(Lnast_node node);//can go to private/protected section!?
   constexpr bool is_digit(char c) const { return c >= '0' && c <= '9'; }
   bool           is_number(std::string_view test_string);
