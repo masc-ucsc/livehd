@@ -16,6 +16,13 @@ Besides moving mmap_lib, we may want:
 * Create the mmap_tree2 because the current mmap_tree is not persistent
 * Move the graph_core out of core to mmap_graph
 
+### Renaming
+
+* Change lgtuple to lbundle (Lgtupe -> Lbundle and lgtuple -> lbundle). The
+  reason is that tuples are ordered, and the lbundle can be ordered and
+  unordered. Also, the lg implies only a Lgraph structure but LNAST should use
+  it too for emulation.
+
 ### Pyrope parser
 
 There are some bugs on the pyrope parser when dealing with ranges. This works:

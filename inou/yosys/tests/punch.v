@@ -10,6 +10,7 @@ module top(output logic [3:0] total);
   logic [2:0] x_top;
 
   always_comb begin
+    // x_top = 0;
     tdown1.x_foo = 1;
     total = x_top + out1 + out2; // 9 == 4 + 2 + 3
   end
