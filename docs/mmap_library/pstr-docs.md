@@ -236,7 +236,7 @@
   - a pstr named `v` that to be searched for inside the pstr that called this function. 
   - a `size_t` variable named `pos` that represents which index to starts the search at.
 - <ins>*outputs*</ins>: a `size_t` variable that represents the last index that `v` was found at inside the pstr that called this function.
-- <ins>*description*</ins>: ??? Oly knows.
+- <ins>*description*</ins>: (placeholder).
 
 #### **```std::size_t rfind(char c, std::size_t pos=0) const {}```**
 - <ins>*inputs*</ins>: 
