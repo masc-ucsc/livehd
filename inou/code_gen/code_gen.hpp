@@ -33,7 +33,7 @@ public:
   void        do_assign(const mmap_lib::Tree_index& assign_node_index, std::vector<std::string>& hier_tup_vec, bool hier_tup_assign = false);
   void        do_for(const mmap_lib::Tree_index& assign_node_index);
   void        do_while(const mmap_lib::Tree_index& assign_node_index);
-  void        do_op(const mmap_lib::Tree_index& op_node_index);
+  void        do_op(const mmap_lib::Tree_index& op_node_index, const std::string& op_type);
   void        do_dot(const mmap_lib::Tree_index& dot_node_index, const std::string& select_type);
   void        do_if(const mmap_lib::Tree_index& dot_node_index);
   void        do_cond(const mmap_lib::Tree_index& cond_node_index);
@@ -41,6 +41,7 @@ public:
   void        do_select(const mmap_lib::Tree_index& select_node_index, const std::string& select_type);
   void        do_func_def(const mmap_lib::Tree_index& func_def_node_index);
   void        do_func_call(const mmap_lib::Tree_index& func_def_node_index);
+  void        do_get_mask(const mmap_lib::Tree_index& tposs_node_index);
   void        do_tposs(const mmap_lib::Tree_index& tposs_node_index);
   std::string resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index);
   std::string resolve_func_cond(const mmap_lib::Tree_index& func_cond_index);

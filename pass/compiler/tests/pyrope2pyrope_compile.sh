@@ -18,10 +18,10 @@ scalar_reg_out_pre_declare firrtl_tail2 firrtl_tail firrtl_gcd_3bits
 hier_tuple_nested_if3 hier_tuple_nested_if hier_tuple_nested_if4 
 hier_tuple_nested_if6 hier_tuple_nested_if7 
 nested_if counter_nested_if tuple_empty_attr tuple_reg2
-tuple_nested1 capricious_bits firrtl_tail3 struct_flop '
+tuple_nested1 capricious_bits firrtl_tail3 struct_flop tuple_nested2 '
 
 #FIXME: fails because of code_gen.prp(code gen prp cannot be converted to LN)
-#pts = ' tuple_nested2 get_mask1 vec_shift_register_param  '
+#pts = ' get_mask1 vec_shift_register_param  '
 #FIXME: fails LEC coz of code_gen?
 #pts = 'bits_rhs  hier_tuple_nested_if5       '
 
