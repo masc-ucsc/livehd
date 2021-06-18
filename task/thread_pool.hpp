@@ -121,8 +121,9 @@ public:
 
     if (thread_count > lim || thread_count == 0)
       thread_count = lim;
-    else if (thread_count < 1)
-      thread_count = 1;
+
+    if (thread_count < 2)
+      thread_count = 2;
 
     assert(thread_count);
 
