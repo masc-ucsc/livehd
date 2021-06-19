@@ -843,47 +843,70 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
   return ok;
 }
 
-std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin) {
+std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin) {
 
-  Node_pin unsigned_dpin;
-  Node_pin bits_dpin;
+  // returns mask_dpin for given dpin
+  //
+  // mask = (1<<(dpin.get_bits())-1)<<start_bit_dpin
+
+  Node_pin mask_dpin;
+  Node_pin new_bits_dpin;
 
   if (dpin.is_type_const()) {
     auto v      = dpin.get_type_const();
     auto v_bits = v.get_bits();
-    if (v<0) {
-      v = v.get_mask_op(-1);
+    auto v_mask = v.get_mask_value();
+
+    mask_dpin = result_node.create_const(v_mask).setup_driver_pin();
+
+    if (start_bit_dpin.is_invalid()) {
+      new_bits_dpin = result_node.create_const(v_bits).setup_driver_pin();
+    }else{
+      auto add_node = result_node.create(Ntype_op::Sum);
+      add_node.setup_sink_pin("A").connect_driver(result_node.create_const(v_bits));
+      add_node.setup_sink_pin("A").connect_driver(start_bit_dpin);
+      new_bits_dpin = add_node.setup_driver_pin();
     }
-    unsigned_dpin = result_node.create_const(v).setup_driver_pin();
-    bits_dpin = result_node.create_const(v_bits).setup_driver_pin();
-  }else if (!sbits_dpin.is_invalid()) { // know sbits
-    auto tposs_node = result_node.create(Ntype_op::Get_mask);
-    tposs_node.setup_sink_pin("a").connect_driver(dpin);
-    tposs_node.setup_sink_pin("mask").connect_driver(result_node.create_const(-1));
+  }else{
 
-    unsigned_dpin = tposs_node.setup_driver_pin();
-    bits_dpin = sbits_dpin;
-  }else if (!ubits_dpin.is_invalid()) { // know ubits (just add + 1 for sbits
-    unsigned_dpin = dpin; // No need for get_mask if already unsigned
+    Node_pin bits_dpin;
 
-    auto attr_node = result_node.create(Ntype_op::Sum);
-    attr_node.setup_sink_pin("A").connect_driver(result_node.create_const(1));
-    attr_node.setup_sink_pin("A").connect_driver(ubits_dpin);
+    if (!sbits_dpin.is_invalid()) {
+      bits_dpin = sbits_dpin;
+    }else if (!ubits_dpin.is_invalid()) {
+      auto add_node = result_node.create(Ntype_op::Sum);
+      add_node.setup_sink_pin("A").connect_driver(ubits_dpin);
+      add_node.setup_sink_pin("A").connect_driver(result_node.create_const(1));
 
-    bits_dpin = attr_node.setup_driver_pin();
-  }else {// unknown bits. insert attr_get + get_mask
-    auto tposs_node = result_node.create(Ntype_op::Get_mask);
-    tposs_node.setup_sink_pin("a").connect_driver(dpin);
-    tposs_node.setup_sink_pin("mask").connect_driver(result_node.create_const(-1));
-    unsigned_dpin = tposs_node.setup_driver_pin();
+      bits_dpin = add_node.setup_driver_pin();
+    }else {
+      auto attr_node = result_node.create(Ntype_op::AttrGet);
+      attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string("__sbits")));
+      attr_node.setup_sink_pin("parent").connect_driver(dpin);
 
-    auto attr_node = result_node.create(Ntype_op::AttrGet);
-    attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string("__sbits")));
-    attr_node.setup_sink_pin("parent").connect_driver(dpin);
-    bits_dpin = attr_node.setup_driver_pin();
+      bits_dpin = attr_node.setup_driver_pin();
+    }
+
+    auto shl_node = result_node.create(Ntype_op::SHL);
+    shl_node.setup_sink_pin("a").connect_driver(result_node.create_const(1));
+    shl_node.setup_sink_pin("B").connect_driver(bits_dpin);
+    auto sub_node = result_node.create(Ntype_op::Sum);
+    sub_node.setup_sink_pin("A").connect_driver(shl_node);
+    sub_node.setup_sink_pin("B").connect_driver(result_node.create_const(1));
+
+    mask_dpin = sub_node.setup_driver_pin();
+
+    if (start_bit_dpin.is_invalid()) {
+      new_bits_dpin = bits_dpin;
+    }else{
+      auto add_node = result_node.create(Ntype_op::Sum);
+      add_node.setup_sink_pin("A").connect_driver(bits_dpin);
+      add_node.setup_sink_pin("A").connect_driver(start_bit_dpin);
+      new_bits_dpin = add_node.setup_driver_pin();
+    }
   }
 
-  return std::pair(unsigned_dpin, bits_dpin);
+  return std::pair(mask_dpin, new_bits_dpin);
 }
 
 Node_pin Lgtuple::flatten() const {
@@ -923,8 +946,9 @@ Node_pin Lgtuple::flatten() const {
     return a_dpin.get_node().create_const(result).get_driver_pin();
   }
 
-  Node result_node = a_dpin.get_node().create(Ntype_op::Or);
+  Node result_node = a_dpin.get_node().create_const(0);
   Node_pin bit_chain_dpin;
+  Node_pin mask_dpin;
   for (auto &e : key_map) {
     if (is_attribute(e.first)) {
       fmt::print("dropping {}\n",e.first);
@@ -934,27 +958,16 @@ Node_pin Lgtuple::flatten() const {
 
     Node_pin sbits_dpin;
     Node_pin ubits_dpin;
-    auto [unsigned_dpin, entry_bits_dpin] = Lgtuple::flatten_field(result_node, e.second, sbits_dpin, ubits_dpin);
+
+    std::tie(mask_dpin, bit_chain_dpin) = Lgtuple::flatten_field(result_node, e.second, bit_chain_dpin, sbits_dpin, ubits_dpin);
 
     Node_pin to_or_dpin;
-    if (bit_chain_dpin.is_invalid()) {
-      bit_chain_dpin = entry_bits_dpin;
-      to_or_dpin     = unsigned_dpin;
-    } else {
-      auto shl_node = result_node.create(Ntype_op::SHL);
-      shl_node.setup_sink_pin("a").connect_driver(unsigned_dpin);
-      shl_node.setup_sink_pin("B").connect_driver(bit_chain_dpin);
+    auto set_mask_node = result_node.create(Ntype_op::Set_mask);
+    set_mask_node.setup_sink_pin("a").connect_driver(result_node);
+    set_mask_node.setup_sink_pin("mask").connect_driver(mask_dpin);
+    set_mask_node.setup_sink_pin("value").connect_driver(e.second);
 
-      to_or_dpin = shl_node.setup_driver_pin();
-
-      auto add_node = result_node.create(Ntype_op::Sum);
-      add_node.setup_sink_pin("A").connect_driver(bit_chain_dpin);
-      add_node.setup_sink_pin("A").connect_driver(entry_bits_dpin);
-
-      bit_chain_dpin = add_node.setup_driver_pin();
-    }
-
-    result_node.setup_sink_pin("A").connect_driver(to_or_dpin);
+    result_node = set_mask_node;
   }
 
   return result_node.setup_driver_pin();

@@ -49,7 +49,7 @@ protected:
 
   std::tuple<std::string_view, bool> get_flop_name(const Node &flop) const;
 
-  static std::pair<Node_pin, Node_pin> flatten_field(Node &result_node, Node_pin &dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin);
+  static std::pair<Node_pin, Node_pin> flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin);
 public:
   Lgtuple(std::string_view _name) : name(_name), correct(true) {}
 

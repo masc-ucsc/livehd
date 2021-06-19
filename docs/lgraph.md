@@ -192,6 +192,7 @@ for (const auto &out_edge : node.out_edges()) {...}
 
 
 ## LGraph Attribute Design
+
 Design attribute stands for the characteristic given to a LGraph node or node
 pin. For instance, the characteristic of a node name and node physical
 placement. Despite a single LGraph stands for a particular module, it could be
@@ -889,3 +890,34 @@ https://github.com/Wandmalfarbe/pandoc-latex-template
 https://pianomanfrazier.com/post/write-a-book-with-markdown/
 
 #### To be continued ...
+
+
+## LGraph Optimization
+
+Not all the nodes have the same complexity overhead. When performing peephole
+optimization is possible to trade one set of nodes for others. In general,
+we have this set of overheads:
+
+* 0 overhead: not, get_mask, set_mask, sext, and SHL/SRA with constant shift
+  amounts. The rational is that those are just "wiring" cells to connect or
+  extract wires across.  The NOT gate is not really zero, but it could be easily
+  mixed with sorrounding cells.
+
+* 1 overhead: And, Or, Xor, LUT, Mux
+
+* 3 overhead: LT, GT, EQ, Ror
+
+* 4 overhead: Less than 4 bit output Sum, and SHL/SRA with non-compile time
+  shift amount. This can be costly an require hardware like barrel shifters.
+
+* 5 overhead: large Sum, SHL/SRA.
+
+* 6 Overhead: Mult/Div
+
+If a overhead level can be elininated having a small number of different  cells
+with a smaller overhead level,the translation makes sense. Notice the "small
+number of cells", after all everything can be translated to nand gates. A 3x
+factor is somewhat reasonable. This means that a 5-level overhead is fine to be
+replaced for 3 4-level (or 3 3-level) but not for 4 4-level overhead. Zero
+overhead cells are not included in the list of cells in the replacement.
+
