@@ -391,16 +391,19 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 			auto mbits = v.get_bits()-1; // positive mask (v>0)
 			auto vbits = value_dpin.get_bits();
 
-			std::string expanded_a_txt;
-			if (a_dpin.is_type_const()) {
-				auto a_val = a_dpin.get_type_const();
-				a_val = a_val.rsh_op(mbits);
-				expanded_a_txt = a_val.to_verilog();
-			}else{
-				expanded_a_txt = absl::StrCat(a, "[", abits - 1, ":", mbits, "]");
-			}
-
 			auto trail_zeroes=v.get_trailing_zeroes();
+
+			std::string expanded_a_txt;
+      if ((abits-trail_zeroes)>mbits) {
+        if (a_dpin.is_type_const()) {
+          auto a_val = a_dpin.get_type_const();
+          a_val = a_val.rsh_op(mbits);
+          expanded_a_txt = a_val.to_verilog();
+        }else{
+          expanded_a_txt = absl::StrCat(a, "[", abits-trail_zeroes - 1, ":", mbits, "]");
+        }
+      }
+
 			std::string expanded_value_txt;
 			if (vbits==(mbits-trail_zeroes)) {
 				expanded_value_txt = value;
@@ -412,10 +415,10 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 
 			if (v.is_mask() && v>0) { // {a[a.bits-1:(a.bits-m.bits),value[m.bits-1:0]}
 
-				if (abits>mbits)
-					final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
-				else
+				if (expanded_a_txt.empty())
 					final_expr = expanded_value_txt;
+				else
+					final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
 
 				clean = true;
 			}else if (v>0) {
@@ -430,13 +433,13 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 							a_val = a_val.sext_op(trail_zeroes);
 							expanded_a_trail_txt = a_val.to_verilog();
 						}else{
-							expanded_a_trail_txt = absl::StrCat(a, "[", mbits - 1, ":0]");
+							expanded_a_trail_txt = absl::StrCat(a, "[", trail_zeroes - 1, ":0]");
 						}
 
-						if (abits>(mbits-trail_zeroes))
-							final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, ",", expanded_a_trail_txt, "}");
-						else
+						if (expanded_a_txt.empty())
 							final_expr = absl::StrCat("{", expanded_value_txt, ",", expanded_a_trail_txt, "}");
+						else
+							final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, ",", expanded_a_trail_txt, "}");
 					}
 				}
 			}
@@ -853,6 +856,8 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
       }
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
+    } else if (op == Ntype_op::Set_mask) {
+      add_to_pin2var(buffer, dpin, name, false);
     } else if (op == Ntype_op::Const) {
       auto final_expr = node.get_type_const().to_verilog();
       pin2expr.emplace(node.get_driver_pin().get_compact_class(), final_expr);

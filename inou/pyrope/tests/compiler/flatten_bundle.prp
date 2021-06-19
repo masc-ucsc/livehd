@@ -1,0 +1,18 @@
+
+$in1.__sbits = 3
+$in2.__ubits = 5
+$in3.__sbits = 7
+
+orig = (a=$in1,b=0xFF00, c=$in2, $in3, 0x100)
+
+tmp = orig@()
+//tmp := (0,$in2+1)
+
+// FIXME too (should compile error)
+// random_lhs := (0,$in2+1)
+
+// FIXME too
+// tmp2 = (0,$in2+1)
+// tmp = tmp2@()
+
+%out = tmp

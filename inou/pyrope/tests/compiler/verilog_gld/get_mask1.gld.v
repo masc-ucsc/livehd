@@ -1,5 +1,5 @@
-module pp(
-   input signed [10:0] in
+module get_mask1(
+   input [9:0] in
   ,output reg signed [7:0] out1
   ,output reg signed [10:0] out2
   ,output reg signed [7:0] out3

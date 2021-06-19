@@ -843,7 +843,7 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
   return ok;
 }
 
-std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin) {
+std::pair<Node, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin) {
 
   // returns mask_dpin for given dpin
   //
@@ -857,15 +857,24 @@ std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin
     auto v_bits = v.get_bits();
     auto v_mask = v.get_mask_value();
 
-    mask_dpin = result_node.create_const(v_mask).setup_driver_pin();
+		auto just_mask_dpin = result_node.create_const(v_mask).setup_driver_pin();
 
     if (start_bit_dpin.is_invalid()) {
       new_bits_dpin = result_node.create_const(v_bits).setup_driver_pin();
+			mask_dpin = just_mask_dpin;
     }else{
+      auto shl_node = result_node.create(Ntype_op::SHL);
+			shl_node.setup_sink_pin("a").connect_driver(just_mask_dpin);
+			shl_node.setup_sink_pin("B").connect_driver(start_bit_dpin);
+
+			mask_dpin = shl_node.setup_driver_pin();
+
       auto add_node = result_node.create(Ntype_op::Sum);
       add_node.setup_sink_pin("A").connect_driver(result_node.create_const(v_bits));
       add_node.setup_sink_pin("A").connect_driver(start_bit_dpin);
       new_bits_dpin = add_node.setup_driver_pin();
+
+
     }
   }else{
 
@@ -894,11 +903,18 @@ std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin
     sub_node.setup_sink_pin("A").connect_driver(shl_node);
     sub_node.setup_sink_pin("B").connect_driver(result_node.create_const(1));
 
-    mask_dpin = sub_node.setup_driver_pin();
+    auto just_mask_dpin = sub_node.setup_driver_pin();
 
     if (start_bit_dpin.is_invalid()) {
       new_bits_dpin = bits_dpin;
+			mask_dpin     = just_mask_dpin;
     }else{
+      auto shl2_node = result_node.create(Ntype_op::SHL);
+			shl2_node.setup_sink_pin("a").connect_driver(just_mask_dpin);
+			shl2_node.setup_sink_pin("B").connect_driver(start_bit_dpin);
+
+			mask_dpin = shl2_node.setup_driver_pin();
+
       auto add_node = result_node.create(Ntype_op::Sum);
       add_node.setup_sink_pin("A").connect_driver(bits_dpin);
       add_node.setup_sink_pin("A").connect_driver(start_bit_dpin);
@@ -906,7 +922,12 @@ std::pair<Node_pin, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin
     }
   }
 
-  return std::pair(mask_dpin, new_bits_dpin);
+	auto set_mask_node = result_node.create(Ntype_op::Set_mask);
+	set_mask_node.setup_sink_pin("a").connect_driver(result_node);
+	set_mask_node.setup_sink_pin("mask").connect_driver(mask_dpin);
+	set_mask_node.setup_sink_pin("value").connect_driver(dpin);
+
+  return std::pair(set_mask_node, new_bits_dpin);
 }
 
 Node_pin Lgtuple::flatten() const {
@@ -948,27 +969,43 @@ Node_pin Lgtuple::flatten() const {
 
   Node result_node = a_dpin.get_node().create_const(0);
   Node_pin bit_chain_dpin;
-  Node_pin mask_dpin;
+
+	Node_pin last_non_attr_dpin;
+	Node_pin sbits_dpin;
+	Node_pin ubits_dpin;
+
   for (auto &e : key_map) {
     if (is_attribute(e.first)) {
-      fmt::print("dropping {}\n",e.first);
+			auto attr_txt = get_last_level(e.first);
+			if (attr_txt == "__sbits")
+				sbits_dpin = e.second;
+			else if (attr_txt == "__ubits")
+				ubits_dpin = e.second;
+
+		  if (!last_non_attr_dpin.is_invalid()) {
+
+				auto attr_set_node = result_node.create(Ntype_op::AttrSet);
+				attr_set_node.setup_sink_pin("parent").connect_driver(last_non_attr_dpin);
+				attr_set_node.setup_sink_pin("value").connect_driver(e.second);
+				attr_set_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string(attr_txt)));
+
+				last_non_attr_dpin = attr_set_node.setup_driver_pin();
+			}
       continue;
     }
-    fmt::print("chaining {}\n",e.first);
 
-    Node_pin sbits_dpin;
-    Node_pin ubits_dpin;
+		if (!last_non_attr_dpin.is_invalid()) {
+			std::tie(result_node, bit_chain_dpin) = Lgtuple::flatten_field(result_node, last_non_attr_dpin, bit_chain_dpin, sbits_dpin, ubits_dpin);
+			sbits_dpin = invalid_dpin; // clear attr
+			ubits_dpin = invalid_dpin; // clear attr
+		}
 
-    std::tie(mask_dpin, bit_chain_dpin) = Lgtuple::flatten_field(result_node, e.second, bit_chain_dpin, sbits_dpin, ubits_dpin);
-
-    Node_pin to_or_dpin;
-    auto set_mask_node = result_node.create(Ntype_op::Set_mask);
-    set_mask_node.setup_sink_pin("a").connect_driver(result_node);
-    set_mask_node.setup_sink_pin("mask").connect_driver(mask_dpin);
-    set_mask_node.setup_sink_pin("value").connect_driver(e.second);
-
-    result_node = set_mask_node;
+		last_non_attr_dpin = e.second;
   }
+
+	if (!last_non_attr_dpin.is_invalid()) {
+		std::tie(result_node, bit_chain_dpin) = Lgtuple::flatten_field(result_node, last_non_attr_dpin, bit_chain_dpin, sbits_dpin, ubits_dpin);
+	}
 
   return result_node.setup_driver_pin();
 }
