@@ -141,6 +141,7 @@ Pyrope_compile_hier_HL_LN () {
 
   declare pts_concat
   declare top_module
+  declare tmp_pts_concat
 
   for pt in $1
   do
@@ -161,15 +162,25 @@ Pyrope_compile_hier_HL_LN () {
     else
       pts_concat="${pts_concat}, ${PATTERN_PATH}/${pt}.prp"
     fi
+
+    if [ -z "${tmp_pts_concat}" ]; then
+      tmp_pts_concat="tmp_prp/${pt}.prp"
+    else
+      tmp_pts_concat="${tmp_pts_concat}, tmp_prp/${pt}.prp"
+    fi
   done
 
-
   ${LGSHELL} "inou.pyrope files:${pts_concat} |> inou.code_gen.prp odir:tmp_prp"
-  ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${top_module}"
-  #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
     echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"
+    exit $ret_val
+  fi
+  ${LGSHELL} "inou.pyrope files:${tmp_pts_concat} |> pass.compiler gviz:true top:${top_module}"
+  #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
+  ret_val=$?
+  if [ $ret_val -ne 0 ]; then
+    echo "ERROR: could not compile with pattern: ${tmp_pts_concat}.prp!"
     exit $ret_val
   fi
 
@@ -185,12 +196,12 @@ Pyrope_compile_hier_HL_LN () {
     echo "----------------------------------------------------"
 
     #${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog "
+    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
     else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
+        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: tmp_prp/${pt}.prp"
         exit 1
     fi
   done
@@ -221,10 +232,10 @@ Pyrope_compile_hier_HL_LN () {
   fi
 }
 
-#rm -rf ./lgdb
-#Pyrope_compile_hier_HL_LN "$pts_hier1"
-#rm -rf ./lgdb
-#Pyrope_compile_hier_HL_LN "$pts_hier2"
+rm -rf ./lgdb
+Pyrope_compile_hier_HL_LN "$pts_hier1"
+rm -rf ./lgdb
+Pyrope_compile_hier_HL_LN "$pts_hier2"
 rm -rf ./lgdb
 Pyrope_compile_HL_LN "$pts"
  
