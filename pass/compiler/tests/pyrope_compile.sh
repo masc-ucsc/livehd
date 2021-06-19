@@ -27,6 +27,7 @@ struct_flop tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param capri
 
 # pts='lhs_wire2'
 # pts='memory_1rd1wr'
+# pts='masked_smem'
 # pts='pp'
 # pts='hier_tuple'
 # pts='memory_1rd1wr'

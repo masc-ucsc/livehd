@@ -748,7 +748,9 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
 
 void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   const auto type = get_type(opr_nid);
-
+  if (type.is_invalid())
+    return;
+  
   I(!type.is_select()); // Select is deprecated
 
   bool the_ta_is_tuple_struct = false;
@@ -778,6 +780,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   if (is_leaf(opr_nid))
     return;
 
+  
   // handle statement lhs
   //if (type.is_assign() || type.is_set_mask() || type.is_dp_assign() || type.is_attr_set() || type.is_tuple_add() || type.is_tuple() || type.is_tuple_concat() || type.is_tuple_get()) {
 
