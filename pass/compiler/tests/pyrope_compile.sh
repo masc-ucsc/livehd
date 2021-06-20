@@ -12,7 +12,7 @@ pts_after_micro='hier_tuple4 tuple_reg3 '
 
 pts='flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin hier_tuple_io hier_tuple3
 hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 lhs_wire
-tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter lhs_wire
+tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter 
 adder_stage capricious_bits4 logic capricious_bits2
 scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if
 hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5
@@ -24,12 +24,9 @@ struct_flop tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param capri
 # pts='scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts ='counter_mix'  
-
-# pts='lhs_wire2'
 # pts='memory_1rd1wr'
 # pts='masked_smem'
 # pts='pp'
-# pts='hier_tuple'
 # pts='memory_1rd1wr'
 # pts='pp2'
 # pts='vector'
