@@ -10,7 +10,7 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3'
 
 
-pts='flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
+pts='scalar_tuple flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
 hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy
 if lhs_wire2 tuple_copy2 counter adder_stage logic tuple_empty_attr if2
 scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if3
@@ -25,8 +25,6 @@ struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3
 # FIXME->Jose: these are the patterns require an extra cprop after bitwidth?
 # pts='hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
 
-# FIXME:
-# pts='scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts='counter_mix'  
 # pts='memory_1rd1wr'
