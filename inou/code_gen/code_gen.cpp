@@ -130,7 +130,7 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_get_mask()) {
       do_get_mask(curr_index);
     } else if ( curr_node_type.is_set_mask()) {
-      do_tposs(curr_index);
+      do_set_mask(curr_index);
     } else if (curr_node_type.is_tuple_concat()) {
       do_op(curr_index, "tup_concat");
     } else if (curr_node_type.is_primitive_op()) {
@@ -639,6 +639,51 @@ void Code_gen::do_tposs(const mmap_lib::Tree_index& tposs_node_index) {
   */
 }
 
+//-------------------------------------------------------------------------------------
+// processing set_mask operator
+
+void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
+  fmt::print("node:set_mask\n");
+
+  auto  curr_index = lnast->get_first_child(smask_node_index);
+  std::vector<std::string> smask_str_vect;
+  while (curr_index != lnast->invalid_index()) {
+    assert(!(lnast->get_type(curr_index)).is_invalid());
+    auto curlvl = curr_index.level;
+    fmt::print("Processing gmask child {}:{} at level {} \n",
+               lnast->get_name(curr_index),
+               lnast->get_type(curr_index).debug_name(),
+               curlvl);
+    smask_str_vect.emplace_back(lnast->get_name(curr_index));
+    curr_index = lnast->get_sibling_next(curr_index);
+  }
+  // dot_str_vect now has all the children of the operation "op"
+
+  I(smask_str_vect.size() > 2);
+  
+  auto key = smask_str_vect.front();
+  std::string val;
+
+  for (unsigned i = 1; i < smask_str_vect.size()-1; i++) {
+    auto ref    = smask_str_vect[i];
+    auto map_it = ref_map.find(ref);
+    if (map_it != ref_map.end()) {
+      ref = map_it->second;
+    }
+
+    absl::StrAppend(&val, ref, lnast_to->gmask_op(), (i==1?"(":""));
+  }
+  val.pop_back();
+  absl::StrAppend(&val, ")");
+
+  if (is_temp_var(key)) {
+    ref_map.insert(std::pair<std::string, std::string>(key, val));
+  } else {
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(val), "=", smask_str_vect.back(), "\n");
+    //I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
+  }
+}
+//-------------------------------------------------------------------------------------
 
 //-------------------------------------------------------------------------------------
 // processing get_mask operator

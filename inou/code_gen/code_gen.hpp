@@ -42,6 +42,7 @@ public:
   void        do_func_def(const mmap_lib::Tree_index& func_def_node_index);
   void        do_func_call(const mmap_lib::Tree_index& func_def_node_index);
   void        do_get_mask(const mmap_lib::Tree_index& tposs_node_index);
+  void        do_set_mask(const mmap_lib::Tree_index& tposs_node_index);
   void        do_tposs(const mmap_lib::Tree_index& tposs_node_index);
   std::string resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index);
   std::string resolve_func_cond(const mmap_lib::Tree_index& func_cond_index);
