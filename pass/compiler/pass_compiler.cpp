@@ -70,7 +70,6 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
   // compiler.do_local_cprop_bitwidth();
 
   // FIXME: I think that global should be called only if top is set
-  compiler.global_io_connection();
   compiler.global_bitwidth_inference();
 }
 

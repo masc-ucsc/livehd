@@ -40,6 +40,7 @@ test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
 coverage --cache_test_results=no
 
+# Address sanitizer
 build:asan --strip=never
 build:asan --copt -fsanitize=address
 build:asan --copt -DADDRESS_SANITIZER
@@ -53,6 +54,28 @@ build:asan --cxxopt -std=c++17
 build:asan --cxxopt -g
 build:asan --cxxopt -fno-omit-frame-pointer
 build:asan --linkopt -fsanitize=address
+
+
+# Thread sanitizer
+build:tsan --strip=never
+build:tsan --copt -fsanitize=thread
+build:tsan --copt -DTHREAD_SANITIZER
+build:tsan --copt -DDYNAMIC_ANNOTATIONS_ENABLED=1
+build:tsan --copt -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
+build:tsan --copt -g
+# build:tsan --copt -O1
+build:tsan --copt -fno-omit-frame-pointer
+
+build:tsan --cxxopt -fsanitize=thread
+build:tsan --cxxopt -DTHREAD_SANITIZER
+build:tsan --cxxopt -DDYNAMIC_ANNOTATIONS_ENABLED=1
+build:tsan --cxxopt -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
+build:tsan --cxxopt -g
+build:tsan --cxxopt -std=c++17
+# build:tsan --copt -O1
+build:tsan --cxxopt -fno-omit-frame-pointer
+build:tsan --linkopt -fsanitize=thread
+
 
 # mada local (no GCP build) but with remote cache
 #build --remote_cache=http://mada2.cse.ucsc.edu:8082 --remote_timeout=5

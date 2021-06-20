@@ -51,7 +51,6 @@ public:
   Lcompiler(std::string_view path, std::string_view odir, std::string_view top, bool gviz);
 
   void local_bitwidth_inference();
-  void global_io_connection();
   void global_bitwidth_inference();
   void add_pyrope_thread(std::shared_ptr<Lnast> lnast);
 

@@ -43,6 +43,13 @@ or use address sanitizer to detect memory leaks
 $ bazel build -c dbg --config asan //...
 ```
 
+or use thread sanitizer to detect data races
+```
+$ bazel build -c dbg --config tsan //...
+```
+
+
+
  - Release build: most optimization, no debug symbols, assertions turned off
 ```
 $ bazel build -c opt <target>

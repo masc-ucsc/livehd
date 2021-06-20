@@ -3,7 +3,7 @@ rm -rf ./lgdb
 
 pts_long_lec='GCD '
 
-pts_todo_advanced='Risc FPU ICache MemoryController RWSmem Smem Rob ICache
+pts_todo_advanced='Risc FPU ICache MemoryController Rob ICache
 HwachaSequencer RocketCore Ops Router'
 
 pts_mem='Smem_simple Stack DynamicMemorySearch Memo'

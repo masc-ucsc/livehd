@@ -48,6 +48,16 @@ LiveHD has the option to run it with address sanitizer to detect memory leaks.
 $ bazel build -c dbg --config asan //...
 ```
 
+## Thread Sanitizer
+
+To debug with concurrent data race.
+
+```
+$ bazel build -c dbg --config tsan //...
+```
+
+
+
 ## Debugging a broken Docker image
 
 The travis/azure regressions run several docker images. To debug the issue, run the same as the failing

@@ -21,120 +21,115 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
-  fmt::print("------------------------ LNAST-> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
+  fmt::print("------------------------ LNAST -> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
 
   auto module_name = ln->get_top_module_name();
-
   Lnast_tolg ln2lg(module_name, path);
-
   const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
-
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
-  if (gviz) {
-    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "local.raw");
-  }
+  if (gviz) 
+    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
+  
+  
+  // // FIXME->sh: cannot separate to do_local_cprop_bitwidth(), why?
+  // Cprop cp(false);                                        
+  // Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
 
-  // FIXME->sh: DEBUG: cannot separate to do_local_cprop_bitwidth(), why?
-  Cprop cp(false);                                        // hier = false, gioc = false
+
+  // todo: should do bottom, start from the top
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
-  for (const auto &lg : local_lgs) {
+  Cprop    cp(false);  // hier = false
+  for (const auto &lg : local_lgs) 
     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
-  }
+  
   thread_pool.wait_all();
+
+
+
+
+  // // exp-start
+  // Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
+  // Cprop    cp(false);  // hier = false
+  // auto     lgcnt                   = 0;
+  // auto     hit                     = false;
+
+  // // hierarchical traversal
+  // for (auto &lg : local_lgs) {
+  //   ++lgcnt;
+  //   // bottom up approach to parallelly do cprop
+  //   if (lg->get_name() == top) {
+  //     hit = true;
+  //     // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
+  //     lg->each_hier_unique_sub_bottom_up_parallel([this, &cp, &bw](Lgraph *lg_sub) {
+  //       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+  //       cp.do_trans(lg_sub);
+  //       gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+
+  //       fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
+  //       bw.do_trans(lg_sub);
+  //       gviz ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
+  //     });
+
+  //     // for top lgraph
+  //     fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
+  //     cp.do_trans(lg);
+  //     gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
+
+  //     fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
+  //     bw.do_trans(lg);
+  //     gviz ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
+  //   }
+  // }
+
+  // if (lgcnt > 1 && hit == false)
+  //   Pass::error("Top module not specified for firrtl codes!\n");
+  // // exp-end 
 
   std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs) lgs.emplace_back(lg);
-}
 
-// TODO: try to make it work
-void Lcompiler::do_local_cprop_bitwidth() {
-  Cprop    cp(false);                                     // hier = false, gioc = false
-  Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
-  for (const auto &lg : lgs) {
-    thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
+  // // todo? should be solveed by bottom-top
+  for (auto &lg : lgs) {
+    fmt::print("---------------- Second Copy-Propagation? ({}) ------------ (C-1)\n", lg->get_name());
+    cp.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "cprop-ed2") : void();
   }
-  thread_pool.wait_all();
 }
 
 void Lcompiler::prp_thread_local_cprop_bitwidth(Lgraph *lg, Cprop &cp, Bitwidth &bw) {
+
   fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-0)\n", lg->get_name());
-  cp.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+  cp.do_trans(lg); 
+  // fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-1)\n", lg->get_name());
+  // cp.do_trans(lg);
+  gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
 
   fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-0)\n", lg->get_name());
-  bw.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void();
-
-#if 0
-  fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-1)\n", lg->get_name());
-  bw.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void();
-#endif
-
-#if 0
-  fmt::print("------------------------ Local Copy-Prop ({})-------------------- (C-1)\n", lg->get_name());
-  cp.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "local.cprop-ed-1") : void();
-#endif
+  bw.do_trans(lg); // should return a flag to identify extra cprop needed, and also need another cprop
+  gviz ? gv.do_from_lgraph(lg, "bitwidth-ed-0") : void();
 }
 
-void Lcompiler::add_pyrope_thread(std::shared_ptr<Lnast> ln) {
-  gviz ? gv.do_from_lnast(ln, "raw") : void();
 
-  fmt::print("------------------------ Pyrope -> LNAST-SSA ({})------------------------ \n", ln->get_top_module_name());
-  ln->ssa_trans();
-  gviz ? gv.do_from_lnast(ln) : void();
+// // TODO: try to make it work
+// void Lcompiler::do_local_cprop_bitwidth() {
+//   Cprop    cp(false);                                     // hier = false
+//   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
+//   for (const auto &lg : lgs) {
+//     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
+//   }
+//   thread_pool.wait_all();
+// }
 
-  fmt::print("------------------------ LNAST-> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
 
-  auto module_name = ln->get_top_module_name();
 
-  Lnast_tolg ln2lg(module_name, path);
 
-  const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
-
-  auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
-
-  if (gviz) {
-    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "local.raw");
-  }
-
-  Cprop cp(false);                                     // hier = false, gioc = false
-  Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
-  for (const auto &lg : local_lgs) {
-    fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-0)\n", lg->get_name());
-    cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
-
-    fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-0)\n", lg->get_name());
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-0") : void();
-
-#if 0
-    fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-1)\n", lg->get_name());
-    bw.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.bitwidth-ed-1") : void();
-#endif
-
-#if 0
-    fmt::print("------------------------ Local Copy-Propagation ({})-------------------- (C-1)\n", lg->get_name());
-    cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "local.cprop-ed-1") : void();
-#endif
-  }
-
-  std::lock_guard<std::mutex>guard(lgs_mutex);
-
-  for (auto *lg : local_lgs) lgs.emplace_back(lg);
-}
 
 void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) {
   for (const auto &ln : lnasts) {
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);
   }
   thread_pool.wait_all();
-  // Graph_library::sync_all();
 }
 
 void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
@@ -159,7 +154,7 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
   if (gviz) {
-    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "local.raw");
+    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
   }
 
   std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
@@ -169,7 +164,7 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 }
 
 void Lcompiler::do_cprop() {
-  Cprop cp(false);  // hier = false, gioc = false
+  Cprop cp(false);  // hier = false
   auto  lgcnt                   = 0;
   auto  hit                     = false;
   auto  top_name_before_mapping = absl::StrCat("__firrtl_", top);
@@ -180,16 +175,17 @@ void Lcompiler::do_cprop() {
     // bottom up approach to parallelly do cprop
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
+      // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
       lg->each_hier_unique_sub_bottom_up_parallel([this, &cp](Lgraph *lg_sub) {
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
-        gviz ? gv.do_from_lgraph(lg_sub, "local.cprop-ed") : void();
+        gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
       });
 
       // for top lgraph
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
       cp.do_trans(lg);
-      gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+      gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
     }
   }
 
@@ -206,8 +202,11 @@ void Lcompiler::do_cprop() {
 void Lcompiler::fir_thread_cprop(Lgraph *lg, Cprop &cp) {
   fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
   cp.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "local.cprop-ed") : void();
+  gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
 }
+
+
+
 
 void Lcompiler::do_firmap_bitwidth() {
   // map __firrtl_foo.lg to foo.lg
@@ -227,18 +226,6 @@ void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgrap
 
   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
   bw.do_trans(new_lg);
-
-#if 0
-  fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-1)\n", new_lg->get_name());
-  bw.do_trans(new_lg);
-#endif
-
-#if 0
-  // FIXME: Why doing a cprop makes the code fail?
-  fmt::print("---------------- Local Cprop-Inference ({}) ----------- (C-1)\n", new_lg->get_name());
-  Cprop    cp(false);
-  cp.do_trans(new_lg);
-#endif
 
   gviz ? gv.do_from_lgraph(new_lg, "") : void();
 
@@ -281,21 +268,6 @@ void Lcompiler::do_firbits() {
     Pass::error("Top module not specified for firrtl codes!\n");
 }
 
-void Lcompiler::global_io_connection() {
-
-  Cprop    cp(false);                                     // hier = false, at_gioc = true
-  // Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true,  max_iters = 10
-  // Gioc     gioc(path); FIXME? Do we need this steps? (gioc is broken. It still uses the old TupGet
-
-  for (auto &lg : lgs) {
-    //fmt::print("---------------- Global IO Connection ({}) --------------- (GIOC)\n", lg->get_name());
-    //gioc.do_trans(lg);
-    //gviz ? gv.do_from_lgraph(lg, "gioc.raw") : void();
-    fmt::print("---------------- Global Copy-Propagation ({}) ------------ (GC)\n", lg->get_name());
-    cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "gioc.cprop-ed") : void();
-  }
-}
 
 void Lcompiler::global_bitwidth_inference() {
   Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true, max_iters = 10

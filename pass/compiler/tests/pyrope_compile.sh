@@ -61,7 +61,8 @@ Pyrope_compile () {
   echo "Pyrope Full Compilation"
   echo "===================================================="
 
-
+# $1 = top sum
+# $1 = sum top
   for pt in $1
   do
     if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
@@ -157,7 +158,6 @@ Pyrope_compile_hier () {
 
 
   ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
-  #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
   ret_val=$?
   if [ $ret_val -ne 0 ]; then
     echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"

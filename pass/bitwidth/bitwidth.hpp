@@ -8,6 +8,7 @@
 #include "pass.hpp"
 
 using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
+// using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range>;
 using BWMap_hier = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
 
 class Bitwidth {
