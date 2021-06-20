@@ -50,8 +50,8 @@ public:
     Lnast_ntype_mod,
 
     // shifts
-    Lnast_ntype_shr,  // >>
     Lnast_ntype_shl,  // << or <<<
+    Lnast_ntype_shr,  // >>
     Lnast_ntype_sra,  // >>>
 
     // zero/sign extend (becomes Cell:And, Cell:sext, Cell:tposs)
