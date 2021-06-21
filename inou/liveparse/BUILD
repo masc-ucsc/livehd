@@ -34,7 +34,7 @@ sh_test(
     name = "chunkify_test.sh",
     srcs = ["tests/chunkify_test.sh"],
     data = [
-        "//inou/yosys:verilog_tests",
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
     ],
     tags = ["fixme"],

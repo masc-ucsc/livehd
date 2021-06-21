@@ -32,7 +32,7 @@ sh_test(
     name = "mt_test.sh",
     srcs = ["tests/mt_test.sh"],
     data = [
-        "//inou/yosys:verilog_tests",
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
     ],
     tags = ["fixme"],

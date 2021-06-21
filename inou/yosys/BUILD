@@ -47,14 +47,6 @@ sh_library(
 )
 
 filegroup(
-    name = "verilog_tests",
-    srcs = glob([
-        "tests/*.v",
-    ]),
-    visibility = ["//visibility:public"],
-)
-
-filegroup(
     name = "inou_yosys_scripts",
     srcs = glob([
         "inou_yosys_*.ys",

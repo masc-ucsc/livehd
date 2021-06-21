@@ -23,7 +23,7 @@ sh_test(
     name = "sample_test1.sh",
     srcs = ["tests/sample_test1.sh"],
     data = [
-        "//inou/yosys:verilog_tests",
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
     ],
     tags = ["fixme"],
