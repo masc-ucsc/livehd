@@ -132,13 +132,13 @@ void Lcompiler::do_cprop() {
   Cprop cp(false);  // hier = false
   auto  lgcnt                   = 0;
   auto  hit                     = false;
-  auto  top_name_before_mapping = absl::StrCat("__firrtl_", top);
+  auto  top_name_before_firmap = absl::StrCat("__firrtl_", top);
 
   // hierarchical traversal
   for (auto &lg : lgs) {
     ++lgcnt;
     // bottom up approach to parallelly do cprop
-    if (lg->get_name() == top_name_before_mapping) {
+    if (lg->get_name() == top_name_before_firmap) {
       hit = true;
       // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
       lg->each_hier_unique_sub_bottom_up_parallel([this, &cp](Lgraph *lg_sub) {
@@ -156,11 +156,6 @@ void Lcompiler::do_cprop() {
 
   if (lgcnt > 1 && hit == false)
     Pass::error("Top module not specified for firrtl codes!\n");
-
-  // for (const auto &lg : lgs) {
-  //   thread_pool.add(&Lcompiler::fir_thread_cprop, this, lg, cp);
-  // }
-  // thread_pool.wait_all();
 }
 
 // FIXME->sh: to be deprecated by bottom-up paralellism
@@ -176,11 +171,60 @@ void Lcompiler::fir_thread_cprop(Lgraph *lg, Cprop &cp) {
 void Lcompiler::do_firmap_bitwidth() {
   // map __firrtl_foo.lg to foo.lg
   std::vector<Lgraph *> mapped_lgs;
-  Bitwidth              bw(false, 10);  // hier = false, max_iters = 10
+  auto  lgcnt = 0;
+  auto  hit   = false;
+  auto  top_name_before_firmap = absl::StrCat("__firrtl_", top);
+  auto  prefix_fir_op_str = "__fir_"; // create once for many comparation
+
+
   for (auto &lg : lgs) {
-    thread_pool.add(&Lcompiler::fir_thread_firmap_bw, this, lg, bw, mapped_lgs);
+    ++lgcnt;
+    // bottom up approach to parallelly do cprop
+    if (lg->get_name() == top_name_before_firmap) {
+      hit = true;
+      // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
+      lg->each_hier_unique_sub_bottom_up_parallel([this, &mapped_lgs, &prefix_fir_op_str](Lgraph *lg_sub) {
+        //FIXME: still, the bottom-up will visit fir_op :(
+        if (lg_sub->get_name().substr(0,6) == prefix_fir_op_str)
+          return;
+
+        Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
+        Bitwidth bw(false, 10);  // hier = false, max_iters = 10
+
+        fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg_sub->get_name());
+        auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
+        gviz ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
+
+        fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg_sub->get_name());
+        bw.do_trans(new_lg_sub);
+        gviz ? gv.do_from_lgraph(new_lg_sub, "") : void();
+        mapped_lgs.emplace_back(new_lg_sub);
+      });
+
+      // for top lgraph
+      Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
+      Bitwidth bw(false, 10);  // hier = false, max_iters = 10
+
+      fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
+      auto new_lg = fm.do_firrtl_mapping(lg);
+      gviz ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
+
+      fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
+      bw.do_trans(new_lg);
+      gviz ? gv.do_from_lgraph(new_lg, "") : void();
+      mapped_lgs.emplace_back(new_lg);
+    }
   }
+
+  if (lgcnt > 1 && hit == false)
+    Pass::error("Top module not specified for firrtl codes!\n");
+
   lgs = mapped_lgs;
+
+  // for (auto &lg : lgs) {
+  //   thread_pool.add(&Lcompiler::fir_thread_firmap_bw, this, lg, bw, mapped_lgs);
+  // }
+  // lgs = mapped_lgs;
 }
 
 void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgraph *> &mapped_lgs) {
