@@ -12,6 +12,8 @@
 #include "iassert.hpp"
 #include "err_tracker.hpp"
 
+static_assert(__cplusplus >= 201703L, "C++ 17 support is required. Please upgrade your compiler.");
+
 class Pass {
 protected:
   const std::string pass_name;
