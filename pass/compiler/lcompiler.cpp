@@ -39,14 +39,11 @@ void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 }
 
 void Lcompiler::do_local_cprop_bitwidth() {
-  Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
+  Bitwidth bw(false, 10);  // hier = false, max_iters = 10
   Cprop    cp(false);  // hier = false
 
-
-  auto lgcnt = 0;
-
   // for each lgraph, bottom up approach to parallelly do cprop->bw->cprop;
-  // also uss a visited table to avoid duplicated visitations 
+  // also use a visited table to avoid duplicated visitations 
   std::set<Lg_type_id> visited_lg_table;
   for (auto &lg : lgs) {
     auto lgid = lg->get_lgid();
@@ -54,12 +51,12 @@ void Lcompiler::do_local_cprop_bitwidth() {
       continue;
 
     visited_lg_table.insert(lgid);
-    ++lgcnt;
 
     lg->each_hier_unique_sub_bottom_up_parallel([this, &cp, &bw, &visited_lg_table](Lgraph *lg_sub) {
       auto lgid_sub = lg_sub->get_lgid();
       if (visited_lg_table.find(lgid_sub) != visited_lg_table.end())
         return;
+      visited_lg_table.insert(lgid_sub);
 
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
       cp.do_trans(lg_sub);
@@ -69,11 +66,11 @@ void Lcompiler::do_local_cprop_bitwidth() {
       bw.do_trans(lg_sub);
       gviz ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
 
+      // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
       cp.do_trans(lg_sub);
       gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
-      visited_lg_table.insert(lgid_sub);
     });
 
     fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
@@ -84,7 +81,7 @@ void Lcompiler::do_local_cprop_bitwidth() {
     bw.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
 
-    //  hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
+    // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
     fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
     cp.do_trans(lg);
     gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
@@ -179,7 +176,7 @@ void Lcompiler::fir_thread_cprop(Lgraph *lg, Cprop &cp) {
 void Lcompiler::do_firmap_bitwidth() {
   // map __firrtl_foo.lg to foo.lg
   std::vector<Lgraph *> mapped_lgs;
-  Bitwidth              bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
+  Bitwidth              bw(false, 10);  // hier = false, max_iters = 10
   for (auto &lg : lgs) {
     thread_pool.add(&Lcompiler::fir_thread_firmap_bw, this, lg, bw, mapped_lgs);
   }
@@ -238,7 +235,7 @@ void Lcompiler::do_firbits() {
 
 
 void Lcompiler::global_bitwidth_inference() {
-  Bitwidth bw(true, 10, global_flat_bwmap, global_hier_bwmap);  // hier = true, max_iters = 10
+  Bitwidth bw(true, 10);  // hier = true, max_iters = 10
 
   auto lgcnt = 0;
   auto hit   = false;

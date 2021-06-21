@@ -1,15 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <unordered_map>
 #include "bitwidth_range.hpp"
 #include "lgedgeiter.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
 #include "pass.hpp"
 
-using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_flat, Bitwidth_range>;
-// using BWMap_flat = absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range>;
-using BWMap_hier = absl::flat_hash_map<Node_pin::Compact, Bitwidth_range>;
 
 class Bitwidth {
 protected:
@@ -22,8 +20,10 @@ protected:
   static Attr get_key_attr(std::string_view key);
 
   bool        not_finished;
-  BWMap_flat &flat_bwmap;  // global bwmap indexing with dpin_compact_flat, (lgid, nid)
-  BWMap_hier &hier_bwmap;  // global bwmap indexing with dpin_compact, (hidx, nid)
+  absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range> bwmap;  // bwmap indexing with dpin_compact_class,         nid
+  // std::unordered_map<Node_pin::Compact_class, Bitwidth_range> bwmap;  // bwmap indexing with dpin_compact_class,         nid
+  // absl::flat_hash_map<Node_pin::Compact_flat , Bitwidth_range> bwmap_flat;  // bwmap indexing with dpin_compact_flat, (lgid, nid)
+  // absl::flat_hash_map<Node_pin::Compact      , Bitwidth_range> bwmap_hier;  // bwmap indexing with dpin_compact,      (hidx, nid)
 
   void adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw);
   void adjust_bw(Node_pin &dpin, const Bitwidth_range &bw);
@@ -63,7 +63,7 @@ protected:
   void bw_pass(Lgraph *lg);
 
 public:
-  Bitwidth(bool hier, int max_iterations, BWMap_flat &flat_bwmap, BWMap_hier &hier_bwmap);
+  Bitwidth(bool hier, int max_iterations);
   void do_trans(Lgraph *orig);
   bool is_finished() const { return !not_finished; }
 };

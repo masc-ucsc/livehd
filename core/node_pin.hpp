@@ -141,6 +141,7 @@ public:
       return H::combine(std::move(h), s.lgid, s.idx, s.sink);
     };
   };
+
   class __attribute__((packed)) Compact_driver {
   protected:
     Hierarchy_index hidx;
@@ -183,6 +184,7 @@ public:
       return H::combine(std::move(h), s.hidx.get_hash(), s.idx);
     };
   };
+
   class __attribute__((packed)) Compact_class {
   protected:
     uint32_t idx : Index_bits;
@@ -223,6 +225,7 @@ public:
       return H::combine(std::move(h), s.idx, s.sink);
     }
   };
+
   class __attribute__((packed)) Compact_class_driver {
   protected:
     uint32_t idx : Index_bits;

@@ -30,8 +30,9 @@ if [ $# -eq 0 ]; then
   VendingMachine Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier
   AddNot GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
   SimpleALU ByteSelector MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter RegXor Mux4 Adder4 BundleConnect SubModule
-  SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd '
+  Decrementer Counter RegXor BundleConnect SubModule
+  SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd Mux4 Adder4'
+
 
   # issue1: run-time vector index
   # pts='Test1 VecSearch Mul'                 
