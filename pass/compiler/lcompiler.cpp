@@ -17,111 +17,79 @@ void Lcompiler::do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) 
 void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   gviz ? gv.do_from_lnast(ln, "raw") : void();
 
-  fmt::print("------------------------ Pyrope -> LNAST-SSA ({})------------------------ \n", ln->get_top_module_name());
+  fmt::print("---------------- Pyrope -> LNAST-SSA ({})------------------- \n", ln->get_top_module_name());
   ln->ssa_trans();
   gviz ? gv.do_from_lnast(ln) : void();
 
-  fmt::print("------------------------ LNAST -> Lgraph ({})----------------------------- \n", ln->get_top_module_name());
+  fmt::print("---------------- LNAST -> Lgraph ({})----------------------- \n", ln->get_top_module_name());
 
   auto module_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(module_name, path);
   const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
-  if (gviz) 
-    for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
+  if (gviz) {
+    for (const auto &lg : local_lgs) 
+      gv.do_from_lgraph(lg, "raw");
+  }
   
-  
-  // // FIXME->sh: cannot separate to do_local_cprop_bitwidth(), why?
-  // Cprop cp(false);                                        
-  // Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
+  std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
+  for (auto *lg : local_lgs) 
+    lgs.emplace_back(lg);
+}
 
-
-  // todo: should do bottom, start from the top
+void Lcompiler::do_local_cprop_bitwidth() {
   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
   Cprop    cp(false);  // hier = false
-  for (const auto &lg : local_lgs) 
-    thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
-  
-  thread_pool.wait_all();
 
 
+  auto lgcnt = 0;
 
-
-  // // exp-start
-  // Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
-  // Cprop    cp(false);  // hier = false
-  // auto     lgcnt                   = 0;
-  // auto     hit                     = false;
-
-  // // hierarchical traversal
-  // for (auto &lg : local_lgs) {
-  //   ++lgcnt;
-  //   // bottom up approach to parallelly do cprop
-  //   if (lg->get_name() == top) {
-  //     hit = true;
-  //     // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
-  //     lg->each_hier_unique_sub_bottom_up_parallel([this, &cp, &bw](Lgraph *lg_sub) {
-  //       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
-  //       cp.do_trans(lg_sub);
-  //       gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-
-  //       fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
-  //       bw.do_trans(lg_sub);
-  //       gviz ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
-  //     });
-
-  //     // for top lgraph
-  //     fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
-  //     cp.do_trans(lg);
-  //     gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-
-  //     fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
-  //     bw.do_trans(lg);
-  //     gviz ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
-  //   }
-  // }
-
-  // if (lgcnt > 1 && hit == false)
-  //   Pass::error("Top module not specified for firrtl codes!\n");
-  // // exp-end 
-
-  std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
-  for (auto *lg : local_lgs) lgs.emplace_back(lg);
-
-  // // todo? should be solveed by bottom-top
+  // for each lgraph, bottom up approach to parallelly do cprop->bw->cprop;
+  // also uss a visited table to avoid duplicated visitations 
+  std::set<Lg_type_id> visited_lg_table;
   for (auto &lg : lgs) {
-    fmt::print("---------------- Second Copy-Propagation? ({}) ------------ (C-1)\n", lg->get_name());
+    auto lgid = lg->get_lgid();
+    if (visited_lg_table.find(lgid) != visited_lg_table.end())
+      continue;
+
+    visited_lg_table.insert(lgid);
+    ++lgcnt;
+
+    lg->each_hier_unique_sub_bottom_up_parallel([this, &cp, &bw, &visited_lg_table](Lgraph *lg_sub) {
+      auto lgid_sub = lg_sub->get_lgid();
+      if (visited_lg_table.find(lgid_sub) != visited_lg_table.end())
+        return;
+
+      fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+      cp.do_trans(lg_sub);
+      gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+
+      fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
+      bw.do_trans(lg_sub);
+      gviz ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
+
+      fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
+      cp.do_trans(lg_sub);
+      gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+
+      visited_lg_table.insert(lgid_sub);
+    });
+
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
     cp.do_trans(lg);
-    gviz ? gv.do_from_lgraph(lg, "cprop-ed2") : void();
+    gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
+
+    fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
+    bw.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
+
+    //  hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
+    cp.do_trans(lg);
+    gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
   }
 }
-
-void Lcompiler::prp_thread_local_cprop_bitwidth(Lgraph *lg, Cprop &cp, Bitwidth &bw) {
-
-  fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-0)\n", lg->get_name());
-  cp.do_trans(lg); 
-  // fmt::print("------------------------ Local Copy-Propagation ({})---------------------- (C-1)\n", lg->get_name());
-  // cp.do_trans(lg);
-  gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-
-  fmt::print("------------------------ Local Bitwidth-Inference ({})-------------------- (B-0)\n", lg->get_name());
-  bw.do_trans(lg); // should return a flag to identify extra cprop needed, and also need another cprop
-  gviz ? gv.do_from_lgraph(lg, "bitwidth-ed-0") : void();
-}
-
-
-// // TODO: try to make it work
-// void Lcompiler::do_local_cprop_bitwidth() {
-//   Cprop    cp(false);                                     // hier = false
-//   Bitwidth bw(false, 10, global_flat_bwmap, global_hier_bwmap);  // hier = false, max_iters = 10
-//   for (const auto &lg : lgs) {
-//     thread_pool.add(&Lcompiler::prp_thread_local_cprop_bitwidth, this, lg, cp, bw);
-//   }
-//   thread_pool.wait_all();
-// }
-
-
 
 
 
@@ -274,17 +242,26 @@ void Lcompiler::global_bitwidth_inference() {
 
   auto lgcnt = 0;
   auto hit   = false;
-  for (auto &lg : lgs) {
-    ++lgcnt;
-    if (lg->get_name() == top) {
-      hit = true;
-      fmt::print("---------------- Global Bitwidth-Inference ({}) ----------------- (GB)\n", lg->get_name());
+
+  // todo: when move to the new compressed bottom-up tree paralellism, you don't need to specify top
+  if (top == "") { // top will be specified only if it is a hierarchical design
+    I(lgs.size() == 1);  
+    for (auto &lg : lgs) {
       bw.do_trans(lg);
+      gviz ? gv.do_from_lgraph(lg, "") : void();
+    }
+  } else {
+    for (auto &lg : lgs) {
+      ++lgcnt;
+      if (lg->get_name() == top) {
+        hit = true;
+        fmt::print("---------------- Global Bitwidth-Inference ({}) ----------------- (GB)\n", lg->get_name());
+        bw.do_trans(lg);
+      }
+      gviz ? gv.do_from_lgraph(lg, "") : void();
     }
 
-    gviz ? gv.do_from_lgraph(lg, "") : void();
+    if (lgcnt > 1 && hit == false)
+      Pass::error("Top module not specified from multiple Pyrope source codes!\n");
   }
-
-  if (lgcnt > 1 && hit == false)
-    Pass::error("Top module not specified from multiple Pyrope source codes!\n");
 }

@@ -57,7 +57,6 @@ public:
   void do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>>);
   void do_local_cprop_bitwidth();
   void prp_thread_ln2lg(std::shared_ptr<Lnast> lnast);
-  void prp_thread_local_cprop_bitwidth(Lgraph *lg, Cprop &cp, Bitwidth &bw);
 
   void do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>>);
   void do_cprop();

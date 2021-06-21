@@ -65,11 +65,7 @@ void Pass_compiler::compile(Eprp_var &var) {
 
 void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
   compiler.do_prp_lnast2lgraph(var.lnasts);
-
-  // TODO: try to separate local cprop/bw out of do_prp_lnast2lgraph()
-  // compiler.do_local_cprop_bitwidth();
-
-  // FIXME: I think that global should be called only if top is set
+  compiler.do_local_cprop_bitwidth();
   compiler.global_bitwidth_inference();
 }
 
