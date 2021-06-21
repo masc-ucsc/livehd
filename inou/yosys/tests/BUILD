@@ -23,16 +23,19 @@ sh_test(
     ],
 )
 
-sh_test(
-    name = "verilog.sh",
-    size = "medium",  # give some extra time to the slow machines
-    srcs = ["tests/verilog.sh"],
+[sh_test(
+    name = "verilog.sh-%s" % t,
+    srcs = ["verilog.sh"],
+    args = ["$(location %s)" % t],
     data = [
-        ":lgshell",
-        "//inou/yosys:verilog_tests",
+        "%s" % t,
+        "//main:lgshell",
     ],
-    tags = ["fixme"],
+    tags = [
+        "fixme",
+        "verilog.sh",
+    ],
     deps = [
         "//inou/yosys:scripts",
     ],
-)
+) for t in VERILOG_TESTS]
