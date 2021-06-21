@@ -10,20 +10,25 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3 '
 
 
-pts='flatten_bundle hier_tuple reg_bits_set reg__q_pin hier_tuple_io hier_tuple3
-hier_tuple2 tuple_if ssa_rhs out_ssa attr_set if2 lhs_wire
-tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter
-adder_stage capricious_bits4 logic capricious_bits2 tuple_reg 
-scalar_reg_out_pre_declare firrtl_tail2 firrtl_tail firrtl_gcd_3bits 
-hier_tuple_nested_if3 hier_tuple_nested_if hier_tuple_nested_if4 
-hier_tuple_nested_if6 hier_tuple_nested_if7 bits_rhs hier_tuple_nested_if5
-nested_if counter_nested_if tuple_empty_attr tuple_reg2 get_mask1
-tuple_nested1 capricious_bits firrtl_tail3 struct_flop tuple_nested2 vec_shift_register_param'
+pts='flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin hier_tuple_io hier_tuple3
+tuple_if ssa_rhs out_ssa attr_set if2 lhs_wire
+tuple_copy if hier_tuple_nested_if2 lhs_wire2 tuple_copy2 counter 
+adder_stage logic tuple_empty_attr struct_flop 
+scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if
+hier_tuple_nested_if3 hier_tuple_nested_if4 hier_tuple_nested_if5
+hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail firrtl_gcd_3bits
+nested_if firrtl_tail3 counter_nested_if tuple_reg tuple_reg2
+tuple_nested1 tuple_nested2 get_mask1 vec_shift_register_param 
+hier_tuple2 capricious_bits capricious_bits2 capricious_bits4
+'
 
-#FIXME:
-#pts = 'scalar_tuple'
+# FIXME->Jose: these are the patterns require an extra cprop after bitwidth?
+# pts='hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
+
+# FIXME:
+# pts='scalar_tuple'
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
-# pts ='counter_mix'  
+# pts='counter_mix'  
 # pts='memory_1rd1wr'
 # pts='masked_smem'
 # pts='pp'

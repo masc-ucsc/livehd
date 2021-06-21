@@ -531,6 +531,11 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const std::strin
     auto curlvl = curr_index.level;  // for debugging message printing purposes only
     auto curpos = curr_index.pos;
     fmt::print("Processing op child {} at level {} pos {}\n", lnast->get_name(curr_index), curlvl, curpos);
+    //if it is shl subtree and it is doing left shift by 1 then do not store the "1"
+    if (lnast->get_type(op_node_index).is_shl() && (curpos==lnast->get_sibling_next(lnast->get_first_child(op_node_index)).pos)/*we are on 2nd child*/ && (lnast->get_name(curr_index)=="1") /*it is const 1*/ ) {
+      curr_index = lnast->get_sibling_next(curr_index);
+      continue;
+    }
     if (lnast->get_type(curr_index).is_const()) {
       Code_gen::const_vect.emplace_back(lnast->get_name(curr_index));
     }
@@ -565,7 +570,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const std::strin
       ref = process_number(ref);
     }
     // check if a number
-    if (op_is_unary) {
+    if (op_is_unary && lnast->get_type(op_node_index).is_shl()) {
+      /*do not append any op type*/
+    } else if (op_is_unary) {
       absl::StrAppend(&val, lnast_to->debug_name_lang(op_node_data.type));
     }
 
