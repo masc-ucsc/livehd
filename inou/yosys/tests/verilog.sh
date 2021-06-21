@@ -82,6 +82,8 @@ do
     echo "Successfully created graph from ${input}"
   else
     echo "FAIL: lgyosys parsing terminated with an error (testcase ${input})"
+    cat tmp_yosys/${input}.log
+    cat tmp_yosys/${input}.err
     ((fail++))
     fail_list+=" "$base
     continue
