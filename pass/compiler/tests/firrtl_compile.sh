@@ -1,58 +1,13 @@
 #!/bin/bash
+
 rm -rf ./lgdb
 
-pts_long_lec='GCD '
-
-pts_todo_advanced='Risc FPU ICache MemoryController Rob ICache
-HwachaSequencer RocketCore Ops Router'
-
-pts_mem='Smem_simple Stack DynamicMemorySearch Memo'
-
-
-if [ $# -eq 0 ]; then
-  echo "Default regression set"
-  # passed lofirrtl pattern pool
-  pts='Life Cell_alone RegisterSimple Register Adder4 Mux4 LogShifter
-  SingleEvenFilter RegXor AddNot VendingMachineSwitch Coverage VendingMachine
-  VecShiftRegister Counter VecSearch ResetShiftRegister Parity
-  EnableShiftRegister GCD_3bits Flop Accumulator LFSR16 BundleConnect SubModule
-  Decrementer Test1 Test2 Test3 Test6 TrivialAdd NotAnd Trivial Tail TrivialArith
-  Shifts PlusAnd MaxN ByteSelector Darken HiLoMultiplier SimpleALU Mul
-  VecShiftRegisterParam VecShiftRegisterSimple '
-
-  # passed hifirrtl pattern pool
+file=$(basename $1)
+if [ "${file#*.}" == "${file}" ]; then
   PATTERN_PATH=./inou/firrtl/tests/proto
-  # FIRRTL_LEVEL='lo'
   FIRRTL_LEVEL='hi'
-
-  pts='Test2 VecShiftRegisterSimple VecShiftRegisterParam VecShiftRegister Cell_alone
-  Accumulator Coverage LFSR16 TrivialAdd VendingMachineSwitch
-  VendingMachine Trivial Tail TrivialArith NotAnd Shifts Darken HiLoMultiplier
-  AddNot GCD_3bits Test3 Register RegisterSimple Parity ResetShiftRegister
-  SimpleALU ByteSelector MaxN Max2 Flop EnableShiftRegister LogShifter
-  Decrementer Counter RegXor BundleConnect SubModule
-  SingleEvenFilter Xor6Thread2 XorSelfThread1 PlusAnd Mux4 Adder4'
-
-
-  # issue1: run-time vector index
-  # pts='Test1 VecSearch Mul'                 
-
-  # issue2: io_state_0 index _0 missing
-  # pts='Life'                  
-
-  # issue3: memory
-  # pts='Smem SmemStruct MaskedSmem MaskedSmemStruct Router ListBuffer'
-
-  # issue4: IO not begin with named io
-  # pts='IntXbar'
-
-  # issue5: partial connect
-
-  # issue6: multi-threaded
-  # pts='SingleEvenFilter'
-
+  pts="$1"
 else
-  file=$(basename $1)
   if [ "${file#*.}" == "hi.pb" ]; then
     echo "Using High Level FIRRTL"
     pts=$(basename $1 ".hi.pb")
@@ -76,8 +31,6 @@ else
     exit 1
   fi
 fi
-
-
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
