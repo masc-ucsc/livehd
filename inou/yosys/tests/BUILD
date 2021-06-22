@@ -1,8 +1,20 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-VERILOG_TESTS = glob([
-    "*.v",
-])
+VERILOG_TESTS = glob(
+    [
+        "*.v",
+    ],
+    exclude = [
+        "fixme*",
+        "long*",
+    ],
+)
+
+VERILOG_LONG_TESTS = glob(
+    [
+        "long*.v",
+    ],
+)
 
 filegroup(
     name = "verilog_tests",
@@ -39,3 +51,20 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in VERILOG_TESTS]
+
+[sh_test(
+    name = "verilog.sh-%s" % t,
+    srcs = ["verilog.sh"],
+    args = ["$(location %s)" % t],
+    data = [
+        "%s" % t,
+        "//main:lgshell",
+    ],
+    tags = [
+        "fixme",
+        "verilog.sh-long",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+) for t in VERILOG_LONG_TESTS]
