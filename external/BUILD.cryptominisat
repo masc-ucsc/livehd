@@ -6,23 +6,28 @@ cc_library(
     name = "cryptominisat",
     srcs = glob(
         [
-            "cryptominisat5/*.cpp",
-            "cryptominisat5/*.c",
+            "src/*.cpp",
+            "src/*.c",
         ],
         exclude = [
-            "cryptominisat5/toplevelgauss.cpp",
-            "cryptominisat5/main*.cpp",
-            "cryptominisat5/watcharray_*.cpp",
-            "cryptominisat5/fuzz*.cpp",
-            "cryptominisat5/sqlitestats.cpp",
-            "cryptominisat5/gatefinder.cpp",
-            "cryptominisat5/cl_predictors.cpp",
-            "cryptominisat5/cms_bosphorus.cpp",  # No MIT
-            "cryptominisat5/datasyncserver.cpp",  # No MPI
-            "cryptominisat5/cms_breakid.cpp",  # No breakid compile option
+            "src/toplevelgauss.cpp",
+            "src/main*.cpp",
+            "src/watcharray_*.cpp",
+            "src/fuzz*.cpp",
+            "src/sqlitestats.cpp",
+            "src/gatefinder.cpp",
+            "src/cl_predictors.cpp",
+            "src/cms_bosphorus.cpp",  # No MIT
+            "src/datasyncserver.cpp",  # No MPI
+            "src/cms_breakid.cpp",  # No breakid compile option
         ],
     ),
-    hdrs = glob(["cryptominisat5/*.h"]),
+    hdrs = glob(
+        [
+            "src/*.h",
+            "include/cryptominisat5/*.h",
+        ],
+    ),
     copts = [
         "-w",
         "-O2",
@@ -31,6 +36,9 @@ cc_library(
         "USE_GAUSS",
         "USE_ZLIB",
         "cryptominisat5_EXPORTS",
+    ],
+    includes = [
+        "include",
     ],
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
