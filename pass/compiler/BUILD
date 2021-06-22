@@ -47,6 +47,7 @@ sh_test(
     ],
 )
 
+# High Level FIRRTL
 [sh_test(
     name = "firrtl_compile-%s" % t,
     srcs = ["tests/firrtl_compile.sh"],
@@ -57,7 +58,10 @@ sh_test(
         "//inou/firrtl:post_io_renaming.py",
         "//main:lgshell",
     ],
-    tags = ["firrtl_compile"],
+    tags = [
+        "firrtl_compile",
+        "firrtl_compile-hi",
+    ],
     deps = [
         "//inou/yosys:scripts",
     ],
@@ -105,6 +109,40 @@ sh_test(
     "PlusAnd",
     "Mux4",
     "Adder4",
+]]
+
+# FIXME:
+# Experimental Chirrtl extension
+[sh_test(
+    name = "firrtl_compile-%s" % t,
+    srcs = ["tests/firrtl_compile.sh"],
+    args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
+    data = [
+        "//inou/firrtl:tests/proto/%s.ch.pb" % t,
+        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
+        "//inou/firrtl:post_io_renaming.py",
+        "//main:lgshell",
+    ],
+    tags = [
+        "firrtl_compile",
+        "firrtl_compile-ch",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+) for t in [
+    # "Arbiter_10",
+    # "BankedStore",
+    # "BoomDuplicatedDataArray",
+    # "DynamicMemorySearch",
+    # "IntXbar",
+    # "ListBuffer",
+    # "MaskedSmem",
+    # "MaskedSmemStruct",
+    # "Memo",
+    # "Router",
+    # "Smem",
+    # "SmemStruct",
 ]]
 
 sh_test(
