@@ -57,51 +57,6 @@ cc_binary(
     ],
 )
 
-sh_test(
-    name = "lgshell_test.sh",
-    srcs = ["tests/lgshell_test.sh"],
-    data = [
-        ":lgshell",
-        "//inou/yosys:verilog_tests",
-    ],
-    tags = ["fixme"],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "verilog.sh",
-    size = "medium",  # give some extra time to the slow machines
-    srcs = ["tests/verilog.sh"],
-    data = [
-        ":lgshell",
-        "//inou/yosys:verilog_tests",
-    ],
-    tags = ["fixme"],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
-sh_test(
-    name = "verilog.sh-long",
-    size = "large",
-    srcs = ["tests/verilog.sh"],
-    args = ["long"],
-    data = [
-        ":lgshell",
-        "//inou/yosys:verilog_tests",
-    ],
-    tags = [
-        "fixme",
-        "long1",
-    ],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
-
 cc_library(
     name = "tmt",
     srcs = ["tmt_test.cpp"],

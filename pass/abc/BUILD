@@ -37,7 +37,7 @@
 #     srcs = ["tests/abc.sh"],
 #     data = [
 #         "//inou/yosys:liblgraph_yosys.so",
-#         "//inou/yosys:verilog_tests",
+#         "//inou/yosys/tests:verilog_tests",
 #         "//main:lgshell",
 #     ],
 #     deps = [

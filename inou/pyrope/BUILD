@@ -34,7 +34,7 @@ sh_test(
     srcs = ["tests/pyrope_test.sh"],
     data = [
         ":pyrope_tests",
-        "//inou/yosys:verilog_tests",
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
     ],
     tags = ["fixme"],

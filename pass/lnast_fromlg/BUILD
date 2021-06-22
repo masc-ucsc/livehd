@@ -23,7 +23,7 @@ sh_test(
     name = "lgtoln_verif_from_verilog.sh",
     srcs = ["tests/lgtoln_verif_from_verilog.sh"],
     data = [
-        "//inou/yosys:verilog_tests",
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
     ],
     tags = ["fixme"],
