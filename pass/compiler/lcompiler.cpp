@@ -207,7 +207,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
   std::set<Lg_type_id> visited_lg_table;
   for (auto &lg : lgs) {
     ++lgcnt;
-    // bottom up approach to parallelly do cprop, start from top. Note that since we could start from top in firrtl, the visitation will never duplicated
+    // bottom up approach to parallelly do cprop, start from top. Since we could start from top in firrtl, the visitation will never duplicated
     if (lg->get_name() == top_name_before_firmap) {
       hit = true;
       // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
