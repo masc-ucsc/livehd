@@ -50,9 +50,11 @@ sh_test(
 [sh_test(
     name = "firrtl_compile-%s" % t,
     srcs = ["tests/firrtl_compile.sh"],
-    args = ["%s" % t],
+    args = ["$(location //inou/firrtl:tests/proto/%s.hi.pb)" % t],
     data = [
-        "//inou/firrtl:firrtl_tests",
+        "//inou/firrtl:tests/proto/%s.hi.pb" % t,
+        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
+        "//inou/firrtl:post_io_renaming.py",
         "//main:lgshell",
     ],
     tags = ["firrtl_compile"],
