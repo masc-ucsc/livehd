@@ -22,7 +22,7 @@
 #include "spmc.hpp"
 #endif
 
-#define DISABLE_THREAD_POOL
+// #define DISABLE_THREAD_POOL
 
 template <class Func, class... Args>
 inline auto forward_as_lambda(Func &&func, Args &&...args) {

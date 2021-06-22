@@ -243,7 +243,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     visited[data.lgid] = 0;
 
     auto *lg = Lgraph::open(path, data.lgid);
-    if (lg != nullptr)
+    if (lg != nullptr && !lg->is_empty())
       next_round.emplace_back(lg);
 
     auto index = href.get_parent(hidx);
@@ -286,7 +286,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
       I(level == it->second);
 
       auto *lg = Lgraph::open(path, it->first);
-      if (lg != nullptr)
+      if (lg != nullptr && !lg->is_empty())
         next_round.emplace_back(lg);
       it = visited.erase(it);
     }

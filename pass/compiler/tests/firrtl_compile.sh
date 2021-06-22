@@ -45,7 +45,7 @@ firrtl_test() {
   echo ""
   echo ""
   echo "======================================================================"
-  echo "                         HiFIRRTL Full Compilation"
+  echo "                         ${FIRRTL_LEVEL}FIRRTL Full Compilation"
   echo "======================================================================"
   for pt in $1
   do

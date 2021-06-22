@@ -65,8 +65,8 @@ void Pass_compiler::compile(Eprp_var &var) {
 
 void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
   compiler.do_prp_lnast2lgraph(var.lnasts);
-  compiler.do_local_cprop_bitwidth();
-  compiler.global_bitwidth_inference();
+  compiler.do_prp_local_cprop_bitwidth();
+  compiler.do_prp_global_bitwidth_inference();
 }
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
@@ -77,9 +77,9 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
   compiler.do_firmap_bitwidth();
 #else
   compiler.do_fir_lnast2lgraph(var.lnasts);
-  compiler.do_cprop();
-  compiler.do_firbits();
-  compiler.do_firmap_bitwidth();
+  compiler.do_fir_cprop();
+  compiler.do_fir_firbits();
+  compiler.do_fir_firmap_bitwidth();
 #endif
 }
 
