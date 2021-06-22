@@ -220,28 +220,9 @@ void Lcompiler::do_firmap_bitwidth() {
     Pass::error("Top module not specified for firrtl codes!\n");
 
   lgs = mapped_lgs;
-
-  // for (auto &lg : lgs) {
-  //   thread_pool.add(&Lcompiler::fir_thread_firmap_bw, this, lg, bw, mapped_lgs);
-  // }
-  // lgs = mapped_lgs;
 }
 
-void Lcompiler::fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgraph *> &mapped_lgs) {
-  Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
-  fmt::print("---------------- Firrtl Op Mapping ({}) --------------- (F-2)\n", lg->get_name());
-  auto new_lg = fm.do_firrtl_mapping(lg);
-  gviz ? gv.do_from_lgraph(new_lg, "gioc.firmap-ed") : void();
 
-  fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", new_lg->get_name());
-  bw.do_trans(new_lg);
-
-  gviz ? gv.do_from_lgraph(new_lg, "") : void();
-
-  mapped_lgs.emplace_back(new_lg);
-}
-
-// TODO: move to multithreaded later
 void Lcompiler::do_firbits() {
   auto lgcnt                   = 0;
   auto hit                     = false;

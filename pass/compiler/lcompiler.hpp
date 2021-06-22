@@ -56,7 +56,6 @@ public:
   void do_firmap_bitwidth();
   void fir_thread_ln2lg(std::shared_ptr<Lnast> lnast);
   void fir_thread_cprop(Lgraph *lg, Cprop &cp);
-  void fir_thread_firmap_bw(Lgraph *lg, Bitwidth &bw, std::vector<Lgraph *> &mapped_lgs);
 
   std::string_view      get_top() { return top; };
   std::vector<Lgraph *> get_lgraphs() { return lgs; }
