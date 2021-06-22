@@ -3,33 +3,27 @@
 rm -rf ./lgdb
 
 file=$(basename $1)
-if [ "${file#*.}" == "${file}" ]; then
-  PATTERN_PATH=./inou/firrtl/tests/proto
+if [ "${file#*.}" == "hi.pb" ]; then
+  echo "Using High Level FIRRTL"
+  pts=$(basename $1 ".hi.pb")
   FIRRTL_LEVEL='hi'
-  pts="$1"
+elif [ "${file#*.}" == "lo.pb" ]; then
+  echo "Using Low Level FIRRTL"
+  pts=$(basename $1 ".lo.pb")
+  FIRRTL_LEVEL='lo'
+elif [ "${file#*.}" == "ch.pb" ]; then
+  pts=$(basename $1 ".ch.pb")
+  FIRRTL_LEVEL='ch'
+  echo "Warning: Experimental Chirrtl extension"
 else
-  if [ "${file#*.}" == "hi.pb" ]; then
-    echo "Using High Level FIRRTL"
-    pts=$(basename $1 ".hi.pb")
-    FIRRTL_LEVEL='hi'
-  elif [ "${file#*.}" == "lo.pb" ]; then
-    echo "Using Low Level FIRRTL"
-    pts=$(basename $1 ".lo.pb")
-    FIRRTL_LEVEL='lo'
-  elif [ "${file#*.}" == "ch.pb" ]; then
-    pts=$(basename $1 ".ch.pb")
-    FIRRTL_LEVEL='ch'
-    echo "Warning: Experimental Chirrtl extension"
-  else
-    echo "Illegal FIRRTL extension. Either ch.pb, hi.pb or lo.pb"
-    exit 1
-  fi
+  echo "Illegal FIRRTL extension. Either ch.pb, hi.pb or lo.pb"
+  exit 1
+fi
 
-  PATTERN_PATH=$(dirname $1)
-  if [ -f "${PATTERN_PATH}/${file}.${FIRRTL_LEVEL}.pb" ]; then
-    echo "Could not access test ${pts} at path ${PATTERN_PATH}"
-    exit 1
-  fi
+PATTERN_PATH=$(dirname $1)
+if [ -f "${PATTERN_PATH}/${file}.${FIRRTL_LEVEL}.pb" ]; then
+  echo "Could not access test ${pts} at path ${PATTERN_PATH}"
+  exit 1
 fi
 
 LGSHELL=./bazel-bin/main/lgshell
