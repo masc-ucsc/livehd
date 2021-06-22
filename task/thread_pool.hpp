@@ -3,6 +3,8 @@
 
 #include <unistd.h>
 
+#include <stdio.h>
+
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -119,11 +121,18 @@ public:
     thread_count = _thread_count;
     size_t lim   = (std::thread::hardware_concurrency() - 1);  // -1 for calling thread
 
-    if (thread_count > lim || thread_count == 0)
+    if (thread_count > lim || thread_count == 0) {
+      auto *var =getenv("LIVEHD_THREADS");
+      if (var) {
+        lim = atoi(var);
+        printf("LIVEHD_THREADS set to %ld\n", lim);
+      }
       thread_count = lim;
+    }
 
     if (thread_count < 2)
       thread_count = 2;
+
 
     assert(thread_count);
 
