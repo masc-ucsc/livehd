@@ -379,7 +379,10 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
       I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
       auto pos = to_pos[sub_lg->get_lgid()];
 
-      EXPECT_EQ(all_visited[pos], 1); // already visited
+      if (sub_lg->is_empty())
+        EXPECT_EQ(all_visited[pos], 0); // not visited
+      else
+        EXPECT_EQ(all_visited[pos], 1); // already visited
 
       return true; // continue
     });
