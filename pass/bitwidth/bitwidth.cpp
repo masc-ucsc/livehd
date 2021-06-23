@@ -1280,6 +1280,7 @@ void Bitwidth::set_graph_boundary(const Node_pin &dpin, Node_pin &spin) {
 
 void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
   (void)node;
+  (void)dpin;
 #ifndef NDEBUG
   if (dpin.has_name()) {
     fmt::print("BW-> gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
