@@ -181,11 +181,34 @@ void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
 
 
 void Lcompiler::do_fir_cprop() {
-  for (auto &lg : lgs) 
-    thread_pool.add(&Lcompiler::fir_thread_cprop, this, lg);
-  
-  thread_pool.wait_all();
+  auto lgcnt                   = 0;
+  auto hit                     = false;
+  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
+
+  // hierarchical traversal
+  for (auto &lg : lgs) {
+    ++lgcnt;
+    // bottom up approach to parallelly analyze the firbits
+    if (lg->get_name() == top_name_before_mapping) {
+      hit = true;
+      lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
+        Cprop    cp(false);      
+        fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg_sub->get_name());
+        cp.do_trans(lg_sub);
+        gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+      });
+
+      // for top lgraph
+      Cprop    cp(false);      
+      fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg->get_name());
+      cp.do_trans(lg);
+      gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
+    }
+  }
+  if (lgcnt > 1 && hit == false)
+    Pass::error("Top module not specified for firrtl codes!\n");
 }
+
 
 void Lcompiler::fir_thread_cprop(Lgraph* lg) {
   Cprop cp(false); 
@@ -204,7 +227,6 @@ void Lcompiler::do_fir_firmap_bitwidth() {
   auto  hit   = false;
   auto  top_name_before_firmap = absl::StrCat("__firrtl_", top);
 
-  std::set<Lg_type_id> visited_lg_table;
   for (auto &lg : lgs) {
     ++lgcnt;
     // bottom up approach to parallelly do cprop, start from top. Since we could start from top in firrtl, the visitation will never duplicated
@@ -268,7 +290,6 @@ void Lcompiler::do_fir_firbits() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-
       lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
         fmt::print("-------- {:<28} ({:<30}) -------- (F-0)\n", "Firrtl Bits Analysis", lg_sub->get_name());
