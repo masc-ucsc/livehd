@@ -1567,7 +1567,7 @@ std::string Inou_firrtl::ReturnExprString(Lnast& lnast, const firrtl::FirrtlPB_E
         auto tmp_sv = create_tmp_var(lnast);
         HandleBundVecAcc(lnast, expr, parent_node, true, Lnast_node::create_ref(tmp_sv));
         expr_string = tmp_sv;
-      }else{
+      } else {
         I(!value_node.is_invalid());
         expr_string = "__INVALID__";
         HandleBundVecAcc(lnast, expr, parent_node, false, value_node);
