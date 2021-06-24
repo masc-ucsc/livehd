@@ -81,15 +81,6 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
           Pass::error("graph {} could not converge bw/cprop in {} iterations", lg_sub->get_name(), n_iters);
         }
       }
-
-#if 1 
-      // FIXME: needed until pending patch
-      // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
-      fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
-      cp.do_trans(lg_sub);
-      gviz ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-#endif
-
     });
 
     Bitwidth bw(false, 10);  // hier = false, max_iters = 10

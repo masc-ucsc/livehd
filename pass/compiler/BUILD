@@ -131,12 +131,22 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in [
+    # issue1: runtime vector index
+    # "Test1 VecSearch Mul"
+    
+    # issue2: io_state_0 index _0 missing
+    # "Life"
+
+    # issue3: memory
+    # "Smem SmemStruct MaskedSmem MaskedSmemStruct Router ListBuffer"
+
+    # issue4: IO not begin with name io
+    # "IntXbar"
+
     # "Arbiter_10",
     # "BankedStore",
     # "BoomDuplicatedDataArray",
     # "DynamicMemorySearch",
-    # "IntXbar",
-    # "ListBuffer",
     # "MaskedSmem",
     # "MaskedSmemStruct",
     # "Memo",

@@ -900,39 +900,30 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     return;
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     // note: instead of using alter_full_str, I use flattened_str.
+    fmt::print("DEBUG0 flattened_str:{}\n", flattened_str);
     auto inst_name = flattened_str.substr(0, flattened_str.find("."));
-    if (inst_name.substr(0, 2) == "_T") {
+    if (inst_name.substr(0, 2) == "_T") 
       inst_name = absl::StrCat("_.", inst_name);
-    }
+    
     auto        str_without_inst = flattened_str.substr(flattened_str.find(".") + 1);
     auto        first_field_name = str_without_inst.substr(0, str_without_inst.find("."));
     std::string str_without_inst_and_io{str_without_inst};
+    bool        is_hier_io = false; 
     auto        str_pos = str_without_inst.find('.');
     if (str_pos != std::string::npos) {
       str_without_inst_and_io = str_without_inst.substr(str_pos + 1);
+      is_hier_io = true;
     }
+
+
     auto module_name = inst_to_mod_map[inst_name];
     auto dir         = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
-    // note: here I assume all module io will start from a hierarchy call "IO" in all firrtl module
-    // FIXME->sh: wrong assumption, check failing cases in BOOM.hifir
-
-    if (first_field_name == "io") {
+    if (is_hier_io) {
       if (dir == 1) {  // PORT_DIRECTION_IN
-        // flattened_str = absl::StrCat("itup_", inst_name, ".inp_io.", str_without_inst_and_io);
-        flattened_str = absl::StrCat("itup_", inst_name, ".io.", str_without_inst_and_io);
+        flattened_str = absl::StrCat("itup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
       } else if (dir == 2) {
-        // flattened_str = absl::StrCat("otup_", inst_name, ".out_io.", str_without_inst_and_io);
-        flattened_str = absl::StrCat("otup_", inst_name, ".io.", str_without_inst_and_io);
-      } else {
-        Pass::error("direction unknown of {}\n", flattened_str);
-        I(false);
-      }
-    } else {           // something like clock, reset, ... etc
-      if (dir == 1) {  // PORT_DIRECTION_IN
-        flattened_str = absl::StrCat("itup_", flattened_str);
-      } else if (dir == 2) {
-        flattened_str = absl::StrCat("otup_", flattened_str);
+        flattened_str = absl::StrCat("otup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
       } else {
         Pass::error("direction unknown of {}\n", flattened_str);
         I(false);
@@ -943,7 +934,7 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   I(flattened_str.find("."));
   if (is_rhs) {
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
-  }else{
+  } else {
     CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
   }
 }
