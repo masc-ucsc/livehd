@@ -577,18 +577,21 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const std::strin
     } else if (op_is_unary) {
       absl::StrAppend(&val, lnast_to->debug_name_lang(op_node_data.type));
     }
-
+    
+    bool ref_is_const = false;
     // TODO:check if ref is const type (used for masking) or not
-    if ((std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end())
-        && (lnast_to->is_unsigned(op_str_vect[i - 1]))) {
-      fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
-      auto bw_num = Lconst(ref);  //(int)log2(ref)+1;
-      fmt::print("{}\n", bw_num.get_bits());
-      ref = absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref, ")");
+    if (std::find(const_vect.begin(), const_vect.end(), ref) != const_vect.end()) {
+      ref_is_const = true;
+      if (lnast_to->is_unsigned(op_str_vect[i - 1])) {
+        fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
+        auto bw_num = Lconst(ref);  //(int)log2(ref)+1;
+        fmt::print("{}\n", bw_num.get_bits());
+        ref = absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref, ")");
+      }
     }
 
     if(op_type=="tup_concat") {
-      absl::StrAppend(&val, lnast_to->str_qoute(is_pos_int(ref)), lnast_to->ref_name(ref), lnast_to->str_qoute(is_pos_int(ref)));
+      absl::StrAppend(&val, lnast_to->str_qoute(!is_pos_int(ref) && ref_is_const), lnast_to->ref_name(ref), lnast_to->str_qoute(!is_pos_int(ref) && ref_is_const));
     } else {
       absl::StrAppend(&val, lnast_to->ref_name(ref));
     }
