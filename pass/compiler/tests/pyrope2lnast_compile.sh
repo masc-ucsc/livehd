@@ -11,8 +11,8 @@ pts_after_micro='hier_tuple4 tuple_reg3'
 
 
 pts='scalar_tuple flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
-hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy
-if lhs_wire2 tuple_copy2 counter adder_stage logic tuple_empty_attr if2
+hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if
+lhs_wire2 tuple_copy2 counter adder_stage logic tuple_empty_attr if2
 scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if3
 hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
 nested_if counter_nested_if tuple_reg tuple_reg2 tuple_nested1 tuple_nested2
@@ -20,7 +20,7 @@ get_mask1 vec_shift_register_param hier_tuple2 capricious_bits
 capricious_bits2 capricious_bits4 hier_tuple_nested_if hier_tuple_nested_if2
 struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3 
 '
-
+# 
 
 # FIXME->Jose: these are the patterns require an extra cprop after bitwidth?
 # pts='hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
@@ -73,8 +73,14 @@ Pyrope_compile_LL_LN () {
         exit 1
     fi
 
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "PRP -> LNAST -> LGraph"
+    echo "----------------------------------------------------"
     #PRP->LN->LG
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb2"
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb2 |> lgraph.dump"
     
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -82,8 +88,14 @@ Pyrope_compile_LL_LN () {
       exit $ret_val
     fi
     
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph -> LNAST -> LGraph"
+    echo "----------------------------------------------------"
     #LG->LN->LG
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> pass.compiler gviz:true top:${pt}"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> lnast.dump |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -104,7 +116,7 @@ Pyrope_compile_LL_LN () {
     echo "----------------------------------------------------"
 
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb/ |> inou.cgen.verilog"
     if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
         echo "Successfully generate Verilog: ${pt}.v"
         rm -f  yosys_script.*
@@ -246,6 +258,7 @@ Pyrope_compile_LL_LN "$pts"
  
 rm -f *.v
 rm -f ./*.dot
+rm -f ./*.dot.pdf
 rm -f ./lgcheck*
 rm -f ./*.tcl
 rm -f logger_*.log
