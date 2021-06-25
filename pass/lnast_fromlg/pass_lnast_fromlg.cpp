@@ -519,7 +519,13 @@ void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, co
 }
 
 void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  auto node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
+  Lnast_nid node_idx;
+  switch (pin.get_node().get_type_op()) {
+    case Ntype_op::Get_mask: node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask()); break;
+    case Ntype_op::Set_mask: node_idx = lnast.add_child(parent_node, Lnast_node::create_set_mask()); break;
+    default: Pass::error("Error: invalid node type in attach_ordered_node");
+  }
+  //auto node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
   lnast.add_child(node_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));  // Dest
 
   for (const auto& e : pin.get_node().inp_edges_ordered()) {
