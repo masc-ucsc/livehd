@@ -1,6 +1,124 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+// Vector n-ary tree implementation:
+//
+// 2 arrays: main and overflow
+//
+// mmap: overflow (under 32K entries continuous) : main array
+//
+// main array:
+//
+//  * A int16_t per entry (<0 points to overflow), >0 is the tree level (0 deleted/unused)
+//  * Nodes in array using post-order, Entry is the level
+//
+// Capacity to print a bit like "tree" (but in post-order)
+//Index: NextSibling: Level : Tree
+//00: +7, 2 -── 1.1
+//01: +1, 4 │       -── 1.2.1.1
+//02: +3, 4 │       ├── 1.2.1.2
+//03: +1, 5 │       |   -── 1.2.1.3.1
+//04: +0, 5 │       |   |── 1.2.1.3.2
+//05: +0, 4 │       |── 1.2.1.3
+//06: +0, 3 │   -── 1.2.1
+//07: +6, 2 ├── 1.2
+//08: +1, 4 │       -── 1.3.1.1
+//09: +1, 4 │       |── 1.3.1.2
+//0a: +1, 3 │   -── 1.3.1
+//0b: +1, 3 │   ├── 1.3.2
+//0c: +0, 3 │   ├── 1.3.3
+//0d: +6, 2 ├── 1.3
+//0e: +3, 3 │   -── 1.4.1
+//0f: +1, 4 │   │   -── 1.4.2.1
+//10: +0, 4 │   │   |── 1.4.2.2
+//11: +1, 3 │   ├── 1.4.2
+//12: +0, 3 │   ├── 1.4.3
+//13: +0, 2 ├── 1.4
+//14: +0, 1 | 1
+//
+// API: find_siblings
+//  while(l[pos]<self_level) {
+//    if (l[pos] == self_level)
+//      add_to_sibling list
+//    ++pos
+//  }
+//
+// API: find_parent
+//  while(l[pos]!=self_level+1) {
+//    ++pos
+//  }
+//  pos is parent (unless root which has no parent)
+//
+// API: find_children
+//  while(l[pos]<self_level) {
+//    if (l[pos] == self_level-1)
+//      add_to_children list
+//    --pos
+//  }
+//
+// ------------------------------------------------------
+// ALTERNATIVE ORDER: (children_first traversal)
+// visit:
+//   visit children(...)
+//   print children()
+// Index: first Child, parent
+//01: 00, 05 │           -── 1.2.1.3.1
+//02: 00, 05 │           -── 1.2.1.3.2
+//03: 00, 06 │       -── 1.2.1.1
+//04: 00, 06 │       ├── 1.2.1.2
+//05: 02, 06 │       |── 1.2.1.3
+//06: 03, 12 │   -── 1.2.1
+//07: 00, 09 │       -── 1.3.1.1
+//08: 00, 09 │       |── 1.3.1.2
+//09: 08, 13 │   -── 1.3.1
+//0a: 00, 13 │   ├── 1.3.2
+//0b: 00, 13 │   ├── 1.3.3
+//0c: 00, 0e │   │   -── 1.4.2.1
+//0d: 00, 0e │   │   -── 1.4.3.1
+//0e: 00, 14 │   -── 1.4.1
+//0f: 0c, 14 │   ├── 1.4.2
+//10: 0d, 14 │   ├── 1.4.3
+//11: 00, 15 -── 1.1
+//12: 06, 15 ├── 1.2
+//13: 09, 15 ├── 1.3
+//14: 0e, 15 ├── 1.4
+//15: 11, 00 | 1
+//
+// API: find_next_siblings
+//  while(parent[++pos]==parent[self]) {
+//    add_to_sibling list
+//  }
+//
+// API: find_prev_siblings
+//  while(parent[--pos]==parent[self]) {
+//    add_to_sibling list
+//  }
+//
+// API: find_parent
+//  parent[pos]
+//
+// API: find_children
+//  from = fc[pos]
+//  while(parent[from++] == pos) {
+//    add_to_children list
+//  }
+//
+//  API: find_last_child()
+//    bin-search between fc[pos] and pos-1 last child
+//    (have a small cache to repeated inserts at the end?. std::map<> last_child_of
+//
+// API: insert_child_next_to
+//    insert after, keep same parent
+//
+// API: insert_first_child
+//    insert before fc[pos], update fc[pos]--
+//
+// API: insert_last_child
+//    find last_child, insert after
+//
+// API: add_child (first child or insert_last_child)
+
+
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>

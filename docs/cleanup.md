@@ -23,6 +23,9 @@ Besides moving mmap_lib, we may want:
   unordered. Also, the lg implies only a Lgraph structure but LNAST should use
   it too for emulation.
 
+* Rename lconst to lops (livehd cell ops). Other implementations would be sops
+  (static C++), vops (verilog),  and jops (javascript)
+
 ### Pyrope parser
 
 There are some bugs on the pyrope parser when dealing with ranges. This works:

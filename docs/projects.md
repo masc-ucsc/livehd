@@ -888,3 +888,100 @@ elimination in LNAST. There are several reasons:
 * Doing code simplification early (LNAST is the earliest) reduces workload/steps in successive passes.
 * The simulation saves checkpoints, a LNAST Opt without dead code elimination would be useful to create the intermediate values for debugging.
 
+# Other non critical projects
+
+## C++ Text Waveform viewer
+
+A C++ library that can display short waveforms in text. A bit like pyRTL
+waveforms
+https://raw.githubusercontent.com/UCSBarchlab/PyRTL/master/docs/screenshots/pyrtl-statemachine.png?raw=true
+
+The C++ API has things like
+
+* add_monitor("var")
+* del_monitor("var")
+* show(from, totime)
+* Read a vcd file
+* update("var", time, value)
+* get("var", time) // returns value
+
+## Zoom drom viewer
+
+ Help with https://github.com/wavedrom/zoom
+
+## HIDE drom
+
+ Add Pyrope to https://github.com/drom/atom-hide
+
+## C++ Cell library with static bit sizes
+
+LiveHD has Lgraph cells and LNAST ops as basic operations. Each Lgraph cell has
+an equivalent LNAST operation, but some LNAST operations do not have a one to
+one mapping to Lgraph cells.
+
+lops (currently called lconst) performs cell and LNAST operations. Typical cell
+operations are sum_op, xor_op... 
+
+lops can be used early in the compilation flow, and as such it does not know
+the bit sizes of the operations. It dynamically allocates memory as needed.
+This is great for flexibility but not for performance.
+
+After the bitwidth pass, before code generation, we know all the bit sizes. A
+more efficient C++ library could be used. ESSENT uint/sint have the same
+optimization. The goal is to create a new sconst (static const) quite similar
+to sint but that performs the LiveHD operations. Some operations like divide
+could be shared with the original sint library, but most need a new
+implementation.
+
+The new sconst.hpp will reside in simlib next to sint.hpp and a dedicated unit
+test could be placed at lemu/tests so that the results are compared against
+lops.
+
+## Javascript Cell library (jops)
+
+LiveHD has cell operations. Typical cell operations are sum_op, xor_op... 
+
+sops is another project to implement the cell with static bit sizes known only
+at the end of the compilation. The goal of this project is to create a
+Javascript version of lops (not sops that needs bit sizes). The goal is that
+a translation from LiveHD to javascript could use this library.
+
+Javascript is adding a new BigInt in the language
+(https://tc39.es/proposal-bigint/), so the idea is to leverage it. 
+
+A good wrapper library (with support for JS without BitInt) is
+https://github.com/peterolson/BigInteger.js
+
+Once
+
+## Verilog Cell library (vops)
+
+The idea is that for each sops there can be an equivalent verilog. Like sops,
+Verilog requires to know the bit size. This is the reason why vops is closer to
+sops.
+
+Notice that the vops is in fact a technology map library for the cells in
+LiveHD.
+
+## Fast Pyrope ASCII to value
+
+ * Translating from strings to constants is a common operation. Create a
+   "simd"-like optimized string to constant for Pyrope constants.
+
+## Jupyter or Polybook for LiveHD
+
+## Tutorial platform
+
+* Execute markdown
+* asciinema
+* slidev
+
+## Hiearchical Inspector
+
+The idea is to have a hierarchy view/debug support. Some exmples in javascript:
+https://github.com/wavedrom/inspect or https://8bitworkshop.com "Debug Tree".
+
+There are 2 parts of this project. Interface LiveHD with inspect and to create
+a C++ version with terminal output (so that we can interface with future
+terminal C++ wave).
+
