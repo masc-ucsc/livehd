@@ -243,12 +243,12 @@ void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool 
    *          dot                    assign
    *     /     |     \               /    \
    * tmp_var pin_name __bits     tmp_var  const(bits)  */
-  /*26March2021: updated LN type:
-   *                 attr_set
+  /*25June2021: updated LN type:
+   *                 tuple_add
    *         /          |         \
    *  ref:pin_name const: __sbits  const(bits)*/
 
-  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_attr_set());
+  auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(idx_dot, Lnast_node::create_ref(lnast.add_string(pin_name)));
   // if (!pin.is_io_sign() || is_pos) {
   if (is_pos) {
