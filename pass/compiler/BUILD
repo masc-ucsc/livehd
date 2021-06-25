@@ -36,12 +36,13 @@ sh_test(
 )
 
 sh_test(
-    name = "pyrope2pyrope_compile",
-    srcs = ["tests/pyrope2pyrope_compile.sh"],
+    name = "pyrope2lnast_compile",
+    srcs = ["tests/pyrope2lnast_compile.sh"],
     data = [
         "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
+    tags = ["fixme"],
     deps = [
         "//inou/yosys:scripts",
     ],

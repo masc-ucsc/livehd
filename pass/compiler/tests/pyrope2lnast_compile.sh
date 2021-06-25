@@ -7,7 +7,7 @@ pts_tuple_dbg='lhs_wire3 funcall_unnamed2
 pts_long_time='firrtl_gcd'
 
 # pts_tbd='tup_out1 tup_out2'
-pts_after_micro='hier_tuple4 tuple_reg3 '
+pts_after_micro='hier_tuple4 tuple_reg3'
 
 
 pts='scalar_tuple flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
@@ -56,12 +56,13 @@ if [ ! -f $LGSHELL ]; then
 fi
 
 
-Pyrope_compile_HL_LN () {
+Pyrope_compile_LL_LN () {
   echo ""
   echo ""
   echo ""
   echo "===================================================="
-  echo "Pyrope Full Compilation to check high level LN generation (code_gen)"
+  echo "Pyrope Full Compilation to check low level LN generation "
+  echo " P->LN->LG(in lgdb2)->LN(low-level)-> LG(in lgdb) -> V (LEC)"
   echo "===================================================="
 
 
@@ -72,20 +73,21 @@ Pyrope_compile_HL_LN () {
         exit 1
     fi
 
-    #PRP->LN->(code_gen)-> PRP
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> inou.code_gen.prp odir:tmp_prp"
+    #PRP->LN->LG
+    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb2"
+    
+    ret_val=$?
+    if [ $ret_val -ne 0 ]; then
+      echo "ERROR: could not compile with pattern: ${PATTERN_PATH}/${pt}.prp!"
+      exit $ret_val
+    fi
+    
+    #LG->LN->LG
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> pass.compiler gviz:true top:${pt}"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: ${pt}.prp!"
-      exit $ret_val
-    fi
-    #code_gen PRP -> LN -> LG
-    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt}"
-    #${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler top:${pt}"
-    ret_val=$?
-    if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: tmp_prp/${pt}.prp!"
+      echo "ERROR: could not compile LG with pattern: ${pt}.prp!"
       exit $ret_val
     fi
   done #end of for
@@ -134,7 +136,7 @@ Pyrope_compile_HL_LN () {
   done
 }
 
-Pyrope_compile_hier_HL_LN () {
+Pyrope_compile_hier_LL_LN () {
   echo ""
   echo ""
   echo ""
@@ -235,17 +237,16 @@ Pyrope_compile_hier_HL_LN () {
   fi
 }
 
-rm -rf ./lgdb
-Pyrope_compile_hier_HL_LN "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier_HL_LN "$pts_hier2"
-rm -rf ./lgdb
-Pyrope_compile_HL_LN "$pts"
+#rm -rf ./lgdb*
+#Pyrope_compile_hier_LL_LN "$pts_hier1"
+#rm -rf ./lgdb*
+#Pyrope_compile_hier_LL_LN "$pts_hier2"
+rm -rf ./lgdb*
+Pyrope_compile_LL_LN "$pts"
  
 rm -f *.v
 rm -f ./*.dot
 rm -f ./lgcheck*
 rm -f ./*.tcl
 rm -f logger_*.log
-rm -rf ./tmp_prp/
 
