@@ -215,6 +215,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   switch (ntype) {
     case Ntype_op::And:
     case Ntype_op::Or:
+    case Ntype_op::Ror:
     case Ntype_op::Xor: attach_binaryop_node(lnast, parent_node, pin); break;
     case Ntype_op::Not: attach_not_node(lnast, parent_node, pin); break;
     case Ntype_op::Get_mask: attach_ordered_node(lnast, parent_node, pin); break;
