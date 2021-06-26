@@ -900,7 +900,6 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     return;
   } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
     // note: instead of using alter_full_str, I use flattened_str.
-    fmt::print("DEBUG0 flattened_str:{}\n", flattened_str);
     auto inst_name = flattened_str.substr(0, flattened_str.find("."));
     if (inst_name.substr(0, 2) == "_T") 
       inst_name = absl::StrCat("_.", inst_name);
@@ -1689,14 +1688,11 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
 
 void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
   switch (stmt.statement_case()) {
-    case firrtl::FirrtlPB_Statement::kWire: {  // Wire
-      // FIXME->sh: 1/25/2021, we don't need to specify bits for wires as in FIRRTL
-      // we could propagate the necessary information from inputs/reg
+    case firrtl::FirrtlPB_Statement::kWire: {  
       init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node);
       break;
     }
-    case firrtl::FirrtlPB_Statement::kRegister: {  // Register
-      // register_names.insert(stmt.register_().id());
+    case firrtl::FirrtlPB_Statement::kRegister: {  
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
       setup_register_bits      (lnast,
@@ -1712,17 +1708,17 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       setup_register_q_pin(lnast, parent_node, stmt);
       break;
     }
-    case firrtl::FirrtlPB_Statement::kMemory: {  // Memory
-      // Handled in pre-traversal (PreCheckForMem)
+    case firrtl::FirrtlPB_Statement::kMemory: {  
+      I(false, "never happen in chirrtl");
       break;
     }
-    case firrtl::FirrtlPB_Statement::kCmemory: {  // CMemory
+    case firrtl::FirrtlPB_Statement::kCmemory: {  
       memory_names.insert(stmt.cmemory().id());
       fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
       InitCMemory(lnast, parent_node, stmt.cmemory());
       break;
     }
-    case firrtl::FirrtlPB_Statement::kMemoryPort: {  // MemoryPort
+    case firrtl::FirrtlPB_Statement::kMemoryPort: {  
       HandleMportDeclaration(lnast, parent_node, stmt.memory_port());
       break;
     }
@@ -1734,7 +1730,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       InitialExprAdd(lnast, stmt.node().expression(), parent_node, stmt.node().id());
       break;
     }
-    case firrtl::FirrtlPB_Statement::kWhen: {  // When
+    case firrtl::FirrtlPB_Statement::kWhen: {  
       auto cond_str = lnast.add_string(ReturnExprString(lnast, stmt.when().predicate(), parent_node, true));
       auto idx_when = lnast.add_child(parent_node, Lnast_node::create_if());
       lnast.add_child(idx_when, Lnast_node::create_ref(cond_str));
@@ -1801,11 +1797,10 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       auto& rhs_expr      = stmt.connect().expression();
       auto  lhs_expr_case = stmt.connect().location().expression_case();
       // FIXME->sh: might need to extend the special cases to lhs_expr_case != firrtl::FirrtlPB_Expression::kNode
-      //
 
-      bool is_lhs_tuple
-          = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
-             || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
+      bool is_lhs_tuple = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
+                        || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
+                        || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
 
 
       if (is_lhs_tuple) {
@@ -1815,7 +1810,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
         std::string tmp_var_string;
         if (is_rhs_mux) {
           tmp_var_string = create_tmp_mut_var(lnast); // must do SSA afterwards
-        }else{
+        } else {
           tmp_var_string = create_tmp_var(lnast); // No SSA
         }
 
@@ -1836,19 +1831,17 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       }
       break;
     }
-    case firrtl::FirrtlPB_Statement::kPartialConnect: {  // PartialConnect
-      /* Note->hunter: Partial connects are treated same as full Connect. It's difficult to
-       * track the exact subfields that need to be assigned. FIXME: Do as future work. */
+    case firrtl::FirrtlPB_Statement::kPartialConnect: {  
       Pass::warn("FIRRTL partial connects are error-prone on this interface. Be careful using them.\n");
       std::string lhs_str = ReturnExprString(lnast, stmt.partial_connect().location(), parent_node, true);
       InitialExprAdd(lnast, stmt.partial_connect().expression(), parent_node, lhs_str);
       break;
     }
-    case firrtl::FirrtlPB_Statement::kIsInvalid: {  // IsInvalid
+    case firrtl::FirrtlPB_Statement::kIsInvalid: {  
       // Nothing to do.
       break;
     }
-    case firrtl::FirrtlPB_Statement::kAttach: {  // Attach
+    case firrtl::FirrtlPB_Statement::kAttach: {  
       Pass::error("Attach statement not yet supported due to bidirectionality.");
       I(false);
       break;
@@ -1923,7 +1916,6 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
     lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(final_ta_tmp_var_str));
 
     for (uint8_t i = 0; i < tmp_flattened_fields_per_port.size(); i++) {
-      fmt::print("DEBUG5 i:{}\n", i);
       lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(lnast.add_string(tmp_flattened_fields_per_port.at(i))));
     }
 

@@ -1,4 +1,12 @@
-e = 1
-e = e ++ 3
-f = e.1 + 4
-%out5 = f  
+
+foo.0.__ubits = 1
+foo.1.__ubits = 1
+// F0 = %auto.inst_out
+// F0 = foo.__last_value
+
+%auto.inst_out = foo.1.__last_value
+
+
+foo.0 = 77
+foo.1 = 66
+
