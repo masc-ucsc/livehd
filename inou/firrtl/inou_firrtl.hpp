@@ -172,11 +172,12 @@ protected:
   std::string_view             ConvergeFCallName(const std::string_view func_out, const std::string_view func_inp);
 
 private:
-  //----------- FOR toLNAST ----------
+  //----------- For toLNAST ----------
   absl::flat_hash_set<std::string> input_names;
   absl::flat_hash_set<std::string> output_names;
-  absl::flat_hash_set<std::string> register_names;
   absl::flat_hash_set<std::string> memory_names;
+  absl::flat_hash_set<std::string> wire_names;
+  absl::flat_hash_set<std::string> is_invalid_names;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;
 
@@ -206,6 +207,8 @@ private:
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
   // mem -> <(rd_port_name1,1), (rd_port_name_foo, 7)>
   absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports; 
+
+
 
 
   uint32_t dummy_expr_node_cnt;

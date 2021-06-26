@@ -89,14 +89,22 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
       return absl::StrCat("#", term);
     }
   } else {
-    // We add _. in front of firrtl temporary names
-    if (term.substr(0, 2) == "_T") {
-      return absl::StrCat("_.", term);
-    } else if (term.substr(0, 4) == "_GEN") {
-      return absl::StrCat("_.", term);
-    } else {
+    // // We add _. in front of firrtl temporary names
+    // if (term.substr(0, 2) == "_T") {
+    //   return absl::StrCat("_.", term);
+    // if (term.substr(0, 4) == "_GEN") {
+    //   return absl::StrCat("_.", term);
+    // } else {
       return term;
-    }
+    // }
+    // // We add _. in front of firrtl temporary names
+    // if (term.substr(0, 2) == "_T") {
+    //   return absl::StrCat("_.", term);
+    // } else if (term.substr(0, 4) == "_GEN") {
+    //   return absl::StrCat("_.", term);
+    // } else {
+    //   return term;
+    // }
   }
 }
 
@@ -867,10 +875,8 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
   auto alter_full_str = get_full_name(flattened_str, is_rhs);
 
   if (alter_full_str[0] == '$') {
-    // flattened_str = absl::StrCat("$inp_", flattened_str);
     flattened_str = absl::StrCat("$", flattened_str);
   } else if (alter_full_str[0] == '%') {
-    // flattened_str = absl::StrCat("%out_", flattened_str);
     flattened_str = absl::StrCat("%", flattened_str);
   } else if (alter_full_str.substr(0, 3) == "_#_") { // note: use _#_ to judge is a reg_qpin without split_hier_name again
     if (is_rhs) {
@@ -932,8 +938,10 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   I(flattened_str.find("."));
   if (is_rhs) {
+    fmt::print("DEBUG11 flattened_str:{}\n", flattened_str);
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
   } else {
+    fmt::print("DEBUG12 flattened_str:{}\n", flattened_str);
     CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
   }
 }
@@ -1021,27 +1029,6 @@ void Inou_firrtl::HandleWrMportUsage(Lnast &lnast, Lnast_nid &parent_node, const
     lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
     lnast.add_child(idx_ta_mdin, Lnast_node::create_const(port_cnt_str));
     lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(mport_last_value));
-    // mport_usage_visited.insert(mport_name);
-    // auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    // lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_latency"))));
-    // lnast.add_child(idx_ta_mlat, Lnast_node::create_const(port_cnt_str));
-    // lnast.add_child(idx_ta_mlat, Lnast_node::create_const(lnast.add_string(std::to_string(1)))); // wr latency must be 1
-
-    // auto idx_ta_mrdport = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_rdport"))));
-    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(port_cnt_str));
-    // lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(lnast.add_string(std::string("false"))));
-
-    // auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
-    // auto mport_last_value = create_tmp_var(lnast);
-    // lnast.add_child(idx_attr_get, Lnast_node::create_ref(mport_last_value));
-    // lnast.add_child(idx_attr_get, Lnast_node::create_ref(lnast.add_string(mport_name)));
-    // lnast.add_child(idx_attr_get, Lnast_node::create_const(lnast.add_string(std::string("__last_value"))));
-
-    // auto idx_ta_mdin = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    // lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(lnast.add_string(absl::StrCat(mem_name, "_din"))));
-    // lnast.add_child(idx_ta_mdin, Lnast_node::create_const(port_cnt_str));
-    // lnast.add_child(idx_ta_mdin, Lnast_node::create_ref(mport_last_value));
   }
   
   auto it2 = mport2mask_bitvec.find(mport_name);
@@ -1449,10 +1436,25 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       if (mport2mem.count(tmp_rhs_str)) {
         HandleRdMportUsage(lnast, parent_node, tmp_rhs_str);
       }
+    
+      std::string_view  rhs_str;
+      if (is_invalid_names.find(tmp_rhs_str) != is_invalid_names.end()) {
+        //create __last_value 
+        auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
+        auto temp_var_str = create_tmp_var(lnast);
+        lnast.add_child(idx_attr_get, Lnast_node::create_ref(temp_var_str));
+        lnast.add_child(idx_attr_get, Lnast_node::create_ref(lnast.add_string(tmp_rhs_str)));
+        lnast.add_child(idx_attr_get, Lnast_node::create_const(lnast.add_string(std::string("__last_value"))));
+        rhs_str = temp_var_str;
+      } else {
+        rhs_str = lnast.add_string(get_full_name(rhs_expr.reference().id(), true));
+      }
 
-      std::string_view rhs_str = lnast.add_string(get_full_name(rhs_expr.reference().id(), true));
-      // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve this problem, we use dp_assign to avoid this
-      //       problem when lhs is a pre-defined circuit component (not ___tmp variable)
+
+
+      // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve
+      // this problem, we use dp_assign to avoid this problem when lhs is a
+      // pre-defined circuit component (not ___tmp variable)
       if (lhs_str.substr(0, 1) == "_") {
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
@@ -1689,6 +1691,7 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
 void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
   switch (stmt.statement_case()) {
     case firrtl::FirrtlPB_Statement::kWire: {  
+      wire_names.insert(stmt.wire().id());
       init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node);
       break;
     }
@@ -1819,26 +1822,61 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
         // (2) create the lhs dot and lhs <- rhs assignment
         ReturnExprString(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(lnast.add_string(tmp_var_string)));
       } else {
-        auto ret_string = ReturnExprString(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
-        InitialExprAdd(lnast, rhs_expr, parent_node, ret_string);
-#if 0
-        // FIXME: renau (is commenting this right)
-        if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
-          HandleWrMportUsage(lnast, parent_node, lhs_str);
-        }
-#endif
+        auto lhs_str = ReturnExprString(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
+        InitialExprAdd(lnast, rhs_expr, parent_node, lhs_str);
 
+        // FIXME: renau (is commenting this right)
+        // if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
+        //   HandleWrMportUsage(lnast, parent_node, lhs_str);
+        // }
       }
       break;
     }
     case firrtl::FirrtlPB_Statement::kPartialConnect: {  
       Pass::warn("FIRRTL partial connects are error-prone on this interface. Be careful using them.\n");
-      std::string lhs_str = ReturnExprString(lnast, stmt.partial_connect().location(), parent_node, true);
-      InitialExprAdd(lnast, stmt.partial_connect().expression(), parent_node, lhs_str);
+      auto& lhs_expr      = stmt.partial_connect().location();
+      auto& rhs_expr      = stmt.partial_connect().expression();
+      auto  lhs_expr_case = stmt.partial_connect().location().expression_case();
+      // FIXME->sh: might need to extend the special cases to lhs_expr_case != firrtl::FirrtlPB_Expression::kNode
+
+      bool is_lhs_tuple = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
+                        || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
+                        || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
+
+
+      if (is_lhs_tuple) {
+        auto  rhs_expr_case = stmt.partial_connect().expression().expression_case();
+        bool is_rhs_mux = rhs_expr_case == firrtl::FirrtlPB_Expression::kMux;
+
+        std::string tmp_var_string;
+        if (is_rhs_mux) {
+          tmp_var_string = create_tmp_mut_var(lnast); // must do SSA afterwards
+        } else {
+          tmp_var_string = create_tmp_var(lnast); // No SSA
+        }
+
+        InitialExprAdd(lnast, rhs_expr, parent_node, tmp_var_string);
+
+        // (2) create the lhs dot and lhs <- rhs assignment
+        ReturnExprString(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(lnast.add_string(tmp_var_string)));
+      } else {
+        auto lhs_str = ReturnExprString(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
+        InitialExprAdd(lnast, rhs_expr, parent_node, lhs_str);
+
+        // FIXME: renau (is commenting this right)
+        // if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
+        //   HandleWrMportUsage(lnast, parent_node, lhs_str);
+        // }
+      }
       break;
     }
     case firrtl::FirrtlPB_Statement::kIsInvalid: {  
-      // Nothing to do.
+      auto id = stmt.is_invalid().expression().reference().id();
+      auto it = wire_names.find(id);
+      if (it != wire_names.end()) {
+        is_invalid_names.insert(id);
+      }
+
       break;
     }
     case firrtl::FirrtlPB_Statement::kAttach: {  
@@ -2210,7 +2248,6 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
     dummy_expr_node_cnt = 0;
     input_names.clear();
     output_names.clear();
-    register_names.clear();
     memory_names.clear();
     async_rst_names.clear();
     mport_usage_visited.clear();
