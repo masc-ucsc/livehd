@@ -96,15 +96,6 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
     //   return absl::StrCat("_.", term);
     // } else {
       return term;
-    // }
-    // // We add _. in front of firrtl temporary names
-    // if (term.substr(0, 2) == "_T") {
-    //   return absl::StrCat("_.", term);
-    // } else if (term.substr(0, 4) == "_GEN") {
-    //   return absl::StrCat("_.", term);
-    // } else {
-    //   return term;
-    // }
   }
 }
 

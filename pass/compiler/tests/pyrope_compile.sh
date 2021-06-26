@@ -29,7 +29,7 @@ struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3
 # pts='counter_mix'  
 # pts='memory_1rd1wr'
 # pts='masked_smem'
-pts='pp'
+# pts='pp'
 # pts='memory_1rd1wr'
 # pts='pp2'
 # pts='vector'
