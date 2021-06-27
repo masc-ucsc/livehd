@@ -110,7 +110,7 @@ sh_test(
     "PlusAnd",
     "Mux4",
     "Adder4",
-    "Life",
+    # "Life",
 ]]
 
 # FIXME:
