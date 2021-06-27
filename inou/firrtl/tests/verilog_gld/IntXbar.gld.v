@@ -1,8 +1,10 @@
 module IntXbar(
-  input   clock,
-  input   reset,
-  input   auto_int_in_0,
-  output  auto_int_out_0
+   input signed [1:0] reset
+  ,input signed clock
+  ,input signed \auto_int_in_0 
+  ,output reg signed \auto_int_out 
 );
-  assign auto_int_out_0 = auto_int_in_0; // @[Nodes.scala 389:84 LazyModule.scala 181:31]
+always_comb begin
+  \auto_int_out  = \auto_int_in_0 ;
+end
 endmodule

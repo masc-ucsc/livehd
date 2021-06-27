@@ -110,6 +110,7 @@ sh_test(
     "PlusAnd",
     "Mux4",
     "Adder4",
+    "Life",
 ]]
 
 # FIXME:
@@ -134,13 +135,12 @@ sh_test(
 ) for t in [
     # issue1: runtime vector index
     # "Test1 VecSearch Mul"
-    
-    # issue2: io_state_0 index _0 missing
-    # "Life IntXbar"
 
     # issue3: memory
     # "Smem SmemStruct MaskedSmem MaskedSmemStruct Router ListBuffer"
 
+    "IntXbar",
+    "SimpleClockGroupSource",
 
     # "Arbiter_10",
     # "BankedStore",
