@@ -62,7 +62,6 @@ firrtl_test() {
     fi
   done #end of for
 
-
   # Verilog code generation
   for pt in $1
   do
@@ -76,19 +75,18 @@ firrtl_test() {
     rm -rf tmp_firrtl
     ${LGSHELL} "lgraph.open name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog odir:tmp_firrtl"
-    cat tmp_firrtl/*.v >${pt}.v
+    cat tmp_firrtl/*.v >tmp_firrtl/top_${pt}.v
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
     ret_val=$?
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
-    if [ $ret_val -eq 0 ] && [ -f ${pt}.v ]; then
-        echo "Successfully generate Verilog: ${pt}.v"
+    if [ $ret_val -eq 0 ] && [ -f "tmp_firrtl/top_${pt}.v" ]; then
+        echo "Successfully generate Verilog: tmp_firrtl/top_${pt}.v"
         rm -f  yosys_script.*
     else
         echo "ERROR: Firrtl compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
         exit $ret_val
     fi
   done
-
 
   # Logic Equivalence Check
   for pt in $1
@@ -100,11 +98,13 @@ firrtl_test() {
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
 
+    cp -f "./inou/firrtl/tests/verilog_gld/${pt}.gld.v" "tmp_firrtl/${pt}.gld.v"
     if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
-        python3 ${POST_IO_RENAME} "${pt}.v"  "./inou/firrtl/tests/verilog_gld/${pt}.gld.v"
+        echo "Running python script to match IO names between LiveHD and FIRRTL compiler"
+        python3 ${POST_IO_RENAME} "tmp_firrtl/top_${pt}.v"  "tmp_firrtl/${pt}.gld.v"
     fi
 
-    ${LGCHECK} --top=${pt} --implementation=${pt}.v --reference=./inou/firrtl/tests/verilog_gld/${pt}.gld.v
+    ${LGCHECK} --top=${pt} --implementation="tmp_firrtl/top_${pt}.v" --reference="tmp_firrtl/${pt}.gld.v"
     ret_val=$?
     if [ $ret_val -eq 0 ]; then
       echo "Successfully pass LEC!"
