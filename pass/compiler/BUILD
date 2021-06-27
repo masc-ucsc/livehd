@@ -23,30 +23,71 @@ cc_library(
     alwayslink = True,
 )
 
-sh_test(
-    name = "pyrope_compile",
+[sh_test(
+    name = "pyrope_compile-%s" % t,
     srcs = ["tests/pyrope_compile.sh"],
+    args = ["$(location //inou/pyrope:tests/%s.prp)" % t],
     data = [
-        "//inou/pyrope:pyrope_tests",
+        "//inou/pyrope:tests/%s.prp" % t,
+        "//inou/pyrope:tests/verilog_gld/%s.gld.v" % t,
         "//main:lgshell",
+    ],
+    tags = [
+        "pyrope_compile",
     ],
     deps = [
         "//inou/yosys:scripts",
     ],
-)
-
-sh_test(
-    name = "pyrope2lnast_compile",
-    srcs = ["tests/pyrope2lnast_compile.sh"],
-    data = [
-        "//inou/pyrope:pyrope_tests",
-        "//main:lgshell",
-    ],
-    tags = ["fixme"],
-    deps = [
-        "//inou/yosys:scripts",
-    ],
-)
+) for t in [
+    "scalar_tuple"
+    ,"flatten_bundle"
+    ,"partial"
+    ,"hier_tuple"
+    ,"reg_bits_set"
+    ,"bits_rhs"
+    ,"reg__q_pin"
+    ,"hier_tuple_io"
+    ,"hier_tuple3"
+    ,"tuple_if"
+    ,"ssa_rhs"
+    ,"out_ssa"
+    ,"attr_set"
+    ,"lhs_wire"
+    ,"tuple_copy"
+    ,"if1"
+    ,"lhs_wire2"
+    ,"tuple_copy2"
+    ,"counter"
+    ,"adder_stage"
+    ,"logic2"
+    ,"tuple_empty_attr"
+    ,"if2"
+    ,"scalar_reg_out_pre_declare"
+    ,"firrtl_tail2"
+    ,"hier_tuple_nested_if3"
+    ,"hier_tuple_nested_if5"
+    ,"hier_tuple_nested_if6"
+    ,"hier_tuple_nested_if7"
+    ,"firrtl_tail"
+    ,"nested_if"
+    ,"counter_nested_if"
+    ,"tuple_reg"
+    ,"tuple_reg2"
+    ,"tuple_nested1"
+    ,"tuple_nested2"
+    ,"get_mask1"
+    ,"VecShiftRegisterParam"
+    ,"hier_tuple2"
+    ,"capricious_bits"
+    ,"capricious_bits2"
+    ,"capricious_bits4"
+    ,"hier_tuple_nested_if"
+    ,"hier_tuple_nested_if2"
+    ,"struct_flop"
+    ,"hier_tuple_nested_if4"
+    ,"firrtl_gcd_3bits"
+    ,"firrtl_tail3"
+]]
 
 # High Level FIRRTL
 [sh_test(

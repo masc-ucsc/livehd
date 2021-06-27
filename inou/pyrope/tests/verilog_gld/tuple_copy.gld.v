@@ -1,4 +1,4 @@
-module tuple_copy_gld (
+module tuple_copy (
   output [2:0] out
 );
 

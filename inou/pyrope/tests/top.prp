@@ -1,4 +1,4 @@
-tmp = sum(a = (foo = 3, bar = 2), b = 4)
+tmp = top_sum(a = (foo = 3, bar = 2), b = 4)
 
 // %out  = tmp.sout.o1.baz + 1  //7 + 1 = 8 -> 4b
 // %out5 = tmp.sout2 + 1        //6 + 1 = 7 -> 3b

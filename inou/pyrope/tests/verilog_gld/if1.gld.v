@@ -1,5 +1,5 @@
-module if_gld (
-  input        inp, 
+module if1 (
+  input        inp,
   output [2:0] out
 );
 

@@ -1,4 +1,4 @@
-module nested_if_gld (
+module nested_if (
   input  [3:0] a,
   input  [3:0] b,
   input  [3:0] c,

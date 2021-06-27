@@ -1,4 +1,4 @@
-module pp(
+module tuple_reg2 (
    input signed reset
   ,input signed clock
   ,output reg signed [4:0] out

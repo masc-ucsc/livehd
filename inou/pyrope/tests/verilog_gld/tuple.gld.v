@@ -1,4 +1,4 @@
-module tuple_gld (
+module tuple (
   output [2:0] out1,
   output [3:0] out2,
   output [3:0] out3,

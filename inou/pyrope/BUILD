@@ -3,6 +3,11 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+PYROPE_TESTS = glob([
+    "tests/*.prp",  # Pyrope tests
+    "tests/verilog_gld/*.v",  # Verilog golden models
+])
+
 cc_library(
     name = "inou_pyrope",
     srcs = glob(
@@ -17,16 +22,6 @@ cc_library(
         "//pass/common:pass",
     ],
     alwayslink = True,
-)
-
-filegroup(
-    name = "pyrope_tests",
-    srcs = glob([
-        "tests/*.prp",
-        "tests/compiler/*.prp",
-        "tests/compiler/verilog_gld/*.v",
-    ]),
-    visibility = ["//visibility:public"],
 )
 
 sh_test(
@@ -71,3 +66,5 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+exports_files(PYROPE_TESTS)

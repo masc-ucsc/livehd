@@ -1,4 +1,4 @@
-module not_gld (
+module not1 (
   input        a,
   input  [2:0] b,
   output       o1,

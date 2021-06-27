@@ -1,4 +1,4 @@
-module tuple_if_gld (
+module tuple_if (
   output [3:0] out1
 );
 

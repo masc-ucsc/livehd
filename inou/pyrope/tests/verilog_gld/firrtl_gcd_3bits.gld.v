@@ -1,4 +1,4 @@
-module firrtl_gcd(
+module firrtl_gcd_3bits(
   input        clock,
   input        reset,
   input  [2:0] io_value1,

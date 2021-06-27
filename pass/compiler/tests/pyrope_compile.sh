@@ -9,20 +9,32 @@ pts_long_time='firrtl_gcd'
 # pts_tbd='tup_out1 tup_out2'
 pts_after_micro='hier_tuple4 tuple_reg3'
 
+# **WARNING** Use the pass/compiler/BUILD to add the tests. Anything here would
+# NOT affect the regression. It is more for "work-in-progress" tests.
 
-pts='scalar_tuple flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
+pts_pass='scalar_tuple flatten_bundle partial hier_tuple reg_bits_set bits_rhs reg__q_pin
 hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy
-if lhs_wire2 tuple_copy2 counter adder_stage logic tuple_empty_attr if2
+if1 lhs_wire2 tuple_copy2 counter adder_stage logic2 tuple_empty_attr if2
 scalar_reg_out_pre_declare firrtl_tail2 hier_tuple_nested_if3
 hier_tuple_nested_if5 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
 nested_if counter_nested_if tuple_reg tuple_reg2 tuple_nested1 tuple_nested2
-get_mask1 vec_shift_register_param hier_tuple2 capricious_bits
+get_mask1 VecShiftRegisterParam hier_tuple2 capricious_bits
 capricious_bits2 capricious_bits4 hier_tuple_nested_if hier_tuple_nested_if2
-struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3 
-'
+struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3
+hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
 
-# FIXME->Jose: these are the patterns require an extra cprop after bitwidth?
-# pts='hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
+pts='hier_tuple'
+
+if [ $# -eq 1 ]; then
+  pts=$(basename $1)
+  pts=${pts%.prp}
+	PATTERN_PATH=$(dirname $1)
+elif [ $# -ne 0 ]; then
+	echo "SPECIFY one test at a time"
+	exit 3
+else
+	PATTERN_PATH=./inou/pyrope/tests
+fi
 
 # FIXME: extra flop left around!! (the test fails because this extra flop has no name and cgen creates incorrect verilog)
 # pts='counter_mix'  
@@ -37,13 +49,10 @@ struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3
 # pts='tuple_if2'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
-pts_hier1='top sum top'
-pts_hier2='top top sum'
-
+#pts_hier='top'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
-PATTERN_PATH=./inou/pyrope/tests/compiler
 
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
@@ -54,365 +63,134 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
+Pyrope_step () {
 
-Pyrope_compile () {
-  echo ""
-  echo ""
-  echo ""
-  echo "===================================================="
-  echo "Pyrope Full Compilation"
-  echo "===================================================="
+  top_module=$1
+	shift 1
 
-# $1 = top sum
-# $1 = sum top
-  for pt in $1
-  do
-    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
-        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
-        exit 1
-    fi
+	all_files=$@
+	gold_verilog="${PATTERN_PATH}/verilog_gld/${top_module}.gld.v"
 
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true"
-    # ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler gviz:true top:${pt}"
-    ret_val=$?
-    if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: ${pt}.prp!"
-      exit $ret_val
-    fi
-  done #end of for
+	for f in $(echo ${all_files} | sed -es/,/\ /g)
+	do
+		if [ ! -f "${f}" ]; then
+			echo "Could not find input pyrope ${f} testing"
+			exit 3
+		fi
+	done
 
+  if [ ! -f "${gold_verilog}" ]; then
+		echo "Could not find reference verilog for testing: ${gold_verilog}"
+		exit 3
+	fi
 
-  # Verilog code generation
-  for pt in $1
-  do
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
-    echo "----------------------------------------------------"
+	rm -rf lgdb_prp
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module}"
+	ret_val=$?
+	if [ $ret_val -ne 0 ]; then
+		echo "ERROR: could not direct compile with files:${all_files}!"
+		exit $ret_val
+	fi
 
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
-    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-        echo "Successfully generate Verilog: ${pt}.v"
-        rm -f  yosys_script.*
-    else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
-        exit 1
-    fi
-  done
+	rm -rf tmp_prp_v
+	${LGSHELL} "lgraph.open hier:true path:lgdb_prp name:${top_module} |> inou.cgen.verilog odir:tmp_prp_v"
+	if [ $? -eq 0 ] && [ -f "tmp_prp_v/${pt}.v" ]; then
+		echo "Successfully generate Verilog: tmp_prp_v/${pt}.v"
+	else
+		echo "ERROR: Pyrope compiler failed: direct verilog generation, testcase: ${all_files2}"
+		exit 1
+	fi
+	cat tmp_prp_v/*.v >tmp_prp_v/all_${top_module}.v
 
+	# WARNING: Verilog can have backslash in name. So get it from the generated verilog
+	top_verilog_name=$(grep module tmp_prp_v/${top_module}.v | grep -v endmodule | cut -d" " -f2 | sed -es/\(//g)
+	if [ ${top_verilog_name} != ${top_module} ]; then
+		echo "top verilog ${top_verilog_name} and top module name ${top_module} do not match (reserved verilog keyword?)"
+		exit 4
+	fi
 
-  # Logic Equivalence Check
-  for pt in $1
-  do
-      echo ""
-      echo ""
-      echo ""
-      echo "----------------------------------------------------"
-      echo "Logic Equivalence Check"
-      echo "----------------------------------------------------"
-
-      ${LGCHECK} --implementation=${pt}.v --reference=${PATTERN_PATH}/verilog_gld/${pt}.gld.v
-
-      if [ $? -eq 0 ]; then
-        echo "Successfully pass LEC!"
-      else
-          echo "FAIL: ${pt}.v !== ${pt}.gld.v"
-          exit 1
-      fi
-  done
-}
-
-
-Pyrope_compile_hier () {
-  echo ""
-  echo ""
-  echo ""
-  echo "===================================================="
-  echo "Hierarchical Pyrope Full Compilation"
-  echo "===================================================="
-
-  declare pts_concat
-  declare top_module
-
-  for pt in $1
-  do
-    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
-        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
-        exit 1
-    fi
-
-    # the first item in pts_hier is just specifying the top_module name
-    if [ -z "${top_module}" ]; then
-      top_module=${pt}
-      continue
-    fi
-
-    # check if pts_concat is empty or not and perform pattern concatenation, patterns have to be comma seperated
-    if [ -z "${pts_concat}" ]; then
-      pts_concat="${PATTERN_PATH}/${pt}.prp"
-    else
-      pts_concat="${pts_concat}, ${PATTERN_PATH}/${pt}.prp"
-    fi
-  done
-
-
-  ${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler gviz:true top:${top_module}"
-  ret_val=$?
-  if [ $ret_val -ne 0 ]; then
-    echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"
-    exit $ret_val
+  ${LGCHECK} --top=$top_verilog_name --implementation=tmp_prp_v/all_${top_module}.v --reference=${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
+  if [ $? -eq 0 ]; then
+		echo "Successfully pass logic equivilence check!"
+  else
+		echo "FAIL: direct tmp_prp_v/all_${top_module}.v !== ${top_module}.gld.v (top verilog name is ${top_verilog_name})"
+		exit 1
   fi
 
+	########################################
+	# Trying the same code but using the PRP2PRP pass
 
-  # Verilog code generation
-  for pt in $1
-  do
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
-    echo "----------------------------------------------------"
+	rm -rf tmp_prp
+	${LGSHELL} "inou.pyrope files:${all_files} |> inou.code_gen.prp odir:tmp_prp"
+	ret_val=$?
+	if [ $ret_val -ne 0 ]; then
+		echo "ERROR: could not prp2prp top: ${top_module} with files:${all_files}!"
+		exit $ret_val
+	fi
 
-    #${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog "
-    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-        echo "Successfully generate Verilog: ${pt}.v"
-        rm -f  yosys_script.*
-    else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
-        exit 1
-    fi
-  done
+	rm -rf lgdb_prp2prp
+	${LGSHELL} "files path:tmp_prp match:\".*\.prp\" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
+	ret_val=$?
+	if [ $ret_val -ne 0 ]; then
+		echo "ERROR: could not prp2prp compile with files:${all_files}!"
+		exit $ret_val
+	fi
 
-  #concatenate every submodule under top_module.v
-  for pt in $1
-  do
-    if [[ pt != $top_module ]]; then
-        $(cat ${pt}.v >> ${top_module}.v)
-    fi
-  done
+	rm -rf tmp_prp2prp_v
+	${LGSHELL} "lgraph.open hier:true path:lgdb_prp2prp name:${top_module} |> inou.cgen.verilog odir:tmp_prp2prp_v"
+	if [ $? -eq 0 ] && [ -f "tmp_prp2prp_v/${pt}.v" ]; then
+		echo "Successfully generate Verilog: tmp_prp2prp_v/${pt}.v"
+	else
+		echo "ERROR: Pyrope compiler failed: prp2prp verilog generation, testcase: ${all_files}"
+		exit 1
+	fi
+	cat tmp_prp2prp_v/*.v >tmp_prp2prp_v/all_${top_module}.v
 
-
-  echo ""
-  echo ""
-  echo ""
-  echo "----------------------------------------------------"
-  echo "Logic Equivalence Check: Hierarchical Design"
-  echo "----------------------------------------------------"
-
-  ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
-
+  ${LGCHECK} --top=$top_module --implementation=tmp_prp2prp_v/all_${top_module}.v --reference=${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
   if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
   else
-      echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
+      echo "FAIL: prp2prp tmp_prp2prp_v/all_${top_module}.v !== ${top_module}.gld.v"
       exit 1
   fi
 }
 
-
-Pyrope_compile_HL_LN () {
-  echo ""
-  echo ""
-  echo ""
-  echo "===================================================="
-  echo "Pyrope Full Compilation to check high level LN generation (code_gen)"
-  echo "===================================================="
-
-
-  for pt in $1
-  do
-    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
-        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
-        exit 1
-    fi
-
-    #PRP->LN->(code_gen)-> PRP
-    ${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> inou.code_gen.prp odir:tmp_prp"
-
-    ret_val=$?
-    if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: ${pt}.prp!"
-      exit $ret_val
-    fi
-    #code_gen PRP -> LN -> LG
-    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt}"
-    #${LGSHELL} "inou.pyrope files:${PATTERN_PATH}/${pt}.prp |> pass.compiler top:${pt}"
-    ret_val=$?
-    if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile with pattern: tmp_prp/${pt}.prp!"
-      exit $ret_val
-    fi
-  done #end of for
-
-
-  # Verilog code generation
-  for pt in $1
-  do
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
-    echo "----------------------------------------------------"
-
-    # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
-    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-        echo "Successfully generate Verilog: ${pt}.v"
-        rm -f  yosys_script.*
-    else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.prp"
-        exit 1
-    fi
-  done
-
-
-  # Logic Equivalence Check
-  for pt in $1
-  do
-      echo ""
-      echo ""
-      echo ""
-      echo "----------------------------------------------------"
-      echo "Logic Equivalence Check"
-      echo "----------------------------------------------------"
-
-      ${LGCHECK} --implementation=${pt}.v --reference=${PATTERN_PATH}/verilog_gld/${pt}.gld.v
-
-      if [ $? -eq 0 ]; then
-        echo "Successfully pass LEC!"
-      else
-          echo "FAIL: ${pt}.v !== ${pt}.gld.v"
-          exit 1
-      fi
-  done
-}
-
-Pyrope_compile_hier_HL_LN () {
-  echo ""
-  echo ""
-  echo ""
+Pyrope_compile() {
   echo "===================================================="
   echo "Hierarchical Pyrope Full Compilation to check high level LN generation (code_gen)"
   echo "===================================================="
 
-  declare pts_concat
-  declare top_module
-  declare tmp_pts_concat
+  top_module=$1
+	top_file=${PATTERN_PATH}/${top_module}.prp
 
-  for pt in $1
-  do
-    if [ ! -f ${PATTERN_PATH}/${pt}.prp ]; then
-        echo "ERROR: could not find ${pt}.prp in ${PATTERN_PATH}"
-        exit 1
-    fi
+	if [ ! -f ${top_file} ]; then
+		echo "ERROR: could not find ${top_file} in ${PATTERN_PATH}"
+		exit 1
+	fi
 
-    # the first item in pts_hier is just specifying the top_module name
-    if [ -z "${top_module}" ]; then
-      top_module=${pt}
-      continue
-    fi
+	# Get all the files associated with this separated with commas
+	xtra_files=$(ls -m ${PATTERN_PATH}/${top_module}_*.prp)
 
-    # check if pts_concat is empty or not and perform pattern concatenation, patterns have to be comma seperated
-    if [ -z "${pts_concat}" ]; then
-      pts_concat="${PATTERN_PATH}/${pt}.prp"
-    else
-      pts_concat="${pts_concat}, ${PATTERN_PATH}/${pt}.prp"
-    fi
+	if [ ! -z "${xtra_files}" ]; then
+		all_files="${top_file}, "$(ls -m ${PATTERN_PATH}/${top_module}_*.prp)
+		Pyrope_step $top_module ${all_files}
 
-    if [ -z "${tmp_pts_concat}" ]; then
-      tmp_pts_concat="tmp_prp/${pt}.prp"
-    else
-      tmp_pts_concat="${tmp_pts_concat}, tmp_prp/${pt}.prp"
-    fi
-  done
-
-  ${LGSHELL} "inou.pyrope files:${pts_concat} |> inou.code_gen.prp odir:tmp_prp"
-  ret_val=$?
-  if [ $ret_val -ne 0 ]; then
-    echo "ERROR: could not compile with pattern: ${pts_concat}.prp!"
-    exit $ret_val
-  fi
-  ${LGSHELL} "inou.pyrope files:${tmp_pts_concat} |> pass.compiler gviz:true top:${top_module}"
-  #${LGSHELL} "inou.pyrope files:${pts_concat} |> pass.compiler top:${top_module}"
-  ret_val=$?
-  if [ $ret_val -ne 0 ]; then
-    echo "ERROR: could not compile with pattern: ${tmp_pts_concat}.prp!"
-    exit $ret_val
-  fi
-
-
-  # Verilog code generation
-  for pt in $1
-  do
-    echo ""
-    echo ""
-    echo ""
-    echo "----------------------------------------------------"
-    echo "LGraph -> Verilog"
-    echo "----------------------------------------------------"
-
-    #${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
-    ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog"
-    if [ $? -eq 0 ] && [ -f ${pt}.v ]; then
-        echo "Successfully generate Verilog: ${pt}.v"
-        rm -f  yosys_script.*
-    else
-        echo "ERROR: Pyrope compiler failed: verilog generation, testcase: tmp_prp/${pt}.prp"
-        exit 1
-    fi
-  done
-
-  #concatenate every submodule under top_module.v
-  for pt in $1
-  do
-    if [[ pt != $top_module ]]; then
-        $(cat ${pt}.v >> ${top_module}.v)
-    fi
-  done
-
-
-  echo ""
-  echo ""
-  echo ""
-  echo "----------------------------------------------------"
-  echo "Logic Equivalence Check: Hierarchical Design"
-  echo "----------------------------------------------------"
-
-  ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
-
-  if [ $? -eq 0 ]; then
-      echo "Successfully pass logic equivilence check!"
-  else
-      echo "FAIL: ${top_module}.v !== ${top_module}.gld.v"
-      exit 1
-  fi
+		all_files2=$(ls -m ${PATTERN_PATH}/${top_module}_*.prp)", ${top_file}"
+		Pyrope_step $top_module ${all_files}
+	else
+		Pyrope_step $top_module ${PATTERN_PATH}/${top_module}.prp
+	fi
 }
 
+for pt in $pts_hier
+do
+	rm -rf ./lgdb
+	Pyrope_compile "$pt"
+done
 
-#rm -rf ./lgdb
-#Pyrope_compile_hier "$pts_hier1"
-#rm -rf ./lgdb
-#Pyrope_compile_hier "$pts_hier2"
-#rm -rf ./lgdb
-#Pyrope_compile "$pts"
+for pt in $pts
+do
+	rm -rf ./lgdb
+	Pyrope_compile "$pt"
+done
 
-rm -rf ./lgdb
-Pyrope_compile_hier_HL_LN "$pts_hier1"
-rm -rf ./lgdb
-Pyrope_compile_hier_HL_LN "$pts_hier2"
-rm -rf ./lgdb
-Pyrope_compile_HL_LN "$pts"
-
-# Do not remove verilog, I tend to have tests cases in home directory
-# rm -f *.v
- rm -f ./*.dot
- rm -f ./lgcheck*
- rm -f ./*.tcl
- rm -f logger_*.log
- rm -rf ./tmp_prp/

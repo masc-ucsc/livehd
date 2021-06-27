@@ -11,9 +11,6 @@ cc_library(
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
-    data = [
-        "//inou/pyrope:pyrope_tests",
-    ],
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [

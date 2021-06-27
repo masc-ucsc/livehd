@@ -1,4 +1,4 @@
-module if2_gld (
+module if2 (
   input        inp, 
   output [2:0] out
 );

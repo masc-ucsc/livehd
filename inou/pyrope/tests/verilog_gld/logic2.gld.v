@@ -1,4 +1,4 @@
-module \logic (
+module logic2 (
   input  signed       a,
   input  signed [2:0] b,
   input  signed [2:0] c,
@@ -25,4 +25,4 @@ wire   t2 = (b != 0);
 assign o8 = t1 && t2;
 assign o9 = t1 || t2;
 
-endmodule 
+endmodule

@@ -11,9 +11,6 @@ cc_library(
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
-    data = [
-        "//inou/pyrope:pyrope_tests",
-    ],
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
@@ -26,7 +23,7 @@ sh_test(
     name = "prp_v_LEC_test.sh",
     srcs = ["tests/prp_v_LEC_test.sh"],
     data = [
-        "//inou/pyrope:pyrope_tests",
+        "//inou/pyrope:pyrope_tests2",
         "//main:lgshell",
     ],
     tags = ["fixme"],

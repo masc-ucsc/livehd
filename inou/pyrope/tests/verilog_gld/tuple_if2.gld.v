@@ -1,4 +1,4 @@
-module tuple_if2_gld (
+module tuple_if2 (
   output [4:0] out1,
   output [4:0] out2,
   output [4:0] out3
