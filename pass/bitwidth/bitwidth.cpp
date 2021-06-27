@@ -170,7 +170,6 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
 
     auto it = bwmap.find(e.driver.get_compact_class());
     if (it != bwmap.end()) {
-      fmt::print("DEBUG0 mux input dpin:{}\n", e.driver.debug_name());
       adjust_bw(node.get_driver_pin(), it->second);
     } else {
       debug_unconstrained_msg(node, e.driver);
@@ -185,7 +184,6 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
 
   auto a_dpin = node.get_sink_pin("a").get_driver_pin();
   auto a_it   = bwmap.find(a_dpin.get_compact_class());
-
 
   Bitwidth_range a_bw(0);
   if (a_it == bwmap.end()) {
@@ -1020,11 +1018,9 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   auto dpin_rhs = node_dp.get_sink_pin("value").get_driver_pin();
 
   auto it = bwmap.find(dpin_lhs.get_compact_class());
-
   if (it == bwmap.end()) {
-#ifndef NDEBUG
-    fmt::print("BW-> LHS isn't ready, wait for next iteration\n");
-#endif
+    if (!not_finished)
+      Pass::info("node:{} dp_assign lhs node:{} is not ready (another iteration)", node_dp.debug_name(), dpin_lhs.get_node().debug_name());
     not_finished = true;
     return;
   }
@@ -1035,9 +1031,8 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
 
   auto it2 = bwmap.find(dpin_rhs.get_compact_class());
   if (it2 == bwmap.end()) {
-#ifndef NDEBUG
-    fmt::print("BW-> RHS isn't ready, wait for next iteration\n");
-#endif
+    if (!not_finished)
+      Pass::info("node:{} dp_assign rhs node:{} is not ready (another iteration)", node_dp.debug_name(), dpin_rhs.get_node().debug_name());
     not_finished = true;
     return;
   }
@@ -1162,7 +1157,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
         continue;
     }
     if (ntposs.is_invalid()) {
-      ntposs = node_attr.get_class_lgraph()->create_node(Ntype_op::Get_mask);
+      ntposs = node_attr.create(Ntype_op::Get_mask);
       ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));
       ntposs.setup_sink_pin("a").connect_driver(name_dpin);
 
@@ -1174,6 +1169,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
         if (attr == Attr::Set_dp_assign) {
           auto range_const   = (Lconst(1UL) << Lconst(ubits)) - 1;
           bwmap.insert_or_assign(ntposs.setup_driver_pin().get_compact_class(), Bitwidth_range(Lconst(0), range_const));
+          // no need to set bits because added to the iterator
         }
       }
     }
@@ -1516,13 +1512,12 @@ void Bitwidth::try_delete_attr_node(Node &node) {
     auto bw_rhs = it2->second;
 
     if (bw_rhs.get_sbits() >= bw_lhs.get_sbits()) {
-#if 0
-      auto sext_node  = node.get_class_lgraph()->create_node(Ntype_op::Sext);
-#else
-      auto mask_node = node.get_class_lgraph()->create_node(Ntype_op::And);
+      auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
+
+      auto mask_node = node.create(Ntype_op::And);
       auto mask_dpin = mask_node.get_driver_pin();
 
-      auto bw_lhs_bits = bw_lhs.is_always_positive() ? bw_lhs.get_sbits() - 1 : bw_lhs.get_sbits();
+      mask_dpin.set_bits(bw_lhs_bits);
 
       auto mask_const   = (Lconst(1UL) << Lconst(bw_lhs_bits)) - 1;
       auto all_one_node = node.create_const(mask_const);
@@ -1532,8 +1527,9 @@ void Bitwidth::try_delete_attr_node(Node &node) {
       bwmap.insert_or_assign(mask_dpin.get_compact_class(), Bitwidth_range(Lconst(0), mask_const));
       dpin_rhs.connect_sink(mask_node.setup_sink_pin("A"));
       all_one_dpin.connect_sink(mask_node.setup_sink_pin("A"));
-      for (auto e : node.out_edges()) mask_dpin.connect_sink(e.sink);
-#endif
+      for (auto e : node.out_edges()) {
+        mask_dpin.connect_sink(e.sink);
+      }
       node.del_node();
       return;
     } else {
