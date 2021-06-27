@@ -1,0 +1,30 @@
+
+$a_2.__sbits = 2
+
+c1 = 0x2F
+c1@(0)=$a_2 // COMPILE ERROR &1 once fails
+
+d1 = 0x2F
+d1@(0)=$a_2@(0)
+
+e1 = 0x2F
+e1@(0):=$a_2
+
+%out_c1 = c1
+%out_d1 = d1
+%out_e1 = e1
+
+c2 = 0x2F
+c2@(1:2)=$a_2
+
+d2 = 0x2F
+d2@(1,2)=$a_2@(0,1)
+
+e2 = 0x2F
+e2@(2,1):=$a_2
+
+%out_c2 = c2
+%out_d2 = d2
+%out_e2 = e2
+
+

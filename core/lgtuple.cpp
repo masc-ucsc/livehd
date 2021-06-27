@@ -1010,6 +1010,160 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(std::shared_ptr<Lgtuple const> tup) const {
+  (void)tup;
+
+  I(false); // FIXME: implement it
+  auto new_tup = std::make_shared<Lgtuple>(get_name());
+
+  return new_tup;
+}
+
+bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string_view, Node_pin>> &pending_entries, std::string_view entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
+
+  if (!sbits_dpin.is_invalid()) {
+    pending_entries.emplace_back(entry_txt, sbits_dpin);
+  }else{
+    if (ubits_dpin.is_invalid()) {
+      Lgraph::info("unable to infer {} size for dp assign (more iterations?)", entry_txt);
+      return false;
+    }
+    auto add_one_node = node.create(Ntype_op::Sum);
+    add_one_node.setup_sink_pin("A").connect_driver(ubits_dpin);
+    add_one_node.setup_sink_pin("A").connect_driver(node.create_const(1));
+
+    pending_entries.emplace_back(entry_txt, add_one_node.setup_driver_pin());
+  }
+
+  return true;
+}
+
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const {
+
+  I(is_correct());
+
+  std::sort(key_map.begin(), key_map.end(), tuple_sort);
+
+  auto tup = std::make_shared<Lgtuple>(get_name());
+
+  // Each field in the LHS must have a size
+  auto rhs_node = rhs_dpin.get_node();
+
+  std::vector<std::pair<std::string_view, Node_pin>> pending_entries;
+  {
+    Node_pin sbits_dpin;
+    Node_pin ubits_dpin;
+    int pending_pos=-1; // <0, no pending
+    std::string_view non_attr_field;
+
+    for (auto i=0u;i<key_map.size();++i) {
+      const auto &e = key_map[i];
+      if (is_attribute(e.first)) {
+        auto attr_txt = get_last_level(e.first);
+        if (attr_txt == "__sbits")
+          sbits_dpin = e.second;
+        else if (attr_txt == "__ubits")
+          ubits_dpin = e.second;
+
+        tup->key_map.emplace_back(e.first, e.second); // Keep all the attributes
+
+        auto txt = get_all_but_last_level(e.first);
+
+        if (txt == non_attr_field)
+          continue;
+        if (non_attr_field.empty()) {
+          non_attr_field = txt;
+          continue;
+        }
+
+        // Change in attr fields, so last attr must have an entry
+        // E.g: (..., foo.__ubits=2, bar.__sbits=3,...)
+        bool ok = add_pending(rhs_node, pending_entries, non_attr_field, ubits_dpin, sbits_dpin);
+        if (!ok)
+          return nullptr;
+
+        non_attr_field = e.first;
+        ubits_dpin = invalid_dpin;
+        sbits_dpin = invalid_dpin;
+        continue;
+      }
+
+      if (!non_attr_field.empty() && non_attr_field != e.first) {
+        // last attr did not plain entry
+        // E.g: (..., foo.__ubits=2, bar=3,...)
+        bool ok = add_pending(rhs_node, pending_entries, non_attr_field, ubits_dpin, sbits_dpin);
+        if (!ok)
+          return nullptr;
+
+        if (pending_pos>=0 && non_attr_field == key_map[pending_pos].first)
+          pending_pos = -1;
+
+        non_attr_field = "";
+        ubits_dpin = invalid_dpin;
+        sbits_dpin = invalid_dpin;
+      }
+
+      if (pending_pos<0 && !e.second.is_type_const()) {
+        // E.g: (..., foo.__ubits=2, bar = non_const,...)
+        pending_pos = i;
+        sbits_dpin = invalid_dpin;
+        ubits_dpin = invalid_dpin;
+        continue;
+      }
+
+      if (pending_pos<0) {
+        // E.g: (..., foo.__ubits=2, bar = 3,...)
+        I(e.second.is_type_const());
+        I(ubits_dpin.is_invalid());
+        I(sbits_dpin.is_invalid());
+
+        auto v      = e.second.get_type_const();
+        auto v_bits = v.get_bits();
+
+        pending_entries.emplace_back(e.first, rhs_node.create_const(v_bits).setup_driver_pin());
+        sbits_dpin = invalid_dpin;
+        ubits_dpin = invalid_dpin;
+        continue;
+      }
+
+      bool ok = add_pending(rhs_node, pending_entries, key_map[pending_pos].first, ubits_dpin, sbits_dpin);
+      if (!ok)
+        return nullptr;
+      pending_pos = -1;
+    }
+
+    if (pending_pos>=0) {
+      bool ok = add_pending(rhs_node, pending_entries, key_map[pending_pos].first, ubits_dpin, sbits_dpin);
+      if (!ok)
+        return nullptr;
+    }
+  }
+
+  Node_pin current_rhs_dpin = rhs_dpin;
+
+  for(auto i=0u;i<pending_entries.size();++i) {
+    auto &e=pending_entries[i];
+
+    auto sext_node = rhs_node.create(Ntype_op::Sext); // sext(rhs, bits)
+    sext_node.setup_sink_pin("a").connect_driver(current_rhs_dpin);
+    sext_node.setup_sink_pin("b").connect_driver(e.second);
+
+    tup->key_map.emplace_back(e.first, sext_node.setup_driver_pin());
+
+    if ((i+1)<pending_entries.size()) { // no need for last
+      auto sra_node = rhs_node.create(Ntype_op::SRA);
+      sra_node.setup_sink_pin("a").connect_driver(current_rhs_dpin);
+      sra_node.setup_sink_pin("b").connect_driver(e.second);
+
+      current_rhs_dpin = sra_node.setup_driver_pin();
+    }
+  }
+
+  std::sort(tup->key_map.begin(), tup->key_map.end(), tuple_sort);
+
+  return tup;
+}
+
 const Lgtuple::Key_map_type &Lgtuple::get_sort_map() const {
   std::sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
   return key_map;

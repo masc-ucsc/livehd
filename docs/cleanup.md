@@ -25,6 +25,7 @@ Besides moving mmap_lib, we may want:
 
 * Rename lconst to lops (livehd cell ops). Other implementations would be sops
   (static C++), vops (verilog),  and jops (javascript)
+* Rename TupAdd for Tup_add, TupGet for Tup_get, AttrSet for Attr_set, AttrGet for Attr_get
 
 ### Pyrope parser
 

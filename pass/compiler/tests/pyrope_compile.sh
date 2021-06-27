@@ -21,7 +21,6 @@ capricious_bits2 capricious_bits4 hier_tuple_nested_if hier_tuple_nested_if2
 struct_flop hier_tuple_nested_if4 firrtl_gcd_3bits firrtl_tail3 
 '
 
-
 # FIXME->Jose: these are the patterns require an extra cprop after bitwidth?
 # pts='hier_tuple2 capricious_bits capricious_bits2 capricious_bits4'
 

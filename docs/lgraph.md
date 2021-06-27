@@ -921,3 +921,7 @@ factor is somewhat reasonable. This means that a 5-level overhead is fine to be
 replaced for 3 4-level (or 3 3-level) but not for 4 4-level overhead. Zero
 overhead cells are not included in the list of cells in the replacement.
 
+This is a heuristic. Once works, it is a nice target to use AI to decide
+when/if a transformation is worth.
+
+

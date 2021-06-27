@@ -1284,92 +1284,80 @@ void Cprop::tuple_attr_set(const Node &node) {
   if (hier)  // hier still not supported
     return;
 
-  // Not much to do, just check for compile error in cases like foo := xxx (were xxx is a tuple)
+  auto self_tup  = find_lgtuple(node);
+  if (self_tup && self_tup->is_correct())
+    return; // already done
 
   auto field_spin = node.get_sink_pin("field");
-  if (!field_spin.is_connected()) {
-    I(node.is_sink_connected("chain"));  // must be a chain attrset
-    return;
-  }
+  I(field_spin.is_connected());
 
-  auto field_txt = field_spin.get_driver_pin().get_type_const().to_string();
-  I(Lgtuple::is_root_attribute(field_txt));  // AttrSet is only for root fields
+  auto attr_field = field_spin.get_driver_pin().get_type_const().to_string();
+  I(Lgtuple::is_root_attribute(attr_field));  // AttrSet is only for root fields
 
-  auto attr_field = Lgtuple::get_last_level(field_txt);
   if (attr_field != "__dp_assign")
     return;
 
   auto value_spin = node.get_sink_pin("value");
-  if (!value_spin.is_connected()) {
+  if (unlikely(!value_spin.is_connected())) {
     node.dump();
     Pass::error("node:{} has := assign without rhs value to assign", node.debug_name());
     return;
   }
 
-  auto                     name_spin = node.get_sink_pin("parent");
-  std::shared_ptr<Lgtuple> node_tup;
-  if (name_spin.is_connected()) {
-    auto name_tup = find_lgtuple(name_spin.get_driver_node());
-    if (name_tup) {
-      if (!name_tup->is_scalar()) {
-        name_tup->dump();
-        node.dump();
-        Pass::error("node:{} has := assign with a tuple in lhs, only scalars allowed", node.debug_name());
-        return;
-      }
-      node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
-      if (!name_tup->is_correct())
-        node_tup->set_issue();
-      node_tup->add(node.get_driver_pin("Y"));
-      for (const auto &e : name_tup->get_map()) {
-        if (Lgtuple::is_root_attribute(e.first)) {
-          if (!node_tup) {
-            node_tup = std::make_shared<Lgtuple>(name_tup->get_name());
-            if (!name_tup->is_correct())
-              node_tup->set_issue();
-            node_tup->add(node.get_driver_pin("Y"));
-          }
-          node_tup->add(e.first, e.second);
-        }
-      }
-    }
+  auto parent_spin = node.get_sink_pin("parent");
+  if (unlikely(!parent_spin.is_connected())) {
+    Pass::error("node:{} has := assign does not have prior assign to lhs??", node.debug_name());
   }
 
-  auto value_tup = find_lgtuple(value_spin.get_driver_node());
-  if (!value_tup) {
-    if (node_tup) {
-      node2tuple[node.get_compact()] = node_tup;
-    }
-    return;  // just propagate from name_tup, nothing from value_tup
-  }
-
-  if (!value_tup->is_scalar()) {
-    value_tup->dump();
-    node.dump();
-    Pass::error("node:{} has := assign with a tuple in rhs, only scalars allowed", node.debug_name());
+  auto parent_tup = find_lgtuple(parent_spin.get_driver_node());
+  if (parent_tup==nullptr) {
+    node2tuple.erase(node.get_compact()); // erase if exists
     return;
   }
 
-  // propagate lgtuple, but strip all the "Bitwidth" fields
-  for (const auto &e : value_tup->get_map()) {
-    // Add update any attr but not the BW fields
-    if (Lgtuple::is_attribute(e.first)) {
-      auto attr = Lgtuple::get_last_level(e.first);
-      if (attr == "__max" || attr == "__min" || attr == "__sbits" || attr == "__ubits")
-        continue;
-    }
-    if (!node_tup) {
-      node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
-      node_tup->add(node.get_driver_pin("Y"));
-    }
-    node_tup->add(e.first, e.second);
+  if (!parent_tup->is_correct()) {
+    node2tuple[node.get_compact()] = parent_tup;
+    return;
   }
 
-  if (node_tup) {
-    if (!value_tup->is_correct())
-      node_tup->set_issue();
-    node2tuple[node.get_compact()] = node_tup;
+  std::shared_ptr<Lgtuple> node_tup;
+  if (parent_tup->is_scalar()) {
+    auto node_dpin = node.get_driver_pin();
+
+    node_tup = std::make_shared<Lgtuple>(parent_tup->get_name());
+    node_tup->add(node_dpin);
+    for (const auto &e : parent_tup->get_map()) {
+      if (!Lgtuple::is_root_attribute(e.first))
+        continue;
+      if (!node_tup) {
+        node_tup = std::make_shared<Lgtuple>(parent_tup->get_name());
+        if (!parent_tup->is_correct())
+          node_tup->set_issue();
+        node_tup->add(node_dpin);
+      }
+      node_tup->add(e.first, e.second);
+    }
+  }else{
+    auto value_tup = find_lgtuple(value_spin.get_driver_node());
+    if (value_tup) {
+      node_tup = parent_tup->create_assign(value_tup);
+    }else{
+      node_tup = parent_tup->create_assign(value_spin.get_driver_pin());
+    }
+    I(parent_tup->is_correct());
+
+    if (node_tup == nullptr) {
+      parent_tup->dump();
+      node.dump();
+      Pass::error("node:{} has := assign with a tuple in lhs, and something failed", node.debug_name());
+    }
   }
+
+  I(node_tup);
+
+  I(node_tup->is_correct());
+  tuple_done.insert(node.get_compact());
+  node2tuple[node.get_compact()] = node_tup;
 }
 
 bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -1680,8 +1668,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
     if (node_tup->is_trivial_scalar()) {
       expand_data_and_attributes(node, "", pending_out_edges, node_tup);
     } else {
-      node_tup->dump();
-      Pass::info("Some pins:{} did not connect", pending_out_edges[0].sink.debug_name());
+      Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
     }
   }
 }

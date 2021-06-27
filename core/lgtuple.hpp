@@ -49,6 +49,7 @@ protected:
 
   std::tuple<std::string_view, bool> get_flop_name(const Node &flop) const;
 
+  static bool add_pending(Node &node, std::vector<std::pair<std::string_view, Node_pin>> &pending_entries, std::string_view entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin);
   static std::pair<Node, Node_pin> flatten_field(Node &result_node, Node_pin &dpin, Node_pin &start_bit_dpin, Node_pin &sbits_dpin, Node_pin &ubits_dpin);
 public:
   Lgtuple(std::string_view _name) : name(_name), correct(true) {}
@@ -152,6 +153,8 @@ public:
   bool     concat(const std::shared_ptr<Lgtuple const> tup2);
   bool     concat(const Node_pin &dpin);
   Node_pin flatten() const;
+  std::shared_ptr<Lgtuple> create_assign(std::shared_ptr<Lgtuple const> tup) const;
+  std::shared_ptr<Lgtuple> create_assign(const Node_pin &dpin) const;
 
   /// Get all the attributes (__bits) in the same tuple level
   std::vector<std::pair<std::string, Node_pin>> get_level_attributes(std::string_view key) const;

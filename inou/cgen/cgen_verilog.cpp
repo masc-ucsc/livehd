@@ -432,9 +432,11 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 							auto a_val = a_dpin.get_type_const();
 							a_val = a_val.sext_op(trail_zeroes);
 							expanded_a_trail_txt = a_val.to_verilog();
-						}else{
-							expanded_a_trail_txt = absl::StrCat(a, "[", trail_zeroes - 1, ":0]");
-						}
+            }else if (trail_zeroes == a_dpin.get_bits()) {
+              expanded_a_trail_txt = a;
+            }else{
+              expanded_a_trail_txt = absl::StrCat(a, "[", trail_zeroes - 1, ":0]");
+            }
 
 						if (expanded_a_txt.empty())
 							final_expr = absl::StrCat("{", expanded_value_txt, ",", expanded_a_trail_txt, "}");
@@ -448,28 +450,36 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 			}
 		}
   } else if (op == Ntype_op::Get_mask) {
-#if 0
-    const std::string src = get_expression(node.get_sink_pin("a").get_driver_pin());
-    final_expr = absl::StrCat("{1'b0,", src, "}");
-#else
-    auto a         = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
     if (mask_dpin.is_type_const()) {
       auto v = mask_dpin.get_type_const();
-      if (v == Lconst(-1)) {
-        final_expr = a;
-      } else if (v.is_mask()) {
-        auto ubits = v.get_bits() - 1;  // -1 because it is a positive
-        final_expr = absl::StrCat(a, "[", ubits - 1, ":0]");
+      auto a_dpin = node.get_sink_pin("a").get_driver_pin();
+      if (a_dpin.is_type_const()) {
+        auto a_v = a_dpin.get_type_const();
+
+        auto result = a_v.get_mask_op(v);
+
+        final_expr = result.to_verilog();
+      }else if (v.is_mask()) {
+        auto a = get_expression(a_dpin);
+        int ubits = v.get_bits() - 1;  // -1 because it is a positive (mask=0 or mask=-1)
+        if (ubits<=1) // if mask is 0b1 is ubits is 1
+          final_expr = a;
+        else
+          final_expr = absl::StrCat(a, "[", ubits - 1, ":0]");
       } else {
         bool clean = false;
         auto trail_zeroes=v.get_trailing_zeroes();
         if (trail_zeroes>0) {
           auto v2 = v.rsh_op(trail_zeroes);
           if (v2.is_mask()) {
+            auto a = get_expression(a_dpin);
             clean = true;
             auto ubits = v.get_bits() - 1;  // -1 because it is a positive
-            final_expr = absl::StrCat(a, "[", ubits - 1, ":", trail_zeroes, "]");
+            if (ubits<=trail_zeroes) // if mask is 0b1 is ubits is 1
+              final_expr = a;
+            else
+              final_expr = absl::StrCat(a, "[", ubits - 1, ":", trail_zeroes, "]");
           }
         }
         if (!clean) {
@@ -479,7 +489,6 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     } else {
       I(false);  // FIXME: implement this
     }
-#endif
   } else if (op == Ntype_op::Sext) {
     auto lhs      = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto pos_node = node.get_sink_pin("b").get_driver_node();

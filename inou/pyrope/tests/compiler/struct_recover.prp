@@ -1,0 +1,10 @@
+
+$in1.__sbits = 4
+#in2.__sbits = 8
+
+orig = (a=$in1,b=$in2)
+
+tmp = orig
+tmp := (0,$in2+1)
+
+%out = tmp
