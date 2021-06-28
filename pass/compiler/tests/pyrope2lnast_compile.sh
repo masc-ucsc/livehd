@@ -10,18 +10,18 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3'
 
 
-pts='scalar_tuple partial hier_tuple bits_rhs 
-hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if
+pts='firrtl_tail3 scalar_tuple hier_tuple bits_rhs 
+hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if1
 lhs_wire2 tuple_copy2 tuple_empty_attr if2
 hier_tuple_nested_if3
 hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
 tuple_nested1 tuple_nested2
-get_mask1 hier_tuple2 capricious_bits
+hier_tuple2 capricious_bits
 capricious_bits2 capricious_bits4 hier_tuple_nested_if 
 hier_tuple_nested_if4 
 '
 #FIXME: for LL LN 
-# firrtl_tail3 firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 firrtl_tail2 logic  counter reg_bits_set flatten_bundle
+# firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 firrtl_tail2 logic2  counter reg_bits_set flatten_bundle partial get_mask1 
 
 #FIXME: for LL LN ... V gen fail!
 # reg__q_pin  adder_stage  scalar_reg_out_pre_declare  vec_shift_register_param    
@@ -45,13 +45,13 @@ hier_tuple_nested_if4
 # pts='tuple_if2'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
-pts_hier1='top sum top'
-pts_hier2='top top sum'
+pts_hier1='top top_sum top'
+pts_hier2='top top top_sum'
 
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
-PATTERN_PATH=./inou/pyrope/tests/compiler
+PATTERN_PATH=./inou/pyrope/tests
 
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
@@ -69,7 +69,7 @@ Pyrope_compile_LL_LN () {
   echo ""
   echo "===================================================="
   echo "Pyrope Full Compilation to check low level LN generation "
-  echo " P->LN->LG(in lgdb2)->LN(low-level)-> LG(in lgdb) -> V (LEC)"
+  echo " P->LN->LG(in lgdb2)->LN(low-level)-> code_gen prp -> LG(in lgdb) -> V (LEC)"
   echo "===================================================="
 
 
@@ -102,11 +102,25 @@ Pyrope_compile_LL_LN () {
     echo "LGraph -> LNAST -> LGraph"
     echo "----------------------------------------------------"
     #LG->LN->LG
-    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> lnast.dump |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp odir:tmp_prp" #This is just to see the LN generated
+
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
-      echo "ERROR: could not compile LG with pattern: ${pt}.prp!"
+      echo "ERROR: could not compile LG from lgdb2 with pattern: ${pt}.prp!"
+      exit $ret_val
+    fi
+    
+    if [ ! -f tmp_prp/${pt}.prp ]; then
+        echo "ERROR: could not find ${pt}.prp in tmp_prp"
+        exit 1
+    fi
+
+    ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
+
+    ret_val=$?
+    if [ $ret_val -ne 0 ]; then
+      echo "ERROR: could not compile LG to lgdb with pattern: tmp_prp/${pt}.prp!"
       exit $ret_val
     fi
   done #end of for
@@ -246,7 +260,7 @@ Pyrope_compile_hier_LL_LN () {
   echo "Logic Equivalence Check: Hierarchical Design"
   echo "----------------------------------------------------"
 
-  ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
+  ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/verilog_gld/${top_module}.gld.v
 
   if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
