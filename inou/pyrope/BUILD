@@ -35,6 +35,12 @@ sh_test(
     tags = ["fixme"],
 )
 
+filegroup(
+    name = "pyrope_tests",
+    srcs = glob(["tests/*.prp"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "prp_test",
     srcs = ["tests/prp_test.cpp"],

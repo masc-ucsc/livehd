@@ -30,6 +30,7 @@ cc_library(
     data = [
         "//inou/pyrope:tests/%s.prp" % t,
         "//inou/pyrope:tests/verilog_gld/%s.gld.v" % t,
+        "//inou/pyrope:pyrope_tests",
         "//main:lgshell",
     ],
     tags = [
@@ -88,6 +89,7 @@ cc_library(
     ,"firrtl_gcd_3bits"
     ,"firrtl_tail3"
     ,"connect_through"
+    ,"top"
 ]]
 
 # High Level FIRRTL
