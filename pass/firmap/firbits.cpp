@@ -360,7 +360,7 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
   } else if (op == "__fir_as_sint") {
     analysis_fir_as_sint(node, inp_edges, fbmap);
   } else if (op == "__fir_as_clock") {
-    I(false);  // TODO
+    analysis_fir_as_clock(node, inp_edges, fbmap);
   } else if (op == "__fir_as_async") {
     I(false);  // TODO
   } else if (op == "__fir_shl") {
@@ -822,6 +822,35 @@ void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges, FBMap &
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, false));
 }
+
+void Firmap::analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+  I(inp_edges.size() == 1);
+
+  Bits_t bits1 = 0;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact_flat());
+    if (it == fbmap.end()) {
+      if (firbits_wait_flop == true) 
+        return;
+
+      // driver is not from other sugraph, wait next iteration for Flop being solved
+      if (e.driver.get_type_op() == Ntype_op::Flop) {
+        firbits_wait_flop = true;
+        return;
+      }
+      it = get_fbits_from_hierarchy(e);
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, false));
+}
+
+
+
+
 
 void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 2);

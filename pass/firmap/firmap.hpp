@@ -49,6 +49,7 @@ protected:
   void analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
+  void analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_shl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_shr(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
@@ -77,6 +78,7 @@ protected:
   void map_node_fir_neq(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_as_uint(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_as_sint(Node &node, Lgraph *new_lg, PinMap &pinmap);
+  void map_node_fir_as_clock(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_pad(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_shl(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_shr(Node &node, Lgraph *new_lg, PinMap &pinmap);
@@ -94,34 +96,6 @@ protected:
   void map_node_fir_head(Node &node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap);
   void map_node_fir_tail(Node &node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap);
 
-  void map_edge_fir_ops(Node &node, std::string_view op, Lgraph *new_lg);
-  void map_edge_fir_add(Node &node, Lgraph *new_lg);
-  void map_edge_fir_sub(Node &node, Lgraph *new_lg);
-  void map_edge_fir_mul(Node &node, Lgraph *new_lg);
-  void map_edge_fir_div(Node &node, Lgraph *new_lg);
-  void map_edge_fir_rem(Node &node, Lgraph *new_lg);
-  void map_edge_fir_lt_gt(Node &node, Lgraph *new_lg, std::string_view op);
-  void map_edge_fir_leq_geq(Node &node, Lgraph *new_lg, std::string_view op);
-  void map_edge_fir_eq(Node &node, Lgraph *new_lg);
-  void map_edge_fir_neq(Node &node, Lgraph *new_lg);
-  void map_edge_fir_as_uint(Node &node, Lgraph *new_lg);
-  void map_edge_fir_as_sint(Node &node);
-  void map_edge_fir_pad(Node &node, Lgraph *new_lg);
-  void map_edge_fir_shl(Node &node, Lgraph *new_lg);
-  void map_edge_fir_shr(Node &node, Lgraph *new_lg);
-  void map_edge_fir_dshl(Node &node, Lgraph *new_lg);
-  void map_edge_fir_dshr(Node &node, Lgraph *new_lg);
-  void map_edge_fir_cvt(Node &node);
-  void map_edge_fir_neg(Node &node, Lgraph *new_lg);
-  void map_edge_fir_not(Node &node, Lgraph *new_lg);
-  void map_edge_fir_and_or_xor(Node &node, Lgraph *new_lg, std::string_view op);
-  void map_edge_fir_andr(Node &node, Lgraph *new_lg);
-  void map_edge_fir_orr(Node &node, Lgraph *new_lg);
-  void map_edge_fir_xorr(Node &node, Lgraph *new_lg);
-  void map_edge_fir_cat(Node &node, Lgraph *new_lg);
-  void map_edge_fir_bits(Node &node, Lgraph *new_lg);
-  void map_edge_fir_head(Node &node, Lgraph *new_lg);
-  void map_edge_fir_tail(Node &node, Lgraph *new_lg);
 
   void clone_lg_ops_node(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void clone_subgraph_node(Node &node, Lgraph *new_lg, PinMap &pinmap);

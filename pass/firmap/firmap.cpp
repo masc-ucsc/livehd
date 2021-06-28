@@ -137,7 +137,7 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, Lgraph *new_lg, F
   } else if (op == "__fir_as_sint") {
     map_node_fir_as_sint(node, new_lg, pinmap);
   } else if (op == "__fir_as_clock") {
-    I(false);  // TODO
+    map_node_fir_as_clock(node, new_lg, pinmap);
   } else if (op == "__fir_as_async") {
     I(false);  // TODO
   } else if (op == "__fir_shl") {
@@ -565,6 +565,21 @@ void Firmap::map_node_fir_as_sint(Node &old_node, Lgraph *new_lg, PinMap &pinmap
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
   }
 }
+
+void Firmap::map_node_fir_as_clock(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
+  auto new_node = new_lg->create_node(Ntype_op::Or);  // note: this is a wiring OR
+  for (auto old_spin : old_node.inp_connected_pins()) {
+    if (old_spin == old_node.setup_sink_pin("e1")) {
+      pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("A"));
+    }
+  }
+
+  for (auto old_dpin : old_node.out_connected_pins()) {
+    pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
+  }
+}
+
+
 
 void Firmap::map_node_fir_rem(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
   // TODO

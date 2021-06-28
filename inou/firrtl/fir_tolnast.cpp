@@ -195,11 +195,8 @@ void Inou_firrtl::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Type& type
       create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
       break;
     }
-    case firrtl::FirrtlPB_Type::kClockType: {
-      break;
-    }
     default: {
-      // UInt Analog Reset Types
+      // UInt Analog Reset Clock Types
       auto wire_bits = get_bit_count(type);
       create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
     }
@@ -847,7 +844,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_const(lnast.add_string(sub_it->second)));
-  lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+  lnast.add_child(idx_conv, Lnast_node::create_const(e1_str));
 }
 
 // --------------------------------------- end of primitive op ----------------------------------------------
@@ -929,10 +926,8 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   I(flattened_str.find("."));
   if (is_rhs) {
-    fmt::print("DEBUG11 flattened_str:{}\n", flattened_str);
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
   } else {
-    fmt::print("DEBUG12 flattened_str:{}\n", flattened_str);
     CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
   }
 }
@@ -1429,7 +1424,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       }
     
       std::string_view  rhs_str;
-      if (is_invalid_names.find(tmp_rhs_str) != is_invalid_names.end()) {
+      if (is_invalid_table.find(tmp_rhs_str) != is_invalid_table.end()) {
         //create __last_value 
         auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
         auto temp_var_str = create_tmp_var(lnast);
@@ -1446,10 +1441,20 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve
       // this problem, we use dp_assign to avoid this problem when lhs is a
       // pre-defined circuit component (not ___tmp variable)
-      if (lhs_str.substr(0, 1) == "_") {
+      
+      auto it = is_invalid_table.find(lhs_str);
+
+      // if (lhs_str.substr(0, 1) == "_") {
+      if (it != is_invalid_table.end()) {
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+        is_invalid_table.erase(lhs_str);
+      } else if (lhs_str.substr(0, 1) == "_") {
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+        lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
+        lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+
       } else {
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
@@ -1865,7 +1870,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       auto id = stmt.is_invalid().expression().reference().id();
       auto it = wire_names.find(id);
       if (it != wire_names.end()) {
-        is_invalid_names.insert(id);
+        is_invalid_table.insert(id);
       }
 
       break;
