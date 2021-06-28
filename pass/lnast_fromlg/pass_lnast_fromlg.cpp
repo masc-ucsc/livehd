@@ -141,6 +141,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
       if (editable_pin.get_node().get_color() == GREY || editable_pin.get_node().get_color() == WHITE) {
         auto ntype = editable_pin.get_node().get_type_op();
         if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
+          //add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
           continue;
         }
         handle_source_node(lg, editable_pin, lnast, ln_node);
@@ -155,6 +156,31 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
   // Node that pin is a driver in has not been visited yet. Handle it.
   I(pin.get_node().get_color() == WHITE);
   pin.get_node().set_color(GREY);
+
+  //add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
+  auto ntype = pin.get_node().get_type_op();
+  if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
+    //add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
+    std::string_view pin_name = lnast.add_string(dpin_get_name(pin));
+    //to add #x = #x.__create_flop
+    auto temp_decl_var_name = create_temp_var(lnast);
+
+    auto dot_decl_node = lnast.add_child(ln_node, Lnast_node::create_attr_get());
+    lnast.add_child(dot_decl_node, Lnast_node::create_ref(temp_decl_var_name));
+    lnast.add_child(dot_decl_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(dot_decl_node, Lnast_node::create_const("__create_flop"));
+
+    auto asg_decl_node = lnast.add_child(ln_node, Lnast_node::create_assign());
+    lnast.add_child(asg_decl_node, Lnast_node::create_ref(pin_name));
+    lnast.add_child(asg_decl_node, Lnast_node::create_ref(temp_decl_var_name));
+   
+    //to create #x_q = #x // test case: firrtl_tail3.prp
+    std::string_view pin_nam_q = lnast.add_string(absl::StrCat(pin_name, "_q"));
+    auto q_decl_node = lnast.add_child(ln_node, Lnast_node::create_assign());
+    lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_nam_q));
+    lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_name));
+  }
+
 
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto editable_pin = inp.driver;
@@ -262,12 +288,12 @@ void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool 
 
 void Pass_lnast_fromlg::handle_io(Lgraph* lg, Lnast_nid& parent_lnast_node, Lnast& lnast) {
   /* Any input or output that has its bitwidth specified should add info to the LNAST.
-   * As an example, if we had an input x that was 7 bits wide, this would be added:
-   *     dot             asg
-   *   /  |  \         /     \
-   *  T0 $x __bits    T0    0d7    (note that the $ would be % if it was an output)*/
+   * As an example, if we had an unsigned input x that was 7 bits wide, this would be added:
+   *     tuple_add              
+   *   /    |     \
+   *  $x   __ubits 7    (note that the $ would be % if it was an output)*/
 
-  auto                                  inp_io_node = lg->get_graph_input_node();
+  auto inp_io_node = lg->get_graph_input_node();
   absl::flat_hash_set<std::string_view> inps_visited;
   for (const auto& edge : inp_io_node.out_edges()) {
     I(edge.driver.has_name());
@@ -622,6 +648,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   I(mux_vals.size() >= 2);
 
   // Set up each cond value
+  // cond "==1" comes from here: (remove these add_child if want to remove that)
   std::vector<std::string_view> temp_vars;
   for (long unsigned int i = 1; i < mux_vals.size(); i++) {
     auto temp_var = create_temp_var(lnast);
@@ -729,7 +756,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   if (has_async) {
     auto temp_var_name = create_temp_var(lnast);
 
-    auto dot_sel_node = lnast.add_child(parent_node, Lnast_node::create_select());
+    auto dot_sel_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_sel_node, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(dot_sel_node, Lnast_node::create_ref(pin_name));
     lnast.add_child(dot_sel_node, Lnast_node::create_const("__reset_async"));
@@ -740,22 +767,23 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
 
   if (has_reset) {
-    auto temp_var_name = create_temp_var(lnast);
+    //auto temp_var_name = create_temp_var(lnast);
 
-    auto dot_rst_node = lnast.add_child(parent_node, Lnast_node::create_select());
-    lnast.add_child(dot_rst_node, Lnast_node::create_ref(temp_var_name));
+    auto dot_rst_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    //lnast.add_child(dot_rst_node, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(dot_rst_node, Lnast_node::create_ref(pin_name));
-    lnast.add_child(dot_rst_node, Lnast_node::create_const("__reset_pin"));
+    lnast.add_child(dot_rst_node, Lnast_node::create_const("__reset"));
+    attach_child(lnast, dot_rst_node, reset_pin);
 
-    auto asg_rst_node = lnast.add_child(parent_node, Lnast_node::create_assign());
-    lnast.add_child(asg_rst_node, Lnast_node::create_ref(temp_var_name));
-    attach_child(lnast, asg_rst_node, reset_pin);
+    //auto asg_rst_node = lnast.add_child(parent_node, Lnast_node::create_assign());
+    //lnast.add_child(asg_rst_node, Lnast_node::create_ref(temp_var_name));
+    //attach_child(lnast, asg_rst_node, reset_pin);
   }
 
   if (has_init) {
     auto temp_var_name = create_temp_var(lnast);
 
-    auto dot_init_node = lnast.add_child(parent_node, Lnast_node::create_select());
+    auto dot_init_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_init_node, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(dot_init_node, Lnast_node::create_ref(pin_name));
     lnast.add_child(dot_init_node, Lnast_node::create_const("__reset"));
@@ -768,7 +796,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   if (has_pola) {
     I(pin.get_node().get_type_op() != Ntype_op::Flop);
     auto temp_var_name = create_temp_var(lnast);
-    auto dot_pol       = lnast.add_child(parent_node, Lnast_node::create_select());
+    auto dot_pol       = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_pol, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(dot_pol, Lnast_node::create_ref(pin_name));
     lnast.add_child(dot_pol, Lnast_node::create_const("__posedge"));
@@ -804,10 +832,12 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
   auto tmp_var_q = create_temp_var(lnast);
-  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_select());
+  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
-  lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name));
-  lnast.add_child(idx_dot_q, Lnast_node::create_const("__q_pin"));
+  //to have %out=#x_q insteasd of #x. test case: firrtl_tail3.prp
+  std::string_view pin_name_q = lnast.add_string(absl::StrCat(pin_name, "_q"));
+  lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name_q));
+  //lnast.add_child(idx_dot_q, Lnast_node::create_const("__q_pin"));
 
   auto editable_pin = pin;
   //	dpin_get_name(editable_pin);
@@ -840,7 +870,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
 
   // Set __latch = true
   auto tmp_var  = create_temp_var(lnast);
-  auto idx_dotl = lnast.add_child(parent_node, Lnast_node::create_select());
+  auto idx_dotl = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dotl, Lnast_node::create_ref(tmp_var));
   lnast.add_child(idx_dotl, Lnast_node::create_ref(pin_name));
   lnast.add_child(idx_dotl, Lnast_node::create_const("__latch"));
@@ -861,7 +891,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
   auto tmp_var_q = create_temp_var(lnast);
-  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_select());
+  auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name));
   lnast.add_child(idx_dot_q, Lnast_node::create_const("__q_pin"));
@@ -912,7 +942,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create output
   for (const auto& dpin : pin.get_node().out_connected_pins()) {
     auto port_name  = dpin.get_type_sub_pin_name();
-    auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_select());
+    auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     attach_child(lnast, idx_dotasg, dpin);
     lnast.add_child(idx_dotasg, Lnast_node::create_ref(out_tup_name));
     lnast.add_child(idx_dotasg, Lnast_node::create_ref(lnast.add_string(port_name)));
