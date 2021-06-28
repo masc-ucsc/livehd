@@ -185,6 +185,7 @@ cc_library(
 
     "IntXbar",
     "SimpleClockGroupSource",
+    "FixedClockBroadcast",
 
     # "Arbiter_10",
     # "BankedStore",
