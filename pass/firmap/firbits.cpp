@@ -828,7 +828,7 @@ void Firmap::analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap 
 
   Bits_t bits1 = 0;
   for (auto e : inp_edges) {
-    auto it = fbmap.find(e.driver.get_compact_flat());
+    auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
       if (firbits_wait_flop == true) 
         return;
@@ -845,7 +845,7 @@ void Firmap::analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap 
       bits1 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_flat(), Firrtl_bits(bits1, false));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, false));
 }
 
 
