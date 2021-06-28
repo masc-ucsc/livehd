@@ -11,26 +11,22 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 
-Firmap::Firmap(absl::node_hash_map<uint32_t, FBMap> &_fbmaps, absl::node_hash_map<uint32_t, PinMap> &_pinmaps,
-               absl::node_hash_map<uint32_t, XorrMap> &_spinmaps_xorr)
+Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_map<Lgraph *, PinMap> &_pinmaps,
+               absl::node_hash_map<Lgraph *, XorrMap> &_spinmaps_xorr)
     : fbmaps(_fbmaps), pinmaps(_pinmaps), spinmaps_xorr(_spinmaps_xorr) {}
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   Lbench      b("pass.firmap");
+
   auto        lg_name = lg->get_name();
   std::string lg_source{lg->get_library().get_source(lg->get_lgid())};
   Lgraph *    new_lg = Lgraph::create(lg->get_path(), lg_name.substr(9), lg_source);
 
-  {
-    std::lock_guard<std::mutex> guard(firrtl_maps_mutex);
-    pinmaps.insert_or_assign(lg->get_lgid(), PinMap());
-    spinmaps_xorr.insert_or_assign(lg->get_lgid(), XorrMap());
-  }
+  I(pinmaps.find(lg) != pinmaps.end()); // call add_map_entry first (needed for multithreaded)
 
-  // FIXME->sh: also protect during spinmaps_xorr.find() ???
-  auto &fbmap        = fbmaps.find(lg->get_lgid())->second;
-  auto &pinmap       = pinmaps.find(lg->get_lgid())->second;
-  auto &spinmap_xorr = spinmaps_xorr.find(lg->get_lgid())->second;
+  auto &fbmap        = fbmaps.find(lg)->second;
+  auto &pinmap       = pinmaps.find(lg)->second;
+  auto &spinmap_xorr = spinmaps_xorr.find(lg)->second;
 
   // clone graph input pins
   lg->each_graph_input([new_lg, &pinmap](Node_pin &old_dpin) {
@@ -189,7 +185,7 @@ void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   I(old_node.is_type_sub());
 
   for (auto &e : old_node.inp_edges()) {
-    auto it = fbmap.find(e.driver.get_compact_flat());
+    auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end())
       it = get_fbits_from_hierarchy(e);
 
@@ -225,7 +221,7 @@ void Firmap::map_node_fir_head(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   Lconst n;
 
   for (auto &e : old_node.inp_edges()) {
-    auto it = fbmap.find(e.driver.get_compact_flat());
+    auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end())
       it = get_fbits_from_hierarchy(e);
 
@@ -299,7 +295,7 @@ void Firmap::map_node_fir_cat(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
     if (e.sink == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(e.sink, new_node_shl.setup_sink_pin("a"));  // e1 -> shl
     } else {                                                              // e2
-      auto it = fbmap.find(e.driver.get_compact_flat());
+      auto it = fbmap.find(e.driver.get_compact_class_driver());
       if (it == fbmap.end())
         it = get_fbits_from_hierarchy(e);
 
@@ -342,7 +338,7 @@ void Firmap::map_node_fir_xorr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
 
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
-      auto it = fbmap.find(e.driver.get_compact_flat());
+      auto it = fbmap.find(e.driver.get_compact_class_driver());
       if (it == fbmap.end())
         it = get_fbits_from_hierarchy(e);
 
@@ -424,7 +420,7 @@ void Firmap::map_node_fir_not(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
   for (auto &e : old_node.inp_edges()) {
     if (e.sink.get_type_sub_pin_name() == "e1") {
       // pinmap.insert_or_assign(e.sink, new_node_not.setup_sink_pin("a"));
-      auto it = fbmap.find(e.driver.get_compact_flat());
+      auto it = fbmap.find(e.driver.get_compact_class_driver());
       if (it == fbmap.end())
         it = get_fbits_from_hierarchy(e);
 

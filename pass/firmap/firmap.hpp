@@ -10,22 +10,19 @@
 #include "pass.hpp"
 #include "struct_firbits.hpp"
 
-using FBMap   = absl::flat_hash_map<Node_pin::Compact_flat, Firrtl_bits>;  // pin->firrtl bits
+using FBMap   = absl::flat_hash_map<Node_pin::Compact_class_driver, Firrtl_bits>; // pin->firrtl bits
 using PinMap  = absl::flat_hash_map<Node_pin, Node_pin>;                   // old_pin to new_pin for both dpin and spin
 using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;      // special case for xorr one old spin -> multi newspin
 
 class Firmap {
 protected:
-  inline static std::mutex firrtl_maps_mutex;
   bool firbits_issues  = false;
   bool firmap_issues   = false;
   bool firbits_wait_flop = false;
 
-  std::string lg_path;
-
-  absl::node_hash_map<uint32_t, FBMap> &  fbmaps;   // firbits maps center
-  absl::node_hash_map<uint32_t, PinMap> & pinmaps;  // pin maps center
-  absl::node_hash_map<uint32_t, XorrMap> &spinmaps_xorr;
+  absl::node_hash_map<Lgraph *, FBMap>   &fbmaps;   // firbits maps center
+  absl::node_hash_map<Lgraph *, PinMap>  &pinmaps;  // pin maps center
+  absl::node_hash_map<Lgraph *, XorrMap> &spinmaps_xorr;
   // absl::flat_hash_map<Node_pin, Node_pin>                  pinmap;       // old_pin to new_pin for both dpin and spin
   // absl::flat_hash_map<Node_pin, std::vector<Node_pin>>     spinmap_xorr;
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
@@ -132,10 +129,12 @@ protected:
   void clone_edges_fir_xorr(Node &node, PinMap &pinmap, XorrMap &spinmap_xorr);
 
 public:
-  Firmap(absl::node_hash_map<uint32_t, FBMap> &_fbmaps, absl::node_hash_map<uint32_t, PinMap> &_pinmaps,
-         absl::node_hash_map<uint32_t, XorrMap> &_spinmaps_xorr);
+  Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_map<Lgraph *, PinMap> &_pinmaps,
+         absl::node_hash_map<Lgraph *, XorrMap> &_spinmaps_xorr);
   void    do_firbits_analysis(Lgraph *orig);
   Lgraph *do_firrtl_mapping(Lgraph *orig);
+
+  void add_map_entry(Lgraph *lg);
 
   void dump() const;
 };

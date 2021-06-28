@@ -14,7 +14,6 @@
 #define AT_ISI            0
 #define STARTS_WITH       0
 #define BENCH             1
-#define WHITEBOARD        0
 
 #if CTOR_TESTS
 template<int m_id>
@@ -53,7 +52,7 @@ void mmap_pstr_ctor_tests() {
   mmap_lib::str<3> bap("12-Johnathan-34567890");
   mmap_lib::str<3> baq("zyxwvutsrqponmlk");
   std::cout << ".\n";
-  
+
   std::cout << "================================ " << std::endl;
   std::cout << "Constructor 1 (size < 14) Tests: " << std::endl;
   std::cout << "================================ " << std::endl;
@@ -127,28 +126,28 @@ bool test_neq(mmap_lib::str<m_id> ts, const char (&rs)[N], bool ans, uint8_t &cn
 }
 
 template<int m_id, int m_id2>
-bool test_eq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) { 
+bool test_eq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls == rs) == ans; 
+  return (ls == rs) == ans;
 
 }
 
 template<int m_id, int m_id2>
-bool test_neq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) { 
+bool test_neq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls != rs) == ans; 
+  return (ls != rs) == ans;
 }
 
 template<int m_id>
-bool test_eq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) { 
+bool test_eq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls == rs) == ans; 
+  return (ls == rs) == ans;
 }
 
 template<int m_id>
-bool test_neq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) { 
+bool test_neq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls != rs) == ans; 
+  return (ls != rs) == ans;
 }
 
 void pstrVchar_eqeq_tests() {
@@ -306,7 +305,7 @@ void cross_template_compare_tests() {
   mmap_lib::str<1> b1("i-am-tired-today>>");
   mmap_lib::str<2> b2("i-am-tired-today>>");
   mmap_lib::str<3> b3("i-am-tired-today>>");
-  
+
   uint8_t r = 0u, t = 0u;
   r += test_eq(a1, a2, true, t);
   r += test_eq(a1, a3, true, t);
@@ -390,15 +389,15 @@ void pstr_isI() {
 
 #if STARTS_WITH
 template<int m_id, int m_id2>
-bool test_starts_with(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) { 
+bool test_starts_with(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return ls.starts_with(rs) == ans; 
+  return ls.starts_with(rs) == ans;
 }
 
 template<int m_id>
-bool test_starts_with(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) { 
+bool test_starts_with(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return ls.starts_with(rs) == ans; 
+  return ls.starts_with(rs) == ans;
 }
 
 void pstr_starts_with() {
@@ -434,7 +433,7 @@ void pstr_starts_with() {
   r += test_starts_with(whole2, four, true, t);
   r += test_starts_with(whole2, empty, true, t);
 #endif
-  
+
   mmap_lib::str<3> whole3("--this_var_will_be_very_long_for_testing_12345");
   mmap_lib::str<3> front5("--this_var");
   mmap_lib::str<3> spec1("-");
@@ -468,81 +467,110 @@ void pstr_starts_with() {
 #endif
 
 #if BENCH
-#define STR_SIZE 1e4
+#define STR_SIZE 1e3
 void bench_str_cmp() {
   {
-    Lbench b("bench_str_cmp");
+    for(auto sz=2;sz<512;sz=sz*2) {
 
-    Lrand_range<char>     ch(33, 126);
-    Lrand_range<uint16_t> sz(1, 30);
+      int conta = 0;
+      std::vector<mmap_lib::str<2>> v;
+      {
+        std::string bench_name = std::string("bench_str_create") + std::to_string(sz);
+        Lbench b(bench_name);
 
-    std::vector<mmap_lib::str<2>> v;
-    for (auto i = 0u; i < STR_SIZE; ++i) {
-      auto          s = sz.any();
-      mmap_lib::str<2> tmp;
-      for (auto j = 0; j < s; ++j) {
-        tmp.append(ch.any());
+        Lrand_range<char>     ch(33, 126);
+        //Lrand_range<uint16_t> sz(1, 30);
+
+        for (auto i = 0u; i < STR_SIZE; ++i) {
+          auto          s = sz; // sz.any();
+#if 1
+          mmap_lib::str<2> tmp;
+          for (auto j = 0; j < s; ++j) {
+            tmp.append(ch.any());
+          }
+#else
+          std::string str;
+          for (auto j = 0; j < s; ++j) {
+            str.append(1, ch.any());
+          }
+          mmap_lib::str<2> tmp(str);
+#endif
+
+          v.emplace_back(tmp);
+          conta += v.size();
+        }
       }
-      v.emplace_back(tmp);
-    }
 
-    int conta = 0;
-    for (auto i = 0u; i < STR_SIZE; ++i) {
-      for (auto j = 0u; j < STR_SIZE; ++j) {
-        if (v[i] == v[j])
-          conta++;
+      {
+        std::string bench_name = std::string("bench_str_cmp") + std::to_string(sz);
+        Lbench b(bench_name);
+
+        for (auto i = 0u; i < STR_SIZE; ++i) {
+          for (auto j = 0u; j < STR_SIZE; ++j) {
+            if (v[i] == v[j])
+              conta++;
+          }
+        }
       }
-    }
 
-    fmt::print("bench_str_cmp conta:{}\n", conta);
-    mmap_lib::str<2>::clear_map();
+      fmt::print("{} conta:{}\n", "mmap_lib::str", conta);
+      mmap_lib::str<2>::clear_map();
+    }
   }
 
   {
-    Lbench b("bench_string_cmp");
+    for(auto sz=2;sz<512;sz=sz*2) {
 
-    Lrand_range<char>     ch(33, 126);
-    Lrand_range<uint16_t> sz(1, 30);
+      int conta = 0;
+      std::vector<std::string> v;
+      {
+        std::string bench_name = std::string("bench_string_create") + std::to_string(sz);
+        Lbench b(bench_name);
 
-    std::vector<std::string> v;
-    for (auto i = 0u; i < STR_SIZE; ++i) {
-      auto        s = sz.any();
-      std::string str;
-      for (auto j = 0; j < s; ++j) {
-        str.append(1, ch.any());
+        Lrand_range<char>     ch(33, 126);
+        //Lrand_range<uint16_t> sz(1, 30);
+
+        for (auto i = 0u; i < STR_SIZE; ++i) {
+          auto        s = sz; // sz.any();
+          std::string str;
+          for (auto j = 0; j < s; ++j) {
+            str.append(1, ch.any());
+          }
+          v.emplace_back(str);
+          conta += v.size();
+        }
       }
-      v.emplace_back(str);
-    }
 
-    int conta = 0;
-    for (auto i = 0u; i < STR_SIZE; ++i) {
-      for (auto j = 0u; j < STR_SIZE; ++j) {
-        if (v[i] == v[j])
-          conta++;
+      {
+        std::string bench_name = std::string("bench_string_cmp") + std::to_string(sz);
+        Lbench b(bench_name);
+
+        for (auto i = 0u; i < STR_SIZE; ++i) {
+          for (auto j = 0u; j < STR_SIZE; ++j) {
+            if (v[i] == v[j])
+              conta++;
+          }
+        }
       }
-    }
 
-    fmt::print("bench_string_cmp conta:{}\n", conta);
+      fmt::print("{} conta:{}\n", "std::string", conta);
+    }
   }
 }
 #endif
 
-#if WHITEBOARD
-void whtbrd() {
-  std::cout << "hello\n";
-}
-#endif
-
-
 int main(int argc, char** argv) {
-  printf("Hello World!\n");
 
   mmap_lib::str<1>::clear_map();
   mmap_lib::str<2>::clear_map();
   mmap_lib::str<3>::clear_map();
 
+#if BENCH
+  bench_str_cmp();
+#endif
+
 #if CTOR_TESTS
-  mmap_pstr_ctor_tests(); 
+  mmap_pstr_ctor_tests();
 #endif
 
 #if NEEQ_TESTS
@@ -556,7 +584,7 @@ int main(int argc, char** argv) {
   cross_template_compare_tests();
   std::cout << "==========================" << std::endl;
 #endif
-  
+
 #if AT_ISI
   pstr_at_operator();
   pstr_isI();
@@ -564,14 +592,6 @@ int main(int argc, char** argv) {
 
 #if STARTS_WITH
   pstr_starts_with();
-#endif
-
-#if BENCH
-  bench_str_cmp();
-#endif
-
-#if WHITEBOARD
-  whtbrd();
 #endif
 
   return 0;

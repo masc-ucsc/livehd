@@ -29,11 +29,13 @@ private:
   const bool             gviz;
 
   // firrtl only tables
-  absl::node_hash_map<uint32_t, FBMap>   fbmaps;         // Lg_type_id -> fbmap
-  absl::node_hash_map<uint32_t, PinMap>  pinmaps;        // Lg_type_id -> pinmap
-  absl::node_hash_map<uint32_t, XorrMap> spinmaps_xorr;  // Lg_type_id -> spinmaps
+  absl::node_hash_map<Lgraph *, FBMap>   fbmaps;         // Lg_type_id -> fbmap
+  absl::node_hash_map<Lgraph *, PinMap>  pinmaps;        // Lg_type_id -> pinmap
+  absl::node_hash_map<Lgraph *, XorrMap> spinmaps_xorr;  // Lg_type_id -> spinmaps
 
   Graphviz gv;
+
+  void setup_maps();
 
 protected:
   std::mutex            lgs_mutex;

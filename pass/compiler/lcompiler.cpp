@@ -12,6 +12,8 @@ void Lcompiler::do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) 
     thread_pool.add(&Lcompiler::prp_thread_ln2lg, this, ln);
   }
   thread_pool.wait_all();
+
+  setup_maps();
 }
 
 void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
@@ -43,23 +45,23 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
 
   // for each lgraph, bottom up approach to parallelly do cprop->bw->cprop;
   // also use a visited table to avoid duplicated visitations 
-  std::set<Lg_type_id> visited_lg_table;
+  std::mutex                     lg_visited_mutex;
+  absl::flat_hash_set<Lgraph *>  lg_visited;
+
   for (auto &lg : lgs) {
     {
-      std::unique_lock<std::mutex> guard(lgs_mutex);
-      auto lgid = lg->get_lgid();
-      if (visited_lg_table.find(lgid) != visited_lg_table.end())
+      std::unique_lock<std::mutex> guard(lg_visited_mutex);
+      if (lg_visited.find(lg) != lg_visited.end())
         continue;
-      visited_lg_table.insert(lgid);
+      // lg_visited.insert(lg); do not insert. The each does the insert
     }
 
-    lg->each_hier_unique_sub_bottom_up_parallel([this, &visited_lg_table](Lgraph *lg_sub) {
+    lg->each_hier_unique_sub_bottom_up_parallel([this, &lg_visited, &lg_visited_mutex](Lgraph *lg_sub) {
       {
-        std::unique_lock<std::mutex> guard(lgs_mutex);
-        auto lgid_sub = lg_sub->get_lgid();
-        if (visited_lg_table.find(lgid_sub) != visited_lg_table.end())
+        std::unique_lock<std::mutex> guard(lg_visited_mutex);
+        if (lg_visited.find(lg_sub) != lg_visited.end())
           return;
-        visited_lg_table.insert(lgid_sub);
+        lg_visited.insert(lg_sub);
       }
 
       Bitwidth bw(false, 10);  
@@ -139,8 +141,9 @@ void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) 
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);
   }
   thread_pool.wait_all();
-}
 
+  setup_maps();
+}
 
 void Lcompiler::fir_thread_ln2lg(std::shared_ptr<Lnast> ln) {
   gviz ? gv.do_from_lnast(ln, "raw") : void();
@@ -209,64 +212,106 @@ void Lcompiler::fir_thread_cprop(Lgraph* lg) {
   gviz ? gv.do_from_lgraph(lg, "cprop-ed") : void();
 }
 
+void Lcompiler::setup_maps() { // single-thread
 
+  I(fbmaps.empty()); // compiler object not reused across compilations (is it?)
+
+  // If reused:
+  //fbmaps.clear();
+  //pinmaps.clear();
+  //spinmaps_xorr.clear();
+
+  for (auto *lg : lgs) {
+    if (fbmaps.find(lg) != fbmaps.end())
+      continue;
+
+    fbmaps.insert_or_assign(lg,        FBMap());
+    pinmaps.insert_or_assign(lg,       PinMap());
+    spinmaps_xorr.insert_or_assign(lg, XorrMap());
+
+    lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
+      if (fbmaps.find(lg_sub) != fbmaps.end())
+        return;
+      fbmaps.insert_or_assign(lg_sub,        FBMap());
+      pinmaps.insert_or_assign(lg_sub,       PinMap());
+      spinmaps_xorr.insert_or_assign(lg_sub, XorrMap());
+    });
+  }
+}
 
 void Lcompiler::do_fir_firmap_bitwidth() {
-  // map __firrtl_foo.lg to foo.lg
-  std::vector<Lgraph *> mapped_lgs;
+
   auto  lgcnt = 0;
   auto  hit   = false;
   auto  top_name_before_firmap = absl::StrCat("__firrtl_", top);
 
+  std::mutex                    lg_visited_mutex;
+  absl::flat_hash_set<Lgraph *> lg_visited;
+
+  std::vector<Lgraph *> new_lgs;
+
   for (auto &lg : lgs) {
+    {
+      std::unique_lock<std::mutex> guard(lg_visited_mutex);
+      if (lg_visited.find(lg) != lg_visited.end())
+        continue; // already processed
+    }
     ++lgcnt;
     // bottom up approach to parallelly do cprop, start from top. Since we could start from top in firrtl, the visitation will never duplicated
-    if (lg->get_name() == top_name_before_firmap) {
-      hit = true;
-      // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
-      lg->each_hier_unique_sub_bottom_up_parallel([this, &mapped_lgs](Lgraph *lg_sub) {
-        I(lg_sub->get_name().substr(0,6) != "__fir_");
+    if (lg->get_name() != top_name_before_firmap)
+      continue; // WE COULD REMOTE THIS. THEN NO TOP NEEDED
 
-        Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
-        Bitwidth bw(false, 10);  
+    hit = true;
+    // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
+    lg->each_hier_unique_sub_bottom_up_parallel([this, &lg_visited, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
+      {
+        std::unique_lock<std::mutex> guard(lg_visited_mutex);
+        if (lg_visited.find(lg_sub) != lg_visited.end())
+          return; // already processed
+        lg_visited.insert(lg_sub);
+      }
 
-        fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
-        auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
-        gviz ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
+      I(lg_sub->get_name().substr(0,6) != "__fir_");
 
-        fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg_sub->get_name());
-        bw.do_trans(new_lg_sub);
-        gviz ? gv.do_from_lgraph(new_lg_sub, "") : void();
-
-        {
-          std::unique_lock<std::mutex> guard(lgs_mutex);
-          mapped_lgs.emplace_back(new_lg_sub);
-        }
-      });
-
-      // for top lgraph
       Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
-      Bitwidth bw(false, 10); 
+      Bitwidth bw(false, 10);  
 
-      fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg->get_name());
-      auto new_lg = fm.do_firrtl_mapping(lg);
-      gviz ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
+      fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
+      auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
+      gviz ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
 
-      fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg->get_name());
-      bw.do_trans(new_lg);
-      gviz ? gv.do_from_lgraph(new_lg, "") : void();
+      fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg_sub->get_name());
+      bw.do_trans(new_lg_sub);
+      gviz ? gv.do_from_lgraph(new_lg_sub, "") : void();
 
       {
         std::unique_lock<std::mutex> guard(lgs_mutex);
-        mapped_lgs.emplace_back(new_lg);
+        new_lgs.emplace_back(new_lg_sub);
       }
+    });
+
+    // for top lgraph
+    Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
+    Bitwidth bw(false, 10); 
+
+    fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg->get_name());
+    auto new_lg = fm.do_firrtl_mapping(lg);
+    gviz ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
+
+    fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg->get_name());
+    bw.do_trans(new_lg);
+    gviz ? gv.do_from_lgraph(new_lg, "") : void();
+
+    {
+      std::unique_lock<std::mutex> guard(lg_visited_mutex);
+      lg_visited.insert(new_lg);
     }
   }
 
   if (lgcnt > 1 && hit == false)
     Pass::error("Top module not specified for firrtl codes!\n");
 
-  lgs = mapped_lgs;
+  lgs = new_lgs; // this line is single threaded code or it will fail
 }
 
 
