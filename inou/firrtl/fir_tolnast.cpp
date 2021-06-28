@@ -77,6 +77,7 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
     term_rest = term.substr(pos);
   }
 
+  fmt::print("DEBUG8 term:{}\n", term);
   if (input_names.count(term)) {
     return absl::StrCat("$", term);
   } else if (output_names.count(term)) {
@@ -95,7 +96,7 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
     // if (term.substr(0, 4) == "_GEN") {
     //   return absl::StrCat("_.", term);
     // } else {
-      return term;
+    return term;
   }
 }
 
@@ -860,7 +861,9 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 //FIXME:sh-> rewrite a clean code later
 void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid& parent_node, const bool is_rhs, const Lnast_node &value_node) {
   auto flattened_str  = FlattenExpression(lnast, parent_node, expr);
+  fmt::print("DEBUG7: flattened_str:{}\n", flattened_str);
   auto alter_full_str = get_full_name(flattened_str, is_rhs);
+  fmt::print("DEBUG9: alter_full_str:{}\n", alter_full_str);
 
   if (alter_full_str[0] == '$') {
     flattened_str = absl::StrCat("$", flattened_str);
@@ -926,6 +929,7 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   I(flattened_str.find("."));
   if (is_rhs) {
+    fmt::print("DEBUG10: flattened_str:{}\n", flattened_str);
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
   } else {
     CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
@@ -1275,10 +1279,13 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
 
     std::string full_port_name;
     if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_IN) {
-      input_names.insert(port_name);
+      // input_names.insert(port_name);
+      record_all_input_hierarchy(port_name);
+
       full_port_name = absl::StrCat("$", port_name);
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
-      output_names.insert(port_name);
+      // output_names.insert(port_name);
+      record_all_output_hierarchy(port_name);
       full_port_name = absl::StrCat("%", port_name);
     } else {
       Pass::error("Found IO port {} specified with unknown direction in Protobuf message.", port_name);
@@ -1289,6 +1296,32 @@ void Inou_firrtl::ListPortInfo(Lnast& lnast, const firrtl::FirrtlPB_Port& port, 
       auto extension = port_sign? ".__sbits": ".__ubits";
       CreateTupAddFromStr(lnast, parent_node, absl::StrCat(full_port_name, extension), value_node);
     }
+  }
+}
+
+void Inou_firrtl::record_all_input_hierarchy(std::string_view port_name) {
+  std::size_t pos = port_name.size();
+  while (pos != std::string_view::npos) {
+    std::string port_name2;
+    if (pos == port_name.size())
+      port_name2 = port_name.substr(0);
+    else 
+      port_name2 = port_name.substr(0, pos);
+    input_names.insert(std::string{port_name2});
+    pos = port_name2.find_last_of(".");
+  }
+}
+
+void Inou_firrtl::record_all_output_hierarchy(std::string_view port_name) {
+  std::size_t pos = port_name.size();
+  while (pos != std::string_view::npos) {
+    std::string port_name2;
+    if (pos == port_name.size())
+      port_name2 = port_name.substr(0);
+    else 
+      port_name2 = port_name.substr(0, pos);
+    output_names.insert(std::string{port_name2});
+    pos = port_name2.find_last_of(".");
   }
 }
 
@@ -1444,13 +1477,12 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       
       auto it = is_invalid_table.find(lhs_str);
 
-      // if (lhs_str.substr(0, 1) == "_") {
-      if (it != is_invalid_table.end()) {
+      if (it != is_invalid_table.end()) { // lhs is declared as invalid before
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
         is_invalid_table.erase(lhs_str);
-      } else if (lhs_str.substr(0, 1) == "_") {
+      } else if (lhs_str.substr(0, 1) == "_") { // lhs is declared as kNode
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(lhs_str)));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));

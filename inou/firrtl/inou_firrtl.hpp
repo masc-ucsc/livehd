@@ -3,6 +3,7 @@
 
 // External package includes
 #include <cstdint>
+#include <string_view>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-compare"
@@ -94,6 +95,8 @@ protected:
   void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const std::string &port_id,
                       std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> &vec);
   void ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port &port, Lnast_nid parent_node);
+  void record_all_input_hierarchy(std::string_view port_name);
+  void record_all_output_hierarchy(std::string_view port_name);
 
   void PrintPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, const std::string &symbol, Lnast_nid &parent_node);
   void ListPrimOpInfo(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const std::string &lhs);
