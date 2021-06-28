@@ -1742,7 +1742,6 @@ void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
 
   auto rst_spin = reg_node.setup_sink_pin("reset");
   lg->add_edge(rst_dpin, rst_spin);
-
 }
 
 void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {

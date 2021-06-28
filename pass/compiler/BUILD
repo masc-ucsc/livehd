@@ -180,7 +180,7 @@ cc_library(
     # issue1: runtime vector index
     # "Test1 VecSearch Mul"
 
-    # issue3: memory
+    # issue2: memory
     # "Smem SmemStruct MaskedSmem MaskedSmemStruct Router ListBuffer"
 
     "IntXbar",
