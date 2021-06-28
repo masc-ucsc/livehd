@@ -76,17 +76,18 @@ void Gioc::reconnect_the_tgs_from_unified_out(std::string_view ret_name) {
 void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name,
                                   Node subg_node) {
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
-  for (const auto *io_pin : sub->get_io_pins()) {
-    I(!io_pin->is_invalid());
-    fmt::print("io_pin->name:{}\n", io_pin->name);
-    if (io_pin->name == "$" || io_pin->name == "%") {
+  for (const auto &io_pin : sub->get_io_pins()) {
+    if(io_pin.is_invalid())
+      continue;
+    fmt::print("io_pin.name:{}\n", io_pin.name);
+    if (io_pin.name == "$" || io_pin.name == "%") {
       continue;
     }
 
     // I. io_pin is_input
-    if (io_pin->is_input()) {
+    if (io_pin.is_input()) {
       std::vector<Node_pin> created_tup_gets;
-      auto                  hier_inp_subnames = split_name(io_pin->name, ".");
+      auto                  hier_inp_subnames = split_name(io_pin.name, ".");
       for (const auto &subname : hier_inp_subnames) {
         auto tup_get    = lg->create_node(Ntype_op::TupGet);
         auto tn_spin    = tup_get.setup_sink_pin("parent");
@@ -114,7 +115,7 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin->name);
+          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
@@ -123,7 +124,7 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
     }
 
     // II. hier-subgraph-output
-    auto hier_inp_subnames = split_name(io_pin->name, ".");
+    auto hier_inp_subnames = split_name(io_pin.name, ".");
     auto i                 = 0;
     for (const auto &subname : hier_inp_subnames) {
       if (i == 0) {
@@ -141,7 +142,7 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
         ta_ret_dpin.set_name(ret_name);
 
         if (hier_inp_subnames.size() == 1) {
-          auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
+          auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
           subg_dpin.connect_sink(ta_ret.setup_sink_pin("value"));
           break;
         } else {
@@ -163,7 +164,7 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
         auto parent_subname    = hier_inp_subnames[i - 1];
         auto ta_hier_parent    = name2dpin[parent_subname].get_node();
         parent_field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
-        auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
+        auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
         subg_dpin.connect_sink(ta_hier_parent.setup_sink_pin("value"));
 
       } else {  // the middle ones, if any
@@ -191,12 +192,12 @@ void Gioc::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view ar
 
 bool Gioc::subgraph_outp_is_tuple(Sub_node *sub) {
   uint16_t outp_cnt = 0;
-  for (const auto *io_pin : sub->get_io_pins()) {
-    if (io_pin->is_output())
+  for (const auto &io_pin : sub->get_io_pins()) {
+    if (io_pin.is_output()) {
       outp_cnt++;
-
-    if (outp_cnt > 1)
-      return true;
+      if (outp_cnt > 1)
+        return true;
+    }
   }
   return false;
 }

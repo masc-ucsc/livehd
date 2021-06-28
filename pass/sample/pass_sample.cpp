@@ -97,11 +97,12 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
     if (sub_lg->is_empty()) {
       int n_inp = 0;
       int n_out = 0;
-      for (auto io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
-        if (io_pin->is_input())
+      for (const auto &io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
+        if (io_pin.is_input()) {
           n_inp++;
-        if (io_pin->is_output())
+        }else if (io_pin.is_output()){
           n_out++;
+        }
       }
       fmt::print("{}  module {} BBOX : inputs {} outputs {}\n", space, sub_lg->get_name(), n_inp, n_out);
 

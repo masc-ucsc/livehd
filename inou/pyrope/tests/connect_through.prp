@@ -1,0 +1,24 @@
+
+sub = ||{
+  subsub = ||{
+    $foo.__sbits = 4
+    counter.__sbits = 8
+    counter = counter.__create_flop
+
+    %out1 = counter
+
+    counter := counter + $foo
+
+  }
+
+  %xx1 = subsub(foo=2)
+  %xx2 = subsub(foo=10)
+
+}
+
+yy1 = sub()
+yy2 = sub()
+
+%out1 = yy1.xx1 + yy2.xx1
+%out2 = yy1.xx2 + yy2.xx2
+

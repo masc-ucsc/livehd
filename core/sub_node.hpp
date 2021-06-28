@@ -19,6 +19,7 @@
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
+
 #include "tech_library.hpp"
 
 class Sub_node {
@@ -353,6 +354,9 @@ public:
 
   size_t size() const { return io_pins.size() - 1; };
 
+  absl::Span<const IO_pin> get_io_pins() const { return absl::MakeSpan(io_pins); }
+
+#if 0
   // Returns a span/vector-like array of all the pins. If the pin was deleted, there may be a pin witout name and position.
   const std::vector<const IO_pin *> get_io_pins() const {
     I(io_pins.size() >= 1);
@@ -364,6 +368,7 @@ public:
     }
     return v;
   }
+#endif
 
   const std::vector<std::pair<const IO_pin *, Port_ID>> get_output_pins() const {
     I(io_pins.size() >= 1);

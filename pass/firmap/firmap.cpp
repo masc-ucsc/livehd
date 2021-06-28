@@ -756,10 +756,11 @@ void Firmap::clone_subgraph_node(Node &old_node_subg, Lgraph *new_lg, PinMap &pi
   }
 
   // clone all old_sub io to new_sub_io and setup all sink_pins and driver_pins for the new_sub node
-  for (const auto *old_io_pin : old_sub->get_io_pins()) {
-    I(!old_io_pin->is_invalid());
-    auto old_io_name = old_io_pin->name;
-    if (old_io_pin->is_input()) {
+  for (const auto &old_io_pin : old_sub->get_io_pins()) {
+    if(old_io_pin.is_invalid())
+      continue;
+    const auto &old_io_name = old_io_pin.name;
+    if (old_io_pin.is_input()) {
       Node_pin new_spin;
 #if 1
       if (!new_sub->has_pin(old_io_name)) {
@@ -783,7 +784,7 @@ void Firmap::clone_subgraph_node(Node &old_node_subg, Lgraph *new_lg, PinMap &pi
     }
 
     // handle old_io_pin->is_output()
-    I(old_io_pin->is_output());
+    I(old_io_pin.is_output());
     Node_pin new_dpin;
 #if 1
     if (!new_sub->has_pin(old_io_name)) {

@@ -1344,13 +1344,12 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
 
 bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
   uint16_t outp_cnt = 0;
-  for (const auto *io_pin : sub->get_io_pins()) {
-    if (io_pin->is_output()) {
+  for (const auto &io_pin : sub->get_io_pins()) {
+    if (io_pin.is_output()) {
       outp_cnt++;
+      if (outp_cnt > 1)
+        return true;
     }
-
-    if (outp_cnt > 1)
-      return true;
   }
   return false;
 }
@@ -1373,14 +1372,16 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
-  for (const auto *io_pin : sub->get_io_pins()) {
-    I(!io_pin->is_invalid());
+  for (const auto &io_pin : sub->get_io_pins()) {
+    if(io_pin.is_invalid())
+      continue;
+
     // I. io_pin is_input
-    if (io_pin->is_input()) {
+    if (io_pin.is_input()) {
       std::vector<Node_pin>         created_tup_gets;
       std::vector<std::string_view> hier_inp_subnames;
 
-      split_hier_name(io_pin->name, hier_inp_subnames);
+      split_hier_name(io_pin.name, hier_inp_subnames);
       for (const auto &subname : hier_inp_subnames) {
 
         Node_pin tn_dpin;
@@ -1391,7 +1392,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
         }
 
         if (!tn_dpin.is_invalid() && subname=="$") {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin->name);
+          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
           tn_dpin.connect_sink(subg_spin);
           continue;
         }
@@ -1408,7 +1409,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
 
         // note: for scalar input, front() == back()
         if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin->name);
+          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
           tup_get.setup_driver_pin().connect_sink(subg_spin);
         }
         created_tup_gets.emplace_back(tup_get.get_driver_pin());
@@ -1418,7 +1419,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
 
     // II. io_pin is_output and is scalar
     if (subg_outp_is_scalar) {
-      auto subg_dpin   = subg_node.setup_driver_pin(io_pin->name);
+      auto subg_dpin   = subg_node.setup_driver_pin(io_pin.name);
       auto scalar_node = lg->create_node(Ntype_op::Or);
       auto scalar_dpin = scalar_node.setup_driver_pin();
       subg_dpin.connect_sink(scalar_node.setup_sink_pin("A"));
@@ -1455,7 +1456,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
 
     // III. hier-subgraph-output
     std::vector<std::string_view> hier_out_subnames;
-    split_hier_name(io_pin->name, hier_out_subnames);
+    split_hier_name(io_pin.name, hier_out_subnames);
     auto i = 0;
     for (const auto &subname : hier_out_subnames) {
       if (i == 0) {
@@ -1475,7 +1476,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
         ta_ret_dpin.set_name(ret_name);
 
         if (hier_out_subnames.size() == 1) {
-          auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
+          auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
           subg_dpin.connect_sink(ta_ret.setup_sink_pin("value"));
           break;
         } else {
@@ -1499,7 +1500,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
         auto parent_subname    = hier_out_subnames[i - 1];
         auto ta_hier_parent    = name2dpin[parent_subname].get_node();
         parent_field_dpin.connect_sink(ta_hier_parent.setup_sink_pin("field"));
-        auto subg_dpin = subg_node.setup_driver_pin(io_pin->name);
+        auto subg_dpin = subg_node.setup_driver_pin(io_pin.name);
         subg_dpin.connect_sink(ta_hier_parent.setup_sink_pin("value"));
 
       } else {  // the middle ones, if any

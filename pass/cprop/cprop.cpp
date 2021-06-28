@@ -535,13 +535,8 @@ void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &s
 
   const auto &sub = sub_node.get_type_sub_node();
 
-  bool sub_dollar_is_gone = false;
-
   for (auto &it : sub.get_input_pins()) {
     if (it.first->name == "$") {
-      if (it.first->is_invalid()) {
-        sub_dollar_is_gone = true;
-      }
       continue;
     }
 
@@ -556,15 +551,6 @@ void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &s
     } else {
       Pass::info("could not find IO {} in graph {}", it.first->name, sub.get_name());
       // tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
-    }
-  }
-
-  if (tup->is_correct() || sub_dollar_is_gone) {
-    for (const auto &it2 : tup->get_map()) {
-      auto name = Lgtuple::get_first_level_name(it2.first);
-      if (!sub.is_input(name)) {
-        Pass::info("potential issue, field {} unused by the sub {} at node {}", it2.first, sub.get_name(), sub_node.debug_name());
-      }
     }
   }
 }
@@ -1598,9 +1584,28 @@ void Cprop::reconnect_tuple_sub(Node &node) {
     }
   }
 
+  std::vector<bool> connected_ios(sub.size()+1);
+  connected_ios[0] = true; // 0 is invalid instance_pid
+
+  const auto &io_pins = sub.get_io_pins();
+
   Node_pin dollar_spin;
   for (auto &spin : node.inp_connected_pins()) {
-    const auto &io_pin = sub.get_io_pin_from_instance_pid(spin.get_pid());
+    auto instance_pid = spin.get_pid();
+    if (!sub.has_instance_pin(instance_pid)) {
+      if (io_pins[instance_pid].name == "$")
+        continue; // only this could be pending. Anything else is an error
+      Pass::error("graph {} connects to subgraph {} and the input pid is invalid. Recompile {}",
+                  node.get_class_lgraph()->get_name(),
+                  sub.get_name(),
+                  node.get_class_lgraph()->get_name());
+      return;
+    }
+    I(io_pins.size()>instance_pid);
+
+    connected_ios[instance_pid] = true;
+    const auto &io_pin = io_pins[instance_pid];
+
     if (io_pin.name == "$") {
       dollar_spin = spin;
     } else if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
@@ -1616,7 +1621,44 @@ void Cprop::reconnect_tuple_sub(Node &node) {
     auto it2         = node2tuple.find(parent_node.get_compact());
     if (it2 != node2tuple.end()) {
       try_connect_tuple_to_sub(it2->second, node, parent_node);
+
+      for (auto &spin : node.inp_connected_pins()) {
+        auto instance_pid = spin.get_pid();
+        I(io_pins.size()>instance_pid);
+        connected_ios[instance_pid] = true;
+      }
     }
+  }
+
+  for (auto &dpin : node.out_connected_pins()) {
+    auto instance_pid = dpin.get_pid();
+    I(io_pins.size()>instance_pid);
+    connected_ios[instance_pid] = true;
+  }
+
+  for(auto pid=1u;pid<connected_ios.size();++pid) {
+    if (connected_ios[pid])
+      continue;
+
+    if (!io_pins[pid].is_input())
+      continue;
+
+    // only punch inputs (clock, resetxxx, foo, but not outputs)
+    auto *lg = node.get_class_lgraph();
+    Pass::info("instance {} has unconnected {}. Punching through lgraph {}"
+        ,node.debug_name()
+        ,io_pins[pid].name
+        ,lg->get_name());
+
+    I(io_pins[pid].is_input());
+    Node_pin dpin;
+    if (lg->has_graph_input(io_pins[pid].name)) {
+      dpin = lg->get_graph_input(io_pins[pid].name);
+    }else{
+      dpin = lg->add_graph_input(io_pins[pid].name, Port_invalid, 0);
+    }
+    I(dpin.is_driver());
+    node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
   }
 }
 

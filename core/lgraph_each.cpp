@@ -23,15 +23,18 @@ void Lgraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)
 
   auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
-    Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
+  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_invalid())
+      continue;
+
+    Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
 
     Index_id nid = Hardcoded_output_nid;
-    if (io_pin->is_input())
+    if (io_pin.is_input())
       nid = Hardcoded_input_nid;
     auto idx = find_idx_from_pid(nid, pid);
     if (idx) {
-      Pair_type p(this, hidx, idx, pid, io_pin->graph_io_pos);
+      Pair_type p(this, hidx, idx, pid, io_pin.graph_io_pos);
       if (p.dpin.has_name()) {
         pin_pair.emplace_back(p);
       }
@@ -110,10 +113,9 @@ void Lgraph::each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierar
 
   auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
-    I(!io_pin->is_invalid());
-    if (io_pin->is_input()) {
-      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
+  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_input()) {
+      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
       auto    idx = find_idx_from_pid(Hardcoded_input_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
@@ -130,10 +132,9 @@ void Lgraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
 
   auto hidx = hierarchical ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index();
 
-  for (const auto *io_pin : get_self_sub_node().get_io_pins()) {
-    I(!io_pin->is_invalid());
-    if (io_pin->is_output()) {
-      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin->name);
+  for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
+    if (io_pin.is_output()) {
+      Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
       auto    idx = find_idx_from_pid(Hardcoded_output_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);

@@ -87,6 +87,7 @@ cc_library(
     ,"hier_tuple_nested_if4"
     ,"firrtl_gcd_3bits"
     ,"firrtl_tail3"
+    ,"connect_through"
 ]]
 
 # High Level FIRRTL
@@ -151,7 +152,7 @@ cc_library(
     "PlusAnd",
     "Mux4",
     "Adder4",
-    # "Life",
+    "Life",
 ]]
 
 # FIXME:

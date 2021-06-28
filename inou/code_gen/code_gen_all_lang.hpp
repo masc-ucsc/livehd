@@ -37,9 +37,9 @@ public:
   std::string_view func_name(std::string_view func_name) const { return func_name; }
   std::string_view param_start(bool param_exist) const {
     if (param_exist)
-      return " = :(";
+      return " = |(";
     else
-      return "= :";
+      return "= |";
   }
   std::string_view func_param_sep() const { return ", "; }
   std::string_view param_end(bool param_exist) const {
@@ -54,7 +54,7 @@ public:
     else
       return cond_val;
   }
-  std::string_view func_stmt_strt() const { return ":{\n"; }
+  std::string_view func_stmt_strt() const { return "|{\n"; }
   std::string_view func_stmt_end() const { return "}\n"; }
   std::string_view func_end() const { return ""; }
 
