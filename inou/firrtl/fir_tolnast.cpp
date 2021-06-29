@@ -77,7 +77,6 @@ std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rh
     term_rest = term.substr(pos);
   }
 
-  fmt::print("DEBUG8 term:{}\n", term);
   if (input_names.count(term)) {
     return absl::StrCat("$", term);
   } else if (output_names.count(term)) {
@@ -861,9 +860,7 @@ void Inou_firrtl::HandleTypeConvOp(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 //FIXME:sh-> rewrite a clean code later
 void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid& parent_node, const bool is_rhs, const Lnast_node &value_node) {
   auto flattened_str  = FlattenExpression(lnast, parent_node, expr);
-  fmt::print("DEBUG7: flattened_str:{}\n", flattened_str);
   auto alter_full_str = get_full_name(flattened_str, is_rhs);
-  fmt::print("DEBUG9: alter_full_str:{}\n", alter_full_str);
 
   if (alter_full_str[0] == '$') {
     flattened_str = absl::StrCat("$", flattened_str);
@@ -929,7 +926,6 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 
   I(flattened_str.find("."));
   if (is_rhs) {
-    fmt::print("DEBUG10: flattened_str:{}\n", flattened_str);
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
   } else {
     CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
@@ -1861,7 +1857,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kPartialConnect: {  
-      Pass::warn("FIRRTL partial connects are error-prone on this interface. Be careful using them.\n");
+      // Pass::warn("FIRRTL partial connects are error-prone on this interface. Be careful using them.\n");
       auto& lhs_expr      = stmt.partial_connect().location();
       auto& rhs_expr      = stmt.partial_connect().expression();
       auto  lhs_expr_case = stmt.partial_connect().location().expression_case();

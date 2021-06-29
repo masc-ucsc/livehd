@@ -79,12 +79,13 @@ Pyrope_step () {
 		fi
 	done
 
-  if [ ! -f "${gold_verilog}" ]; then
-		echo "Could not find reference verilog for testing: ${gold_verilog}"
-		exit 3
-	fi
+  # if [ ! -f "${gold_verilog}" ]; then
+		# echo "Could not find reference verilog for testing: ${gold_verilog}"
+		# exit 3
+	# fi
 
 	rm -rf lgdb_prp
+  ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
 	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module}"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then

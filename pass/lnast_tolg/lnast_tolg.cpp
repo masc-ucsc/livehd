@@ -305,6 +305,7 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
   } else if (opd1.has_name() && is_input(opd1.get_name())) {
     opr_spin = setup_tuple_assignment(lg, lnidx_assign);
   } else {
+    // opr_spin = setup_tuple_assignment(lg, lnidx_assign);
     opr_spin = setup_node_assign_and_lhs(lg, lnidx_assign);
   }
 
@@ -754,7 +755,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         tn_dpin.connect_sink(tn_spin);
       }
 
-      // name2dpin[tup_sname] = tup_add.setup_driver_pin();
       name2dpin.insert_or_assign(tup_sname, tup_add.setup_driver_pin());
       tup_add.setup_driver_pin().set_name(tup_sname);
       setup_dpin_ssa(name2dpin[tup_sname], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
@@ -806,7 +806,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        tup_name = ta_name[i - 1];
 
       auto tn_dpin = setup_tuple_ref(lg, tup_name);
-      // if (!tn_dpin.is_invalid()) {
       if (!tn_dpin.is_invalid() && !tn_dpin.get_node().is_type_const()) {
         auto tn_spin  = tup_add.setup_sink_pin("parent");
         lg->add_edge(tn_dpin, tn_spin);
@@ -852,9 +851,12 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
 
 // either tuple root or tuple key(str) fit in this case
 Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
+  
+  static Node_pin invalid_dpin;
+  if (ref_name.find_first_not_of("0123456789") == std::string::npos)
+    return invalid_dpin;
 
   auto it = name2dpin.find(ref_name);
-
   if (it != name2dpin.end()) {
     return it->second;
   }
@@ -862,7 +864,6 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
   if (is_input(ref_name))
     return create_inp_tg(lg, ref_name);
 
-  static Node_pin invalid_dpin;
   return invalid_dpin;
 }
 

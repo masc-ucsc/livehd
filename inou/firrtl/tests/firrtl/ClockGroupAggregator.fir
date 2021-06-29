@@ -1,6 +1,10 @@
 circuit ClockGroupAggregator :
   module ClockGroupAggregator : 
-    output auto : {flip in : {member : {5 : {clock : Clock, reset : UInt<1>}, 4 : {clock : Clock, reset : UInt<1>}, 3 : {clock : Clock, reset : UInt<1>}, 2 : {clock : Clock, reset : UInt<1>}, 1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, out_3 : {member : {1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, out_2 : {member : {0 : {clock : Clock, reset : UInt<1>}}}, out_1 : {member : {1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, out_0 : {member : {0 : {clock : Clock, reset : UInt<1>}}}}
+    output auto : {flip in : {member : {5 : {clock : Clock, reset : UInt<1>}, 4 : {clock : Clock, reset : UInt<1>}, 3 : {clock : Clock, reset : UInt<1>}, 2 : {clock : Clock, reset : UInt<1>}, 1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, 
+                     out_3 : {member : {1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, 
+                     out_2 : {member : {0 : {clock : Clock, reset : UInt<1>}}}, 
+                     out_1 : {member : {1 : {clock : Clock, reset : UInt<1>}, 0 : {clock : Clock, reset : UInt<1>}}}, 
+                     out_0 : {member : {0 : {clock : Clock, reset : UInt<1>}}}}
     
     auto is invalid
     wire childClock : Clock @[LazyModule.scala 201:24]

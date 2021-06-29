@@ -13,7 +13,7 @@ void Lcompiler::do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> lnasts) 
   }
   thread_pool.wait_all();
 
-  setup_maps();
+  setup_maps(); //FIXME->sh: pyrope doesn't use these table, could remove this line
 }
 
 void Lcompiler::prp_thread_ln2lg(std::shared_ptr<Lnast> ln) {
@@ -225,15 +225,15 @@ void Lcompiler::setup_maps() { // single-thread
     if (fbmaps.find(lg) != fbmaps.end())
       continue;
 
-    fbmaps.insert_or_assign(lg,        FBMap());
-    pinmaps.insert_or_assign(lg,       PinMap());
+    fbmaps.insert_or_assign(lg, FBMap());
+    pinmaps.insert_or_assign(lg, PinMap());
     spinmaps_xorr.insert_or_assign(lg, XorrMap());
 
     lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
       if (fbmaps.find(lg_sub) != fbmaps.end())
         return;
-      fbmaps.insert_or_assign(lg_sub,        FBMap());
-      pinmaps.insert_or_assign(lg_sub,       PinMap());
+      fbmaps.insert_or_assign(lg_sub, FBMap());
+      pinmaps.insert_or_assign(lg_sub, PinMap());
       spinmaps_xorr.insert_or_assign(lg_sub, XorrMap());
     });
   }
