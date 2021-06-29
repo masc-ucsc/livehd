@@ -10,7 +10,7 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3'
 
 
-pts='firrtl_tail3 scalar_tuple hier_tuple bits_rhs 
+pts='firrtl_tail3 scalar_tuple hier_tuple bits_rhs logic2  
 hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if1
 lhs_wire2 tuple_copy2 tuple_empty_attr if2
 hier_tuple_nested_if3
@@ -21,7 +21,7 @@ capricious_bits2 capricious_bits4 hier_tuple_nested_if
 hier_tuple_nested_if4 
 '
 #FIXME: for LL LN 
-# firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 firrtl_tail2 logic2  counter reg_bits_set flatten_bundle partial get_mask1 
+# firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 firrtl_tail2 counter reg_bits_set flatten_bundle partial get_mask1 
 
 #FIXME: for LL LN ... V gen fail!
 # reg__q_pin  adder_stage  scalar_reg_out_pre_declare  vec_shift_register_param    
@@ -99,9 +99,11 @@ Pyrope_compile_LL_LN () {
     echo ""
     echo ""
     echo "----------------------------------------------------"
-    echo "LGraph -> LNAST -> LGraph"
+    echo "LGraph -> LNAST -> pyrope_gen"
     echo "----------------------------------------------------"
     #LG->LN->LG
+    ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> inou.graphviz.from odir:gvizes" 
+
     ${LGSHELL} "lgraph.open name:${pt} path:lgdb2 |> pass.lnast_fromlg |> lnast.dump |> inou.code_gen.prp odir:tmp_prp" #This is just to see the LN generated
 
 
@@ -115,6 +117,12 @@ Pyrope_compile_LL_LN () {
         echo "ERROR: could not find ${pt}.prp in tmp_prp"
         exit 1
     fi
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "pyrope_gen -> LNAST -> LGraph"
+    echo "----------------------------------------------------"
 
     ${LGSHELL} "inou.pyrope files:tmp_prp/${pt}.prp |> pass.compiler gviz:true top:${pt} path:lgdb/ |> lgraph.dump"
 
@@ -283,4 +291,4 @@ rm -f ./*.dot.pdf
 rm -f ./lgcheck*
 rm -f ./*.tcl
 rm -f logger_*.log
-
+rm -f gvizes*
