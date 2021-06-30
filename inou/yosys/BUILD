@@ -14,17 +14,6 @@ cc_library(
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
-    defines = [
-        "_YOSYS_",
-        # "YOSYS_ENABLE_PLUGINS",
-        # "YOSYS_ENABLE_READLINE",
-        "YOSYS_ENABLE_GLOB",
-        #"YOSYS_ENABLE_TCL",
-        "YOSYS_ENABLE_ABC",
-        "YOSYS_ENABLE_COVER",
-        'ABCEXTERNAL=\\"abc\\"',
-    ],
-    features = ["-use_header_modules"],
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
@@ -32,7 +21,6 @@ cc_library(
         "@at_clifford_yosys//:version",
         "@mustache//:headers",
     ],
-    #alwayslink=1,
     alwayslink = True,
 )
 
