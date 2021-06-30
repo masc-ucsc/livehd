@@ -41,7 +41,6 @@ protected:
   void process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_nary_op_one2n_map(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_logical_op(Lgraph *lg, const Lnast_nid &lnidx);
-  void process_ast_ne_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_if_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_phi_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_uif_op(Lgraph *lg, const Lnast_nid &lnidx);
