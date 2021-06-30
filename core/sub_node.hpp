@@ -109,6 +109,7 @@ public:
     clear_io_pins();
     io_pins.clear();    // WARNING: Do NOT remove mappings, just port id. (allows to reload designs)
     io_pins.resize(1);  // No id ZERO
+    deleted.clear();
     name2id.clear();
   }
 
@@ -128,6 +129,7 @@ public:
   void expunge() {
     name2id.clear();
     io_pins.clear();
+    deleted.clear();
     lgid = 0;
   }
 
@@ -164,13 +166,27 @@ public:
   Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
     I(lgid);
     I(!has_pin(io_name));
-    Port_ID instance_pid;
-    if (deleted.empty()) {
+
+    Port_ID instance_pid=0;
+
+    auto it = name2id.find(io_name);
+    if (it != name2id.end()) {
+      instance_pid = it->second;
+      I(io_pins.size() > instance_pid);
+    }else{
+      while(!deleted.empty()) {
+        instance_pid = deleted.back();
+        deleted.pop_back();
+        I(io_pins.size() > instance_pid);
+        if (io_pins[instance_pid].is_invalid())
+          break;
+      }
+    }
+
+    if (io_pins[instance_pid].is_invalid()) {
       instance_pid = io_pins.size();
       io_pins.emplace_back(io_name, dir, graph_pos);
-    } else {
-      instance_pid = deleted.back();
-      deleted.pop_back();
+    }else{
       if (io_pins.size() <= instance_pid) {
         io_pins.resize(instance_pid + 1);
       }
