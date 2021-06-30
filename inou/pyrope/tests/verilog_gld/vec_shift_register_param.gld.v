@@ -1,4 +1,4 @@
-module VecShiftRegisterParam(
+module vec_shift_register_param(
   input        clock,
   input        reset,
   input  [3:0] \io.inp ,
