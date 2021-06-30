@@ -347,7 +347,7 @@ public:
     return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_reduce_xor
            && val != Lnast_ntype_mod
            // && val != Lnast_ntype_shr
-           && val != Lnast_ntype_is && val != Lnast_ntype_ne && val != Lnast_ntype_le;
+           && val != Lnast_ntype_is && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }
 
   std::string_view debug_name() const { return namemap[val]; }

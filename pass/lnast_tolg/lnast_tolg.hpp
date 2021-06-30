@@ -25,9 +25,7 @@ private:
   std::string_view         path;
   std::string              tuple_assign_str;
 
-  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string_view, Node_pin> vname2attr_dpin;  // for dummy attribute node construction, vn = variable non-ssa
-                                                                    // name, dpin = last attr dpin within "any" attributes
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>   primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>                    name2dpin;  // for scalar variable
   absl::flat_hash_map<std::string, Node_pin>                    field2dpin;
   absl::flat_hash_map<std::string_view, std::vector<Node>>      driver_var2wire_nodes;  // for __last_value temporarily wire nodes
@@ -42,6 +40,7 @@ protected:
   void process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_nary_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_logical_op(Lgraph *lg, const Lnast_nid &lnidx);
+  void process_ast_ne_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_if_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_phi_op(Lgraph *lg, const Lnast_nid &lnidx);
   void process_ast_uif_op(Lgraph *lg, const Lnast_nid &lnidx);
@@ -118,7 +117,7 @@ protected:
   Node_pin create_const(Lgraph *lg, std::string_view const_str);
 
   // attribute related
-  bool is_new_var_chain(const Lnast_nid &lnidx_opr);
+  // bool is_new_var_chain(const Lnast_nid &lnidx_opr);
   bool check_is_attrset_ta(Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign(Node node) { return !node.setup_sink_pin("value").is_connected(); };
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
