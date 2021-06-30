@@ -34,7 +34,6 @@ cc_library(
     ],
     defines = [
         "USE_GAUSS",
-        "USE_ZLIB",
         "cryptominisat5_EXPORTS",
     ],
     includes = [
