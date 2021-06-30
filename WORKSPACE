@@ -108,7 +108,7 @@ new_git_repository(
     build_file = "BUILD.replxx",
     commit = "d13d26504f97ed2a54bc02dd37d20ef3b0179518",
     remote = "https://github.com/AmokHuginnsson/replxx.git",
-    shallow_since = "1622167435 +0200"
+    shallow_since = "1622167435 +0200",
 )
 
 new_git_repository(
@@ -143,9 +143,9 @@ http_archive(
 
 http_archive(
     name = "rules_hdl",
-    sha256 = "03f36c964759d2dc3bcd327f54568f159c8f2c11cb1182be4ac720ad6b09ebaf",
-    strip_prefix = "bazel_rules_hdl-73e4e801359b6ccec0e8b3ea22b1ec32d182ec1c",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/73e4e801359b6ccec0e8b3ea22b1ec32d182ec1c.zip",
+    sha256 = "1dd1ae619c6bce5d994de487bc43cf4c32f80187352826e66596ed8ec9a9058b",
+    strip_prefix = "bazel_rules_hdl-e8670bce1cf0ddc1da8fa97227da30306585ac34",
+    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/e8670bce1cf0ddc1da8fa97227da30306585ac34.zip",
 )
 
 load("@rules_hdl//toolchains/cpython:cpython_toolchain.bzl", "register_cpython_repository")
