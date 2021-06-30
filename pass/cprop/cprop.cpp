@@ -203,7 +203,7 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   if (inp_edges_ordered.size() == 1) {
     auto prev_op = inp_edges_ordered[0].driver.get_node().get_type_op();
     if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
-        || op == Ntype_op::Xor) {
+        || op == Ntype_op::Xor || op == Ntype_op::Ror) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
     }

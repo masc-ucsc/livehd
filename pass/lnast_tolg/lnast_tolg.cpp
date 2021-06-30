@@ -129,7 +129,13 @@ void Lnast_tolg::process_ast_phi_op(Lgraph *lg, const Lnast_nid &lnidx_phi) {
   auto lhs_sname = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
 
-  auto     cond_dpin  = setup_ref_node_dpin(lg, c1);
+  auto     cond_dpin_pre  = setup_ref_node_dpin(lg, c1);
+
+  auto     ror_node       = lg->create_node(Ntype_op::Ror);
+  cond_dpin_pre.connect_sink(ror_node.setup_sink_pin("A"));
+  auto     cond_dpin      = ror_node.setup_driver_pin();
+
+
   Node_pin true_dpin  = setup_ref_node_dpin(lg, c2, false, true);
   Node_pin false_dpin = setup_ref_node_dpin(lg, c3, false, true);
 
