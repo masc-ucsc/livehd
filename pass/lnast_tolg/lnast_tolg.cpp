@@ -50,10 +50,10 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
       process_ast_dp_assign_op(lg, lnidx);
     } else if (ntype.is_logical_op()) {
       process_ast_logical_op(lg, lnidx);
-    } else if (ntype.is_ne()) {
-      process_ast_ne_op(lg, lnidx);
+    } else if (ntype.is_ne() || ntype.is_ge() || ntype.is_le()) {
+      process_ast_nary_op_one2n_map(lg, lnidx);
     } else if (ntype.is_direct_lgraph_op()) {
-      process_ast_nary_op(lg, lnidx);
+      process_ast_nary_op_direct_map(lg, lnidx);
     } else if (ntype.is_attr_set()) {
       process_ast_attr_set_op(lg, lnidx);
     } else if (ntype.is_attr_get()) {
@@ -188,17 +188,39 @@ void Lnast_tolg::process_ast_concat_op(Lgraph *lg, const Lnast_nid &lnidx_concat
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
 }
 
-void Lnast_tolg::process_ast_nary_op(Lgraph *lg, const Lnast_nid &lnidx_opr) {
+
+void Lnast_tolg::process_ast_nary_op_one2n_map(Lgraph *lg, const Lnast_nid &lnidx_opr) {
+  I(lnast->get_type(lnidx_opr).is_ne() || lnast->get_type(lnidx_opr).is_ge() || lnast->get_type(lnidx_opr).is_le());
+  auto exit_node = setup_node_opr_and_lhs(lg, lnidx_opr, "");
+  auto opr_node  = exit_node.setup_sink_pin("a").get_driver_node();
+
+  std::vector<Node_pin> opds;
+  for (const auto &child : lnast->children(lnidx_opr)) {
+    if (child == lnast->get_first_child(lnidx_opr))
+      continue;  // the lhs has been handled at setup_node_opr_and_lhs();
+
+    auto opd = setup_ref_node_dpin(lg, child);
+    if (opd.is_invalid())
+      Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(child));
+
+    opds.emplace_back(opd);
+  }
+  nary_node_rhs_connections(lg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
+}
+
+
+
+void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lnidx_opr) {
   auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr, "");
 
   std::vector<Node_pin> opds;
-  for (const auto &opr_child : lnast->children(lnidx_opr)) {
-    if (opr_child == lnast->get_first_child(lnidx_opr))
+  for (const auto &child : lnast->children(lnidx_opr)) {
+    if (child == lnast->get_first_child(lnidx_opr))
       continue;  // the lhs has been handled at setup_node_opr_and_lhs();
 
-    auto opd = setup_ref_node_dpin(lg, opr_child);
+    auto opd = setup_ref_node_dpin(lg, child);
     if (opd.is_invalid())
-      Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(opr_child));
+      Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(child));
 
     opds.emplace_back(opd);
   }
@@ -920,58 +942,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
   Ntype_op lg_ntype_op;
   Node     exit_node;
 
-  // todo after remove attr_vname related
-  // if (!fir_func_name.empty()) {
-  //   // handle firrtl sub
-  //   I(fir_func_name.substr(0, 2) == "__");
-
-  //   auto op = Ntype::get_op(fir_func_name.substr(2));
-  //   if (op == Ntype_op::Invalid) {
-  //     exit_node = lg->create_node_sub(fir_func_name);
-  //   } else {
-  //     exit_node = lg->create_node(op);
-  //   }
-  // } else {
-  //   // handle normal lnast oprator
-
-  //   // if (ln_opr_type.is_ne()) {
-  //   //   auto eq_node  = lg->create_node(Ntype_op::EQ);
-  //   //   exit_node   = lg->create_node(Ntype_op::Not);
-  //   //   eq_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("A"));
-
-  //   // } else if (ln_opr_type.is_le()) {
-  //   //   auto le_node  = lg->create_node(Ntype_op::LT);
-  //   //   exit_node   = lg->create_node(Ntype_op::Not);
-  //   //   le_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("A"));
-
-  //   // } else if (ln_opr_type.is_ge()) {
-
-  //   // } else {
-  //     lg_ntype_op = decode_lnast_op(lnidx_opr);
-  //     exit_node   = lg->create_node(lg_ntype_op);
-  //   // }
-  // }
-
-
-
-  if (fir_func_name.empty()) {
-    // if (ln_opr_type.is_ne()) {
-    //   auto eq_node  = lg->create_node(Ntype_op::EQ);
-    //   exit_node   = lg->create_node(Ntype_op::Not);
-    //   eq_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("A"));
-
-    // } else if (ln_opr_type.is_le()) {
-    //   auto le_node  = lg->create_node(Ntype_op::LT);
-    //   exit_node   = lg->create_node(Ntype_op::Not);
-    //   le_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("A"));
-
-    // } else if (ln_opr_type.is_ge()) {
-
-    // } else {
-      lg_ntype_op = decode_lnast_op(lnidx_opr);
-      exit_node   = lg->create_node(lg_ntype_op);
-    // }
-  } else {
+  if (!fir_func_name.empty()) { // handle firrtl sub
     I(fir_func_name.substr(0, 2) == "__");
 
     auto op = Ntype::get_op(fir_func_name.substr(2));
@@ -980,8 +951,29 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
     } else {
       exit_node = lg->create_node(op);
     }
-  }
+  } else { // handle normal lnast oprator
 
+    auto lnopr_type = lnast->get_type(lnidx_opr);
+    if (lnopr_type.is_ne()) {
+      auto eq_node  = lg->create_node(Ntype_op::EQ);
+      exit_node   = lg->create_node(Ntype_op::Not);
+      eq_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("a"));
+
+    } else if (lnopr_type.is_le()) {
+      auto lt_node  = lg->create_node(Ntype_op::LT);
+      exit_node   = lg->create_node(Ntype_op::Not);
+      lt_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("a"));
+
+    } else if (lnopr_type.is_ge()) {
+      auto gt_node  = lg->create_node(Ntype_op::GT);
+      exit_node   = lg->create_node(Ntype_op::Not);
+      gt_node.setup_driver_pin().connect_sink(exit_node.setup_sink_pin("a"));
+
+    } else {
+      lg_ntype_op = decode_lnast_op(lnidx_opr);
+      exit_node   = lg->create_node(lg_ntype_op);
+    }
+  }
 
   name2dpin[lhs_name] = exit_node.setup_driver_pin("Y");
   exit_node.get_driver_pin("Y").set_name(lhs_name);
@@ -990,6 +982,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
     setup_dpin_ssa(name2dpin[lhs_name], lhs_vname, lnast->get_subs(lhs));
   return exit_node;
 }
+
 
 Node_pin Lnast_tolg::setup_tuple_assignment(Lgraph *lg, const Lnast_nid &lnidx_opr) {
   auto lhs       = lnast->get_first_child(lnidx_opr);
