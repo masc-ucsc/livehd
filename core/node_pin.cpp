@@ -4,6 +4,7 @@
 
 #include "annotate.hpp"
 #include "lgraph.hpp"
+#include "lgtuple.hpp"
 #include "node.hpp"
 
 Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
@@ -454,11 +455,19 @@ bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(curren
 Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
   auto       ref = Ann_node_pin_name::ref(top);
   const auto it  = ref->find_val(wname);
-  if (it == ref->end()) {
-    return Node_pin();
+  if (it != ref->end()) {
+    return Node_pin(top, ref->get_key(it));
   }
 
-  return Node_pin(top, ref->get_key(it));
+  auto can_wname = Lgtuple::get_canonical_name(wname);
+  if (can_wname != wname) {
+    const auto it2 = ref->find_val(can_wname);
+    if (it2 != ref->end()) {
+      return Node_pin(top, ref->get_key(it2));
+    }
+  }
+
+  return Node_pin();
 }
 
 std::string_view Node_pin::get_pin_name() const {

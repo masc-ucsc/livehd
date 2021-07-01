@@ -35,13 +35,15 @@ std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> Cprop::get_value(const Node
 }
 
 void Cprop::add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &key, Node_pin &dpin) {
+  tup->add(key, dpin);
+
   if (likely(!dpin.is_type_tup())) {
-    tup->add(key, dpin);
     return;
   }
 
   auto pos_spin = dpin.get_node().get_sink_pin("field");
   I(pos_spin.is_connected());
+
   auto pos_dpin = pos_spin.get_driver_pin();
   if (pos_dpin.is_type_const()) {
     auto v = pos_dpin.get_type_const().to_string();
@@ -53,7 +55,6 @@ void Cprop::add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &
     tup->set_issue();
     tuple_issues = true;
   }
-  tup->add(key, dpin);
 }
 
 void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered) {
@@ -266,6 +267,10 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     }
 
     collapse_forward_for_pin(node, a_pin);
+  } else if (op == Ntype_op::EQ) {
+      // FIXME:
+      //
+      // 1- eq(X,0) = not(ror(x))
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
     XEdge first_const_edge;
     int   nconstants = 0;
@@ -1107,12 +1112,28 @@ void Cprop::tuple_tuple_add(const Node &node) {
       } break;
       case 0x3: {
         node_tup = std::make_shared<Lgtuple>(tup_name);
-        add_pin_with_check(node_tup, "", parent_dpin);
+        add_pin_with_check(node_tup, "0", parent_dpin);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x4: {
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
-        node_tup->add(key_name, value_tup);
+        if (Lgtuple::is_attribute(key_name) && value_tup->is_scalar()) {
+          auto v_dpin = value_tup->get_dpin();
+          if (v_dpin.is_invalid()) {
+            node_tup->set_issue();
+            tuple_issues = true;
+            Pass::info("node:{} field:{} can not find a non attribute field a on tuple:{}", node.debug_name(), key_name, value_tup->get_name());
+          }
+          node_tup->add(key_name, v_dpin);
+        }else{
+          if (Lgtuple::is_attribute(key_name)) {
+            node_tup->set_issue();
+            tuple_issues = true;
+            Pass::info("node:{} attribute:{} can not have a complex sub tuple:{}", node.debug_name(), key_name, value_tup->get_name());
+          }else{
+            node_tup->add(key_name, value_tup);
+          }
+        }
       } break;
       case 0x5: {
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
@@ -1148,7 +1169,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
     } else {
       node_tup = std::make_shared<Lgtuple>(tup_name);
       if (has_parent_scalar) {
-        add_pin_with_check(node_tup, "", parent_dpin);
+        add_pin_with_check(node_tup, "0", parent_dpin);
       }
     }
 
@@ -1311,18 +1332,20 @@ void Cprop::tuple_attr_set(const Node &node) {
     auto node_dpin = node.get_driver_pin();
 
     node_tup = std::make_shared<Lgtuple>(parent_tup->get_name());
-    node_tup->add(node_dpin);
+    std::string_view parent_key;
     for (const auto &e : parent_tup->get_map()) {
-      if (!Lgtuple::is_root_attribute(e.first))
+      if (!Lgtuple::is_attribute(e.first)) {
+        parent_key = e.first;
         continue;
-      if (!node_tup) {
-        node_tup = std::make_shared<Lgtuple>(parent_tup->get_name());
-        if (!parent_tup->is_correct())
-          node_tup->set_issue();
-        node_tup->add(node_dpin);
       }
+      GI(!parent_key.empty(), parent_key == Lgtuple::get_all_but_last_level(e.first));
+      parent_key = Lgtuple::get_all_but_last_level(e.first);
       node_tup->add(e.first, e.second);
     }
+    if (parent_key.empty())
+      node_tup->add(node_dpin);
+    else
+      node_tup->add(parent_key, node_dpin);
   }else{
     auto value_tup = find_lgtuple(value_spin.get_driver_node());
     if (value_tup) {
@@ -1707,7 +1730,9 @@ void Cprop::reconnect_tuple_add(Node &node) {
   }
 
   if (!pending_out_edges.empty()) {
-    if (node_tup->is_trivial_scalar()) {
+    if (node_tup->is_empty()) {
+      // Empty tuple. Useless but legal. Just delete
+    }else if (node_tup->is_trivial_scalar()) {
       expand_data_and_attributes(node, "", pending_out_edges, node_tup);
     } else {
       Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
@@ -1834,6 +1859,54 @@ void Cprop::scalar_pass(Lgraph *lg) {
       bool del = scalar_mux(node, inp_edges_ordered);
       if (del)
         continue;
+    } else if (op == Ntype_op::Not) {
+      // FIXME:
+      //
+      // 1- not(not(x)) = x
+      //
+      // 2- mux(sel=ror(not(s)), X, Y) = mux(sel=ror(s), Y, X)
+    } else if (op == Ntype_op::Ror) {
+      // FIXME:
+      //
+      // 1- ror(ror(X)) == ror(X)
+      //
+      // 2- not(ror(not(X))) == ror(x)
+      //
+      // BW: ror(X) and X.__sbits==1 -> X
+
+    } else if (op == Ntype_op::Get_mask) {
+      // FIXME:
+      //
+      // 1- get_mask(get_mask(X,a),b)) == get_mask(X, set_mask(a=a,val=-1,mask=b))
+      //
+      // 2- get_mask(0,b) == 0
+      //
+      // 3- get_mask(-1,b) && b>0 == b
+      //
+      // 4- get_mask(a,-1) && a>0 == a
+      //
+      // 5- get_mask(a,0) == 0
+      //
+      // 6- set_mask(a=0,val=X,mask=b) == get_mask(X,b)
+      //
+      // 7- set_mask(a=X,val=Y,mask=-1) == Y
+      //
+      // 8- set_mask(a=X,val=Y,mask=0) == X
+      //
+      // 9- Since set_mask(a=X,val=-1,mask=b) == X | b
+      // 9.1- get_mask(or(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=-1,mask=b),c) -> get_mask(-1,c) (if c>0 -> c)
+      //
+      // 10- Since set_mask(a=X,val=0,mask=b) == X & b
+      // 10.1- get_mask(and(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=0,mask=b),c) -> get_mask(0,c) -> c
+      //
+      // 11- get_mask(set_mask(a=Y,val=X,mask=a),b) && a bit_implies b -> get_mask(X,b)
+      //
+      // 12- get_mask(set_mask(a=Y,val=X,mask=a),b) && ~a bit_implies b -> get_mask(Y,b)
+      //
+      // 13- set_mask(a=get_mask(Y,a),val=X,mask=b) && popcount(a) < popcount(b) -> get_mask(X,b)
+      //
+      // 14- eq(get_mask(X,b), c) and b bit_implies c == ror(get_mask(X,b))
+      //
     } else if (!node.has_outputs()) {
       bwd_del_node(node);
       continue;
@@ -2054,6 +2127,7 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> t
 
   auto *lg          = node.get_class_lgraph();
   bool  local_error = false;
+  bool  tup_scalar  = tup->is_scalar(); // It could have just attributes
   for (const auto &it : tup->get_map()) {
     if (unlikely(it.second.is_invalid())) {
       local_error = true;
@@ -2065,6 +2139,9 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> t
     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
       out_name = out_name.substr(2);
     }
+    if (tup_scalar) // Remove foo.0.0.0 if scalar
+      out_name = Lgtuple::get_canonical_name(out_name);
+
 
     if (unlikely(it.first.empty() || out_name.empty())) {
       local_error = true;

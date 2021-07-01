@@ -23,7 +23,7 @@ _T.7 = 0;
 #delays.7.__ubits = 4
 
 #delays.__reset = $reset
-#delays.__initial = _T
+#delays.__initial = _T@()
 #delays  = #delays.__create_flop
 delays_q = #delays
 

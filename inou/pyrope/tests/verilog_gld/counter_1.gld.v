@@ -1,4 +1,4 @@
-module counter (
+module counter_1 (
   input clock,
   input en,
   output reg [3:0] cnt_o

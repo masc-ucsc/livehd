@@ -937,6 +937,15 @@ The new sconst.hpp will reside in simlib next to sint.hpp and a dedicated unit
 test could be placed at lemu/tests so that the results are compared against
 lops.
 
+To save space (cache hit improvement), the sops that need 8 or less bits should
+use an byte for storage, between 8 and 16 a short, between 16 and 32 a int32_t,
+then a int64_t. Anything bigger should use multiples of int64_t.
+
+Summary of sop tasks:
+* Static, compile time, bit size (like sint.hpp)
+* Compile time option to have x-logic
+* Size optimization (8,16,32,64, or 64xn sizes)
+
 ## Javascript Cell library (jops)
 
 LiveHD has cell operations. Typical cell operations are sum_op, xor_op... 

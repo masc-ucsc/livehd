@@ -64,14 +64,15 @@ public:
   std::vector<Node::Compact>                        make_mux(Node &mux_node, Node_pin &sel_dpin,
                                                              const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
-  std::tuple<std::shared_ptr<Lgtuple>, bool> get_flop_tup(Node &flop) const;
-  std::shared_ptr<Lgtuple>                   make_flop(Node &flop) const;
+  std::tuple<std::shared_ptr<Lgtuple>, bool>      get_flop_tup(Node &flop) const;
+  static std::pair<std::string_view, std::string> get_flop_attr_name(std::string_view flop_root_name, std::string_view cname);
+  std::shared_ptr<Lgtuple>                        make_flop(Node &flop) const;
 
   bool is_correct() const { return correct; }
   void set_issue() const { correct = false; }
 
   bool has_dpin(std::string_view key) const;
-  bool has_dpin() const { return has_dpin(""); }
+  bool has_dpin() const { return has_dpin("0"); }
 
   static std::pair<Port_ID, std::string_view> convert_key_to_io(std::string_view key);
 
@@ -85,8 +86,8 @@ public:
   static bool is_root_attribute(std::string_view key) {
     if (key.substr(0, 2) == "__" && key[3] != '_')
       return true;
-//    if (key.substr(0, 4) == "0.__" && key[5] != '_')
-//      return true;
+    if (key.substr(0, 4) == "0.__" && key[5] != '_')
+      return true;
 
     return false;
   }
@@ -111,21 +112,9 @@ public:
   }
 
   static std::string_view get_attribute(std::string_view key) {
-    if (is_root_attribute(key))
-      return key;
-
-    auto it = key.find(".__");
-    if (it != std::string::npos) {
-      if (key[it + 3] != '_')
-        return key.substr(it+1);
-    }
-
-    auto it2 = key.find(":__");
-    if (it2 != std::string::npos) {
-      if (key[it2 + 3] != '_')
-        return key.substr(it2+1);
-    }
-
+    auto last = get_last_level(key);
+    if (last.size()>2 && last[0] == '_' && last[1] == '_' && last[2] != '_')
+      return last;
     return "";
   }
 
@@ -133,10 +122,7 @@ public:
 
   // return const Node_pin ref. WARNING: no pointer stability if add/del fields
   const Node_pin &get_dpin(std::string_view key) const;
-  const Node_pin &get_dpin() const {
-    I(is_scalar());
-    return get_dpin("");
-  }
+  const Node_pin &get_dpin() const;
 
   std::shared_ptr<Lgtuple> get_sub_tuple(std::string_view key) const;
   std::shared_ptr<Lgtuple> get_sub_tuple(std::shared_ptr<Lgtuple const> tup) const;
@@ -148,7 +134,10 @@ public:
   void add(std::string_view key, std::shared_ptr<Lgtuple const> tup);
   void add(std::string_view key, const Node_pin &dpin);
 
-  void add(const Node_pin &dpin) { return add("", dpin); }
+  void add(const Node_pin &dpin) {
+    // clear everything that is not 0.__attr. Add 0
+    return add("0", dpin);
+  }
 
   bool     concat(const std::shared_ptr<Lgtuple const> tup2);
   bool     concat(const Node_pin &dpin);
