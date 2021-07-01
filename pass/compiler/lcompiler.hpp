@@ -10,7 +10,6 @@
 #include "bitwidth_range.hpp"
 #include "cprop.hpp"
 #include "firmap.hpp"
-#include "gioc.hpp"
 #include "inou_graphviz.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"

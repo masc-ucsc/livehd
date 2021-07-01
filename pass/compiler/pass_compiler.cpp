@@ -70,17 +70,10 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 }
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
-#ifdef DISABLE_THREAD_POOL
-  compiler.do_fir_lnast2lgraph(var.lnasts);
-  compiler.do_cprop();
-  compiler.do_firbits();
-  compiler.do_firmap_bitwidth();
-#else
   compiler.do_fir_lnast2lgraph(var.lnasts);
   compiler.do_fir_cprop();
   compiler.do_fir_firbits();
   compiler.do_fir_firmap_bitwidth();
-#endif
 }
 
 void Pass_compiler::setup_firmap_library(Lgraph *lg) {

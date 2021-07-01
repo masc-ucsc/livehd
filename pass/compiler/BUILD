@@ -17,7 +17,6 @@ cc_library(
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
         "//pass/firmap:pass_firmap",
-        "//pass/gioc:pass_gioc",
         "//pass/lnast_tolg:pass_lnast_tolg",
     ],
     alwayslink = True,

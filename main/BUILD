@@ -36,7 +36,6 @@ cc_binary(
         "//lgcpp/prplib",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
-        "//pass/gioc:pass_gioc",
         "//pass/cprop:pass_cprop",
         "//pass/fplan",
         "//pass/label:pass_label",

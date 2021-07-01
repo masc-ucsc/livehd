@@ -61,7 +61,7 @@ protected:
   Name2id                       name2id;      // WR protect on add entries, RD protect any access
   Recycled_id                   recycled_id;  // WR protect on add entries, RD protect any access
   std::vector<Graph_attributes> attributes;   // WR protect on add entries, RD protect any access
-  std::vector<Sub_node>         sub_nodes;    // WR protect on add entries, RD protect any access
+  std::vector<Sub_node *>       sub_nodes;    // WR protect on add entries, RD protect any access
 
   static Global_instances   global_instances;    // WR protect on add entries, RD protect any access
   static Global_name2lgraph global_name2lgraph;  // WR protect on add entries, RD protect any access
@@ -103,8 +103,10 @@ protected:
   std::string_view get_name_int(Lg_type_id lgid) const {
     I(lgid > 0);  // 0 is invalid lgid
     I(sub_nodes.size() > lgid);
-    I(sub_nodes[lgid].get_lgid() == lgid);
-    return sub_nodes[lgid].get_name();
+    // fmt::print("DEBUG0 sub_nodes[1]->get_lgid:{}, name:{}\n", sub_nodes[1]->get_lgid(), sub_nodes[1]->get_name());
+    // fmt::print("DEBUG0 sub_nodes[2]->get_lgid:{}, name:{}\n", sub_nodes[2]->get_lgid(), sub_nodes[2]->get_name());
+    I(sub_nodes[lgid]->get_lgid() == lgid);
+    return sub_nodes[lgid]->get_name();
   }
 
   Lg_type_id get_lgid_int(std::string_view name) const {

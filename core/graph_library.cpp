@@ -105,7 +105,7 @@ void Graph_library::clean_library_int() {
     writer.Key("source");
     writer.String(it.source.c_str());
 
-    sub_nodes[i].to_json(writer);
+    sub_nodes[i]->to_json(writer);
 
     writer.EndObject();
   }
@@ -246,7 +246,7 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
     return false;
   I(attributes.size() > lgid);
   I(sub_nodes.size() > lgid);
-  return sub_nodes[lgid].get_lgid() == lgid;
+  return sub_nodes[lgid]->get_lgid() == lgid;
 }
 
 Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, std::string_view name) {
@@ -296,12 +296,12 @@ Lgraph *Graph_library::try_find_lgraph_int(Lg_type_id lgid) const {
   return lg;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
+Lgraph * Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
   const Graph_library *lib = instance_int(path);  // path must be full path
   return lib->try_find_lgraph_int(lgid);
 }
 
-Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
+Sub_node & Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
   graph_library_clean = false;
 
   Lg_type_id lgid = get_lgid_int(name);
@@ -310,44 +310,45 @@ Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view s
       // Lgraph::info("module {} changed source changed from {} to {}\n", name, attributes[lgid].source, source);
       attributes[lgid].source = source;
     }
-    auto &sub = sub_nodes[lgid];
-    sub.reset_pins();
-    return sub;
+    auto sub = sub_nodes[lgid];
+    sub->reset_pins();
+
+    return *sub;
   }
 
   lgid = add_name_int(name, source);
   I(lgid);
-  return sub_nodes[lgid];
+  return *sub_nodes[lgid];
 }
 
-Sub_node &Graph_library::setup_sub_int(std::string_view name) { return setup_sub_int(name, "-"); }
+Sub_node& Graph_library::setup_sub_int(std::string_view name) { return setup_sub_int(name, "-"); }
 
-Sub_node &Graph_library::setup_sub_int(std::string_view name, std::string_view source) {
+Sub_node& Graph_library::setup_sub_int(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid_int(name);
   if (lgid) {
-    return sub_nodes[lgid];
+    return *sub_nodes[lgid];
   }
 
   lgid = add_name_int(name, source);
   I(lgid);
-  return sub_nodes[lgid];
+  return *sub_nodes[lgid];
 }
 
-Sub_node *Graph_library::ref_sub_int(Lg_type_id lgid) {
+Sub_node* Graph_library::ref_sub_int(Lg_type_id lgid) {
   graph_library_clean = false;
   I(lgid > 0);  // 0 is invalid lgid
   I(attributes.size() > lgid);
   I(sub_nodes.size() > lgid);
-  I(sub_nodes[lgid].get_lgid() == lgid);
-  return &sub_nodes[lgid];
+  I(sub_nodes[lgid]->get_lgid() == lgid);
+  return sub_nodes[lgid];
 }
 
-const Sub_node &Graph_library::get_sub_int(Lg_type_id lgid) const {
+const Sub_node& Graph_library::get_sub_int(Lg_type_id lgid) const {
   I(lgid > 0);  // 0 is invalid lgid
   I(attributes.size() > lgid);
   I(sub_nodes.size() > lgid);
-  I(sub_nodes[lgid].get_lgid() == lgid);
-  return sub_nodes[lgid];
+  I(sub_nodes[lgid]->get_lgid() == lgid);
+  return *sub_nodes[lgid];
 }
 
 Lg_type_id Graph_library::add_name_int(std::string_view name, std::string_view source) {
@@ -357,12 +358,12 @@ Lg_type_id Graph_library::add_name_int(std::string_view name, std::string_view s
   if (id == 0) {
     id = attributes.size();
     attributes.emplace_back();
-    sub_nodes.emplace_back();
+    sub_nodes.emplace_back(new Sub_node());
   }
 
   I(id < attributes.size());
   I(id < sub_nodes.size());
-  sub_nodes[id].reset(name, id);
+  sub_nodes[id]->reset(name, id);
   attributes[id].source  = source;
   attributes[id].version = max_next_version++;
 
@@ -399,8 +400,8 @@ bool Graph_library::rename_name_int(std::string_view orig, std::string_view dest
   I(name2id.find(orig) == name2id.end());
 
   graph_library_clean = false;
-  sub_nodes[id].rename(dest);
-  I(sub_nodes[id].get_lgid() == id);
+  sub_nodes[id]->rename(dest);
+  I(sub_nodes[id]->get_lgid() == id);
 
   name2id[dest] = id;
 
@@ -432,7 +433,7 @@ void Graph_library::reload_int() {
   {
     name2id.clear();
     attributes.resize(1);  // 0 is not a valid ID
-    sub_nodes.resize(1);   // 0 is not a valid ID
+    sub_nodes.resize(1, new Sub_node());   // 0 is not a valid ID
   }
   if (access(library_file.c_str(), F_OK) == -1) {
     mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
@@ -459,6 +460,9 @@ void Graph_library::reload_int() {
   I(document.HasMember("Lgraph"));
   const rapidjson::Value &Lgraph_array = document["Lgraph"];
   I(Lgraph_array.IsArray());
+
+
+
   for (const auto &lg_entry : Lgraph_array.GetArray()) {
     I(lg_entry.IsObject());
 
@@ -466,28 +470,39 @@ void Graph_library::reload_int() {
     I(lg_entry.HasMember("version"));
 
     uint64_t id = lg_entry["lgid"].GetUint64();
-    ;
+    
+    fmt::print("hello!! id:{}\n", id);
+
     if (id >= attributes.size()) {
       attributes.resize(id + 1);
-      sub_nodes.resize(id + 1);
+
+      //FIXME->sh: wiered bug that the two pointer, sub_nodes[1] and sub_nodes[2], will pollute each other when using resize (size, initial value) ??
+      //           to avoid such bug, I create Sub_node() pointers and emplace_back them one by one.
+      // sub_nodes.resize(id + 1, new Sub_node()); 
+      auto increase_size = id - sub_nodes.size() + 1;
+      if (increase_size > 0) {
+        for (std::string::size_type i = 0 ; i < increase_size; i++) {
+          auto ptr = new Sub_node();
+          sub_nodes.emplace_back(ptr);
+        }
+      }
     }
 
     auto version = lg_entry["version"].GetUint64();
-    ;
     if (version != 0) {
       if (max_next_version < version)
         max_next_version = version;
 
       I(lg_entry.HasMember("source"));
       attributes[id].source = lg_entry["source"].GetString();
-      ;
       attributes[id].version = version;
 
-      sub_nodes[id].from_json(lg_entry);
+      sub_nodes[id]->from_json(lg_entry);
+      // fmt::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id, sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
 
       // NOTE: must use attributes to keep the string in memory
-      name2id[sub_nodes[id].get_name()] = id;
-      I(sub_nodes[id].get_lgid() == id);  // for consistency
+      name2id[sub_nodes[id]->get_name()] = id;
+      I(sub_nodes[id]->get_lgid() == id);  // for consistency
     } else {
       recycled_id.insert(id);
     }
@@ -513,7 +528,7 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
   I(it != name2id.end());
-  I(sub_nodes[lgid].get_name() == name);
+  I(sub_nodes[lgid]->get_name() == name);
 #endif
 
   return lg;
@@ -574,16 +589,17 @@ void Graph_library::expunge_int(std::string_view name) {
   }
   closedir(dr);
 
-  sub_nodes[id].expunge();  // Nuke IO and contents, but keep around lgid
+  sub_nodes[id]->expunge();  // Nuke IO and contents, but keep around lgid
 }
 
 void Graph_library::clear_int(Lg_type_id lgid) {
   I(lgid < attributes.size());
 
-  sub_nodes[lgid].reset_pins();
+  sub_nodes[lgid]->reset_pins();
 }
 
 Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_view new_name) {
+  I(false);
   graph_library_clean = false;
   auto it2            = global_name2lgraph[path].find(name);
   if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
@@ -592,12 +608,12 @@ Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_vie
   const auto &it = name2id.find(name);
   I(it != name2id.end());
   auto id_orig = it->second;
-  I(sub_nodes[id_orig].get_name() == name);
+  I(sub_nodes[id_orig]->get_name() == name);
 
   Lg_type_id id_new = reset_id_int(new_name, attributes[id_orig].source);
 
   attributes[id_new] = attributes[id_orig];
-  sub_nodes[id_new].copy_from(new_name, id_new, sub_nodes[id_orig]);
+  sub_nodes[id_new]->copy_from(new_name, id_new, *sub_nodes[id_orig]);
 
   DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
@@ -663,7 +679,7 @@ Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
   I(it != name2id.end());
-  I(sub_nodes[id].get_name() == name);
+  I(sub_nodes[id]->get_name() == name);
 #endif
 
   return id;
@@ -681,7 +697,7 @@ void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgrap
     I(it == global_name2lgraph[path].end());
   }
 
-  if (sub_nodes[lgid].is_invalid())
+  if (sub_nodes[lgid]->is_invalid())
     expunge_int(name);
 }
 

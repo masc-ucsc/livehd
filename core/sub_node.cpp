@@ -10,6 +10,8 @@ void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const S
   graph_pos2instance_pid = sub.graph_pos2instance_pid;
 }
 
+
+
 void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const {
   writer.Key("lgid");
   writer.Uint64(lgid);
@@ -58,7 +60,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
   I(entry["name"].IsString());
-
+  // fmt::print("DEBUG18 old lgid:{}, new lgid:{}\n", lgid, entry["lgid"].GetUint64());
   lgid            = entry["lgid"].GetUint64();
   std::string str = entry["name"].GetString();
   name            = str;
