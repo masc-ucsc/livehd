@@ -151,7 +151,7 @@ public:
   const Key_map_type &get_map() const { return key_map; }
   const Key_map_type &get_sort_map() const;
 
-  std::string get_scalar_name() const;  // empty if not scalar
+  std::string_view get_scalar_name() const;  // empty if not scalar
 
   bool is_empty() const { return (key_map.empty()); }
 

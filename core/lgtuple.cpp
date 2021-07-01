@@ -556,13 +556,6 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
 
   for (auto &e : key_map) {
     std::string_view entry(e.first);
-    if (key == "0" && e.first.empty()) {
-      if (!tup) {
-        tup = std::make_shared<Lgtuple>(get_name());
-      }
-      tup->key_map.emplace_back("0", e.second);
-      continue;
-    }
     auto e_pos = match_first_partial(key, entry);
     if (e_pos == 0)
       continue;
@@ -580,7 +573,11 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
     }else{
       auto key2 = entry.substr(e_pos);
       I(!key2.empty());
-      tup->key_map.emplace_back(key2, e.second);
+      if (is_root_attribute(key2)) {
+        tup->key_map.emplace_back(absl::StrCat("0.", key2), e.second);
+      }else{
+        tup->key_map.emplace_back(key2, e.second);
+      }
     }
   }
 
@@ -684,55 +681,24 @@ void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
   bool tup_scalar = tup->is_scalar();
 
   for (const auto &e:tup->key_map) {
-    if (e.first.empty()) {
-      I(false); // "0" is scalar single entry
-      add(key, e.second);
-    } else {
-      if (is_attribute(key) && is_attribute(e.first)) {
-        I(false); // who calls this weird option?
-        Lgraph::info("dropping nested attribute {} with new key field {}", e.first, key);
-        continue;
-      }
-
-#if 1
-      std::string_view key2;
-      // Remove 0. from tup if tup is scalar
-      if (tup_scalar && e.first[0] == '0' && (e.first.size()==1 || e.first[1] == '.')) {
-        if (e.first.size()==1)
-          key2 = ""; // remove "0"
-        else
-          key2 = e.first.substr(2); // remove "0."
-      }else{
-        key2 = e.first;
-      }
-
-      if (key2.empty()) {
-        add(key, e.second);
-      }else{
-        auto key3 = absl::StrCat(key, ".", key2);
-        add(key3, e.second);
-      }
-#else
-      std::string key2{get_canonical_name(e.first)};  // Remove 0.0.0.xxxx and xxx.0.0.0 if e exists
-
-      if (key2.empty()) {
-        if (tup_scalar || root_key) {
-          key2 = key;
-        }else{
-          key2 = absl::StrCat(key, ".0");
-        }
-      }else{
-        if (root_key) {
-          key2 = absl::StrCat(key2, ".", key);
-        }else{
-          key2 = absl::StrCat(key, ".", key2);
-        }
-      }
-
-      add(key2, e.second);
-#endif
-
+    std::string_view key2;
+    // Remove 0. from tup if tup is scalar
+    if (tup_scalar && e.first[0] == '0' && (e.first.size()==1 || e.first[1] == '.')) {
+      if (e.first.size()==1)
+        key2 = ""; // remove "0"
+      else
+        key2 = e.first.substr(2); // remove "0."
+    }else{
+      key2 = e.first;
     }
+
+    if (key2.empty()) {
+      add(key, e.second);
+    }else{
+      auto key3 = absl::StrCat(key, ".", key2);
+      add(key3, e.second);
+    }
+
   }
 }
 
@@ -742,10 +708,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   std::string uncanonical_key{key};
 	bool pending_adjust = false;
   if (is_scalar()) {
-    if (key.empty()) {
-      I(false);
-      uncanonical_key = "0";
-    } else if (key.substr(0, 2) == "__" && key[3] != '_') { // is_root_attribute BUT not with 0.__xxx
+    if (key.substr(0, 2) == "__" && key[3] != '_') { // is_root_attribute BUT not with 0.__xxx
       uncanonical_key = absl::StrCat("0.", key);
     } else {
       pending_adjust = true;
@@ -851,11 +814,6 @@ bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
   if (delayed_numbers.size()) {
     auto max_pos = 0;
     for (const auto &e : key_map) {
-      if (e.first.empty()) {
-        dump();
-        Lgraph::info("can not concat pin to tuple {} when some are unnamed", get_name());
-        return false;
-      }
       int x = 0;
       if (std::isdigit(e.first[0])) {
         std::from_chars(e.first.data(), e.first.data() + e.first.size(), x);
@@ -1210,19 +1168,8 @@ const Lgtuple::Key_map_type &Lgtuple::get_sort_map() const {
 }
 
 bool Lgtuple::concat(const Node_pin &dpin) {
-  if (key_map.size() == 1 && key_map[0].first.empty()) {
-    key_map[0].first = "0";
-    key_map.emplace_back("1", dpin);
-    return true;
-  }
-
   auto max_pos = 0;
   for (const auto &e : key_map) {
-    if (e.first.empty()) {
-      dump();
-      Lgraph::info("can not concat pin to tuple {} when some are unnamed", get_name());
-      return false;
-    }
     int x = 0;
     if (std::isdigit(e.first[0])) {
       std::from_chars(e.first.data(), e.first.data() + e.first.size(), x);
@@ -1682,8 +1629,6 @@ bool Lgtuple::is_scalar() const {
 
 bool Lgtuple::is_ordered() const {
   for (const auto &e : key_map) {
-    if (e.first.empty())
-      continue;
     if (is_root_attribute(e.first))
       continue;
 
@@ -1694,11 +1639,11 @@ bool Lgtuple::is_ordered() const {
   return true;
 }
 
-std::string Lgtuple::get_scalar_name() const {
-  std::string sname;
+std::string_view Lgtuple::get_scalar_name() const {
+  std::string_view sname;
 
   for (const auto &e : key_map) {
-    std::string s;
+    std::string_view s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
     } else {
@@ -1725,7 +1670,7 @@ bool Lgtuple::is_trivial_scalar() const {
         return false;
       ++conta;
     }
-    if (field.empty() || field == "0")
+    if (field == "0")
       continue;
 
     return false;
