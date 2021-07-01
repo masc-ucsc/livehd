@@ -376,6 +376,14 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     else
       replace_node(node, result);
 
+  } else if (op == Ntype_op::Ror) {
+    Lconst result(0);
+    for (auto &i : inp_edges_ordered) {
+      auto c = i.driver.get_node().get_type_const();
+      result = result.ror_op(c);
+    }
+
+    replace_node(node, result);
   } else if (op == Ntype_op::Get_mask) {
     Lconst val       = node.get_sink_pin("a").get_driver_node().get_type_const();
     auto   mask_spin = node.get_sink_pin("mask");

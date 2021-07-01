@@ -803,6 +803,13 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
   return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
+Lconst Lconst::ror_op(const Lconst &o) const {
+
+  Number res_num = (num!=0 || o!=0)?1:0;
+
+  return Lconst(false, 1, res_num);
+}
+
 Lconst Lconst::or_op(const Lconst &o) const {
   if (bits == 0)
     return o;

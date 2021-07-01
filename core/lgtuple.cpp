@@ -1004,8 +1004,8 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(std::shared_ptr<Lgtuple const> tup) const {
-  (void)tup;
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(std::shared_ptr<Lgtuple const> rhs_tup) const {
+  (void)rhs_tup;
 
   I(false); // FIXME: implement it
   auto new_tup = std::make_shared<Lgtuple>(get_name());
