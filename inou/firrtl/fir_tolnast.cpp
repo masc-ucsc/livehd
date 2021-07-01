@@ -1705,7 +1705,16 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
     initial_node = Lnast_node::create_const(lnast.add_string(str_val));
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
     auto ref_str = inite.reference().id();
-    initial_node = Lnast_node::create_ref(lnast.add_string(ref_str));
+    // initial_node = Lnast_node::create_ref(lnast.add_string(ref_str));
+    auto empty_tup_add_op = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var(lnast));
+    lnast.add_child(empty_tup_add_op, empty_tup_add_var);
+
+    auto get_mask_op = lnast.add_child(parent_node, Lnast_node::create_get_mask());
+    initial_node     = Lnast_node::create_ref(create_tmp_var(lnast));
+    lnast.add_child(get_mask_op, initial_node);
+    lnast.add_child(get_mask_op, Lnast_node::create_ref(lnast.add_string(ref_str)));
+    lnast.add_child(get_mask_op, empty_tup_add_var);
   }
 
   if (!initial_node.is_invalid())

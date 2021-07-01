@@ -58,7 +58,7 @@ cc_library(
     "if1",
     "lhs_wire2",
     "tuple_copy2",
-    "counter",
+    "counter_1",
     "adder_stage",
     "logic2",
     "tuple_empty_attr",
