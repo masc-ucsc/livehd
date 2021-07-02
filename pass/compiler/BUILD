@@ -87,7 +87,7 @@ cc_library(
     "hier_tuple_nested_if4",
     "firrtl_gcd_3bits",
     "firrtl_tail3",
-    "connect_through",
+    #"connect_through",  FIXME: re-enable
     "top",
 ]]
 
