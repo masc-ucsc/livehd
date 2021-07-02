@@ -470,8 +470,6 @@ void Graph_library::reload_int() {
     I(lg_entry.HasMember("version"));
 
     uint64_t id = lg_entry["lgid"].GetUint64();
-    
-    fmt::print("hello!! id:{}\n", id);
 
     if (id >= attributes.size()) {
       attributes.resize(id + 1);

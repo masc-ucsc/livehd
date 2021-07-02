@@ -116,7 +116,6 @@ public:
   }
 
   void reset(std::string_view _name, Lg_type_id _lgid) {
-    fmt::print("DEBUG17 old lgid:{}, new lgid:{}\n", lgid, _lgid);
     name = _name;
     lgid = _lgid;
 
@@ -133,7 +132,6 @@ public:
     name2id.clear();
     io_pins.clear();
     deleted.clear();
-    fmt::print("DEBUG19 old lgid:{}, new lgid:{}\n", lgid, 0);
     lgid = 0;
   }
 

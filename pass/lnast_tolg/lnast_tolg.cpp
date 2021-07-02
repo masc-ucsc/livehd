@@ -723,74 +723,70 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  //// -------- test start ---------
-  //bool is_all_constant_key_ta = true;
-  //int k = 0;
-  //std::string concatenated_field_str = "";
-  //// std::string tup_sname;
-  //Node_pin val_dpin;
-
-  //for (const auto &child : lnast->children(lnidx_ta)) {
-  //  if (child == lnast->get_last_child(lnidx_ta)) {
-  //    val_dpin = setup_ref_node_dpin(lg, child, true);
-  //    break;
-  //  }
-
-  //  if (k == 0) {
-  //    k++;
-  //    continue;
-  //  } else {
-  //    if (lnast->get_type(child).is_ref()) {
-  //      is_all_constant_key_ta = false;
-  //      break;
-  //    }
-  //    auto cn_name = lnast->get_vname(child);
-  //    if (concatenated_field_str == "")
-  //      concatenated_field_str = cn_name;
-  //    else 
-  //      concatenated_field_str = absl::StrCat(concatenated_field_str, ".",cn_name);
-  //    k++;
-  //    continue;
-  //  }
-  //}
+  // -------- test start ---------
   
-  //if (is_all_constant_key_ta) {
-  //  int j = 0;
-  //  for (const auto &child : lnast->children(lnidx_ta)) {
-  //    if (j == 0) {
-  //      const auto &c0_ta     = child;
-  //      auto        tuple_sname = lnast->get_sname(c0_ta);
-  //      auto        tuple_vname = lnast->get_vname(c0_ta);
-  //      auto        subs        = lnast->get_subs(c0_ta);
-  //      auto tup_add = lg->create_node(Ntype_op::TupAdd);
+  bool is_all_constant_key_ta = true;
+  int k = 0;
+  std::string concatenated_field_str = "";
+  Node_pin val_dpin;
 
-  //      auto        pos_spin    = tup_add.setup_sink_pin("field");
-  //      auto        pos_dpin = lg->create_node_const(Lconst(concatenated_field_str)).setup_driver_pin();
-  //      pos_dpin.connect_sink(pos_spin);
+  for (const auto &child : lnast->children(lnidx_ta)) {
+    if (child == lnast->get_last_child(lnidx_ta)) {
+      val_dpin = setup_ref_node_dpin(lg, child, true);
+    } else {
+      if (lnast->get_type(child).is_ref()) {
+        is_all_constant_key_ta = false;
+        break;
+      }
+      auto cn_name = lnast->get_vname(child);
+      if (concatenated_field_str == "")
+        concatenated_field_str = cn_name;
+      else 
+        concatenated_field_str = absl::StrCat(concatenated_field_str, ".",cn_name);
 
-
-  //      auto        val_spin    = tup_add.setup_sink_pin("value");
-  //      val_dpin.connect_sink(val_spin);
-
-  //      auto tn_dpin = setup_ta_ref_previous_ssa(lg, tuple_vname, subs);
-  //      if (!tn_dpin.is_invalid()) {
-  //        auto tn_spin = tup_add.setup_sink_pin("parent");
-  //        tn_dpin.connect_sink(tn_spin);
-  //      }
-
-  //      name2dpin.insert_or_assign(tuple_sname, tup_add.setup_driver_pin());
-  //      tup_add.setup_driver_pin().set_name(tuple_sname);
-  //      setup_dpin_ssa(name2dpin[tuple_sname], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
-
-  //      auto it = vname2tuple_head.find(tuple_vname);
-  //      if (it == vname2tuple_head.end())
-  //        vname2tuple_head.insert_or_assign(tuple_vname, tup_add);
+      k++;
+      continue;
+    }
+  }
   
-  //      j++;
-  //    }
-  //  }
-  //  return;
-  //}
+  if (is_all_constant_key_ta) {
+    int j = 0;
+    for (const auto &child : lnast->children(lnidx_ta)) {
+      if (j == 0) {
+        const auto &c0_ta     = child;
+        auto        tuple_sname = lnast->get_sname(c0_ta);
+        auto        tuple_vname = lnast->get_vname(c0_ta);
+        auto        subs        = lnast->get_subs(c0_ta);
+        auto tup_add = lg->create_node(Ntype_op::TupAdd);
+
+        auto        pos_spin    = tup_add.setup_sink_pin("field");
+        // fmt::print("DEBUG00 concatenated_field_str:{}\n", concatenated_field_str);
+        auto        pos_dpin = lg->create_node_const(Lconst(concatenated_field_str)).setup_driver_pin();
+        pos_dpin.connect_sink(pos_spin);
+
+
+        auto        val_spin    = tup_add.setup_sink_pin("value");
+        val_dpin.connect_sink(val_spin);
+
+        auto tn_dpin = setup_ta_ref_previous_ssa(lg, tuple_vname, subs);
+        if (!tn_dpin.is_invalid()) {
+          auto tn_spin = tup_add.setup_sink_pin("parent");
+          tn_dpin.connect_sink(tn_spin);
+        }
+
+        name2dpin.insert_or_assign(tuple_sname, tup_add.setup_driver_pin());
+        tup_add.setup_driver_pin().set_name(tuple_sname);
+        setup_dpin_ssa(name2dpin[tuple_sname], lnast->get_vname(c0_ta), lnast->get_subs(c0_ta));
+
+        auto it = vname2tuple_head.find(tuple_vname);
+        if (it == vname2tuple_head.end())
+          vname2tuple_head.insert_or_assign(tuple_vname, tup_add);
+  
+        j++;
+      }
+    }
+    return;
+  }
 
 ////------- test end ------
 
