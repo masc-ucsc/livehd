@@ -124,6 +124,10 @@ public:
       assert(get_sink_name(op, pid) == str);
       return pid;
     }
+    if (str == "$") {
+      assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)] == 0);
+      return 0;
+    }
     if (c == 'A') {
       assert(sink_name2pid[str[0]][static_cast<std::size_t>(op)] == 0);
       assert(get_sink_name(op, 0) == str);
@@ -169,7 +173,7 @@ public:
   }
 
   static int get_driver_pid(Ntype_op op, std::string_view pin_name) {
-    if (likely(!is_multi_driver(op))) {
+    if (likely(!is_multi_driver(op) || pin_name == "%")) {
       return 0;
     }
     assert(std::isdigit(pin_name[0]));

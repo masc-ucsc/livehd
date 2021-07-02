@@ -188,6 +188,9 @@ void Sub_node::populate_graph_pos() {
 }
 
 void Sub_node::del_pin(Port_ID instance_pid) {
+  if (instance_pid==0)
+    return; // $ and % are special cases
+
   I(has_instance_pin(instance_pid));
 
   name2id.erase(io_pins[instance_pid].name);

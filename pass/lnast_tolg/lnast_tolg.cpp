@@ -24,7 +24,8 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
 
   // move %/$ generation at the pb->lnast
   lg             = Lgraph::create(path, module_name, src);
-  name2dpin["$"] = lg->add_graph_input("$", Port_invalid, 0);
+  name2dpin["$"] = lg->get_graph_input("$");
+
   setup_tuple_ref(lg, "%");
   std::vector<Lgraph *> lgs;
   top_stmts2lgraph(lg, top_stmts);
@@ -1352,6 +1353,8 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
                                         Node subg_node) {
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
+  fmt::print("FIXME: This method should not connect/setup IOs. Just do % and $\n");
+
   // start query subgraph io and construct TGs for connecting inputs, TAs/scalar for connecting outputs
   for (const auto &io_pin : sub->get_io_pins()) {
     if(io_pin.is_invalid())
@@ -1536,52 +1539,35 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   else
     arg_tup_name = cn_fc_sname;
 
-  std::unique_lock<std::mutex> guard(lgs_mutex);
+  //std::unique_lock<std::mutex> guard(lgs_mutex);
   auto * library = Graph_library::instance(path);
   if (name2dpin.find(func_name) == name2dpin.end()) {
 
-    Node      subg_node;
-    Sub_node *sub;
-    if (library->has_name(func_name)) {
-      auto lgid = library->get_lgid(func_name);
-      subg_node = lg->create_node_sub(lgid);
-      sub       = library->ref_sub(lgid);
-
-    } else {
-      subg_node = lg->create_node_sub(func_name);
-      sub       = library->ref_sub(func_name);
-    }
-    guard.unlock();
+    auto subg_node = lg->create_node_sub(func_name);
 
     subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
 
-    // just connect to $ and %, handle the rest at global io connection
-    Node_pin subg_spin;
-    Node_pin subg_dpin;
-    if (sub->has_pin("$")) {  // sum.prp -> top.prp
-      subg_spin = subg_node.setup_sink_pin("$");
-    } else {  // top.prp -> sum.prp
-      sub->add_input_pin("$", Port_invalid);
-      subg_spin = subg_node.setup_sink_pin("$");
-    }
+    auto subg_spin = subg_node.setup_sink_pin("$");
+    auto subg_dpin = subg_node.setup_driver_pin("%");
+
     auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
     I(!arg_tup_dpin.is_invalid()); // input is guaranteed
     arg_tup_dpin.connect_sink(subg_spin);
 
-    if (sub->has_pin("%")) {
-      subg_dpin = subg_node.setup_driver_pin("%");
-    } else {
-      sub->add_output_pin("%", Port_invalid);
-      subg_dpin = subg_node.setup_driver_pin("%");
+    if (ret_name[0] == '%') {
+      create_out_ta(lg, ret_name.substr(1), subg_dpin);
+    }else{
+      // TODO: For efficiency, it would be good to get rid of this TA. Not sure
+      // that it is needed. If connected to '%' pin, for sure it is a Tuple
+      //
+      // create a TA assignment for the ret
+      auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
+      auto ta_ret_dpin = ta_ret.setup_driver_pin();
+
+      subg_dpin.connect_sink(ta_ret.setup_sink_pin("parent"));
+      name2dpin[ret_name] = ta_ret_dpin;
+      ta_ret_dpin.set_name(ret_name);
     }
-
-    // create a TA assignment for the ret
-    auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
-    auto ta_ret_dpin = ta_ret.setup_driver_pin();
-
-    subg_dpin.connect_sink(ta_ret.setup_sink_pin("parent"));
-    name2dpin[ret_name] = ta_ret_dpin;
-    ta_ret_dpin.set_name(ret_name);
     return;
   }
 
@@ -1621,13 +1607,13 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto field_dpin = lg->create_node_const(Lconst("__fdef")).setup_driver_pin();
   field_dpin.connect_sink(pos_spin);
 
-  std::unique_lock<std::mutex> guard(lgs_mutex);
+  //std::unique_lock<std::mutex> guard(lgs_mutex);
   auto *                       library = Graph_library::instance(path);
   Lg_type_id                   lgid;
   if (library->has_name(subg_module_name)) {
     lgid = library->get_lgid(subg_module_name);
   }
-  guard.unlock();
+  //guard.unlock();
 
   auto value_dpin = lg->create_node_const(Lconst(lgid)).setup_driver_pin();
   value_dpin.connect_sink(value_spin);
@@ -1819,7 +1805,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
 
   // connect output tuple-chain to output pin "%"
   auto unified_out_dpin = name2dpin["%"];  // TA node
-  auto unified_out_spin = lg->add_graph_output("%", Port_invalid, 0);
+  auto unified_out_spin = lg->get_graph_output("%"); // Must be created before
   unified_out_dpin.connect_sink(unified_out_spin);
 
   // try to create flattened inputs

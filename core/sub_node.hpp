@@ -168,6 +168,8 @@ public:
   Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
     I(lgid);
     I(!has_pin(io_name));
+    I(io_name != "%"); // reserved for default output
+    I(io_name != "$"); // reserved for default input
 
     Port_ID instance_pid=0;
 
@@ -232,8 +234,9 @@ public:
   bool has_pin(std::string_view io_name) const {
     I(lgid);
     const auto it = name2id.find(io_name);
-    if (it == name2id.end())
-      return false;
+    if (it == name2id.end()) {
+      return io_name == "%" || io_name == "$";
+    }
 
     return !io_pins[it->second].is_invalid(); // It could be deleted and name preserved to remap to the same pin again in the future
   }
@@ -247,6 +250,8 @@ public:
   }
 
   Port_ID get_instance_pid(std::string_view io_name) const {
+    if (io_name == "$" || io_name == "%")
+      return 0;
     has_pin(io_name);
     return name2id.at(io_name);
   }
@@ -330,6 +335,9 @@ public:
   }
 
   bool is_input(std::string_view io_name) const {
+    if (io_name == "$")
+      return true;
+
     const auto it = name2id.find(io_name);
     if (it == name2id.end())
       return false;
@@ -348,6 +356,9 @@ public:
   }
 
   bool is_output(std::string_view io_name) const {
+    if (io_name == "%")
+      return true;
+
     const auto it = name2id.find(io_name);
     if (it == name2id.end())
       return false;

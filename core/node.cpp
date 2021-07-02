@@ -146,6 +146,7 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
 
 Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
   I(is_type_sub());
+  I(pname != "%");
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
@@ -163,6 +164,7 @@ Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
 
 Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   I(is_type_sub());
+  I(pname != "$");
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
@@ -180,6 +182,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
 
 Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   I(is_type_sub());
+  I(name != "%");
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
@@ -251,6 +254,7 @@ bool Node::is_driver_connected(std::string_view pname) const {
 
 Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   I(is_type_sub());
+  I(name != "$");
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
   I(current_g->get_library().exists(sub_lgid));  // Must be a valid lgid
@@ -387,7 +391,7 @@ bool Node::is_type_loop_last() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
     const auto sub_name = get_type_sub_node().get_name();
-    if (sub_name.substr(0, 6) == "__fir_")
+    if (sub_name.substr(0, 6) == "__fir_") // FIXME: NOT NICE to have __fir_ specific RUles. It should be generic language independent
       return false;
     return true;
   }

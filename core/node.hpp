@@ -231,7 +231,7 @@ public:
   Node_pin get_driver_pin_slow(std::string_view pname) const;
   Node_pin get_driver_pin(std::string_view pname) const {
     assert(pname.size());
-    if (unlikely(is_type_sub())) {
+    if (unlikely(is_type_sub() && pname != "%")) {
       return get_driver_pin_slow(pname);
     }
     I(!Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
@@ -240,7 +240,7 @@ public:
   Node_pin get_sink_pin_slow(std::string_view pname) const;
   Node_pin get_sink_pin(std::string_view pname) const {
     assert(pname.size());
-    if (unlikely(is_type_sub())) {
+    if (unlikely(is_type_sub() && pname != "$")) {
       return get_sink_pin_slow(pname);
     }
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
@@ -251,10 +251,10 @@ public:
   Node_pin setup_driver_pin_slow(std::string_view name) const;
   Node_pin setup_driver_pin(std::string_view pname) const {
     assert(pname.size());
-    if (unlikely(is_type_sub())) {
+    if (unlikely(is_type_sub() && pname != "%")) {
       return setup_driver_pin_slow(pname);
     }
-    I(!Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
+    GI(pname != "%", !Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
   }
   Node_pin setup_driver_pin_raw(Port_ID pid) const;
@@ -263,7 +263,7 @@ public:
   Node_pin setup_sink_pin_slow(std::string_view name);
   Node_pin setup_sink_pin(std::string_view pname) {
     assert(pname.size());
-    if (unlikely(is_type_sub())) {
+    if (unlikely(is_type_sub() && pname != "$")) {
       return setup_sink_pin_slow(pname);
     }
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);

@@ -48,6 +48,9 @@ Ntype::_init::_init() {
       ntype2single_input[op] = false;
     }
 
+    // special sink case
+    sink_name2pid['$'][static_cast<int>(Ntype_op::Sub)] = 0;
+
     int pid;
     (void)pid;
     // Check that common case is fine

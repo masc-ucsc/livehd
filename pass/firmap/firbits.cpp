@@ -55,12 +55,14 @@ void Firmap::do_firbits_analysis(Lgraph *lg) { // multi-threaded
       #endif
       auto op = node.get_type_op();
 
-      I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::Ror && op != Ntype_op::And && op != Ntype_op::Sum
+      I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And && op != Ntype_op::Sum
             && op != Ntype_op::Mult && op != Ntype_op::SRA && op != Ntype_op::SHL && op != Ntype_op::Not && op != Ntype_op::GT
             && op != Ntype_op::LT && op != Ntype_op::EQ && op != Ntype_op::Div,
         "basic op should be a fir_op_subnode before the firmap pass!");
 
-      if (op == Ntype_op::Sub) {
+      if (op == Ntype_op::Ror) {
+        fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(1, false));
+      }else if (op == Ntype_op::Sub) {
         auto subname = node.get_type_sub_node().get_name();
         if (subname.substr(0, 6) == "__fir_")
           analysis_fir_ops(node, subname, fbmap);

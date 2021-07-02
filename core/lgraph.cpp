@@ -175,6 +175,7 @@ bool Lgraph::has_graph_output(std::string_view io_name) const {
 }
 
 Node_pin Lgraph::add_graph_input(std::string_view str_sv, Port_ID pos, uint32_t bits) {
+  I(str_sv != "$");
   std::string str{str_sv};  // This function can trigger remaps. Remember string, not pointer
   I(!has_graph_output(str));
 
@@ -202,6 +203,7 @@ Node_pin Lgraph::add_graph_input(std::string_view str_sv, Port_ID pos, uint32_t 
 Node_pin Lgraph::add_graph_output(std::string_view str_sv, Port_ID pos, uint32_t bits) {
   std::string str{str_sv};  // This function can trigger remaps. Remember string, not pointer
   I(!has_graph_input(str));
+  I(str_sv != "%");
 
   Port_ID inst_pid;
   if (get_self_sub_node().has_pin(str)) {

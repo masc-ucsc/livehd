@@ -472,21 +472,21 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
 
 std::string_view Node_pin::get_pin_name() const {
   if (is_graph_io()) {
+    if (pid==0) {
+      return is_graph_output()? "%":"$";
+    }
     const auto &sub    = current_g->get_self_sub_node();
     const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
     return io_pin.name;
-#if 0
-    // handles case that there is no name by returning PID instead of INVALID
-		if (sub_node.has_instance_pin(pid))
-			return std::string(sub_node.get_name_from_instance_pid(pid));
-
-		return std::to_string(pid);
-#endif
   }
 
   auto op = get_type_op();
-  if (op == Ntype_op::Sub)
+  if (op == Ntype_op::Sub) {
+    if (pid==0) {
+      return is_driver()?"%":"$";
+    }
     return get_type_sub_pin_name();
+  }
 
   if (is_driver())
     return Ntype::get_driver_name(op);
@@ -584,7 +584,7 @@ Node_pin Node_pin::get_down_pin() const {
 
   // 2nd: get down_pid
   I(pid != Port_invalid);
-  I(node.get_type_sub_node().has_instance_pin(pid));
+  I(node.get_type_sub_node().has_instance_pin(pid) || pid == 0);
   auto down_pid = pid;
   I(down_pid != Port_invalid);
 
@@ -606,6 +606,7 @@ Node_pin Node_pin::get_up_pin() const {
 
   // 1st: get up_pid
   I(pid != Port_invalid);
+  I(pid); // FIXME: implement the case of PID = 0 (% out, $ inp)
   const auto &io_pin = current_g->get_self_sub_node().get_io_pin_from_instance_pid(pid);
 
   if (io_pin.is_input() != up_sink) {

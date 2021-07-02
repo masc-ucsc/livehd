@@ -204,7 +204,7 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   if (inp_edges_ordered.size() == 1) {
     auto prev_op = inp_edges_ordered[0].driver.get_node().get_type_op();
     if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
-        || op == Ntype_op::Xor || op == Ntype_op::Ror) {
+        || op == Ntype_op::Xor) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
     }
@@ -213,10 +213,6 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
         // Since this node get_mask has 1 input, value is not set
         collapse_forward_always_pin0(node, inp_edges_ordered);
         return;
-      } else if (op == Ntype_op::Ror) {
-        auto prev_node      = inp_edges_ordered[0].driver.get_node();
-        auto prev_inp_edges = prev_node.inp_edges();
-        collapse_forward_always_pin0(prev_node, prev_inp_edges);
       }
     }
   }
@@ -1623,8 +1619,13 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   Node_pin dollar_spin;
   for (auto &spin : node.inp_connected_pins()) {
     auto instance_pid = spin.get_pid();
+    if (instance_pid == 0) { // "$" pin
+      dollar_spin = spin;
+      continue;
+    }
+
     if (!sub.has_instance_pin(instance_pid)) {
-      if (io_pins[instance_pid].name == "$")
+      if (instance_pid < io_pins.size())
         continue; // only this could be pending. Anything else is an error
       Pass::error("graph {} connects to subgraph {} and the input pid is invalid. Recompile {}",
                   node.get_class_lgraph()->get_name(),
@@ -1637,9 +1638,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
     connected_ios[instance_pid] = true;
     const auto &io_pin = io_pins[instance_pid];
 
-    if (io_pin.name == "$") {
-      dollar_spin = spin;
-    } else if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
+    if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
       Pass::error("graph {} connects to subgraph {} and the inputs have changed. Recompile {}",
                   node.get_class_lgraph()->get_name(),
                   sub.get_name(),
@@ -1730,8 +1729,12 @@ void Cprop::reconnect_tuple_add(Node &node) {
     } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(node_tup, sub_node, node);
-    } else if (sink_type == Ntype_op::Get_mask || sink_type == Ntype_op::TupAdd || sink_type == Ntype_op::Mux
-               || sink_type == Ntype_op::TupGet || sink_type == Ntype_op::SHL) {
+    } else if (sink_type == Ntype_op::Get_mask  // get_mask handles tuples at both inputs
+            || sink_type == Ntype_op::TupAdd
+            || (sink_type == Ntype_op::Mux && e.sink.get_pid() && !tuple_done.contains(e.sink.get_node().get_compact())) // mux handles tuples at inputs, not select
+            || sink_type == Ntype_op::TupGet
+            || (sink_type == Ntype_op::SHL && e.sink.get_pid()) // SHL handles tuples at B (not a)
+              ) {
     } else {
       pending_out_edges.emplace_back(e);
     }
