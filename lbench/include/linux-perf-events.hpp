@@ -129,7 +129,6 @@ public:
 
 private:
   void report_error(const std::string &context) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
     if (working)
       std::cerr << (context + ": " + std::string(strerror(errno))) << std::endl;
     working = false;
