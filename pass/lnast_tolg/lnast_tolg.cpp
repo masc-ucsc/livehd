@@ -732,7 +732,10 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
   Node_pin val_dpin;
 
   for (const auto &child : lnast->children(lnidx_ta)) {
-    if (child == lnast->get_last_child(lnidx_ta)) {
+    if (k == 0) {
+      k++;
+      continue;
+    } else if (child == lnast->get_last_child(lnidx_ta)) {
       val_dpin = setup_ref_node_dpin(lg, child, true);
     } else {
       if (lnast->get_type(child).is_ref()) {
@@ -761,7 +764,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         auto tup_add = lg->create_node(Ntype_op::TupAdd);
 
         auto        pos_spin    = tup_add.setup_sink_pin("field");
-        // fmt::print("DEBUG00 concatenated_field_str:{}\n", concatenated_field_str);
+        fmt::print("DEBUG00 tuple_sname:{}, concatenated_field_str:{}\n", tuple_sname, concatenated_field_str);
         auto        pos_dpin = lg->create_node_const(Lconst(concatenated_field_str)).setup_driver_pin();
         pos_dpin.connect_sink(pos_spin);
 
