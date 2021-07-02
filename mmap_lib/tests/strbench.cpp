@@ -23,7 +23,7 @@ int main() {
       sprintf(cadena, "hello%d", i);
     else
       sprintf(cadena, "potatoes");
-    for (int j = 0; j < strlen(cadena) - 1; ++j) {
+    for (auto j = 0u; j < strlen(cadena) - 1; ++j) {
       mem[i + j] = cadena[j];
     }
     if (strcmp(&mem[i], "hello1000000") == 0) {

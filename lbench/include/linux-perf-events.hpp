@@ -12,10 +12,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <mutex>
 
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
-  static inline int     fd      = -1;  // Shared across calls
+  inline static std::mutex lgs_mutex;
+  static inline std::vector<int>     fds;  // Shared across calls
   static inline bool    working = true;
   perf_event_attr       attribs{};
   size_t                num_events{};
@@ -26,9 +28,10 @@ public:
   LinuxEvents() {}
 
   void setup(const std::vector<int> &config_vec) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
     if (!working)
       return;
-    if (fd != -1)
+    if (!fds.empty())
       return;
 
     memset(&attribs, 0, sizeof(attribs));
@@ -44,13 +47,13 @@ public:
     const int           cpu   = -1;  // all CPUs
     const unsigned long flags = 0;
 
-    int group  = fd;  // no group
+    int group  = -1;  // no group
     num_events = config_vec.size();
     ids.resize(config_vec.size());
     uint32_t i = 0;
     for (auto config : config_vec) {
       attribs.config = config;
-      fd             = static_cast<int>(syscall(__NR_perf_event_open, &attribs, pid, cpu, group, flags));
+      int fd         = static_cast<int>(syscall(__NR_perf_event_open, &attribs, pid, cpu, group, flags));
       if (fd == -1) {
         working = false;  // silent case when perf counters do not exist
         // std::cerr << "perf_event_open failed (no perf counters)\n";
@@ -59,43 +62,46 @@ public:
       if (group == -1) {
         group = fd;
       }
+      fds.emplace_back(fd);
     }
-    fd = group;
-
     temp_result_vec.resize(num_events * 2 + 1);
   }
 
   void close() {
-    if (fd == -1)
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    if (fds.empty())
       return;
-    ::close(fd);
-    fd = -1;
+    for(auto &fd:fds)
+      ::close(fd);
+    fds.clear();
   }
 
   ~LinuxEvents() { close(); }
   inline void start() {
-    if (fd == -1)
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    if (fds.empty())
       return;
 
-    if (ioctl(fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP) == -1) {
+    if (ioctl(fds[0], PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP) == -1) {
       report_error("linux-perf-events ioctl(PERF_EVENT_IOC_RESET)");
     }
 
-    if (ioctl(fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP) == -1) {
+    if (ioctl(fds[0], PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP) == -1) {
       report_error("linux-perf-events ioctl(PERF_EVENT_IOC_ENABLE)");
     }
   }
 
   inline void stop(std::vector<uint64_t> &results) {
-    if (fd == -1)
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    if (fds.empty())
       return;
 
-    if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
+    if (ioctl(fds[0], PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {
       report_error("linux-perf-events ioctl(PERF_EVENT_IOC_DISABLE)");
     }
 
-    lseek(fd, SEEK_SET, 0);
-    if (read(fd, temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
+    lseek(fds[0], SEEK_SET, 0);
+    if (read(fds[0], temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
       report_error("linux-perf-events read_stop");
     }
     // our actual results are in slots 1,3,5, ... of this structure
@@ -106,9 +112,10 @@ public:
   }
 
   inline void sample(std::vector<uint64_t> &results) {
-    if (fd == -1)
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    if (fds.empty())
       return;
-    if (read(fd, temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
+    if (read(fds[0], temp_result_vec.data(), temp_result_vec.size() * 8) == -1) {
       report_error("linux-perf-events read_sample");
     }
     // our actual results are in slots 1,3,5, ... of this structure
@@ -122,10 +129,11 @@ public:
 
 private:
   void report_error(const std::string &context) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
     if (working)
       std::cerr << (context + ": " + std::string(strerror(errno))) << std::endl;
     working = false;
-    fd      = -1;  // disable all the APIs
+    fds.clear();
   }
 };
 #else
