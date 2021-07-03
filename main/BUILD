@@ -44,13 +44,13 @@ cc_binary(
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/lnastopt:pass_lnastopt",
-        "//pass/mockturtle:pass_mockturtle",
         "//pass/punch:pass_punch",
         "//pass/sample:pass_sample",
         "//pass/sat_opt:pass_sat_opt",
         "//pass/semantic:pass_semantic",
         "//pass/submatch:pass_submatch",
         "//pass/compiler:pass_compiler",
+        # "//pass/mockturtle:pass_mockturtle",
 
         #add dependencies to new passes here
     ],
