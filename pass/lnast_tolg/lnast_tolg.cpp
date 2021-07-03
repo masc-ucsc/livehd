@@ -17,14 +17,18 @@ Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : 
 std::vector<Lgraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
   Lbench b("pass.lnast_tolg");
   lnast = ln;
-  Lgraph *    lg;
+  Lgraph* lg;
   std::string src{lnast->get_source()};
   if (src.empty())
     src = "-";
 
   // move %/$ generation at the pb->lnast
-  lg             = Lgraph::create(path, module_name, src);
+  lg = Lgraph::create(path, module_name, src);
+
   name2dpin["$"] = lg->get_graph_input("$");
+  I(!lg->get_graph_input("$").is_invalid());
+  I(!lg->get_graph_output("%").is_invalid());
+  // name2dpin["%"] = lg->get_graph_output("%");
 
   setup_tuple_ref(lg, "%");
   std::vector<Lgraph *> lgs;
@@ -765,7 +769,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
 
         auto        pos_spin    = tup_add.setup_sink_pin("field");
         fmt::print("DEBUG00 tuple_sname:{}, concatenated_field_str:{}\n", tuple_sname, concatenated_field_str);
-        auto        pos_dpin = lg->create_node_const(Lconst(concatenated_field_str)).setup_driver_pin();
+        auto        pos_dpin = lg->create_node_const(Lconst::string(concatenated_field_str)).setup_driver_pin();
         pos_dpin.connect_sink(pos_spin);
 
 
@@ -1352,8 +1356,7 @@ void Lnast_tolg::split_hier_name(std::string_view full_name, std::vector<std::st
   hier_io_subnames.emplace_back(token);
 }
 
-void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name,
-                                        Node subg_node) {
+void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view ret_name, Node subg_node) {
   bool subg_outp_is_scalar = !subgraph_outp_is_tuple(sub);
 
   fmt::print("FIXME: This method should not connect/setup IOs. Just do % and $\n");
@@ -1365,47 +1368,55 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
 
     // I. io_pin is_input
     if (io_pin.is_input()) {
-      std::vector<Node_pin>         created_tup_gets;
-      std::vector<std::string_view> hier_inp_subnames;
+      fmt::print("DEBUG-008 input name:{}\n", io_pin.name);
+      I(io_pin.name == "$");
 
-      split_hier_name(io_pin.name, hier_inp_subnames);
-      for (const auto &subname : hier_inp_subnames) {
+      auto tn_dpin = setup_tuple_ref(lg, arg_tup_name);
+      auto subg_spin = subg_node.setup_sink_pin("$");
+      tn_dpin.connect_sink(subg_spin);
 
-        Node_pin tn_dpin;
-        if (&subname == &hier_inp_subnames.front()) {
-          tn_dpin = setup_tuple_ref(lg, arg_tup_name);
-        } else {
-          tn_dpin = created_tup_gets.back();
-        }
+      // std::vector<Node_pin>         created_tup_gets;
+      // std::vector<std::string_view> hier_inp_subnames;
 
-        if (!tn_dpin.is_invalid() && subname=="$") {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
-          tn_dpin.connect_sink(subg_spin);
-          continue;
-        }
+      // split_hier_name(io_pin.name, hier_inp_subnames);
+      // for (const auto &subname : hier_inp_subnames) {
 
-        auto tup_get  = lg->create_node(Ntype_op::TupGet);
-        if (!tn_dpin.is_invalid()) {
-          auto tn_spin  = tup_get.setup_sink_pin("parent");
-          tn_dpin.connect_sink(tn_spin);
-        }
+      //   Node_pin tn_dpin;
+      //   if (&subname == &hier_inp_subnames.front()) {
+      //     tn_dpin = setup_tuple_ref(lg, arg_tup_name);
+      //   } else {
+      //     tn_dpin = created_tup_gets.back();
+      //   }
 
-        auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
-        auto pos_spin = tup_get.setup_sink_pin("field");  // key pos
-        lg->add_edge(pos_dpin, pos_spin);
+      //   if (!tn_dpin.is_invalid() && subname=="$") {
+      //     auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
+      //     tn_dpin.connect_sink(subg_spin);
+      //     continue;
+      //   }
 
-        // note: for scalar input, front() == back()
-        if (&subname == &hier_inp_subnames.back()) {
-          auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
-          tup_get.setup_driver_pin().connect_sink(subg_spin);
-        }
-        created_tup_gets.emplace_back(tup_get.get_driver_pin());
-      }
+      //   auto tup_get  = lg->create_node(Ntype_op::TupGet);
+      //   if (!tn_dpin.is_invalid()) {
+      //     auto tn_spin  = tup_get.setup_sink_pin("parent");
+      //     tn_dpin.connect_sink(tn_spin);
+      //   }
+
+      //   auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+      //   auto pos_spin = tup_get.setup_sink_pin("field");  // key pos
+      //   lg->add_edge(pos_dpin, pos_spin);
+
+      //   // note: for scalar input, front() == back()
+      //   if (&subname == &hier_inp_subnames.back()) {
+      //     auto subg_spin = subg_node.setup_sink_pin(io_pin.name);
+      //     tup_get.setup_driver_pin().connect_sink(subg_spin);
+      //   }
+      //   created_tup_gets.emplace_back(tup_get.get_driver_pin());
+      // }
       continue;
     }
 
     // II. io_pin is_output and is scalar
     if (subg_outp_is_scalar) {
+      fmt::print("DEBUG-006 ret_name:{}\n", ret_name);
       auto subg_dpin   = subg_node.setup_driver_pin(io_pin.name);
       auto scalar_node = lg->create_node(Ntype_op::Or);
       auto scalar_dpin = scalar_node.setup_driver_pin();
@@ -1424,6 +1435,7 @@ void Lnast_tolg::subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_v
     }
 
     // III. hier-subgraph-output
+    fmt::print("DEBUG-007 ret_name:{}\n", ret_name);
     std::vector<std::string_view> hier_out_subnames;
     split_hier_name(io_pin.name, hier_out_subnames);
     auto i = 0;
@@ -1542,50 +1554,79 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   else
     arg_tup_name = cn_fc_sname;
 
-  //std::unique_lock<std::mutex> guard(lgs_mutex);
-  auto * library = Graph_library::instance(path);
-  if (name2dpin.find(func_name) == name2dpin.end()) {
 
-    auto subg_node = lg->create_node_sub(func_name);
 
-    subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
+  auto subg_node = lg->create_node_sub(func_name);
 
-    auto subg_spin = subg_node.setup_sink_pin("$");
-    auto subg_dpin = subg_node.setup_driver_pin("%");
+  subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
 
-    auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
-    I(!arg_tup_dpin.is_invalid()); // input is guaranteed
-    arg_tup_dpin.connect_sink(subg_spin);
+  auto subg_spin = subg_node.setup_sink_pin("$");
+  auto subg_dpin = subg_node.setup_driver_pin("%");
 
-    if (ret_name[0] == '%') {
-      create_out_ta(lg, ret_name.substr(1), subg_dpin);
-    }else{
-      // TODO: For efficiency, it would be good to get rid of this TA. Not sure
-      // that it is needed. If connected to '%' pin, for sure it is a Tuple
-      //
-      // create a TA assignment for the ret
-      auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
-      auto ta_ret_dpin = ta_ret.setup_driver_pin();
+  auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
+  I(!arg_tup_dpin.is_invalid()); // input is guaranteed
+  arg_tup_dpin.connect_sink(subg_spin);
 
-      subg_dpin.connect_sink(ta_ret.setup_sink_pin("parent"));
-      name2dpin[ret_name] = ta_ret_dpin;
-      ta_ret_dpin.set_name(ret_name);
-    }
-    return;
+  if (ret_name[0] == '%') {
+    create_out_ta(lg, ret_name.substr(1), subg_dpin);
+  } else {
+    // TODO: For efficiency, it would be good to get rid of this TA. Not sure
+    // that it is needed. If connected to '%' pin, for sure it is a Tuple
+    //
+    // create a TA assignment for the ret
+    auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
+    auto ta_ret_dpin = ta_ret.setup_driver_pin();
+
+    subg_dpin.connect_sink(ta_ret.setup_sink_pin("parent"));
+    name2dpin[ret_name] = ta_ret_dpin;
+    ta_ret_dpin.set_name(ret_name);
   }
 
-  // FIXME->sh: for the inlined function, we should also just connect to %/$ only?
-  //fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
-  auto ta_func_def = name2dpin[func_name].get_node();
-  I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
-  I(ta_func_def.setup_sink_pin("value").get_driver_node().get_type_op() == Ntype_op::Const);
-  Lg_type_id lgid = ta_func_def.setup_sink_pin("value").get_driver_node().get_type_const().to_i();
 
-  auto  subg_node = lg->create_node_sub(lgid);
-  auto *sub       = library->ref_sub(lgid);
+  //std::unique_lock<std::mutex> guard(lgs_mutex);
+  //auto * library = Graph_library::instance(path);
+  //fmt::print("DEBUG-005 func_name:{}, ret_name:{}\n", func_name, ret_name);
+  //if (name2dpin.find(func_name) == name2dpin.end()) {
+  //  auto subg_node = lg->create_node_sub(func_name);
 
-  subg_node.set_name(absl::StrCat(ret_name, ".", func_name));
-  subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
+  //  subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
+
+  //  auto subg_spin = subg_node.setup_sink_pin("$");
+  //  auto subg_dpin = subg_node.setup_driver_pin("%");
+
+  //  auto arg_tup_dpin = setup_tuple_ref(lg, arg_tup_name);
+  //  I(!arg_tup_dpin.is_invalid()); // input is guaranteed
+  //  arg_tup_dpin.connect_sink(subg_spin);
+
+  //  if (ret_name[0] == '%') {
+  //    create_out_ta(lg, ret_name.substr(1), subg_dpin);
+  //  } else {
+  //    // TODO: For efficiency, it would be good to get rid of this TA. Not sure
+  //    // that it is needed. If connected to '%' pin, for sure it is a Tuple
+  //    //
+  //    // create a TA assignment for the ret
+  //    auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
+  //    auto ta_ret_dpin = ta_ret.setup_driver_pin();
+
+  //    subg_dpin.connect_sink(ta_ret.setup_sink_pin("parent"));
+  //    name2dpin[ret_name] = ta_ret_dpin;
+  //    ta_ret_dpin.set_name(ret_name);
+  //  }
+  //  return;
+  //}
+
+  //// FIXME->sh: for the inlined function, we should also just connect to %/$ only?
+  ////fmt::print("function {} defined in same prp file, query lgdb\n", func_name);
+  //auto ta_func_def = name2dpin[func_name].get_node();
+  //I(ta_func_def.get_type_op() == Ntype_op::TupAdd);
+  //I(ta_func_def.setup_sink_pin("value").get_driver_node().get_type_op() == Ntype_op::Const);
+  //Lg_type_id lgid = ta_func_def.setup_sink_pin("value").get_driver_node().get_type_const().to_i();
+
+  //auto  subg_node = lg->create_node_sub(lgid);
+  //auto *sub       = library->ref_sub(lgid);
+
+  //subg_node.set_name(absl::StrCat(ret_name, ".", func_name));
+  //subgraph_io_connection(lg, sub, arg_tup_name, ret_name, subg_node);
 }
 
 void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
@@ -1596,9 +1637,10 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto       subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg p(subg_module_name, path);
 
-  fmt::print("============================= Sub-module: LNAST->Lgraph Start ===============================================\n");
+  fmt::print("============================= Sub-module: LNAST->Lgraph Start ({}) ==============================================\n", subg_module_name);
+
   p.do_tolg(lnast, func_stmts);
-  fmt::print("============================= Sub-module: LNAST->Lgraph End ===============================================\n");
+  fmt::print("============================= Sub-module: LNAST->Lgraph End   ({}) ==============================================\n", subg_module_name);
 
   // TODO: We should have a TupAdd so that the function can be passed, but this
   // code is wrong because there is no SSA at the function definition
@@ -1607,12 +1649,12 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto pos_spin   = tup_add.setup_sink_pin("field");  // field name
   auto value_spin = tup_add.setup_sink_pin("value");
 
-  auto field_dpin = lg->create_node_const(Lconst("__fdef")).setup_driver_pin();
+  auto field_dpin = lg->create_node_const(Lconst::string("__fdef")).setup_driver_pin();
   field_dpin.connect_sink(pos_spin);
 
   //std::unique_lock<std::mutex> guard(lgs_mutex);
-  auto *                       library = Graph_library::instance(path);
-  Lg_type_id                   lgid;
+  auto *     library = Graph_library::instance(path);
+  Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {
     lgid = library->get_lgid(subg_module_name);
   }
@@ -1720,6 +1762,8 @@ void Lnast_tolg::create_out_ta(Lgraph *lg, std::string_view field_name, Node_pin
   val_dpin.connect_sink(val_spin);
 
   name2dpin["%"] = tup_add.setup_driver_pin();
+  I(!name2dpin["%"].is_invalid());
+  fmt::print("DEBUG-001 name2dpin[%] = {}\n", name2dpin["%"].debug_name());
   tup_add.setup_driver_pin().set_name("%");  // tuple ref semantically moves to here
 }
 
@@ -1769,6 +1813,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
   for (const auto &[vname, dpin_largest_ssa] : vname2ssa_dpin) {
     if (is_output(vname)) {
       auto edible_dpin = dpin_largest_ssa;
+      fmt::print("DEBUG-000, vname:{}\n", vname);
       create_out_ta(lg, vname.substr(1), edible_dpin);  // don't pass first char % as the key name
       continue;
     }
@@ -1809,6 +1854,9 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
   // connect output tuple-chain to output pin "%"
   auto unified_out_dpin = name2dpin["%"];  // TA node
   auto unified_out_spin = lg->get_graph_output("%"); // Must be created before
+  fmt::print("DEBUG-003 current lgraph:{}\n", lg->get_name());
+  I(!unified_out_spin.is_invalid());
+  I(!unified_out_dpin.is_invalid());
   unified_out_dpin.connect_sink(unified_out_spin);
 
   // try to create flattened inputs

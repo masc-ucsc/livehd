@@ -13,7 +13,6 @@ sub = ||{
 
   %xx1 = subsub(foo=2)
   %xx2 = subsub(foo=10)
-
 }
 
 yy1 = sub()
