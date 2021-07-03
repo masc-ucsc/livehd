@@ -178,6 +178,7 @@ cc_library(
     "IntXbar",
     "SimpleClockGroupSource",
     "FixedClockBroadcast",
+    "ClockGroupAggregator",
 
     # FIXME:
 
