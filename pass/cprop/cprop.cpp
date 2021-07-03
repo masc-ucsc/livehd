@@ -264,9 +264,9 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
 
     collapse_forward_for_pin(node, a_pin);
   } else if (op == Ntype_op::EQ) {
-      // FIXME:
-      //
-      // 1- eq(X,0) = not(ror(x))
+    // FIXME:
+    //
+    // 1- eq(X,0) = not(ror(x))
   } else if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::And) {
     XEdge first_const_edge;
     int   nconstants = 0;
@@ -343,7 +343,7 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
       if (amt_node.is_type_const() && amt_node.get_type_const() == 0) {
         collapse_forward_for_pin(node, inp_edges_ordered[0].driver);
       }
-    }else{
+    } else {
       // res = val << (B.0, B.1, B.2)
       // res = (val <<B.0) | (val<<B.1) | (val<<B.2)
       fmt::print("FIXME: OPT the inputs in B if they are constants\n");
@@ -360,10 +360,10 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     Lconst result(0);
 
     bool zero_shifts = true;
-    for(auto &amt_dpin:node.get_sink_pin("B").inp_drivers()) {
+    for (auto &amt_dpin : node.get_sink_pin("B").inp_drivers()) {
       Lconst amt = amt_dpin.get_type_const();
 
-      result = result.or_op(val << amt);
+      result      = result.or_op(val << amt);
       zero_shifts = false;
     }
 
@@ -625,11 +625,11 @@ void Cprop::tuple_shl_mut(Node &node) {
   // SHL can have a tuple in B port. E.g: 1<<(2,3). Any data pin gets expanded directly
   auto spin_amount = node.get_sink_pin("B");
 
-  for(auto &dpin:spin_amount.inp_drivers()) {
+  for (auto &dpin : spin_amount.inp_drivers()) {
     auto tup = find_lgtuple(dpin);
-    if (tup==nullptr)
+    if (tup == nullptr)
       continue;
-    if (!tup->is_correct() || tuple_issues) // conservative in expansion
+    if (!tup->is_correct() || tuple_issues)  // conservative in expansion
       continue;
 
 #if 0
@@ -641,7 +641,7 @@ void Cprop::tuple_shl_mut(Node &node) {
 #endif
 
     XEdge::del_edge(dpin, spin_amount);
-    for(auto e:tup->get_map()) {
+    for (auto e : tup->get_map()) {
       if (Lgtuple::is_attribute(e.first))
         continue;
 
@@ -1126,15 +1126,21 @@ void Cprop::tuple_tuple_add(const Node &node) {
           if (v_dpin.is_invalid()) {
             node_tup->set_issue();
             tuple_issues = true;
-            Pass::info("node:{} field:{} can not find a non attribute field a on tuple:{}", node.debug_name(), key_name, value_tup->get_name());
+            Pass::info("node:{} field:{} can not find a non attribute field a on tuple:{}",
+                       node.debug_name(),
+                       key_name,
+                       value_tup->get_name());
           }
           node_tup->add(key_name, v_dpin);
-        }else{
+        } else {
           if (Lgtuple::is_attribute(key_name)) {
             node_tup->set_issue();
             tuple_issues = true;
-            Pass::info("node:{} attribute:{} can not have a complex sub tuple:{}", node.debug_name(), key_name, value_tup->get_name());
-          }else{
+            Pass::info("node:{} attribute:{} can not have a complex sub tuple:{}",
+                       node.debug_name(),
+                       key_name,
+                       value_tup->get_name());
+          } else {
             node_tup->add(key_name, value_tup);
           }
         }
@@ -1295,9 +1301,9 @@ void Cprop::tuple_attr_set(const Node &node) {
   if (hier)  // hier still not supported
     return;
 
-  auto self_tup  = find_lgtuple(node);
+  auto self_tup = find_lgtuple(node);
   if (self_tup && self_tup->is_correct())
-    return; // already done
+    return;  // already done
 
   auto field_spin = node.get_sink_pin("field");
   I(field_spin.is_connected());
@@ -1321,8 +1327,8 @@ void Cprop::tuple_attr_set(const Node &node) {
   }
 
   auto parent_tup = find_lgtuple(parent_spin.get_driver_node());
-  if (parent_tup==nullptr) {
-    node2tuple.erase(node.get_compact()); // erase if exists
+  if (parent_tup == nullptr) {
+    node2tuple.erase(node.get_compact());  // erase if exists
     return;
   }
 
@@ -1350,11 +1356,11 @@ void Cprop::tuple_attr_set(const Node &node) {
       node_tup->add(node_dpin);
     else
       node_tup->add(parent_key, node_dpin);
-  }else{
+  } else {
     auto value_tup = find_lgtuple(value_spin.get_driver_node());
     if (value_tup) {
       node_tup = parent_tup->create_assign(value_tup);
-    }else{
+    } else {
       node_tup = parent_tup->create_assign(value_spin.get_driver_pin());
     }
     I(parent_tup->is_correct());
@@ -1611,32 +1617,32 @@ void Cprop::reconnect_tuple_sub(Node &node) {
     }
   }
 
-  std::vector<bool> connected_ios(sub.size()+1);
-  connected_ios[0] = true; // 0 is invalid instance_pid
+  std::vector<bool> connected_ios(sub.size() + 1);
+  connected_ios[0] = true;  // 0 is invalid instance_pid
 
   const auto &io_pins = sub.get_io_pins();
 
   Node_pin dollar_spin;
   for (auto &spin : node.inp_connected_pins()) {
     auto instance_pid = spin.get_pid();
-    if (instance_pid == 0) { // "$" pin
+    if (instance_pid == 0) {  // "$" pin
       dollar_spin = spin;
       continue;
     }
 
     if (!sub.has_instance_pin(instance_pid)) {
       if (instance_pid < io_pins.size())
-        continue; // only this could be pending. Anything else is an error
+        continue;  // only this could be pending. Anything else is an error
       Pass::error("graph {} connects to subgraph {} and the input pid is invalid. Recompile {}",
                   node.get_class_lgraph()->get_name(),
                   sub.get_name(),
                   node.get_class_lgraph()->get_name());
       return;
     }
-    I(io_pins.size()>instance_pid);
+    I(io_pins.size() > instance_pid);
 
     connected_ios[instance_pid] = true;
-    const auto &io_pin = io_pins[instance_pid];
+    const auto &io_pin          = io_pins[instance_pid];
 
     if (io_pin.dir != Sub_node::Direction::Input) {  // OOPS!!!
       Pass::error("graph {} connects to subgraph {} and the inputs have changed. Recompile {}",
@@ -1654,7 +1660,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
       for (auto &spin : node.inp_connected_pins()) {
         auto instance_pid = spin.get_pid();
-        I(io_pins.size()>instance_pid);
+        I(io_pins.size() > instance_pid);
         connected_ios[instance_pid] = true;
       }
     }
@@ -1662,11 +1668,11 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
   for (auto &dpin : node.out_connected_pins()) {
     auto instance_pid = dpin.get_pid();
-    I(io_pins.size()>instance_pid);
+    I(io_pins.size() > instance_pid);
     connected_ios[instance_pid] = true;
   }
 
-  for(auto pid=1u;pid<connected_ios.size();++pid) {
+  for (auto pid = 1u; pid < connected_ios.size(); ++pid) {
     if (connected_ios[pid])
       continue;
 
@@ -1675,16 +1681,13 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
     // only punch inputs (clock, resetxxx, foo, but not outputs)
     auto *lg = node.get_class_lgraph();
-    Pass::info("instance {} has unconnected {}. Punching through lgraph {}"
-        ,node.debug_name()
-        ,io_pins[pid].name
-        ,lg->get_name());
+    Pass::info("instance {} has unconnected {}. Punching through lgraph {}", node.debug_name(), io_pins[pid].name, lg->get_name());
 
     I(io_pins[pid].is_input());
     Node_pin dpin;
     if (lg->has_graph_input(io_pins[pid].name)) {
       dpin = lg->get_graph_input(io_pins[pid].name);
-    }else{
+    } else {
       dpin = lg->add_graph_input(io_pins[pid].name, Port_invalid, 0);
     }
     I(dpin.is_driver());
@@ -1730,11 +1733,12 @@ void Cprop::reconnect_tuple_add(Node &node) {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(node_tup, sub_node, node);
     } else if (sink_type == Ntype_op::Get_mask  // get_mask handles tuples at both inputs
-            || sink_type == Ntype_op::TupAdd
-            || (sink_type == Ntype_op::Mux && e.sink.get_pid() && !tuple_done.contains(e.sink.get_node().get_compact())) // mux handles tuples at inputs, not select
-            || sink_type == Ntype_op::TupGet
-            || (sink_type == Ntype_op::SHL && e.sink.get_pid()) // SHL handles tuples at B (not a)
-              ) {
+               || sink_type == Ntype_op::TupAdd
+               || (sink_type == Ntype_op::Mux && e.sink.get_pid()
+                   && !tuple_done.contains(e.sink.get_node().get_compact()))  // mux handles tuples at inputs, not select
+               || sink_type == Ntype_op::TupGet
+               || (sink_type == Ntype_op::SHL && e.sink.get_pid())  // SHL handles tuples at B (not a)
+    ) {
     } else {
       pending_out_edges.emplace_back(e);
     }
@@ -1743,7 +1747,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
   if (!pending_out_edges.empty()) {
     if (node_tup->is_empty()) {
       // Empty tuple. Useless but legal. Just delete
-    }else if (node_tup->is_trivial_scalar()) {
+    } else if (node_tup->is_trivial_scalar()) {
       expand_data_and_attributes(node, "", pending_out_edges, node_tup);
     } else {
       Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
@@ -2138,7 +2142,7 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> t
 
   auto *lg          = node.get_class_lgraph();
   bool  local_error = false;
-  bool  tup_scalar  = tup->is_scalar(); // It could have just attributes
+  bool  tup_scalar  = tup->is_scalar();  // It could have just attributes
   for (const auto &it : tup->get_map()) {
     if (unlikely(it.second.is_invalid())) {
       local_error = true;
@@ -2150,9 +2154,8 @@ void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> t
     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
       out_name = out_name.substr(2);
     }
-    if (tup_scalar) // Remove foo.0.0.0 if scalar
+    if (tup_scalar)  // Remove foo.0.0.0 if scalar
       out_name = Lgtuple::get_canonical_name(out_name);
-
 
     if (unlikely(it.first.empty() || out_name.empty())) {
       local_error = true;

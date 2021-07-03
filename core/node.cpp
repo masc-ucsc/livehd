@@ -378,7 +378,7 @@ bool Node::is_type_flop() const {
 bool Node::is_type_register() const {
   auto op = get_type_op();
 
-  return op==Ntype_op::Flop || op==Ntype_op::Fflop || op==Ntype_op::Memory || op==Ntype_op::Latch;
+  return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch;
 }
 
 bool Node::is_type_tup() const {
@@ -391,7 +391,8 @@ bool Node::is_type_loop_last() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
     const auto sub_name = get_type_sub_node().get_name();
-    if (sub_name.substr(0, 6) == "__fir_") // FIXME: NOT NICE to have __fir_ specific RUles. It should be generic language independent
+    if (sub_name.substr(0, 6)
+        == "__fir_")  // FIXME: NOT NICE to have __fir_ specific RUles. It should be generic language independent
       return false;
     return true;
   }

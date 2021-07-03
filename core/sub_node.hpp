@@ -19,7 +19,6 @@
 #include "rapidjson/filereadstream.h"
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
-
 #include "tech_library.hpp"
 
 class Sub_node {
@@ -98,11 +97,10 @@ public:
     expunge();
   }
 
-
   Sub_node(const Sub_node &s) = default;
   Sub_node &operator=(const Sub_node &) = delete;
 
-  void      copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
+  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);
@@ -168,17 +166,17 @@ public:
   Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
     I(lgid);
     I(!has_pin(io_name));
-    I(io_name != "%"); // reserved for default output
-    I(io_name != "$"); // reserved for default input
+    I(io_name != "%");  // reserved for default output
+    I(io_name != "$");  // reserved for default input
 
-    Port_ID instance_pid=0;
+    Port_ID instance_pid = 0;
 
     auto it = name2id.find(io_name);
     if (it != name2id.end()) {
       instance_pid = it->second;
       I(io_pins.size() > instance_pid);
-    }else{
-      while(!deleted.empty()) {
+    } else {
+      while (!deleted.empty()) {
         instance_pid = deleted.back();
         deleted.pop_back();
         I(io_pins.size() > instance_pid);
@@ -190,7 +188,7 @@ public:
     if (io_pins[instance_pid].is_invalid()) {
       instance_pid = io_pins.size();
       io_pins.emplace_back(io_name, dir, graph_pos);
-    }else{
+    } else {
       if (io_pins.size() <= instance_pid) {
         io_pins.resize(instance_pid + 1);
       }
@@ -238,7 +236,8 @@ public:
       return io_name == "%" || io_name == "$";
     }
 
-    return !io_pins[it->second].is_invalid(); // It could be deleted and name preserved to remap to the same pin again in the future
+    return !io_pins[it->second]
+                .is_invalid();  // It could be deleted and name preserved to remap to the same pin again in the future
   }
   bool has_graph_pos_pin(Port_ID graph_pos) const {
     I(lgid);

@@ -44,7 +44,7 @@ static inline uint64_t _wootr64(const uint8_t *p) {
 static inline uint64_t __wootr64(const uint8_t *p) { return (_wootr32(p) << 32) | _wootr32(p + 4); }
 
 static inline uint64_t woothash64(const void *key, uint64_t len,
-                                            uint64_t seed = 1021) {  // 1021 is a small prime easy const
+                                  uint64_t seed = 1021) {  // 1021 is a small prime easy const
   const uint8_t *p = (const uint8_t *)key;
   uint64_t       a = seed ^ _wootp4;
   uint64_t       b = rotl64(seed, 17) ^ _wootp3;

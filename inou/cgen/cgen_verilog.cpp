@@ -14,7 +14,6 @@
 #include "pass.hpp"
 
 Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
-
   if (reserved_keyword.empty()) {
     reserved_keyword.insert("reg");
     reserved_keyword.insert("input");
@@ -44,18 +43,18 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
   if (name[0] == '%') {
     if (name[1] == '.') {
       name = name.substr(2);
-    }else{
+    } else {
       name = name.substr(1);
     }
   }
 
   if (reserved_keyword.contains(name)) {
-    return absl::StrCat("\\", name , " ");
+    return absl::StrCat("\\", name, " ");
   }
 
   for (auto ch : name) {
     if (!std::isalnum(ch) && ch != '_')
-      return absl::StrCat("\\", name , " ");
+      return absl::StrCat("\\", name, " ");
   }
 
   return std::string{name};
@@ -99,7 +98,7 @@ void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
   auto dpin_q = node.get_driver_pin();
 
   std::string pin_name  = dpin_q.get_wire_name();
-  const auto  name_next = get_scaped_name(absl::StrCat("___next_",std::string(pin_name)));
+  const auto  name_next = get_scaped_name(absl::StrCat("___next_", std::string(pin_name)));
 
   if (dpin_d.is_invalid()) {
     absl::StrAppend(&buffer, "  ", name_next, " = 'hx; // disconnected flop\n");
@@ -113,31 +112,31 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
 
   auto iname = get_scaped_name(node.default_instance_name());
 
-  int n_rd_ports=0;
-  int n_wr_ports=0;
+  int n_rd_ports = 0;
+  int n_wr_ports = 0;
 
   // WARNING: The read_vector must be computed first, to have know if the
   // addr/din/... are read/writes ahead (traverse out of order)
 
   struct Port_field {
-    bool rdport;
+    bool     rdport;
     Node_pin enable;
     Node_pin addr;
     Node_pin clock;
-    Node_pin din; // only for write port
+    Node_pin din;  // only for write port
   };
-  std::vector<Port_field> port_vector; // first == read, second == port_id
+  std::vector<Port_field> port_vector;  // first == read, second == port_id
 
   std::string parameters;
 
-  bool first_entry=true;
-  for(auto e:node.inp_edges()) {
+  bool first_entry = true;
+  for (auto e : node.inp_edges()) {
     auto pin_name = e.sink.get_pin_name();
 
     size_t port_id = e.sink.get_pid() / 11;
 
-    if (port_vector.size()<=port_id)
-      port_vector.resize(1+port_id);
+    if (port_vector.size() <= port_id)
+      port_vector.resize(1 + port_id);
 
     if (pin_name == "bits") {
       if (!e.driver.is_type_const()) {
@@ -145,68 +144,68 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry?"":" ,", ".BITS(", v, ")");
-      first_entry=false;
-    }else if (pin_name == "size") {
+      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".BITS(", v, ")");
+      first_entry = false;
+    } else if (pin_name == "size") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for size not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry?"":" ,",".SIZE(", v, ")");
-      first_entry=false;
-    }else if (pin_name == "latency") {
+      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".SIZE(", v, ")");
+      first_entry = false;
+    } else if (pin_name == "latency") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for latency not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry?"":" ,",".LATENCY_", std::to_string(port_id), "(", v, ")");
-      first_entry=false;
-    }else if (pin_name == "wensize") {
+      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".LATENCY_", std::to_string(port_id), "(", v, ")");
+      first_entry = false;
+    } else if (pin_name == "wensize") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for wensize not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry?"":" ,",".WENSIZE", "(", v, ")");
-      first_entry=false;
-    }else if (pin_name == "fwd") {
+      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".WENSIZE", "(", v, ")");
+      first_entry = false;
+    } else if (pin_name == "fwd") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for fwd not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry?"":" ,",".FWD", "(", v, ")");
-      first_entry=false;
-    }else if (pin_name == "clock") {
+      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".FWD", "(", v, ")");
+      first_entry = false;
+    } else if (pin_name == "clock") {
       port_vector[port_id].clock = e.driver;
-    }else if (pin_name == "addr") {
-      port_vector[port_id].addr  = e.driver;
-    }else if (pin_name == "enable") {
-      port_vector[port_id].enable  = e.driver;
-    }else if (pin_name == "din") {
-      port_vector[port_id].din  = e.driver;
-    }else if (pin_name == "rdport") {
+    } else if (pin_name == "addr") {
+      port_vector[port_id].addr = e.driver;
+    } else if (pin_name == "enable") {
+      port_vector[port_id].enable = e.driver;
+    } else if (pin_name == "din") {
+      port_vector[port_id].din = e.driver;
+    } else if (pin_name == "rdport") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      bool rdport = !e.driver.get_type_const().is_false();
+      bool rdport                 = !e.driver.get_type_const().is_false();
       port_vector[port_id].rdport = rdport;
 
       if (rdport) {
         ++n_rd_ports;
-      }else{
+      } else {
         ++n_wr_ports;
       }
     }
   }
 
-  bool single_clock = true;
+  bool     single_clock    = true;
   Node_pin base_clock_dpin = port_vector[0].clock;
   {
-    for(auto &p:port_vector) {
+    for (auto &p : port_vector) {
       auto &dpin = p.clock;
       if (dpin.is_invalid()) {
         dpin = base_clock_dpin;
@@ -221,11 +220,21 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
     return;
   }
 
-  absl::StrAppend(&buffer
-      ,"cgen_memory_", single_clock? "":"multiclock_", std::to_string(n_rd_ports), "rd_", std::to_string(n_wr_ports), "wr " // name
-      ," #(", parameters, ") ", iname, "(\n"); // rest
+  absl::StrAppend(&buffer,
+                  "cgen_memory_",
+                  single_clock ? "" : "multiclock_",
+                  std::to_string(n_rd_ports),
+                  "rd_",
+                  std::to_string(n_wr_ports),
+                  "wr "  // name
+                  ,
+                  " #(",
+                  parameters,
+                  ") ",
+                  iname,
+                  "(\n");  // rest
 
-  first_entry=true;
+  first_entry = true;
   if (single_clock) {
     absl::StrAppend(&buffer, ".clock(", get_wire_or_const(base_clock_dpin), ")\n");
     first_entry = false;
@@ -234,15 +243,21 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
   {
     auto n_rd_pos = 0;
     auto n_wr_pos = 0;
-    auto n_pos = 0;
-    for(auto &p:port_vector) {
+    auto n_pos    = 0;
+    for (auto &p : port_vector) {
       if (p.rdport) {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
           node.dump();
           Pass::error("memory {} read port is not correctly configured\n", node.debug_name());
         }
-        absl::StrAppend(&buffer, first_entry?"":",",".rd_addr_"  , std::to_string(n_rd_pos), "(", get_wire_or_const(p.addr)  , ")\n");
-        first_entry=false;
+        absl::StrAppend(&buffer,
+                        first_entry ? "" : ",",
+                        ".rd_addr_",
+                        std::to_string(n_rd_pos),
+                        "(",
+                        get_wire_or_const(p.addr),
+                        ")\n");
+        first_entry = false;
 
         auto id = std::to_string(n_rd_pos);
 
@@ -250,16 +265,22 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         if (!single_clock) {
           absl::StrAppend(&buffer, ",.rd_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
         }
-        auto dout_dpin = node.setup_driver_pin_raw(n_pos); // rd data out
+        auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
         absl::StrAppend(&buffer, ",.rd_dout_", id, "(", get_wire_or_const(dout_dpin), ")\n");
         ++n_rd_pos;
-      }else{
+      } else {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
           node.dump();
           Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
         }
-        absl::StrAppend(&buffer, first_entry?"":",", ".wr_addr_"  , std::to_string(n_wr_pos), "(", get_wire_or_const(p.addr), ")\n");
-        first_entry=false;
+        absl::StrAppend(&buffer,
+                        first_entry ? "" : ",",
+                        ".wr_addr_",
+                        std::to_string(n_wr_pos),
+                        "(",
+                        get_wire_or_const(p.addr),
+                        ")\n");
+        first_entry = false;
 
         auto id = std::to_string(n_wr_pos);
 
@@ -267,7 +288,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         if (!single_clock) {
           absl::StrAppend(&buffer, ",.wr_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
         }
-        absl::StrAppend(&buffer, ",.wr_din_"   , id, "(", get_wire_or_const(p.din), ")\n");
+        absl::StrAppend(&buffer, ",.wr_din_", id, "(", get_wire_or_const(p.din), ")\n");
         ++n_wr_pos;
       }
       ++n_pos;
@@ -372,87 +393,97 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto a_dpin     = node.get_sink_pin("a").get_driver_pin();
     auto mask_dpin  = node.get_sink_pin("mask").get_driver_pin();
     auto value_dpin = node.get_sink_pin("value").get_driver_pin();
-    auto a         = get_expression(a_dpin);
-    auto value     = get_expression(value_dpin);
+    auto a          = get_expression(a_dpin);
+    auto value      = get_expression(value_dpin);
 
-    I(mask_dpin.is_type_const()); // Do we want to support this? (not easy)
+    I(mask_dpin.is_type_const());  // Do we want to support this? (not easy)
 
     auto v = mask_dpin.get_type_const();
 
     bool clean = false;
-    if (v == Lconst(-1)) { //replace all bits with value
+    if (v == Lconst(-1)) {  // replace all bits with value
       final_expr = value;
-      clean = true;
-    }else if (v == Lconst(0)) { //nothing to do
+      clean      = true;
+    } else if (v == Lconst(0)) {  // nothing to do
       final_expr = a;
-      clean = true;
-		}else{
-			auto abits = a_dpin.get_bits();
-			auto mbits = v.get_bits()-1; // positive mask (v>0)
-			auto vbits = value_dpin.get_bits();
+      clean      = true;
+    } else {
+      auto abits = a_dpin.get_bits();
+      auto mbits = v.get_bits() - 1;  // positive mask (v>0)
+      auto vbits = value_dpin.get_bits();
 
-			auto trail_zeroes=v.get_trailing_zeroes();
+      auto trail_zeroes = v.get_trailing_zeroes();
 
-			std::string expanded_a_txt;
-      if ((abits-trail_zeroes)>mbits) {
+      std::string expanded_a_txt;
+      if ((abits - trail_zeroes) > mbits) {
         if (a_dpin.is_type_const()) {
-          auto a_val = a_dpin.get_type_const();
-          a_val = a_val.rsh_op(mbits);
+          auto a_val     = a_dpin.get_type_const();
+          a_val          = a_val.rsh_op(mbits);
           expanded_a_txt = a_val.to_verilog();
-        }else{
-          expanded_a_txt = absl::StrCat(a, "[", abits-trail_zeroes - 1, ":", mbits, "]");
+        } else {
+          expanded_a_txt = absl::StrCat(a, "[", abits - trail_zeroes - 1, ":", mbits, "]");
         }
       }
 
-			std::string expanded_value_txt;
-			if (vbits==(mbits-trail_zeroes)) {
-				expanded_value_txt = value;
-			}else if (vbits>(mbits-trail_zeroes)) {
-				expanded_value_txt = absl::StrCat(value, "[", mbits-trail_zeroes-1,":0]");
-			}else{ // sign-extend value to match mbits
-				expanded_value_txt = absl::StrCat("{", mbits-trail_zeroes-vbits, "{", value, "[", mbits-trail_zeroes-1, "]}", value, "[", mbits-trail_zeroes-1,":0]}");
-			}
+      std::string expanded_value_txt;
+      if (vbits == (mbits - trail_zeroes)) {
+        expanded_value_txt = value;
+      } else if (vbits > (mbits - trail_zeroes)) {
+        expanded_value_txt = absl::StrCat(value, "[", mbits - trail_zeroes - 1, ":0]");
+      } else {  // sign-extend value to match mbits
+        expanded_value_txt = absl::StrCat("{",
+                                          mbits - trail_zeroes - vbits,
+                                          "{",
+                                          value,
+                                          "[",
+                                          mbits - trail_zeroes - 1,
+                                          "]}",
+                                          value,
+                                          "[",
+                                          mbits - trail_zeroes - 1,
+                                          ":0]}");
+      }
 
-			if (v.is_mask() && v>0) { // {a[a.bits-1:(a.bits-m.bits),value[m.bits-1:0]}
+      if (v.is_mask() && v > 0) {  // {a[a.bits-1:(a.bits-m.bits),value[m.bits-1:0]}
 
-				if (expanded_a_txt.empty())
-					final_expr = expanded_value_txt;
-				else
-					final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
+        if (expanded_a_txt.empty())
+          final_expr = expanded_value_txt;
+        else
+          final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
 
-				clean = true;
-			}else if (v>0) {
-				if (trail_zeroes>0) {
-					auto v2 = v.rsh_op(trail_zeroes);
-					if (v2.is_mask()) {
-						clean = true;
+        clean = true;
+      } else if (v > 0) {
+        if (trail_zeroes > 0) {
+          auto v2 = v.rsh_op(trail_zeroes);
+          if (v2.is_mask()) {
+            clean = true;
 
-						std::string expanded_a_trail_txt;
-						if (a_dpin.is_type_const()) {
-							auto a_val = a_dpin.get_type_const();
-							a_val = a_val.sext_op(trail_zeroes);
-							expanded_a_trail_txt = a_val.to_verilog();
-            }else if (trail_zeroes == a_dpin.get_bits()) {
+            std::string expanded_a_trail_txt;
+            if (a_dpin.is_type_const()) {
+              auto a_val           = a_dpin.get_type_const();
+              a_val                = a_val.sext_op(trail_zeroes);
+              expanded_a_trail_txt = a_val.to_verilog();
+            } else if (trail_zeroes == a_dpin.get_bits()) {
               expanded_a_trail_txt = a;
-            }else{
+            } else {
               expanded_a_trail_txt = absl::StrCat(a, "[", trail_zeroes - 1, ":0]");
             }
 
-						if (expanded_a_txt.empty())
-							final_expr = absl::StrCat("{", expanded_value_txt, ",", expanded_a_trail_txt, "}");
-						else
-							final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, ",", expanded_a_trail_txt, "}");
-					}
-				}
-			}
-			if (!clean) {
-				I(false); // FIXME. Iterate all the bits, create mask and decide
-			}
-		}
+            if (expanded_a_txt.empty())
+              final_expr = absl::StrCat("{", expanded_value_txt, ",", expanded_a_trail_txt, "}");
+            else
+              final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, ",", expanded_a_trail_txt, "}");
+          }
+        }
+      }
+      if (!clean) {
+        I(false);  // FIXME. Iterate all the bits, create mask and decide
+      }
+    }
   } else if (op == Ntype_op::Get_mask) {
     auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
     if (mask_dpin.is_type_const()) {
-      auto v = mask_dpin.get_type_const();
+      auto v      = mask_dpin.get_type_const();
       auto a_dpin = node.get_sink_pin("a").get_driver_pin();
       if (a_dpin.is_type_const()) {
         auto a_v = a_dpin.get_type_const();
@@ -460,23 +491,23 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
         auto result = a_v.get_mask_op(v);
 
         final_expr = result.to_verilog();
-      }else if (v.is_mask()) {
-        auto a = get_expression(a_dpin);
-        int ubits = v.get_bits() - 1;  // -1 because it is a positive (mask=0 or mask=-1)
-        if (ubits<=1) // if mask is 0b1 is ubits is 1
+      } else if (v.is_mask()) {
+        auto a     = get_expression(a_dpin);
+        int  ubits = v.get_bits() - 1;  // -1 because it is a positive (mask=0 or mask=-1)
+        if (ubits <= 1)                 // if mask is 0b1 is ubits is 1
           final_expr = a;
         else
           final_expr = absl::StrCat(a, "[", ubits - 1, ":0]");
       } else {
-        bool clean = false;
-        auto trail_zeroes=v.get_trailing_zeroes();
-        if (trail_zeroes>0) {
+        bool clean        = false;
+        auto trail_zeroes = v.get_trailing_zeroes();
+        if (trail_zeroes > 0) {
           auto v2 = v.rsh_op(trail_zeroes);
           if (v2.is_mask()) {
-            auto a = get_expression(a_dpin);
-            clean = true;
+            auto a     = get_expression(a_dpin);
+            clean      = true;
             auto ubits = v.get_bits() - 1;  // -1 because it is a positive
-            if (ubits<=trail_zeroes) // if mask is 0b1 is ubits is 1
+            if (ubits <= trail_zeroes)      // if mask is 0b1 is ubits is 1
               final_expr = a;
             else
               final_expr = absl::StrCat(a, "[", ubits - 1, ":", trail_zeroes, "]");
@@ -530,12 +561,12 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
       }
     }
   } else if (op == Ntype_op::SHL) {
-    auto val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
+    auto        val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
     std::string onehot;
-    bool first=true;
-    for(auto &amt_dpin:node.get_sink_pin("B").inp_drivers()) {
+    bool        first = true;
+    for (auto &amt_dpin : node.get_sink_pin("B").inp_drivers()) {
       auto amt_expr = get_expression(amt_dpin);
-      absl::StrAppend(&onehot, first?"(":" | (", val_expr, " << ", amt_expr, ")");
+      absl::StrAppend(&onehot, first ? "(" : " | (", val_expr, " << ", amt_expr, ")");
       first = false;
     }
     final_expr = onehot;
@@ -547,7 +578,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Const) {
     // final_expr = node.get_type_const().to_verilog();
-    return; // Done before at create_locals
+    return;  // Done before at create_locals
   } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
@@ -623,9 +654,9 @@ void Cgen_verilog::create_module_io(std::string &buffer, Lgraph *lg) {
 }
 
 void Cgen_verilog::create_memories(std::string &buffer, Lgraph *lg) {
-  for(auto node:lg->fast()) {
+  for (auto node : lg->fast()) {
     auto op = node.get_type_op();
-    if (op!=Ntype_op::Memory)
+    if (op != Ntype_op::Memory)
       continue;
 
     process_memory(buffer, node);
@@ -646,14 +677,14 @@ void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
       Node_pin dpin;
       if (io_pin.is_input()) {
         auto spin = node.get_sink_pin(io_pin.name);
-        dpin = spin.get_driver_pin();
-      }else{
+        dpin      = spin.get_driver_pin();
+      } else {
         dpin = node.get_driver_pin(io_pin.name);
         if (!dpin.is_connected())
           dpin.invalidate();
       }
       if (!dpin.is_invalid()) {
-        absl::StrAppend(&buffer, first_entry?"":",", ".", io_pin.name, "(", get_wire_or_const(dpin), ")\n");
+        absl::StrAppend(&buffer, first_entry ? "" : ",", ".", io_pin.name, "(", get_wire_or_const(dpin), ")\n");
         first_entry = false;
       }
     }
@@ -683,7 +714,7 @@ void Cgen_verilog::create_combinational(std::string &buffer, Lgraph *lg) {
 
 void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
   lg->each_graph_output([&](const Node_pin &dpin) {
-    auto       spin = dpin.change_to_sink_from_graph_out_driver();
+    auto spin = dpin.change_to_sink_from_graph_out_driver();
     if (!spin.is_connected())
       return;
 
@@ -728,12 +759,12 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
     if (node.get_sink_pin("reset").is_connected()) {
       auto reset_dpin = node.get_sink_pin("reset").get_driver_pin();
       if (reset_dpin.is_type_const()) {
-       auto reset_const = reset_dpin.get_node().get_type_const();
-       if (reset_const != Lconst(0) && reset_const != Lconst("false")) {
-         Pass::info("flop reset is hardwired to value:{}. (weird)", reset_const.to_pyrope());
-         reset = reset_const.to_verilog(); // hardcoded value???
-       }
-      }else{
+        auto reset_const = reset_dpin.get_node().get_type_const();
+        if (reset_const != Lconst(0) && reset_const != Lconst("false")) {
+          Pass::info("flop reset is hardwired to value:{}. (weird)", reset_const.to_pyrope());
+          reset = reset_const.to_verilog();  // hardcoded value???
+        }
+      } else {
         if (node.get_sink_pin("negreset").is_connected()) {
           negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i() != 0;
         }
@@ -778,7 +809,7 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
 
 void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned) {
   if (dpin.is_type_const()) {
-    return; // No point for constants
+    return;  // No point for constants
   }
 
   auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), name});
@@ -887,7 +918,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
 
       if (n_out < 2)
         continue;
-    } 
+    }
 
     add_to_pin2var(buffer, dpin, name, out_unsigned);
   }

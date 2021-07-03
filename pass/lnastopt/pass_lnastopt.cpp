@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_lnastopt.hpp"
+
 #include <string>
 
-#include "pass_lnastopt.hpp"
 #include "opt_lnast.hpp"
 
 static Pass_plugin lnastopt("pass_lnastopt", Pass_lnastopt::setup);
@@ -22,4 +23,3 @@ void Pass_lnastopt::work(Eprp_var &var) {
     p.opt(ln);
   }
 }
-

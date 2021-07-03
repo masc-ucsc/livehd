@@ -26,15 +26,15 @@ Pass_firmap::Pass_firmap(const Eprp_var &var) : Pass("pass.firmap", var) {
 }
 
 void Pass_firmap::trans(Eprp_var &var) {
-  Pass_firmap                            p(var);
+  Pass_firmap p(var);
 
   absl::node_hash_map<Lgraph *, FBMap>   fbmaps;         // Lg_type_id -> fbmap
   absl::node_hash_map<Lgraph *, PinMap>  pinmaps;        // Lg_type_id -> pinmap
   absl::node_hash_map<Lgraph *, XorrMap> spinmaps_xorr;  // Lg_type_id -> spinmap
 
-  Firmap                fm(fbmaps, pinmaps, spinmaps_xorr);
+  Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
   for (const auto &lg : var.lgs) {
-    fm.add_map_entry(lg); // must be done to reserve the fbmap (multi-threaded)
+    fm.add_map_entry(lg);  // must be done to reserve the fbmap (multi-threaded)
   }
 
   std::vector<Lgraph *> lgs;

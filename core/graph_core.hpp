@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "boost/container/static_vector.hpp"
-
 #include <cassert>
 #include <string_view>
 #include <vector>
 
+#include "boost/container/static_vector.hpp"
 #include "lgraph_base_core.hpp"
 
 class Graph_core;
@@ -57,7 +56,7 @@ class Graph_core {
 protected:
   class __attribute__((packed)) Overflow_entry {
   protected:
-    void extract_all(boost::container::static_vector<uint32_t,40> &expanded);
+    void extract_all(boost::container::static_vector<uint32_t, 40> &expanded);
     bool delete_edge_rebalance_ledges(uint32_t other_id);
 
   public:
@@ -67,7 +66,8 @@ protected:
       overflow_vertex = 1;
     }
 
-    void readjust_edges(boost::container::static_vector<uint32_t,40> &pending_inp, boost::container::static_vector<uint32_t,40> &pending_out);
+    void readjust_edges(boost::container::static_vector<uint32_t, 40> &pending_inp,
+                        boost::container::static_vector<uint32_t, 40> &pending_out);
 
     bool delete_edge(uint32_t other_id, bool out);
 
@@ -143,7 +143,8 @@ protected:
       bzero(this, sizeof(Master_entry));  // set zero everything
     }
 
-    void readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t,40> &pending_inp, boost::container::static_vector<uint32_t,40> &pending_out);
+    void readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t, 40> &pending_inp,
+                        boost::container::static_vector<uint32_t, 40> &pending_out);
     bool insert_sedge(int16_t rel_id, bool out);
     bool insert_ledge(uint32_t id, bool out);
     bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
@@ -318,8 +319,8 @@ public:
   }
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const boost::container::static_vector<uint32_t,40> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
-  const boost::container::static_vector<uint32_t,40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
+  const boost::container::static_vector<uint32_t, 40> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
+  const boost::container::static_vector<uint32_t, 40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
   uint32_t fast_next(uint32_t start);

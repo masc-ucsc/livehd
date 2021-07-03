@@ -2,6 +2,7 @@
 
 #pragma once
 #include <string_view>
+
 #include "mmap_map.hpp"
 
 namespace mmap_lib {
@@ -12,8 +13,7 @@ namespace mmap_lib {
 
 template <typename Key, typename T>
 class vset {
-
-//FIXME: info sentinel?
+  // FIXME: info sentinel?
 private:
   T max = 0;
   T min = 0;
@@ -31,7 +31,7 @@ public:
   explicit vset(std::string_view _path, std::string_view _set_name) : visitor_set(_path, std::string(_set_name) + "_vs") {}
 
   // Clears the whole data structure
-  void clear() { 
+  void clear() {
     visitor_set.clear();
     max = 0;
     min = 0;
@@ -156,22 +156,30 @@ public:
     // find correct index the pos is at
     const auto p    = ele / (sizeof(T) * 8);  // p points to the correct bitmap
     const auto i    = ele % (sizeof(T) * 8);  // i is the bit we want in the bitmap
-    T          hold = 0;                      // will hold the bitmap at index p 
-    if (visitor_set.has((Key)p)) { hold = visitor_set.get((Key)p); } // get the bitmap at p
+    T          hold = 0;                      // will hold the bitmap at index p
+    if (visitor_set.has((Key)p)) {
+      hold = visitor_set.get((Key)p);
+    }                                  // get the bitmap at p
     hold = hold | (1 << i);            // modify the bit at pos
     visitor_set.set((Key)p, (T)hold);  // put it back in the bitmap
-    if (ele > max) { max = ele; }
+    if (ele > max) {
+      max = ele;
+    }
   }
 
   [[nodiscard]] void insert(const T &&ele) {
     // find correct index the pos is at
     const auto p    = ele / (sizeof(T) * 8);  // p points to the correct bitmap
     const auto i    = ele % (sizeof(T) * 8);  // i is the bit we want in the bitmap
-    T          hold = 0;                      // will hold the bitmap at index p 
-    if (visitor_set.has((Key)p)) { hold = visitor_set.get((Key)p); } // get the bitmap at p
+    T          hold = 0;                      // will hold the bitmap at index p
+    if (visitor_set.has((Key)p)) {
+      hold = visitor_set.get((Key)p);
+    }                                  // get the bitmap at p
     hold = hold | (1 << i);            // modify the bit at pos
     visitor_set.set((Key)p, (T)hold);  // put it back in the bitmap
-    if (ele > max) { max = ele; }
+    if (ele > max) {
+      max = ele;
+    }
   }
 
   //================================
@@ -206,19 +214,19 @@ public:
       //   delete hold; check the p
       //   if p == 0: max is 0; return
       //   else:
-      //     decrement p 
+      //     decrement p
       //     while p >= 0: check the p
       //       if p exists: get and check the hold
       //         if hold == 0: delete hold; decrement p
-      //         else: 
+      //         else:
       //           check hold for next high bit and set max
       //           return
-      //     max is 0; return 
-      // else 
+      //     max is 0; return
+      // else
       //   check hold for next high bit and set max
       //   return
       //
-      
+
       while (hold == 0) {
         if (p == 0) {
           max = 0;
@@ -355,11 +363,12 @@ public:
     vIter &operator++() {
       int flg = 0;
       if (iData == owner.max) {
-        ++iData; return *this;
+        ++iData;
+        return *this;
       } else if (iData > owner.max) {
         return *this;
       } else if (iData < owner.max) {
-        while (owner.efind(iData+1) == false) { 
+        while (owner.efind(iData + 1) == false) {
           ++iData;
         }
         ++iData;
@@ -435,8 +444,10 @@ public:
   [[nodiscard]] vIter begin() {
     vIter tmp(*this);
     tmp.iter_change(0);
-    if (visitor_set.empty() == true) { return tmp; }
-    
+    if (visitor_set.empty() == true) {
+      return tmp;
+    }
+
     for (auto i = 0; i <= max; ++i) {
       if (vset::efind(i) == true) {
         tmp.iter_change(i);
@@ -456,7 +467,7 @@ public:
     // tmp.iter_change(vset::get_max()+1);
 
     // does not include last element of set
-    tmp.iter_change(max + 1); 
+    tmp.iter_change(max + 1);
     return tmp;
   }
 
@@ -465,7 +476,7 @@ public:
     if (vset::efind(ele + 0)) {
       tmp.iter_change(ele);
       return tmp;
-    } else { // if it does not exist, it equals end
+    } else {  // if it does not exist, it equals end
       tmp.iter_change(max + 1);
       return tmp;
     }

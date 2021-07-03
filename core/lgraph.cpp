@@ -1284,7 +1284,7 @@ void Lgraph::dump() {
                io_pin.name,
                io_pin.graph_io_pos,
                get_self_sub_node().get_instance_pid(io_pin.name),
-               io_pin.is_input()? "input" : "output");
+               io_pin.is_input() ? "input" : "output");
   }
 
   fmt::print("\n");

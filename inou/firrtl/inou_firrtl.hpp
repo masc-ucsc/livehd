@@ -36,21 +36,23 @@ protected:
   std::string_view create_tmp_mut_var(Lnast &lnast);
   std::string      get_full_name(const std::string &term, const bool is_rhs);
   void             setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
-  void             declare_register (Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
-  void             setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, const std::string &reg_raw_name, const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
+  void             declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
+  void             setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, const std::string &reg_raw_name,
+                                             const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
 
   // Helper Functions (for handling specific cases)
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
   uint32_t get_bit_count(const firrtl::FirrtlPB_Type &type);
-  void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);  
-  void setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
-  void setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
-  void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
+  void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
+  void     setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
+  void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
-  void split_hier_name(std::string_view full_name, std::vector<std::string_view>& hier_subnames);
+  void split_hier_name(std::string_view full_name, std::vector<std::string_view> &hier_subnames);
   void set_leaf_type(std::string_view subname, std::string_view hier_name, size_t prev,
                      std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
-  void collect_memory_data_struct_hierarchy(const std::string& mem_name, const firrtl::FirrtlPB_Type& type_in, const std::string &hier_fields_concats);
+  void collect_memory_data_struct_hierarchy(const std::string &mem_name, const firrtl::FirrtlPB_Type &type_in,
+                                            const std::string &hier_fields_concats);
 
   void HandleMuxAssign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                        const std::string &lhs_of_asg);
@@ -76,9 +78,10 @@ protected:
   void HandleTypeConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const std::string &lhs);
   void AttachExprStrToNode(Lnast &lnast, const std::string_view access_str, Lnast_nid &parent_node);
 
-  std::string      FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  std::string FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
-  void HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs, const Lnast_node &value_node);
+  void HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
+                        const Lnast_node &value_node);
   void CreateTupAddFromStr(Lnast &ln, Lnast_nid &parent_node, const std::string &flattened_str, const Lnast_node &value_node);
   void CreateTupGetFromStr(Lnast &ln, Lnast_nid &parent_node, const std::string &flattened_str, const Lnast_node &dest_node);
 
@@ -101,7 +104,8 @@ protected:
   void PrintPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, const std::string &symbol, Lnast_nid &parent_node);
   void ListPrimOpInfo(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const std::string &lhs);
   void InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const std::string &lhs_unalt);
-  std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs, const Lnast_node value_node=Lnast_node::create_invalid());
+  std::string ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
+                               const Lnast_node value_node = Lnast_node::create_invalid());
 
   void ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
   void FinalMemInterfaceAssign(Lnast &lnast, Lnast_nid &parent_node);
@@ -198,21 +202,18 @@ private:
 
   absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
 
-  absl::flat_hash_map<std::string, uint8_t>                  mem2port_cnt;
-  absl::flat_hash_map<std::string, uint8_t>                  mem2wensize;
-  absl::flat_hash_map<std::string, uint8_t>                  mem2rd_latency;
-  absl::flat_hash_map<std::string, Lnast_nid>                mem2initial_idx;
-  absl::flat_hash_map<std::string, std::string>              mport2mem;
+  absl::flat_hash_map<std::string, uint8_t>     mem2port_cnt;
+  absl::flat_hash_map<std::string, uint8_t>     mem2wensize;
+  absl::flat_hash_map<std::string, uint8_t>     mem2rd_latency;
+  absl::flat_hash_map<std::string, Lnast_nid>   mem2initial_idx;
+  absl::flat_hash_map<std::string, std::string> mport2mem;
   // control how many bits should be shifted at the bit-vector for masked mem_wr_enable
-  absl::flat_hash_map<std::string, uint32_t>                 mport2mask_bitvec; 
-  absl::flat_hash_map<std::string, uint8_t>                  mport2mask_cnt; 
+  absl::flat_hash_map<std::string, uint32_t>                 mport2mask_bitvec;
+  absl::flat_hash_map<std::string, uint8_t>                  mport2mask_cnt;
   absl::flat_hash_map<std::string, uint8_t>                  mem2one_wr_mport;
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
   // mem -> <(rd_port_name1,1), (rd_port_name_foo, 7)>
-  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports; 
-
-
-
+  absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports;
 
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;

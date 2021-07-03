@@ -143,7 +143,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
           hint_map.set(n.get_compact(), hint_enum);
           const Tree_index parent_idx = nt.get_parent(index);
-          const Node& parent = nt.get_data(parent_idx);
+          const Node&      parent     = nt.get_data(parent_idx);
           if (!parent_idx.is_root() && !hint_map.has(parent.get_compact())) {
             hint_map.set(parent.get_compact(), UnknownHint);
             fmt::print("setting UnknownHint for parent {} due to child having hint\n", safe_name(parent));

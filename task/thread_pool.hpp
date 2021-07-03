@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <unistd.h>
-
 #include <stdio.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cassert>
@@ -43,8 +42,8 @@ inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
 
 class Thread_pool {
   std::vector<std::thread> threads;
-  std::atomic_flag booting_lock = ATOMIC_FLAG_INIT;
-  std::atomic<bool> started_lock;
+  std::atomic_flag         booting_lock = ATOMIC_FLAG_INIT;
+  std::atomic<bool>        started_lock;
 
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
@@ -122,7 +121,7 @@ public:
     size_t lim   = (std::thread::hardware_concurrency() - 1);  // -1 for calling thread
 
     if (thread_count > lim || thread_count == 0) {
-      auto *var =getenv("LIVEHD_THREADS");
+      auto *var = getenv("LIVEHD_THREADS");
       if (var) {
         lim = atoi(var);
         printf("LIVEHD_THREADS set to %ld\n", lim);
@@ -133,15 +132,14 @@ public:
     if (thread_count < 2)
       thread_count = 2;
 
-
     assert(thread_count);
 
     threads.push_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
 
   virtual ~Thread_pool() {
-    while(!started_lock)
-      ; // The exit could be before we even booting the threads (uff)
+    while (!started_lock)
+      ;  // The exit could be before we even booting the threads (uff)
 
     wait_all();
 

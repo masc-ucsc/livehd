@@ -10,19 +10,19 @@
 #include <cerrno>   // for errno
 #include <cstring>  // for memset
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
-#include <mutex>
 
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
-  inline static std::mutex lgs_mutex;
-  static inline std::vector<int>     fds;  // Shared across calls
-  static inline bool    working = true;
-  perf_event_attr       attribs{};
-  size_t                num_events{};
-  std::vector<uint64_t> temp_result_vec{};
-  std::vector<uint64_t> ids{};
+  inline static std::mutex       lgs_mutex;
+  static inline std::vector<int> fds;  // Shared across calls
+  static inline bool             working = true;
+  perf_event_attr                attribs{};
+  size_t                         num_events{};
+  std::vector<uint64_t>          temp_result_vec{};
+  std::vector<uint64_t>          ids{};
 
 public:
   LinuxEvents() {}
@@ -71,8 +71,7 @@ public:
     std::lock_guard<std::mutex> guard(lgs_mutex);
     if (fds.empty())
       return;
-    for(auto &fd:fds)
-      ::close(fd);
+    for (auto &fd : fds) ::close(fd);
     fds.clear();
   }
 

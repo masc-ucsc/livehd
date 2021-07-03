@@ -25,12 +25,13 @@ private:
   std::string_view         path;
   std::string              tuple_assign_str;
 
-  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op>   primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string, Node_pin>                    name2dpin;  // for scalar variable
-  absl::flat_hash_map<std::string, Node_pin>                    field2dpin;
-  absl::flat_hash_map<std::string_view, std::vector<Node>>      driver_var2wire_nodes;  // for __last_value temporarily wire nodes
-  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>          inp2leaf_tg_spins;
-  absl::flat_hash_map<std::string, Node>                        vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
+  absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
+  absl::flat_hash_map<std::string, Node_pin>                  name2dpin;  // for scalar variable
+  absl::flat_hash_map<std::string, Node_pin>                  field2dpin;
+  absl::flat_hash_map<std::string_view, std::vector<Node>>    driver_var2wire_nodes;  // for __last_value temporarily wire nodes
+  absl::flat_hash_map<Node_pin, std::vector<Node_pin>>        inp2leaf_tg_spins;
+  absl::flat_hash_map<std::string, Node>
+      vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
 
 protected:

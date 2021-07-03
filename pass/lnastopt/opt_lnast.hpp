@@ -2,16 +2,15 @@
 #pragma once
 
 #include <array>
-#include "absl/container/flat_hash_map.h"
 
+#include "absl/container/flat_hash_map.h"
 #include "lconst.hpp"
 #include "lnast.hpp"
 #include "pass.hpp"
 
 class Opt_lnast {
 protected:
-
-  int level;
+  int                                           level;
   absl::flat_hash_map<std::string, std::string> level_forward_ref;
   absl::flat_hash_map<std::string, Lconst>      level_forward_val;
 

@@ -24,13 +24,10 @@ void Meta_api::open(Eprp_var &var) {
       Main_api::warn("lgraph.open lgraph {} is empty!", name);
     }
     if (hier != "false" && hier != "0") {
-      lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) {
-        var.add(g);
-      });
+      lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { var.add(g); });
     }
     var.add(lg);
   }
-
 }
 
 void Meta_api::create(Eprp_var &var) {

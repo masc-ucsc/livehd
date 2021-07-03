@@ -20,8 +20,8 @@ protected:
   absl::flat_hash_set<Rule_id>                               expr_rules;
 
   // std::list<std::string> temp_vars;
-  std::string last_temp_var;
-  Lnast_node  current_return_node;
+  std::string      last_temp_var;
+  Lnast_node       current_return_node;
   const Lnast_node lnast_node_invalid;
 
   std::string get_temp_string();

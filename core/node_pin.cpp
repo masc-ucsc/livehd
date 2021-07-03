@@ -102,7 +102,7 @@ bool Node_pin::is_type_register() const {
   auto nid = current_g->get_node_nid(idx);
   auto op  = current_g->get_type_op(nid);
 
-  return op==Ntype_op::Flop || op==Ntype_op::Fflop || op==Ntype_op::Memory || op==Ntype_op::Latch;
+  return op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch;
 }
 
 bool Node_pin::is_type(const Ntype_op op) const {
@@ -472,8 +472,8 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
 
 std::string_view Node_pin::get_pin_name() const {
   if (is_graph_io()) {
-    if (pid==0) {
-      return is_graph_output()? "%":"$";
+    if (pid == 0) {
+      return is_graph_output() ? "%" : "$";
     }
     const auto &sub    = current_g->get_self_sub_node();
     const auto &io_pin = sub.get_io_pin_from_instance_pid(pid);
@@ -482,8 +482,8 @@ std::string_view Node_pin::get_pin_name() const {
 
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
-    if (pid==0) {
-      return is_driver()?"%":"$";
+    if (pid == 0) {
+      return is_driver() ? "%" : "$";
     }
     return get_type_sub_pin_name();
   }
@@ -606,7 +606,7 @@ Node_pin Node_pin::get_up_pin() const {
 
   // 1st: get up_pid
   I(pid != Port_invalid);
-  I(pid); // FIXME: implement the case of PID = 0 (% out, $ inp)
+  I(pid);  // FIXME: implement the case of PID = 0 (% out, $ inp)
   const auto &io_pin = current_g->get_self_sub_node().get_io_pin_from_instance_pid(pid);
 
   if (io_pin.is_input() != up_sink) {

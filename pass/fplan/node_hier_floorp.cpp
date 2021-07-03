@@ -10,7 +10,8 @@
 
 Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
-FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg, const Tree_index tidx) {
+FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg,
+                                             const Tree_index tidx) {
   /*
     It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
     However, ArchFP does not support calling addComponent more than once on the same pointer, so we are forced to deep copy repeated

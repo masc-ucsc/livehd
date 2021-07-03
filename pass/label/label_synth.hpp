@@ -2,19 +2,18 @@
 
 #pragma once
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"
 #include "lnast.hpp"
 
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
-
 class Label_synth {
 private:
   const bool verbose;
   const bool hier;
-	bool synth;
+  bool       synth;
 
   int last_free_id;
   int collapse_set_min;

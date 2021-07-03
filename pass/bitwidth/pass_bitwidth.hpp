@@ -9,7 +9,6 @@
 #include "node_pin.hpp"
 #include "pass.hpp"
 
-
 class Pass_bitwidth : public Pass {
 protected:
   int         max_iterations;

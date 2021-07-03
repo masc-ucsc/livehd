@@ -20,7 +20,7 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
     p.do_tofirrtl(lnast, circuit);
     std::string n{lnast->get_name(mmap_lib::Tree_index::root())};
 
-    top_msg->set_name(n); // FIXME: Placeholder for now, need to figure out which LNAST is "top"
+    top_msg->set_name(n);  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
   }
 
   // fir_design.PrintDebugString();
@@ -38,9 +38,9 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
   name_to_range_map.clear();
   dot_map.clear();
 
-  constexpr auto top  = mmap_lib::Tree_index::root();
-  const auto stmts    = ln->get_first_child(top);
-  const auto top_name = (std::string)ln->get_name(top);
+  constexpr auto top      = mmap_lib::Tree_index::root();
+  const auto     stmts    = ln->get_first_child(top);
+  const auto     top_name = (std::string)ln->get_name(top);
 
   firrtl::FirrtlPB_Module *           mod  = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();

@@ -25,11 +25,11 @@ Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {
 
 void Pass_compiler::compile(Eprp_var &var) {
   // Lbench b("pass.compile.front");
-  Pass_compiler pc(var);
-  auto          path      = pc.get_path(var);
-  auto          odir      = pc.get_odir(var);
-  auto          top       = pc.check_option_top(var);
-  auto          gviz      = pc.check_option_gviz(var);  
+  Pass_compiler    pc(var);
+  auto             path       = pc.get_path(var);
+  auto             odir       = pc.get_odir(var);
+  auto             top        = pc.check_option_top(var);
+  auto             gviz       = pc.check_option_gviz(var);
   std::string_view get_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
@@ -260,14 +260,13 @@ std::string Pass_compiler::check_option_top(Eprp_var &var) {
 std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
   std::string_view get_firrtl;
   if (var.has_label("firrtl")) {
-    auto fir  = var.get("firrtl");
-    if (fir.compare("false") != 0 && fir.compare("0") !=0 ) {
+    auto fir = var.get("firrtl");
+    if (fir.compare("false") != 0 && fir.compare("0") != 0) {
       get_firrtl = fir;
     } else {
       get_firrtl = "";
     }
-  }
-  else {
+  } else {
     get_firrtl = "";
   }
   return get_firrtl;

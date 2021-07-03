@@ -141,12 +141,12 @@ Lconst Lconst::string(std::string_view orig_txt) {
 Lconst Lconst::unknown(Bits_t nbits) {
   Lconst lc;
 
-  for(Bits_t i=0u;i<nbits;++i) {
-    lc.num  <<=8;
-    lc.num   |= '?';
+  for (Bits_t i = 0u; i < nbits; ++i) {
+    lc.num <<= 8;
+    lc.num |= '?';
   }
-  lc.bits         = nbits;  // 0sb?>>>
-  if (nbits>0)
+  lc.bits = nbits;  // 0sb?>>>
+  if (nbits > 0)
     lc.explicit_str = true;
 
   return lc;
@@ -155,14 +155,14 @@ Lconst Lconst::unknown(Bits_t nbits) {
 Lconst Lconst::unknown_positive(Bits_t nbits) {
   Lconst lc;
 
-  for(Bits_t i=0u;i<nbits-1;++i) {
-    lc.num  <<=8;
-    lc.num   |= '?';
+  for (Bits_t i = 0u; i < nbits - 1; ++i) {
+    lc.num <<= 8;
+    lc.num |= '?';
   }
-  lc.bits         = nbits;  // 0sb?>>>
-  if (nbits>1) {
-    lc.num        <<=8;
-    lc.num         |= '0';
+  lc.bits = nbits;  // 0sb?>>>
+  if (nbits > 1) {
+    lc.num <<= 8;
+    lc.num |= '0';
     lc.explicit_str = true;
   }
 
@@ -172,14 +172,14 @@ Lconst Lconst::unknown_positive(Bits_t nbits) {
 Lconst Lconst::unknown_negative(Bits_t nbits) {
   Lconst lc;
 
-  for(Bits_t i=0u;i<nbits-1;++i) {
-    lc.num  <<=8;
-    lc.num   |= '?';
+  for (Bits_t i = 0u; i < nbits - 1; ++i) {
+    lc.num <<= 8;
+    lc.num |= '?';
   }
-  lc.bits         = nbits;  // 0sb?>>>
-  if (nbits>1) {
-    lc.num        <<=8;
-    lc.num         |= '1';
+  lc.bits = nbits;  // 0sb?>>>
+  if (nbits > 1) {
+    lc.num <<= 8;
+    lc.num |= '1';
     lc.explicit_str = true;
   }
 
@@ -199,15 +199,15 @@ Lconst::Lconst(std::string_view orig_txt) {
   std::string_view txt{orig_txt};
 
   // Special cases
-  if (strncasecmp(txt.data(), "true", txt.size())==0) {
+  if (strncasecmp(txt.data(), "true", txt.size()) == 0) {
     explicit_str = false;
-    bits = 1;
-    num  = -1;
+    bits         = 1;
+    num          = -1;
     return;
-  }else if (strncasecmp(txt.data(), "false", txt.size())==0) {
+  } else if (strncasecmp(txt.data(), "false", txt.size()) == 0) {
     explicit_str = false;
-    bits = 1;
-    num  = 0;
+    bits         = 1;
+    num          = 0;
     return;
   }
 
@@ -372,8 +372,7 @@ void Lconst::dump() const {
 }
 
 void Lconst::adjust(const Lconst &o) {
-
-  explicit_str = o.explicit_str && (bits==0 || explicit_str);
+  explicit_str = o.explicit_str && (bits == 0 || explicit_str);
   bits         = calc_num_bits(num);
 }
 
@@ -383,11 +382,10 @@ Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bi
 Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
 
 size_t Lconst::get_trailing_zeroes() const {
-
-  if (num==0)
+  if (num == 0)
     return 0;
 
-  if (num>0)
+  if (num > 0)
     return boost::multiprecision::lsb(num);
   return boost::multiprecision::lsb(-num);
 #if 0
@@ -403,42 +401,42 @@ size_t Lconst::get_trailing_zeroes() const {
 }
 
 Lconst Lconst::sext_op(Bits_t ebits) const {
-  I(!is_string()); // FIXME: handle 0b0??
+  I(!is_string());  // FIXME: handle 0b0??
 
-  if (ebits>=bits)
+  if (ebits >= bits)
     return *this;
 
   // boost keeps an unsigned + sign, so must get correct bits
   Number num_2s = num;
-  if (num<0) {
-    num_2s = (-num)+2;
+  if (num < 0) {
+    num_2s = (-num) + 2;
   }
 
   bool msb_set = boost::multiprecision::bit_test(num_2s, ebits);
 
-  if (ebits==0) {
+  if (ebits == 0) {
     if (msb_set)
       return Lconst(-1);
     return Lconst(0);
   }
 
   Number res_num;
-  if (msb_set) { // negative number
+  if (msb_set) {  // negative number
     // remove leading ones
-    auto pos = ebits-1;
-    while(boost::multiprecision::bit_test(num_2s, pos)) {
-      if (pos==0)
+    auto pos = ebits - 1;
+    while (boost::multiprecision::bit_test(num_2s, pos)) {
+      if (pos == 0)
         return Lconst(-1);
       --pos;
     }
-    res_num = (num_2s & ((Number(1)<<pos)-1)) - (Number(1)<<(pos+1));
-    I(res_num<0);
-  }else{
-    res_num = num_2s & ((Number(1)<<ebits)-1);
-    I(res_num>=0);
+    res_num = (num_2s & ((Number(1) << pos) - 1)) - (Number(1) << (pos + 1));
+    I(res_num < 0);
+  } else {
+    res_num = num_2s & ((Number(1) << ebits) - 1);
+    I(res_num >= 0);
   }
 
-  auto v=Lconst(false, calc_num_bits(res_num), res_num);
+  auto v = Lconst(false, calc_num_bits(res_num), res_num);
   v.dump();
 
   return v;
@@ -476,9 +474,9 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   auto   mask_num  = mask.get_num();
   auto   mask_bits = mask.get_bits();
   if (mask < 0) {
-    auto m   = std::max(get_bits(), mask.get_bits());
-    //mask_num = (Number(1) << m) + ((Lconst(1) - mask).not_op()).get_num();
-    mask_num = ((Number(1) << m)-1) & (((Lconst(-1) - mask).not_op()).get_num());
+    auto m = std::max(get_bits(), mask.get_bits());
+    // mask_num = (Number(1) << m) + ((Lconst(1) - mask).not_op()).get_num();
+    mask_num = ((Number(1) << m) - 1) & (((Lconst(-1) - mask).not_op()).get_num());
   }
 
   if (has_unknowns()) {
@@ -528,7 +526,7 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   std::string str;
   while (res_num) {
     unsigned char ch = static_cast<unsigned char>(res_num & 0xFF);
-    if (ch) // remove zeroes from string
+    if (ch)  // remove zeroes from string
       str.append(1, ch);
     res_num >>= 8;
   }
@@ -555,10 +553,10 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   }
 
   if (mask == Lconst(0)) {
-    return *this; // no mask, just copy this
+    return *this;  // no mask, just copy this
   }
   if (mask == Lconst(-1)) {
-    return value; // all ones mask, just copy value
+    return value;  // all ones mask, just copy value
   }
 
   I(!mask.has_unknowns() && !has_unknowns());  // FIXME: this should work (just someone else could do it?)
@@ -569,29 +567,29 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   auto res_num = get_num();
 
   // If base, and value are positive
-  I(!is_negative());  // FIXME: Not tested
-  I(!value.is_negative()); // FIXME: Not tested
+  I(!is_negative());        // FIXME: Not tested
+  I(!value.is_negative());  // FIXME: Not tested
   auto value_pos    = 0u;
   auto mask_num     = mask.get_num();
   bool mask_on_zero = mask.is_negative();
   if (mask.is_negative()) {
     mask_num = mask.not_op().get_num();
   }
-  for(auto i=mask_min;i<mask_max;++i) {
-    if ((boost::multiprecision::bit_test(mask_num, i)?true:false) == mask_on_zero)
+  for (auto i = mask_min; i < mask_max; ++i) {
+    if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero)
       continue;
 
     if (boost::multiprecision::bit_test(value.num, value_pos)) {
       bit_set(res_num, i);
-    }else{
+    } else {
       bit_unset(res_num, i);
     }
     ++value_pos;
   }
 
   if (mask.is_negative()) {
-    auto res_value = (value.num>>value_pos)<<mask_max; // clear used bits, get in position
-    res_num &= (Number(1)<<mask_max)-1; // clear upper result_bits to use res_value left
+    auto res_value = (value.num >> value_pos) << mask_max;  // clear used bits, get in position
+    res_num &= (Number(1) << mask_max) - 1;                 // clear upper result_bits to use res_value left
     res_num |= res_value;
   }
 
@@ -710,11 +708,11 @@ Lconst Lconst::mult_op(const Lconst &o) const {
     return Lconst::unknown(0);
   }
   if (has_unknowns() || o.has_unknowns()) {
-    auto n1 = is_negative()?-1:1;
-    auto n2 = o.is_negative()?-1:1;
-    if (n1*n2<0)
-      return Lconst::unknown_negative(get_bits()+o.get_bits());
-    return Lconst::unknown_positive(get_bits()+o.get_bits());
+    auto n1 = is_negative() ? -1 : 1;
+    auto n2 = o.is_negative() ? -1 : 1;
+    if (n1 * n2 < 0)
+      return Lconst::unknown_negative(get_bits() + o.get_bits());
+    return Lconst::unknown_positive(get_bits() + o.get_bits());
   }
 
   Lconst res;
@@ -731,23 +729,23 @@ Lconst Lconst::div_op(const Lconst &o) const {
     return Lconst::unknown(0);
   }
 
-  if (o.get_num()==0) {
+  if (o.get_num() == 0) {
     if (is_negative())
       return Lconst::unknown_negative(2);
     return Lconst::unknown_positive(2);
   }
   if (has_unknowns() || o.has_unknowns()) {
-    auto n1 = is_negative()?-1:1;
-    auto n2 = o.is_negative()?-1:1;
+    auto n1 = is_negative() ? -1 : 1;
+    auto n2 = o.is_negative() ? -1 : 1;
 
     int b = get_bits();
     if (!o.has_unknowns()) {
       b -= o.get_bits();
-      if (b<=0)
+      if (b <= 0)
         return Lconst(0);
     }
 
-    if (n1*n2<0)
+    if (n1 * n2 < 0)
       return Lconst::unknown_negative(b);
     return Lconst::unknown_positive(b);
   }
@@ -774,7 +772,7 @@ Lconst Lconst::sub_op(const Lconst &o) const {
 }
 
 Lconst Lconst::lsh_op(Bits_t amount) const {
-  if (bits==0)
+  if (bits == 0)
     return *this;
 
   if (has_unknowns()) {
@@ -789,7 +787,7 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 }
 
 Lconst Lconst::rsh_op(Bits_t amount) const {
-  if (bits==0)
+  if (bits == 0)
     return *this;
 
   if (is_string()) {
@@ -804,8 +802,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 }
 
 Lconst Lconst::ror_op(const Lconst &o) const {
-
-  Number res_num = (num!=0 || o!=0)?1:0;
+  Number res_num = (num != 0 || o != 0) ? 1 : 0;
 
   return Lconst(false, 1, res_num);
 }
@@ -1007,14 +1004,14 @@ std::string Lconst::to_pyrope() const {
 size_t Lconst::popcount() const {
   I(!is_string());
 
-  if (num==0)
+  if (num == 0)
     return 0;
 
-  auto popcount = 0;
-  auto i = boost::multiprecision::lsb(num);
-  const auto end = boost::multiprecision::msb(num);
+  auto       popcount = 0;
+  auto       i        = boost::multiprecision::lsb(num);
+  const auto end      = boost::multiprecision::msb(num);
   for (; i <= end; ++i) {
-    if (boost::multiprecision::bit_test(num,i) != 0) {
+    if (boost::multiprecision::bit_test(num, i) != 0) {
       ++popcount;
     }
   }

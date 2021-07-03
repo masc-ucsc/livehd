@@ -71,7 +71,7 @@ public:
   Bitwidth_range(const Lconst &min_val, const Lconst &max_val);
 
   Bitwidth_range(const int64_t min_val, const int64_t max_val) {
-    I(min_val<=max_val);
+    I(min_val <= max_val);
     min      = min_val;
     max      = max_val;
     overflow = false;
@@ -91,9 +91,9 @@ public:
   Bits_t get_sbits() const;
   Lconst get_range() const {
     if (overflow) {
-      return (Lconst(1)<<get_sbits());
+      return (Lconst(1) << get_sbits());
     }
-    return Lconst(max-min+1);
+    return Lconst(max - min + 1);
   }
   Lconst get_max() const { return to_lconst(overflow, max); };
   Lconst get_min() const { return to_lconst(overflow, min); };

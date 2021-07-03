@@ -5,7 +5,6 @@
 
 class Pass_lnastopt : public Pass {
 protected:
-
 public:
   static void work(Eprp_var &var);
 

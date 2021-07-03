@@ -7,9 +7,8 @@
 #include <cstdint>
 #include <string_view>
 
-#include "lbench.hpp"
-
 #include "absl/container/flat_hash_map.h"
+#include "lbench.hpp"
 
 enum class Ntype_op : uint8_t {
   Invalid,  // Detect bugs/unset (not used anywhere)
@@ -66,8 +65,8 @@ enum class Ntype_op : uint8_t {
 class Ntype {
 protected:
   inline static constexpr std::string_view cell_name[] = {
-      "invalid", "sum",   "mult", "div",   "and",     "or",      "xor",     "ror",      "not",      "get_mask",    "set_mask",
-      "sext",    "lt",    "gt",   "eq",    "shl",     "sra",     "lut",     "mux",      "io",       "memory",      "flop",
+      "invalid", "sum",   "mult", "div",   "and",     "or",      "xor",      "ror",      "not",         "get_mask",    "set_mask",
+      "sext",    "lt",    "gt",   "eq",    "shl",     "sra",     "lut",      "mux",      "io",          "memory",      "flop",
       "latch",   "fflop", "sub",  "const", "tup_add", "tup_get", "attr_set", "attr_get", "compile_err", "last_invalid"};
 
   inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
@@ -98,15 +97,17 @@ public:
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
-    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet
-           && op != Ntype_op::AttrSet && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr && op != Ntype_op::Invalid
-           && op != Ntype_op::Last_invalid;
+    return op != Ntype_op::Sub && op != Ntype_op::TupAdd && op != Ntype_op::TupGet && op != Ntype_op::AttrSet
+           && op != Ntype_op::AttrGet && op != Ntype_op::CompileErr && op != Ntype_op::Invalid && op != Ntype_op::Last_invalid;
   }
 
   static inline constexpr bool is_unlimited_sink(Ntype_op op) {
-    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux || op == Ntype_op::CompileErr;
+    return op == Ntype_op::IO || op == Ntype_op::LUT || op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Mux
+           || op == Ntype_op::CompileErr;
   }
-  static inline constexpr bool is_unlimited_driver(Ntype_op op) { return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO; }
+  static inline constexpr bool is_unlimited_driver(Ntype_op op) {
+    return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
+  }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
   static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {
     if (is_unlimited_sink(op))
@@ -139,7 +140,7 @@ public:
       return 1;
     }
 
-    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str[0]>='0' && str[0]<='9', 0)) {  // unlikely case
+    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str[0] >= '0' && str[0] <= '9', 0)) {  // unlikely case
       int pid = 0;
       for (auto ch : str) {
         assert(ch >= '0' && ch <= '9');
@@ -158,7 +159,7 @@ public:
 
   static inline constexpr std::string_view get_sink_name(Ntype_op op, int pid) {
     if (pid > 10)
-      pid = pid % 11; // wrap names around for multi inputs like memory cell
+      pid = pid % 11;  // wrap names around for multi inputs like memory cell
 
     auto name = sink_pid2name[pid][static_cast<std::size_t>(op)];
     assert(name != "invalid");
@@ -177,14 +178,12 @@ public:
       return 0;
     }
     assert(std::isdigit(pin_name[0]));
-    int x=0;
+    int x = 0;
     std::from_chars(pin_name.data(), pin_name.data() + pin_name.size(), x);
     return x;
   }
 
-  static inline constexpr std::string_view get_driver_name(Ntype_op op) {
-    return is_multi_driver(op)?"invalid":"Y";
-  }
+  static inline constexpr std::string_view get_driver_name(Ntype_op op) { return is_multi_driver(op) ? "invalid" : "Y"; }
 
   static inline constexpr bool has_driver(Ntype_op op, int pid) {
     if (pid == 0)

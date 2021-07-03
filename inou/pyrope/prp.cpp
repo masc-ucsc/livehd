@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <iostream>
 
-#include "fmt/format.h"
 #include "err_tracker.hpp"
+#include "fmt/format.h"
 inline void Prp::eat_comments() {
   while (scan_is_token(Token_id_comment)) {
     scan_next();
@@ -1026,18 +1026,18 @@ uint8_t Prp::rule_range_notation(std::list<std::tuple<Rule_id, Token_entry>> &pa
 
   // optional
   CHECK_RULE(&Prp::rule_bit_selection_notation);
-  //CHECK_RULE(&Prp::rule_factor);
+  // CHECK_RULE(&Prp::rule_factor);
 
   if (!SCAN_IS_TOKEN(Token_id_colon, Prp_rule_range_notation)) {
     RULE_FAILED("Failed rule_range_notation; couldn't find the first dot.\n");
   }
 
   // optional
-  //CHECK_RULE(&Prp::rule_additive_expression);
+  // CHECK_RULE(&Prp::rule_additive_expression);
   CHECK_RULE(&Prp::rule_factor);
 
   // optional
-  //CHECK_RULE(&Prp::rule_tuple_by_notation);
+  // CHECK_RULE(&Prp::rule_tuple_by_notation);
 
   RULE_SUCCESS("Matched rule_range_notation.\n", Prp_rule_range_notation);
 }
@@ -1741,10 +1741,23 @@ uint8_t Prp::rule_rhs_expression(std::list<std::tuple<Rule_id, Token_entry>> &pa
 uint8_t Prp::rule_keyword(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) {
   INIT_FUNCTION("rule_keyword");
 
-  Token_id toks[]
-      = {Pyrope_id_TRUE, Pyrope_id_true,  Pyrope_id_FALSE, Pyrope_id_false, Pyrope_id_if,     Pyrope_id_else,
-         Pyrope_id_elif, Pyrope_id_and,   Pyrope_id_or,    Pyrope_id_xor,    Pyrope_id_until, Pyrope_id_default,
-         Pyrope_id_try,  Pyrope_id_punch, Pyrope_id_for,   Pyrope_id_unique, Pyrope_id_when};
+  Token_id toks[] = {Pyrope_id_TRUE,
+                     Pyrope_id_true,
+                     Pyrope_id_FALSE,
+                     Pyrope_id_false,
+                     Pyrope_id_if,
+                     Pyrope_id_else,
+                     Pyrope_id_elif,
+                     Pyrope_id_and,
+                     Pyrope_id_or,
+                     Pyrope_id_xor,
+                     Pyrope_id_until,
+                     Pyrope_id_default,
+                     Pyrope_id_try,
+                     Pyrope_id_punch,
+                     Pyrope_id_for,
+                     Pyrope_id_unique,
+                     Pyrope_id_when};
 
   if (SCAN_IS_TOKENS(toks, 17)) {
     RULE_SUCCESS("Matched rule_keyword.\n", Prp_rule_keyword);
@@ -2042,7 +2055,10 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   if (ws_map.find(tok) != ws_map.end()) {
     allowed_ws_after  = ws_map[tok];
     allowed_ws_before = (ws_map[tok] >> 8);
-    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n",
+                  scan_text(scan_token_entry()),
+                  allowed_ws_before,
+                  allowed_ws_after);
   }
 
   if (allowed_ws_before) {
@@ -2138,7 +2154,10 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   if (ws_map.find(toks[i]) != ws_map.end()) {
     allowed_ws_after  = ws_map[toks[i]];
     allowed_ws_before = (ws_map[toks[i]] >> 8);
-    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
+    PRINT_DBG_AST("Etoken {}: ws before = {}, ws after = {}.\n",
+                  scan_text(scan_token_entry()),
+                  allowed_ws_before,
+                  allowed_ws_after);
   }
 
   if (allowed_ws_before) {

@@ -34,7 +34,7 @@ std::string_view Slang_tree::create_lnast_var(std::string_view val) {
   std::string_view var_name;
 
   const auto &it = net2attr.find(val);
-  if (it == net2attr.end()) { // OOPS, use before assignment
+  if (it == net2attr.end()) {  // OOPS, use before assignment
     auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
     auto tmp_var = create_lnast_tmp();
     lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
@@ -58,7 +58,6 @@ std::string_view Slang_tree::create_lnast_var(std::string_view val) {
 }
 
 std::string_view Slang_tree::create_lnast_lhs_var(std::string_view val) {
-
   const auto &it = net2attr.find(val);
   if (it == net2attr.end()) {
     return val;

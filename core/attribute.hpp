@@ -16,7 +16,7 @@ class Attribute {
   inline static absl::flat_hash_map<std::string, Attr_data *> lg2attr;
 
   inline static thread_local const Lgraph *last_lg   = nullptr;
-  inline static thread_local Attr_data    *last_attr = nullptr;
+  inline static thread_local Attr_data *   last_attr = nullptr;
 
   static std::string_view get_base() {
     if constexpr (std::is_same<Base, Node>::value) {
@@ -85,7 +85,7 @@ public:
       last_lg   = nullptr;
       last_attr = nullptr;
     }
-    return; // FIXME: Why does this create a deadlock/livelock with OPT only??? (not needed beyond asan, but it should not happen)
+    return;  // FIXME: Why does this create a deadlock/livelock with OPT only??? (not needed beyond asan, but it should not happen)
 
     const auto key = absl::StrCat(lg->get_unique_name(), Name);
 

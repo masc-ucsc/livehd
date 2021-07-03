@@ -33,7 +33,7 @@ Ntype::_init::_init() {
         I(it->second == pid);  // same name should always have same PID
       }
 
-      if (static_cast<Ntype_op>(op)!= Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
+      if (static_cast<Ntype_op>(op) != Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
         continue;
 
       sink_name2pid[pin_name[0]][op] = pid;
@@ -123,7 +123,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         return "b";
       return "invalid";
       break;
-    case Ntype_op::SHL: // n<<(a,b) == (n<<a)|(n<<b) : useful for onehot encoding for lgtuple inputs
+    case Ntype_op::SHL:  // n<<(a,b) == (n<<a)|(n<<b) : useful for onehot encoding for lgtuple inputs
       if (pid == 0)
         return "a";
       else if (pid == 1)
@@ -157,17 +157,17 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::Memory:
       switch (pid) {
-        case 0: return "addr";      // runtime  x n_ports
-        case 1: return "bits";      // comptime x 1
-        case 2: return "clock";     // runtime  x 1 or n_ports
-        case 3: return "din";       // runtime  x n_ports
-        case 4: return "enable";    // runtime  x n_ports
-        case 5: return "fwd";       // comptime x 1
-        case 6: return "posclk";    // comptime x 1
-        case 7: return "latency";   // comptime x n_ports
-        case 8: return "wensize";   // comptime x 1  -- number of Write Enable bits
-        case 9: return "size";      // comptime x 1
-        case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
+        case 0: return "addr";     // runtime  x n_ports
+        case 1: return "bits";     // comptime x 1
+        case 2: return "clock";    // runtime  x 1 or n_ports
+        case 3: return "din";      // runtime  x n_ports
+        case 4: return "enable";   // runtime  x n_ports
+        case 5: return "fwd";      // comptime x 1
+        case 6: return "posclk";   // comptime x 1
+        case 7: return "latency";  // comptime x n_ports
+        case 8: return "wensize";  // comptime x 1  -- number of Write Enable bits
+        case 9: return "size";     // comptime x 1
+        case 10: return "rdport";  // comptime x n_ports (1 rd, 0 wr)
         default: return "invalid";
       }
       break;

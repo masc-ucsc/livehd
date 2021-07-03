@@ -25,7 +25,7 @@ protected:
 
                                              "<<",        ">>",         ">>>",
 
-                                             "sext",      "set_mask", "get_mask",
+                                             "sext",      "set_mask",   "get_mask",
 
                                              "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 

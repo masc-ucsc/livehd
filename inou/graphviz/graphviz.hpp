@@ -30,7 +30,7 @@ private:
   static std::string graphviz_legalize_name(std::string_view name);
   void               populate_lg_data(Lgraph *g, std::string_view dot_postfix = "");
 
-	void save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data);
+  void save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data);
 
 public:
   void do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix = "");

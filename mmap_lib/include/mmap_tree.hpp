@@ -24,7 +24,7 @@ public:
   constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
 
   static constexpr Tree_index root() {
-    Tree_index i(0,0);
+    Tree_index i(0, 0);
     return i;
   }
 
@@ -227,8 +227,8 @@ protected:
     I((index.pos >> 2) < (int)pointers_stack[index.level].size());
 
     auto pos = pointers_stack[index.level][index.pos >> 2].next_sibling;
-    if ((pos & 3) > (index.pos & 3) || (pos&3)==0)
-      return true; // Either the index is smaller than end or all the entries are used (pos==0)
+    if ((pos & 3) > (index.pos & 3) || (pos & 3) == 0)
+      return true;  // Either the index is smaller than end or all the entries are used (pos==0)
 
     return false;
   }
@@ -530,7 +530,7 @@ public:
   Tree_depth_preorder_iterator  depth_preorder() const { return Tree_depth_preorder_iterator(Tree_index::root(), this); }
   Tree_depth_postorder_iterator depth_postorder() const {
     auto last_child = Tree_index::root();
-    while(!is_leaf(last_child)) {
+    while (!is_leaf(last_child)) {
       last_child = get_first_child(last_child);
     }
     return Tree_depth_postorder_iterator(last_child, this);
@@ -982,7 +982,7 @@ template <typename X>
 const Tree_index tree<X>::get_depth_postorder_next(const Tree_index &child) const {
   auto next_child = get_sibling_next(child);
   if (!next_child.is_invalid()) {
-    while(!is_leaf(next_child)) {
+    while (!is_leaf(next_child)) {
       next_child = get_first_child(next_child);
     }
     return next_child;

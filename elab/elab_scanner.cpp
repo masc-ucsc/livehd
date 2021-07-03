@@ -178,7 +178,7 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   token_list.clear();
   buffer_name = filename;
 
-  if (sb.st_size==0) {
+  if (sb.st_size == 0) {
     memblock = std::string_view("");
     parser_warn("file {} seems empty. Nothing to parse", filename);
     return;
@@ -190,8 +190,8 @@ void Elab_scanner::parse_setup(std::string_view filename) {
     return;
   }
 
-  memblock    = std::string_view(b, sb.st_size);
-  err_tracker::sot_log("{}\n", memblock);//this is the correct(original) version
+  memblock = std::string_view(b, sb.st_size);
+  err_tracker::sot_log("{}\n", memblock);  // this is the correct(original) version
   buffer_name = filename;
 
   token_list.clear();
@@ -434,27 +434,27 @@ void Elab_scanner::lex_error(std::string_view text) {
   throw std::runtime_error(std::string(text));
 }
 void Elab_scanner::scan_error_int(std::string_view text) const {
-  err_tracker::err_logger( text);
+  err_tracker::err_logger(text);
   scan_raw_msg("error", text, true);
   n_errors++;
   throw std::runtime_error(std::string(text));
 }
 
 void Elab_scanner::scan_warn_int(std::string_view text) const {
-  err_tracker::err_logger( text);
+  err_tracker::err_logger(text);
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings > max_warnings)
     throw std::runtime_error("too many warnings");
 }
 
-void Elab_scanner::parser_info_int(std::string_view text) const { 
-  err_tracker::err_logger( text);
-  scan_raw_msg("info", text, true); 
+void Elab_scanner::parser_info_int(std::string_view text) const {
+  err_tracker::err_logger(text);
+  scan_raw_msg("info", text, true);
 }
 
 void Elab_scanner::parser_error_int(std::string_view text) const {
-  err_tracker::err_logger( text);
+  err_tracker::err_logger(text);
   scan_raw_msg("error", text, false);
   n_errors++;
   // if (n_errors > max_errors) exit(-3);
@@ -467,7 +467,7 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
 }
 
 void Elab_scanner::parser_warn_int(std::string_view text) const {
-  err_tracker::err_logger( text);
+  err_tracker::err_logger(text);
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings)
@@ -475,7 +475,7 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
-  //err_tracker::err_logger( text);
+  // err_tracker::err_logger( text);
   if (token_list.size() <= 1) {
     fmt::print("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text);
     return;

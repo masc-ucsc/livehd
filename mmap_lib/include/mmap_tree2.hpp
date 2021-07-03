@@ -13,28 +13,28 @@
 //  * Nodes in array using post-order, Entry is the level
 //
 // Capacity to print a bit like "tree" (but in post-order)
-//Index: NextSibling: Level : Tree
-//00: +7, 2 -── 1.1
-//01: +1, 4 │       -── 1.2.1.1
-//02: +3, 4 │       ├── 1.2.1.2
-//03: +1, 5 │       |   -── 1.2.1.3.1
-//04: +0, 5 │       |   |── 1.2.1.3.2
-//05: +0, 4 │       |── 1.2.1.3
-//06: +0, 3 │   -── 1.2.1
-//07: +6, 2 ├── 1.2
-//08: +1, 4 │       -── 1.3.1.1
-//09: +1, 4 │       |── 1.3.1.2
-//0a: +1, 3 │   -── 1.3.1
-//0b: +1, 3 │   ├── 1.3.2
-//0c: +0, 3 │   ├── 1.3.3
-//0d: +6, 2 ├── 1.3
-//0e: +3, 3 │   -── 1.4.1
-//0f: +1, 4 │   │   -── 1.4.2.1
-//10: +0, 4 │   │   |── 1.4.2.2
-//11: +1, 3 │   ├── 1.4.2
-//12: +0, 3 │   ├── 1.4.3
-//13: +0, 2 ├── 1.4
-//14: +0, 1 | 1
+// Index: NextSibling: Level : Tree
+// 00: +7, 2 -── 1.1
+// 01: +1, 4 │       -── 1.2.1.1
+// 02: +3, 4 │       ├── 1.2.1.2
+// 03: +1, 5 │       |   -── 1.2.1.3.1
+// 04: +0, 5 │       |   |── 1.2.1.3.2
+// 05: +0, 4 │       |── 1.2.1.3
+// 06: +0, 3 │   -── 1.2.1
+// 07: +6, 2 ├── 1.2
+// 08: +1, 4 │       -── 1.3.1.1
+// 09: +1, 4 │       |── 1.3.1.2
+// 0a: +1, 3 │   -── 1.3.1
+// 0b: +1, 3 │   ├── 1.3.2
+// 0c: +0, 3 │   ├── 1.3.3
+// 0d: +6, 2 ├── 1.3
+// 0e: +3, 3 │   -── 1.4.1
+// 0f: +1, 4 │   │   -── 1.4.2.1
+// 10: +0, 4 │   │   |── 1.4.2.2
+// 11: +1, 3 │   ├── 1.4.2
+// 12: +0, 3 │   ├── 1.4.3
+// 13: +0, 2 ├── 1.4
+// 14: +0, 1 | 1
 //
 // API: find_siblings
 //  while(l[pos]<self_level) {
@@ -62,27 +62,27 @@
 //   visit children(...)
 //   print children()
 // Index: first Child, parent
-//01: 00, 05 │           -── 1.2.1.3.1
-//02: 00, 05 │           -── 1.2.1.3.2
-//03: 00, 06 │       -── 1.2.1.1
-//04: 00, 06 │       ├── 1.2.1.2
-//05: 02, 06 │       |── 1.2.1.3
-//06: 03, 12 │   -── 1.2.1
-//07: 00, 09 │       -── 1.3.1.1
-//08: 00, 09 │       |── 1.3.1.2
-//09: 08, 13 │   -── 1.3.1
-//0a: 00, 13 │   ├── 1.3.2
-//0b: 00, 13 │   ├── 1.3.3
-//0c: 00, 0e │   │   -── 1.4.2.1
-//0d: 00, 0e │   │   -── 1.4.3.1
-//0e: 00, 14 │   -── 1.4.1
-//0f: 0c, 14 │   ├── 1.4.2
-//10: 0d, 14 │   ├── 1.4.3
-//11: 00, 15 -── 1.1
-//12: 06, 15 ├── 1.2
-//13: 09, 15 ├── 1.3
-//14: 0e, 15 ├── 1.4
-//15: 11, 00 | 1
+// 01: 00, 05 │           -── 1.2.1.3.1
+// 02: 00, 05 │           -── 1.2.1.3.2
+// 03: 00, 06 │       -── 1.2.1.1
+// 04: 00, 06 │       ├── 1.2.1.2
+// 05: 02, 06 │       |── 1.2.1.3
+// 06: 03, 12 │   -── 1.2.1
+// 07: 00, 09 │       -── 1.3.1.1
+// 08: 00, 09 │       |── 1.3.1.2
+// 09: 08, 13 │   -── 1.3.1
+// 0a: 00, 13 │   ├── 1.3.2
+// 0b: 00, 13 │   ├── 1.3.3
+// 0c: 00, 0e │   │   -── 1.4.2.1
+// 0d: 00, 0e │   │   -── 1.4.3.1
+// 0e: 00, 14 │   -── 1.4.1
+// 0f: 0c, 14 │   ├── 1.4.2
+// 10: 0d, 14 │   ├── 1.4.3
+// 11: 00, 15 -── 1.1
+// 12: 06, 15 ├── 1.2
+// 13: 09, 15 ├── 1.3
+// 14: 0e, 15 ├── 1.4
+// 15: 11, 00 | 1
 //
 // API: find_next_siblings
 //  while(parent[++pos]==parent[self]) {
@@ -118,7 +118,6 @@
 //
 // API: add_child (first child or insert_last_child)
 
-
 #include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -131,23 +130,23 @@
 
 namespace mmap_lib {
 
-using Tree2_index   = uint64_t;
+using Tree2_index = uint64_t;
 
 template <typename X>
 class tree2 {
 protected:
-  const std::string         mmap_name;
-  const std::string         mmap_path;
+  const std::string mmap_name;
+  const std::string mmap_path;
 
-  std::vector<X>            data_stack;
-  std::vector<int16_t>      level_stack;
+  std::vector<X>       data_stack;
+  std::vector<int16_t> level_stack;
 
-  std::vector<X>            overflow_data_stack;
-  std::vector<int16_t>      overflow_level_stack;
+  std::vector<X>       overflow_data_stack;
+  std::vector<int16_t> overflow_level_stack;
 
 public:
   static constexpr Tree2_index invalid_index() { return Tree2_index(0); }
-  static constexpr Tree2_index root_index()    { return Tree2_index(1); }
+  static constexpr Tree2_index root_index() { return Tree2_index(1); }
 
   const Tree2_index get_last_child(const Tree2_index parent_index) const;
   const Tree2_index get_first_child(const Tree2_index parent_index) const;
@@ -238,11 +237,10 @@ public:
     CTree2_sibling_iterator end() const { return CTree2_sibling_iterator(invalid_index(), t); }
   };
 
-  tree2() {
-  };
+  tree2(){};
 
   tree2(std::string_view _path, std::string_view _map_name)
-  : mmap_path(_path.empty() ? "." : _path), mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
+      : mmap_path(_path.empty() ? "." : _path), mmap_name{std::string(_path) + std::string("/") + std::string(_map_name)} {
     if (mmap_path != ".") {
       struct stat sb;
       if (stat(mmap_path.c_str(), &sb) != 0 || !S_ISDIR(sb.st_mode)) {
@@ -295,7 +293,7 @@ public:
 
   const Tree2_index get_parent(const Tree2_index index) const;
 
-  void                        set_root(const X &data);
+  void set_root(const X &data);
 
   const Tree2_index get_child(const Tree2_index start_index) const;
 
@@ -304,7 +302,7 @@ public:
     return Tree2_depth_preorder_iterator(start_index, this);
   }
 
-  Tree2_depth_preorder_iterator  depth_preorder() const { return Tree2_depth_preorder_iterator(Tree2_index::root(), this); }
+  Tree2_depth_preorder_iterator depth_preorder() const { return Tree2_depth_preorder_iterator(Tree2_index::root(), this); }
 
   Tree2_sibling_iterator siblings(const Tree2_index &start_index) const { return Tree2_sibling_iterator(start_index, this); }
   Tree2_sibling_iterator children(const Tree2_index &start_index) const {

@@ -296,12 +296,12 @@ Lgraph *Graph_library::try_find_lgraph_int(Lg_type_id lgid) const {
   return lg;
 }
 
-Lgraph * Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
   const Graph_library *lib = instance_int(path);  // path must be full path
   return lib->try_find_lgraph_int(lgid);
 }
 
-Sub_node & Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
+Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
   graph_library_clean = false;
 
   Lg_type_id lgid = get_lgid_int(name);
@@ -321,9 +321,9 @@ Sub_node & Graph_library::reset_sub_int(std::string_view name, std::string_view 
   return *sub_nodes[lgid];
 }
 
-Sub_node& Graph_library::setup_sub_int(std::string_view name) { return setup_sub_int(name, "-"); }
+Sub_node &Graph_library::setup_sub_int(std::string_view name) { return setup_sub_int(name, "-"); }
 
-Sub_node& Graph_library::setup_sub_int(std::string_view name, std::string_view source) {
+Sub_node &Graph_library::setup_sub_int(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid_int(name);
   if (lgid) {
     return *sub_nodes[lgid];
@@ -334,7 +334,7 @@ Sub_node& Graph_library::setup_sub_int(std::string_view name, std::string_view s
   return *sub_nodes[lgid];
 }
 
-Sub_node* Graph_library::ref_sub_int(Lg_type_id lgid) {
+Sub_node *Graph_library::ref_sub_int(Lg_type_id lgid) {
   graph_library_clean = false;
   I(lgid > 0);  // 0 is invalid lgid
   I(attributes.size() > lgid);
@@ -343,7 +343,7 @@ Sub_node* Graph_library::ref_sub_int(Lg_type_id lgid) {
   return sub_nodes[lgid];
 }
 
-const Sub_node& Graph_library::get_sub_int(Lg_type_id lgid) const {
+const Sub_node &Graph_library::get_sub_int(Lg_type_id lgid) const {
   I(lgid > 0);  // 0 is invalid lgid
   I(attributes.size() > lgid);
   I(sub_nodes.size() > lgid);
@@ -432,8 +432,8 @@ void Graph_library::reload_int() {
   spef_list.push_back("fake_bad.spef");    // FIXME
   {
     name2id.clear();
-    attributes.resize(1);  // 0 is not a valid ID
-    sub_nodes.resize(1, new Sub_node());   // 0 is not a valid ID
+    attributes.resize(1);                 // 0 is not a valid ID
+    sub_nodes.resize(1, new Sub_node());  // 0 is not a valid ID
   }
   if (access(library_file.c_str(), F_OK) == -1) {
     mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
@@ -461,8 +461,6 @@ void Graph_library::reload_int() {
   const rapidjson::Value &Lgraph_array = document["Lgraph"];
   I(Lgraph_array.IsArray());
 
-
-
   for (const auto &lg_entry : Lgraph_array.GetArray()) {
     I(lg_entry.IsObject());
 
@@ -474,12 +472,13 @@ void Graph_library::reload_int() {
     if (id >= attributes.size()) {
       attributes.resize(id + 1);
 
-      //FIXME->sh: wiered bug that the two pointer, sub_nodes[1] and sub_nodes[2], will pollute each other when using resize (size, initial value) ??
+      // FIXME->sh: wiered bug that the two pointer, sub_nodes[1] and sub_nodes[2], will pollute each other when using resize (size,
+      // initial value) ??
       //           to avoid such bug, I create Sub_node() pointers and emplace_back them one by one.
-      // sub_nodes.resize(id + 1, new Sub_node()); 
+      // sub_nodes.resize(id + 1, new Sub_node());
       auto increase_size = id - sub_nodes.size() + 1;
       if (increase_size > 0) {
-        for (std::string::size_type i = 0 ; i < increase_size; i++) {
+        for (std::string::size_type i = 0; i < increase_size; i++) {
           auto ptr = new Sub_node();
           sub_nodes.emplace_back(ptr);
         }
@@ -492,11 +491,12 @@ void Graph_library::reload_int() {
         max_next_version = version;
 
       I(lg_entry.HasMember("source"));
-      attributes[id].source = lg_entry["source"].GetString();
+      attributes[id].source  = lg_entry["source"].GetString();
       attributes[id].version = version;
 
       sub_nodes[id]->from_json(lg_entry);
-      // fmt::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id, sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
+      // fmt::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
+      // sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
 
       // NOTE: must use attributes to keep the string in memory
       name2id[sub_nodes[id]->get_name()] = id;

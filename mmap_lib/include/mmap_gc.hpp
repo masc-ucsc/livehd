@@ -9,9 +9,9 @@
 #include <cassert>
 #include <climits>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <mutex>
-#include <iostream>
 
 #include "absl/container/flat_hash_map.h"
 

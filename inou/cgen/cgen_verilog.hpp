@@ -17,7 +17,7 @@ private:
   pin2str_type                                          pin2var;
   absl::flat_hash_map<Node::Compact_class, std::string> mux2vector;
 
-  inline static absl::flat_hash_set< std::string>       reserved_keyword;
+  inline static absl::flat_hash_set<std::string> reserved_keyword;
 
   static std::string get_wire_or_const(const Node_pin &dpin);
   static std::string get_scaped_name(std::string_view wire_name);

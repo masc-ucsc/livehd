@@ -15,7 +15,6 @@ Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(
 }
 
 void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
-
   std::string file;
   if (dot_postfix == "")
     file = absl::StrCat(odir, "/", name, ".dot");
@@ -35,7 +34,6 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
 
   close(fd);
 }
-
 
 void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose) {
   std::string dp_pid, sp_pid;
@@ -166,70 +164,68 @@ void Graphviz::do_hierarchy(Lgraph *g) {
 
   data += "\n}\n";
 
-	save_graph(g->get_name(), ".hier", data);
+  save_graph(g->get_name(), ".hier", data);
 }
 
 void Graphviz::create_color_map(Lgraph *lg) {
+  std::set<int>                 colors_used;
+  absl::flat_hash_map<int, int> color2size;
 
-  std::set<int> colors_used;
-	absl::flat_hash_map<int, int> color2size;
-
-	float max_size = 1;
-  for(auto node:lg->fast()) {
+  float max_size = 1;
+  for (auto node : lg->fast()) {
     if (!node.has_color())
-			continue;
+      continue;
 
-		auto c = node.get_color();
-		colors_used.insert(c);
-		auto sz = color2size[c]++;
-		if (sz>max_size)
-			max_size = sz;
+    auto c = node.get_color();
+    colors_used.insert(c);
+    auto sz = color2size[c]++;
+    if (sz > max_size)
+      max_size = sz;
   }
 
   std::string data = "digraph {\n";
 
   color2rgb.clear();
-  for(auto c:colors_used) {
-		auto sz = color2size[c];
-    RGB color(sz/max_size);
+  for (auto c : colors_used) {
+    auto sz = color2size[c];
+    RGB  color(sz / max_size);
     color2rgb[c] = color.to_s();
-		data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", c, sz, color.to_s());
+    data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", c, sz, color.to_s());
   }
 
-	absl::flat_hash_set<uint64_t> edges; // hackish graph
-  for(auto node:lg->fast()) {
+  absl::flat_hash_set<uint64_t> edges;  // hackish graph
+  for (auto node : lg->fast()) {
     if (!node.has_color())
-			continue;
+      continue;
 
-		auto c = node.get_color();
-		for(auto e:node.out_edges()) {
-			auto snode = e.sink.get_node();
-			if (!snode.has_color())
-				continue;
-			auto sc = snode.get_color();
-			if (sc==c)
-				continue;
+    auto c = node.get_color();
+    for (auto e : node.out_edges()) {
+      auto snode = e.sink.get_node();
+      if (!snode.has_color())
+        continue;
+      auto sc = snode.get_color();
+      if (sc == c)
+        continue;
 
-			uint64_t edge = c;
-			edge <<=32;
-			edge  |=sc;
+      uint64_t edge = c;
+      edge <<= 32;
+      edge |= sc;
 
-			if (edges.contains(edge))
-				continue;
+      if (edges.contains(edge))
+        continue;
 
-			data += fmt::format(" c{}->c{};\n", c, sc);
+      data += fmt::format(" c{}->c{};\n", c, sc);
 
-			edges.insert(edge);
-		}
+      edges.insert(edge);
+    }
   }
 
   data += "}\n";
 
-	save_graph(lg->get_name(), "color_map", data);
+  save_graph(lg->get_name(), "color_map", data);
 }
 
 void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
-
   create_color_map(lg_parent);
 
   populate_lg_data(lg_parent, dot_postfix);
@@ -261,7 +257,7 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
       node_info = graphviz_legalize_name(node.debug_name());
     }
 
-    auto gv_name = graphviz_legalize_name(node.debug_name());
+    auto        gv_name = graphviz_legalize_name(node.debug_name());
     std::string color;
     if (node.has_color()) {
       const auto it = color2rgb.find(node.get_color());
@@ -300,7 +296,7 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
 
   data += "}\n";
 
-	save_graph(g->get_name(), dot_postfix, data);
+  save_graph(g->get_name(), dot_postfix, data);
 }
 
 void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix) {
@@ -343,8 +339,4 @@ void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_
   } else {
     save_graph(lnast->get_top_module_name(), "lnast", data);
   }
-
-
-
-
 }

@@ -18,8 +18,8 @@ public:
   virtual std::string_view get_lang_type() const                        = 0;
   virtual std::string_view debug_name_lang(Lnast_ntype node_type) const = 0;
   std::string_view         dot_type_op() const { return "."; };
-  std::string_view         str_qoute(bool is_str) const { return is_str? "\"" : "";/*if string then " is added*/ };
-  std::string_view         gmask_op() const { return "@";}
+  std::string_view         str_qoute(bool is_str) const { return is_str ? "\"" : ""; /*if string then " is added*/ };
+  std::string_view         gmask_op() const { return "@"; }
   virtual std::string_view start_else_if() const = 0;
 
   virtual std::string_view end_else_if() const { return ("}"); }

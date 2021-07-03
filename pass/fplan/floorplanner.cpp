@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "floorplanner.hpp"
 
-#include <typeinfo>
 #include <stdexcept>
+#include <typeinfo>
 
 #include "annotate.hpp"
 #include "cell.hpp"

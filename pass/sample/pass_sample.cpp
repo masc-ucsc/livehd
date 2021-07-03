@@ -100,7 +100,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
       for (const auto &io_pin : sub_lg->get_self_sub_node().get_io_pins()) {
         if (io_pin.is_input()) {
           n_inp++;
-        }else if (io_pin.is_output()){
+        } else if (io_pin.is_output()) {
           n_out++;
         }
       }

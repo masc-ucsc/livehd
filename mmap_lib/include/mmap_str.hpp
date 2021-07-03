@@ -70,20 +70,13 @@ public:
     }
   }
 
-  mmap_lib::map<std::string_view, bool> &map_ref() {
-    return map_id == 1 ? m1 : map_id == 2 ? m2 : map_id == 3 ? m3 : m0;
-  }
+  mmap_lib::map<std::string_view, bool> &map_ref() { return map_id == 1 ? m1 : map_id == 2 ? m2 : map_id == 3 ? m3 : m0; }
 
-  mmap_lib::map<std::string_view, bool> &map_cref() const {
-    return map_id == 1 ? m1 : map_id == 2 ? m2 : map_id == 3 ? m3 : m0;
-  }
+  mmap_lib::map<std::string_view, bool> &map_cref() const { return map_id == 1 ? m1 : map_id == 2 ? m2 : map_id == 3 ? m3 : m0; }
 
   int get_map_id() const { return map_id; }
 
-  static void clear_map() { 
-    map_id == 1 ? m1.clear() : map_id == 2 ? m2.clear() : map_id == 3 ? m3.clear() : m0.clear(); 
-  }
-
+  static void clear_map() { map_id == 1 ? m1.clear() : map_id == 2 ? m2.clear() : map_id == 3 ? m3.clear() : m0.clear(); }
 
   //=====helper function to check if a string exists in string_vector=====
   // If the string being searched exists inside the map, then return info about string
@@ -95,7 +88,7 @@ public:
       //<std::string_view, uint32_t(position in vec)> string_map2
       auto rec = map_ref().set(sv.substr(0, size), 0);
       return static_cast<uint32_t>(rec->first);
-    } else { 
+    } else {
       return static_cast<uint32_t>(it->first);
       // pair is (ptr_or_start, size of string)
     }
@@ -173,7 +166,7 @@ public:
     std::cout << "StrMap{ ";
     for (auto it = map_cref().begin(), end = map_cref().end(); it != end; ++it) {
       std::string key   = std::string(map_cref().get_key(it));
-      bool    value = map_cref().get(it);
+      bool        value = map_cref().get(it);
       std::cout << "<" << key << ", " << value << "> ";
     }
     std::cout << "}" << std::endl;
@@ -209,7 +202,6 @@ public:
   [[nodiscard]] constexpr char        get_e(uint8_t i) const { return e[i]; }
   [[nodiscard]] constexpr std::size_t e_size() const { return e.size(); }
 
-
   template <int m_id>
   constexpr bool operator==(const str<m_id> &rhs) const {
     if (get_map_id() == rhs.get_map_id() || (_size < 14 && rhs.size() < 14)) {
@@ -228,21 +220,26 @@ public:
       return map_cref().get_sview(ptr_or_start) == rhs.map_cref().get_sview(rhs.get_pos());
     }
   }
-  
+
   // const char* and std::string will go through this one
   bool operator==(std::string_view rhs) const { return (*this == str<map_id>(rhs)); }
-  
-  template <std::size_t N>
-  bool operator==(const char (&rhs)[N]) const { return (*this == str<map_id>(rhs)); }
 
-  template<int m_id>
-  constexpr bool operator!=(const str<m_id> &rhs) const { return !(*this == rhs); }
+  template <std::size_t N>
+  bool operator==(const char (&rhs)[N]) const {
+    return (*this == str<map_id>(rhs));
+  }
+
+  template <int m_id>
+  constexpr bool operator!=(const str<m_id> &rhs) const {
+    return !(*this == rhs);
+  }
 
   bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
- 
-  template <std::size_t N>
-  constexpr bool operator!=(const char (&rhs)[N]) const { return !(*this == rhs); }
 
+  template <std::size_t N>
+  constexpr bool operator!=(const char (&rhs)[N]) const {
+    return !(*this == rhs);
+  }
 
   constexpr char operator[](std::size_t pos) const {
     if (pos >= _size) {
@@ -275,7 +272,7 @@ public:
     }
   }
 
-  template<int m_id>
+  template <int m_id>
   bool starts_with(str<m_id> &st) const {
     if (st.size() > _size) {
       return false;
@@ -292,7 +289,6 @@ public:
       return true;
     }
   }
-
 
   // const char * and std::string will come through here
   bool starts_with(std::string_view st) const {
@@ -312,7 +308,7 @@ public:
   }
 
   // checks if *this pstr ends with en
-  template<int m_id>
+  template <int m_id>
   bool ends_with(str<m_id> &en) const {
     if (en.size() > _size) {
       return false;
@@ -346,7 +342,7 @@ public:
     return true;
   }
 
-  template<int m_id>
+  template <int m_id>
   std::size_t find(const str<m_id> &v, std::size_t pos = 0) const {
     char first = v[0];
     for (size_t i = ((pos == 0) ? 0 : pos); i < _size; i++) {
@@ -359,7 +355,7 @@ public:
         }
       }
     }
-    return -1; 
+    return -1;
   }
 
   std::size_t find(char c, std::size_t pos = 0) const {
@@ -377,7 +373,7 @@ public:
     return find(str<map_id>(s), pos);
   }
 
-  template<int m_id>
+  template <int m_id>
   std::size_t rfind(const str<m_id> &v, std::size_t pos = 0) const {
     int position = _size - 1;
     if (pos != 0)
@@ -389,7 +385,7 @@ public:
         if (v.size() == 1)
           return i;
         size_t k = 0;
-        for (int j = i; k < v.size() && j < i + v.size(); j++, k++) { 
+        for (int j = i; k < v.size() && j < i + v.size(); j++, k++) {
           if ((*this)[j] != v[k])
             break;
           if ((j == (i + v.size() - 1)) and (i <= position))
@@ -415,7 +411,7 @@ public:
   constexpr std::size_t rfind(const char (&s)[N], std::size_t pos = 0) {
     return rfind(str<map_id>(s), pos);
   }
-  
+
   std::string to_s() const {  // convert to string
     std::string out;
     for (auto i = 0; i < _size; ++i) {
@@ -423,7 +419,7 @@ public:
     }
     return out;
   }
-  
+
   int64_t to_i() const {  // convert to integer
     if (is_i()) {
       std::string temp = to_s();
@@ -432,7 +428,7 @@ public:
       return 0;
     }
   }
-  
+
   bool is_i() const {
     if (_size < 14) {
       int  temp  = (_size >= 4) ? 3 : (_size - 1);
@@ -473,8 +469,8 @@ public:
     }
     return true;
   }
-  
-  template<int m_id>
+
+  template <int m_id>
   str append(const str<m_id> &b) {
     if (_size <= 13) {
       if ((_size + b.size()) <= 13) {  // size and b size < = 13
@@ -540,10 +536,10 @@ public:
         ptr_or_start = insertfind(full, _size + b.size() - 10);
       }
     } else {
-      std::string start = this->to_s();           // n
-      start += b.to_s();                          // m
-      str<map_id> temp_str(start);  // n + m
-      ptr_or_start         = static_cast<uint32_t>(temp_str.get_pos());
+      std::string start = this->to_s();  // n
+      start += b.to_s();                 // m
+      str<map_id> temp_str(start);       // n + m
+      ptr_or_start = static_cast<uint32_t>(temp_str.get_pos());
       for (uint8_t i = 0; i < static_cast<uint8_t>(temp_str.e_size()); i++) {
         e[i] = temp_str.get_e(i);
       }
@@ -565,28 +561,27 @@ public:
   }
 
   // str created from this will be whichever template we call this func from
-  template<int m_id, int m_id2>
-  static str concat(str<m_id> &a, const str<m_id2> &b) { 
+  template <int m_id, int m_id2>
+  static str concat(str<m_id> &a, const str<m_id2> &b) {
     str<map_id> ret(a.to_s() + b.to_s());
-    return  ret;
+    return ret;
   }
 
-  template<int m_id>
+  template <int m_id>
   static str concat(std::string_view a, const str<m_id> &b) {
     str<map_id> temp(a);
     return temp.append(b);
   }
 
-  template<int m_id>
-  static str concat(str<m_id> &a, std::string_view b) { 
+  template <int m_id>
+  static str concat(str<m_id> &a, std::string_view b) {
     return a.append(b);
   }
 
-  template<int m_id>
-  static str concat(str<m_id> &a, int v) { 
+  template <int m_id>
+  static str concat(str<m_id> &a, int v) {
     return a.append(v);
   }
-
 
   // used as a tokenizing function
   // all str's in the vec will be same template as original str
@@ -663,8 +658,6 @@ public:
     return str<map_id>(out);
   }
 
-
-
   // str created from this function will be same template as original str
   str substr(size_t start) const { return substr(start, _size - start); }
 
@@ -673,22 +666,22 @@ public:
       return mmap_lib::str<map_id>();
     }
 
-    size_t as = (step > (_size - start)) ? (_size - start) : step; // adjusting end
+    size_t as  = (step > (_size - start)) ? (_size - start) : step;  // adjusting end
     size_t sm8 = static_cast<size_t>(_size - 8);
-    char hold[as+1];
+    char   hold[as + 1];
     hold[as] = '\0';
-    
-    if (_size <= 13 || as == 1) { //SHORT, or single access
+
+    if (_size <= 13 || as == 1) {  // SHORT, or single access
       for (size_t i = start; i < (start + as); ++i) {
         hold[i - start] = (*this)[i];
-      }  
-    } else if (_size > 13 && as > 1) { //LONG and multi access
-      if (start < 2 && (as + start) <= 2) { // only want first 2
+      }
+    } else if (_size > 13 && as > 1) {       // LONG and multi access
+      if (start < 2 && (as + start) <= 2) {  // only want first 2
         hold[0] = e[0];
         hold[1] = e[1];
-      } else if (start >= 2 && start < sm8 && as+start <= sm8) { //middle
-        return mmap_lib::str<map_id>(map_cref().get_sview(ptr_or_start).substr(start-2, as));
-      } else if (start >= sm8 && as + start <= _size) { // last 8
+      } else if (start >= 2 && start < sm8 && as + start <= sm8) {  // middle
+        return mmap_lib::str<map_id>(map_cref().get_sview(ptr_or_start).substr(start - 2, as));
+      } else if (start >= sm8 && as + start <= _size) {  // last 8
         for (size_t k = 0; k + start < (start + as); ++k) {
           hold[k] = e[l8(_size, k + start)];
         }
@@ -700,8 +693,6 @@ public:
     }
     return mmap_lib::str<map_id>(hold);
   }
-
-
 };
 
 }  // namespace mmap_lib

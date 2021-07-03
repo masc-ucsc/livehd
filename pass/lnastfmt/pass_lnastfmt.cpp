@@ -38,7 +38,7 @@ void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::stri
   // now we will make the formatted LNAST:
   lnastfmted->set_root(
       Lnast_node(Lnast_ntype::create_top(), Etoken(0, 0, 0, 0, ln->get_top_module_name())));  // root node of lnfmted
-  const auto& stmt_index = ln->get_child(mmap_lib::Tree_index::root());                                     // stmt node of ln
+  const auto& stmt_index = ln->get_child(mmap_lib::Tree_index::root());                       // stmt node of ln
   // lnastfmted->add_string(ln->get_name(stmt_index));
   const auto& stmt_index_fmt
       = lnastfmted->add_child(mmap_lib::Tree_index::root(),

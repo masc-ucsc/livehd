@@ -8,10 +8,10 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "err_tracker.hpp"
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
-#include "err_tracker.hpp"
 
 using Token_id = uint8_t;
 
@@ -110,7 +110,7 @@ public:
     tok = new_tok;
 
     auto new_len = text.size() + t2.text.size();
-    pos2 = pos2 + 1;
+    pos2         = pos2 + 1;
     text         = std::string_view{text.data(), new_len};
   }
 
@@ -118,7 +118,7 @@ public:
     I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
 
     auto new_len = text.size() + t2.text.size();
-    pos2 = pos2 + 1;
+    pos2         = pos2 + 1;
     text         = std::string_view{text.data(), new_len};
   }
 

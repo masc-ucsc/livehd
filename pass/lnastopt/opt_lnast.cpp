@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "opt_lnast.hpp"
+
 #include "lnast.hpp"
 
 /* TODO:
@@ -72,19 +73,18 @@ Opt_lnast::Opt_lnast(const Eprp_var &var) {
 }
 
 void Opt_lnast::process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
-
-  Lconst result;
+  Lconst    result;
   Lnast_nid const_pos;
-  int n_children_left = 0;
-  bool simplified     = false;
+  int       n_children_left = 0;
+  bool      simplified      = false;
 
-  for(auto child:ln->children(lnid)) {
+  for (auto child : ln->children(lnid)) {
     auto &data = ln->get_data(child);
-    //fmt::print("plus:{}\n", data.type.debug_name());
+    // fmt::print("plus:{}\n", data.type.debug_name());
 
     Lconst constant;
     if (data.type.is_ref()) {
-      if (n_children_left==0) { // first child
+      if (n_children_left == 0) {  // first child
         ++n_children_left;
         continue;
       }
@@ -92,43 +92,43 @@ void Opt_lnast::process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
       auto rhs = ln->get_data(child).token.get_text();
 
       auto val_it = level_forward_val.find(rhs);
-      if (val_it==level_forward_val.end()) {
+      if (val_it == level_forward_val.end()) {
         auto ref_it = level_forward_ref.find(rhs);
-        if (ref_it!=level_forward_ref.end()) {
+        if (ref_it != level_forward_ref.end()) {
           auto ln_txt = ln->add_string(ref_it->second);
           auto lnode  = Lnast_node::create_ref(ln_txt);
           ln->set_data(child, lnode);
         }
         ++n_children_left;
 #ifndef LNAST_REWRITE
-        if (n_children_left>2)
-          return; // not possible to compute the whole plus node
+        if (n_children_left > 2)
+          return;  // not possible to compute the whole plus node
 #endif
         continue;
-      }else{
+      } else {
         constant = val_it->second;
       }
-    }else{
+    } else {
       constant = Lconst(data.token.get_text());
       I(data.type.is_const());
     }
 
     if (const_pos.is_invalid()) {
-      result = constant;
+      result    = constant;
       const_pos = child;
       ++n_children_left;
-    }else{
+    } else {
       simplified = true;
-      result = result + constant;
+      result     = result + constant;
 #ifdef LNAST_REWRITE
-      auto lnode  = Lnast_node::create_const("0");
-      ln->set_data(child, lnode); // HACK until mmap_tree2 gets online
-      // FIXME: delete_leaf does not work. mmap_tree2. Then use this: ln->delete_leaf(child);
+      auto lnode = Lnast_node::create_const("0");
+      ln->set_data(child, lnode);  // HACK until mmap_tree2 gets online
+                                   // FIXME: delete_leaf does not work. mmap_tree2. Then use this: ln->delete_leaf(child);
 #endif
     }
   }
 
-  if (n_children_left<=1) {
+  if (n_children_left <= 1) {
     auto &data = ln->get_data(lnid);
     Pass::error("undriven LNAST plus node:{}", data.token.get_text());
     return;
@@ -143,7 +143,7 @@ void Opt_lnast::process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
   }
 #endif
 
-  if (n_children_left==2) { // + tmp val  -> same as -> tmp = val
+  if (n_children_left == 2) {  // + tmp val  -> same as -> tmp = val
     auto lhs_id = ln->get_first_child(lnid);
     auto rhs_id = ln->get_sibling_next(lhs_id);
 
@@ -165,7 +165,7 @@ void Opt_lnast::process_assign(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid)
   auto rhs = ln->get_data(rhs_id).token.get_text();
 
   auto val_it = level_forward_val.find(rhs);
-  if (val_it!=level_forward_val.end()) {
+  if (val_it != level_forward_val.end()) {
     auto ln_txt = ln->add_string(val_it->second.to_pyrope());
     auto lnode  = Lnast_node::create_const(ln_txt);
     ln->set_data(rhs_id, lnode);
@@ -175,7 +175,7 @@ void Opt_lnast::process_assign(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid)
   }
 
   auto ref_it = level_forward_ref.find(rhs);
-  if (ref_it!=level_forward_ref.end()) {
+  if (ref_it != level_forward_ref.end()) {
     auto ln_txt = ln->add_string(ref_it->second);
     auto lnode  = Lnast_node::create_ref(ln_txt);
     ln->set_data(rhs_id, lnode);
@@ -191,11 +191,10 @@ void Opt_lnast::process_todo(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
 }
 
 void Opt_lnast::opt(std::shared_ptr<Lnast> ln) {
-
   level = INT32_MAX;
   for (auto &lnid : ln->depth_postorder()) {
     if (ln->is_leaf(lnid))
-      continue; // TODO: Maybe a faster postorder traversal
+      continue;  // TODO: Maybe a faster postorder traversal
 
     if (level != lnid.level) {
       level = lnid.level;
@@ -204,13 +203,12 @@ void Opt_lnast::opt(std::shared_ptr<Lnast> ln) {
     }
 
     auto &data = ln->get_data(lnid);
-    //fmt::print("lnast:{}\n", data.type.debug_name());
+    // fmt::print("lnast:{}\n", data.type.debug_name());
 
-    switch(data.type.get_raw_ntype()) {
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus  : process_plus(ln, lnid); break;
+    switch (data.type.get_raw_ntype()) {
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: process_plus(ln, lnid); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: process_assign(ln, lnid); break;
       default: process_todo(ln, lnid);
     }
   }
 }
-

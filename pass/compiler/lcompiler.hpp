@@ -19,7 +19,6 @@
 #include "lnast_tolg.hpp"
 #include "thread_pool.hpp"
 
-
 class Lcompiler {
 private:
   const std::string_view path;
@@ -52,7 +51,7 @@ public:
   void do_fir_cprop();
   void do_fir_firbits();
   void do_fir_firmap_bitwidth();
-  void fir_thread_cprop(Lgraph* lg);
+  void fir_thread_cprop(Lgraph *lg);
   void fir_thread_ln2lg(std::shared_ptr<Lnast> lnast);
 
   std::string_view      get_top() { return top; };

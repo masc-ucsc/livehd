@@ -10,8 +10,6 @@ void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const S
   graph_pos2instance_pid = sub.graph_pos2instance_pid;
 }
 
-
-
 void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const {
   writer.Key("lgid");
   writer.Uint64(lgid);
@@ -188,8 +186,8 @@ void Sub_node::populate_graph_pos() {
 }
 
 void Sub_node::del_pin(Port_ID instance_pid) {
-  if (instance_pid==0)
-    return; // $ and % are special cases
+  if (instance_pid == 0)
+    return;  // $ and % are special cases
 
   I(has_instance_pin(instance_pid));
 

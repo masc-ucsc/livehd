@@ -68,12 +68,6 @@ void Pass_fplan_makefp::makefp_int(Lhd_floorplanner& fp, const std::string_view 
 Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", var), root_lg(nullptr) {
   root_lg = var.lgs[0];  // length checked by pass() before being passed to Pass_fplan_makefp
 
-
-
-
-
-
-
   annLayout* chip = new annLayout(5);
   chip->addComponentCluster("Cnorm", 1, 3, 4., 1.);
   chip->addComponentCluster("Csmallar", 1, 4, 2., 1.);
@@ -85,15 +79,6 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   I(success);
 
   return;
-
-
-
-
-
-
-
-
-
 
   std::string_view t_str = var.get("traversal");
 

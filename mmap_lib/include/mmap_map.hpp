@@ -1383,7 +1383,7 @@ private:
       mmap_fd = -1;
     }
 
-    uint64_t*    old_mmap_base = mmap_base;
+    uint64_t* old_mmap_base = mmap_base;
 
     Node* const          oldKeyVals = mKeyVals;
     uint8_t const* const oldInfo    = mInfo;

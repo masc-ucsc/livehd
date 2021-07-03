@@ -95,7 +95,7 @@ public:
   Container serialize() const;
   uint64_t  hash() const;
 
-  void dump() const;
+  void                 dump() const;
   [[nodiscard]] size_t get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
@@ -133,7 +133,7 @@ public:
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '1');
   }
-  bool is_false() const { return num==0; }
+  bool is_false() const { return num == 0; }
   bool is_string() const { return explicit_str && (bits & 0x7) == 0 && bits >= calc_num_bits(num); }
   bool is_mask() const { return ((num + 1) & (num)) == 0; }
   bool is_power2() const { return ((num - 1) & (num)) == 0; }
@@ -183,5 +183,5 @@ public:
   bool operator>(const Lconst &other) const { return num > other.num; }
   bool operator>=(const Lconst &other) const { return num >= other.num; }
 
-  const Number get_raw_num() const { return num; } // FOR DEBUG ONLY
+  const Number get_raw_num() const { return num; }  // FOR DEBUG ONLY
 };

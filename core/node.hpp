@@ -234,7 +234,7 @@ public:
     if (unlikely(is_type_sub() && pname != "%")) {
       return get_driver_pin_slow(pname);
     }
-    I(!Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
+    I(!Ntype::is_multi_driver(get_type_op()));               // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);  // could be invalid if not setup
   }
   Node_pin get_sink_pin_slow(std::string_view pname) const;
@@ -254,7 +254,7 @@ public:
     if (unlikely(is_type_sub() && pname != "%")) {
       return setup_driver_pin_slow(pname);
     }
-    GI(pname != "%", !Ntype::is_multi_driver(get_type_op())); // Use direct pid for multidriver
+    GI(pname != "%", !Ntype::is_multi_driver(get_type_op()));  // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);
   }
   Node_pin setup_driver_pin_raw(Port_ID pid) const;
@@ -308,7 +308,7 @@ public:
   bool             is_type_const() const;
   bool             is_type_attr() const;
   bool             is_type_flop() const;
-  bool             is_type_register() const; // Flop/Latch/Memory
+  bool             is_type_register() const;  // Flop/Latch/Memory
   bool             is_type_tup() const;
   bool             is_type_io() const { return nid == Hardcoded_input_nid || nid == Hardcoded_output_nid; }
   bool             is_type_loop_first() const { return Ntype::is_loop_first(get_type_op()); }

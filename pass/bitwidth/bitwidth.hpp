@@ -2,12 +2,12 @@
 #pragma once
 
 #include <unordered_map>
+
 #include "bitwidth_range.hpp"
 #include "lgedgeiter.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
 #include "pass.hpp"
-
 
 class Bitwidth {
 protected:
@@ -19,8 +19,8 @@ protected:
 
   static Attr get_key_attr(std::string_view key);
 
-  bool        not_finished;
-  absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range> bwmap;          // bwmap indexing with dpin_compact_class, nid
+  bool                                                         not_finished;
+  absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range> bwmap;  // bwmap indexing with dpin_compact_class, nid
   // absl::flat_hash_map<Node_pin::Compact_flat , Bitwidth_range> bwmap_flat;  // bwmap indexing with dpin_compact_flat, (lgid, nid)
   // absl::flat_hash_map<Node_pin::Compact      , Bitwidth_range> bwmap_hier;  // bwmap indexing with dpin_compact,      (hidx, nid)
 

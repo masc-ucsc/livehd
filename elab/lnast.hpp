@@ -41,8 +41,8 @@ struct Lnast_node {
   int16_t     subs;  // ssa subscript
 
   constexpr Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
-  constexpr Lnast_node(Lnast_ntype _type) : type(_type), subs(0) { }
-  constexpr Lnast_node(Lnast_ntype _type, const Etoken &_token) : type(_type), token(_token), subs(0) { }
+  constexpr Lnast_node(Lnast_ntype _type) : type(_type), subs(0) {}
+  constexpr Lnast_node(Lnast_ntype _type, const Etoken &_token) : type(_type), token(_token), subs(0) {}
 
   Lnast_node(Lnast_ntype _type, const Etoken &_token, int16_t _subs) : type(_type), token(_token), subs(_subs) {
     I(!type.is_invalid());
@@ -107,16 +107,11 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_tuple_delete)
   CREATE_LNAST_NODE(_select)
 
-  CREATE_LNAST_NODE_sv(_ref)
-  CREATE_LNAST_NODE_sv(_const)
+  CREATE_LNAST_NODE_sv(_ref) CREATE_LNAST_NODE_sv(_const)
 
-  CREATE_LNAST_NODE(_assert)
-  CREATE_LNAST_NODE(_err_flag)
+      CREATE_LNAST_NODE(_assert) CREATE_LNAST_NODE(_err_flag)
 
-  CREATE_LNAST_NODE(_tuple_add)
-  CREATE_LNAST_NODE(_tuple_get)
-  CREATE_LNAST_NODE(_attr_set)
-  CREATE_LNAST_NODE(_attr_get)
+          CREATE_LNAST_NODE(_tuple_add) CREATE_LNAST_NODE(_tuple_get) CREATE_LNAST_NODE(_attr_set) CREATE_LNAST_NODE(_attr_get)
 };
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
@@ -219,9 +214,11 @@ public:
   bool             is_register(std::string_view name) { return name.at(0) == '#'; }
   bool             is_output(std::string_view name) { return name.at(0) == '%'; }
   bool             is_input(std::string_view name) { return name.at(0) == '$'; }
-  std::string_view get_name(const Lnast_nid &nid)  { return get_data(nid).token.get_text(); }
-  std::string_view get_vname(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }  // better expression for Lgraph
-                                                                                               // passes
+  std::string_view get_name(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
+  std::string_view get_vname(const Lnast_nid &nid) {
+    return get_data(nid).token.get_text();
+  }  // better expression for Lgraph
+     // passes
   Lnast_ntype get_type(const Lnast_nid &nid) { return get_data(nid).type; }
   int16_t     get_subs(const Lnast_nid &nid) { return get_data(nid).subs; }
   Etoken      get_token(const Lnast_nid &nid) { return get_data(nid).token; }
