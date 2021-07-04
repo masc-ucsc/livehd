@@ -148,12 +148,6 @@ http_archive(
     url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/e8670bce1cf0ddc1da8fa97227da30306585ac34.zip",
 )
 
-load("@rules_hdl//toolchains/cpython:cpython_toolchain.bzl", "register_cpython_repository")
-
-register_cpython_repository()
-
-register_toolchains("@rules_hdl//toolchains/cpython:cpython_toolchain")
-
 load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
 
 dependency_support()
