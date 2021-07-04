@@ -14,109 +14,126 @@ node pins, edges and tables of attributes. An LGraph node is affiliated with a
 node type and each type defines different amounts of input and output node pins.
 For example, a node can have 3 input ports and 2 output pins. Each of the
 input/output pins can have many edges to other graph nodes. Every node pin has
-an affiliated node pid. In the code, every node_pin has a `Port_ID`. 
+an affiliated node pid. In the code, every node_pin has a `Port_ID`.
 
 A pair of driver pin and sink pin constitutes an edge. In the
 following API example, an edge is connected from a driver pin (pid1) to a sink
 pin (pid3). The bitwidth of the driver pin determines the edge bitwidth.
 
+### Node, Node_pin, and Edge Construction
 
-### Node, Node_pin, and Edge Construction 
+- create node
 
-* create node
-```
+```cpp
 new_node = lg->create_node()
 //note: type and/or bits still need to be assigned later
 ```
-* create node with node type assigned
-```
+
+- create node with node type assigned
+
+```cpp
 new_node = lg->create_node(Node_type_Op)
 //note: recommended way if you know the target node type
 ```
-* create a constant node
-```
+
+- create a constant node
+
+```cpp
 new_node = lg->create_node_const(value)
 //note: recommended way to create a const node
 ```
 
-* setup default driver pin for pin_0 of a node
-```
+- setup default driver pin for pin_0 of a node
+
+```cpp
 driver_pin = new_node.setup_driver_pin();
 //note: when you know the node type only has one output pin
 
 ```
 
-* setup default sink pin for pin_0 of a node
-```
+- setup default sink pin for pin_0 of a node
+
+```cpp
 sink_pin = new_node.setup_sink_pin()
 //note: when you know the node type only has one input pin
 ```
 
-* setup driver pin for pin_x of a node
-```
+- setup driver pin for pin_x of a node
+
+```cpp
 driver_pin = new_node.setup_driver_pin(pid)
 //note: when you know the pid, same as sink_pin
 ```
 
-* get the pid value of a node_pin object
-```
+- get the pid value of a node_pin object
+
+```cpp
 node_pin.get_pid()
 ```
 
-* add an edge between driver_pin and sink_pin
-```
+- add an edge between driver_pin and sink_pin
+
+```cpp
 driver_pin.connect(sink_pin);
 ```
 
-* get the driver node of an edge
-```
+- get the driver node of an edge
+
+```cpp
 driver_node = edge.driver.get_node()
 
 ```
 
-* use node as the index/key for a container
-```
+- use node as the index/key for a container
+
+```cpp
 absl::flat_hash_map<Node::Compact, int> my_map;
 my_map[node1.get_compact()] = 77;
 my_map[node2.get_compact()] = 42;
 ...
 ```
 
-* use node_pin as the index/key for a container
-```
+- use node_pin as the index/key for a container
+
+```cpp
 absl::flat_hash_map<Node_pin::Compact, int> my_map;
 my_map[node_pin1.get_compact()] = 14;
 my_map[node_pin2.get_compact()] = 58;
 ...
 ```
 
-* get the node_pin back from a Node_pin::Compact
-```
+- get the node_pin back from a Node_pin::Compact
+
+```cpp
 Node_pin dpin(lg, some_dpin.get_compact())
 ```
 
-* get the node back from a Node::Compact
-```
+- get the node back from a Node::Compact
+
+```cpp
 Node node(lg, some_node.get_compact())
 ```
 
+- create a LGraph input(output) with the name
 
-
-* create a LGraph input(output) with the name
-```
+```cpp
 new_node_pin = lg->add_graph_input(std::string_view)
 ```
 
-* debug information of a node
-```
+- debug information of a node
+
+```cpp
 node.debug_name()
 ```
 
-* debug information of a node_pin
-```
+- debug information of a node_pin
+
+```cpp
 node_pin.debug_name()
 ```
-* iterate output edges and get node/pin information from it
+
+- iterate output edges and get node/pin information from it
+
 ```cpp
 for (auto &out : node.out_edges()) {
   auto  dpin       = out.driver;
@@ -166,7 +183,7 @@ design will be transformed into a new LGraph and represented as a sub-graph node
 in the parent module. If the hierarchical traversal is used, every time the
 iterator encounters a sub-graph node, it will load the sub-graph persistent
 tables to the memory and traverse the subgraph recursively, ignoring the
-sub-graph input/outputs.  This cross-module traversal treats the hierarchical
+sub-graph input/outputs. This cross-module traversal treats the hierarchical
 netlist just like a flattened design. In this way, all integrated third-party
 tools could automatically achieve global design optimization or analysis by
 leveraging the LGraph hierarchical traversal feature.
@@ -174,7 +191,6 @@ leveraging the LGraph hierarchical traversal feature.
 ```cpp
 for (const auto &node:lg->forward_hier()) {...}
 ```
-
 
 ### Edge Iterators
 
@@ -190,7 +206,6 @@ And for output edges:
 for (const auto &out_edge : node.out_edges()) {...}
 ```
 
-
 ## LGraph Attribute Design
 
 Design attribute stands for the characteristic given to a LGraph node or node
@@ -201,21 +216,21 @@ attribute at different hierarchy of the netlist. A good design of attribute
 structure should be able to represent both non-hierarchical and hierarchical
 characteristic.
 
-
 ### Non-Hierarchical Attribute
+
 Non-hierarchical LGraph attributes include pin name, node name and line of
 source code. Such properties should be the same across different LGraph
 instantia- tions. Two instantiations of the same LGraph module will have the
 exact same user-defined node name on every node. For example, instantiations of
 a subgraph-2 in both top and subgraph-1 would maintain the same non-hierarchical
-attribute table.  
+attribute table.
 
 ```cpp
 node.set_name(std::string_view name);
 ```
 
-
 ### Hierarchical Attribute
+
 LGraph also support hierarchical attribute. It is achieved by using a tree data
 structure to record the design hierarchy. In LGraph, every graph has a unique
 id (lg_id), every instantiation of a graph would form some nodes in the tree and
@@ -227,13 +242,11 @@ attribute table. An example of hierarchical attribute is wire-delay.
 node_pin.set_delay(float delay);
 ```
 
-
 ## LGraph Node Type Semantics
-
 
 For each LGraph node, there is a specific semantic. This section explains the
 operation to perform for each node. It includes a precise way to compute the
-maximum and minimum value for the output. 
+maximum and minimum value for the output.
 
 In LGraph, the cells operate like having unlimited precision with signed
 numbers. Most HDLs focus on unsigned, but LiveHD handles the superset (sign and
@@ -241,18 +254,15 @@ unlimited precision). The precision is reduced only explicitly with few
 operations like and-gate with masks or Shifts. In LGraph, an unsigned value is
 a value that can not be negative.
 
-
 The document also explains corner cases in relationship to Verilog and how to
 convert to/from Verilog semantics. These are corner cases to deal with sign and
 precision. Each HDL may have different semantics, the Verilog is to showcase
 the specifics.
 
-
 In general the nodes have a single output with the exception of complex nodes
-like subgraphs or memories.  Ntypes with single output, have 'Y' as output. The
+like subgraphs or memories. Ntypes with single output, have 'Y' as output. The
 inputs are single characters 'A', 'B'... For most inputs, there can be many
-drivers. E.g: a single Sum cell can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1}
-= 20`, `A_{2} = a0`, and `A_{3} = a3`.
+drivers. E.g: a single Sum cell can do `Y=3+20+a0+a3` where `A_{0} = 3`, `A_{1} = 20`, `A_{2} = a0`, and `A_{3} = a3`.
 
 If an input can not have multiple drivers, a lower case name is used ('a',
 'b'...). E.g: the right shift cell is `Y=a>>b` because only one driver can
@@ -262,13 +272,10 @@ The section includes description on how to compute the maximum (`max`) and
 minimum (`min`) allowed result range. This is used by the bitwidth inference
 pass. To ease the explanation, a `sign` value means that the result may be
 negative (`a.sign == a.min<0`). `known` is true if the result sign is known
-(`a.known == a.max<0 or a.min>=0`), either positive or negative (`neg ==
-a.max<0`). The cells explanation also requires the to compute the bit mask
+(`a.known == a.max<0 or a.min>=0`), either positive or negative (`neg == a.max<0`). The cells explanation also requires the to compute the bit mask
 (`a.mask == (1<<a.bits)-1`).
 
-For any value (`a`), the number of bits required (`bits`) is `a.bits =
-log2(absmax(a.max,a.min))+a.sign?1:0`.
-
+For any value (`a`), the number of bits required (`bits`) is `a.bits = log2(absmax(a.max,a.min))+a.sign?1:0`.
 
 ### Sum_op
 
@@ -296,9 +303,9 @@ to all have the same length.
 
 #### Forward Propagation
 
-* $Y = \sum_{i=0}^{\infty} A_{i} - \sum_{i=0}^{\infty} B_{i}$
-* $Y.max = \sum_{i=0}^{\infty} A_{i}.max - \sum_{i=0}^{\infty} B_{i}.min$
-* $Y.min = \sum_{i=0}^{\infty} A_{i}.min - \sum_{i=0}^{\infty} B_{i}.max$
+- $Y = \sum_{i=0}^{\infty} A_{i} - \sum_{i=0}^{\infty} B_{i}$
+- $Y.max = \sum_{i=0}^{\infty} A_{i}.max - \sum_{i=0}^{\infty} B_{i}.min$
+- $Y.min = \sum_{i=0}^{\infty} A_{i}.min - \sum_{i=0}^{\infty} B_{i}.max$
 
 #### Backward Propagation
 
@@ -308,13 +315,13 @@ that have more precision than needed and reduce the max/min backwards.
 
 For example, if and all the inputs but one A ($A_{0}$) are known:
 
-* $A_{0}.max = Y.max - \sum{i=1}^{\infty} A_{i}.min + \sum_{i=0}^{\infty} B_{i}.max$
-* $A_{0}.min = Y.min - \sum{i=1}^{\infty} A_{i}.max + \sum_{i=0}^{\infty} B_{i}.min$
+- $A_{0}.max = Y.max - \sum{i=1}^{\infty} A_{i}.min + \sum_{i=0}^{\infty} B_{i}.max$
+- $A_{0}.min = Y.min - \sum{i=1}^{\infty} A_{i}.max + \sum_{i=0}^{\infty} B_{i}.min$
 
 If and all the inputs but one B ($B_{0}$) are known:
 
-* $B_{0}.max = \sum{i=0}^{\infty} A_{i}.max - \sum_{i=1}^{\infty} B_{i}.min - Y.min$
-* $B_{0}.min = \sum{i=0}^{\infty} A_{i}.min - \sum_{i=1}^{\infty} B_{i}.max - Y.max$
+- $B_{0}.max = \sum{i=0}^{\infty} A_{i}.max - \sum_{i=1}^{\infty} B_{i}.min - Y.min$
+- $B_{0}.min = \sum{i=0}^{\infty} A_{i}.min - \sum_{i=1}^{\infty} B_{i}.max - Y.max$
 
 #### Verilog Considerations
 
@@ -324,7 +331,6 @@ largest value. This is different from Sum_Op semantics were each input is
 signed or unsigned extended independent of the other inputs. To match the
 semantics, when mixing signed and unsigned, all the potentially negative inputs
 must be converted to unsign with the Ntype_op::Tposs.
-
 
 ```verilog
 logic signed [3:0] a = -1
@@ -342,20 +348,18 @@ c = 5b01111 + 5b0001 // this is the Verilog semantics by matching size
 c == -16 (!!)
 ```
 
-
 Since the operation is commutative. A Sum(a,b) can have these options:
 
-| size | A_sign | B_sign | Operation |
--------------------------------
-|  a==b  | S | S |  EQ(a,b) |
-|  a==b  | S | U |  EQ(a,b) | 
-|  a==b  | U | S |  EQ(a,b) |
-|  a==b  | U | U |  EQ(a,b) |
-|  a< b  | S | S |  LT(a,b) |
-|  a< b  | S | U |  LT(a,Tposs(b)) |
-|  a< b  | U | S |  LT(Tposs(a),b) |
-|  a< b  | U | U |  LT(Tposs(a),Tposs(b)) |
+## | size | A_sign | B_sign | Operation |
 
+| a==b | S | S | EQ(a,b) |
+| a==b | S | U | EQ(a,b) |
+| a==b | U | S | EQ(a,b) |
+| a==b | U | U | EQ(a,b) |
+| a< b | S | S | LT(a,b) |
+| a< b | S | U | LT(a,Tposs(b)) |
+| a< b | U | S | LT(Tposs(a),b) |
+| a< b | U | U | LT(Tposs(a),Tposs(b)) |
 
 The Verilog addition/substraction output can have more bits than the inputs.
 This is the same as in LGraph Sum. Nevertheless, Verilog requires to specify
@@ -375,14 +379,14 @@ precision an AND gate must be added. In the following examples only the 'g' and
 
 #### Peephole Optimizations
 
-* `Y = x-0+0+...` becomes `Y = x+...`
-* `Y = x-x+...` becomes `Y = ...`
-* `Y = x+x+...` becomes `Y = (x<<1)+...`
-* `Y = (x<<n)+(y<<m)` where m>n becomes `Y = (x+y<<(m-n)<<n`
-* `Y = (~x)+1+...` becomes `Y = ...-x`
-* `Y = a + (b<<n)` becomes `Y = {(a>>n)+b, a&n.mask}`
-* `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&n.mask}`
-* If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
+- `Y = x-0+0+...` becomes `Y = x+...`
+- `Y = x-x+...` becomes `Y = ...`
+- `Y = x+x+...` becomes `Y = (x<<1)+...`
+- `Y = (x<<n)+(y<<m)` where m>n becomes `Y = (x+y<<(m-n)<<n`
+- `Y = (~x)+1+...` becomes `Y = ...-x`
+- `Y = a + (b<<n)` becomes `Y = {(a>>n)+b, a&n.mask}`
+- `Y = a - (b<<n)` becomes `Y = {(a>>n)-b, a&n.mask}`
+- If every x,y... lower bit is zero `Y=x+y+...` becomes Y=((x>>1)+(y>>1)+..)<<1
 
 ### Ntype_op::Mult
 
@@ -407,16 +411,16 @@ digraph Mult {
 
 #### Forward Propagation
 
-* $Y = \prod_{i=0}^{\infty} A_{i}$
-* $Tmax = \prod_{i=0}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)$
-* $Tmin = \prod_{i=0}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)$
-* $neg  = \prod_{i=0}^{\infty} A_{i}.sign$
-* $known = \forall_{i=0}^{\infty} A_{i}.known$
+- $Y = \prod_{i=0}^{\infty} A_{i}$
+- $Tmax = \prod_{i=0}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)$
+- $Tmin = \prod_{i=0}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)$
+- $neg  = \prod_{i=0}^{\infty} A_{i}.sign$
+- $known = \forall_{i=0}^{\infty} A_{i}.known$
 
-* $Y.max = \begin{cases} -Tmin &      neg  \land known \\
+- $Y.max = \begin{cases} -Tmin &      neg  \land known \\
                           Tmax & \text{otherwise} \end{cases}$
 
-* $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+- $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
                          -Tmax & \text{otherwise} \end{cases}$
 
 When the result sign is not known, the max/min is conservatively computed.
@@ -427,26 +431,24 @@ If only one input is missing, it is possible to infer the max/min from the
 output and the other inputs. As usual, if all the inputs and outputs are known,
 it is possible to backward propagate to further constraint the inputs.
 
-
-* $Tmax = \frac{\prod_{i=1}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)}{Y.min}$
-* $Tmin = \frac{\prod_{i=1}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)}{Y.max}$
-* $neg  = Y.sign \times \prod_{i=1}^{\infty} A_{i}.sign$
-* $known = Y.known \land \forall_{i=1}^{\infty} A_{i}.known$
-* $A_{0}.max = \begin{cases} -Tmin &      neg  \land known \\
+- $Tmax = \frac{\prod_{i=1}^{\infty} \text{maxabs}(A_{i}.max, A_{i}.min)}{Y.min}$
+- $Tmin = \frac{\prod_{i=1}^{\infty} \text{minabs}(A_{i}.max, A_{i}.min)}{Y.max}$
+- $neg  = Y.sign \times \prod_{i=1}^{\infty} A_{i}.sign$
+- $known = Y.known \land \forall_{i=1}^{\infty} A_{i}.known$
+- $A_{0}.max = \begin{cases} -Tmin &      neg  \land known \\
                               Tmax & \text{otherwise} \end{cases}$
-* $A_{0}.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+- $A_{0}.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
                              -Tmax & \text{otherwise} \end{cases}$
-
 
 ### Verilog Considerations
 
 Unlike the Sum_Op, the Verilog 2 LiveHD translation does not need to extend the
-inputs to have matching sizes.  Multiplying/dividing signed and unsigned
+inputs to have matching sizes. Multiplying/dividing signed and unsigned
 numbers has the same result. The bit representation is the same if the result
 was signed or unsigned.
 
 LiveHD mult node result (Y) number of bits can be more efficient than in
-Verilog.  E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
+Verilog. E.g: if the max value of A0 is 3 (2 bits) and A1 is 5 (3bits). If the
 result is unsigned, the maximum result is 15 (4 bits). In Verilog, the result
 will always be 5 bits. If the Verilog result was to an unsigned variable.
 Either all the inputs were unsigned, or there should pass to an Ntype_op::Tposs to
@@ -455,11 +457,11 @@ LGraph that the output is to be treated as unsigned.
 
 #### Peephole Optimizations
 
-* `Y = a*1*...` becomes `Y=a*...`
-* `Y = a*0*...` becomes `Y=0`
-* `Y = power2a*...` becomes `Y=(...)<<log2(power2a)`
-* `Y = (power2a+power2b)*...` becomes `tmp=... ; Y = (tmp+tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
-* `Y = (power2a-power2b)*...` becomes `tmp=... ; Y = (tmp-tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
+- `Y = a*1*...` becomes `Y=a*...`
+- `Y = a*0*...` becomes `Y=0`
+- `Y = power2a*...` becomes `Y=(...)<<log2(power2a)`
+- `Y = (power2a+power2b)*...` becomes `tmp=... ; Y = (tmp+tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
+- `Y = (power2a-power2b)*...` becomes `tmp=... ; Y = (tmp-tmp<<power2b)<<(power2a-power2b)` when power2a>power2b
 
 ### Div_op
 
@@ -483,14 +485,14 @@ digraph Div {
 
 #### Forward Propagation
 
-* $Y = \frac{a}{b}$
-* $Tmax = \frac{\text{maxabs}(a.max,a.min)}{\text{minabs}(b.max,b.min)}$
-* $Tmin = \frac{\text{minabs}(a.max,a.min)}{\text{maxabs}(b.max,b.min)}$
-* $known = a.known \land \b.known$
-* $neg   = a.sign \times b.sign$
-* $Y.max = \begin{cases} -Tmin &      neg  \land known \\
+- $Y = \frac{a}{b}$
+- $Tmax = \frac{\text{maxabs}(a.max,a.min)}{\text{minabs}(b.max,b.min)}$
+- $Tmin = \frac{\text{minabs}(a.max,a.min)}{\text{maxabs}(b.max,b.min)}$
+- $known = a.known \land \b.known$
+- $neg   = a.sign \times b.sign$
+- $Y.max = \begin{cases} -Tmin &      neg  \land known \\
                           Tmax & \text{otherwise} \end{cases}$
-* $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
+- $Y.min = \begin{cases}  Tmin & \overline{neg}  \land known \\
                          -Tmax & \text{otherwise} \end{cases}$
 
 #### Backward Propagation
@@ -504,16 +506,15 @@ The same considerations as in the multiplication should be applied.
 
 #### Peephole Optimizations
 
-* `Y = a/1` becomes `Y=a`
-* `Y = 0/b` becomes `Y=0`
-* `Y = a/power2b` becomes `Y=a>>log2(power2b)` if `Y.known and !Y.neg`
-* `Y = a/power2b` becomes `Y=1+~(a>>log2(power2b))` if `Y.known and Y.neg`
-* `Y = (x*c)/a` if c.bits>a.bits becomes `Y = x * (c/a)` which should be a smaller division.
-* If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we
-* know that the division can be changed for a multiplication
-* `Y=(a*(((1<<(a.bits+2)))/b+1))>>(a.bits+2)` If a sign is not `known`. Then `Y
-* = Y.neg? (~Y_unsigned+1):Y_unsigned`
-
+- `Y = a/1` becomes `Y=a`
+- `Y = 0/b` becomes `Y=0`
+- `Y = a/power2b` becomes `Y=a>>log2(power2b)` if `Y.known and !Y.neg`
+- `Y = a/power2b` becomes `Y=1+~(a>>log2(power2b))` if `Y.known and Y.neg`
+- `Y = (x*c)/a` if c.bits>a.bits becomes `Y = x * (c/a)` which should be a smaller division.
+- If b is a constant and `Y.known and !Y.neg`. From the hackers delight, we
+- know that the division can be changed for a multiplication
+- `Y=(a*(((1<<(a.bits+2)))/b+1))>>(a.bits+2)` If a sign is not `known`. Then `Y
+- = Y.neg? (~Y_unsigned+1):Y_unsigned`
 
 #### Modulo
 
@@ -521,15 +522,14 @@ There is no mod cell (Ntype_op::Mod) in LGraph. The reason is that a modulo
 different from a power of 2 is very rare in hardware. If the language supports
 modulo operations, they must be translated to division/multiplication.
 
-
 ```
- y = a mod b
+y = a mod b
 ```
 
 It is the same as:
 
 ```
- y = a-b*(a/b)
+y = a-b*(a/b)
 ```
 
 If b is a power of 2, the division optimization will transform the modulo operation to:
@@ -564,19 +564,18 @@ digraph Not {
 
 #### Forward Propagation
 
-* $Y = \text{bitwise-not}(\text{a})$
-* $Y.max = \text{max}(~a.max,~a.min)$
-* $Y.min = \text{min}(~a.max,~a.min)$
+- $Y = \text{bitwise-not}(\text{a})$
+- $Y.max = \text{max}(~a.max,~a.min)$
+- $Y.min = \text{min}(~a.max,~a.min)$
 
 #### Backward Propagation
 
-* $a.max = \text{max}(~Y.max,~Y.min)$
-* $a.min = \text{min}(~Y.max,~Y.min)$
+- $a.max = \text{max}(~Y.max,~Y.min)$
+- $a.min = \text{min}(~Y.max,~Y.min)$
 
 ### Verilog Considerations
 
 Same semantics as verilog
-
 
 #### Peephole Optimizations
 
@@ -586,7 +585,6 @@ No optimizations by itself, it has a single input. Other operations like Sum_Op 
 
 `And` is a typical AND gate with multiple inputs. All the inputs connect to pin
 'A' because input order does not matter. The result is always a signed number.
-
 
 ```{.graph .center caption="Ntype_op::And LGraph Node."}
 digraph And {
@@ -604,10 +602,10 @@ digraph And {
 
 #### Forward Propagation
 
-* $Y = \forall_{i=0}^{\infty} Y \& A_{i}$
-* $m = \forall_{i=0}^{\infty} min(m,A_{i}.bits)$
-* $Y.max = (1\ll m)-1$
-* $Y.min = -Y.max-1$
+- $Y = \forall_{i=0}^{\infty} Y \& A_{i}$
+- $m = \forall_{i=0}^{\infty} min(m,A_{i}.bits)$
+- $Y.max = (1\ll m)-1$
+- $Y.min = -Y.max-1$
 
 #### Backward Propagation
 
@@ -615,15 +613,12 @@ The And cell has a significant backpropagation impact. Even if some inputs had
 more bits, after the And cell the upper bits are dropped. This allows the back
 propagation to indicate that those bits are useless.
 
-* $a.max = Y.max $
-* $a.min = -Y.max-1 $
+- $a.max = Y.max $
+- $a.min = -Y.max-1 $
 
 #### Other Considerations
 
-
-
 #### Peephole Optimizations
-
 
 ### Ntype_op::Tposs
 
@@ -649,48 +644,43 @@ digraph Unsigned {
 
 #### Forward Propagation
 
-* $Y     = \begin{cases} a               & a \get 0 \\
+- $Y     = \begin{cases} a               & a \get 0 \\
                          a.mask+a+1      & otherwise \end{cases}$
-* $Y.max = \begin{cases} a.max           & a.min \get 0 \\
+- $Y.max = \begin{cases} a.max           & a.min \get 0 \\
                          a.mask          & otherwise \end{cases}$
-* $Y.min = 0$
+- $Y.min = 0$
 
 #### Backward Propagation
 
-* $a.max = Y.max $
-* $a.min = -Y.max-1 $
-
+- $a.max = Y.max $
+- $a.min = -Y.max-1 $
 
 #### Other Considerations
 
 It is important to notice that Ntype_op::Tposs is different from a absolute
 calculation. It is like a concatenating a zero to convert the signed values.
 
-
 #### Peephole Optimizations
 
-* `Y = Tposs(a)` becomes `Y= a` when `a.min>=0`
-* `Y = And(Tposs(a),a.mask)` becomes `Y= a`
-* `Y = And(Tposs(a),b)` can become `Y= Tposs(And(a,b))`
-* `Y = Tposs(const)` becomes `Y=const` when `const>=0`
+- `Y = Tposs(a)` becomes `Y= a` when `a.min>=0`
+- `Y = And(Tposs(a),a.mask)` becomes `Y= a`
+- `Y = And(Tposs(a),b)` can become `Y= Tposs(And(a,b))`
+- `Y = Tposs(const)` becomes `Y=const` when `const>=0`
 
 ### Comparators
 
 LT, GT, EQ
 
-
 There are only 3 comparators. Other typically found like LE, GE, and NE can be
-created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
-~GE`, and `NE = ~EQ`.
+created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT = ~GE`, and `NE = ~EQ`.
 
 #### Forward Propagation
 
-* `Y = A LT B`
+- `Y = A LT B`
 
-* `Y = A0 LT B and A1 LT B`
+- `Y = A0 LT B and A1 LT B`
 
-* `Y = A0 LT B0 and A1 LT B0 and A0 LT B1 and A1 LT B1`
-
+- `Y = A0 LT B0 and A1 LT B0 and A0 LT B1 and A1 LT B1`
 
 #### Backward Propagation
 
@@ -698,17 +688,13 @@ created by simply negating one of the LGraph comparators. `GT = ~LE`, `LT =
 
 #### Other Considerations
 
-
 Verilog treats all the inputs as unsigned if any of them is unsigned. LGraph treats all the inputs as signed all the time.
-
 
 ### SHL_op
 
 Shift Left performs the typical shift left when there is a single amount
 (`a<<amt`). The allow supports multiple left shift amounts. In this case the
-shift left is used to build one hot encoding mask.  (`1<<(1,2) ==
-(1<<1)|(1<<2)`)
-
+shift left is used to build one hot encoding mask. (`1<<(1,2) == (1<<1)|(1<<2)`)
 
 The result for when there are not amounts (`a<<()`) is `-1`. Notice that this
 is not ZERO but -1. The -1 means that all the bits are set. The reason is that
@@ -729,21 +715,18 @@ a `>>>` if the input is Verilog unsigned (`ShiftRigt(a,b)`)
 
 ### Mux_op
 
-
 #### Forward Propagation
 
-* $Y = P_{(1+P_{0}}$
-* $Y.max = (1\ll m)-1$
-* $Y.max = \forall_{i=0}^{\infty} P_{i}.max$
-* $Y.max = \forall_{i=0}^{\infty} P_{i}.min$
+- $Y = P_{(1+P_{0}}$
+- $Y.max = (1\ll m)-1$
+- $Y.max = \forall_{i=0}^{\infty} P_{i}.max$
+- $Y.max = \forall_{i=0}^{\infty} P_{i}.min$
 
 #### Backward Propagation
 
 #### Peephole Optimizations
 
 #### Other Considerations
-
-
 
 ### LUT_op
 
@@ -753,7 +736,7 @@ reduce AND `a =u= -1` // unsigned equal
 
 ### Or_op
 
-reduce OR `a != 0` 
+reduce OR `a != 0`
 
 ### Xor_op
 
@@ -772,7 +755,6 @@ reduce xor is a chain of XORs.
 ### Memory_op
 
 Memory is the basic block to represent SRAM-like structures. Any large storage will benefit from using memory arrays instead of flops, which are slower to simulate. These memories are highly configurable.
-
 
 ```{.graph .center caption="Memory LGraph Node."}
 digraph Memory {
@@ -808,10 +790,10 @@ digraph Memory {
 }
 ```
 
-* `s` (`size`) is for the array size in number of entries
-* `b` (`bits`) is the number of bits per entry
-* `f` (`fwd`)     points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
-* `c`,`d`,`e`,`q`... are the memory configuration, data, address ports
+- `s` (`size`) is for the array size in number of entries
+- `b` (`bits`) is the number of bits per entry
+- `f` (`fwd`) points to a 0/1 constant driver pin to indicate if writes forward value (`0b0` for write-only ports). Effectively, it means zero cycles read latency when enabled. `fwd` is more than just setting `latency=0`. Even with latency zero, the write delay affects until the result is visible. With `fwd` enabled, the write latency does not matter to observe the results. This requires a costly forwarding logic.
+- `c`,`d`,`e`,`q`... are the memory configuration, data, address ports
 
 Ports (`a`,`c`...`p`,`w`) are arrays/vectors to support multiported memories. If a single instance
 exists in a port, the same is used across all the ports. E.g: if clock (`c`) is populated:
@@ -826,31 +808,30 @@ mem2.c[2] = clk2 // clock for memory port 2
 
 Each memory port (rd, wr, or rd/wr) has the following ports:
 
-* `a` (`addr`)    points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
-* `c` (`clock`) points to the clock driver pin
-* `d` (`data_in`)   points to the write data driver pin (read result is in `q` port).
-* `e` (`enable`)  points to the driver pin for read/write enable.
-* `l` (`latency`) points to an integer constant driver pin (2 bits always). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
-* `w` (`wmask`)   Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
-* `p` (`posedge`) points to a 1/0 constant driver pin
-* `m` (`mode`)   points to the driver pin or switching between read (0) and write mode (1) (single bit)
-* `Q` (`data_out`)  is a driver pin with the data read from the memory
+- `a` (`addr`) points to the driver pin for the address. The address bits should match the array size (`ceil(log2(s))`)
+- `c` (`clock`) points to the clock driver pin
+- `d` (`data_in`) points to the write data driver pin (read result is in `q` port).
+- `e` (`enable`) points to the driver pin for read/write enable.
+- `l` (`latency`) points to an integer constant driver pin (2 bits always). For writes `latency from 1 to 3`, for reads `latency from 0 to 3`
+- `w` (`wmask`) Points to the write mask (1 == write, 0==no write). The mask bust be a big as the number of bits per entry (`b`). The `wmask` pin can be disconnected which means no write mask (a write will write all the bits).
+- `p` (`posedge`) points to a 1/0 constant driver pin
+- `m` (`mode`) points to the driver pin or switching between read (0) and write mode (1) (single bit)
+- `Q` (`data_out`) is a driver pin with the data read from the memory
 
 All the entries but the `wmask` must be populated. If the `wmask` is not set, a
-full write size is expected.  Read-only ports do not have `data` and `wmask`
-fields if the write use the low ports (0,1...).  By placing the read-only ports
+full write size is expected. Read-only ports do not have `data` and `wmask`
+fields if the write use the low ports (0,1...). By placing the read-only ports
 to the high numbers, we can avoid populating the wmask (`m`) and data out (`q`)
 ports. If the read ports use low port numbers those fields must be populated to
 allow the correct matching between write port (`a[n]`) and write result
 (`q[n]`).
 
 All the ports must be populated with the correct size. This is important
-because some modules access the field by bit position. 
+because some modules access the field by bit position.
 If it is not used, it will point to a zero constant with the correct number of bits.
 The exception to this is `wmask` which, if `b` indicates 8 bits per entry,
 will be equivalent to `0xFF`. Setting wmask to `0b1` will mean a 1 bit zero,
 and the memory will be incorrectly operated.
-
 
 The memory usually has power of two sizes. If the size is not a power of 2, the
 address is rounded up. Writes to the invalid addresses will generated random
@@ -866,22 +847,19 @@ memory updates. Reads should read random data.
 
 ### SubGraph_op
 
-
 And_Op: bitwise AND with 2 outputs single bit reduction (RED) or bitwise
 Y = VAL&..&VAL ; RED= &Y
 
-
 #### Forward Propagation
 
-* $Y = \left\{\begin{matrix} VAL>>OFF & SZ==0 \\ (VAL>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
-* $Y.max = \left\{\begin{matrix} VAL.max>>OFF & SZ==0 \\ (VAL.max>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
-* $Y.min = 0$
-* $Y.sign = 0$
+- $Y = \left\{\begin{matrix} VAL>>OFF & SZ==0 \\ (VAL>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
+- $Y.max = \left\{\begin{matrix} VAL.max>>OFF & SZ==0 \\ (VAL.max>>OFF) \& (1<<SZ)-1) & otherwise \end{matrix}\right.$
+- $Y.min = 0$
+- $Y.sign = 0$
 
 #### Backward Propagation
 
 The sign can not be backward propagated because Pick_Op removes the sign no matter the input sign.
-
 
 # Generate PDF
 
@@ -891,30 +869,29 @@ https://pianomanfrazier.com/post/write-a-book-with-markdown/
 
 #### To be continued ...
 
-
 ## LGraph Optimization
 
 Not all the nodes have the same complexity overhead. When performing peephole
 optimization is possible to trade one set of nodes for others. In general,
 we have this set of overheads:
 
-* 0 overhead: not, get_mask, set_mask, sext, and SHL/SRA with constant shift
+- 0 overhead: not, get_mask, set_mask, sext, and SHL/SRA with constant shift
   amounts. The rational is that those are just "wiring" cells to connect or
-  extract wires across.  The NOT gate is not really zero, but it could be easily
+  extract wires across. The NOT gate is not really zero, but it could be easily
   mixed with sorrounding cells.
 
-* 1 overhead: And, Or, Xor, LUT, Mux
+- 1 overhead: And, Or, Xor, LUT, Mux
 
-* 3 overhead: LT, GT, EQ, Ror
+- 3 overhead: LT, GT, EQ, Ror
 
-* 4 overhead: Less than 4 bit output Sum, and SHL/SRA with non-compile time
+- 4 overhead: Less than 4 bit output Sum, and SHL/SRA with non-compile time
   shift amount. This can be costly an require hardware like barrel shifters.
 
-* 5 overhead: large Sum, SHL/SRA.
+- 5 overhead: large Sum, SHL/SRA.
 
-* 6 Overhead: Mult/Div
+- 6 Overhead: Mult/Div
 
-If a overhead level can be elininated having a small number of different  cells
+If a overhead level can be elininated having a small number of different cells
 with a smaller overhead level,the translation makes sense. Notice the "small
 number of cells", after all everything can be translated to nand gates. A 3x
 factor is somewhat reasonable. This means that a 5-level overhead is fine to be
@@ -923,5 +900,3 @@ overhead cells are not included in the list of cells in the replacement.
 
 This is a heuristic. Once works, it is a nice target to use AI to decide
 when/if a transformation is worth.
-
-
