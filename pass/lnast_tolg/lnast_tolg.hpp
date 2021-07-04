@@ -93,7 +93,6 @@ protected:
   }
 
   bool subgraph_outp_is_tuple(Sub_node *sub);
-  void subgraph_io_connection(Lgraph *lg, Sub_node *sub, std::string_view arg_tup_name, std::string_view res_name, Node subg_node);
   void process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc);
   void split_hier_name(std::string_view hier_name, std::vector<std::string_view> &hier_inp_subnames);
 

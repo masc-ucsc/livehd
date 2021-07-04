@@ -17,6 +17,8 @@ sub = ||{
 yy1 = sub()
 yy2 = sub()
 
-%out1 = yy1.xx1 + yy2.xx1
-%out2 = yy1.xx2 + yy2.xx2
+%out1 = yy1.xx1.out1 + yy2.xx1.out1
+%out2 = yy1.xx2.out1 + yy2.xx2.out1
+// %out1 = yy1.xx1.out1 + yy2.xx1.out1
+// %out2 = yy1.xx2 + yy2.xx2
 
