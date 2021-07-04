@@ -1758,42 +1758,42 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kStop: {  // Stop
-      // Translate to: if (cond) then stop(clk, return val)
-      std::string stop_cond = ReturnExprString(lnast, stmt.stop().en(), parent_node, true);
-      std::string stop_clk  = ReturnExprString(lnast, stmt.stop().clk(), parent_node, true);
+      // // Translate to: if (cond) then stop(clk, return val)
+      // std::string stop_cond = ReturnExprString(lnast, stmt.stop().en(), parent_node, true);
+      // std::string stop_clk  = ReturnExprString(lnast, stmt.stop().clk(), parent_node, true);
 
-      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
-      lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(stop_cond)));
-      auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
+      // auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
+      // lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(stop_cond)));
+      // auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
 
-      auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
-      lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
-      lnast.add_child(idx_fncall, Lnast_node::create_const("stop"));
-      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stop_clk)));
-      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(std::to_string(stmt.stop().return_value()))));
+      // auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
+      // lnast.add_child(idx_fncall, Lnast_node::create_const("stop"));
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stop_clk)));
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(std::to_string(stmt.stop().return_value()))));
       break;
     }
     case firrtl::FirrtlPB_Statement::kPrintf: {  // Printf
-      // Translate to: if (cond) then printf(clk, str, vals)
-      std::string              printf_cond = ReturnExprString(lnast, stmt.printf().en(), parent_node, true);
-      std::string              printf_clk  = ReturnExprString(lnast, stmt.printf().clk(), parent_node, true);
-      std::vector<std::string> arg_list;
-      for (int i = 0; i < stmt.printf().arg_size(); i++) {
-        arg_list.emplace_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
-      }
+      // // Translate to: if (cond) then printf(clk, str, vals)
+      // std::string              printf_cond = ReturnExprString(lnast, stmt.printf().en(), parent_node, true);
+      // std::string              printf_clk  = ReturnExprString(lnast, stmt.printf().clk(), parent_node, true);
+      // std::vector<std::string> arg_list;
+      // for (int i = 0; i < stmt.printf().arg_size(); i++) {
+      //   arg_list.emplace_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
+      // }
 
-      auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
-      lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(printf_cond)));
-      auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
+      // auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
+      // lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(printf_cond)));
+      // auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
 
-      auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
-      lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
-      lnast.add_child(idx_fncall, Lnast_node::create_const("printf"));
-      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(printf_clk)));
-      lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stmt.printf().value())));
-      for (const auto& arg_str : arg_list) {
-        lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(arg_str)));
-      }
+      // auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
+      // lnast.add_child(idx_fncall, Lnast_node::create_const("printf"));
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(printf_clk)));
+      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stmt.printf().value())));
+      // for (const auto& arg_str : arg_list) {
+      //   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(arg_str)));
+      // }
       break;
     }
     case firrtl::FirrtlPB_Statement::kSkip: {  // Skip
