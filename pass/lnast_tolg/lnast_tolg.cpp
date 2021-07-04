@@ -22,15 +22,13 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast
   if (src.empty())
     src = "-";
 
-  // move %/$ generation at the pb->lnast
   lg = Lgraph::create(path, module_name, src);
+  fmt::print("DEBUG01 module_name:{}\n", module_name);
 
   name2dpin["$"] = lg->get_graph_input("$");
   I(!lg->get_graph_input("$").is_invalid());
   I(!lg->get_graph_output("%").is_invalid());
-  // name2dpin["%"] = lg->get_graph_output("%");
 
-  setup_tuple_ref(lg, "%");
   std::vector<Lgraph *> lgs;
   top_stmts2lgraph(lg, top_stmts);
   lgs.push_back(lg);
@@ -1526,13 +1524,25 @@ void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx
 }
 
 void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc) {
-  auto c0_fc       = lnast->get_first_child(lnidx_fc);
-  auto func_name   = lnast->get_vname(lnast->get_sibling_next(c0_fc));
-  auto cn_fc       = lnast->get_last_child(lnidx_fc);
-  auto cn_fc_sname = lnast->get_sname(cn_fc);
-  if (func_name.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
+  auto c0_fc         = lnast->get_first_child(lnidx_fc);
+  auto func_name_ori = lnast->get_vname(lnast->get_sibling_next(c0_fc));
+  auto cn_fc         = lnast->get_last_child(lnidx_fc);
+  auto cn_fc_sname   = lnast->get_sname(cn_fc);
+
+  if (func_name_ori.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
     process_direct_op_connection(lg, lnidx_fc);
     return;
+  }
+
+  std::string func_name;
+  if (module_name.substr(0,9) == "__firrtl_") {
+    func_name = func_name_ori;
+  } else if (func_name_ori.substr(0,2) == "__") { //__flop, __mem ... etc
+    func_name = func_name_ori;
+  } else if (inlined_func_names.find(std::string{func_name_ori}) == inlined_func_names.end()) {
+    func_name = func_name_ori;
+  } else {
+    func_name = absl::StrCat(module_name, ".", func_name_ori);
   }
 
   auto        ret_name = lnast->get_sname(c0_fc);
@@ -1652,6 +1662,7 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
 
   name2dpin[func_vname] = tup_add.setup_driver_pin();  // note: record only the function_name instead of top.function_name
   tup_add.setup_driver_pin().set_name(func_vname);
+  inlined_func_names.insert(std::string{func_vname});
 };
 
 void Lnast_tolg::process_ast_uif_op(Lgraph *lg, const Lnast_nid &lnidx) {

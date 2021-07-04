@@ -1,0 +1,6 @@
+sub = ||{
+  %xx1 = 77
+  %xx2 = 88
+}
+yy1 = sub()
+%out1 = yy1.xx1 + yy1.xx2

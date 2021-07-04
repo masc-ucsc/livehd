@@ -4,7 +4,6 @@ sub = ||{
     $foo.__sbits = 4
     counter.__sbits = 8
     counter = counter.__create_flop
-
     %out1 = counter
 
     counter := counter + $foo
