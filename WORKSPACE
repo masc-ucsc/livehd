@@ -14,7 +14,7 @@ http_archive(
 
 load("@rules_foreign_cc//:workspace_definitions.bzl", "rules_foreign_cc_dependencies")
 
-rules_foreign_cc_dependencies(register_preinstalled_tools = False)
+rules_foreign_cc_dependencies()
 
 new_git_repository(
     name = "mustache",
