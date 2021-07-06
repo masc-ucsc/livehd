@@ -74,6 +74,7 @@ for line in file:
         tree.move_node(inst_module, cur_module)
 
 tree.show()
+print(tree.depth())
 
 # tree.create_node("top", "top")
 # tree.create_node("m0 (loc = 5)", "m0", parent = "top")
