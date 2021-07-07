@@ -74,5 +74,15 @@ for line in file:
         tree.move_node(inst_module, cur_module)
 
 tree.show()
-print(tree.depth())
 
+total_parent_cnt = 0
+total_children_cnt = 0
+for node in tree.expand_tree(mode=Tree.DEPTH):
+    if (tree[node].is_leaf()):
+        continue
+    total_parent_cnt += 1
+    total_children_cnt += len(tree.children(node))
+
+print("total_parents_cnt ", total_parent_cnt)
+print("total_children_cnt", total_children_cnt)
+print("average children per module = ", total_children_cnt/total_parent_cnt)
