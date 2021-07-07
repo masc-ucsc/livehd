@@ -240,7 +240,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     if (unlikely(hidx.is_root()))
       return;
 
-    I(href.is_leaf(hidx));  // Otherwise, it will be not visited
+    // I(href.is_leaf(hidx));  // Otherwise, it will be not visited
     visited[data.lgid] = 0;
 
     auto *lg = Lgraph::open(path, data.lgid);

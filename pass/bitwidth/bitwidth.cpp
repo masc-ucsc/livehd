@@ -1309,6 +1309,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         [this](Node_pin &dpin) {
           if (dpin.get_bits()) {
             Bitwidth_range bw;
+            
             bw.set_sbits_range(dpin.get_bits());  // We do not know if it was sign/unsigned start +1 in case
             bwmap.insert_or_assign(dpin.get_compact_class(), bw);
           }

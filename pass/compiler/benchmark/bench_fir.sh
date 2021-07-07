@@ -22,9 +22,9 @@ else
   LGDB=/local/scrap/masc/swang203/lgdb   # NSF
 fi
 
-GVIZ='true'
-INSTANCES='16'
-# INSTANCES='256'
+GVIZ='false'
+# INSTANCES='16'
+INSTANCES='256'
 
 rm -rf $LGDB
 
@@ -51,7 +51,7 @@ pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
 
-pts='Snx64Insts16'
+pts='Snx6400Insts16'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -77,6 +77,7 @@ fucntion() {
     # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
     # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
+    GVIZ='true'
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
 
     # perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 

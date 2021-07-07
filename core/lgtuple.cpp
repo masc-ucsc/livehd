@@ -766,7 +766,8 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   I(!fixed_key.empty());
   key_map.emplace_back(fixed_key, dpin);
 
-#ifndef NDEBUG
+
+#ifdef DEBUG_SLOW
   for (const auto &e : key_map) {
     auto lower = get_all_but_last_level(e.first);
     if (is_attribute(e.first)) {
