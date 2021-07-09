@@ -29,6 +29,10 @@ protected:
   void attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  bool is_hex(std::string test_string);
+  std::string hex_to_bin(std::string hex_str);
+  int range_low(std::string binstr );
+  int range_high(std::string binstr );
   void attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);

@@ -549,9 +549,22 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
   Lnast_nid node_idx;
 
   auto num_of_bits = Lconst(pin.get_node().get_type_name());
+	std::string const_num;
+	std::string const_bin;
+	std::string upper_val, lower_val;
   for (const auto& e : pin.get_node().inp_edges_ordered()) {
     if (e.driver.get_node().get_type_op() == Ntype_op::Const) {
-      num_of_bits = Lconst(e.driver.get_node().get_type_const().to_pyrope());  // get_the val of const
+      num_of_bits = Lconst(const_num);  // get_the val of const
+			const_num = e.driver.get_node().get_type_const().to_pyrope();
+			if(is_hex(const_num)) {
+        const_bin = hex_to_bin(const_num);
+        upper_val = std::to_string(range_high(const_bin));
+        lower_val = std::to_string(range_low(const_bin));
+			} else {
+        //num is in decimal
+        lower_val = "0"; 
+				upper_val = std::to_string(num_of_bits.get_bits()-2);
+			}
       break;
     }
   }
@@ -563,15 +576,17 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
       auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
       lnast.add_child(gm_tup_node, Lnast_node::create_ref(tmp_varr));
 
-      auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-      lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
-      lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("0"));
-      auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-      lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
-      lnast.add_child(asg_rang_end_node,
-                      Lnast_node::create_const(lnast.add_string(std::to_string(
-                          num_of_bits.get_bits() - 2))));  //"-2" because the const "1" had num_of_bits.get_bits() = 2
-
+			if (num_of_bits.get_bits()==2) {
+        lnast.add_child(gm_tup_node, Lnast_node::create_const("0"));
+			} else {
+				auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
+				lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
+				lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(lnast.add_string(lower_val)));//"0");
+				auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
+				lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
+				lnast.add_child(asg_rang_end_node,
+                      Lnast_node::create_const(lnast.add_string(upper_val)));//std::to_string(num_of_bits.get_bits() - 2))));  //"-2" because the const "1" had num_of_bits.get_bits() = 2
+      }
       node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
       break;
     }
@@ -1263,4 +1278,104 @@ bool Pass_lnast_fromlg::has_prefix(std::string_view test_string) {
 }
 bool Pass_lnast_fromlg::has_prefix(std::string test_string) {
   return (test_string.find("$") == 0 || test_string.find("#") == 0 || test_string.find("%") == 0);
+}
+
+
+bool Pass_lnast_fromlg::is_hex(std::string test_string) {
+  if (test_string.find("0x") == 0) {
+    return true;
+  }
+  return false;
+}
+
+std::string Pass_lnast_fromlg::hex_to_bin(std::string hex_str) {
+	if(hex_str.find("0x")==0) {
+    hex_str = hex_str.substr(2);//removes "0x" from beginning
+	}
+	long int i = 0;
+  std::string bin_str="";
+	while (hex_str[i]) {
+
+		switch (hex_str[i]) {
+		case '0':
+			absl::StrAppend(&bin_str, "0000"); break;
+		case '1':
+			absl::StrAppend(&bin_str, "0001"); break;
+		case '2':
+			absl::StrAppend(&bin_str, "0010"); break;
+		case '3':
+			absl::StrAppend(&bin_str, "0011");	break;
+		case '4':
+			absl::StrAppend(&bin_str, "0100");	break;
+		case '5':
+			absl::StrAppend(&bin_str, "0101");	break;
+		case '6':
+			absl::StrAppend(&bin_str, "0110");	break;
+		case '7':
+			absl::StrAppend(&bin_str, "0111");	break;
+		case '8':
+			absl::StrAppend(&bin_str, "1000");	break;
+		case '9':
+			absl::StrAppend(&bin_str, "1001");	break;
+		case 'A':
+		case 'a':
+			absl::StrAppend(&bin_str, "1010");	break;
+		case 'B':
+		case 'b':
+			absl::StrAppend(&bin_str, "1011");	break;
+		case 'C':
+		case 'c':
+			absl::StrAppend(&bin_str, "1100");	break;
+		case 'D':
+		case 'd':
+			absl::StrAppend(&bin_str, "1101");	break;
+		case 'E':
+		case 'e':
+			absl::StrAppend(&bin_str, "1110");	break;
+		case 'F':
+		case 'f':
+			absl::StrAppend(&bin_str, "1111");	break;
+		default:
+			Pass::error("Error: Invalid hexadecimal digit.\n");
+		}
+		i++;
+	}
+	return bin_str;
+}
+int Pass_lnast_fromlg::range_high(std::string binstr) {
+//std::string binstr = "11110000";
+
+//std::cout <<"binstr: "<< binstr << ":" << binstr.length()<<std::endl;
+
+bool cont = true;
+long int i = 0;
+int msb_high = binstr.length() -1;
+//std::cout <<"msb_high:" << msb_high <<std::endl;
+while (binstr[i]&&cont==true) {
+    switch(binstr[i]) {
+        case '0': {msb_high-=1; break;}
+        default: {cont= false;break;}
+    }
+    i++;
+}
+
+return msb_high;
+}
+int Pass_lnast_fromlg::range_low(std::string binstr ){
+
+bool cont = true;
+long int j = 0;
+int lsb_high = 0;
+std::string bin_str_rev = std::string(binstr.rbegin(),binstr.rend());
+//std::cout << "bin_str_rev: "<<bin_str_rev << ":" << bin_str_rev.length()<<std::endl;
+
+while (bin_str_rev[j] && cont==true) {
+    switch(bin_str_rev[j]) {
+        case '0': {lsb_high+=1; break;}
+        default: {cont=false;break;}
+    }
+    j++;
+}
+//std::cout << std::endl;
+return lsb_high;
 }
