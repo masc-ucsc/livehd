@@ -1343,14 +1343,10 @@ std::string Pass_lnast_fromlg::hex_to_bin(std::string hex_str) {
 	return bin_str;
 }
 int Pass_lnast_fromlg::range_high(std::string binstr) {
-//std::string binstr = "11110000";
-
-//std::cout <<"binstr: "<< binstr << ":" << binstr.length()<<std::endl;
 
 bool cont = true;
 long int i = 0;
 int msb_high = binstr.length() -1;
-//std::cout <<"msb_high:" << msb_high <<std::endl;
 while (binstr[i]&&cont==true) {
     switch(binstr[i]) {
         case '0': {msb_high-=1; break;}
@@ -1360,6 +1356,8 @@ while (binstr[i]&&cont==true) {
 }
 
 return msb_high;
+
+
 }
 int Pass_lnast_fromlg::range_low(std::string binstr ){
 
@@ -1367,7 +1365,6 @@ bool cont = true;
 long int j = 0;
 int lsb_high = 0;
 std::string bin_str_rev = std::string(binstr.rbegin(),binstr.rend());
-//std::cout << "bin_str_rev: "<<bin_str_rev << ":" << bin_str_rev.length()<<std::endl;
 
 while (bin_str_rev[j] && cont==true) {
     switch(bin_str_rev[j]) {
@@ -1376,6 +1373,5 @@ while (bin_str_rev[j] && cont==true) {
     }
     j++;
 }
-//std::cout << std::endl;
 return lsb_high;
 }
