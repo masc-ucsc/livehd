@@ -76,27 +76,3 @@ for line in file:
 tree.show()
 print(tree.depth())
 
-# tree.create_node("top", "top")
-# tree.create_node("m0 (loc = 5)", "m0", parent = "top")
-# tree.create_node("m1 (loc = 7)", "m1", parent = "top")
-# tree.create_node("m2", "m2", parent = "top")
-# tree.create_node("m3", "m3", parent = "top")
-# tree.create_node("m4", "m4", parent = "top")
-# tree.create_node("m5", "m5", parent = "top")
-# tree.create_node("m6", "m6", parent = "top")
-# tree.create_node("m7", "m7", parent = "top")
-
-# tree.move_node("m7", "m5")
-# tree.move_node("m7", "m5")
-# tree.move_node("m6", "m5")
-
-# tree.move_node("m2", "m1")
-# tree.move_node("m3", "m1")
-
-# tree.move_node("m4", "m2")
-# tree.move_node("m5", "m3")
-# print(tree.contains("m9"))
-
-
-
-

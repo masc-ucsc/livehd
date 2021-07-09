@@ -23,10 +23,7 @@ else
 fi
 
 GVIZ='false'
-# INSTANCES='16'
-INSTANCES='256'
 
-rm -rf $LGDB
 
 if [ ! -f $LGSHELL ]; then
   if [ -f ./main/lgshell ]; then
@@ -39,7 +36,7 @@ fi
 
 
 unsorted=''
-for filename in ./livehd_regression/synthetic/generated/*${INSTANCES}.${FIRRTL_LEVEL}.pb
+for filename in ./livehd_regression/synthetic/generated/*.${FIRRTL_LEVEL}.pb
 do
   pt=$(basename "$filename" .${FIRRTL_LEVEL}.pb) # ./foo/bar.scala -> bar 
   unsorted+="$pt "
@@ -51,7 +48,7 @@ pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
 
-pts='Snx6400Insts16'
+pts='Snxn100k'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
@@ -62,6 +59,7 @@ fucntion() {
 
   for pt in $1
   do
+    rm -rf $LGDB
     echo ""
     echo ""
     echo ""
@@ -77,7 +75,7 @@ fucntion() {
     # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
     # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
-    GVIZ='true'
+    # GVIZ='true'
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
 
     # perf stat -o pp-yosys ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb 
