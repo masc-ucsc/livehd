@@ -73,6 +73,7 @@ for line in file:
 
 tree.show()
 
+
 total_parent_cnt = 0
 total_children_cnt = 0
 total_modules = 0
@@ -97,6 +98,7 @@ standard_deviation = numpy.std(a)
 mean = numpy.mean(a)
 
 
+print("total loc", loc)
 print("total_modules", total_modules)
 print("total_parents_cnt ", total_parent_cnt)
 print("total_children_cnt", total_children_cnt)
