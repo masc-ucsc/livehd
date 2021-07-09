@@ -1,6 +1,8 @@
 from treelib import Node, Tree
 import sys
 import re
+import math
+import numpy
 
 fname = sys.argv[1]
 file = open(fname, 'r')
@@ -25,10 +27,6 @@ for line in file:
 else:
     loc_end = loc
     name2loc[cur_module] = loc_end - loc_start
-
-
-# for name in name2loc:
-#     print(name, name2loc[name])
 
 file.close()
 
@@ -77,12 +75,31 @@ tree.show()
 
 total_parent_cnt = 0
 total_children_cnt = 0
+total_modules = 0
+
 for node in tree.expand_tree(mode=Tree.DEPTH):
+    total_modules += 1
     if (tree[node].is_leaf()):
         continue
     total_parent_cnt += 1
     total_children_cnt += len(tree.children(node))
 
+
+tmp_list = []
+for value in name2loc.values() :
+    tmp_list.append(value)
+
+
+a = numpy.array(tmp_list)
+
+
+standard_deviation = numpy.std(a)
+mean = numpy.mean(a)
+
+
+print("total_modules", total_modules)
 print("total_parents_cnt ", total_parent_cnt)
 print("total_children_cnt", total_children_cnt)
-print("average children per module = ", total_children_cnt/total_parent_cnt)
+print("average children modules per parent module = ", total_children_cnt/total_parent_cnt)
+print("average size per module = ", mean)
+print("standard_deviation = ", standard_deviation)
