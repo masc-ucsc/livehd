@@ -994,3 +994,44 @@ There are 2 parts of this project. Interface LiveHD with inspect and to create
 a C++ version with terminal output (so that we can interface with future
 terminal C++ wave).
 
+## Improve the iassert
+
+(C++17 skills)
+
+Make iassert (I) to be constexpr. Now constexpr methods can not have I()
+
+```
+constexpr int add1(const int i) {
+   I(i>0); // compile error
+   assert(i>0); // OK
+}
+```
+
+Extend iassert class to have debug break code from:
+https://github.com/scottt/debugbreak
+
+Integrate with this?
+https://github.com/bombela/backward-cpp
+
+## Aligned code generation
+
+Read pyrope, and indent/align code.
+
+(We have an old/rejected paper that we never finished. Maybe finish do arvix with the Pyrope aligner implemented).
+
+Sample of code alignment:
+
+```
+  mut as  = my_call      (a=1 , b=3123)
+  let foo = my_other_call(a=22, b=33  )
+
+  x   = 3
+  foo = 4
+```
+
+Non-alnum values have a higher weight in the alignment constrains. Space have no negative weight, but constant overhead...
+
+The idea is to align only adjacent lines.
+
+If a line is "too different", a newline may be added.
+

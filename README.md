@@ -3,19 +3,33 @@
 
 # LiveHD: Live Hardware Development
 
+## Summary
+
 [![CodeFactor](https://www.codefactor.io/repository/github/masc-ucsc/livehd/badge)](https://www.codefactor.io/repository/github/masc-ucsc/livehd)
 [![codecov](https://codecov.io/gh/masc-ucsc/livehd/branch/master/graph/badge.svg)](https://codecov.io/gh/masc-ucsc/livehd)
 [![CI](https://github.com/masc-ucsc/livehd/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/masc-ucsc/livehd/actions/workflows/ubuntu.yml)
 
 LiveHD is an infrastructure designed for Live Hardware Development. By live, we
 mean that small changes in the design should have the synthesis and simulation
-results in a few seconds, as the fast interactive systems usually response in
-sub-second.
+results in a few seconds.
 
 As the goal of "seconds," we do not need to perform too fine grain incremental
 work. Notice that this is a different goal from having an typical incremental
 synthesis, where many edges are added and removed in the order of thousands of
 nodes/edges.
+
+## Goal
+
+LiveHD: a fast and friendly hardware development flow that you can trust
+
+To be "Fast", LiveHD aims to be parallel, scalable, and incremental/live flow.
+
+To be "friendly", LiveHD aims to build new models to have good error reporting.
+
+To "trust", LiveHD has CI and many random tests with logic equivalence tests (LEC).
+
+> :warning: LiveHD is beta under active development and we keep improving the
+> API. Semantic versioning is a 0.+, significant API changes are expect.
 
 
 ## LiveHD Framework
@@ -151,5 +165,3 @@ to LiveHD, please send us a notification, we are glad to add your paper.
    Second Workshop on Open-Source EDA Technology (WOSET), 2019.
 
 
-> :warning: LiveHD is under active development and we keep improving the API.
-> Breaks in compatibility would not happen unless justified, but expect to be
