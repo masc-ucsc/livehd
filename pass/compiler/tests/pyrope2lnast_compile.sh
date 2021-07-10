@@ -10,18 +10,19 @@ pts_long_time='firrtl_gcd'
 pts_after_micro='hier_tuple4 tuple_reg3'
 
 
-pts='scalar_tuple firrtl_tail3 hier_tuple bits_rhs logic2 
-hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if1     
-lhs_wire2 tuple_copy2 tuple_empty_attr if2
-hier_tuple_nested_if3
-hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
-tuple_nested1 tuple_nested2
-hier_tuple2 capricious_bits
-capricious_bits2 capricious_bits4 hier_tuple_nested_if 
-hier_tuple_nested_if4 
-'
+pts=' get_mask1 '
+# scalar_tuple firrtl_tail3 hier_tuple bits_rhs logic2 
+# hier_tuple_io hier_tuple3 tuple_if ssa_rhs out_ssa attr_set lhs_wire tuple_copy if1     
+# lhs_wire2 tuple_copy2 tuple_empty_attr if2
+# hier_tuple_nested_if3
+# hier_tuple_nested_if6 hier_tuple_nested_if7 firrtl_tail
+# tuple_nested1 tuple_nested2
+# hier_tuple2 capricious_bits
+# capricious_bits2 capricious_bits4 hier_tuple_nested_if 
+# hier_tuple_nested_if4 
+# '
 #FIXME: for LL LN 
-# get_mask1 counter_1 firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 firrtl_tail2 reg_bits_set flatten_bundle partial 
+# firrtl_tail2 counter_1 firrtl_gcd_3bits  struct_flop tuple_reg tuple_reg2 nested_if counter_nested_if hier_tuple_nested_if5 reg_bits_set flatten_bundle partial 
 
 #FIXME: for LL LN ... V gen fail!
 # reg__q_pin  adder_stage  scalar_reg_out_pre_declare  vec_shift_register_param    
@@ -278,6 +279,7 @@ Pyrope_compile_hier_LL_LN () {
   fi
 }
 
+rm -r tmp_prp*
 #rm -rf ./lgdb*
 #Pyrope_compile_hier_LL_LN "$pts_hier1"
 #rm -rf ./lgdb*
