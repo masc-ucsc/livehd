@@ -553,7 +553,7 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
 	std::string const_bin;
 	std::string upper_val, lower_val;
   for (const auto& e : pin.get_node().inp_edges_ordered()) {
-    if (e.sink.get_pid()==2){//e.driver.get_node().get_type_op() == Ntype_op::Const) {
+    if (e.sink.get_pid()==2){
       num_of_bits = Lconst(const_num);  // get_the val of const
       const_num = e.driver.get_node().get_type_const().to_pyrope();
       if(is_hex(const_num)) {
@@ -571,6 +571,7 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
 
   auto tmp_varr = create_temp_var(lnast);
 
+  // creating the ytuple_add rangees
   auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(gm_tup_node, Lnast_node::create_ref(tmp_varr));
 
@@ -588,25 +589,9 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
 
   switch (pin.get_node().get_type_op()) {
     case Ntype_op::Get_mask: {
-      // creating the ytuple_add rangees
-//      auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-//      lnast.add_child(gm_tup_node, Lnast_node::create_ref(tmp_varr));
-//
-//			if (num_of_bits.get_bits()==2) {
-//        lnast.add_child(gm_tup_node, Lnast_node::create_const("0"));
-//			} else {
-//				auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-//				lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
-//				lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(lnast.add_string(lower_val)));//"0");
-//				auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-//				lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
-//				lnast.add_child(asg_rang_end_node,
-//                      Lnast_node::create_const(lnast.add_string(upper_val)));//std::to_string(num_of_bits.get_bits() - 2))));  //"-2" because the const "1" had num_of_bits.get_bits() = 2
-//      }
       node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
       auto tmp_GM = create_temp_var(lnast);
       lnast.add_child(node_idx, Lnast_node::create_ref(tmp_GM));  // Dest
-      //lnast.add_child(node_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));  // Dest
       for (const auto& e : pin.get_node().inp_edges_ordered()) {
         if (e.driver.get_node().get_type_op() == Ntype_op::Const) {
           lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));//FIXME: this is ok for GM but need to correct for SM (for LL LN)//create mask and value from these!
@@ -619,9 +604,7 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
     case Ntype_op::Set_mask: {
       node_idx = lnast.add_child(parent_node, Lnast_node::create_set_mask());
       for (const auto& e : pin.get_node().inp_edges_ordered()) {
-        if (e.sink.get_pid()==0){//driver.get_node().get_type_op() == Ntype_op::Const) {
-          //lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));//FIXME: this is ok for GM but need to correct for SM (for LL LN)//create mask and value from these!
-        //} else {
+        if (e.sink.get_pid()==0){
           attach_child(lnast, node_idx, e.driver);
           attach_child(lnast, node_idx, e.driver);
         } else if (e.sink.get_pid() == 2) {
@@ -634,15 +617,6 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
     }
     default: Pass::error("Error: invalid node type in attach_ordered_node");
   }
-  //lnast.add_child(node_idx, Lnast_node::create_ref(lnast.add_string(dpin_get_name(pin))));  // Dest
-
-  //for (const auto& e : pin.get_node().inp_edges_ordered()) {
-  //  if (e.driver.get_node().get_type_op() == Ntype_op::Const) {
-  //    lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));//FIXME: this is ok for GM but need to correct for SM (for LL LN)//create mask and value from these!
-  //  } else {
-  //    attach_child(lnast, node_idx, e.driver);
-  //  }
-  //}
 }
 
 void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
