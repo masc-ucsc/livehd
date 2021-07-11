@@ -7,9 +7,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <thread>
 #include <cassert>
 #include <functional>
 #include <iostream>
+#include <atomic>
 
 #include "mmap_gc.hpp"
 
@@ -142,7 +144,7 @@ protected:
     return (T *)(&mmap_base[4096]);
   }
 
-  mutable uint8_t *__restrict__ mmap_base;
+  mutable uint8_t  *mmap_base;
   mutable uint64_t *entries_size;
   mutable size_t    entries_capacity;  // size/sizeof - space_control
   mutable size_t    mmap_size;
@@ -151,20 +153,29 @@ protected:
   const std::string mmap_name;
 
   bool gc_done(void *base, bool force_recycle) const {
+    //std::cerr << "trying GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+    bool lock_was_set = std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed);
+    if (lock_was_set)
+      return false; // lock in use, abort!!
+
+    //std::cerr << " ACK   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+
     (void)base;
-    (void)force_recycle;
     assert(base == mmap_base);
+
+    mmap_base    = nullptr; // first thing (atomic pointer)
 
     if (mmap_fd >= 0 && *entries_size == 0) {
       unlink(mmap_name.c_str());
     }
 
-    mmap_base    = nullptr;
     entries_size = nullptr;
     mmap_fd      = -1;
     // entries_capacity = 0;
 
-    return false;
+    in_use_mutex.store(false, std::memory_order_release);
+    //std::cerr << " REL   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+    return true;
   }
 
   size_t calc_min_mmap_size() const { return sizeof(T) * MMAPA_MIN_ENTRIES + 4096; }
@@ -188,6 +199,8 @@ protected:
 
     return (T *)(&mmap_base[4096]);
   }
+
+  mutable std::atomic<bool> in_use_mutex{false};
 
 public:
   explicit vector(std::string_view _path, std::string_view _map_name)
@@ -219,24 +232,43 @@ public:
 
   ~vector() {
     if (mmap_base) {
+      // WARNING: can not call in_use because recycle needs in_use==0
       mmap_gc::recycle(mmap_base);
       assert(mmap_base == nullptr);
     }
   }
 
   // Allocates space, but it does not touch contents
-  void reserve(size_t n) const { reserve_int(n); }
+  void reserve(size_t n) const {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
+    reserve_int(n);
+
+    in_use_mutex.store(false, std::memory_order_release);
+  }
 
   void emplace_back() {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     ref_base();
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
       reserve_int(size() + 1);
     }
     (*entries_size)++;
+
+    in_use_mutex.store(false, std::memory_order_release);
   }
 
   template <class... Args>
   void emplace_back(Args &&...args) {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     auto *base = ref_base();
     assert(entries_size);
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
@@ -245,78 +277,105 @@ public:
 
     base[*entries_size] = T(std::forward<Args>(args)...);
     (*entries_size)++;
+
+    in_use_mutex.store(false, std::memory_order_release);
   }
 
-#if 0
-  template <typename Data>
-    T *doCreate(const size_t idx, Data&& val) {
-      const auto *base = ref_base();
-      assert(idx < capacity());
-      base[idx] = std::forward<Data>(val);
-      return &base[idx];
-    }
+  void ref_lock() const {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+  }
 
-	T *set(const size_t idx, T &&val) {
-		return doCreate(idx, std::move(val));
-	}
-	T *set(const size_t idx, const T &val) {
-		return doCreate(idx, val);
-	}
-#endif
+  void ref_unlock() const {
+    assert(in_use_mutex);
+    in_use_mutex.store(false, std::memory_order_release);
+  }
+
   template <class... Args>
-  T *set(const size_t idx, Args &&...args) {
+  void set(const size_t idx, Args &&...args) {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     auto *base = ref_base();
     assert(base);
     assert(idx < capacity());
 
     base[idx] = T(std::forward<Args>(args)...);
 
-    return &base[idx];
+    in_use_mutex.store(false, std::memory_order_release);
   }
 
   [[nodiscard]] inline const T *ref(size_t const &idx) const {
+    assert(in_use_mutex);
+
     const auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
 
   [[nodiscard]] inline T *ref(size_t const &idx) {
+    assert(in_use_mutex);
+
     auto *base = ref_base();
     assert(idx < size());
     return &base[idx];
   }
 
-  [[nodiscard]] inline const T &operator[](const size_t idx) const {
+  [[nodiscard]] inline const T operator[](const size_t idx) const {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     const auto *base = ref_base();
     assert(idx < size());
-    return base[idx];
+    const auto copy = base[idx];
+
+    in_use_mutex.store(false, std::memory_order_release);
+    return copy;
   }
 
-  T *      begin() { return ref_base(); }
-  const T *cbegin() const { return ref_base(); }
-  const T *begin() const { return ref_base(); }
+  T *      begin() {
+    assert(in_use_mutex);
+    return ref_base();
+  }
+  const T *cbegin() const {
+    assert(in_use_mutex);
+    return ref_base();
+  }
+  const T *begin() const {
+    assert(in_use_mutex);
+    return ref_base();
+  }
 
   T *end() {
+    assert(in_use_mutex);
     auto *base = ref_base();
     return &base[*entries_size];
   }
 
   const T *cend() const {
+    assert(in_use_mutex);
     const auto *base = ref_base();
     return &base[*entries_size];
   }
 
   const T *end() const {
+    assert(in_use_mutex);
     const auto *base = ref_base();
     return &base[*entries_size];
   }
 
   void clear() {
+    // WARNING: no need to block gc in this method
+
     if (mmap_base == nullptr) {
       assert(mmap_base == nullptr);
       assert(mmap_fd < 0);
       if (!mmap_name.empty())
         unlink(mmap_name.c_str());
+
       return;
     }
     if (*entries_size != 0) {
@@ -335,6 +394,7 @@ public:
 
   [[nodiscard]] inline size_t capacity() const { return entries_capacity; }
 
+#if 0
   uint64_t *ref_config_data(int offset) const {
     assert(offset < 4096 / 8);
     assert(offset > 0);
@@ -344,6 +404,7 @@ public:
 
     return (uint64_t *)&mmap_base[offset];
   }
+#endif
 
   [[nodiscard]] size_t size() const {
     if (entries_size != nullptr) {
@@ -353,8 +414,15 @@ public:
       return 0;
     }
 
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     ref_base();  // Force to get entries_size
-    return *entries_size;
+    auto v = *entries_size;
+    in_use_mutex.store(false, std::memory_order_release);
+
+    return v;
   }
 
   bool empty() const { return size() == 0; }

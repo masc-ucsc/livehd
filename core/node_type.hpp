@@ -26,7 +26,6 @@ protected:
 
   void     set_type(Index_id nid, const Ntype_op op);
   Ntype_op get_type_op(Index_id nid) const {
-    I(node_internal[nid].is_master_root());
     return node_internal[nid].get_type();
   }
 

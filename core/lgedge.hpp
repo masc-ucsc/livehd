@@ -319,7 +319,6 @@ public:
   uint8_t get_num_local_edges() const { return get_num_local_inputs() + get_num_local_outputs(); }
 
   Ntype_op get_type() const {
-    I(is_master_root());
     return static_cast<Ntype_op>(type);
   }
   void set_type(Ntype_op op) {
@@ -389,8 +388,6 @@ public:
     I(nid);
     if (likely(root))
       return nid;
-
-    I(get_root().get_nid() == get_master_root().get_nid());
 
     return get_root().get_nid();  // No need to do get_master_root
   }

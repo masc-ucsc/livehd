@@ -24,7 +24,7 @@
 #     name = "mock_test",
 #     srcs = ["mock_test.cpp"],
 #     deps = [
-#         "//lbench:headers",
+#         "//task",
 #         "@fmt",
 #         "@mockturtle",
 #     ],

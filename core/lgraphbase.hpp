@@ -52,14 +52,14 @@ protected:
 
   uint32_t get_bits(Index_id idx) const {
     I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
     return node_internal[idx].get_bits();
   }
 
   void set_bits(Index_id idx, uint32_t bits) {
     I(idx < node_internal.size());
-    I(node_internal[idx].is_root());
+    node_internal.ref_lock();
     node_internal.ref(idx)->set_bits(bits);
+    node_internal.ref_unlock();
   }
 
 public:
@@ -77,9 +77,7 @@ public:
 
   void add_edge(const Index_id dst_idx, const Index_id src_idx) {
     I(src_idx < node_internal.size());
-    I(node_internal[src_idx].is_root());
     I(dst_idx < node_internal.size());
-    I(node_internal[dst_idx].is_root());
     I(src_idx != dst_idx);
 
     add_edge_int(dst_idx, node_internal[dst_idx].get_dst_pid(), src_idx, node_internal[src_idx].get_dst_pid());
@@ -87,39 +85,44 @@ public:
 
   void print_stats() const;
 
-  const Node_internal &get_node_int(Index_id idx) const {
-    I(static_cast<Index_id>(node_internal.size()) > idx);
-    return node_internal[idx];
-  }
-
-  /*
-  Node_internal &get_node_int(Index_id idx) {
-    I(static_cast<Index_id>(node_internal.size()) > idx);
-    return node_internal[idx];
-  }
-  */
-
   bool is_valid_node(Index_id nid) const {
     if (nid >= node_internal.size())
       return false;
-    return node_internal[nid].is_valid() && node_internal[nid].is_master_root();
+
+    node_internal.ref_lock();
+    const auto *ref = node_internal.ref(nid);
+    auto ret        = ref->is_valid() && ref->is_master_root();
+    node_internal.ref_unlock();
+
+    return ret;
   }
 
   bool is_valid_node_pin(Index_id idx) const {
     if (idx >= node_internal.size())
       return false;
-    return node_internal[idx].is_valid() && node_internal[idx].is_root();
+
+    node_internal.ref_lock();
+    const auto *ref = node_internal.ref(idx);
+    auto ret        = ref->is_valid() && ref->is_root();
+    node_internal.ref_unlock();
+
+    return ret;
   }
 
   Port_ID get_dst_pid(Index_id idx) const {
     I(static_cast<Index_id>(node_internal.size()) > idx);
-    I(node_internal[idx].is_root());
     return node_internal[idx].get_dst_pid();
   }
 
   bool is_root(Index_id idx) const {
     I(static_cast<Index_id>(node_internal.size()) > idx);
-    return node_internal[idx].is_root();
+
+    node_internal.ref_lock();
+    const auto *ref = node_internal.ref(idx);
+    auto ret        = ref->is_root();
+    node_internal.ref_unlock();
+
+    return ret;
   }
 
   static size_t max_size() { return (((size_t)1) << Index_bits) - 1; }

@@ -32,16 +32,27 @@ protected:
   explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
 
   Index_id get_root_idx(Index_id idx) const {
-    if (node_internal[idx].is_root())
+
+    node_internal.ref_lock();
+    const auto *ref = node_internal.ref(idx);
+    if (ref->is_root()) {
+      node_internal.ref_unlock();
       return idx;
-    return node_internal[idx].get_nid();
+    }
+    auto ret = ref->get_nid();
+    node_internal.ref_unlock();
+
+    return ret;
   }
 
   Index_id get_node_nid(Index_id idx) const {
-    while (!node_internal[idx].is_master_root()) {
-      idx = node_internal[idx].get_nid();
+    node_internal.ref_lock();
+
+    while (!node_internal.ref(idx)->is_master_root()) {
+      idx = node_internal.ref(idx)->get_nid();
     }
 
+    node_internal.ref_unlock();
     return idx;
   }
 
@@ -110,16 +121,28 @@ protected:
   }
 
   Index_id fast_next(Index_id nid) const {
+
     while (true) {
       nid.value++;
-      if (nid >= static_cast<Index_id>(node_internal.size()))
+      if (nid >= static_cast<Index_id>(node_internal.size())) {
         return 0;
-      if (!node_internal[nid].is_valid())
+      }
+
+      node_internal.ref_lock();
+      const auto *ref = node_internal.ref(nid);
+      bool valid = ref->is_valid();
+      auto mroot = valid?ref->is_master_root():false;
+      node_internal.ref_unlock();
+
+      if (!valid) {
         continue;
-      if (has_graph_io(nid))
+      }
+      if (has_graph_io(nid)) {
         continue;
-      if (node_internal[nid].is_master_root())
+      }
+      if (mroot) {
         return nid;
+      }
     }
 
     return 0;
@@ -131,9 +154,6 @@ protected:
   }
 
   bool is_sub(Index_id nid) const {  // Very common function (shoud be fast)
-    I(node_internal[nid].is_node_state());
-    I(node_internal[nid].is_master_root());
-
     return node_internal[nid].get_type() == Ntype_op::Sub;
   }
 

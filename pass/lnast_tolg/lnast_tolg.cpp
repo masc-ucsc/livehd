@@ -1566,7 +1566,7 @@ void Lnast_tolg::create_out_ta(Lgraph *lg, std::string_view field_name, Node_pin
 }
 
 void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
-  absl::flat_hash_map<std::string_view, Node_pin> vname2ssa_dpin;  // pyrope variable -> dpin with the largest ssa var subscription
+  absl::flat_hash_map<std::string, Node_pin> vname2ssa_dpin;  // pyrope variable -> dpin with the largest ssa var subscription
   for (auto node : lg->forward()) {
     auto ntype = node.get_type_op();
 

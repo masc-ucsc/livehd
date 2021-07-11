@@ -42,7 +42,9 @@ TEST_F(Setup_map_test, mmap_vector_to_set) {
 
   absl::flat_hash_set<int> my_set;
 
+  dense.ref_lock();
   my_set.insert(dense.begin(), dense.end());
+  dense.ref_unlock();
 
   for (auto v : {1, 3, 5, 7, 9}) {
     EXPECT_TRUE(my_set.contains(v));
@@ -55,7 +57,9 @@ TEST_F(Setup_map_test, iter_test_set) {
 
   absl::flat_hash_set<int> my_set;
 
+  dense.ref_lock();
   my_set.insert(dense.begin(), dense.end());
+  dense.ref_unlock();
 
   for (auto v : {1, 3, 5, 7, 9}) {
     EXPECT_TRUE(my_set.contains(v));

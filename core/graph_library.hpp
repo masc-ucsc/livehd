@@ -174,7 +174,8 @@ public:
   }
 
   Lgraph *try_find_lgraph(Lg_type_id lgid) const {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    // WARNING: This is a frequent case to build netlists (designed to not require lock)
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(lgid);
   }
 
@@ -196,12 +197,14 @@ public:
   }
 
   Sub_node *ref_sub(Lg_type_id lgid) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    // WARNING: This is a frequent case to build netlists (designed to not require lock)
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_sub_int(lgid);
   }
 
   const Sub_node &get_sub(Lg_type_id lgid) const {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    // WARNING: This is a frequent case to build netlists (designed to not require lock)
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
     return get_sub_int(lgid);
   }
 

@@ -16,7 +16,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//eprp",
-        "//lbench:headers",
         "//lemu",
         "//mmap_lib:headers",
         "//task",

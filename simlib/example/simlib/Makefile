@@ -1,4 +1,4 @@
-CXXFLAGS=-std=c++17 -I../../ -I../../../lbench/include
+CXXFLAGS=-std=c++17 -I../../ -I../../../task
 CXXFLAGS+=-O0
 #make this -O3 for final optimized run.
 CXXFLAGS+=-g

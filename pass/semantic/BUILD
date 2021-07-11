@@ -16,7 +16,7 @@ cc_library(
     deps = [
         "//elab",
         "//inou/pyrope:inou_pyrope",
-        "//lbench:headers",
+        "//task",
         "//pass/common:pass",
         "@com_google_absl//absl/container:flat_hash_set",
     ],

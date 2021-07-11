@@ -9,6 +9,8 @@
 #include "sub_node.hpp"
 #include "thread_pool.hpp"
 
+//#define NO_BOTTOM_UP_PARALLEL 1
+
 void Lgraph::each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical) {
   if (node_internal.size() < Hardcoded_output_nid)
     return;
@@ -89,21 +91,20 @@ void Lgraph::each_pin(const Node_pin &dpin, std::function<bool(Index_id idx)> f1
     if (!cont)
       return;
 
+    node_internal.ref_lock();
     do {
-      if (node_internal[idx2].is_last_state()) {
-#ifndef NDEBUG
-        idx2 = node_internal[idx2].get_master_root_nid();
-        I(idx2 == dpin.get_node().get_nid());
-        should_not_find = true;  // loop and try the others (should not have it before root)
-#else
+      if (node_internal.ref(idx2)->is_last_state()) {
+        node_internal.ref_unlock();
         return;
-#endif
       } else {
-        idx2 = node_internal[idx2].get_next();
+        idx2 = node_internal.ref(idx2)->get_next();
       }
-      if (idx2 == first_idx2)
+      if (idx2 == first_idx2) {
+        node_internal.ref_unlock();
         return;
-    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
+      }
+    } while (node_internal.ref(idx2)->get_dst_pid() != dpin.get_pid());
+    node_internal.ref_unlock();
   }
 }
 
@@ -150,8 +151,6 @@ void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
     I(cid);
-    I(node_internal[cid].is_node_state());
-    I(node_internal[cid].is_master_root());
 
     auto node = Node(this, it->first);
 
@@ -182,7 +181,6 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
     I(cid);
-    I(node_internal[cid].is_node_state());
 
     if (visited.find(it->second) != visited.end())
       continue;
@@ -203,8 +201,6 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
   for (auto it = m.begin(), end = m.end(); it != end; ++it) {
     Index_id cid = it->first.nid;
     I(cid);
-    I(node_internal[cid].is_node_state());
-    I(node_internal[cid].is_master_root());
 
     if (visited.find(it->second) != visited.end())
       continue;
@@ -268,8 +264,11 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
   });
 
   for (auto *lg : next_round) {
+#ifdef NO_BOTTOM_UP_PARALLEL
+    fn(lg);
+#else
     thread_pool.add(fn, lg);
-    // fn(lg); // can be in parallel
+#endif
     visited.erase(lg->get_lgid());
   }
   if (!next_round.empty())
@@ -293,8 +292,11 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
     }
     ++level;
     for (auto *lg : next_round) {
+#ifdef NO_BOTTOM_UP_PARALLEL
+      fn(lg);
+#else
       thread_pool.add(fn, lg);
-      // fn(lg); // can be in parallel
+#endif
     }
     if (!next_round.empty())
       thread_pool.wait_all();

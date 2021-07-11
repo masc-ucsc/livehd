@@ -613,7 +613,7 @@ private:
   // gc_done can be called for mmap_base or mmap_txt_base
   bool gc_done(void* base, bool force_recycle) const noexcept {
     if (iter_cntr && !force_recycle)
-      return true;
+      return false;
 
     if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
       return false;
@@ -639,13 +639,13 @@ private:
     // mmap_size = 0;
     mmap_fd = -1;
 
-    return false;
+    return true;
   }
 
   bool gc_txt_done(void* base, bool force_recycle) const {
     (void)base;
     if (iter_cntr && !force_recycle)
-      return true;  // abort
+      return false;  // abort
 
     assert(using_sview);
     assert(mmap_txt_base == base);
@@ -659,7 +659,7 @@ private:
     // mmap_txt_size = 0;
     mmap_txt_fd = -1;
 
-    return false;
+    return true;
   }
 
   size_t calc_mmap_size(size_t nelems) const {

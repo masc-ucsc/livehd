@@ -25,7 +25,6 @@ cc_test(
     # tags = ["long1"], # Run only with long1 set of tests
     deps = [
         ":task",
-        "//lbench:headers",
         "@com_google_googletest//:gtest_main",
     ],
 )

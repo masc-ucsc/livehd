@@ -79,6 +79,11 @@ protected:
       sorted.emplace_back(it.second);
     }
 
+    if (sorted.empty()) {
+      std::cerr << "mmap_gc: nothing available to recycle\n";
+      return;
+    }
+
     size_t n_recycle_fds   = may_recycle_fds == 1 ? 1 : may_recycle_fds / 2;
     size_t n_recycle_mmaps = may_recycle_mmaps == 1 ? 1 : may_recycle_mmaps / 2;
 
@@ -140,8 +145,9 @@ protected:
         auto it = mmap_gc_pool.find(e.base);
         assert(it != mmap_gc_pool.end());
         bool done = mmap_gc::recycle_int(it, true);  // force (do not give an option)
-        (void)done;
-        assert(done);
+        if (!done)
+          continue;
+
         if (e.base)
           n_recycle_mmaps--;
         n_recycle_fds--;
@@ -164,12 +170,11 @@ protected:
     recursion_mode = true;
 #endif
 
-    bool aborted = it->second.gc_function(it->first, force_recycle);
+    bool done = it->second.gc_function(it->first, force_recycle);
 #ifndef NDEBUG
     recursion_mode = false;
 #endif
-    if (aborted) {
-      assert(!force_recycle);
+    if (!done) {
 #ifndef NDEBUG
       std::cerr << "ABORT GC for " << it->second.name << std::endl;  // OK
 #endif
@@ -284,13 +289,6 @@ public:
       std::cerr << "mmap_gc_pool open filename:" << name << " n_open_fds=" << n_open_fds << " n_open_mmaps=" << n_open_mmaps
                 << "\n";
 #endif
-#ifndef NDEBUG
-      for (const auto &e : mmap_gc_pool) {
-        if (e.second.fd < 0)
-          continue;
-        assert(e.second.name != name);  // No name duplicate (may be OK for multithreaded access)
-      }
-#endif
 
       if (n_open_fds > 500) {
         recycle_older();
@@ -329,11 +327,11 @@ public:
     assert(it != mmap_gc_pool.end());
 
     bool done = recycle_int(it, true);
-    (void)done;
     // auto entry = it->second;
     // std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
-    assert(done);  // Do not call recycle and then deny it!!!!
-    mmap_gc_pool.erase(it);
+    if(done) {
+      mmap_gc_pool.erase(it);
+    }
   }
 
   // mmap_vector.hpp: std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, mmap_size, std::bind(&vector<T>::gc_function,

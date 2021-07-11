@@ -14,7 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//lbench:headers",
+        "//task",
         "//mmap_lib:headers",
         "@boost//:multiprecision",
         "@com_google_absl//absl/strings",

@@ -21,31 +21,37 @@ void Lgraph_Node_Type::clear() {
 }
 
 void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
-  I(node_internal[nid].is_master_root());
+  node_internal.ref_lock();
 
-  auto type = node_internal[nid].get_type();
+  I(node_internal.ref(nid)->is_master_root());
+
+  auto type = node_internal.ref(nid)->get_type();
   if (type == Ntype_op::Sub)
     subid_map.erase(Node::Compact_class(nid));
   else if (type == Ntype_op::LUT)
     lut_map.erase(Node::Compact_class(nid));
 
   node_internal.ref(nid)->set_type(op);
+  node_internal.ref_unlock();
 }
 
 bool Lgraph_Node_Type::is_type_const(Index_id nid) const {
-  I(node_internal[nid].is_master_root());
+  node_internal.ref_lock();
+  bool b = node_internal.ref(nid)->get_type() == Ntype_op::Const;
+  node_internal.ref_unlock();
 
-  return node_internal[nid].get_type() == Ntype_op::Const;
+  return b;
 }
 
 void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
-  I(node_internal[nid].is_master_root());
 
   subid_map.set(Node::Compact_class(nid), subgraphid.value);
 
   // Ann_node_tree_pos::ref(static_cast<const Lgraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
 
+  node_internal.ref_lock();
   node_internal.ref(nid)->set_type(Ntype_op::Sub);
+  node_internal.ref_unlock();
 }
 
 Lg_type_id Lgraph_Node_Type::get_type_sub(Index_id nid) const {
@@ -77,8 +83,9 @@ Sub_node *Lgraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
 }
 
 void Lgraph_Node_Type::set_type_lut(Index_id nid, const Lconst &lutid) {
-  auto *ptr = node_internal.ref(nid);
-  ptr->set_type(Ntype_op::LUT);
+  node_internal.ref_lock();
+  node_internal.ref(nid)->set_type(Ntype_op::LUT);
+  node_internal.ref_unlock();
 
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }
@@ -90,16 +97,18 @@ Lconst Lgraph_Node_Type::get_type_lut(Index_id nid) const {
 }
 
 Lconst Lgraph_Node_Type::get_type_const(Index_id nid) const {
-  I(node_internal[nid].is_master_root());
 
   return Lconst(const_map.get(Node::Compact_class(nid)));
 }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
   const_map.set(Node::Compact_class(nid), value.serialize());
+
+  node_internal.ref_lock();
   auto *ptr = node_internal.ref(nid);
   ptr->set_type(Ntype_op::Const);
   ptr->set_bits(value.get_bits());
+  node_internal.ref_unlock();
 }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }

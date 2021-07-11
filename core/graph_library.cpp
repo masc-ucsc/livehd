@@ -278,18 +278,21 @@ Lgraph *Graph_library::try_find_lgraph_int(Lg_type_id lgid) const {
   Lgraph *lg = attributes[lgid].lg;
 
 #ifndef NDEBUG
-  // Check consistency across
-  auto name = get_name_int(lgid);
+  {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    // Check consistency across
+    auto name = get_name_int(lgid);
 
-  if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    if (lg != global_name2lgraph[path][name]) {
-      fmt::print("global_name2lgraph[{}][{}] = {}\n", path, name, global_name2lgraph[path][name]->get_name());
-      fmt::print("lg :{}\n", lg->get_name());
+    if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
+      if (lg != global_name2lgraph[path][name]) {
+        fmt::print("global_name2lgraph[{}][{}] = {}\n", path, name, global_name2lgraph[path][name]->get_name());
+        fmt::print("lg :{}\n", lg->get_name());
+      }
+      I(lg != nullptr);
+      I(lg == global_name2lgraph[path][name]);
+    } else {
+      I(lg == nullptr);
     }
-    I(lg != nullptr);
-    I(lg == global_name2lgraph[path][name]);
-  } else {
-    I(lg == nullptr);
   }
 #endif
 

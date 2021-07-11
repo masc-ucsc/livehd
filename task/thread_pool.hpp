@@ -45,6 +45,9 @@ class Thread_pool {
   std::atomic_flag         booting_lock = ATOMIC_FLAG_INIT;
   std::atomic<bool>        started_lock;
 
+  static inline std::atomic<int>  task_id_count{0};
+  static inline thread_local int  task_id;
+
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
 #else
@@ -60,6 +63,8 @@ class Thread_pool {
   std::mutex              queue_mutex;
 
   void task() {
+    task_id = ++task_id_count;
+
     if (!booting_lock.test_and_set(std::memory_order_acquire)) {
       for (unsigned i = 1; i < thread_count; ++i) {
         threads.push_back(std::thread([this] { this->task(); }));
@@ -129,13 +134,15 @@ public:
       thread_count = lim;
     }
 
-    if (thread_count < 2)
-      thread_count = 2;
+    if (thread_count < 1)
+      thread_count = 1;
 
     assert(thread_count);
 
     threads.push_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
+
+  static int get_task_id() { return task_id; }
 
   virtual ~Thread_pool() {
     while (!started_lock)
