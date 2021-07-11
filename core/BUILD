@@ -12,7 +12,6 @@ cc_library(
     hdrs = glob(["*.hpp"]),
     copts = COPTS + ["-Wno-error=shadow"],
     includes = ["."],
-    linkopts = ["-lstdc++fs"],  # for gcc-8 or older
     visibility = ["//visibility:public"],
     deps = [
         "//eprp",

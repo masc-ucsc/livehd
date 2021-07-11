@@ -2,8 +2,6 @@
 
 #include "lcompiler.hpp"
 
-#include <bits/stdint-uintn.h>
-
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz)
     : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {}
 

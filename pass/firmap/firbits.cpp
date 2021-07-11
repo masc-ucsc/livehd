@@ -1,7 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <bits/stdint-uintn.h>
-
 #include <algorithm>
 #include <cmath>
 #include <vector>

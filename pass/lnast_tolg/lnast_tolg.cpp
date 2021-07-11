@@ -2,8 +2,6 @@
 
 #include "lnast_tolg.hpp"
 
-#include <bits/stdint-intn.h>
-
 #include <cctype>
 
 #include "cprop.hpp"

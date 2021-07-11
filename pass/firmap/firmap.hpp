@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <bits/stdint-uintn.h>
-
 #include "absl/container/node_hash_map.h"
 #include "lgedgeiter.hpp"
 #include "node.hpp"
