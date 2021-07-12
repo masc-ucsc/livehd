@@ -1,0 +1,2 @@
+Checks: '-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,modernize-*,performance-*,-modernize-use-trailing-return-type'
+FormatStyle: 'file'
