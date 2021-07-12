@@ -7,11 +7,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <thread>
+#include <atomic>
 #include <cassert>
 #include <functional>
 #include <iostream>
-#include <atomic>
+#include <thread>
 
 #include "mmap_gc.hpp"
 
@@ -152,18 +152,18 @@ protected:
   const std::string mmap_path;
   const std::string mmap_name;
 
-  bool gc_done(void *base, bool force_recycle) const {
-    //std::cerr << "trying GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+  bool gc_done(void *base, bool /* force_recycle */) const {
+    // std::cerr << "trying GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
     bool lock_was_set = std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed);
     if (lock_was_set)
-      return false; // lock in use, abort!!
+      return false;  // lock in use, abort!!
 
-    //std::cerr << " ACK   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+    // std::cerr << " ACK   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
 
     (void)base;
     assert(base == mmap_base);
 
-    mmap_base    = nullptr; // first thing (atomic pointer)
+    mmap_base = nullptr;  // first thing (atomic pointer)
 
     if (mmap_fd >= 0 && *entries_size == 0) {
       unlink(mmap_name.c_str());
@@ -174,7 +174,7 @@ protected:
     // entries_capacity = 0;
 
     in_use_mutex.store(false, std::memory_order_release);
-    //std::cerr << " REL   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+    // std::cerr << " REL   GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
     return true;
   }
 
@@ -241,7 +241,7 @@ public:
   // Allocates space, but it does not touch contents
   void reserve(size_t n) const {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     reserve_int(n);
@@ -251,7 +251,7 @@ public:
 
   void emplace_back() {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     ref_base();
@@ -266,7 +266,7 @@ public:
   template <class... Args>
   void emplace_back(Args &&...args) {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     auto *base = ref_base();
@@ -283,7 +283,7 @@ public:
 
   void ref_lock() const {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
   }
 
@@ -295,7 +295,7 @@ public:
   template <class... Args>
   void set(const size_t idx, Args &&...args) {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     auto *base = ref_base();
@@ -325,7 +325,7 @@ public:
 
   [[nodiscard]] inline const T operator[](const size_t idx) const {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     const auto *base = ref_base();
@@ -336,7 +336,7 @@ public:
     return copy;
   }
 
-  T *      begin() {
+  T *begin() {
     assert(in_use_mutex);
     return ref_base();
   }
@@ -415,7 +415,7 @@ public:
     }
 
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
       ;
 
     ref_base();  // Force to get entries_size
