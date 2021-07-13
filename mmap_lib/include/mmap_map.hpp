@@ -417,7 +417,7 @@ private:
   static constexpr size_t  InitialNumElements   = 1024;
   static constexpr int     InitialInfoNumBits   = 5;
   static constexpr uint8_t InitialInfoInc       = 1 << InitialInfoNumBits;
-  static constexpr uint8_t InitialInfoHashShift = sizeof(size_t) * 8 - InitialInfoNumBits;
+  static constexpr uint8_t InitialInfoHashShift = sizeof(int) * 8 - InitialInfoNumBits;
 
   // type needs to be wider than uint8_t.
   using InfoType = int32_t;
