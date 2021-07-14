@@ -4,16 +4,20 @@
 #include "eprp_method.hpp"
 #include "eprp_var.hpp"
 
+struct Pipe_step {
+  Pipe_step(const Eprp_method &fun, const Eprp_var &var) : m(fun), var_fields(var), next_step(nullptr) {}
+
+  void run(Eprp_var &last_cmd_var);
+
+  Eprp_method m;
+  Eprp_var    var_fields;
+  Pipe_step  *next_step;
+};
+
 class Eprp_pipe {
 protected:
-  struct Step {
-    Step(const Eprp_method &fun, const Eprp_var &var) : m(fun), var_fields(var) {}
 
-    Eprp_method m;
-    Eprp_var    var_fields;
-  };
-
-  std::vector<Step> steps;
+  std::vector<Pipe_step> steps;
 public:
 
   void clear() {
