@@ -79,17 +79,8 @@ bool Eprp::rule_reg(bool first) {
   if (!scan_is_token(Token_id_register))
     return false;
 
-  std::string var{scan_text()};
-  ast->add(Eprp_rule_reg, scan_token_entry());
-  if (first) {  // First in line #a |> ...
-    if (variables.find(var) == variables.end()) {
-      scan_error("variable {} is empty", var);
-      return false;
-    }
-    last_cmd_var = variables[var];
-  } else {
-    variables[var] = last_cmd_var;
-  }
+  (void)first;
+  scan_error("variables are deprecated (multithreaded)");
 
   scan_next();
   eat_comments();
@@ -134,23 +125,23 @@ bool Eprp::rule_cmd_line(std::string &path) {
 bool Eprp::rule_cmd_full() {
   std::string cmd_line;
 
-  Eprp_var next_var;
-
   ast->down();
   bool cmd_found = rule_cmd_line(cmd_line);
   ast->up(Eprp_rule_cmd_full);
   if (!cmd_found)
     return false;
 
+  Eprp_var cmd_var_fields;
+
   bool path_found;
   do {
     ast->down();
-    path_found = rule_label_path(cmd_line, next_var);
+    path_found = rule_label_path(cmd_line, cmd_var_fields);
     ast->up(Eprp_rule_cmd_full);
   } while (path_found);
 
   ast->down();
-  run_cmd(cmd_line, next_var);
+  run_cmd(cmd_line, cmd_var_fields);
   ast->up(Eprp_rule_cmd_full);
 
   return true;
@@ -229,6 +220,9 @@ bool Eprp::rule_top() {
 
 // top = parse_top+
 void Eprp::elaborate() {
+
+  pipe.clear();
+
   ast = std::make_unique<Ast_parser>(get_memblock(), Eprp_rule);
   ast->down();
 
@@ -247,7 +241,8 @@ void Eprp::elaborate() {
   // process_ast();
 
   ast = nullptr;
-  last_cmd_var.clear();
+
+  pipe.run();
 };
 
 void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parser_node &node) {
@@ -280,38 +275,14 @@ void Eprp::process_ast() {
   ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));
 }
 
-void Eprp::run_cmd(const std::string &cmd, Eprp_var &var) {
+void Eprp::run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields) {
   const auto &it = methods.find(cmd);
   if (it == methods.end()) {
     parser_error("method {} not registered", cmd);
     return;
   }
 
-  const auto &m = it->second;
-
-  last_cmd_var.add(var);
-
-  std::string err_msg;
-  bool        err = m.check_labels(last_cmd_var, err_msg);
-  if (err) {
-    parser_error(err_msg);
-    return;
-  }
-
-#if 0
-  for(const auto &v:var.dict) {
-    if (!m.has_label(v.first)) {
-      parser_warn("method {} does not have passed label {}", cmd, v.first);
-    }
-  }
-#endif
-
-  for (const auto &label : m.labels) {
-    if (!label.second.default_value.empty() && !last_cmd_var.has_label(label.first))
-      last_cmd_var.add(label.first, label.second.default_value);
-  }
-
-  m.method(last_cmd_var);
+  pipe.add_command(it->second, cmd_var_fields);
 }
 
 const std::string &Eprp::get_command_help(const std::string &cmd) const {

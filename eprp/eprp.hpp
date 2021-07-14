@@ -1,5 +1,4 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
 #pragma once
 
 #include <memory>
@@ -8,13 +7,13 @@
 #include "elab_scanner.hpp"
 #include "eprp_method.hpp"
 #include "eprp_var.hpp"
+#include "eprp_pipe.hpp"
 
 class Eprp : public Elab_scanner {
 protected:
   std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
-  std::map<std::string, Eprp_var, eprp_casecmp_str>    variables;
 
-  Eprp_var last_cmd_var;
+  Eprp_pipe pipe;
 
   std::unique_ptr<Ast_parser> ast;
 
@@ -57,8 +56,7 @@ public:
 
   bool has_method(const std::string &cmd) const { return methods.find(cmd) != methods.end(); }
 
-  void run_cmd(const std::string &cmd, Eprp_var &var);
-  void set_variable(const std::string &name, const Eprp_var &var) { variables[name] = var; }
+  void run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields);
 
   bool readline(const char *line);
 
