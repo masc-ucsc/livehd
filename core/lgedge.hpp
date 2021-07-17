@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
+#include <cstring>
+
 #include "cell.hpp"
 #include "lgraph_base_core.hpp"
 
@@ -318,9 +321,8 @@ public:
 
   uint8_t get_num_local_edges() const { return get_num_local_inputs() + get_num_local_outputs(); }
 
-  Ntype_op get_type() const {
-    return static_cast<Ntype_op>(type);
-  }
+  Ntype_op get_type() const { return static_cast<Ntype_op>(type); }
+
   void set_type(Ntype_op op) {
     I(is_master_root());
     type = static_cast<uint8_t>(op);
@@ -420,19 +422,21 @@ public:
 
   Index_id get_next() const {
     I(is_next_state());
-    uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    return *idx_upp;
+    uint32_t result = 0;
+    std::memcpy(&result, &sedge[0], sizeof(uint32_t));
+    return result;
   }
 
   void set_next_state(Index_id _idx) {
     I(is_next_state());
-    uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    *idx_upp          = _idx.value;
+    uint32_t idx_value = _idx.value;
+    std::memcpy(static_cast<void *>(&sedge[0]), &idx_value, sizeof(uint32_t));
   }
+
   void force_next_state(Index_id _idx) {
-    state             = Next_node_state;
-    uint32_t *idx_upp = (uint32_t *)(&sedge[0]);
-    *idx_upp          = _idx.value;
+    state              = Next_node_state;
+    uint32_t idx_value = _idx.value;
+    std::memcpy(static_cast<void *>(&sedge[0]), &idx_value, sizeof(uint32_t));
   }
 
   void push_next_state(Index_id _idx) {
