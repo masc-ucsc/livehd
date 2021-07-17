@@ -3,13 +3,14 @@
 #include "cell.hpp"
 
 #include "iassert.hpp"
+#include "lgraph_base_core.hpp"
 
 Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto i = 0; i < 256; ++i) {
-      sink_name2pid[i][op] = -1;
+      sink_name2pid[i][op] = Port_invalid;
     }
     for (auto i = 0u; i < sink_pid2name.size(); ++i) {
       sink_pid2name[i][op] = "invalid";
@@ -23,7 +24,7 @@ Ntype::_init::_init() {
 
       ++n_sinks;
 
-      assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == -1
+      assert(is_unlimited_sink(static_cast<Ntype_op>(op)) || pid > 10 || sink_name2pid[pin_name[0]][op] == Port_invalid
              || sink_name2pid[pin_name[0]][op] == pid);  // No double assign
 
       sink_pid2name[pid][op] = pin_name;
@@ -56,28 +57,28 @@ Ntype::_init::_init() {
     // Check that common case is fine
 
     pid = sink_name2pid['a'][op];
-    assert(pid == -1 || pid == 0);
+    assert(pid == Port_invalid || pid == 0);
 
     pid = sink_name2pid['b'][op];
-    assert(pid == -1 || pid == 1);
+    assert(pid == Port_invalid || pid == 1);
 
     pid = sink_name2pid['c'][op];
-    assert(pid == -1 || pid == 2);
+    assert(pid == Port_invalid || pid == 2);
 
     pid = sink_name2pid['d'][op];
-    assert(pid == -1 || pid == 3);
+    assert(pid == Port_invalid || pid == 3);
 
     pid = sink_name2pid['e'][op];
-    assert(pid == -1 || pid == 4);
+    assert(pid == Port_invalid || pid == 4);
 
     pid = sink_name2pid['f'][op];
-    assert(pid == -1 || pid == 5);
+    assert(pid == Port_invalid || pid == 5);
 
     pid = sink_name2pid['A'][op];
-    assert(pid == -1 || pid == 0);
+    assert(pid == Port_invalid || pid == 0);
 
     pid = sink_name2pid['B'][op];
-    assert(pid == -1 || pid == 1);
+    assert(pid == Port_invalid || pid == 1);
   }
 
   int pos = 0;

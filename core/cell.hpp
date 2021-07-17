@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "lbench.hpp"
+#include "lgraph_base_core.hpp"
 
 enum class Ntype_op : uint8_t {
   Invalid,  // Detect bugs/unset (not used anywhere)
@@ -78,7 +79,7 @@ protected:
   static _init _static_initializer;
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
-  inline static std::array<std::array<char, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>            sink_name2pid;
+  inline static std::array<std::array<Port_ID, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>         sink_name2pid;
   inline static std::array<std::array<std::string_view, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11> sink_pid2name;
   inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                             ntype2single_input;
   inline static absl::flat_hash_map<std::string, int>                                                          name2pid;
@@ -152,7 +153,7 @@ public:
     }
 
     auto pid = sink_name2pid[str[0]][static_cast<std::size_t>(op)];
-    assert(pid != -1);
+    assert(pid != Port_invalid);
     assert(get_sink_name(op, pid) == str);
     return pid;
   }

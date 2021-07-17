@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -12,10 +13,12 @@
 #include "likely.hpp"
 #include "mmap_tree.hpp"
 
+using Lg_id_t = uint32_t;
+
 // Lgraph basic core types used all over
-using Lg_type_id  = Explicit_type<uint32_t, struct Lg_type_id_struct, 0>;  // Global used all over
-using Index_id    = Explicit_type<uint32_t, struct Index_id_struct, 0>;
-using Lut_type_id = Explicit_type<uint32_t, struct Lut_type_id_struct, 0>;
+using Lg_type_id  = Explicit_type<Lg_id_t, struct Lg_type_id_struct, 0>;  // Global used all over
+using Index_id    = Explicit_type<Lg_id_t, struct Index_id_struct, 0>;
+using Lut_type_id = Explicit_type<Lg_id_t, struct Lut_type_id_struct, 0>;
 
 class Hierarchy_data {  // 64bits total
 public:
@@ -42,10 +45,11 @@ using Port_ID = uint16_t;  // ports have a set order (a-b != b-a)
 constexpr Index_id Hardcoded_input_nid  = 1;
 constexpr Index_id Hardcoded_output_nid = 2;
 
-constexpr int Index_bits = 31;  // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int Port_bits  = 15;
+constexpr int Index_bits = std::numeric_limits<Lg_id_t>::digits - 1;  // 31 bit to have Sink/Driver + Index in 32 bits
+constexpr int Port_bits  = std::numeric_limits<Port_ID>::digits - 1;
+
 // NOTE: Bits_bits defined in lconst.hpp
-constexpr Port_ID Port_invalid   = ((1ULL << Port_bits) - 1);  // Max Port_bits allowed
+constexpr Port_ID Port_invalid   = std::numeric_limits<Port_ID>::max();  // Max Port_bits allowed
 constexpr int     LUT_input_bits = 4;
 
 class Graph_library;
