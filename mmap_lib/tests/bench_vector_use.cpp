@@ -126,10 +126,12 @@ void use_mmap_vector(int max) {
     }
     conta *= NIT;
     for (int i = 0; i < NIT; ++i) {
+      map.ref_lock();
       for (auto v : map) {
         (void)v;
         conta--;
       }
+      map.ref_unlock();
     }
     assert(conta == 0);
   }

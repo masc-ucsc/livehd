@@ -22,8 +22,8 @@
 //#define BENCH_OUT_SIZE 500
 //#define BENCH_INN_SIZE 500
 
-#define BENCH_OUT_SIZE 100
-#define BENCH_INN_SIZE 100
+#define BENCH_OUT_SIZE 50
+#define BENCH_INN_SIZE 50
 
 //#define ABSEIL_USE_MAP
 //#define USE_MAP_FALSE

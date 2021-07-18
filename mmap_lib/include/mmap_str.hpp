@@ -154,7 +154,14 @@ protected:
     uint32_t insert_entry(const void *data, uint32_t sz) {
       assert(base);
 
+      const void *data_local=data;
+
       if (MMAP_LIB_UNLIKELY((*size + sz + 16) >= capacity)) {
+
+        // WARNING: data could be in the mmap, so create a copy
+        void *ptr = alloca(sz);
+        memcpy(ptr, data, sz);
+        data_local = ptr;
 
         auto new_capacity = capacity + 64*1024;
         void* base2;
@@ -168,7 +175,7 @@ protected:
 
       auto pos = *size;
 
-      memcpy(base + *size, data, sz);
+      memcpy(base + *size, data_local, sz);
 
       *size += sz;
 
@@ -206,13 +213,14 @@ protected:
 
       auto key = key2sv_vector.insert_entry(sv.data(), sv.size());
 
+      // WARNING: key2sv_vector can trigger a remap, and sv.data is wrong. Just use the new ptr
+      map.emplace(std::string(key2sv_vector.get_data(key), sv.size()), key);
+
       Map_entry me;
       me.ptr  = key;
       me.size = key2sv_vector.get_size() - key;
 
       map_vector.insert_entry(&me, sizeof(Map_entry));
-
-      map.emplace(sv, key);
 
       return key;
     }
@@ -257,7 +265,7 @@ protected:
         auto key_id   = me_ptr->ptr;
         auto key_size = me_ptr->size;
 
-        assert((key_id + key_size) < key2sv_vector.get_size());
+        assert((key_id + key_size) <= key2sv_vector.get_size());
 
         std::string_view sv(&key2sv_ptr[key_id], key_size);
 
@@ -310,12 +318,13 @@ protected:
 
     auto ptr_offset = get_n_data_chars();
 
-    ptr_or_start = mut_ref().insert_find(s + ptr_offset, size()-ptr_offset);
-
     for(auto i=0u;i<ptr_offset;++i) {
       uint64_t d = s[i];
       data |= d<<(8*i);
     }
+
+    // WARNING: insert_find last because it can remap the *s
+    ptr_or_start = mut_ref().insert_find(s + ptr_offset, size()-ptr_offset);
   }
 
   size_t fill_txt(size_t skip_bytes, char *txt) const {
@@ -681,7 +690,11 @@ public:
   int to_i() const {  // convert to integer
     if (is_sso()) {
       int result;
-      std::from_chars(ref_base_sso(), ref_base_sso() + size_sso(), result);
+      const auto *base = ref_base_sso();
+      if (size()==0 || !std::isdigit(base[0]))
+        return 0;
+      std::from_chars(base, base + size_sso(), result);
+
       return result;
     }
     assert(false); // overflow non SSO is a TOO long integer
@@ -693,6 +706,8 @@ public:
       return false;
     int result;
     const auto *base = ref_base_sso();
+    if (size()==0 || !std::isdigit(base[0]))
+      return false;
     auto [p,ec] = std::from_chars(base, base + size(), result);
     (void)p;
     if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range)
@@ -960,6 +975,28 @@ public:
     return concat(sv_first, sv_last.substr(0,new_size-sv_first.size()));
   }
 
+  constexpr size_t hash() const {
+    uint64_t h = size_ctrl;
+    h <<= 32;
+    h  |= ptr_or_start;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccd;
+    h ^= h >> 33;
+    h ^= data;
+    h ^= h >> 33;
+    h *= 0xc4ceb9fe1a85ec53;
+    h ^= h >> 33;
+    return static_cast<size_t>(h);
+  }
 };
+
+bool operator==(const std::string_view &a, const mmap_lib::str &b) {
+  return b == a;
+}
+
+template <std::size_t N>
+bool operator==(const char (&a)[N], const mmap_lib::str &b) {
+  return b == a;
+}
 
 }  // namespace mmap_lib

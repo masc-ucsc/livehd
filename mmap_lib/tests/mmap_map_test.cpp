@@ -52,6 +52,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       EXPECT_EQ(map2.count(key), 1);
     }
 
+    map.ref_lock();
     for (const auto &it : map) {
       (void)it;
       if (it.getFirst() == 0)
@@ -63,6 +64,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
+    map.ref_unlock();
     for (const auto &it : map2) {
       if (!map.has(it.first))
         std::cout << "HI\n";
@@ -85,8 +87,8 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
   int conta;
   for (int n = 0; n < 3; n++) {
-    mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
-    map.set(3, "test");
+    mmap_lib::map<uint32_t, mmap_lib::str> map("lgdb_bench", "mmap_map_test_sview_data");
+    map.set(3, mmap_lib::str("test"));
     EXPECT_EQ(map.get(3), "test");
     map.clear();
     map2.clear();
@@ -104,7 +106,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
       conta++;
 
       EXPECT_TRUE(!map.has(key));
-      map.set(key, key_str);
+      map.set(key, mmap_lib::str(key_str));
       EXPECT_TRUE(map.has(key));
 
       EXPECT_EQ(map2.count(key), 0);
@@ -117,7 +119,10 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
   {
     mmap_lib::map<uint32_t, mmap_lib::str> map("lgdb_bench", "mmap_map_test_sview_data");
+
+    map.ref_lock(); // iteators should work with and without ref_lock before
     for (const auto &it : map) {
+      //fmt::print("it.first:{} it.second:{} ref_lock:{}\n",it.first, it.second.to_s(), map.get_lock_num());
       auto txt1 = it.second;
       auto txt2 = map.get(it.first);
       auto it2  = map.find(it.first);
@@ -130,6 +135,8 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
+    map.ref_unlock();
+
     for (const auto &it : map2) {
       EXPECT_TRUE(map.has(it.first));
     }
@@ -143,36 +150,8 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 TEST_F(Setup_mmap_map_test, string_key) {
   Lrand<int> rng;
 
-#if 0
-  {
-    mmap_lib::map<std::string_view, uint32_t> map;
-
-    map.set("foo", 3);
-    map.has("foo");
-    map.get("foo") -> 3
-    it = map.find("foo");
-    map.get_key(it)
-
-    //--------------
-
-    // Create new string
-    auto it = map.find("bar");
-    if (it == map.end()) { // hello is not there
-      auto it = map.set("bar", 0);
-    }else{
-      auto pos = it->first; // position
-      auto sv = map.get_key(pstr.pos); // size of the original insertion (bar == 3) bars
-      std::string_view sv2(sv.data(), pstr.size);
-    }
-
-    // pos -> string_view
-    auto sv = map.get_sview(pos);
-
-  }
-#endif
-
   for (int n = 0; n < 4; ++n) {
-    mmap_lib::map<std::string_view, uint32_t> map;
+    mmap_lib::map<mmap_lib::str, uint32_t> map;
     map.clear();
     absl::flat_hash_map<std::string, uint32_t> map2;
 
@@ -198,14 +177,17 @@ TEST_F(Setup_mmap_map_test, string_key) {
       EXPECT_EQ(map2.count(key), 1);
     }
 
+    map.ref_lock();
     for (const auto &it : map) {
       (void)it;
-      EXPECT_EQ(map.get_key(it), "base" + std::to_string(it.second) + "foo");
-      EXPECT_EQ(map2.count(map.get_key(it)), 1);
+      EXPECT_EQ(it.first, "base" + std::to_string(it.second) + "foo");
+      EXPECT_EQ(map2.count(it.first.to_s()), 1);
       conta--;
     }
+    map.ref_unlock();
     for (const auto &it : map2) {
-      EXPECT_TRUE(map.has(it.first));
+      EXPECT_TRUE(map.has(mmap_lib::str(it.first)));
+      EXPECT_EQ(it.second, map.get(mmap_lib::str(it.first)));
     }
 
     EXPECT_EQ(conta, 0);
@@ -228,7 +210,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
 
   int conta;
   {
-    mmap_lib::map<std::string_view, uint32_t> map("lgdb_bench", "mmap_map_test_str");
+    mmap_lib::map<mmap_lib::str, uint32_t> map("lgdb_bench", "mmap_map_test_str");
     map.clear();  // Clear the garbage from before
 
     conta = 0;
@@ -255,16 +237,19 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
   }
 
   {
-    mmap_lib::map<std::string_view, uint32_t> map("lgdb_bench", "mmap_map_test_str");
+    mmap_lib::map<mmap_lib::str, uint32_t> map("lgdb_bench", "mmap_map_test_str");
 
+    map.ref_lock();
     for (const auto &it : map) {
       (void)it;
       EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
-      EXPECT_EQ(map2.count(map.get_key(it)), 1);
+      EXPECT_EQ(map2.count(it.first.to_s()), 1);
       conta--;
     }
+    map.ref_unlock();
     for (const auto &it : map2) {
-      EXPECT_TRUE(map.has(it.first));
+      EXPECT_TRUE(map.has(mmap_lib::str(it.first)));
+      EXPECT_EQ(it.second, map.get(mmap_lib::str(it.first)));
     }
 
     EXPECT_EQ(conta, 0);
@@ -346,19 +331,39 @@ TEST_F(Setup_mmap_map_test, big_entry) {
     int conta = 0;
     for (int i = 1; i < rng.max(16); ++i) {
       int sz = rng.max(0xFFFFFF);
-      if (map.find(sz) != map.end()) {
+      if (!map.has(sz)) {
+        EXPECT_EQ(map.get_lock_num(), 0);
+
+        {
+          map.ref_lock();
+          EXPECT_EQ(map.find(sz), map.end());
+          map.ref_unlock();
+        }
+
+        EXPECT_EQ(map.get_lock_num(), 0);
         map.erase(sz);
+        EXPECT_EQ(map.get_lock_num(), 0);
       } else {
+        map.ref_lock();
+        EXPECT_NE(map.find(sz), map.end());
+        map.ref_unlock();
+
         map.set(sz, {11, sz});
         EXPECT_EQ(map.has(sz), 1);
         conta++;
+        EXPECT_EQ(map.get_lock_num(), 0);
       }
     }
+    EXPECT_EQ(map.get_lock_num(), 0);
 
+    map.ref_lock();
     for (const auto &it : map) {
       EXPECT_EQ(it.first, it.second.f1);
       conta--;
     }
+    map.ref_unlock();
+
+    EXPECT_EQ(map.get_lock_num(), 0);
     EXPECT_EQ(conta, 0);
   }
   map.clear();
@@ -382,6 +387,7 @@ TEST_F(Setup_mmap_map_test, big_entry) {
     }
   }
 
+  map.ref_lock();
   for (const auto &it : map) {
     EXPECT_EQ(it.first + 0, it.second.f0);
     EXPECT_EQ(it.first + 1, it.second.f1);
@@ -390,11 +396,13 @@ TEST_F(Setup_mmap_map_test, big_entry) {
     EXPECT_TRUE(map2[it.first] == it.second);
     conta--;
   }
+  map.ref_unlock();
   EXPECT_EQ(conta, 0);
 
   fmt::print("load_factor:{} conflict_factor:{}\n", map.load_factor(), map.conflict_factor());
 
   map.clear();
+
   for (const auto &it : map) {
     (void)it;
     EXPECT_TRUE(false);
@@ -460,7 +468,7 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
   auto       seed = rseed.any();
   {
     Lrand<int>                                  rng(seed);
-    mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
+    mmap_lib::bimap<uint32_t, mmap_lib::str> bimap("lgdb_bench", "mmap_map_large_sview");
     bimap.clear();  // Remove data from previous runs
 
     for (uint32_t i = 0; i < 60'000; ++i) {
@@ -468,15 +476,15 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
       str             = str + ":" + std::to_string(i);
 
       EXPECT_FALSE(bimap.has_key(i));
-      EXPECT_FALSE(bimap.has_val(str));
+      EXPECT_FALSE(bimap.has_val(mmap_lib::str(str)));
 
-      bimap.set(i, str);
+      bimap.set(i, mmap_lib::str(str));
 
       EXPECT_TRUE(bimap.has_key(i));
-      EXPECT_TRUE(bimap.has_val(str));
+      EXPECT_TRUE(bimap.has_val(mmap_lib::str(str)));
 
       auto str2 = bimap.get_val(i);
-      auto i2   = bimap.get_key(str);
+      auto i2   = bimap.get_key(mmap_lib::str(str));
 
       EXPECT_EQ(str, str2);
       EXPECT_EQ(i, i2);
@@ -485,11 +493,11 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
 
   {
     Lrand<int>                                  rng(seed);  // same seed
-    mmap_lib::bimap<uint32_t, std::string_view> bimap("lgdb_bench", "mmap_map_large_sview");
+    mmap_lib::bimap<uint32_t, mmap_lib::str> bimap("lgdb_bench", "mmap_map_large_sview");
 
     for (uint32_t i = 0; i < 60'000; ++i) {
-      std::string str = roots[rng.max(roots.size())];
-      str             = str + ":" + std::to_string(i);
+      std::string str_std = roots[rng.max(roots.size())];
+      mmap_lib::str str(str_std + ":" + std::to_string(i));
 
       EXPECT_TRUE(bimap.has_key(i));
       EXPECT_TRUE(bimap.has_val(str));

@@ -55,6 +55,9 @@
 
 #include "mmap_gc.hpp"
 #include "mmap_hash.hpp"
+#include "mmap_str.hpp"
+
+#define FAST_MISS_ALIGNED_CPU 1
 
 //#define mmap_map_LOG_ENABLED
 #ifdef mmap_map_LOG_ENABLED
@@ -263,6 +266,14 @@ struct hash<uint64_t> {
   }
 };
 
+
+template <>
+struct hash<mmap_lib::str> {
+  constexpr size_t operator()(mmap_lib::str const &o) const {
+    return o.hash();
+  }
+};
+
 template <>
 struct hash<int64_t> {
   constexpr size_t operator()(int64_t const& obj) const { return hash<uint64_t>{}(static_cast<uint64_t>(obj)); }
@@ -376,8 +387,10 @@ class map : public Hash {
 private:
   // static_assert(std::is_trivially_destructible<Key>::value, "Objects in map should be simple without pointer (simple
   // destruction)");
-  static_assert(!std::is_same<Key, std::string>::value, "mmap_lib::map uses string_view as key (not slower std::string)\n");
-  static_assert(!std::is_same<T, std::string>::value, "mmap_lib::map uses string_view as value (not slower std::string)\n");
+  static_assert(!std::is_same<Key, std::string>::value, "mmap_lib::map uses mmap_lib::str as key (not std::string)\n");
+  static_assert(!std::is_same<T, std::string>::value, "mmap_lib::map uses mmap_lib::str as value (not std::string)\n");
+  static_assert(!std::is_same<Key, std::string_view>::value, "mmap_lib::map uses mmap_lib::str as key (not std::string_view)\n");
+  static_assert(!std::is_same<T, std::string_view>::value, "mmap_lib::map uses mmap_lib::str as value (not std::string_view)\n");
 
   static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
@@ -458,30 +471,41 @@ private:
 
     // default constructed iterator can be compared to itself, but WON'T return true when
     // compared to end().
-    Iter() : mKeyVals(nullptr), mInfo(nullptr) {}
+    Iter() : mKeyVals(nullptr), mInfo(nullptr), map_ptr{nullptr} {}
 
     ~Iter() {
+      if (map_ptr) {
+        map_ptr->ref_unlock();
+      }
     }
 
     void operator=(const Iter& other) {
       mKeyVals = other.mKeyVals;
       mInfo    = other.mInfo;
+      map_ptr  = other.map_ptr;
+      if (map_ptr) {
+        map_ptr->ref_lock();
+      }
     }
 
     // both const_iterator and iterator can be constructed from a non-const iterator
-    Iter(Iter<false> const& other) : mKeyVals(other.mKeyVals), mInfo(other.mInfo) {
+    Iter(Iter<false> const& other) : mKeyVals(other.mKeyVals), mInfo(other.mInfo), map_ptr(other.map_ptr) {
+      if (map_ptr)
+        map_ptr->ref_lock();
     }
 
-    Iter(NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr) {
+    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
     }
 
-    Iter(NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
-        : mKeyVals(valPtr), mInfo(infoPtr) {
+    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
+        : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
       fastForward();
     }
 
     // prefix increment. Undefined behavior if we are at end()!
     Iter& operator++() {
+      assert(map_ptr);             // true iter should have ptr to avoid gc
+      assert(map_ptr->mmap_base);  // no gc
       mInfo++;
       mKeyVals++;
       fastForward();
@@ -530,6 +554,7 @@ private:
     friend class map<MaxLoadFactor100, key_type, T, hasher>;
     NodePtr        mKeyVals;
     uint8_t const* mInfo;
+    const map*     map_ptr;
   };
 
   ////////////////////////////////////////////////////////////////////
@@ -563,10 +588,15 @@ private:
     bool lock_was_set = std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed);
     if (lock_was_set)
       return false; // lock in use, abort!!
+    assert(!ref_locked);
 
-    if (mmap_fd >= 0 && empty()) {
-      mmap_size = 0;  // forget memoize size
-      unlink(mmap_name.c_str());
+    if (mmap_fd >= 0) {
+      if (empty()) {
+        unlink(mmap_name.c_str());
+        mmap_size = 0;  // forget memoize size
+      }
+    }else{
+      mmap_size = 0;  // forget memoize size if no file to backup
     }
 
     assert(mmap_base);
@@ -911,13 +941,16 @@ public:
   void swap(map& o)            = delete;
 
   void clear() {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    assert(!ref_locked); // do not call clear while in an iterator
 
     if (mmap_base != nullptr) {
       mmap_gc::recycle(mmap_base);
-      assert(mmap_base == nullptr);
+      assert(in_use_mutex || mmap_base == nullptr);
     }
+
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     if (!mmap_name.empty()) {
       unlink(mmap_name.c_str());
     }
@@ -940,67 +973,82 @@ public:
 
   // Returns 1 if key is found, 0 otherwise.
   [[nodiscard]] bool has(const key_type& key) const {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     auto ret = findIdx(key) >= 0;
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
 
     return ret;
   }
 
   [[nodiscard]] int find_key(const key_type& key) const {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     auto ret = findIdx(key);
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
 
     return ret;
   }
 
+  size_t get_lock_num() const {
+    return ref_locked;
+  }
+
   void ref_lock() const {
     // Single thread check: assert(in_use_mutex == 0);
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (ref_locked==0)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
+    ++ref_locked;
   }
 
   void ref_unlock() const {
+    assert(ref_locked);
+    --ref_locked;
     assert(in_use_mutex);
-    in_use_mutex.store(false, std::memory_order_release);
+    if (ref_locked==0)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   [[nodiscard]] const T get(key_type const& key) const {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
     const auto idx = findIdx(key);
     assert(idx >= 0);
 
     const auto ret = mKeyVals[idx].getSecond();
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
 
     return ret;
   }
 
   [[nodiscard]] const T  get(const const_iterator& it) const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return it->second;
   }
 
   [[nodiscard]] Key get_key(const const_iterator& it) const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return it->first;
   }
   [[nodiscard]] Key get_key(const value_type& it) const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return it.first;
   }
 
   [[nodiscard]] T* ref(key_type const& key) {
-    assert(in_use_mutex);
+    assert(ref_locked);
 
     auto idx = findIdx(key);
     assert(idx >= 0);
@@ -1009,99 +1057,112 @@ public:
   }
 
   [[nodiscard]] T* ref(const value_type& it) {
-    assert(in_use_mutex);
+    assert(ref_locked);
 
     return &it.second;
   }
 
   [[nodiscard]] T* ref(iterator& it) {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return &it->second;
   }
 
   [[nodiscard]] const_iterator find(const key_type& key) const {
-    assert(in_use_mutex);
+    ref_lock();
+    assert(ref_locked); // when the iterator is destroyed, the ref_unlock will be called
+
     const auto idx = findIdx(key);
     if (idx < 0)
-      return end();
-    return const_iterator{mKeyVals + idx, mInfo + idx};
+      return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+
+    return const_iterator{this, mKeyVals + idx, mInfo + idx};
   }
 
   template <typename OtherKey>
   [[nodiscard]] const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
-    assert(in_use_mutex);
+    ref_lock();
+
     const auto idx = findIdx(key);
     if (idx < 0)
-      return cend();
-    return const_iterator{mKeyVals + idx, mInfo + idx};
+      return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+
+    return const_iterator{this, mKeyVals + idx, mInfo + idx};
   }
 
   [[nodiscard]] iterator find(const key_type& key) {
-    assert(in_use_mutex);
+    ref_lock();
+
     const auto idx = findIdx(key);
     if (idx < 0)
-      return end();
-    return iterator{mKeyVals + idx, mInfo + idx};
+      return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+
+    return iterator{this, mKeyVals + idx, mInfo + idx};
   }
 
   template <typename OtherKey>
   [[nodiscard]] iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
-    assert(in_use_mutex);
+    ref_lock();
+
     const auto idx = findIdx(key);
     if (idx < 0)
-      return end();
-    return iterator{mKeyVals + idx, mInfo + idx};
+      return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+
+    return iterator{this, mKeyVals + idx, mInfo + idx};
   }
 
   [[nodiscard]] iterator begin() {
-    assert(in_use_mutex);
+    ref_lock();
+
     reload();
 
     if (empty()) {
-      return end();
+      return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
     }
-    return iterator{mKeyVals, mInfo, fast_forward_tag{}};
+    return iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
   }
   [[nodiscard]] const_iterator begin() const {
-    assert(in_use_mutex);
+    ref_lock();
+
     return cbegin();
   }
   [[nodiscard]] const_iterator cbegin() const {
-    assert(in_use_mutex);
+    ref_lock();
+
     reload();
 
     if (empty()) {
-      return cend();
+      return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
     }
-    return const_iterator{mKeyVals, mInfo, fast_forward_tag{}};
+    return const_iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
   }
 
   [[nodiscard]] iterator end() {
-    assert(in_use_mutex);
+    ref_lock();
+
     reload();
     // no need to supply valid info pointer: end() must not be dereferenced, and only node
     // pointer is compared.
-    return iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+    return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
   }
   [[nodiscard]] const_iterator end() const {
-    assert(in_use_mutex);
     return cend();
   }
   [[nodiscard]] const_iterator cend() const {
-    assert(in_use_mutex);
+    ref_lock();
     reload();
-    return const_iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+    return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
   }
 
   iterator erase(const_iterator& pos) {
-    assert(in_use_mutex);
+    ref_lock();
+
     // its safe to perform const cast here
-    return erase(iterator{const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
+    return erase(iterator{this, const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
   }
 
   // Erases element at pos, returns iterator to the next element.
   iterator erase(iterator pos) {
-    assert(in_use_mutex);
+    assert(ref_locked);
 
     // we assume that pos always points to a valid entry, and not end().
     auto const idx = static_cast<size_t>(pos.mKeyVals - mKeyVals);
@@ -1119,8 +1180,9 @@ public:
   }
 
   size_t erase(const key_type& key) {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     int      idx;
     InfoType info;
@@ -1131,21 +1193,26 @@ public:
       if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
         shiftDown(idx);
         --(*mNumElements);
-        in_use_mutex.store(false, std::memory_order_release);
+
+        if (!ref_locked)
+          in_use_mutex.store(false, std::memory_order_release);
+
         return 1;
       }
       idx  = next_idx(idx);
       info = next_info(info);
     } while (info <= mInfo[idx]);
 
-    in_use_mutex.store(false, std::memory_order_release);
-    // nothing found to delete
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
+
     return 0;
   }
 
   void reserve(size_t count) {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     auto newSize = InitialNumElements > *mMask + 1 ? InitialNumElements : *mMask + 1;
     while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
@@ -1155,7 +1222,8 @@ public:
 
     rehash(newSize);
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   [[nodiscard]] size_type size() const { return *mNumElements; }
@@ -1166,17 +1234,21 @@ public:
   [[nodiscard]] inline std::string_view get_path() const { return mmap_path; }
 
   [[nodiscard]] size_t capacity() const {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     if (mmap_base) {
       auto ret =  *mMaxNumElementsAllowed;
-      in_use_mutex.store(false, std::memory_order_release);
+      if (!ref_locked)
+        in_use_mutex.store(false, std::memory_order_release);
       return ret;
     }
     auto ret = calcMaxNumElementsAllowed(InitialNumElements);
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
+
     return ret;
   }
 
@@ -1243,8 +1315,9 @@ private:
 
   template <typename Arg, typename Data>
   int doCreate(Arg&& key, Data&& val) {
-    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     reload();
     while (true) {
@@ -1306,7 +1379,8 @@ private:
         ++(*mNumElements);
       }
 
-      in_use_mutex.store(false, std::memory_order_release);
+      if (!ref_locked)
+        in_use_mutex.store(false, std::memory_order_release);
 
       return insertion_idx;
     }
@@ -1390,6 +1464,7 @@ private:
   mutable size_t    mmap_size     = 0;
   mutable uint64_t* mmap_base     = 0;
   mutable std::atomic<bool> in_use_mutex{false};
+  mutable std::atomic<int>  ref_locked{0};
 #ifndef NDEBUG
   size_t conflicts = 0;
 #endif

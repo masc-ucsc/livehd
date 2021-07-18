@@ -85,7 +85,7 @@ cc_test(
 cc_test(
     name = "bench_vector_use",
     srcs = ["tests/bench_vector_use.cpp"],
-    tags = ["fixme"],
+    # tags = ["fixme"],
     deps = [
         ":mmap_lib_test_lib",
         "//task",
@@ -111,8 +111,8 @@ cc_test(
 )
 
 cc_test(
-    name = "bench_pstr_use",
-    srcs = ["tests/bench_pstr_use.cpp"],
+    name = "bench_str_use",
+    srcs = ["tests/bench_str_use.cpp"],
     deps = [
         "mmap_lib_test_lib",
         "//task",
@@ -128,7 +128,6 @@ cc_test(
 cc_test(
     name = "mmap_map_test",
     srcs = ["tests/mmap_map_test.cpp"],
-    #tags = [ "fixme", ],
     deps = [
         ":mmap_lib_test_lib",
         "//task",

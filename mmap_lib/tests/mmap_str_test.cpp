@@ -10,7 +10,7 @@
 #include "fmt/format.h"
 #include "gtest/gtest.h"
 
-#define RNDN   150  // number of rand strings
+#define RNDN   5250  // number of rand strings
 #define MaxLen 50   // max len + 1 for rand strings
 #define MaxNum 10
 #define MinLen 2  // min len for rand strings
@@ -49,7 +49,7 @@ public:
     srand(time(0));
     uint8_t t_len = 0u;
     // random string generation
-    for (uint8_t i = 0; i < RNDN; ++i) {  // # of strings in vectors
+    for (auto i = 0; i < RNDN; ++i) {  // # of strings in vectors
       std::string ele, ele2, ele3, ele4;
       t_len = MinLen + (rand() % (MaxLen - MinLen));  // deciding string length (0-31)
       // construct string with ASCII (32-126) -> 95 chars
@@ -193,7 +193,7 @@ TEST_F(Mmap_str_test, random_at_operator) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string   hold = s_get(i);
     mmap_lib::str temp(hold);
-    for (auto j = 0; j < temp.size(); ++j) {
+    for (auto j = 0u; j < temp.size(); ++j) {
       EXPECT_EQ(hold[j], temp[j]);
     }
   }
@@ -217,6 +217,9 @@ TEST_F(Mmap_str_test, isI_operator) {
       EXPECT_TRUE(str1.is_i());
     } else {
       EXPECT_FALSE(str2.is_i());
+      if (str2.is_i()) {
+        fmt::print("[{}]\n",str2.to_s());
+      }
     }
   }
 }
