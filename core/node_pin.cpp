@@ -511,22 +511,12 @@ Bits_t Node_pin::get_offset() const {
   return off;
 }
 
-const Ann_ssa &Node_pin::get_ssa() const {
-  const auto *data = Ann_node_pin_ssa::ref(top_g)->ref(get_compact_class_driver());
-  I(data);
-  return *data;
+uint32_t Node_pin::get_ssa() const {
+  return Ann_node_pin_ssa::ref(top_g)->get(get_compact_class_driver());
 }
 
-Ann_ssa *Node_pin::ref_ssa() {
-  auto *ref = Ann_node_pin_ssa::ref(top_g);
-
-  auto it = ref->find(get_compact_class_driver());
-  if (it != ref->end()) {
-    return ref->ref(it);
-  }
-
-  auto it2 = ref->set(get_compact_class_driver(), Ann_ssa());  // Empty
-  return ref->ref(it2);
+void Node_pin::set_ssa(uint32_t v) {
+  Ann_node_pin_ssa::ref(top_g)->set(get_compact_class_driver(), v);
 }
 
 bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_class_driver()); }

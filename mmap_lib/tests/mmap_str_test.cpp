@@ -43,6 +43,9 @@ class Mmap_str_test : public ::testing::Test {
 
 public:
   void SetUp() override {
+    mmap_lib::str::setup();
+    mmap_lib::str::clear();
+
     srand(time(0));
     uint8_t t_len = 0u;
     // random string generation
@@ -72,12 +75,7 @@ public:
       t_len = MinNum + (rand() % (MaxNum - MinNum));
       for (uint8_t j = 0; j < t_len; ++j) {
         if (j == 0) {
-          if ((rand() % 2) == 1) {
-            ele2 += '-';
-            ele2 += ('1' + (rand() % 9));
-          } else {
-            ele2 += ('1' + (rand() % 9));
-          }
+          ele2 += ('1' + (rand() % 9));
         } else {
           ele2 += ('0' + (rand() % 10));
         }
@@ -87,9 +85,7 @@ public:
   }
 
   void TearDown() override {
-    mmap_lib::str<1>::clear_map();
-    mmap_lib::str<2>::clear_map();
-    mmap_lib::str<3>::clear_map();
+    mmap_lib::str::clear();
   }
 
   // wrapper for .at() since vectors are private
@@ -101,26 +97,54 @@ public:
 
 // random mmap_lib::str creation
 TEST_F(Mmap_str_test, random_ctor_cmp) {
+
+  std::string std_str("this is a long string to 1234 1234 test abcdefghijklmnop");
+  mmap_lib::str  str1("this is a long string to 1234 1234 test abcdefghijklmnop");
+  mmap_lib::str  other("NOT THE SAME TO FORCE OTHER a long string to 1234 1234 test abcdefghijklmnop");
+  mmap_lib::str  str2("this is a long string to 1234 1234 test abcdefghijklmnop");
+  mmap_lib::str  str3(std_str);
+  mmap_lib::str  str4(std_str.c_str());
+
+  std::cerr << "str1:" << str1.to_s() << "\n";
+  std::cerr << "str2:" << str2.to_s() << "\n";
+  std::cerr << "str3:" << str3.to_s() << "\n";
+  std::cerr << "str4:" << str4.to_s() << "\n";
+
+  EXPECT_EQ(str1, str2);
+  EXPECT_EQ(str1, str3);
+  EXPECT_EQ(str1, str4);
+  EXPECT_EQ(str2, str1);
+  EXPECT_EQ(str2, str3);
+  EXPECT_EQ(str2, str4);
+  EXPECT_EQ(str3, str1);
+  EXPECT_EQ(str3, str2);
+  EXPECT_EQ(str3, str4);
+  EXPECT_EQ(str4, str1);
+  EXPECT_EQ(str4, str2);
+  EXPECT_EQ(str4, str3);
+
+
+  std::cerr << "str1:" << str1.substr(1).to_s() << "\n";
+  std::cerr << "std1:" << std_str.substr(1) << "\n";
+
+  std::cerr << "str5:" << str1.substr(5).to_s() << "\n";
+  std::cerr << "std5:" << std_str.substr(5) << "\n";
+
+  std::cerr << "str5,3:" << str1.substr(5,3).to_s() << "\n";
+  std::cerr << "std5,3:" << std_str.substr(5,3) << "\n";
+
+  std::cerr << "str9,9:" << str1.substr(9,9).to_s() << "\n";
+  std::cerr << "std9,9:" << std_str.substr(9,9) << "\n";
+
   for (auto i = 0; i < RNDN; ++i) {
     std::string      c_st = s_get(i), n_st = s_get((i + 1) % RNDN);
     std::string_view c_sv = c_st, n_sv = n_st;
-    mmap_lib::str<1>    c_s1(c_st); 
-    mmap_lib::str<2>    n_s1(n_st);
-    mmap_lib::str<3>    c_s2(c_sv);
-    mmap_lib::str<1>    n_s2(n_sv);
-    mmap_lib::str<2>    c_s3(c_st.c_str());
-    mmap_lib::str<3>    n_s3(n_st.c_str());
-    
-
-#if 0
-    std::cout << "str curr: " << c_st << std::endl;
-    std::cout << "str next: " << n_st << std::endl;
-    std::cout << "pstr c_s1: ";
-    c_s1.print_string();
-    std::cout << "\npstr n_s1: ";
-    n_s1.print_string();
-    std::cout << std::endl;
-#endif
+    mmap_lib::str    c_s1(c_st);
+    mmap_lib::str    n_s1(n_st);
+    mmap_lib::str    c_s2(c_sv);
+    mmap_lib::str    n_s2(n_sv);
+    mmap_lib::str    c_s3(c_st.c_str());
+    mmap_lib::str    n_s3(n_st.c_str());
 
     // Testing ctors
     EXPECT_EQ(c_s3, c_s1);
@@ -168,7 +192,7 @@ TEST_F(Mmap_str_test, random_ctor_cmp) {
 TEST_F(Mmap_str_test, random_at_operator) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string   hold = s_get(i);
-    mmap_lib::str<2> temp(hold);
+    mmap_lib::str temp(hold);
     for (auto j = 0; j < temp.size(); ++j) {
       EXPECT_EQ(hold[j], temp[j]);
     }
@@ -179,15 +203,14 @@ TEST_F(Mmap_str_test, random_at_operator) {
 // one for numbers, one for outcomes (bool)
 TEST_F(Mmap_str_test, isI_operator) {
   for (auto i = 0; i < RNDN; ++i) {
-    std::string   hold1 = n_get(i), hold2 = s_get(i);
-    mmap_lib::str<3> str1(hold1), str2(hold2);
+    std::string  hold1 = n_get(i);
+    std::string  hold2 = s_get(i);
+    mmap_lib::str str1(hold1);
+    mmap_lib::str str2(hold2);
 
-#if 0 
-    std::cout << "str1: ";
-    str1.print_string();
-    std::cout << "\nstr2: ";
-    str2.print_string();
-    std::cout << "\n";
+#if 0
+    std::cout << "str1:" << str1.to_s() << "\n";
+    std::cout << "str2:" << str2.to_s() << "\n";
 #endif
 
     if ((rand() % 100) >= 50) {
@@ -205,7 +228,7 @@ TEST_F(Mmap_str_test, starts_ends_with) {
   // ALWAYS TRUE
   for (auto i = 0; i < RNDN; ++i) {
     std::string   orig = s_get(i);  // std::string creation
-    mmap_lib::str<1> temp(orig);       // mmap_lib::str creation
+    mmap_lib::str temp(orig);       // mmap_lib::str creation
 
     // gen start/end indx
     if (temp.size() == 0) {
@@ -220,8 +243,8 @@ TEST_F(Mmap_str_test, starts_ends_with) {
     std::string      stable_ew   = orig.substr(start_ew);
     std::string_view sv_check_sw = stable_sw;  // sv
     std::string_view sv_check_ew = stable_ew;
-    mmap_lib::str<1>    check_sw(stable_sw);  // str
-    mmap_lib::str<1>    check_ew(stable_ew);
+    mmap_lib::str    check_sw(stable_sw);  // str
+    mmap_lib::str    check_ew(stable_ew);
 
 #if 0    
     std::cout << "pstr temp: ";
@@ -245,7 +268,7 @@ TEST_F(Mmap_str_test, starts_ends_with) {
   // TRUE AND FALSE
   for (auto i = 0; i < RNDN; ++i) {
     std::string   orig = s_get(i);
-    mmap_lib::str<1> temp(orig);
+    mmap_lib::str temp(orig);
 
     if (temp.size() == 0) {
       start_sw = 0;
@@ -263,8 +286,8 @@ TEST_F(Mmap_str_test, starts_ends_with) {
     std::string      stable_ew   = orig.substr(start_ew, end_ew);
     std::string_view sv_check_sw = stable_sw;
     std::string_view sv_check_ew = stable_ew;
-    mmap_lib::str<1>    check_sw(stable_sw);
-    mmap_lib::str<1>    check_ew(stable_ew);
+    mmap_lib::str    check_sw(stable_sw);
+    mmap_lib::str    check_ew(stable_ew);
 
 #if 0    
     std::cout << "pstr temp: ";
@@ -314,8 +337,8 @@ TEST_F(Mmap_str_test, to_s_to_i) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string   temp = s_get(i), numt = n_get(i);
     int           numref = stoi(numt);
-    mmap_lib::str<2> check(temp);
-    mmap_lib::str<2> numch(numt);
+    mmap_lib::str check(temp);
+    mmap_lib::str numch(numt);
     std::string   hold = check.to_s();
     int           numh = numch.to_i();
     EXPECT_EQ(temp, hold);
@@ -327,66 +350,35 @@ TEST_F(Mmap_str_test, concat_append) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string      one = s_get(i), two = s_get((i + 1) % RNDN);
     std::string_view sv1 = one, sv2 = two;
-    mmap_lib::str<1> sone(one); 
-    mmap_lib::str<2> stwo(two);
-    mmap_lib::str<3> sthree(one);
-    mmap_lib::str<1> sfour(two);
-    mmap_lib::str<2> sfive(one);
-    mmap_lib::str<3> ssix(two);
-    std::string      three = one + two, three2 = two + one;
-    mmap_lib::str<1> ref(three);
-    mmap_lib::str<2> ref2(three2);
+    mmap_lib::str sone(one); 
+    mmap_lib::str stwo(two);
+    mmap_lib::str sthree(one);
+    mmap_lib::str sfour(two);
+    mmap_lib::str sfive(one);
+    mmap_lib::str ssix(two);
 
-#if 0
-    std::cout << one << "   " << two << "   " << three << std::endl;
-    std::cout << "pstr one is: ";
-    sone.print_string();
-    std::cout << std::endl;
-    std::cout << "pstr two is: ";
-    stwo.print_string();
-    std::cout << std::endl;
-    std::cout << "pstr ref is: ";
-    ref.print_string();
-    std::cout << std::endl;
-#endif
+    mmap_lib::str ref(one+two);
+    mmap_lib::str ref2(two+one);
 
-#if 0
-    std::cout << two << "   " << one << "   " << three2 << std::endl;
-    std::cout << "pstr two is: ";
-    stwo.print_string();
-    std::cout << std::endl;
-    std::cout << "pstr one is: ";
-    sone.print_string();
-    std::cout << std::endl;
-    std::cout << "pstr ref is: ";
-    ref2.print_string();
-    std::cout << std::endl;
-#endif
+    // std::cout << "sone :" << sone.to_s() << "\n";
+    // std::cout << "stwo :" << stwo.to_s() << "\n";
 
-    sone.append(stwo);
-    sfour.append(sthree);
-    auto yon = mmap_lib::str<3>::concat(sfive, ssix);
-    auto yok = mmap_lib::str<3>::concat(ssix, sfive);
+    auto sone2 = sone.append(stwo);
+
+    // std::cout << "sone2:" << sone2.to_s() << "\n";
+    // std::cout << "ref  :" << ref.to_s()   << "\n";
+
+    auto sfour2 = sfour.append(sthree);
+    auto yon = mmap_lib::str::concat(sfive, ssix);
+    auto yok = mmap_lib::str::concat(ssix, sfive);
 
     // mmap_lib::str    test  = mmap_lib::str::concat(sone, stwo);
     // mmap_lib::str    test2 = mmap_lib::str::concat(sv1, stwo);
     // mmap_lib::str    test3 = mmap_lib::str::concat(sone, sv2);
     // mmap_lib::str    test4 = sone.append(sv2);
 
-#if 0
-    std::cout << "one.append(two): ";
-    sone.print_string();
-    std::cout << std::endl;
-#endif
-
-#if 0
-    std::cout << "two.append(one): ";
-    stwo.print_string();
-    std::cout << std::endl;
-#endif
-
-    EXPECT_EQ(ref, sone);
-    EXPECT_EQ(ref2, sfour);
+    EXPECT_EQ(ref, sone2);
+    EXPECT_EQ(ref2, sfour2);
     EXPECT_EQ(ref, yon);
     EXPECT_EQ(ref2, yok);
     /*
@@ -428,10 +420,10 @@ TEST_F(Mmap_str_test, find_rfind) {
     std::string      stable_n = next.substr(start2, end2);
     std::string_view c_sv     = stable_c;
     std::string_view n_sv     = stable_n;
-    mmap_lib::str<1>    curr_str(curr);
-    mmap_lib::str<2>    next_str(next);
-    mmap_lib::str<3>    curr_sub(stable_c);
-    mmap_lib::str<1>    next_sub(stable_n);
+    mmap_lib::str    curr_str(curr);
+    mmap_lib::str    next_str(next);
+    mmap_lib::str    curr_sub(stable_c);
+    mmap_lib::str    next_sub(stable_n);
 
 #if 0
     std::cout << "curr_str: ";
@@ -483,30 +475,16 @@ TEST_F(Mmap_str_test, substr) {
 
     std::string   stable_c = curr.substr(start, end);
     std::string   stable_n = next.substr(start2, end2);
-    mmap_lib::str<1> curr_sub_ref(stable_c);
-    mmap_lib::str<2> next_sub_ref(stable_n);
-    mmap_lib::str<3> curr_str(curr);
-    mmap_lib::str<1> next_str(next);
+    mmap_lib::str curr_sub_ref(stable_c);
+    mmap_lib::str next_sub_ref(stable_n);
+    mmap_lib::str curr_str(curr);
+    mmap_lib::str next_str(next);
     auto curr_sub = curr_str.substr(start, end);
     auto next_sub = next_str.substr(start2, end2);
 
-#if 0
-    std::cout << "curr_str: ";
-    curr_str.print_string();
-    std::cout << "\nstart = " << start << " end = " << end;
-    std::cout << "\ncurr_sub: ";
-    curr_sub.print_string();
-    std::cout << "\ncurr_sub_ref: ";
-    curr_sub_ref.print_string();
-    std::cout << "\nnext_str: ";
-    next_str.print_string();
-    std::cout << "\nstart2 = " << start2 << " end2 = " << end2;
-    std::cout << "\nnext_sub: ";
-    next_sub.print_string();
-    std::cout << "\nnext_sub_ref: ";
-    next_sub_ref.print_string();
-    std::cout << "\n";
-#endif
+    //std::cout << "orig    :" << next        << ".substr("<< start2 << "," << end2 <<")\n";
+    //std::cout << "next str:" << next_sub.to_s() << "\n";
+    //std::cout << "next std:" << stable_n        << "\n";
 
     // find(const str& a)
     EXPECT_EQ(curr_sub, curr_sub_ref);
@@ -515,7 +493,7 @@ TEST_F(Mmap_str_test, substr) {
 }
 
 TEST_F(Mmap_str_test, split) {
-  std::vector<mmap_lib::str<3>> ref_nu, ref_nd, hold_nu, hold_nd;
+  std::vector<mmap_lib::str> ref_nu, ref_nd, hold_nu, hold_nd;
   std::string                longg_nu, longg_nd;
 
   uint8_t iter = 0, sum = 0;
@@ -528,14 +506,14 @@ TEST_F(Mmap_str_test, split) {
       }
       sum += iter;  // add to sum to compare
     }
-    ref_nu.push_back(mmap_lib::str<3>(nu_get(i)));  // add to ref_
-    ref_nd.push_back(mmap_lib::str<3>(nd_get(i)));  // add to ref-
+    ref_nu.push_back(mmap_lib::str(nu_get(i)));  // add to ref_
+    ref_nd.push_back(mmap_lib::str(nd_get(i)));  // add to ref-
     longg_nu += nu_get(i);                       // add to long
     longg_nd += nd_get(i);
     --iter;
     if (iter == 0) {  // iter == 0 means times to split
-      mmap_lib::str<3> tt_nu(longg_nu);
-      mmap_lib::str<3> tt_nd(longg_nd);
+      mmap_lib::str tt_nu(longg_nu);
+      mmap_lib::str tt_nd(longg_nd);
       hold_nu = tt_nu.split('_');  // splitting by underscore
       hold_nd = tt_nd.split('-');  // splitting by dash
       EXPECT_EQ(ref_nu, hold_nu);  // checking
@@ -561,7 +539,7 @@ TEST_F(Mmap_str_test, split) {
 TEST_F(Mmap_str_test, get_str_before_after) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string   temp = s_get(i);
-    mmap_lib::str<1> hold(temp);
+    mmap_lib::str hold(temp);
     char          ch  = temp[rand() % temp.size()];
     size_t        ffo = temp.find_first_of(ch);
     size_t        flo = temp.find_last_of(ch);
@@ -588,10 +566,10 @@ TEST_F(Mmap_str_test, get_str_before_after) {
     std::string gsal_stable = temp.substr(flo + 1, temp.size() - (flo + 1));
     std::string gsbl_stable = temp.substr(0, flo);
 
-    mmap_lib::str<1> gsaf_ref(gsaf_stable);
-    mmap_lib::str<2> gsbf_ref(gsbf_stable);
-    mmap_lib::str<3> gsal_ref(gsal_stable);
-    mmap_lib::str<1> gsbl_ref(gsbl_stable);
+    mmap_lib::str gsaf_ref(gsaf_stable);
+    mmap_lib::str gsbf_ref(gsbf_stable);
+    mmap_lib::str gsal_ref(gsal_stable);
+    mmap_lib::str gsbl_ref(gsbl_stable);
 
 #if 0
     std::cout << "std gsaf_stable: " << gsaf_stable << std::endl;

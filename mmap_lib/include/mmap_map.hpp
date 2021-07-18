@@ -136,32 +136,6 @@
 // umul
 namespace mmap_lib {
 
-template <typename T>
-struct is_array_serializable {
-  template <typename U>
-  static constexpr decltype(std::declval<U>().data(), bool()) test_data(int) {
-    return true;
-  }
-
-  template <typename U>
-  static constexpr bool test_data(...) {
-    return false;
-  }
-
-  template <typename U>
-  static constexpr decltype(std::declval<U>().size(), bool()) test_size(int) {
-    return true;
-  }
-
-  template <typename U>
-  static constexpr bool test_size(...) {
-    return false;
-  }
-
-  // std::string can work too but it can easily do copies all over. Not worth it for performance reasons
-  static constexpr bool value = test_data<T>(int()) && test_size<T>(int()) && !std::is_same<T, std::string>::value;
-};
-
 namespace detail {
 #if defined(__SIZEOF_INT128__)
 #define mmap_map_UMULH(a, b) static_cast<uint64_t>((static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b)) >> 64u)
@@ -363,8 +337,6 @@ struct hash<std::string_view> {
   size_t operator()(std::string_view str) const noexcept { return mmap_lib::hash64(str.data(), str.size()); }
 };
 
-// std::enable_if_t<is_array_serializable<T>::value && !std::is_same_v<T,std::string_view>, int> = 0
-
 template <class T>
 struct hash<std::vector<T>> {
   size_t operator()(const std::vector<T>& str) const noexcept { return mmap_lib::hash64(str.data(), sizeof(T) * str.size()); }
@@ -407,13 +379,8 @@ private:
   static_assert(!std::is_same<Key, std::string>::value, "mmap_lib::map uses string_view as key (not slower std::string)\n");
   static_assert(!std::is_same<T, std::string>::value, "mmap_lib::map uses string_view as value (not slower std::string)\n");
 
-  static_assert(!(is_array_serializable<Key>::value && is_array_serializable<T>::value),
-                "mmap_lib::map can not have an array for for KEY and VALUE simultaneously\n");
   static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
-  static constexpr bool    using_key_sview      = is_array_serializable<Key>::value;
-  static constexpr bool    using_val_sview      = is_array_serializable<T>::value;
-  static constexpr bool    using_sview          = using_key_sview || using_val_sview;
   static constexpr size_t  InitialNumElements   = 1024;
   static constexpr int     InitialInfoNumBits   = 5;
   static constexpr uint8_t InitialInfoInc       = 1 << InitialInfoNumBits;
@@ -424,9 +391,7 @@ private:
 
 public:
   using key_type   = Key;
-  using array_type = typename std::conditional<is_array_serializable<Key>::value, Key, T>::type;
-  using value_type = mmap_lib::pair<typename std::conditional<is_array_serializable<Key>::value, uint32_t, Key>::type,
-                                    typename std::conditional<is_array_serializable<T>::value, uint32_t, T>::type>;
+  using value_type = mmap_lib::pair<Key, T>;
   using size_type  = size_t;
   using hasher     = Hash;
   using Self       = map<MaxLoadFactor100, key_type, T, hasher>;
@@ -472,13 +437,6 @@ private:
     value_type mData;
   };
 
-  void iter_free() const {
-    assert(iter_cntr > 0);
-    iter_cntr--;
-  }
-
-  void iter_new() const { iter_cntr++; }
-
   using Node = DataNode<Self>;
 
   // Iter ////////////////////////////////////////////////////////////
@@ -500,44 +458,30 @@ private:
 
     // default constructed iterator can be compared to itself, but WON'T return true when
     // compared to end().
-    Iter() : mKeyVals(nullptr), mInfo(nullptr), map_ptr(nullptr) {}
+    Iter() : mKeyVals(nullptr), mInfo(nullptr) {}
 
     ~Iter() {
-      if (map_ptr && map_ptr->iter_cntr > 0) {
-        map_ptr->iter_free();
-      }
     }
 
     void operator=(const Iter& other) {
       mKeyVals = other.mKeyVals;
       mInfo    = other.mInfo;
-      map_ptr  = other.map_ptr;
-      if (map_ptr) {
-        map_ptr->iter_new();
-      }
     }
 
     // both const_iterator and iterator can be constructed from a non-const iterator
-    Iter(Iter<false> const& other) : mKeyVals(other.mKeyVals), mInfo(other.mInfo), map_ptr(other.map_ptr) {
-      if (map_ptr) {
-        map_ptr->iter_new();
-      }
+    Iter(Iter<false> const& other) : mKeyVals(other.mKeyVals), mInfo(other.mInfo) {
     }
 
-    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
-      map_ptr->iter_new();
+    Iter(NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr) {
     }
 
-    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
-        : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
-      map_ptr->iter_new();
+    Iter(NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
+        : mKeyVals(valPtr), mInfo(infoPtr) {
       fastForward();
     }
 
     // prefix increment. Undefined behavior if we are at end()!
     Iter& operator++() {
-      assert(map_ptr);             // true iter should have ptr to avoid gc
-      assert(map_ptr->mmap_base);  // no gc
       mInfo++;
       mKeyVals++;
       fastForward();
@@ -586,7 +530,6 @@ private:
     friend class map<MaxLoadFactor100, key_type, T, hasher>;
     NodePtr        mKeyVals;
     uint8_t const* mInfo;
-    const map*     map_ptr;
   };
 
   ////////////////////////////////////////////////////////////////////
@@ -610,14 +553,16 @@ private:
     return s;
   }
 
-  // gc_done can be called for mmap_base or mmap_txt_base
   bool gc_done(void* base, bool force_recycle) const noexcept {
-    if (iter_cntr && !force_recycle)
-      return false;
+    (void)force_recycle;
 
     if (mmap_base != base) {  // WARNING: Possible because 2 mmaps can be active during rehash
       return false;
     }
+
+    bool lock_was_set = std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed);
+    if (lock_was_set)
+      return false; // lock in use, abort!!
 
     if (mmap_fd >= 0 && empty()) {
       mmap_size = 0;  // forget memoize size
@@ -639,25 +584,7 @@ private:
     // mmap_size = 0;
     mmap_fd = -1;
 
-    return true;
-  }
-
-  bool gc_txt_done(void* base, bool force_recycle) const {
-    (void)base;
-    if (iter_cntr && !force_recycle)
-      return false;  // abort
-
-    assert(using_sview);
-    assert(mmap_txt_base == base);
-
-    if (mmap_txt_fd >= 0 && mmap_txt_base[0] == 0) {
-      unlink((mmap_name + "txt").c_str());
-    }
-
-    mmap_txt_base = nullptr;
-    // NOTE: preserve mmap_txt_size to avoid read file in reload
-    // mmap_txt_size = 0;
-    mmap_txt_fd = -1;
+    in_use_mutex.store(false, std::memory_order_release);
 
     return true;
   }
@@ -674,26 +601,6 @@ private:
     auto   n     = total / (sizeof(Node) + sizeof(uint8_t));
     return n - 1;
   }
-
-  void grow_txt_mmap(size_t size) {
-    assert(mmap_txt_size < size);
-    assert(mmap_txt_base);
-
-    void* base;
-    std::tie(base, mmap_txt_size) = mmap_gc::remap(mmap_name, mmap_txt_base, mmap_txt_size, size);
-    mmap_txt_base                 = reinterpret_cast<uint64_t*>(base);
-  }
-
-#if 0
-	std::tuple<uint64_t *, size_t> create_mmap(std::string name, int fd, size_t size) const {
-    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1, std::placeholders::_2);
-
-    void *base = nullptr;
-    std::tie(base, size) = mmap_gc::mmap(name, fd, size, gc_func);
-
-		return std::make_tuple(reinterpret_cast<uint64_t *>(base),size);
-	}
-#endif
 
   __attribute__((noinline, cold)) void setup_mmap(size_t n_entries) const {
     assert(mmap_base == nullptr);
@@ -769,45 +676,6 @@ private:
     }
   }
 
-  __attribute__((noinline, cold)) void setup_mmap_txt() const {
-    if constexpr (!using_sview) {
-      return;
-    }
-    assert(mmap_txt_base == nullptr);
-
-    auto new_mmap_txt_size = mmap_txt_size;
-
-    if (mmap_name.empty()) {
-      // MMAP_TXT------------------------------
-      assert(mmap_txt_fd == -1);
-      if (mmap_txt_size == 0) {  // First reload
-        new_mmap_txt_size = 8192;
-      }
-    } else {
-      // MMAP_TXT------------------------------
-      if (mmap_txt_fd < 0) {
-        mmap_txt_fd = mmap_gc::open(mmap_name + "txt");
-        assert(mmap_txt_fd >= 0);
-      }
-      if (mmap_txt_size == 0) {  // First reload
-        size_t entries;
-        int    sz = read(mmap_txt_fd, &entries, 8);
-        if (sz != 8) {
-          entries = 1024;
-        } else {
-          entries++;  // We read base 0
-        }
-
-        new_mmap_txt_size = entries * 8;
-      }
-    }
-
-    auto gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_txt_done, this, std::placeholders::_1, std::placeholders::_2);
-    void* base   = nullptr;
-    std::tie(base, mmap_txt_size) = mmap_gc::mmap(mmap_name + "txt", mmap_txt_fd, new_mmap_txt_size, gc_func);
-    mmap_txt_base                 = reinterpret_cast<uint64_t*>(base);
-  }
-
   void reload() const {
     if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
       assert(mmap_base == nullptr);
@@ -816,16 +684,6 @@ private:
       setup_mmap(0);
 
       assert(mmap_base);
-    }
-    if constexpr (using_sview) {
-      if (MMAP_LIB_UNLIKELY(mmap_txt_base == nullptr)) {
-        assert(mmap_txt_base == nullptr);
-        assert(mmap_txt_fd < 0);
-
-        setup_mmap_txt();
-
-        assert(mmap_txt_base);
-      }
     }
   }
 
@@ -919,13 +777,6 @@ private:
 
   inline bool equals(const Key& k1, const Key& k2) const { return k1 == k2; }
 
-  template <typename Key_ = Key, typename = std::enable_if_t<is_array_serializable<Key_>::value>>
-  inline bool equals(Key k1, const uint32_t key_pos) const {
-    assert(using_sview);
-    auto txt = get_sview(key_pos);
-    return k1 == txt;
-  }
-
   // copy of find(), except that it returns iterator instead of const_iterator.
   template <typename Other>
   int findIdx(Other const& key) const {
@@ -965,11 +816,7 @@ private:
 
     int      idx;
     InfoType info;
-    if constexpr (using_key_sview) {
-      keyToIdx(get_sview(keyval.getFirst()), idx, info);
-    } else {
-      keyToIdx(keyval.getFirst(), idx, info);
-    }
+    keyToIdx(keyval.getFirst(), idx, info);
 
     // skip forward. Use <= because we are certain that the element is not there.
     while (info <= mInfo[idx]) {
@@ -1033,12 +880,6 @@ private:
     mMaxNumElementsAllowed = &local_mMaxNumElementsAllowed;
     mInfoInc               = &static_InitialInfoInc;
     mInfoHashShift         = &static_InitialInfoHashShift;
-
-#if 0
-    for(auto &ent:memoize_sview_insert) {
-      ent.first = 0; // clear to invalid possition
-    }
-#endif
   }
 
 public:
@@ -1070,6 +911,9 @@ public:
   void swap(map& o)            = delete;
 
   void clear() {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     if (mmap_base != nullptr) {
       mmap_gc::recycle(mmap_base);
       assert(mmap_base == nullptr);
@@ -1083,129 +927,80 @@ public:
     local_mMaxNumElementsAllowed = 0;
     assert(*mNumElements == 0);
 
-    if constexpr (using_sview) {
-      assert(using_sview);
-      if (mmap_txt_base != nullptr) {
-        mmap_gc::recycle(mmap_txt_base);
-      }
-      if (!mmap_name.empty()) {
-        unlink((mmap_name + "txt").c_str());
-      }
-      mmap_txt_base = nullptr;
-      mmap_txt_size = 0;
-    }
+    in_use_mutex.store(false, std::memory_order_release);
   }
 
   // Destroys the map and all it's contents.
   virtual ~map() { destroy(); }
 
-  iterator set(key_type&& key, T&& val) { return doCreate(std::move(key), std::move(val)); }
-  iterator set(const key_type& key, T&& val) { return doCreate(key, std::move(val)); }
-  iterator set(const key_type& key, const T& val) { return doCreate(key, val); }
-  iterator set(key_type&& key, const T& val) { return doCreate(std::move(key), val); }
-
-#if 0
-	template <typename Iter>
-		void insert(Iter first, Iter last) {
-			for (; first != last; ++first) {
-				// value_type ctor needed because this might be called with std::pair's
-				insert(value_type(*first));
-			}
-		}
-
-	template <typename... Args>
-		std::pair<iterator, bool> emplace(Args&&... args) {
-			Node n{*this, std::forward<Args>(args)...};
-			auto r = doInsert(std::move(n));
-			if (!r.second) {
-				// insertion not possible: destroy node
-				n.destroy(*this);
-			}
-			return r;
-		}
-
-	std::pair<iterator, bool> insert(const value_type& keyval) {
-		return doInsert(keyval);
-	}
-
-	std::pair<iterator, bool> insert(value_type&& keyval) {
-		return doInsert(std::move(keyval));
-	}
-#endif
+  int set(key_type&& key, T&& val) { return doCreate(std::move(key), std::move(val)); }
+  int set(const key_type& key, T&& val) { return doCreate(key, std::move(val)); }
+  int set(const key_type& key, const T& val) { return doCreate(key, val); }
+  int set(key_type&& key, const T& val) { return doCreate(std::move(key), val); }
 
   // Returns 1 if key is found, 0 otherwise.
-  [[nodiscard]] bool has(const key_type& key) const { return findIdx(key) >= 0; }
+  [[nodiscard]] bool has(const key_type& key) const {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
 
-  // FIXME: enable_if T or Key is array_serializable
-  array_type get_sview(uint32_t key_pos) const {
-    reload();
-    if (MMAP_LIB_UNLIKELY(key_pos >= mmap_txt_base[0])) {
-      array_type sview;
-      return sview;
-    }
+    auto ret = findIdx(key) >= 0;
 
-    using tt = typename array_type::value_type;
-    if constexpr (std::is_same_v<array_type, std::string_view>) {
-      array_type sview(reinterpret_cast<const tt*>(&mmap_txt_base[key_pos + 1]), mmap_txt_base[key_pos]);
-      return sview;
-    } else {
-      array_type sview(reinterpret_cast<const tt*>(&mmap_txt_base[key_pos + 1]),
-                       reinterpret_cast<const tt*>(((const char*)&mmap_txt_base[key_pos + 1]) + mmap_txt_base[key_pos]));
-      return sview;
-    }
+    in_use_mutex.store(false, std::memory_order_release);
+
+    return ret;
   }
 
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T get(key_type const& key) const {
+  [[nodiscard]] int find_key(const key_type& key) const {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
+    auto ret = findIdx(key);
+
+    in_use_mutex.store(false, std::memory_order_release);
+
+    return ret;
+  }
+
+  void ref_lock() const {
+    // Single thread check: assert(in_use_mutex == 0);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+  }
+
+  void ref_unlock() const {
+    assert(in_use_mutex);
+    in_use_mutex.store(false, std::memory_order_release);
+  }
+
+  [[nodiscard]] const T get(key_type const& key) const {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
     const auto idx = findIdx(key);
     assert(idx >= 0);
 
-    return get_sview(mKeyVals[idx].getSecond());
-  }
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T& get(key_type const& key) const {
-    const auto idx = findIdx(key);
-    assert(idx >= 0);
+    const auto ret = mKeyVals[idx].getSecond();
 
-    return mKeyVals[idx].getSecond();
+    in_use_mutex.store(false, std::memory_order_release);
+
+    return ret;
   }
 
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T get(const value_type& it) const {
-    static_assert(using_val_sview, "mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
-    return get_sview(it.second);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T get(const const_iterator& it) const {
-    static_assert(using_val_sview, "mmap_lib::map::get_sview should be called only when 'value' is array_serializable\n");
-    return get_sview(it->second);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T& get(const const_iterator& it) const {
-    static_assert(!using_val_sview,
-                  "mmap_lib::map::get should not be called when 'value' is array_serializable. Use get_sview instead.\n");
+  [[nodiscard]] const T  get(const const_iterator& it) const {
+    assert(in_use_mutex);
     return it->second;
   }
 
   [[nodiscard]] Key get_key(const const_iterator& it) const {
-    if constexpr (using_key_sview) {
-      return get_sview(it->first);
-    } else {
-      return it->first;
-    }
+    assert(in_use_mutex);
+    return it->first;
   }
   [[nodiscard]] Key get_key(const value_type& it) const {
-    if constexpr (using_key_sview) {
-      return get_sview(it.first);
-    } else {
-      return it.first;
-    }
+    assert(in_use_mutex);
+    return it.first;
   }
 
   [[nodiscard]] T* ref(key_type const& key) {
-    static_assert(!using_val_sview, "mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
+    assert(in_use_mutex);
 
     auto idx = findIdx(key);
     assert(idx >= 0);
@@ -1214,83 +1009,100 @@ public:
   }
 
   [[nodiscard]] T* ref(const value_type& it) {
-    static_assert(!using_val_sview, "mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
+    assert(in_use_mutex);
 
     return &it.second;
   }
 
   [[nodiscard]] T* ref(iterator& it) {
-    static_assert(!using_val_sview, "mmap_lib::map::ref can not be called for array_serializable. Use get_sview instead.\n");
+    assert(in_use_mutex);
     return &it->second;
   }
 
   [[nodiscard]] const_iterator find(const key_type& key) const {
+    assert(in_use_mutex);
     const auto idx = findIdx(key);
     if (idx < 0)
       return end();
-    return const_iterator{this, mKeyVals + idx, mInfo + idx};
+    return const_iterator{mKeyVals + idx, mInfo + idx};
   }
 
   template <typename OtherKey>
   [[nodiscard]] const_iterator find(const OtherKey& key, is_transparent_tag /*unused*/) const {
+    assert(in_use_mutex);
     const auto idx = findIdx(key);
     if (idx < 0)
       return cend();
-    return const_iterator{this, mKeyVals + idx, mInfo + idx};
+    return const_iterator{mKeyVals + idx, mInfo + idx};
   }
 
   [[nodiscard]] iterator find(const key_type& key) {
+    assert(in_use_mutex);
     const auto idx = findIdx(key);
     if (idx < 0)
       return end();
-    return iterator{this, mKeyVals + idx, mInfo + idx};
+    return iterator{mKeyVals + idx, mInfo + idx};
   }
 
   template <typename OtherKey>
   [[nodiscard]] iterator find(const OtherKey& key, is_transparent_tag /*unused*/) {
+    assert(in_use_mutex);
     const auto idx = findIdx(key);
     if (idx < 0)
       return end();
-    return iterator{this, mKeyVals + idx, mInfo + idx};
+    return iterator{mKeyVals + idx, mInfo + idx};
   }
 
   [[nodiscard]] iterator begin() {
+    assert(in_use_mutex);
     reload();
 
     if (empty()) {
       return end();
     }
-    return iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
+    return iterator{mKeyVals, mInfo, fast_forward_tag{}};
   }
-  [[nodiscard]] const_iterator begin() const { return cbegin(); }
+  [[nodiscard]] const_iterator begin() const {
+    assert(in_use_mutex);
+    return cbegin();
+  }
   [[nodiscard]] const_iterator cbegin() const {
+    assert(in_use_mutex);
     reload();
 
     if (empty()) {
       return cend();
     }
-    return const_iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
+    return const_iterator{mKeyVals, mInfo, fast_forward_tag{}};
   }
 
   [[nodiscard]] iterator end() {
+    assert(in_use_mutex);
     reload();
     // no need to supply valid info pointer: end() must not be dereferenced, and only node
     // pointer is compared.
-    return iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+    return iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
   }
-  [[nodiscard]] const_iterator end() const { return cend(); }
+  [[nodiscard]] const_iterator end() const {
+    assert(in_use_mutex);
+    return cend();
+  }
   [[nodiscard]] const_iterator cend() const {
+    assert(in_use_mutex);
     reload();
-    return const_iterator{this, reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
+    return const_iterator{reinterpret_cast<Node*>(&mKeyVals[*mMask + 1]), nullptr};
   }
 
   iterator erase(const_iterator& pos) {
+    assert(in_use_mutex);
     // its safe to perform const cast here
-    return erase(iterator{nullptr, const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
+    return erase(iterator{const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
   }
 
   // Erases element at pos, returns iterator to the next element.
   iterator erase(iterator pos) {
+    assert(in_use_mutex);
+
     // we assume that pos always points to a valid entry, and not end().
     auto const idx = static_cast<size_t>(pos.mKeyVals - mKeyVals);
 
@@ -1307,6 +1119,9 @@ public:
   }
 
   size_t erase(const key_type& key) {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     int      idx;
     InfoType info;
     keyToIdx(key, idx, info);
@@ -1316,17 +1131,22 @@ public:
       if (info == mInfo[idx] && equals(key, mKeyVals[idx].getFirst())) {
         shiftDown(idx);
         --(*mNumElements);
+        in_use_mutex.store(false, std::memory_order_release);
         return 1;
       }
       idx  = next_idx(idx);
       info = next_info(info);
     } while (info <= mInfo[idx]);
 
+    in_use_mutex.store(false, std::memory_order_release);
     // nothing found to delete
     return 0;
   }
 
   void reserve(size_t count) {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     auto newSize = InitialNumElements > *mMask + 1 ? InitialNumElements : *mMask + 1;
     while (calcMaxNumElementsAllowed(newSize) < count && newSize != 0) {
       newSize *= 2;
@@ -1334,6 +1154,8 @@ public:
     assert(newSize != 0);
 
     rehash(newSize);
+
+    in_use_mutex.store(false, std::memory_order_release);
   }
 
   [[nodiscard]] size_type size() const { return *mNumElements; }
@@ -1344,23 +1166,24 @@ public:
   [[nodiscard]] inline std::string_view get_path() const { return mmap_path; }
 
   [[nodiscard]] size_t capacity() const {
-    if (mmap_base)
-      return *mMaxNumElementsAllowed;
-    return calcMaxNumElementsAllowed(InitialNumElements);
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
+    if (mmap_base) {
+      auto ret =  *mMaxNumElementsAllowed;
+      in_use_mutex.store(false, std::memory_order_release);
+      return ret;
+    }
+    auto ret = calcMaxNumElementsAllowed(InitialNumElements);
+
+    in_use_mutex.store(false, std::memory_order_release);
+    return ret;
   }
 
   [[nodiscard]] float max_load_factor() const { return MaxLoadFactor100 / 100.0f; }
 
   // Average number of elements per bucket. Since we allow only 1 per bucket
   [[nodiscard]] float load_factor() const { return static_cast<float>(size()) / (*mMask + 1); }
-
-  [[nodiscard]] size_t txt_size() const {
-    if constexpr (using_sview) {
-      return mmap_txt_size;
-    } else {
-      return 0;
-    }
-  }
 
 #ifndef NDEBUG
   float conflict_factor() const { return static_cast<float>(conflicts) / (*mNumElements + 1); }
@@ -1418,78 +1241,11 @@ private:
 
   size_t mask() const { return *mMask; }
 
-#if 0
-  int recently_inserted(array_type txt) const {
-    uint32_t h = hash_bytes(txt.data(), txt.size());
-    const auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
-
-    if (ent.second == h && ent.first) {
-      // OK, check contents if there is a match
-      const auto *data = get_sview(ent.first).data(); // data is null if empty array
-      if (data && std::memcmp(data, txt.data(), txt.size()) == 0) return ent.first;
-    }
-
-    return -1;
-  }
-#endif
-
-  uint32_t allocate_sview_id(array_type txt) {
-#if 0
-    auto pos = recently_inserted(txt);
-    if (pos >= 0) {
-      return pos;
-    }
-#endif
-
-    reload();
-
-    static_assert(using_sview);
-
-    assert(txt.size() < 40000);  // OK to go bigger but likely bug
-
-    // vector: mmap_txt_base is the pointer to the string vector
-    // pos[0] = size_vector
-    // [size_vector=120, (5,'hello'), (3,bar), 0 0 0 ]
-
-    auto insert_point = mmap_txt_base[0] + 1;
-    if (mmap_txt_size <= (8 * insert_point + 8 * txt.size())) {
-      auto new_size = mmap_txt_size * 2;
-      if (new_size < 8 * insert_point + 8 * txt.size())
-        new_size = 8 * insert_point + 8 * txt.size();
-      grow_txt_mmap(new_size);
-    }
-    assert(mmap_txt_size > (8 * insert_point + txt.size()));
-
-    char* ptr = reinterpret_cast<char*>(&mmap_txt_base[insert_point + 1]);
-    std::memcpy(ptr, txt.data(), txt.size());
-    assert(txt.size() < 4096);  // Objects should not be insane (optimize otherwise)
-    mmap_txt_base[insert_point] = txt.size();
-    auto bytes                  = txt.size();
-
-    // Extra space from bytes&0xF to xtra_space
-    // 0 -> 0
-    // 1 -> 15
-    // 2 -> 14
-    // 14 -> 2
-    // 15 -> 1
-    uint8_t xtra_space = bytes & 0xF;
-    xtra_space         = (~xtra_space) & 0xF;
-    mmap_txt_base[0] += 1 + (bytes + xtra_space + 7) / 8;  // +7 to cheaply round up, +1 for the strlen
-
-#if 0
-    {
-      uint32_t h = hash_bytes(txt.data(), txt.size());
-      auto &ent = memoize_sview_insert[h%memoize_sview_insert.size()];
-      ent.first = insert_point;
-      ent.second = h;
-    }
-#endif
-
-    return insert_point;
-  }
-
   template <typename Arg, typename Data>
-  iterator doCreate(Arg&& key, Data&& val) {
+  int doCreate(Arg&& key, Data&& val) {
+    while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+      ;
+
     reload();
     while (true) {
       int      idx;
@@ -1534,32 +1290,13 @@ private:
       if (idx == insertion_idx) {
         // put at empty spot. This forwards all arguments into the node where the object is
         // constructed exactly where it is needed.
-        if constexpr (using_key_sview) {
-          uint32_t key_pos = allocate_sview_id(key);
-          ::new (static_cast<void*>(&l))
-              Node(*this, std::piecewise_construct, std::forward_as_tuple(key_pos), std::forward_as_tuple(val));
-        } else if constexpr (using_val_sview) {
-          uint32_t val_pos = allocate_sview_id(val);
-          ::new (static_cast<void*>(&l))
-              Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val_pos));
-        } else {
-          ::new (static_cast<void*>(&l))
-              Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
-        }
+        ::new (static_cast<void*>(&l))
+          Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
       } else {
         assert(!found);
         shiftUp(idx, insertion_idx);
-        if constexpr (using_key_sview) {
-          uint32_t key_pos = allocate_sview_id(key);
-          ::new (&l) Node(*this, std::piecewise_construct, std::forward_as_tuple(key_pos), std::forward_as_tuple(val));
-        } else if constexpr (using_val_sview) {
-          uint32_t val_pos = allocate_sview_id(val);
-          ::new (&l)
-              Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val_pos));
-        } else {
-          ::new (&l)
-              Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
-        }
+        ::new (&l)
+          Node(*this, std::piecewise_construct, std::forward_as_tuple(std::forward<Arg>(key)), std::forward_as_tuple(val));
       }
 
       if (!found) {
@@ -1569,9 +1306,12 @@ private:
         ++(*mNumElements);
       }
 
-      return iterator{this, mKeyVals + insertion_idx, mInfo + insertion_idx};
-      // return;
+      in_use_mutex.store(false, std::memory_order_release);
+
+      return insertion_idx;
     }
+    assert(false);
+    return 0;
   }
 
   size_t calcMaxNumElementsAllowed(size_t maxElements) const {
@@ -1635,20 +1375,7 @@ private:
       assert(mmap_base == nullptr);
       assert(mmap_fd == -1);
     }
-
-    if constexpr (using_sview) {
-      if (mmap_txt_base) {
-        mmap_gc::recycle(mmap_txt_base);
-        assert(mmap_txt_base == nullptr);
-        assert(mmap_txt_fd == -1);
-      }
-    }
   }
-
-#if 0
-	// members are sorted so no padding occurs
-  std::array<std::pair<uint32_t,uint32_t>,8> memoize_sview_insert;
-#endif
 
   mutable Node*     mKeyVals = nullptr;
   mutable uint8_t*  mInfo    = nullptr;
@@ -1662,10 +1389,7 @@ private:
   mutable int       mmap_fd       = -1;
   mutable size_t    mmap_size     = 0;
   mutable uint64_t* mmap_base     = 0;
-  mutable int       iter_cntr     = 0;
-  mutable int       mmap_txt_fd   = -1;
-  mutable size_t    mmap_txt_size = 0;
-  mutable uint64_t* mmap_txt_base = 0;
+  mutable std::atomic<bool> in_use_mutex{false};
 #ifndef NDEBUG
   size_t conflicts = 0;
 #endif

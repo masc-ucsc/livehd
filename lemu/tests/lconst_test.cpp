@@ -1370,8 +1370,20 @@ TEST_F(Lconst_test, lconst_get_bits) {
   EXPECT_EQ(Lconst("0xFFF").get_mask_op(Lconst("-1")), Lconst("0xFFF"));
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-1")), Lconst("0xfeef"));
 
+  // a  =0b1111_1110_1110_1111 mask=11111.111110
+  // out=0b 1111_1110_1110_111
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-2")), Lconst("0x7F77"));
   EXPECT_EQ(Lconst("0xfeef").get_mask_op(Lconst("-3")), Lconst("0x7F77"));
+
+  // a  =0b1111_1110_1110_1[11]1 mask=11111.111001
+  // out=  0b1111_1110_1110_11
+  //
+  // out = {foo[1],foo[3],foo[5]}
+  // out = getmask(foo,0b1_1010)
+  //
+  // out = getmask(foo,-1) // convert to unsign
+  //
+  // tmp = bar@[1,2,54]  // get_mask(bar, (1<<1) | (1<<2) | (1<<54))
 
   auto val1 = Lconst("0xfeee").get_mask_op(Lconst("-2"));
   auto val2 = Lconst("0xfeee").get_mask_op(Lconst("-3"));
@@ -1429,6 +1441,9 @@ TEST_F(Lconst_test, lconst_set_bits) {
   // res   is 0b11_1111_1101_1111
   Lconst(  0x10).set_mask_op(Lconst("-17"), Lconst(0x1FEF)).dump();
   EXPECT_EQ(Lconst(  0x10).set_mask_op(Lconst("-17"), Lconst(0x1FEF)), Lconst(0x3FDF));
+
+  // out[0:300] = xxxx
+  // out[2:3] = bar  // out = set_mask(out, 0b01100, bar)
 
   src.set_mask_op(Lconst("-1"), Lconst(0x3abcd)).dump();
 

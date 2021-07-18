@@ -7,7 +7,6 @@ class Node;
 
 #include <vector>
 
-#include "ann_ssa.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "mmap_map.hpp"
@@ -433,9 +432,10 @@ public:
   void   set_offset(Bits_t offset);
   Bits_t get_offset() const;
 
-  const Ann_ssa &get_ssa() const;
-  Ann_ssa *      ref_ssa();
+  uint32_t       get_ssa() const;
+  void           set_ssa(uint32_t v);
   bool           has_ssa() const;
+
   bool           is_connected() const;
   bool           is_connected(const Node_pin &pin) const;
 

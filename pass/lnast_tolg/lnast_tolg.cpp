@@ -1509,7 +1509,7 @@ void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
 }
 
 void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
-  dpin.ref_ssa()->set_ssa(subs);
+  dpin.set_ssa(subs);
   dpin.set_prp_vname(var_name);
 }
 
@@ -1569,12 +1569,12 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     // collect vname table info
     if (dpin.has_ssa() && dpin.has_prp_vname()) {
       auto vname = dpin.get_prp_vname();
-      auto subs  = dpin.ref_ssa()->get_subs();
+      auto subs  = dpin.get_ssa();
 
       auto it = vname2ssa_dpin.find(vname);
       if (it == vname2ssa_dpin.end()) {
         vname2ssa_dpin.insert_or_assign(vname, dpin);
-      } else if (subs >= it->second.get_ssa().get_subs()) {
+      } else if (subs >= it->second.get_ssa()) {
         vname2ssa_dpin.insert_or_assign(vname, dpin);
       }
     }

@@ -26,31 +26,26 @@ public:
     key2val.clear();
     val2key.clear();
   }
-  const_iterator set(Key &&key, T &&val) {
+  void set(Key &&key, T &&val) {
     val2key.set(val, key);
-    return key2val.set(key, val);
+    key2val.set(key, val);
   }
-  const_iterator set(const Key &key, T &&val) {
+  void set(const Key &key, T &&val) {
     val2key.set(val, key);
-    return key2val.set(key, val);
+    key2val.set(key, val);
   }
-  const_iterator set(const Key &key, const T &val) {
+  void set(const Key &key, const T &val) {
     val2key.set(val, key);
-    return key2val.set(key, val);
+    key2val.set(key, val);
   }
-  const_iterator set(Key &&key, const T &val) {
+  void set(Key &&key, const T &val) {
     val2key.set(val, key);
-    return key2val.set(key, val);
+    key2val.set(key, val);
   }
 
   [[nodiscard]] bool has_key(const Key &key) const { return key2val.has(key); }
   [[nodiscard]] bool has_val(const T &val) const { return val2key.has(val); }
 
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &get_val(const Key &key) const {
-    return key2val.get(key);
-  }
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
   [[nodiscard]] T get_val(const Key &key) const {
     return key2val.get(key);
   }
@@ -111,20 +106,9 @@ public:
   [[nodiscard]] Key get_key(const iterator &it) const { return key2val.get_key(it); }
   [[nodiscard]] Key get_key(const const_iterator &it) const { return key2val.get_key(it); }
 
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &get_val(const iterator &it) const {
-    return key2val.get(it);
-  }
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &get_val(const const_iterator &it) const {
-    return key2val.get(it);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
   [[nodiscard]] T get_val(const iterator &it) const {
     return key2val.get(it);
   }
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
   [[nodiscard]] T get_val(const const_iterator &it) const {
     return key2val.get(it);
   }

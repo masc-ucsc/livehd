@@ -375,13 +375,12 @@ public:
 
   // non-hierarchical node name (1 for all nodes)
   void             set_name(std::string_view iname);
-  std::string_view get_name() const;
-  std::string_view create_name() const;
+  std::string      get_name() const;
+  std::string      create_name() const;
   bool             has_name() const;
 
   void             set_place(const Ann_place &p);
-  const Ann_place &get_place() const;
-  Ann_place *      ref_place();
+  const Ann_place  get_place() const;
   bool             has_place() const;
 
   Bits_t get_bits() const;

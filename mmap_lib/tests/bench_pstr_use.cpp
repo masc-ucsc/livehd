@@ -9,84 +9,86 @@
 #include "mmap_map.hpp"
 #include "mmap_str.hpp"
 
+//#define BENCH             1
+
+#ifdef BENCH
 #define CTOR_TESTS        0
 #define NEEQ_TESTS        0
 #define AT_ISI            0
 #define STARTS_WITH       0
-#define BENCH             1
+#else
+#define CTOR_TESTS        1
+#define NEEQ_TESTS        1
+#define AT_ISI            1
+#define STARTS_WITH       1
+#endif
 
 #if CTOR_TESTS
-template<int m_id>
-void test_ctor(mmap_lib::str<m_id> ts, const char* rs) {
-  std::cout << "> Test Case: str<" << ts.get_map_id() << ">(\"" << rs << "\")" << std::endl;
-  std::cout << "  ";
-  ts.print_PoS();
-  std::cout << "  ";
-  ts.print_e();
-  std::cout << "  ";
-  ts.print_StrMap();
-  std::cout << std::endl;
+void test_ctor(mmap_lib::str ts, const char* rs) {
+
+  std::cout << "str:" << ts.to_s() << "\n";
+  std::cout << "std:" << rs << "\n";
 }
 
 void mmap_pstr_ctor_tests() {
   std::cout << "Warming Up";
 
-  mmap_lib::str<0> baa("hello");
-  mmap_lib::str<0> bab("12-micro-34567890");
-  mmap_lib::str<0> bac("flower");
-  mmap_lib::str<0> bad("--foobarbazball!");
+  mmap_lib::str baa("hello");
+  mmap_lib::str bab("12-micro-34567890");
+  mmap_lib::str bac("flower");
+  mmap_lib::str bad("--foobarbazball!");
   std::cout << ". ";
-  mmap_lib::str<1> bae("microarchitecture");
-  mmap_lib::str<1> baf("12-roach-34567890");
-  mmap_lib::str<1> bag("abcdefghijklmnop");
-  mmap_lib::str<1> bah("--Joker-34567890");
-  mmap_lib::str<1> bai("12-micro-34567890");
+  mmap_lib::str bae("microarchitecture");
+  mmap_lib::str baf("12-roach-34567890");
+  mmap_lib::str bag("abcdefghijklmnop");
+  mmap_lib::str bah("--Joker-34567890");
+  mmap_lib::str bai("12-micro-34567890");
   std::cout << ". ";
-  mmap_lib::str<2> baj("12-Andy-34567890");
-  mmap_lib::str<2> bak("12-Base-34567890");
-  mmap_lib::str<2> bal("12-Reed-34567890");
-  mmap_lib::str<2> bam("zyxwvutsrqponmlk");
+  mmap_lib::str baj("12-Andy-34567890");
+  mmap_lib::str bak("12-Base-34567890");
+  mmap_lib::str bal("12-Reed-34567890");
+  mmap_lib::str bam("zyxwvutsrqponmlk");
   std::cout << ". ";
-  mmap_lib::str<3> ban("12-Gorgon-34567890");
-  mmap_lib::str<3> bao("12-drums-34567890");
-  mmap_lib::str<3> bap("12-Johnathan-34567890");
-  mmap_lib::str<3> baq("zyxwvutsrqponmlk");
+  mmap_lib::str ban("12-Gorgon-34567890");
+  mmap_lib::str bao("12-drums-34567890");
+  mmap_lib::str bap("12-Johnathan-34567890");
+  mmap_lib::str baq("zyxwvutsrqponmlk");
   std::cout << ".\n";
 
   std::cout << "================================ " << std::endl;
   std::cout << "Constructor 1 (size < 14) Tests: " << std::endl;
   std::cout << "================================ " << std::endl;
 
-  test_ctor(mmap_lib::str<0>("hello"), "hello");
-  test_ctor(mmap_lib::str<1>("cat"), "cat");
-  test_ctor(mmap_lib::str<2>("four"), "four");
-  test_ctor(mmap_lib::str<3>("feedback"), "feedback");
-  test_ctor(mmap_lib::str<1>("natural_fries"), "natural_fries");
+  test_ctor(mmap_lib::str("hello"), "hello");
+  test_ctor(mmap_lib::str("cat"), "cat");
+  test_ctor(mmap_lib::str("four"), "four");
+  test_ctor(mmap_lib::str("feedback"), "feedback");
+  test_ctor(mmap_lib::str("natural_fries"), "natural_fries");
 
   std::cout << "================================ " << std::endl;
   std::cout << "Constructor 2 (size >=14) Tests: " << std::endl;
   std::cout << "================================ " << std::endl;
 
-  test_ctor(mmap_lib::str<0>("0_words_1234567"), "0_words_1234567");
-  test_ctor(mmap_lib::str<1>("7_words_6543210"), "7_words_6543210");
-  test_ctor(mmap_lib::str<2>("0_sloan_1234567"), "0_sloan_1234567");
-  test_ctor(mmap_lib::str<3>("0_tang_1234567"), "0_tang_1234567");
-  test_ctor(mmap_lib::str<0>("hisloanbuzzball"), "hisloanbuzzball");
-  test_ctor(mmap_lib::str<1>("--this_var_will_bee_very_longbuzzball"), "--this_var_will_bee_very_longbuzzball");
-  test_ctor(mmap_lib::str<2>("hidifferentbuzzball"), "hidifferentbuzzball");
+  test_ctor(mmap_lib::str("0_words_1234567"), "0_words_1234567");
+  test_ctor(mmap_lib::str("7_words_6543210"), "7_words_6543210");
+  test_ctor(mmap_lib::str("0_sloan_1234567"), "0_sloan_1234567");
+  test_ctor(mmap_lib::str("0_tang_1234567"), "0_tang_1234567");
+  test_ctor(mmap_lib::str("hisloanbuzzball"), "hisloanbuzzball");
+  test_ctor(mmap_lib::str("--this_var_will_bee_very_longbuzzball"), "--this_var_will_bee_very_longbuzzball");
+  test_ctor(mmap_lib::str("hidifferentbuzzball"), "hidifferentbuzzball");
 
   std::cout << "================================ " << std::endl;
   std::cout << "Constructor 3 (string_view) Tests: " << std::endl;
   std::cout << "================================ " << std::endl;
 
-  test_ctor(mmap_lib::str<3>(std::string_view("hello")), "hello");
-  test_ctor(mmap_lib::str<0>(std::string_view("cat")), "cat");
-  test_ctor(mmap_lib::str<1>(std::string_view("abcd")), "abcd");
-  test_ctor(mmap_lib::str<2>(std::string_view("feedback")), "feedback");
-  test_ctor(mmap_lib::str<3>(std::string_view("neutralizatio")), "neutralizatio");
-  test_ctor(mmap_lib::str<0>(std::string_view("neutralization")), "neutralization");
-  test_ctor(mmap_lib::str<1>(std::string_view("01andy23456789")), "01andy23456789");
-  test_ctor(mmap_lib::str<2>(std::string_view("--this_var_will_bee_very_longbuzzball")), "--this_var_will_bee_very_longbuzzball");
+  test_ctor(mmap_lib::str(std::string_view("hello")), "hello");
+  test_ctor(mmap_lib::str(std::string_view("cat")), "cat");
+  test_ctor(mmap_lib::str(std::string_view("abcd")), "abcd");
+  test_ctor(mmap_lib::str(std::string_view("feedback")), "feedback");
+  test_ctor(mmap_lib::str(std::string_view("neutralizatio")), "neutralizatio");
+  test_ctor(mmap_lib::str(std::string_view("neutralization")), "neutralization");
+  test_ctor(mmap_lib::str(std::string_view("01andy23456789")), "01andy23456789");
+  test_ctor(mmap_lib::str(std::string_view("--this_var_will_bee_very_longbuzzball")), "--this_var_will_bee_very_longbuzzball");
 
   std::cout << "================================== " << std::endl;
   std::cout << "Constructor 3 (const char *) Tests: " << std::endl;
@@ -101,62 +103,58 @@ void mmap_pstr_ctor_tests() {
   const char* andy     = "01andy23456789";
   const char* lvar     = "--this_var_will_bee_very_longbuzzball";
 
-  test_ctor(mmap_lib::str<3>(hello), "hello");
-  test_ctor(mmap_lib::str<0>(cat), "cat");
-  test_ctor(mmap_lib::str<1>(abcd), "abcd");
-  test_ctor(mmap_lib::str<2>(feedback), "feedback");
-  test_ctor(mmap_lib::str<3>(n13), "neutralizatio");
-  test_ctor(mmap_lib::str<0>(n14), "neutralization");
-  test_ctor(mmap_lib::str<1>(andy), "01andy23456789");
-  test_ctor(mmap_lib::str<2>(lvar), "--this_var_will_bee_very_longbuzzball");
+  test_ctor(mmap_lib::str(hello), "hello");
+  test_ctor(mmap_lib::str(cat), "cat");
+  test_ctor(mmap_lib::str(abcd), "abcd");
+  test_ctor(mmap_lib::str(feedback), "feedback");
+  test_ctor(mmap_lib::str(n13), "neutralizatio");
+  test_ctor(mmap_lib::str(n14), "neutralization");
+  test_ctor(mmap_lib::str(andy), "01andy23456789");
+  test_ctor(mmap_lib::str(lvar), "--this_var_will_bee_very_longbuzzball");
 }
 #endif
 
 #if NEEQ_TESTS
-template <std::size_t N, int m_id>
-bool test_eq(mmap_lib::str<m_id> ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
+template <std::size_t N>
+bool test_eq(mmap_lib::str ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
   ++cnt;
   return (ts == rs) == ans;
 }
 
-template <std::size_t N, int m_id>
-bool test_neq(mmap_lib::str<m_id> ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
+template <std::size_t N>
+bool test_neq(mmap_lib::str ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
   ++cnt;
   return (ts != rs) == ans;
 }
 
-template<int m_id, int m_id2>
-bool test_eq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
+bool test_eq(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return (ls == rs) == ans;
 
 }
 
-template<int m_id, int m_id2>
-bool test_neq(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
+bool test_neq(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return (ls != rs) == ans;
 }
 
-template<int m_id>
-bool test_eq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
+bool test_eq(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return (ls == rs) == ans;
 }
 
-template<int m_id>
-bool test_neq(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
+bool test_neq(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return (ls != rs) == ans;
 }
 
 void pstrVchar_eqeq_tests() {
   std::cout << "pstr vs. char Operator == Tests: ";
-  mmap_lib::str<1> hello("hello");
-  mmap_lib::str<1> hi("hi");
-  mmap_lib::str<1> hello_world("hello_!_world");
-  mmap_lib::str<1> micro("micro-architecture");
-  mmap_lib::str<1> foo("--foo1234567890!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str micro("micro-architecture");
+  mmap_lib::str foo("--foo1234567890!!!");
 
   uint8_t r = 0u, t = 0u;
   r += test_eq(hello, "hello", true, t);
@@ -177,11 +175,11 @@ void pstrVchar_eqeq_tests() {
 
 void pstrVchar_noeq_tests() {
   std::cout << "pstr vs. char Operator != Tests: ";
-  mmap_lib::str<2> hello("hello");
-  mmap_lib::str<2> hi("hi");
-  mmap_lib::str<2> hello_world("hello_!_world");
-  mmap_lib::str<2> amethysts("amethysts_emeralds");
-  mmap_lib::str<2> balloon("_balloon_223344!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str amethysts("amethysts_emeralds");
+  mmap_lib::str balloon("_balloon_223344!!!");
 
   uint8_t r = 0u, t = 0u;
   r += test_neq(hello, "hi", true, t);
@@ -198,11 +196,11 @@ void pstrVchar_noeq_tests() {
 
 void pstrVpstr_eqeq_tests() {
   std::cout << "pstr vs. pstr Operator == Tests: ";
-  mmap_lib::str<3> hello("hello");
-  mmap_lib::str<3> hi("hi");
-  mmap_lib::str<3> hello_world("hello_!_world");
-  mmap_lib::str<3> micro("micro-architecture");
-  mmap_lib::str<3> foo("--foo1234567890!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str micro("micro-architecture");
+  mmap_lib::str foo("--foo1234567890!!!");
 
   uint8_t r = 0u, t = 0u;
   r += test_eq(hello, hello, true, t);
@@ -221,11 +219,11 @@ void pstrVpstr_eqeq_tests() {
 
 void pstrVpstr_noeq_tests() {
   std::cout << "pstr vs. pstr Operator != Tests: ";
-  mmap_lib::str<0> hello("hello");
-  mmap_lib::str<0> hi("hi");
-  mmap_lib::str<0> hello_world("hello_!_world");
-  mmap_lib::str<0> amethysts("amethysts_emeralds");
-  mmap_lib::str<0> balloon("_balloon_223344!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str amethysts("amethysts_emeralds");
+  mmap_lib::str balloon("_balloon_223344!!!");
 
   uint8_t r = 0u, t = 0u;
   r += test_neq(hello, hi, true, t);
@@ -241,11 +239,11 @@ void pstrVpstr_noeq_tests() {
 
 void pstrVcstr_eqeq_tests() {
   std::cout << "pstr vs. cstr Operator == Tests: ";
-  mmap_lib::str<1> hello("hello");
-  mmap_lib::str<1> hi("hi");
-  mmap_lib::str<1> hello_world("hello_!_world");
-  mmap_lib::str<1> micro("micro-architecture");
-  mmap_lib::str<1> foo("--foo1234567890!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str micro("micro-architecture");
+  mmap_lib::str foo("--foo1234567890!!!");
   const char*   chello       = "hello";
   const char*   chi          = "hi";
   const char*   chello_world = "hello_!_world";
@@ -271,11 +269,11 @@ void pstrVcstr_eqeq_tests() {
 
 void pstrVcstr_noeq_tests() {
   std::cout << "pstr vs. cstr Operator != Tests: ";
-  mmap_lib::str<2> hello("hello");
-  mmap_lib::str<2> hi("hi");
-  mmap_lib::str<2> hello_world("hello_!_world");
-  mmap_lib::str<2> amethysts("amethysts_emeralds");
-  mmap_lib::str<2> balloon("_balloon_223344!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str hello_world("hello_!_world");
+  mmap_lib::str amethysts("amethysts_emeralds");
+  mmap_lib::str balloon("_balloon_223344!!!");
   const char*   chello       = "hello";
   const char*   chi          = "hi";
   const char*   chello_world = "hello_!_world";
@@ -299,12 +297,12 @@ void pstrVcstr_noeq_tests() {
 
 void cross_template_compare_tests() {
   std::cout << "pstr vs. pstr Cross template Compare Tests: ";
-  mmap_lib::str<1> a1("i-am-tired-today=(");
-  mmap_lib::str<2> a2("i-am-tired-today=(");
-  mmap_lib::str<3> a3("i-am-tired-today=(");
-  mmap_lib::str<1> b1("i-am-tired-today>>");
-  mmap_lib::str<2> b2("i-am-tired-today>>");
-  mmap_lib::str<3> b3("i-am-tired-today>>");
+  mmap_lib::str a1("i-am-tired-today=(");
+  mmap_lib::str a2("i-am-tired-today=(");
+  mmap_lib::str a3("i-am-tired-today=(");
+  mmap_lib::str b1("i-am-tired-today>>");
+  mmap_lib::str b2("i-am-tired-today>>");
+  mmap_lib::str b3("i-am-tired-today>>");
 
   uint8_t r = 0u, t = 0u;
   r += test_eq(a1, a2, true, t);
@@ -344,10 +342,10 @@ void cross_template_compare_tests() {
 #if AT_ISI
 void pstr_at_operator() {
   std::cout << "pstr_at_operator Operator [] Tests: ";
-  mmap_lib::str<1> hello("hello");
-  mmap_lib::str<2> hi("hi");
-  mmap_lib::str<1> micro("micro-architecture");
-  mmap_lib::str<2> foo("--foo1234567890!!!");
+  mmap_lib::str hello("hello");
+  mmap_lib::str hi("hi");
+  mmap_lib::str micro("micro-architecture");
+  mmap_lib::str foo("--foo1234567890!!!");
   uint8_t       p = 0u, f = 0u;
   (hello[2] == 'l') ? p++ : f++;
   (hello[0] == 'h') ? p++ : f++;
@@ -368,13 +366,13 @@ void pstr_at_operator() {
 
 void pstr_isI() {
   std::cout << "pstr_isI Tests: ";
-  mmap_lib::str<1> hello("hello");
-  mmap_lib::str<2> eight("888888");
-  mmap_lib::str<3> neg_one("-111111");
-  mmap_lib::str<1> not_i("123g5");
-  mmap_lib::str<2> not_int("-1234f");
-  mmap_lib::str<3> zero("-1234f");
-  mmap_lib::str<1> num_float("12.34");
+  mmap_lib::str hello("hello");
+  mmap_lib::str eight("888888");
+  mmap_lib::str neg_one("-111111");
+  mmap_lib::str not_i("123g5");
+  mmap_lib::str not_int("-1234f");
+  mmap_lib::str zero("-1234f");
+  mmap_lib::str num_float("12.34");
   uint8_t       p = 0u, f = 0u;
   (hello.is_i() == false) ? p++ : f++;
   (eight.is_i() == true) ? p++ : f++;
@@ -388,14 +386,12 @@ void pstr_isI() {
 #endif
 
 #if STARTS_WITH
-template<int m_id, int m_id2>
-bool test_starts_with(mmap_lib::str<m_id> ls, mmap_lib::str<m_id2> rs, bool ans, uint8_t &cnt) {
+bool test_starts_with(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return ls.starts_with(rs) == ans;
 }
 
-template<int m_id>
-bool test_starts_with(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uint8_t &cnt) {
+bool test_starts_with(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
   return ls.starts_with(rs) == ans;
 }
@@ -403,12 +399,12 @@ bool test_starts_with(mmap_lib::str<m_id> ls, std::string_view rs, bool ans, uin
 void pstr_starts_with() {
   uint8_t t = 0u, r = 0u;
 #if 1
-  mmap_lib::str<1> whole("foobar");
-  mmap_lib::str<1> front1("foo");
-  mmap_lib::str<1> front2("bar");
-  mmap_lib::str<1> same("foobar");
-  mmap_lib::str<1> one("f");
-  mmap_lib::str<1> two("g");
+  mmap_lib::str whole("foobar");
+  mmap_lib::str front1("foo");
+  mmap_lib::str front2("bar");
+  mmap_lib::str same("foobar");
+  mmap_lib::str one("f");
+  mmap_lib::str two("g");
 
   r += test_starts_with(whole, front1, true, t);
   r += test_starts_with(whole, front2, false, t);
@@ -416,14 +412,14 @@ void pstr_starts_with() {
   r += test_starts_with(whole, one, true, t);
   r += test_starts_with(whole, two, false, t);
 
-  mmap_lib::str<2> whole2("hello_!_world");
-  mmap_lib::str<2> front3("hello_!_worl");
-  mmap_lib::str<2> almost("hello_!_worl!");
-  mmap_lib::str<2> front4("johnny");
-  mmap_lib::str<2> same2("hello_!_world");
-  mmap_lib::str<2> three("h");
-  mmap_lib::str<2> four("he");
-  mmap_lib::str<2> empty("");
+  mmap_lib::str whole2("hello_!_world");
+  mmap_lib::str front3("hello_!_worl");
+  mmap_lib::str almost("hello_!_worl!");
+  mmap_lib::str front4("johnny");
+  mmap_lib::str same2("hello_!_world");
+  mmap_lib::str three("h");
+  mmap_lib::str four("he");
+  mmap_lib::str empty("");
 
   r += test_starts_with(whole2, front3, true, t);
   r += test_starts_with(whole2, front4, false, t);
@@ -434,19 +430,19 @@ void pstr_starts_with() {
   r += test_starts_with(whole2, empty, true, t);
 #endif
 
-  mmap_lib::str<3> whole3("--this_var_will_be_very_long_for_testing_12345");
-  mmap_lib::str<3> front5("--this_var");
-  mmap_lib::str<3> spec1("-");
-  mmap_lib::str<3> spec2("--");
-  mmap_lib::str<3> spec3("--t");
-  mmap_lib::str<3> spec4("--th");
-  mmap_lib::str<3> front6("--this_var_wi");
-  mmap_lib::str<3> front7("--this_var_wil");
-  mmap_lib::str<3> front8("--this_var_will_be_very_");
-  mmap_lib::str<3> same3("--this_var_will_be_very_long_for_testing_12345");
-  mmap_lib::str<3> almost2("--this_var_will_be_very_long_for_testing_12346");
-  mmap_lib::str<3> five("-");
-  mmap_lib::str<3> six("balalalalalalalalala");
+  mmap_lib::str whole3("--this_var_will_be_very_long_for_testing_12345");
+  mmap_lib::str front5("--this_var");
+  mmap_lib::str spec1("-");
+  mmap_lib::str spec2("--");
+  mmap_lib::str spec3("--t");
+  mmap_lib::str spec4("--th");
+  mmap_lib::str front6("--this_var_wi");
+  mmap_lib::str front7("--this_var_wil");
+  mmap_lib::str front8("--this_var_will_be_very_");
+  mmap_lib::str same3("--this_var_will_be_very_long_for_testing_12345");
+  mmap_lib::str almost2("--this_var_will_be_very_long_for_testing_12346");
+  mmap_lib::str five("-");
+  mmap_lib::str six("balalalalalalalalala");
 
   // long vs short
   r += test_starts_with(whole3, front5, true, t);
@@ -466,14 +462,15 @@ void pstr_starts_with() {
 }
 #endif
 
-#if BENCH
-#define STR_SIZE 1e3
+#ifdef BENCH
+#define STR_SIZE 1e4
 void bench_str_cmp() {
   {
     for(auto sz=2;sz<512;sz=sz*2) {
+      mmap_lib::str::clear();
 
       int conta = 0;
-      std::vector<mmap_lib::str<2>> v;
+      std::vector<mmap_lib::str> v;
       {
         std::string bench_name = std::string("bench_str_create") + std::to_string(sz);
         Lbench b(bench_name);
@@ -483,17 +480,17 @@ void bench_str_cmp() {
 
         for (auto i = 0u; i < STR_SIZE; ++i) {
           auto          s = sz; // sz.any();
-#if 1
-          mmap_lib::str<2> tmp;
+#if 0
+          mmap_lib::str tmp;
           for (auto j = 0; j < s; ++j) {
-            tmp.append(ch.any());
+            tmp = tmp.append(ch.any());
           }
 #else
           std::string str;
           for (auto j = 0; j < s; ++j) {
             str.append(1, ch.any());
           }
-          mmap_lib::str<2> tmp(str);
+          mmap_lib::str tmp(str);
 #endif
 
           v.emplace_back(tmp);
@@ -514,7 +511,6 @@ void bench_str_cmp() {
       }
 
       fmt::print("{} conta:{}\n", "mmap_lib::str", conta);
-      mmap_lib::str<2>::clear_map();
     }
   }
 
@@ -561,11 +557,10 @@ void bench_str_cmp() {
 
 int main(int argc, char** argv) {
 
-  mmap_lib::str<1>::clear_map();
-  mmap_lib::str<2>::clear_map();
-  mmap_lib::str<3>::clear_map();
+  mmap_lib::str::setup();
+  mmap_lib::str::clear();
 
-#if BENCH
+#ifdef BENCH
   bench_str_cmp();
 #endif
 

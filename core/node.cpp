@@ -519,7 +519,7 @@ std::string Node::default_instance_name() const {
   return name;
 }
 
-std::string_view Node::create_name() const {
+std::string Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end())
@@ -527,35 +527,11 @@ std::string_view Node::create_name() const {
 
   auto        cell_name = Ntype::get_name(get_type_op());
   std::string sig       = absl::StrCat("lg_", cell_name, std::to_string(nid));
-  const auto  it2       = ref->set(get_compact_class(), sig);
-  return ref->get_val(it2);
-#if 0
-  // FIXME: HERE. Does not scale for large designs (too much recursion)
-
-  if (get_type_op() == GraphIO_Op) {
-    absl::StrAppend(&signature, "_io");
-	}else if (get_type_op() == SubGraph_Op) {
-    absl::StrAppend(&signature, "_", get_type_sub_node().get_name());
-  }
-
-  for(const auto &e:inp_edges()) {
-    absl::StrAppend(&signature, "_", e.driver.create_name());
-  }
-
-  auto nod = Ann_node_name::find(current_g, signature);
-  if (nod.is_invalid()) {
-    return Ann_node_name::set(*this, signature);
-  }
-
-  absl::StrAppend(&signature,"_", std::to_string(nid)); // OK, add to stop trying
-
-  I(Ann_node_name::find(current_g, signature).is_invalid());
-
-  return Ann_node_name::set(*this, signature);
-#endif
+  ref->set(get_compact_class(), sig);
+  return sig;
 }
 
-std::string_view Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
+std::string      Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
 
 std::string Node::debug_name() const {
 #ifndef NDEBUG
@@ -592,22 +568,10 @@ bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_
 
 void Node::set_place(const Ann_place &p) { Ann_node_place::ref(top_g)->set(get_compact(), p); }
 
-const Ann_place &Node::get_place() const {
+const Ann_place Node::get_place() const {
   auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
   I(data);
   return *data;
-}
-
-Ann_place *Node::ref_place() {
-  auto *ref = Ann_node_place::ref(top_g);
-
-  auto it = ref->find(get_compact());
-  if (it != ref->end()) {
-    return ref->ref(it);
-  }
-
-  auto it2 = ref->set(get_compact(), Ann_place());  // Empty
-  return ref->ref(it2);
 }
 
 Bits_t Node::get_bits() const {

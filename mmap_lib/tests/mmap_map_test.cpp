@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "mmap_map.hpp"
 
 #include <unistd.h>
 
@@ -9,11 +8,16 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lrand.hpp"
+
 #include "mmap_bimap.hpp"
+#include "mmap_map.hpp"
+#include "mmap_str.hpp"
 
 class Setup_mmap_map_test : public ::testing::Test {
 protected:
-  void SetUp() override {}
+  void SetUp() override {
+    mmap_lib::str::setup();
+  }
 
   void TearDown() override {}
 };
@@ -23,7 +27,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
   bool zero_found = false;
   while (!zero_found) {
-    mmap_lib::map<uint32_t, std::string_view> map;
+    mmap_lib::map<uint32_t, mmap_lib::str> map;
     map.clear();
     absl::flat_hash_map<uint32_t, std::string> map2;
 
@@ -40,7 +44,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       conta++;
 
       EXPECT_TRUE(!map.has(key));
-      map.set(key, key_str);
+      map.set(key, mmap_lib::str(key_str));
       EXPECT_TRUE(map.has(key));
 
       EXPECT_EQ(map2.count(key), 0);
@@ -55,7 +59,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       const auto &key = map.get_key(it);
       EXPECT_TRUE(map.has(key));
 
-      std::string_view val = map.get(it);
+      const auto val = it.second;
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
@@ -67,7 +71,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
     EXPECT_EQ(conta, 0);
 
-    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n", map.load_factor(), map.conflict_factor(), map.txt_size());
+    fmt::print("load_factor:{} conflict_factor:{}\n", map.load_factor(), map.conflict_factor());
   }
 }
 
@@ -82,10 +86,8 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   int conta;
   for (int n = 0; n < 3; n++) {
     mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
-    auto                                      it = map.set(3, "test");
-    EXPECT_EQ(it->first, 3);
-    EXPECT_NE(it->second, 0);
-    EXPECT_EQ(map.get(it->first), "test");
+    map.set(3, "test");
+    EXPECT_EQ(map.get(3), "test");
     map.clear();
     map2.clear();
 
@@ -112,21 +114,19 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
   }
 
   EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_data", F_OK), 0);
-  EXPECT_EQ(access("lgdb_bench/mmap_map_test_sview_datatxt", F_OK), 0);
 
   {
-    mmap_lib::map<uint32_t, std::string_view> map("lgdb_bench", "mmap_map_test_sview_data");
+    mmap_lib::map<uint32_t, mmap_lib::str> map("lgdb_bench", "mmap_map_test_sview_data");
     for (const auto &it : map) {
-      auto txt1 = map.get(it);
+      auto txt1 = it.second;
       auto txt2 = map.get(it.first);
-      auto txt3 = map.get(it);
       auto it2  = map.find(it.first);
       EXPECT_NE(it2, map.end());
       auto txt4 = map.get(it2);
       EXPECT_EQ(txt1, txt2);
-      EXPECT_EQ(txt1, txt3);
       EXPECT_EQ(txt1, txt4);
-      std::string_view val = map.get(it);
+
+      auto val = map.get(it.first);
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
@@ -136,7 +136,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
 
     EXPECT_EQ(conta, 0);
 
-    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n", map.load_factor(), map.conflict_factor(), map.txt_size());
+    fmt::print("load_factor:{} conflict_factor:{}\n", map.load_factor(), map.conflict_factor());
   }
 }
 
@@ -210,7 +210,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
 
     EXPECT_EQ(conta, 0);
 
-    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n", map.load_factor(), map.conflict_factor(), map.txt_size());
+    fmt::print("load_factor:{} conflict_factor:{}\n", map.load_factor(), map.conflict_factor());
   }
 }
 
@@ -269,7 +269,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
 
     EXPECT_EQ(conta, 0);
 
-    fmt::print("load_factor:{} conflict_factor:{} txt_size:{}\n", map.load_factor(), map.conflict_factor(), map.txt_size());
+    fmt::print("load_factor:{} conflict_factor:{}\n", map.load_factor(), map.conflict_factor());
   }
 }
 
@@ -502,11 +502,5 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
     }
   }
 }
-
-static_assert(mmap_lib::is_array_serializable<std::string_view>::value);
-static_assert(mmap_lib::is_array_serializable<std::vector<int>>::value);
-static_assert(!mmap_lib::is_array_serializable<uint32_t>::value);
-static_assert(!mmap_lib::is_array_serializable<std::map<int, int>>::value);
-static_assert(!mmap_lib::is_array_serializable<std::string>::value);
 
 TEST_F(Setup_mmap_map_test, serializable) {}

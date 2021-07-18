@@ -8,7 +8,6 @@
 // TODO: We have attributes per node/pin/edge, we should have also per Lgraph module (lef attributes)
 #include "ann_file_loc.hpp"
 #include "ann_place.hpp"
-#include "ann_ssa.hpp"
 #include "attribute.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
@@ -37,7 +36,7 @@ using Ann_node_pin_name
 using Ann_node_pin_prp_vname
     = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
 
-using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Ann_ssa> >;
+using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint32_t> >;
 
 using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<Node_pin::Compact_driver, float> >;
 

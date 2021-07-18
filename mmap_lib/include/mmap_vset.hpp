@@ -63,33 +63,15 @@ public:
    * Need to access single bits of the bitmap outside of the functions
    */
 
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &bucket_get_val(const Key &key) const {
+  [[nodiscard]] const T bucket_get_val(const Key &key) const {
     return visitor_set.get(key);
   }
 
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T bucket_get_val(const Key &key) const {
-    return visitor_set.get(key);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &bucket_get_val(const bucket_iterator &it) const {
+  [[nodiscard]] const T bucket_get_val(const bucket_iterator &it) const {
     return visitor_set.get(it);
   }
 
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T bucket_get_val(const bucket_iterator &it) const {
-    return visitor_set.get(it);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<!is_array_serializable<T_>::value>>
-  [[nodiscard]] const T &bucket_get_val(const const_bucket_iterator &it) const {
-    return visitor_set.get(it);
-  }
-
-  template <typename T_ = T, typename = std::enable_if_t<is_array_serializable<T_>::value>>
-  [[nodiscard]] T bucket_get_val(const const_bucket_iterator &it) const {
+  [[nodiscard]] const T bucket_get_val(const const_bucket_iterator &it) const {
     return visitor_set.get(it);
   }
 
@@ -424,16 +406,6 @@ public:
     // Fix this to make the auto for loop work
     T operator*() const { return iData; }
   };
-
-  void test_begin() {
-    vIter alpha;
-    alpha.cont_test();
-  }
-
-  vIter test_ret() {
-    vIter beta;
-    return beta;
-  }
 
   // trying to change vIter member vars using vset
   T set_and_ret(T ele) {
