@@ -21,7 +21,6 @@
 #include "replxx.hxx"
 
 #include "meta_api.hpp"
-//#include "../eprp/eprp_var.hpp"
 using Replxx = replxx::Replxx;
 
 #include "main_api.hpp"
@@ -121,16 +120,12 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       	
     if (label_name)
     {
-    	//std::vector<Lgraph *> lgs;
     	std::vector<std::string> name_files;
     	auto *library = Graph_library::instance("lgdb/");
 
 	    library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name){
-	        //(void)name;
-          	(void)id;
+          (void)id;
 	        name_files.push_back(std::string{name});
-	        //Lgraph *lg = Lgraph::open(path, id);
-	        //lgs.push_back(lg);
 	    });
     	fields = name_files;
     	examples = &fields;
