@@ -19,12 +19,14 @@
 #include "iassert.hpp"
 #include "lgraph.hpp"
 #include "replxx.hxx"
+
+#include "meta_api.hpp"
+#include "../eprp/eprp_var.hpp"
 using Replxx = replxx::Replxx;
 
 #include "main_api.hpp"
 
 void help(const std::string& cmd, const std::string& txt) { fmt::print("{:20s} {}\n", cmd, txt); }
-
 void help_labels(const std::string& cmd, const std::string& txt, bool required) {
   if (required)
     fmt::print("  {:20s} {} (required)\n", cmd, txt);
@@ -98,36 +100,58 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     }
     // std::cerr << "[" << context << "][" << prefix << "]" << context.size() << ":" << index << "label[" << label << "]" <<
     // std::endl;
-    bool label_files  = strcasecmp(label.c_str(), "files") == 0;
-    bool label_output = strcasecmp(label.c_str(), "output") == 0;
-    bool label_path   = strcasecmp(label.c_str(), "path") == 0;
-    bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
-    if (label_files || label_output || label_path || label_odir) {
-      std::string path = ".";
-      auto        pos2 = full_filename.find_last_of('/');
-      std::string filename;
-      if (pos2 != std::string::npos) {
+
+    std::string path = ".";
+    auto        pos2 = full_filename.find_last_of('/');
+    std::string filename;
+    if (pos2 != std::string::npos) {
         path     = full_filename.substr(0, pos2);
         filename = full_filename.substr(pos2 + 1);
         prefix_add += path + "/";
         prefix = filename;
-      } else {
+    } else {
         filename = full_filename;
-      }
+    }
+
+    bool label_files  = strcasecmp(label.c_str(), "files") == 0;
+    bool label_output = strcasecmp(label.c_str(), "output") == 0;
+    bool label_path   = strcasecmp(label.c_str(), "path") == 0;
+    bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
+    bool label_name   = strcasecmp(label.c_str(), "name") == 0;
+      	
+    if (label_name)
+    {
+    	std::vector<Lgraph *> lgs;
+    	std::vector<std::string> name_files;
+    	auto *library = Graph_library::instance("lgdb/");
+
+	    library->each_lgraph([&lgs, &name_files, path](Lg_type_id id, std::string_view name){
+	        (void)name;
+	        name_files.push_back(std::string{name});
+	        Lgraph *lg = Lgraph::open(path, id);
+	        lgs.push_back(lg);
+	    });
+
+    	fields = name_files;
+    	examples = &fields;
+    }
+    else if (label_files || label_output || label_path || label_odir) {
       // fmt::print("label[{}] full_filename[{}] path[{}] filename[{}] prefix[{}] add[{}]\n", label, full_filename, path, filename,
       // prefix, prefix_add);
       DIR* dirp = opendir(path.c_str());
       if (dirp) {
         std::vector<std::string> sort_files;
         struct dirent*           dp;
+        
         while ((dp = readdir(dirp)) != NULL) {
           if (dp->d_type != DT_DIR && (label_path || label_odir))
             continue;
           // fmt::print("preadding {}\n",dp->d_name);
+         
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
             // fmt::print("adding {}\n",dp->d_name);
             struct stat sb;
-
+	   
             std::string dir_name{path + "/" + dp->d_name};
             if (stat(dir_name.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
               sort_files.push_back(std::string{dp->d_name} + "/");
@@ -160,6 +184,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       examples = &fields;
     prefix = cmd;
   }
+
 
   int last_match_end   = context.size();
   int last_match_start = last_match_end;
