@@ -156,10 +156,7 @@ TEST_F(Eprp_test, SimpleReadlinePipe) {
   EXPECT_TRUE(is_equal_called);
   is_equal_called = false;
 
-  buffer = " test1.pass test1_foo:field1 check2:chacha  check1:lgdb |> #a";
-  eprp.parse_inline(buffer);
-
-  buffer = "#a |> test1.fff.test check2:not_used";
+  buffer = " test1.pass test1_foo:field1 check2:chacha  check1:lgdb |> test1.fff.test check2:not_used";
   eprp.parse_inline(buffer);
   EXPECT_TRUE(is_equal_called);
 }
