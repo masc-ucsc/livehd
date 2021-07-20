@@ -1,4 +1,6 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// This file is distributed under the BSD 3-Clause License.
+// See LICENSE for details.
+
 #pragma once
 
 #include <cassert>
@@ -8,7 +10,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "err_tracker.hpp"
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
@@ -23,11 +24,12 @@ using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
 // inheritance in C++. It is just cleaner (less static_cast conversions) using
 // constexpr
 //
-// Suggested way to extend tokens for other languages: (replace pyrope for your language)
+// Suggested way to extend tokens for other languages: (replace pyrope for your
+// language)
 //
-// constexpr Token_id Pyrope_id_if   = 128; // Bigger than Token_id_keyword_first
-// constexpr Token_id Pyrope_id_else = 129;
-// constexpr Token_id Pyrope_id_for  = 130;
+// constexpr Token_id Pyrope_id_if   = 128; // Bigger than
+// Token_id_keyword_first constexpr Token_id Pyrope_id_else = 129; constexpr
+// Token_id Pyrope_id_for  = 130;
 //
 constexpr Token_id Token_id_nop           = 0;    // invalid token
 constexpr Token_id Token_id_comment       = 1;    // c-like comments
@@ -93,14 +95,16 @@ public:
   void reset(Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text) {
     tok  = _tok;
     pos1 = _pos1;
-    pos2 = _pos1;  // FIXME->sh: you reset the token so the length of the token should be 0, pos2 follows pos1
+    pos2 = _pos1;  // FIXME->sh: you reset the token so the length of the token
+                   // should be 0, pos2 follows pos1
     line = _line;
     text = _text;
   }
   void clear(uint64_t _pos1, uint32_t _line, std::string_view _text) {
     tok  = Token_id_nop;
     pos1 = _pos1;
-    pos2 = _pos1;  // FIXME->sh: you clear the token so the length of the token should be 0, pos2 follows pos1
+    pos2 = _pos1;  // FIXME->sh: you clear the token so the length of the token
+                   // should be 0, pos2 follows pos1
     line = _line;
     text = _text;
   }
@@ -123,7 +127,8 @@ public:
   }
 
   void adjust_token_size(uint64_t end_pos) {
-    GI(tok != Token_id_nop, end_pos >= pos2);  // FIXME->sh: check correctness of pos2
+    GI(tok != Token_id_nop,
+       end_pos >= pos2);  // FIXME->sh: check correctness of pos2
     auto new_len = end_pos - pos2;
     text         = std::string_view{text.data(), new_len};
   }
@@ -179,7 +184,8 @@ private:
 
   int         max_errors;
   int         max_warnings;
-  mutable int n_errors;  // NOTE: mutable to allow const methods for error/warning reporting
+  mutable int n_errors;  // NOTE: mutable to allow const methods for
+                         // error/warning reporting
   mutable int n_warnings;
 
   void setup_translate();
@@ -187,8 +193,6 @@ private:
   void add_token(Etoken &t);
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
-
-  void lex_error(std::string_view text);
 
   void parse_setup(std::string_view filename);
   void parse_setup();
@@ -217,26 +221,32 @@ public:
   Elab_scanner();
   virtual ~Elab_scanner();
 
-  template <typename S, typename... Args>
-  void scan_error(const S &format, Args &&...args) const {
-    err_tracker::err_logger(fmt::format(format, args...));
-    scan_error_int(fmt::format(format, args...));
-  }
+  class scan_error : public std::runtime_error {
+  public:
+    template <typename S, typename... Args>
+    scan_error(const Elab_scanner &scanner, const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+      scanner.scan_error_int(what());
+    };
+  };
+
   template <typename S, typename... Args>
   void scan_warn(const S &format, Args &&...args) const {
-    err_tracker::err_logger(fmt::format(format, args...));
     scan_warn_int(fmt::format(format, args...));
   }
 
-  template <typename S, typename... Args>
-  void parser_error(const S &format, Args &&...args) const {
-    err_tracker::err_logger(fmt::format(format, args...));
-    parser_error_int(fmt::format(format, args...));
-  }
+  class parser_error : public std::runtime_error {
+  public:
+    template <typename S, typename... Args>
+    parser_error(const Elab_scanner &scanner, const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+      scanner.parser_error_int(what());
+    };
+  };
+
   template <typename S, typename... Args>
   void parser_warn(const S &format, Args &&...args) const {
     parser_warn_int(fmt::format(format, args...));
   }
+
   template <typename S, typename... Args>
   void parser_info(const S &format, Args &&...args) const {
     parser_info_int(fmt::format(format, args...));

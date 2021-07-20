@@ -2,7 +2,6 @@
 
 #include "elab_scanner.hpp"
 
-#include <ctype.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -13,6 +12,7 @@
 #include <limits>
 #include <string>
 
+#include "err_tracker.hpp"
 #include "iassert.hpp"
 #include "likely.hpp"
 
@@ -168,8 +168,7 @@ void Elab_scanner::parse_setup(std::string_view filename) {
 
   memblock_fd = open(std::string(filename).c_str(), O_RDONLY);
   if (memblock_fd < 0) {
-    parser_error("::parse could not open file {}", filename);
-    return;
+    throw parser_error(*this, "::parse could not open file {}", filename);
   }
 
   struct stat sb;
@@ -180,14 +179,12 @@ void Elab_scanner::parse_setup(std::string_view filename) {
 
   if (sb.st_size == 0) {
     memblock = std::string_view("");
-    parser_warn("file {} seems empty. Nothing to parse", filename);
-    return;
+    throw parser_error(*this, "file {} seems empty. Nothing to parse", filename);
   }
 
   char *b = (char *)mmap(NULL, sb.st_size, PROT_WRITE, MAP_PRIVATE, memblock_fd, 0);
   if (b == MAP_FAILED) {
-    parser_error("parse mmap failed for file {} with size {}", filename, sb.st_size);
-    return;
+    throw parser_error(*this, "parse mmap failed for file {} with size {}", filename, sb.st_size);
   }
 
   memblock = std::string_view(b, sb.st_size);
@@ -297,7 +294,7 @@ void Elab_scanner::parse_step() {
 
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
-        scan_error("{}:{} found end of comment without matching beginning of comment", buffer_name, nlines);
+        throw scan_error(*this, "{}:{} found end of comment without matching beginning of comment", buffer_name, nlines);
       } else if (in_multiline_comment == 0) {
         in_singleline_comment = false;
         in_comment            = false;
@@ -354,7 +351,7 @@ void Elab_scanner::parse_step() {
   }
 
   if (in_multiline_comment) {
-    scan_error("scanner reached end of file with a multi-line comment");
+    throw scan_error(*this, "scanner reached end of file with a multi-line comment");
   }
 
   elaborate();  // build ast
@@ -425,19 +422,10 @@ uint32_t Elab_scanner::scan_line() const {
   return token_list[max_pos].line;
 }
 
-void Elab_scanner::lex_error(std::string_view text) {
-  // lexer can not look at Etoken list
-
-  fmt::print("{}\n", text);
-  err_tracker::err_logger("{}\n", text);
-  n_errors++;
-  throw std::runtime_error(std::string(text));
-}
 void Elab_scanner::scan_error_int(std::string_view text) const {
   err_tracker::err_logger(text);
   scan_raw_msg("error", text, true);
   n_errors++;
-  throw std::runtime_error(std::string(text));
 }
 
 void Elab_scanner::scan_warn_int(std::string_view text) const {
@@ -445,7 +433,7 @@ void Elab_scanner::scan_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings > max_warnings)
-    throw std::runtime_error("too many warnings");
+    throw scan_error(*this, "too many warnings");
 }
 
 void Elab_scanner::parser_info_int(std::string_view text) const {
@@ -463,7 +451,6 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
   fmt::print("Pass::Error: {}\n", text);
   I(false, "Compiler pass error! debug with gdb");
 #endif
-  throw std::runtime_error(std::string(text));
 }
 
 void Elab_scanner::parser_warn_int(std::string_view text) const {
@@ -471,7 +458,7 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings)
-    throw std::runtime_error("too many warnings");
+    throw parser_error(*this, "too many warnings");
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {

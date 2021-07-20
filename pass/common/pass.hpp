@@ -39,7 +39,7 @@ public:
 
   static void error(std::string_view msg) {
     Graph_library::sync_all();
-    eprp.parser_error(msg);
+    throw Eprp::parser_error(eprp, msg);
   }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
   static void info(std::string_view msg) {

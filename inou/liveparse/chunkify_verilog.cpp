@@ -25,8 +25,7 @@ int Chunkify_verilog::open_write_file(std::string_view filename) const {
   std::string sfilename(filename);
   int         fd = open(sfilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
-    scan_error(fmt::format("could not open {} for output", sfilename));
-    return -1;
+    throw scan_error(*this, "could not open {} for output", sfilename);
   }
 
   return fd;
@@ -75,13 +74,11 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
 
   size_t sz = write(fd, text1.data(), text1.size());
   if (sz != text1.size()) {
-    scan_error(fmt::format("could not write contents to file err:{} vs {}", sz, text1.size()));
-    return;
+    throw scan_error(*this, "could not write contents to file err:{} vs {}", sz, text1.size());
   }
   sz = write(fd, text2.data(), text2.size());
   if (sz != text2.size()) {
-    scan_error(fmt::format("could not write contents to file err:{} vs {}", sz, text2.size()));
-    return;
+    throw scan_error(*this, "could not write contents to file err:{} vs {}", sz, text2.size());
   }
 
   close(fd);
@@ -94,8 +91,7 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
 
   size_t sz2 = write(fd, text.data(), text.size());
   if (sz2 != text.size()) {
-    scan_error(fmt::format("could not write contents to file err:{} vs {}", sz2, text.size()));
-    return;
+    throw scan_error(*this, "could not write contents to file err:{} vs {}", sz2, text.size());
   }
 
   close(fd);
@@ -119,14 +115,12 @@ void Chunkify_verilog::elaborate() {
     std::string spath(path);
     int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
-      scan_error(fmt::format("could not create {} directory", path));
-      return;
+      throw scan_error(*this, "could not create {} directory", path);
     }
 
     err = mkdir(parse_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
-      scan_error(fmt::format("could not create {}/{} directory", path, "parse"));
-      return;
+      throw scan_error(*this, "could not create {}/{} directory", path, "parse");
     }
   }
 
@@ -193,7 +187,7 @@ void Chunkify_verilog::elaborate() {
       // fmt::print("T:{}\n",txt);
       if (txt == "module") {
         if (in_module) {
-          scan_error(fmt::format("unexpected nested modules"));
+          throw scan_error(*this, "unexpected nested modules");
         }
         scan_format_append(in_module_text);
         scan_next();
@@ -216,7 +210,7 @@ void Chunkify_verilog::elaborate() {
           endmodule_found      = true;
           inside_task_function = 0;
         } else {
-          scan_error(fmt::format("found endmodule without corresponding module"));
+          throw scan_error(*this, "found endmodule without corresponding module");
         }
       } else if (txt == "task" || txt == "function") {
         inside_task_function++;

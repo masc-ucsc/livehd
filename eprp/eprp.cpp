@@ -52,8 +52,7 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   eat_comments();
 
   if (scan_is_end()) {
-    scan_error("the {} field in {} command has no argument", label, cmd_line);
-    return false;
+    throw scan_error(*this, "the {} field in {} command has no argument", label, cmd_line);
   }
 
   std::string path;
@@ -62,11 +61,10 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
   ast->up(Eprp_rule_label_path);
   if (!ok) {
     if (scan_is_token(Token_id_register)) {
-      scan_error("could not pass a register {} to a method {}", scan_text(), cmd_line);
+      throw scan_error(*this, "could not pass a register {} to a method {}", scan_text(), cmd_line);
     } else {
-      scan_error("field {} with invalid value in {} command", label, cmd_line);
+      throw scan_error(*this, "field {} with invalid value in {} command", label, cmd_line);
     }
-    return false;
   }
 
   next_var.add(label, path);
@@ -75,17 +73,11 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
 }
 
 // rule_reg = reg+
-bool Eprp::rule_reg(bool first) {
+bool Eprp::rule_reg(bool /* first */) {
   if (!scan_is_token(Token_id_register))
     return false;
 
-  (void)first;
-  scan_error("variables are deprecated (multithreaded)");
-
-  scan_next();
-  eat_comments();
-
-  return true;
+  throw scan_error(*this, "variables are deprecated (multithreaded)");
 }
 
 // rule_cmd_line = alnum (dot alnum)*
@@ -162,8 +154,7 @@ bool Eprp::rule_pipe() {
   bool try_either = rule_cmd_or_reg(false);
   ast->up(Eprp_rule_pipe);
   if (!try_either) {
-    scan_error("after a pipe there should be a register or a command");
-    return false;
+    throw scan_error(*this, "after a pipe there should be a register or a command");
   }
 
   return true;
@@ -189,8 +180,7 @@ bool Eprp::rule_top() {
   bool try_either = rule_cmd_or_reg(true);
   ast->up(Eprp_rule_top);
   if (!try_either) {
-    scan_error("statements start with a register or a command");
-    return false;
+    throw scan_error(*this, "statements start with a register or a command");
   }
 
   // tree.add_lazy_child(1);
@@ -198,13 +188,11 @@ bool Eprp::rule_top() {
   bool try_pipe = rule_pipe();
   if (!try_pipe) {
     if (scan_is_token(Token_id_or)) {
-      scan_error("eprp pipe is |> not |");
-      return false;
+      throw scan_error(*this, "eprp pipe is |> not |");
     } else if (scan_is_end()) {
       return true;
     } else {
-      scan_error("invalid command");
-      return false;
+      throw scan_error(*this, "invalid command");
     }
   }
 
@@ -220,7 +208,6 @@ bool Eprp::rule_top() {
 
 // top = parse_top+
 void Eprp::elaborate() {
-
   pipe.clear();
 
   ast = std::make_unique<Ast_parser>(get_memblock(), Eprp_rule);
@@ -278,8 +265,7 @@ void Eprp::process_ast() {
 void Eprp::run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields) {
   const auto &it = methods.find(cmd);
   if (it == methods.end()) {
-    parser_error("method {} not registered", cmd);
-    return;
+    throw parser_error(*this, "method {} not registered", cmd);
   }
 
   pipe.add_command(it->second, cmd_var_fields);
@@ -301,7 +287,7 @@ void Eprp::get_commands(std::function<void(const std::string &, const std::strin
   }
 }
 
-void Eprp::get_labels(const std::string &                                                          cmd,
+void Eprp::get_labels(const std::string                                                           &cmd,
                       std::function<void(const std::string &, const std::string &, bool required)> fn) const {
   const auto &it = methods.find(cmd);
   if (it == methods.end())

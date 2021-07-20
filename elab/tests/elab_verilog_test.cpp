@@ -140,7 +140,7 @@ public:
 
         if (token == "module") {
           if (!module.empty()) {
-            scan_error(fmt::format("unexpected nested modules"));
+            throw scan_error(*this, fmt::format("unexpected nested modules"));
           }
           scan_next();
           module = scan_text();
@@ -153,7 +153,7 @@ public:
             fmt::print("{}={}\n", token, module);
             module = std::string_view("");
           } else {
-            scan_error(fmt::format("found endmodule without corresponding module"));
+            throw scan_error(*this, fmt::format("found endmodule without corresponding module"));
           }
         }
       } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
