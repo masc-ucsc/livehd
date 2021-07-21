@@ -49,11 +49,9 @@ cc_binary(
     ],
     copts = COPTS,
     features = ["-use_header_modules"],
-    linkstatic = True,
     visibility = ["//visibility:public"],
     deps = [
         ":lgyosys",
         "//core",
-        #"@dk_thrysoee_libedit//:pretend_to_be_gnu_readline_system",
     ],
 )

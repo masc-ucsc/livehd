@@ -15,8 +15,6 @@ cc_binary(
     data = [
         "//inou/yosys:inou_yosys_scripts",
     ],
-    #linkopts = ["-static"],
-    linkstatic = False,
     visibility = ["//visibility:public"],
     deps = [
         "@replxx",
