@@ -22,7 +22,7 @@ void Eprp_var::add(const Eprp_lgs &_lgs) {
 }
 
 void Eprp_var::add(Eprp_lnasts &_lns) {
-  for (auto ln : _lns) {
+  for (const auto &ln : _lns) {
     lnasts.emplace_back(ln);
   }
 }

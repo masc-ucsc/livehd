@@ -440,7 +440,7 @@ int main(int argc, char **argv) {
 
   if (!vlog_defines.empty()) {
     std::string vdef_cmd = "read -define";
-    for (auto vdef : vlog_defines) vdef_cmd += " " + vdef;
+    for (const auto &vdef : vlog_defines) vdef_cmd += " " + vdef;
     run_pass(vdef_cmd);
   }
 
@@ -472,12 +472,12 @@ int main(int argc, char **argv) {
     if (f == nullptr)
       log_error("Can't open dependencies file for writing: %s\n", strerror(errno));
     bool first = true;
-    for (auto fn : yosys_output_files) {
+    for (const auto &fn : yosys_output_files) {
       fprintf(f, "%s%s", first ? "" : " ", escape_filename_spaces(fn).c_str());
       first = false;
     }
     fprintf(f, ":");
-    for (auto fn : yosys_input_files) {
+    for (const auto &fn : yosys_input_files) {
       if (yosys_output_files.count(fn) == 0)
         fprintf(f, " %s", escape_filename_spaces(fn).c_str());
     }
@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
 #if defined(YOSYS_ENABLE_COVER) && (defined(__linux__) || defined(__FreeBSD__))
   if (getenv("YOSYS_COVER_DIR") || getenv("YOSYS_COVER_FILE")) {
     string filename;
-    FILE * f;
+    FILE  *f;
 
     if (getenv("YOSYS_COVER_DIR")) {
       filename = stringf("%s/yosys_cover_%d_XXXXXX.txt", getenv("YOSYS_COVER_DIR"), getpid());

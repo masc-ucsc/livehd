@@ -2239,13 +2239,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     for (auto &it : design->modules_) {
       RTLIL::Module *module = it.second;
-      auto *         g      = library->try_find_lgraph(&module->name.c_str()[1]);
+      auto          *g      = library->try_find_lgraph(&module->name.c_str()[1]);
       if (g == nullptr) {
         g = ::Lgraph::create(path, &module->name.c_str()[1], "-");
       }
       Sub_node *sub = g->ref_self_sub_node();
 
-      for (auto port : module->ports) {
+      for (const auto &port : module->ports) {
         RTLIL::Wire *wire = module->wire(port);
         std::string  wire_name(&wire->name.c_str()[1]);
 
@@ -2282,7 +2282,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         Lbench b("inou.YOSYS_tolg_" + mod_name);
 
-        for (auto port : module->ports) {
+        for (const auto &port : module->ports) {
           RTLIL::Wire *wire = module->wire(port);
           std::string  wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {

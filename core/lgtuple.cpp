@@ -590,7 +590,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> t
   std::shared_ptr<Lgtuple> ret_tup;
 
   int pos = 0;
-  for (auto e : tup->key_map) {
+  for (const auto &e : tup->key_map) {
     std::string_view e_name{e.first};
     (void)e_name;
     auto e_node = e.second.get_node();
@@ -765,7 +765,6 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
   I(!has_dpin(fixed_key));
   I(!fixed_key.empty());
   key_map.emplace_back(fixed_key, dpin);
-
 
 #ifdef DEBUG_SLOW
   for (const auto &e : key_map) {
@@ -1201,7 +1200,7 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   // find all the possible keys
   absl::flat_hash_map<std::string, Node_pin> key_entries;
   bool                                       first_iter = true;
-  for (auto tup : tup_list) {
+  for (const auto &tup : tup_list) {
     if (!tup->is_correct())
       fixing_tup->set_issue();
 
@@ -1222,7 +1221,7 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
     first_iter = false;
   }
 
-  for (auto it : key_entries) {
+  for (const auto &it : key_entries) {
     bool        found = false;
     std::string key{it.first};
 

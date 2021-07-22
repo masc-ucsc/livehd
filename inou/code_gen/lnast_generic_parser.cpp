@@ -266,26 +266,26 @@ bool Cpp_parser::set_convert_parameters(const std::string &key, const std::strin
 
 void Prp_parser::dump_maps() const {
   fmt::print("printing the unsigned vector\n");
-  for (auto elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
 }
 void Prp_parser::call_dump_maps() const { Prp_parser::dump_maps(); }
 void Ver_parser::dump_maps() const {
   fmt::print("printing the unsigned vector\n");
-  for (auto elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
 }
 void Ver_parser::call_dump_maps() const { Ver_parser::dump_maps(); }
 void Cpp_parser::dump_maps() const {
   fmt::print("printing I/P bitwidth values:\n");
-  for (auto elem : inp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : inp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
 
   fmt::print("printing O/P bitwidth values:\n");
-  for (auto elem : outp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : outp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
 
   fmt::print("printing reg bitwidth values:\n");
-  for (auto elem : reg_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : reg_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
 
   fmt::print("printing the unsigned vector\n");
-  for (auto elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
 }
 void Cpp_parser::call_dump_maps() const { Cpp_parser::dump_maps(); }
 int  Cpp_parser::indent_final_system() const { return 1; }
@@ -334,22 +334,22 @@ std::string Cpp_parser::set_final_print(const std::string &modname, const std::s
       = absl::StrCat("void ", modname, "_sim::vcd_comb(", inps_csv, ") {\n", buffer_to_print, "  ", buff_to_print_vcd, "\n}");
   std::string main_func = absl::StrCat("void ", modname, "_sim::cycle(", inps_csv, ") {\n", buffer_to_print, "\n}");
   auto        answer    = absl::StrCat("#ifdef SIMLIB_VCD\n",
-                             constructor_vcd,
-                             "\n",
-                             reset_vcd,
-                             "\n",
-                             posedge_vcd,
-                             "\n",
-                             negedge_vcd,
-                             "\n",
-                             main_func_vcd,
-                             "\n#else\n",
-                             constructor,
-                             "\n",
-                             reset_func,
-                             "\n",
-                             main_func,
-                             "\n#endif\n");
+                                       constructor_vcd,
+                                       "\n",
+                                       reset_vcd,
+                                       "\n",
+                                       posedge_vcd,
+                                       "\n",
+                                       negedge_vcd,
+                                       "\n",
+                                       main_func_vcd,
+                                       "\n#else\n",
+                                       constructor,
+                                       "\n",
+                                       reset_func,
+                                       "\n",
+                                       main_func,
+                                       "\n#endif\n");
   absl::StrAppend(&main_file_final_str, answer);
   return answer;
 }

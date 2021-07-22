@@ -334,7 +334,7 @@ void Node_pin::set_prp_vname(std::string_view prp_vname) {
 void Node_pin::dump_all_prp_vname() const {
   auto *ref = Ann_node_pin_prp_vname::ref(current_g);
 
-  for (auto it : *ref) {
+  for (const auto &it : *ref) {
     if (current_g->is_valid_node_pin(it.first.idx)) {
       Node_pin a(current_g, it.first);
       fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));

@@ -41,7 +41,7 @@ struct mmap_gc_entry {
   std::string                       name;  // Mostly for debugging
   int                               fd;
   size_t                            size;
-  void *                            base;
+  void                             *base;
   std::function<bool(void *, bool)> gc_function;
 };
 
@@ -65,7 +65,7 @@ protected:
     int may_recycle_mmaps = 0;
 
     std::vector<mmap_gc_entry> sorted;
-    for (auto it : mmap_gc_pool) {
+    for (const auto &it : mmap_gc_pool) {
       if (it.second.fd < 0)
         continue;
       if (it.second.base == nullptr)
@@ -258,7 +258,7 @@ protected:
 public:
   /* LCOV_EXCL_START */
   static void dump() {
-    for (auto it : mmap_gc_pool) {
+    for (const auto &it : mmap_gc_pool) {
       std::cerr << "name:" << it.second.name << " base:" << it.first << " age:" << it.second.age << " fd:" << it.second.fd
                 << std::endl;
     }
@@ -329,7 +329,7 @@ public:
     bool done = recycle_int(it, true);
     // auto entry = it->second;
     // std::cerr << "mmap_gc_pool del name:" << entry.name << " fd:" << entry.fd << std::endl;
-    if(done) {
+    if (done) {
       mmap_gc_pool.erase(it);
     }
   }

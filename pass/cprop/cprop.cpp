@@ -641,7 +641,7 @@ void Cprop::tuple_shl_mut(Node &node) {
 #endif
 
     XEdge::del_edge(dpin, spin_amount);
-    for (auto e : tup->get_map()) {
+    for (const auto &e : tup->get_map()) {
       if (Lgtuple::is_attribute(e.first))
         continue;
 
@@ -1801,7 +1801,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_na
 
   std::shared_ptr<Lgtuple> use_tup;
 
-  for (auto it : node_tup->get_level_attributes(key_name)) {
+  for (const auto &it : node_tup->get_level_attributes(key_name)) {
     I(Lgtuple::is_attribute(it.first));
     auto attr = Lgtuple::get_last_level(it.first);
     if (Ntype::has_sink(Ntype_op::Flop, attr.substr(2)))

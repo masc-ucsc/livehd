@@ -130,7 +130,7 @@ protected:
   void check_ios(Lgraph *lg) {
     auto &sub_node = lg->get_self_sub_node();
 
-    for (auto it : name2pos) {
+    for (const auto &it : name2pos) {
       if (posinput.count(it.second)) {
         EXPECT_TRUE(lg->has_graph_input(it.first));
 

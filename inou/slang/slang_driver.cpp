@@ -173,10 +173,10 @@ bool loadAllSources(Compilation& compilation, SourceManager& sourceManager, cons
     }
   };
 
-  for (auto tree : compilation.getSyntaxTrees()) addDefNames(tree);
+  for (const auto& tree : compilation.getSyntaxTrees()) addDefNames(tree);
 
   flat_hash_set<string_view> missingNames;
-  for (auto tree : compilation.getSyntaxTrees()) {
+  for (const auto& tree : compilation.getSyntaxTrees()) {
     for (auto name : tree->getMetadata().globalInstances) {
       if (definitionNames.find(name) == definitionNames.end())
         missingNames.emplace(name);

@@ -87,7 +87,7 @@ std::string_view Semantic_check::in_lhs_list(Lnast *lnast, int index) {
 
 int Semantic_check::in_rhs_list(Lnast *lnast, std::string_view node_name, int op_start_index = 0) {
   int index = 0;
-  for (auto node : rhs_list) {
+  for (const auto &node : rhs_list) {
     if (index < op_start_index) {
       index++;
       continue;
@@ -260,7 +260,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   // for (auto node_name : read_variables) {
   // std::string_view read_node_name = node_name.first;
   int rhs_index = 0;
-  for (auto group : rhs_list) {
+  for (const auto &group : rhs_list) {
     for (auto node_name : group) {
       std::string_view read_node_name = lnast->get_name(node_name);
       if (is_temp_var(read_node_name)) {

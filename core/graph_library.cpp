@@ -42,7 +42,7 @@ static Cleanup_graph_library private_instance;
 void Graph_library::shutdown_int() {
   absl::flat_hash_set<Lgraph *> lg_deleted;
   for (auto it : global_name2lgraph) {
-    for (auto it2 : it.second) {
+    for (const auto &it2 : it.second) {
       if (lg_deleted.contains(it2.second))
         continue;
 
@@ -55,7 +55,7 @@ void Graph_library::shutdown_int() {
   absl::flat_hash_set<Graph_library *> gl_deleted;
 
   // The same graph library is inserted TWICE (full and short path)
-  for (auto it : global_instances) {
+  for (const auto &it : global_instances) {
     if (gl_deleted.contains(it.second))
       continue;
 
@@ -512,7 +512,7 @@ void Graph_library::reload_int() {
 
 Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
   std::lock_guard<std::mutex> guard(lgs_mutex);
-  auto *                      lg = try_find_lgraph_int(name);
+  auto                       *lg = try_find_lgraph_int(name);
   if (lg)
     return lg;
 
