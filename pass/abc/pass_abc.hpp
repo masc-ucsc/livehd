@@ -203,11 +203,11 @@ private:
     std::string_view cell_name = tcell->get_name();
     std::string_view flop      = "FF";
     std::string_view latch     = "LATCH";
-    if (cell_name.find(flop) != std::string::npos) {
+    if (cell_name.find(flop) != std::string_view::npos) {
       return true;
     }
 
-    return cell_name.find(latch) != std::string::npos;
+    return cell_name.find(latch) != std::string_view::npos;
   }
 
   void clear() {

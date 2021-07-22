@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include "absl/strings/match.h"
 #include "firrtl.pb.h"
 #include "google/protobuf/util/time_util.h"
 #include "inou_firrtl.hpp"
@@ -29,7 +30,7 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
 
   if (var.has_label("files")) {
     auto files = var.get("files");
-    for (const auto& f : absl::StrSplit(files, ",")) {
+    for (const auto& f : absl::StrSplit(files, ',')) {
       fmt::print("FILE: {}\n", f);
       firrtl::FirrtlPB firrtl_input;
       std::fstream     input(std::string(f).c_str(), std::ios::in | std::ios::binary);
@@ -278,8 +279,8 @@ void Inou_firrtl::collect_memory_data_struct_hierarchy(const std::string& mem_na
           || type_sub_field.type_case() == firrtl::FirrtlPB_Type::kVectorType) {
         collect_memory_data_struct_hierarchy(mem_name, type_sub_field, new_hier_fields_concats);
       } else {
-        auto bits               = get_bit_count(type_sub_field);
-        new_hier_fields_concats = absl::StrCat(new_hier_fields_concats, ".", bits);  // encode .bits at the end of hier-fields
+        auto bits = get_bit_count(type_sub_field);
+        absl::StrAppend(&new_hier_fields_concats, ".", bits);  // encode .bits at the end of hier-fields
         mem2din_fields[mem_name].emplace_back(new_hier_fields_concats);
       }
     }
@@ -296,8 +297,8 @@ void Inou_firrtl::collect_memory_data_struct_hierarchy(const std::string& mem_na
           || type_sub_field.type_case() == firrtl::FirrtlPB_Type::kVectorType) {
         collect_memory_data_struct_hierarchy(mem_name, type_sub_field, new_hier_fields_concats);
       } else {
-        auto bits               = get_bit_count(type_sub_field);
-        new_hier_fields_concats = absl::StrCat(new_hier_fields_concats, ".", bits);  // encode .bits at the end of hier-fields
+        auto bits = get_bit_count(type_sub_field);
+        absl::StrAppend(&new_hier_fields_concats, ".", bits);  // encode .bits at the end of hier-fields
         mem2din_fields[mem_name].emplace_back(new_hier_fields_concats);
       }
     }
@@ -1095,7 +1096,7 @@ void Inou_firrtl::split_hier_name(std::string_view                              
 // note: "#" prefix need to be ready if the full_name is a register
 void Inou_firrtl::CreateTupGetFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name,
                                       const Lnast_node& dest_node) {
-  I((full_name.find('.') != std::string::npos));
+  I((absl::StrContains(full_name, '.')));
   I(!dest_node.is_invalid());
 
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
@@ -1125,7 +1126,7 @@ void Inou_firrtl::CreateTupGetFromStr(Lnast& ln, Lnast_nid& parent_node, const s
 
 void Inou_firrtl::CreateTupAddFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name,
                                       const Lnast_node& value_node) {
-  I((full_name.find('.') != std::string::npos));
+  I((absl::StrContains(full_name, '.')));
 
   std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> hier_subnames;
   split_hier_name(full_name, hier_subnames);
@@ -2224,7 +2225,7 @@ std::string Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt& bigin
       }
       bigint_char >>= 1;
     }
-    bigint_val = absl::StrCat(bigint_val, bit_str);
+    absl::StrAppend(&bigint_val, bit_str);
   }
   return absl::StrCat("0b", bigint_val);
 }

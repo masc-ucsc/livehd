@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "absl/strings/match.h"
 #include "lbench.hpp"
 
 static Pass_plugin sample("Pass_lnastfmt", Pass_lnastfmt::setup);
@@ -206,7 +207,7 @@ bool Pass_lnastfmt::is_temp_var(std::string_view test_string) {
   return (test_string.find("___") == 0 || test_string.find("_._") == 0);
 }
 bool Pass_lnastfmt::is_ssa(std::string_view test_string) {
-  return ((test_string.find('_') != 0) && (test_string.find('_') != std::string_view::npos));
+  return ((test_string.find('_') != 0) && (absl::StrContains(test_string, '_')));
 }
 
 Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std::shared_ptr<Lnast> ln,

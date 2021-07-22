@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/match.h"
 #include "lconst.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
@@ -84,7 +85,7 @@ public:
   static std::string_view get_canonical_name(std::string_view key);
   static int              get_last_level_pos(std::string_view key) { return get_first_level_pos(get_last_level(key)); }
 
-  static bool is_single_level(std::string_view key) { return key.find('.') == std::string::npos; }
+  static bool is_single_level(std::string_view key) { return !absl::StrContains(key, '.'); }
 
   static bool is_root_attribute(std::string_view key) {
     if (key.substr(0, 2) == "__" && key[3] != '_')
@@ -100,13 +101,13 @@ public:
       return true;
 
     auto it = key.find(".__");
-    if (it != std::string::npos) {
+    if (it != std::string_view::npos) {
       if (key[it + 3] != '_')
         return true;
     }
 
     auto it2 = key.find(":__");
-    if (it2 != std::string::npos) {
+    if (it2 != std::string_view::npos) {
       if (key[it2 + 3] != '_')
         return true;
     }

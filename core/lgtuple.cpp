@@ -449,7 +449,7 @@ std::string_view Lgtuple::get_canonical_name(std::string_view key) {
 
 std::string_view Lgtuple::get_last_level(std::string_view key) {
   auto n = key.find_last_of('.');
-  if (n == std::string::npos)
+  if (n == std::string_view::npos)
     return key;
 
   I(n != 0);  // name can not start with a .
@@ -458,7 +458,7 @@ std::string_view Lgtuple::get_last_level(std::string_view key) {
 
 std::string_view Lgtuple::get_all_but_last_level(std::string_view key) {
   auto n = key.find_last_of('.');
-  if (n != std::string::npos) {
+  if (n != std::string_view::npos) {
     return key.substr(0, n);
   }
 
@@ -494,7 +494,7 @@ std::pair<Port_ID, std::string_view> Lgtuple::convert_key_to_io(std::string_view
 
 std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
   auto n = key.find_first_of('.');
-  if (n != std::string::npos) {
+  if (n != std::string_view::npos) {
     return key.substr(n + 1);
   }
 
@@ -1383,7 +1383,7 @@ std::tuple<std::string_view, bool> Lgtuple::get_flop_name(const Node &flop) cons
       first_flop = false;  // Do not allow to use flop directly
 
     auto n = flop_root_name.find('.');
-    if (n != std::string::npos)
+    if (n != std::string_view::npos)
       flop_root_name = flop_root_name.substr(0, n);
   } else {
     flop_root_name = name;

@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/match.h"
+
 //-------------------------------------------------------------------------------------
 // Constructor:
 //
@@ -179,8 +181,8 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
     ref = process_number(ref);
   }
 
-  if (ref.find(".__q_pin") != std::string::npos && lnast_to->get_lang_type() == "cpp") {
-    std::vector<std::string> _ref = absl::StrSplit(ref, ".");
+  if (absl::StrContains(ref, ".__q_pin") && lnast_to->get_lang_type() == "cpp") {
+    std::vector<std::string> _ref = absl::StrSplit(ref, '.');
     ref                           = _ref[0];
   }  // TODO: make virtual func extract_main_name() and remove the second condition from this "if"
 
@@ -194,7 +196,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
     }
     std::string key_sec         = it->second;
     bool        param_converted = false;
-    if (key_sec.find(".__sbits") != std::string::npos || key_sec.find(".__ubits") != std::string::npos) {
+    if (absl::StrContains(key_sec, ".__sbits") || absl::StrContains(key_sec, ".__ubits")) {
       param_converted = lnast_to->set_convert_parameters(key_sec, std::string(ref));  // for getting UInt<3> a from $a.___bits=3
     }
     if (!param_converted) {
@@ -211,9 +213,9 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
             //   assign:
             //       const: __range_begin
             //       const: 0
-            if (key.find("range_begin") != std::string::npos) {
+            if (absl::StrContains(key, "range_begin")) {
               hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
-            } else if (key.find("range_end") != std::string::npos) {
+            } else if (absl::StrContains(key, "range_end")) {
               std::string vec_replacement = absl::StrCat(hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
               hier_tup_vec.pop_back();
               hier_tup_vec.emplace_back(vec_replacement);
@@ -243,9 +245,9 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
         //   assign:
         //       const: __range_begin
         //       const: 0
-        if (key.find("range_begin") != std::string::npos) {
+        if (absl::StrContains(key, "range_begin")) {
           hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
-        } else if (key.find("range_end") != std::string::npos) {
+        } else if (absl::StrContains(key, "range_end")) {
           std::string vec_replacement = absl::StrCat(hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
           hier_tup_vec.pop_back();
           hier_tup_vec.emplace_back(vec_replacement);
@@ -1120,13 +1122,18 @@ std::string Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_ass
 
 //-------------------------------------------------------------------------------------
 // check if the node has "___"
-bool Code_gen::is_temp_var(std::string_view test_string) { return (test_string.find("___") == 0 || test_string.find("_._") == 0); }
-bool Code_gen::is_temp_var(std::string test_string) { return (test_string.find("___") == 0 || test_string.find("_._") == 0); }
+bool Code_gen::is_temp_var(std::string_view test_string) {
+  return (absl::StartsWith(test_string, "___") || absl::StartsWith(test_string, "_._"));
+}
+
+bool Code_gen::is_temp_var(std::string test_string) {
+  return (absl::StartsWith(test_string, "___") || absl::StartsWith(test_string, "_._"));
+}
 
 //-------------------------------------------------------------------------------------
 // check if the node has "__"
-bool Code_gen::has_DblUndrScor(std::string_view test_string) { return (test_string.find("__") == 0); }
-bool Code_gen::has_DblUndrScor(std::string test_string) { return (test_string.find("__") == 0); }
+bool Code_gen::has_DblUndrScor(std::string_view test_string) { return (absl::StartsWith(test_string, "__")); }
+bool Code_gen::has_DblUndrScor(std::string test_string) { return (absl::StartsWith(test_string, "__")); }
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(std::string_view test_string) {
@@ -1167,7 +1174,7 @@ std::string_view Code_gen::process_number(std::string_view num_string) {
 }
 
 std::string Code_gen::process_number(std::string num_string) {
-  if (num_string.find("0d") == 0) {
+  if (absl::StartsWith(num_string, "0d")) {
     return num_string.substr(2);
   }
   return num_string;

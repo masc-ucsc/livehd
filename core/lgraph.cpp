@@ -9,6 +9,7 @@
 #include <iostream>
 #include <set>
 
+#include "absl/strings/match.h"
 #include "annotate.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
@@ -16,7 +17,7 @@
 
 Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_Node_Type(_path, _name, _lgid, _lib), htree(this) {
-  I(_name.find('/') == std::string::npos);  // No path in name
+  I(!absl::StrContains(_name, '/'));  // No path in name
   I(_name == get_name());
 }
 
@@ -39,7 +40,7 @@ Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string
 Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
   std::string lg_source{get_library().get_source(get_lgid())};  // string, create can free it
   auto        lg_name = absl::StrCat(new_lg_name);
-  Lgraph *    new_lg  = Lgraph::create(get_path(), lg_name, lg_source);
+  Lgraph     *new_lg  = Lgraph::create(get_path(), lg_name, lg_source);
 
   auto *new_sub = new_lg->ref_self_sub_node();
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
@@ -467,7 +468,12 @@ XEdge_iterator Lgraph::inp_edges(const Node &node) const {
   while (true) {
     auto n = node_internal.ref(idx2)->get_num_local_inputs();
     if (n) {
-      Node_pin spin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), idx2, node_internal.ref(idx2)->get_dst_pid(), true);
+      Node_pin spin(node.get_top_lgraph(),
+                    node.get_class_lgraph(),
+                    node.get_hidx(),
+                    idx2,
+                    node_internal.ref(idx2)->get_dst_pid(),
+                    true);
 
       uint8_t         i;
       const Edge_raw *redge;
@@ -548,7 +554,6 @@ XEdge_iterator Lgraph::out_edges(const Node_pin &dpin) const {
   XEdge_iterator xiter;
 
   each_pin(dpin, [this, &xiter, &dpin](Index_id idx2) {
-
     node_internal.ref_lock();
     auto            n = node_internal.ref(idx2)->get_num_local_outputs();
     uint8_t         i;
@@ -585,7 +590,6 @@ XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
   XEdge_iterator xiter;
 
   each_pin(spin, [this, &xiter, &spin](Index_id idx2) {
-
     node_internal.ref_lock();
     auto            n = node_internal.ref(idx2)->get_num_local_inputs();
     uint8_t         i;
@@ -613,7 +617,6 @@ XEdge_iterator Lgraph::inp_edges(const Node_pin &spin) const {
     }
     return true;  // continue the iterations
   });
-
 
   return xiter;
 }
@@ -708,7 +711,6 @@ bool Lgraph::has_outputs(const Node &node) const {
 }
 
 bool Lgraph::has_inputs(const Node &node) const {
-
   node_internal.ref_lock();
 
   auto idx2 = node.get_nid();
@@ -857,7 +859,7 @@ int Lgraph::get_num_edges(const Node &node) const {
 int Lgraph::get_num_out_edges(const Node_pin &pin) const {
   I(pin.is_driver());
 
-  int  total = 0;
+  int total = 0;
 
   auto idx2 = pin.get_root_idx();
 
@@ -884,7 +886,7 @@ int Lgraph::get_num_out_edges(const Node_pin &pin) const {
 int Lgraph::get_num_inp_edges(const Node_pin &pin) const {
   I(pin.is_sink());
 
-  int  total = 0;
+  int total = 0;
 
   auto idx2 = pin.get_root_idx();
 
@@ -941,7 +943,6 @@ void Lgraph::del_node(const Node &node) {
 
   // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
   I(node.get_class_lgraph() == node.get_top_lgraph());
-
 
   while (true) {
     auto *node_int_ptr = node_internal.ref(idx2);
@@ -1016,7 +1017,7 @@ void Lgraph::del_sink2node_int(const Node &driver, Node &sink) {
   I(sink.get_class_lgraph() == driver.get_top_lgraph());
 
   Index_id idx2         = sink.get_nid();
-  auto *   node_int_ptr = node_internal.ref(idx2);
+  auto    *node_int_ptr = node_internal.ref(idx2);
   node_int_ptr->clear_full_hint();
 
   Index_id last_idx = idx2;
@@ -1076,7 +1077,7 @@ bool Lgraph::del_edge_driver_int(const Node_pin &dpin, const Node_pin &spin) {
   node_internal.ref(root_idx)->clear_full_hint();
 
   Index_id idx2         = dpin.get_idx();
-  auto *   node_int_ptr = node_internal.ref(idx2);
+  auto    *node_int_ptr = node_internal.ref(idx2);
 
   Index_id last_idx = idx2;
 
@@ -1139,11 +1140,11 @@ bool Lgraph::del_edge_sink_int(const Node_pin &dpin, const Node_pin &spin) {
   GI(!dpin.is_invalid(), spin.get_class_lgraph() == spin.get_top_lgraph());
   GI(!dpin.is_invalid(), spin.get_class_lgraph() == dpin.get_top_lgraph());
 
-  Index_id idx2         = spin.get_idx();
-  auto root_idx = spin.get_root_idx();
+  Index_id idx2     = spin.get_idx();
+  auto     root_idx = spin.get_root_idx();
 
   node_internal.ref_lock();
-  auto *   node_int_ptr = node_internal.ref(idx2);
+  auto *node_int_ptr = node_internal.ref(idx2);
   node_internal.ref(root_idx)->clear_full_hint();
 
   Index_id dpin_root_idx = 0;

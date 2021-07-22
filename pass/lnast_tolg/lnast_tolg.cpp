@@ -4,6 +4,7 @@
 
 #include <cctype>
 
+#include "absl/strings/match.h"
 #include "cprop.hpp"
 #include "pass.hpp"
 
@@ -15,7 +16,7 @@ Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : 
 std::vector<Lgraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
   Lbench b("pass.lnast_tolg");
   lnast = ln;
-  Lgraph *    lg;
+  Lgraph     *lg;
   std::string src{lnast->get_source()};
   if (src.empty())
     src = "-";
@@ -629,7 +630,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
-      full_inp_hier_name = absl::StrCat(full_inp_hier_name, ".", lnast->get_vname(child));
+      absl::StrAppend(&full_inp_hier_name, ".", lnast->get_vname(child));
 
     } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
@@ -737,7 +738,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       if (concatenated_field_str == "")
         concatenated_field_str = cn_name;
       else
-        concatenated_field_str = absl::StrCat(concatenated_field_str, ".", cn_name);
+        absl::StrAppend(&concatenated_field_str, ".", cn_name);
 
       k++;
       continue;
@@ -1127,7 +1128,7 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
 #if 0
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
-  if (const_str.find("bits") == std::string_view::npos)
+  if (!absl::StrContains(const_str, "bits"))
     return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 
   // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
@@ -1337,7 +1338,6 @@ void Lnast_tolg::split_hier_name(std::string_view full_name, std::vector<std::st
   hier_io_subnames.emplace_back(token);
 }
 
-
 void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   Node fc_node;
   int  i = 0;
@@ -1379,9 +1379,9 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   }
 
   std::string func_name;
-  if (module_name.substr(0,9) == "__firrtl_") {
+  if (module_name.substr(0, 9) == "__firrtl_") {
     func_name = func_name_ori;
-  } else if (func_name_ori.substr(0,2) == "__") { //__flop, __mem ... etc
+  } else if (func_name_ori.substr(0, 2) == "__") {  //__flop, __mem ... etc
     func_name = func_name_ori;
   } else if (inlined_func_names.find(std::string{func_name_ori}) == inlined_func_names.end()) {
     func_name = func_name_ori;
@@ -1407,7 +1407,6 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   I(!arg_tup_dpin.is_invalid());  // input is guaranteed
   arg_tup_dpin.connect_sink(subg_spin);
 
-
   // create a TA assignment for the ret
   auto ta_ret      = lg->create_node(Ntype_op::TupAdd);
   auto ta_ret_dpin = ta_ret.setup_driver_pin();
@@ -1418,7 +1417,7 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
 
   if (ret_name[0] == '%') {
     auto ret_vname = lnast->get_vname(c0_fc);
-    auto subs = lnast->get_subs(c0_fc);
+    auto subs      = lnast->get_subs(c0_fc);
     setup_dpin_ssa(name2dpin[ret_name], ret_vname, subs);
   }
 }
@@ -1449,7 +1448,7 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   field_dpin.connect_sink(pos_spin);
 
   // std::unique_lock<std::mutex> guard(lgs_mutex);
-  auto *     library = Graph_library::instance(path);
+  auto      *library = Graph_library::instance(path);
   Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {
     lgid = library->get_lgid(subg_module_name);

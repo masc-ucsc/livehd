@@ -5,6 +5,7 @@
 #include <cmath>
 #include <vector>
 
+#include "absl/strings/match.h"
 #include "bitwidth_range.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
@@ -1141,7 +1142,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_string().find("__ubits") != std::string::npos);
+  I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_string(), "__ubits"));
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
   auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
@@ -1309,7 +1310,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         [this](Node_pin &dpin) {
           if (dpin.get_bits()) {
             Bitwidth_range bw;
-            
+
             bw.set_sbits_range(dpin.get_bits());  // We do not know if it was sign/unsigned start +1 in case
             bwmap.insert_or_assign(dpin.get_compact_class(), bw);
           }
