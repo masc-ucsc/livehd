@@ -296,10 +296,9 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
     }
   }
 
-  for (auto var_iter = (**parentscope).vars.begin(); var_iter != (**parentscope).vars.end(); var_iter++) {
-    auto randm = *var_iter;
-    if (name == (*var_iter)->name) {
-      unique_var_id = stoul((*var_iter)->ident, 0, 16);
+  for (auto &randm : (**parentscope).vars) {
+    if (name == randm->name) {
+      unique_var_id = stoul(randm->ident, 0, 16);
     }
   }
   VarValue init_value(init);

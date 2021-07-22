@@ -9,11 +9,12 @@ Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
-    for (auto i = 0; i < 256; ++i) {
-      sink_name2pid[i][op] = Port_invalid;
+    for (auto& e : sink_name2pid) {
+      e[op] = Port_invalid;
     }
-    for (auto i = 0u; i < sink_pid2name.size(); ++i) {
-      sink_pid2name[i][op] = "invalid";
+
+    for (auto& e : sink_pid2name) {
+      e[op] = "invalid";
     }
 
     int n_sinks = 0;

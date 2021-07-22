@@ -74,7 +74,7 @@ void Code_gen::generate() {
   // header inclusion:(#includes):
   fmt::print("{}\n", lnast_to->set_main_fstart(basename, basename_s));
   fmt::print("{}\n", lnast_to->set_final_print(modname, buffer_to_print));
-  //:main code segment
+  // main code segment
   // fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
 
@@ -1143,16 +1143,16 @@ bool Code_gen::is_number(std::string_view test_string) {
 //-------------------------------------------------------------------------------------
 // Returns true if test_string is a number else false
 bool Code_gen::is_pos_int(std::string_view test_string) {
-  for (auto i = 0; i < int(test_string.length()); i++) {
-    if (is_digit(test_string[i]) == false)
+  for (char i : test_string) {
+    if (is_digit(i) == false)
       return false;
   }
   return true;
 }
 
 bool Code_gen::is_pos_int(std::string test_string) {
-  for (auto i = 0; i < int(test_string.length()); i++) {
-    if (is_digit(test_string[i]) == false)
+  for (char i : test_string) {
+    if (is_digit(i) == false)
       return false;
   }
   return true;

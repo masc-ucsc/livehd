@@ -638,18 +638,18 @@ void Lgtuple::del(std::string_view key) {
 
   bool is_attr_key = is_root_attribute(key);
 
-  for (auto i = 0u; i < key_map.size(); ++i) {
-    std::string_view entry{key_map[i].first};
+  for (auto &e : key_map) {
+    std::string_view entry{e.first};
     if (entry.empty()) {
       if (is_attr_key) {
-        new_map.emplace_back(std::move(key_map[i]));
+        new_map.emplace_back(std::move(e));
       }
       continue;  // "" keys must be gone by now
     }
 
     auto e_pos = match_first_partial(key, entry);
     if (e_pos == 0) {
-      new_map.emplace_back(std::move(key_map[i]));
+      new_map.emplace_back(std::move(e));
       continue;
     }
     if (e_pos >= entry.size())
@@ -659,7 +659,7 @@ void Lgtuple::del(std::string_view key) {
 
     auto sub_name = entry.substr(e_pos);
     if (sub_name.substr(0, 2) == "__" && sub_name[3] != '_') {
-      new_map.emplace_back(std::move(key_map[i]));
+      new_map.emplace_back(std::move(e));
       continue;  // Keep the attributes
     }
   }
@@ -1312,8 +1312,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   std::vector<Node::Compact> mux_list;
 
   bool mux_node_reused = false;
-  for (auto e_index = 0u; e_index < key_map.size(); ++e_index) {
-    auto &e = key_map[e_index];
+  for (auto &e : key_map) {
     if (!e.second.is_invalid()) {  // No need to create mux
       continue;
     }

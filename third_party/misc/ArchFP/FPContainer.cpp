@@ -14,9 +14,8 @@ FPContainer::FPContainer(unsigned int rsize) : items(), yMirror(false), xMirror(
 FPContainer::~FPContainer() {
   // It's very important to only delete items when their refcount hits zero.
   // cout << "deleting container.\n";
-  for (int i = 0; i < (int)items.size(); i++) {
-    FPObject* item     = items[i];
-    int       newCount = item->decRefCount();
+  for (auto item : items) {
+    int newCount = item->decRefCount();
     if (newCount == 0)
       delete item;
   }

@@ -63,8 +63,8 @@ inline string strip_case(const char *str) {
     return result;
   };
 
-  for (string::iterator p = result.begin(); result.end() != p; ++p) {
-    *p = toupper(*p);
+  for (char &c : result) {
+    c = toupper(c);
   }
 
   return result;
@@ -275,8 +275,8 @@ void lefAddNumDefine(const char *token, double val) { lefData->define_set[strip_
 
 static int GetTokenFromStack(char *s) {
   const char *ch;           // utility variable
-  char *      prS  = NULL;  // pointing to the previous char or s
-  char *      save = s;     // for debug printing
+  char       *prS  = NULL;  // pointing to the previous char or s
+  char       *save = s;     // for debug printing
 
   while (lefData->input_level >= 0) {
     for (ch = lefData->current_stack[lefData->input_level]; *ch != 0; ch++)  // skip white space
@@ -622,7 +622,7 @@ int yylex() {
 int lefsublex() {
   char   fc;
   double numVal;
-  char * outStr;
+  char  *outStr;
 
   strcpy(lefData->pv_token, lefData->current_token);  // save the previous token
 
@@ -927,7 +927,7 @@ int lefamper_lookup(char *tkn) {
 }
 
 void lefError(int msgNum, const char *s) {
-  char *      str;
+  char       *str;
   const char *curToken = isgraph(lefData->current_token[0]) ? lefData->current_token : "<unprintable>";
   const char *pvToken  = isgraph(lefData->pv_token[0]) ? lefData->pv_token : "<unprintable>";
   int         len      = strlen(curToken) - 1;

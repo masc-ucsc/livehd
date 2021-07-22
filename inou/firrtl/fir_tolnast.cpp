@@ -1953,8 +1953,8 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
     auto final_ta_tmp_var_str = create_tmp_var(lnast);
     lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(final_ta_tmp_var_str));
 
-    for (uint8_t i = 0; i < tmp_flattened_fields_per_port.size(); i++) {
-      lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(lnast.add_string(tmp_flattened_fields_per_port.at(i))));
+    for (auto& e : tmp_flattened_fields_per_port) {
+      lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(lnast.add_string(e)));
     }
 
     auto idx_ta_margs = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
@@ -2214,9 +2214,8 @@ std::string Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt& bigin
   }
 
   std::string bigint_val = "";
-  for (long unsigned int i = 0; i < bigint.value().length(); i++) {
-    char        bigint_char = bigint.value()[i];
-    std::string bit_str     = "";
+  for (char bigint_char : bigint.value()) {
+    std::string bit_str = "";
     for (int j = 0; j < 8; j++) {
       if (bigint_char % 2) {
         bit_str = absl::StrCat("1", bit_str);

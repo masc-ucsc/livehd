@@ -18,12 +18,11 @@
 #include "eprp.hpp"
 #include "iassert.hpp"
 #include "lgraph.hpp"
+#include "main_api.hpp"
+#include "meta_api.hpp"
 #include "replxx.hxx"
 
-#include "meta_api.hpp"
 using Replxx = replxx::Replxx;
-
-#include "main_api.hpp"
 
 void help(const std::string& cmd, const std::string& txt) { fmt::print("{:20s} {}\n", cmd, txt); }
 void help_labels(const std::string& cmd, const std::string& txt, bool required) {
@@ -104,12 +103,12 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     auto        pos2 = full_filename.find_last_of('/');
     std::string filename;
     if (pos2 != std::string::npos) {
-        path     = full_filename.substr(0, pos2);
-        filename = full_filename.substr(pos2 + 1);
-        prefix_add += path + "/";
-        prefix = filename;
+      path     = full_filename.substr(0, pos2);
+      filename = full_filename.substr(pos2 + 1);
+      prefix_add += path + "/";
+      prefix = filename;
     } else {
-        filename = full_filename;
+      filename = full_filename;
     }
 
     bool label_files  = strcasecmp(label.c_str(), "files") == 0;
@@ -117,36 +116,34 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     bool label_path   = strcasecmp(label.c_str(), "path") == 0;
     bool label_odir   = strcasecmp(label.c_str(), "odir") == 0;
     bool label_name   = strcasecmp(label.c_str(), "name") == 0;
-      	
-    if (label_name)
-    {
-    	std::vector<std::string> name_files;
-    	auto *library = Graph_library::instance("lgdb/");
 
-	    library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name){
-          (void)id;
-	        name_files.push_back(std::string{name});
-	    });
-    	fields = name_files;
-    	examples = &fields;
-    }
-    else if (label_files || label_output || label_path || label_odir) {
+    if (label_name) {
+      std::vector<std::string> name_files;
+      auto*                    library = Graph_library::instance("lgdb/");
+
+      library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name) {
+        (void)id;
+        name_files.push_back(std::string{name});
+      });
+      fields   = name_files;
+      examples = &fields;
+    } else if (label_files || label_output || label_path || label_odir) {
       // fmt::print("label[{}] full_filename[{}] path[{}] filename[{}] prefix[{}] add[{}]\n", label, full_filename, path, filename,
       // prefix, prefix_add);
       DIR* dirp = opendir(path.c_str());
       if (dirp) {
         std::vector<std::string> sort_files;
         struct dirent*           dp;
-        
+
         while ((dp = readdir(dirp)) != NULL) {
           if (dp->d_type != DT_DIR && (label_path || label_odir))
             continue;
           // fmt::print("preadding {}\n",dp->d_name);
-         
+
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
             // fmt::print("adding {}\n",dp->d_name);
             struct stat sb;
-	   
+
             std::string dir_name{path + "/" + dp->d_name};
             if (stat(dir_name.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
               sort_files.push_back(std::string{dp->d_name} + "/");
@@ -180,7 +177,6 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     prefix = cmd;
   }
 
-
   int last_match_end   = context.size();
   int last_match_start = last_match_end;
   for (int i = last_match_end - 1; i >= 0; --i) {
@@ -202,13 +198,13 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   if (context.size() != static_cast<unsigned>(index)) {
     std::string fprefix{context.substr(context.size() - index)};
     auto        to_chop = prefix.size() - fprefix.size();
-    for (auto i = 0u; i < completions.size(); ++i) {
-      const std::string comp = completions[i].text();
+    for (auto& completion : completions) {
+      const std::string comp = completion.text();
       if (comp.back() == ':')
         continue;
       // fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
       if (comp.size() > to_chop && to_chop > 0)
-        completions[i] = Replxx::Completion(comp.substr(to_chop));
+        completion = Replxx::Completion(comp.substr(to_chop));
     }
   }
 
@@ -524,8 +520,8 @@ int main(int argc, char** argv) {
         continue;
 
       } else if (input.compare(0, 9, "cool_mode") == 0) {
-        for (size_t i = 0; i < regex_color.size(); i++) {
-          regex_color[i] = std::pair(regex_color[i].first, cl::LIGHTGRAY);
+        for (auto& e : regex_color) {
+          e = std::pair(e.first, cl::LIGHTGRAY);
         }
 
         rx.set_highlighter_callback(std::bind(&hook_color, std::placeholders::_1, std::placeholders::_2, cref(regex_color)));

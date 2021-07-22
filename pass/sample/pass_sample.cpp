@@ -126,8 +126,8 @@ void Pass_sample::compute_histogram(Lgraph *g) {
     histogram[type]++;
   }
 
-  for (auto it = histogram.begin(); it != histogram.end(); it++) {
-    fmt::print("{} {}\n", it->first, it->second);
+  for (auto &e : histogram) {
+    fmt::print("{} {}\n", e.first, e.second);
   }
 
   fmt::print("Pass: cells {}\n", cells);

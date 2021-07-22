@@ -147,14 +147,13 @@ void Lgraph::each_graph_output(std::function<void(Node_pin &pin)> f1, bool hiera
 }
 
 void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> fn) {
-  const auto &m = get_down_nodes_map();
-  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
-    Index_id cid = it->first.nid;
+  for (auto e : get_down_nodes_map()) {
+    Index_id cid = e.first.nid;
     I(cid);
 
-    auto node = Node(this, it->first);
+    auto node = Node(this, e.first);
 
-    bool cont = fn(node, it->second);
+    bool cont = fn(node, e.second);
     if (!cont)
       return;
   }
@@ -176,18 +175,17 @@ void Lgraph::each_hier_fast(const std::function<bool(Node &)> f) {
 }
 
 void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)> fn) {
-  const auto &         m = get_down_nodes_map();
   std::set<Lg_type_id> visited;
-  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
-    Index_id cid = it->first.nid;
+  for (auto e : get_down_nodes_map()) {
+    Index_id cid = e.first.nid;
     I(cid);
 
-    if (visited.find(it->second) != visited.end())
+    if (visited.find(e.second) != visited.end())
       continue;
 
-    visited.insert(it->second);
+    visited.insert(e.second);
 
-    auto *sub_lg = Lgraph::open(path, it->second);
+    auto *sub_lg = Lgraph::open(path, e.second);
     if (sub_lg) {
       bool cont = fn(sub_lg);
       if (!cont)
@@ -197,21 +195,20 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> fn) {
-  const auto &m = get_down_nodes_map();
-  for (auto it = m.begin(), end = m.end(); it != end; ++it) {
-    Index_id cid = it->first.nid;
+  for (auto e : get_down_nodes_map()) {
+    Index_id cid = e.first.nid;
     I(cid);
 
-    if (visited.find(it->second) != visited.end())
+    if (visited.find(e.second) != visited.end())
       continue;
 
-    Lgraph *lg = Lgraph::open(get_path(), it->second);
+    Lgraph *lg = Lgraph::open(get_path(), e.second);
     if (lg == nullptr)
       continue;
 
     lg->each_hier_unique_sub_bottom_up_int(visited, fn);
-    if (visited.find(it->second) == visited.end()) {
-      visited.insert(it->second);
+    if (visited.find(e.second) == visited.end()) {
+      visited.insert(e.second);
       fn(lg);
     }
   }

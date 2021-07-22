@@ -298,8 +298,8 @@ lefrData::~lefrData() {
   }
 
   // destroyRingBuffer();
-  for (int i = 0; i < RING_SIZE; i++) {
-    free(ring[i]);
+  for (auto &e : ring) {
+    free(e);
   }
 
   free(current_token);

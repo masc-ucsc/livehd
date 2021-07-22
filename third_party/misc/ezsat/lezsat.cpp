@@ -550,7 +550,7 @@ int lezSAT::bind(int id, bool auto_freeze) {
       goto assign_idx;
     }
 
-    for (int i = 0; i < int(args.size()); i++) args[i] = bind(args[i], false);
+    for (int &arg : args) arg = bind(arg, false);
 
     switch (op) {
       case OpNot: idx = bind_cnf_not(args); break;
@@ -1289,9 +1289,9 @@ std::vector<int> lezSAT::vec_shra_LiveHD(std::vector<int> vec1, std::vector<int>
 /* New functions for shift */
 
 void lezSAT::vec_join_multiarg(std::vector<int> &vec, const std::vector<std::vector<int>> &vec1) {
-  for (size_t i = 0; i < vec1.size(); i++) {
-    for (size_t j = 0; j < vec1[i].size(); j++) {
-      vec.push_back(vec1[i][j]);
+  for (const auto &e1 : vec1) {
+    for (int e2 : e1) {
+      vec.push_back(e2);
     }
   }
 }

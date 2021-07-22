@@ -131,9 +131,9 @@ void Chunkify_verilog::elaborate() {
   } else {
     format_name = get_filename();
 
-    for (size_t i = 0; i < format_name.size(); i++) {
-      if (format_name[i] == '/')
-        format_name[i] = '.';
+    for (char &c : format_name) {
+      if (c == '/')
+        c = '.';
     }
   }
 

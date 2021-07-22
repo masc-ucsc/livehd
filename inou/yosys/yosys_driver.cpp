@@ -458,7 +458,7 @@ int main(int argc, char **argv) {
       run_frontend(scriptfile, "script", output_filename == "-" ? &backend_command : NULL);
   }
 
-  for (auto it = passes_commands.begin(); it != passes_commands.end(); it++) run_pass(*it);
+  for (auto &passes_command : passes_commands) run_pass(passes_command);
 
   if (!backend_command.empty())
     run_backend(output_filename, backend_command);

@@ -1992,8 +1992,7 @@ void Prp::ast_dump(mmap_lib::Tree_index tree_idx) const {
 }
 
 void Prp::ast_builder(std::list<std::tuple<Rule_id, Token_entry>> &passed_list) {
-  for (auto it = passed_list.begin(); it != passed_list.end(); ++it) {
-    auto ast_op  = *it;
+  for (auto ast_op : passed_list) {
     auto rule_id = std::get<0>(ast_op);
     if (rule_id == 0) {
       ast->down();

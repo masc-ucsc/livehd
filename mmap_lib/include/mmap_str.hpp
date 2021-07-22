@@ -156,8 +156,8 @@ public:
 
   void print_e() const {
     std::cout << "e is: [ ";
-    for (auto i = 0u; i < e.size(); ++i) {
-      std::cout << e[i] << " ";
+    for (char c : e) {
+      std::cout << c << " ";
     }
     std::cout << "]" << std::endl;
   }
@@ -179,8 +179,8 @@ public:
         std::cout << isol8(ptr_or_start, i);
       }
       if (_size > 4) {
-        for (uint8_t j = 0; j < e.size(); ++j) {
-          std::cout << static_cast<char>(e[j]);
+        for (char j : e) {
+          std::cout << static_cast<char>(j);
         }
       }
     } else {
