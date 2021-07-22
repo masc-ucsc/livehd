@@ -71,7 +71,7 @@ std::string_view Inou_firrtl::create_tmp_mut_var(Lnast& lnast) {
 std::string Inou_firrtl::get_full_name(const std::string& term, const bool is_rhs) {
   std::string term2     = term;
   std::string term_rest = "";
-  auto        pos       = term.find_first_of(".");
+  auto        pos       = term.find_first_of('.');
   if (pos != std::string::npos) {
     term2     = term.substr(0, pos);
     term_rest = term.substr(pos);
@@ -520,7 +520,7 @@ void Inou_firrtl::InitMemDin(Lnast& lnast, const std::string& mem_name, std::str
     for (const auto& hier_full_name : hier_full_names) {  // hier_full_name example: foo.bar.baz.20, the last field is bit
       fmt::print("hier_name:{}\n", hier_full_name);
       std::vector<std::string_view> hier_sub_names;
-      auto                          found = hier_full_name.find_last_of(".");  // get rid of last bit field
+      auto                          found = hier_full_name.find_last_of('.');  // get rid of last bit field
       split_hier_name(hier_full_name.substr(0, found), hier_sub_names);
 
       auto idx_ta_mdin_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
@@ -867,11 +867,11 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     } else {
       flattened_str = absl::StrCat("#", flattened_str);
     }
-  } else if (mport2mem.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
+  } else if (mport2mem.count(alter_full_str.substr(0, alter_full_str.find('.')))) {
     // FIXME-sh: the mport name is not necessary at the head, it might be used as an index
     //       to cover this case, you might need to split the hierarchy name and check if any of
     //       the hierarchy name is a mport
-    auto mport_name = alter_full_str.substr(0, alter_full_str.find("."));
+    auto mport_name = alter_full_str.substr(0, alter_full_str.find('.'));
     if (is_rhs) {
       HandleRdMportUsage(lnast, parent_node, mport_name);
       CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
@@ -880,14 +880,14 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
       CreateTupAddFromStr(lnast, parent_node, flattened_str, value_node);
     }
     return;
-  } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find(".")))) {
+  } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find('.')))) {
     // note: instead of using alter_full_str, I use flattened_str.
-    auto inst_name = flattened_str.substr(0, flattened_str.find("."));
+    auto inst_name = flattened_str.substr(0, flattened_str.find('.'));
     if (inst_name.substr(0, 2) == "_T")
       inst_name = absl::StrCat("_.", inst_name);
 
-    auto        str_without_inst = flattened_str.substr(flattened_str.find(".") + 1);
-    auto        first_field_name = str_without_inst.substr(0, str_without_inst.find("."));
+    auto        str_without_inst = flattened_str.substr(flattened_str.find('.') + 1);
+    auto        first_field_name = str_without_inst.substr(0, str_without_inst.find('.'));
     std::string str_without_inst_and_io{str_without_inst};
     bool        is_hier_io = false;
     auto        str_pos    = str_without_inst.find('.');
@@ -911,7 +911,7 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
     }
   }
 
-  I(flattened_str.find("."));
+  I(flattened_str.find('.'));
   if (is_rhs) {
     CreateTupGetFromStr(lnast, parent_node, flattened_str, value_node);
   } else {
@@ -1095,7 +1095,7 @@ void Inou_firrtl::split_hier_name(std::string_view                              
 // note: "#" prefix need to be ready if the full_name is a register
 void Inou_firrtl::CreateTupGetFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name,
                                       const Lnast_node& dest_node) {
-  I((full_name.find(".") != std::string::npos));
+  I((full_name.find('.') != std::string::npos));
   I(!dest_node.is_invalid());
 
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
@@ -1125,7 +1125,7 @@ void Inou_firrtl::CreateTupGetFromStr(Lnast& ln, Lnast_nid& parent_node, const s
 
 void Inou_firrtl::CreateTupAddFromStr(Lnast& ln, Lnast_nid& parent_node, const std::string& full_name,
                                       const Lnast_node& value_node) {
-  I((full_name.find(".") != std::string::npos));
+  I((full_name.find('.') != std::string::npos));
 
   std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> hier_subnames;
   split_hier_name(full_name, hier_subnames);
@@ -1286,7 +1286,7 @@ void Inou_firrtl::record_all_input_hierarchy(std::string_view port_name) {
     else
       port_name2 = port_name.substr(0, pos);
     input_names.insert(std::string{port_name2});
-    pos = port_name2.find_last_of(".");
+    pos = port_name2.find_last_of('.');
   }
 }
 
@@ -1299,7 +1299,7 @@ void Inou_firrtl::record_all_output_hierarchy(std::string_view port_name) {
     else
       port_name2 = port_name.substr(0, pos);
     output_names.insert(std::string{port_name2});
-    pos = port_name2.find_last_of(".");
+    pos = port_name2.find_last_of('.');
   }
 }
 

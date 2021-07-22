@@ -42,7 +42,7 @@ void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circui
   const auto     stmts    = ln->get_first_child(top);
   const auto     top_name = (std::string)ln->get_name(top);
 
-  firrtl::FirrtlPB_Module *           mod  = circuit->add_module();
+  firrtl::FirrtlPB_Module            *mod  = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
   umod->set_id(top_name);  // FIXME: Need to make sure top node has module name
   FindCircuitComps(*ln, umod);
@@ -249,7 +249,7 @@ firrtl::FirrtlPB_Expression_SubField *Inou_firrtl::make_subfield_expr(std::strin
   fmt::print("make subfield: {}\n", name);
   std::vector<std::string> subnames;
   size_t                   pos = 0;
-  while ((pos = name.find(".")) != std::string::npos) {
+  while ((pos = name.find('.')) != std::string::npos) {
     subnames.push_back(name.substr(0, pos));
     name.erase(0, pos + 1);
   }
@@ -281,7 +281,7 @@ void Inou_firrtl::process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_not, f
   I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
-  firrtl::FirrtlPB_Expression *       rhs_expr    = new firrtl::FirrtlPB_Expression();
+  firrtl::FirrtlPB_Expression        *rhs_expr    = new firrtl::FirrtlPB_Expression();
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
 
@@ -301,7 +301,7 @@ void Inou_firrtl::process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_par
   I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
-  firrtl::FirrtlPB_Expression *       rhs_expr    = new firrtl::FirrtlPB_Expression();
+  firrtl::FirrtlPB_Expression        *rhs_expr    = new firrtl::FirrtlPB_Expression();
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_XOR_REDUCE);
 
@@ -323,8 +323,8 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
   // Grab the LHS for later use. Also create PrimOP for RHS expr.
   Lnast_nid                           lnidx_lhs;
   firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op      = NULL;
-  firrtl::FirrtlPB_Expression *       rhs_expr         = NULL;
-  firrtl::FirrtlPB_Expression *       rhs_highest_expr = NULL;
+  firrtl::FirrtlPB_Expression        *rhs_expr         = NULL;
+  firrtl::FirrtlPB_Expression        *rhs_highest_expr = NULL;
   for (const auto &lnchild_idx : ln.children(lnidx_op)) {
     if (first) {
       first     = false;

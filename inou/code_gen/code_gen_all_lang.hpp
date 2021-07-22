@@ -89,9 +89,9 @@ public:
 
   // this func is to truncate the %/$/# during cpp or verilog conversion
   bool has_prefix(std::string_view test_string) const {
-    return (test_string.find("$") == 0 || test_string.find("#") == 0 || test_string.find("%") == 0);
+    return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
   }
-  bool is_output(std::string_view test_string) const { return (test_string.find("%") == 0); }
+  bool is_output(std::string_view test_string) const { return (test_string.find('%') == 0); }
 
   // if you do not want "outputs." to appear before the output variable in cpp, then use "false" as second parameter
   virtual std::string ref_name(std::string_view prp_term, bool strct = true) const = 0;

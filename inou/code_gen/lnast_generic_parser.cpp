@@ -240,7 +240,7 @@ bool Cpp_parser::set_convert_parameters(const std::string &key, const std::strin
   // convert parameters to cpp format
   // currently supports .__bits only
   assert(key.size() >= 1);
-  if (key.find("$") == 0) {  // it is i/p
+  if (key.find('$') == 0) {  // it is i/p
     std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("$."));
     if (_key[1].find("clock") == std::string::npos) {
       inp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
@@ -252,10 +252,10 @@ bool Cpp_parser::set_convert_parameters(const std::string &key, const std::strin
       sys_clock      = _key[1];
       sys_clock_bits = ref;
     }
-  } else if (key.find("%") == 0) {  // it is o/p
+  } else if (key.find('%') == 0) {  // it is o/p
     std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("%."));
     outp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
-  } else if (key.find("#") == 0) {  // it is register
+  } else if (key.find('#') == 0) {  // it is register
     std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("#."));
     reg_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
   } else {  // TODO: print error!

@@ -85,7 +85,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
   if (last_label_found && last_label_done) {
     std::string label         = context.substr(last_label_start, context.size());
     std::string full_filename = "";
-    auto        pos           = label.find_last_of(":");
+    auto        pos           = label.find_last_of(':');
     if (pos != std::string::npos) {
       auto pos2 = label.find_last_of(',');
       if (pos2 == std::string::npos) {
@@ -162,7 +162,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     }
   } else if (last_cmd_start < last_cmd_end) {
     std::string cmd = context.substr(last_cmd_start, last_cmd_end);
-    auto        pos = cmd.find(" ");
+    auto        pos = cmd.find(' ');
     if (pos != std::string::npos) {
       cmd = cmd.substr(0, pos);
     }
@@ -464,7 +464,7 @@ int main(int argc, char** argv) {
         break;
 
       } else if (input.compare(0, 4, "help") == 0) {
-        auto pos = input.find(" ");
+        auto pos = input.find(' ');
         while (input[pos + 1] == ' ') pos++;
 
         if (pos == std::string::npos) {
@@ -479,7 +479,7 @@ int main(int argc, char** argv) {
           Main_api::get_commands(help);
         } else {
           std::string cmd2 = input.substr(pos + 1);
-          auto        pos2 = cmd2.find(" ");
+          auto        pos2 = cmd2.find(' ');
           if (pos2 != std::string::npos)
             cmd2 = cmd2.substr(0, pos2);
 
@@ -492,7 +492,7 @@ int main(int argc, char** argv) {
 
       } else if (input.compare(0, 6, "prompt") == 0) {
         // set the repl prompt text
-        auto pos = input.find(" ");
+        auto pos = input.find(' ');
         if (pos == std::string::npos) {
           std::cout << "Error: 'prompt' missing argument\n";
         } else {

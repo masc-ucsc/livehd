@@ -206,7 +206,7 @@ bool Pass_lnastfmt::is_temp_var(std::string_view test_string) {
   return (test_string.find("___") == 0 || test_string.find("_._") == 0);
 }
 bool Pass_lnastfmt::is_ssa(std::string_view test_string) {
-  return ((test_string.find("_") != 0) && (test_string.find("_") != std::string_view::npos));
+  return ((test_string.find('_') != 0) && (test_string.find('_') != std::string_view::npos));
 }
 
 Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std::shared_ptr<Lnast> ln,

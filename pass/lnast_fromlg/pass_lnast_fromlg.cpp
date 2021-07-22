@@ -1285,10 +1285,10 @@ std::string_view Pass_lnast_fromlg::create_temp_var(Lnast& lnast, std::string_vi
 }
 
 bool Pass_lnast_fromlg::has_prefix(std::string_view test_string) {
-  return (test_string.find("$") == 0 || test_string.find("#") == 0 || test_string.find("%") == 0);
+  return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
 }
 bool Pass_lnast_fromlg::has_prefix(std::string test_string) {
-  return (test_string.find("$") == 0 || test_string.find("#") == 0 || test_string.find("%") == 0);
+  return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
 }
 
 
