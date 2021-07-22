@@ -631,12 +631,10 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
       case Ntype_op::LUT: {
         RTLIL::SigSpec joined_inp_wires;
         bool           has_inputs = false;
-        uint8_t        inp_num    = 0;
         for (const auto &e : node.inp_edges_ordered()) {
           RTLIL::Wire *join = get_wire(e.driver);
           joined_inp_wires.append(RTLIL::SigSpec(join));
           has_inputs = true;
-          inp_num += 1;
         }
 
         if (!has_inputs)
