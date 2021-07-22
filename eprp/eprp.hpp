@@ -6,8 +6,8 @@
 #include "ast.hpp"
 #include "elab_scanner.hpp"
 #include "eprp_method.hpp"
-#include "eprp_var.hpp"
 #include "eprp_pipe.hpp"
+#include "eprp_var.hpp"
 
 class Eprp : public Elab_scanner {
 protected:
@@ -62,6 +62,7 @@ public:
 
   const std::string &get_command_help(const std::string &cmd) const;
 
-  void get_commands(std::function<void(const std::string &, const std::string &)> fn) const;
-  void get_labels(const std::string &cmd, std::function<void(const std::string &, const std::string &, bool required)> fn) const;
+  void get_commands(const std::function<void(const std::string &, const std::string &)> &fn) const;
+  void get_labels(const std::string                                                                  &cmd,
+                  const std::function<void(const std::string &, const std::string &, bool required)> &fn) const;
 };

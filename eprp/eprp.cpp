@@ -281,14 +281,14 @@ const std::string &Eprp::get_command_help(const std::string &cmd) const {
   return it->second.help;
 }
 
-void Eprp::get_commands(std::function<void(const std::string &, const std::string &)> fn) const {
+void Eprp::get_commands(const std::function<void(const std::string &, const std::string &)> &fn) const {
   for (const auto &v : methods) {
     fn(v.first, v.second.help);
   }
 }
 
-void Eprp::get_labels(const std::string                                                           &cmd,
-                      std::function<void(const std::string &, const std::string &, bool required)> fn) const {
+void Eprp::get_labels(const std::string                                                                  &cmd,
+                      const std::function<void(const std::string &, const std::string &, bool required)> &fn) const {
   const auto &it = methods.find(cmd);
   if (it == methods.end())
     return;

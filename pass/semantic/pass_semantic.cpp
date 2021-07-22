@@ -21,7 +21,7 @@ void Pass_semantic::do_work(Lgraph *g) {
   fmt::print("future lgraph semantic check\n");
 }
 
-void Pass_semantic::do_work(std::shared_ptr<Lnast> lnast) {
+void Pass_semantic::do_work(const std::shared_ptr<Lnast> &lnast) {
   Semantic_check p;
 
   p.do_check(lnast.get());

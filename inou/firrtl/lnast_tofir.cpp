@@ -31,7 +31,7 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
   google::protobuf::ShutdownProtobufLibrary();
 }
 
-void Inou_firrtl::do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circuit *circuit) {
+void Inou_firrtl::do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB_Circuit *circuit) {
   io_map.clear();
   reg_wire_map.clear();
   wire_rename_map.clear();

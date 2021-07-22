@@ -47,8 +47,8 @@ class Thread_pool {
   std::atomic_flag         booting_lock = ATOMIC_FLAG_INIT;
   std::atomic<bool>        started_lock;
 
-  static inline std::atomic<int>  task_id_count{0};
-  static inline thread_local int  task_id;
+  static inline std::atomic<int> task_id_count{0};
+  static inline thread_local int task_id;
 
 #ifdef MPMC
   mpmc<std::function<void(void)>> queue;
@@ -84,7 +84,7 @@ class Thread_pool {
     std::function<void(void)>    res;
     std::unique_lock<std::mutex> job_lock(queue_mutex);
 
-		Lbench b("idle");
+    Lbench b("idle");
 
     // Wait for a job if we don't have any.
     job_available_var.wait(job_lock, [this]() -> bool { return !queue.empty() || finishing; });
@@ -99,7 +99,7 @@ class Thread_pool {
     return [] {};  // Nothing to do
   }
 
-  void add_(std::function<void(void)> job) {
+  void add_(const std::function<void(void)> &job) {
 #ifdef DISABLE_THREAD_POOL
     job();
     return;
@@ -185,11 +185,11 @@ public:
       if (has_work) {
         res();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
-      }else{
-				Lbench b("waiting");
-				while (jobs_left > 0)
-					;
-			}
+      } else {
+        Lbench b("waiting");
+        while (jobs_left > 0)
+          ;
+      }
     }
   }
 };

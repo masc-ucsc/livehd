@@ -128,7 +128,7 @@ protected:
 
   //----------- FOR toFIRRTL ----------
   static void toFIRRTL(Eprp_var &var);
-  void        do_tofirrtl(std::shared_ptr<Lnast> ln, firrtl::FirrtlPB_Circuit *circuit);
+  void        do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB_Circuit *circuit);
   void        process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Module_UserModule *umod);
   void        process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);
 
@@ -173,7 +173,7 @@ protected:
   void                         CheckTuple(Lnast &ln, const Lnast_nid &tup_node, firrtl::FirrtlPB_Module_UserModule *umod);
   void                         HandleMemTup(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
   void                         CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::FirrtlPB_Module_UserModule *umod);
-  firrtl::FirrtlPB_Type *      CreateTypeObject(uint32_t bitwidth);
+  firrtl::FirrtlPB_Type       *CreateTypeObject(uint32_t bitwidth);
   firrtl::FirrtlPB_Expression *CreateULitExpr(const uint32_t &val);
   void                         CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrtl::FirrtlPB_Module_UserModule *umod);
   std::string_view             ConvergeFCallName(const std::string_view func_out, const std::string_view func_inp);

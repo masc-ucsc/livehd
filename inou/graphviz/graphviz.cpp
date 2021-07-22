@@ -299,7 +299,7 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
   save_graph(g->get_name(), dot_postfix, data);
 }
 
-void Graphviz::do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix) {
+void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (const auto &itr : lnast->depth_preorder()) {

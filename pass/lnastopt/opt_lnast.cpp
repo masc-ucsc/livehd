@@ -72,7 +72,7 @@ Opt_lnast::Opt_lnast(const Eprp_var &var) {
   // could check for options
 }
 
-void Opt_lnast::process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   Lconst    result;
   Lnast_nid const_pos;
   int       n_children_left = 0;
@@ -157,7 +157,7 @@ void Opt_lnast::process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
   }
 }
 
-void Opt_lnast::process_assign(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   auto lhs_id = ln->get_first_child(lnid);
   auto rhs_id = ln->get_sibling_next(lhs_id);
 
@@ -184,13 +184,13 @@ void Opt_lnast::process_assign(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid)
   }
 }
 
-void Opt_lnast::process_todo(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   auto &data = ln->get_data(lnid);
 
   fmt::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
 
-void Opt_lnast::opt(std::shared_ptr<Lnast> ln) {
+void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
   level = INT32_MAX;
   for (auto &lnid : ln->depth_postorder()) {
     if (ln->is_leaf(lnid))

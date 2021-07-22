@@ -636,7 +636,7 @@ std::vector<int> lezSAT::vec_var(int numBits) {
   return vec;
 }
 
-std::vector<int> lezSAT::vec_var(std::string name, int numBits) {
+std::vector<int> lezSAT::vec_var(const std::string &name, int numBits) {
   std::vector<int> vec;
   vec.reserve(numBits);
   for (int i = 0; i < numBits; i++) {
@@ -1291,7 +1291,7 @@ std::vector<int> lezSAT::vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int>
   return vec1;
 }
 
-std::vector<int> lezSAT::vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2) {
+std::vector<int> lezSAT::vec_shra_LiveHD(std::vector<int> vec1, const std::vector<int> &vec2) {
   // May not be required, will be added if required
   return vec1;
 }

@@ -39,7 +39,7 @@ void Eprp_var::add(Lgraph *lg) {
 
 void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move(lnast)); }
 
-void Eprp_var::add(std::shared_ptr<Lnast> lnast) { lnasts.emplace_back(lnast); }
+void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(lnast); }
 
 void Eprp_var::add(const std::string &name, std::string_view value) {
   if (name == "files") {
@@ -64,7 +64,7 @@ void Eprp_var::add(const std::string &name, std::string_view value) {
   }
   dict[name] = value;
 }
-void Eprp_var::replace(std::shared_ptr<Lnast> lnast_old, std::shared_ptr<Lnast> &lnast_new) {
+void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new) {
   // lnast_old.swap(lnast_new);
 
   std::vector<std::shared_ptr<Lnast> >::iterator itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);

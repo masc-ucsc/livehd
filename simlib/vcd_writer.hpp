@@ -113,7 +113,7 @@ HeadPtr makeVCDHeader(TimeScale timescale_quan = TimeScale::ONE, TimeScaleUnit t
 // Writer of a Value Change Dump file
 // A VCD file captures time-ordered changes to the value of variables
 class VCDWriter {
-  FILE *    ofile;
+  FILE     *ofile;
   TimeStamp timestamp;
   HeadPtr   header;
 
@@ -151,7 +151,7 @@ public:
                       const std::string &name,                                  // Human-readable variable idetifier
                       VariableType       type                  = var_def_type,  // Verilog data type of variable
                       unsigned           size                  = 0,             // Size of variable, in bits
-                      const VarValue &   init                  = {VCDValues::ZERO},  // Initial value (optional)
+                      const VarValue    &init                  = {VCDValues::ZERO},  // Initial value (optional)
                       bool               duplicate_names_check = true);                            // speed-up (optimisation)
 
   // Register a VCD variable and return its mark to change value further.
@@ -161,7 +161,7 @@ public:
                              const std::string &name,   // Human-readable variable idetifier
                              VariableType       type                  = var_def_type,       // Verilog data type of variable
                              unsigned           size                  = 0,                  // Size of variable, in bits
-                             const VarValue &   init                  = {VCDValues::ZERO},  // Initial value (optional)
+                             const VarValue    &init                  = {VCDValues::ZERO},  // Initial value (optional)
                              bool               duplicate_names_check = true);                            // speed-up (optimisation)
 
   // Change variable's value in VCD stream.
@@ -226,7 +226,7 @@ public:
   static const VariableType var_def_type = VariableType::wire;
 
 protected:
-  bool change(VarPtr, const VarValue &, bool);
+  bool change(const VarPtr &, const VarValue &, bool);
   void dump_off_int(TimeStamp timestamp);
   //        void _dump_values();
   void dump_values(const std::string &keyword);

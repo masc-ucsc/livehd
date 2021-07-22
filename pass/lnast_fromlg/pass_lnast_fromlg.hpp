@@ -24,24 +24,24 @@ protected:
 
   void attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
-  void attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
-  void attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  bool is_hex(std::string test_string);
+  void        attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
+  void        attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  bool        is_hex(const std::string& test_string);
   std::string hex_to_bin(std::string hex_str);
-  int range_low(std::string binstr );
-  int range_high(std::string binstr );
-  void attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void attach_memory_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  int         range_low(std::string binstr);
+  int         range_high(std::string binstr);
+  void        attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void        attach_memory_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
   void attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin);
   void attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
@@ -53,7 +53,7 @@ protected:
 
   std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
   bool             has_prefix(std::string_view test_string);
-  bool             has_prefix(std::string test_string);
+  bool             has_prefix(const std::string& test_string);
 
   std::string_view dpin_get_name(const Node_pin dpin);
   void             dpin_set_map_name(const Node_pin dpin, std::string_view name_part);

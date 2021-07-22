@@ -13,7 +13,7 @@ class dummyComponent {
 
 public:
   dummyComponent(Ntype_op typeArg);
-  dummyComponent(std::string name);
+  dummyComponent(const std::string& name);
 
   std::string getName() const { return name; }
   Ntype_op    getType() const { return type; }

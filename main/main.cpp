@@ -167,7 +167,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       cmd = cmd.substr(0, pos);
     }
     // fmt::print("cmd[{}]\n", cmd);
-    Main_api::get_labels(cmd, [&fields](const std::string& label, const std::string txt, bool required) {
+    Main_api::get_labels(cmd, [&fields](const std::string& label, const std::string& txt, bool required) {
       (void)required;
       (void)txt;
       fields.push_back(label + ":");

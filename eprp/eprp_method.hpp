@@ -26,7 +26,7 @@ public:
   const std::string                        help;
   const std::function<void(Eprp_var &var)> method;
 
-  Eprp_method(const std::string &_name, const std::string &_help, const std::function<void(Eprp_var &var)> _method);
+  Eprp_method(const std::string &_name, const std::string &_help, const std::function<void(Eprp_var &var)> &_method);
 
   bool check_labels(const Eprp_var &var, std::string &err_msg) const;
 

@@ -232,7 +232,7 @@ public:
   std::vector<int> vec_const_signed(int64_t value, int numBits);
   std::vector<int> vec_const_unsigned(uint64_t value, int numBits);
   std::vector<int> vec_var(int numBits);
-  std::vector<int> vec_var(std::string name, int numBits);
+  std::vector<int> vec_var(const std::string& name, int numBits);
   std::vector<int> vec_cast(const std::vector<int> &vec1, int toBits, bool signExtend = false);
   std::vector<int> vec_pick(const std::vector<int> &vec1, int U32Const, int pickbits);
 
@@ -315,7 +315,7 @@ public:
   /* New functions for shift */
   std::vector<int> vec_shl_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
   std::vector<int> vec_shrl_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
-  std::vector<int> vec_shra_LiveHD(std::vector<int> vec1, std::vector<int> vec2);
+  std::vector<int> vec_shra_LiveHD(std::vector<int> vec1, const std::vector<int>& vec2);
   /* New functions for shift */
 
   // helpers for generating lezSATbit and lezSATvec objects

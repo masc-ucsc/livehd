@@ -11,7 +11,7 @@ dummyComponent::dummyComponent(Ntype_op typeArg) {
   name = std::string(Ntype::get_name(type));
 }
 
-dummyComponent::dummyComponent(std::string nameArg) {
+dummyComponent::dummyComponent(const std::string& nameArg) {
   type = Ntype_op::Sub;
   name = nameArg;
   for (int i = 1; i < static_cast<int>(Ntype_op::Last_invalid); i++) {

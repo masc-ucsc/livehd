@@ -353,7 +353,7 @@ bool Lgtuple::match_either_partial(std::string_view a, std::string_view b) {
   return m1 || m2;  // either reached the end it match_int
 }
 
-void Lgtuple::add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup) {
+void Lgtuple::add_int(const std::string &key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
     I(!has_dpin(key));  // It was deleted before
@@ -585,7 +585,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::shared_ptr<Lgtuple const> tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple const>& tup) const {
   // create a dpin or subtuple with the selected fields
   std::shared_ptr<Lgtuple> ret_tup;
 
@@ -667,7 +667,7 @@ void Lgtuple::del(std::string_view key) {
   key_map.swap(new_map);
 }
 
-void Lgtuple::add(std::string_view key, std::shared_ptr<Lgtuple const> tup) {
+void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
 
   correct = correct && tup->correct;
@@ -786,7 +786,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
 #endif
 }
 
-bool Lgtuple::concat(std::shared_ptr<Lgtuple const> tup) {
+bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Node_pin>> delayed_numbers;
@@ -999,7 +999,7 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(std::shared_ptr<Lgtuple const> rhs_tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const>& rhs_tup) const {
   (void)rhs_tup;
 
   I(false);  // FIXME: implement it

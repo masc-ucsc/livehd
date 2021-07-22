@@ -44,9 +44,9 @@ public:
 
   void add(Lgraph *lg);
   void add(std::unique_ptr<Lnast> lnast);
-  void add(std::shared_ptr<Lnast> lnast);
+  void add(const std::shared_ptr<Lnast> &lnast);
   void add(const std::string &name, std::string_view value);
-  void replace(std::shared_ptr<Lnast> lnast_old, std::shared_ptr<Lnast> &lnast_new);
+  void replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new);
   template <typename Str>
   std::enable_if_t<std::is_convertible_v<std::string_view, Str>, void> add(const Str &name, std::string_view value) {
     add(std::string(name), value);

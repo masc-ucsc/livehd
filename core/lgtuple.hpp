@@ -45,7 +45,7 @@ protected:
   static size_t match_first_partial(std::string_view a, std::string_view b);
   static bool   match_either_partial(std::string_view a, std::string_view b);
 
-  void        add_int(const std::string &key, std::shared_ptr<Lgtuple const> tup);
+  void        add_int(const std::string &key, const std::shared_ptr<Lgtuple const>& tup);
   static void reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin);
 
   std::tuple<std::string_view, bool> get_flop_name(const Node &flop) const;
@@ -129,13 +129,13 @@ public:
   const Node_pin &get_dpin() const;
 
   std::shared_ptr<Lgtuple> get_sub_tuple(std::string_view key) const;
-  std::shared_ptr<Lgtuple> get_sub_tuple(std::shared_ptr<Lgtuple const> tup) const;
+  std::shared_ptr<Lgtuple> get_sub_tuple(const std::shared_ptr<Lgtuple const>& tup) const;
 
   void del(std::string_view key);
 
   // set a dpin/sub tuple. If already existed anything, it is deleted (not attributes)
 
-  void add(std::string_view key, std::shared_ptr<Lgtuple const> tup);
+  void add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup);
   void add(std::string_view key, const Node_pin &dpin);
 
   void add(const Node_pin &dpin) {
@@ -143,10 +143,10 @@ public:
     return add("0", dpin);
   }
 
-  bool                     concat(const std::shared_ptr<Lgtuple const> tup2);
+  bool                     concat(const std::shared_ptr<Lgtuple const>& tup2);
   bool                     concat(const Node_pin &dpin);
   Node_pin                 flatten() const;
-  std::shared_ptr<Lgtuple> create_assign(std::shared_ptr<Lgtuple const> tup) const;
+  std::shared_ptr<Lgtuple> create_assign(const std::shared_ptr<Lgtuple const>& tup) const;
   std::shared_ptr<Lgtuple> create_assign(const Node_pin &dpin) const;
 
   /// Get all the attributes (__bits) in the same tuple level

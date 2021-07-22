@@ -1126,14 +1126,14 @@ bool Code_gen::is_temp_var(std::string_view test_string) {
   return (absl::StartsWith(test_string, "___") || absl::StartsWith(test_string, "_._"));
 }
 
-bool Code_gen::is_temp_var(std::string test_string) {
+bool Code_gen::is_temp_var(const std::string& test_string) {
   return (absl::StartsWith(test_string, "___") || absl::StartsWith(test_string, "_._"));
 }
 
 //-------------------------------------------------------------------------------------
 // check if the node has "__"
 bool Code_gen::has_DblUndrScor(std::string_view test_string) { return (absl::StartsWith(test_string, "__")); }
-bool Code_gen::has_DblUndrScor(std::string test_string) { return (absl::StartsWith(test_string, "__")); }
+bool Code_gen::has_DblUndrScor(const std::string& test_string) { return (absl::StartsWith(test_string, "__")); }
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(std::string_view test_string) {
@@ -1157,7 +1157,7 @@ bool Code_gen::is_pos_int(std::string_view test_string) {
   return true;
 }
 
-bool Code_gen::is_pos_int(std::string test_string) {
+bool Code_gen::is_pos_int(const std::string& test_string) {
   for (char i : test_string) {
     if (is_digit(i) == false)
       return false;

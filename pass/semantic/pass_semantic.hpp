@@ -6,7 +6,7 @@
 class Pass_semantic : public Pass {
 protected:
   void do_work(Lgraph *g);
-  void do_work(std::shared_ptr<Lnast> lnast);
+  void do_work(const std::shared_ptr<Lnast> &lnast);
 
 public:
   static void setup();

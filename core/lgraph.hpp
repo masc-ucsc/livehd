@@ -160,7 +160,7 @@ protected:
   static void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
   static void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
 
-  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> fn);
+  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)>& fn);
 
 public:
   Lgraph()               = delete;
@@ -244,18 +244,18 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_pin(const Node_pin &dpin, std::function<bool(Index_id idx)> f1) const;
-  void each_sorted_graph_io(std::function<void(Node_pin &pin, Port_ID pos)> f1, bool hierarchical = false);
-  void each_graph_input(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
-  void each_graph_output(std::function<void(Node_pin &pin)> f1, bool hierarchical = false);
+  void each_pin(const Node_pin &dpin, const std::function<bool(Index_id idx)>& f1) const;
+  void each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_ID pos)>& f1, bool hierarchical = false);
+  void each_graph_input(const std::function<void(Node_pin &pin)>& f1, bool hierarchical = false);
+  void each_graph_output(const std::function<void(Node_pin &pin)>& f1, bool hierarchical = false);
 
-  void each_hier_fast(const std::function<bool(Node &)>);
+  void each_hier_fast(const std::function<bool(Node &)>&);
 
-  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>);
+  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>&);
 
-  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)> fn);
-  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> fn);
-  void each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)> fn);
+  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)>& fn);
+  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)>& fn);
+  void each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)>& fn);
 
   template <typename FN>
   void each_local_sub_fast(const FN f1) {

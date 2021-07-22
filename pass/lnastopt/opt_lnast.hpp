@@ -14,12 +14,12 @@ protected:
   absl::flat_hash_map<std::string, std::string> level_forward_ref;
   absl::flat_hash_map<std::string, Lconst>      level_forward_val;
 
-  void process_plus(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid);
-  void process_assign(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid);
-  void process_todo(std::shared_ptr<Lnast> ln, const Lnast_nid &lnid);
+  void process_plus(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_assign(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_todo(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
 
 public:
-  Opt_lnast(const Eprp_var &var);
+  Opt_lnast(const Eprp_var& var);
 
-  void opt(std::shared_ptr<Lnast> ln);
+  void opt(const std::shared_ptr<Lnast>& ln);
 };

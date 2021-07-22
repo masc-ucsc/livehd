@@ -31,7 +31,7 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   }
 }
 
-void Pass_lnastfmt::parse_ln(std::shared_ptr<Lnast> ln, Eprp_var& var, std::string_view module_name) {
+void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view module_name) {
   std::shared_ptr<Lnast> lnastfmted = std::make_shared<Lnast>(module_name);
 
   observe_lnast(ln.get());  // 1st traversal through the original LN to record assign subtrees.
@@ -210,7 +210,7 @@ bool Pass_lnastfmt::is_ssa(std::string_view test_string) {
   return ((test_string.find('_') != 0) && (absl::StrContains(test_string, '_')));
 }
 
-Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, std::shared_ptr<Lnast> ln,
+Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, const std::shared_ptr<Lnast>& ln,
                                          const mmap_lib::Tree_index& it) {
   // auto orig_node_token = ln->get_token(it);
   // auto orig_node_subs = ln->get_subs(it);

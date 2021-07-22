@@ -86,7 +86,7 @@ public:
 
     s = ast.insert_next_sibling(c11, "child1.1");
 
-    ast.each_bottom_up_fast([this](const mmap_lib::Tree_index &self, std::string str) {
+    ast.each_bottom_up_fast([this](const mmap_lib::Tree_index &self, const std::string &str) {
       while (static_cast<size_t>(self.level) >= ast_sorted_verification.size()) ast_sorted_verification.emplace_back();
       ast_sorted_verification[self.level].emplace_back(str);
     });

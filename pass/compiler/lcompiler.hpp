@@ -41,17 +41,17 @@ protected:
 public:
   Lcompiler(std::string_view path, std::string_view odir, std::string_view top, bool gviz);
 
-  void do_prp_lnast2lgraph(std::vector<std::shared_ptr<Lnast>>);
+  void do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &);
   void do_prp_local_cprop_bitwidth();
   void do_prp_global_bitwidth_inference();
-  void prp_thread_ln2lg(std::shared_ptr<Lnast> lnast);
+  void prp_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
-  void do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>>);
+  void do_fir_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &);
   void do_fir_cprop();
   void do_fir_firbits();
   void do_fir_firmap_bitwidth();
   void fir_thread_cprop(Lgraph *lg);
-  void fir_thread_ln2lg(std::shared_ptr<Lnast> lnast);
+  void fir_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
   std::string_view      get_top() { return top; };
   std::vector<Lgraph *> get_lgraphs() { return lgs; }

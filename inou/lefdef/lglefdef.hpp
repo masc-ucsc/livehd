@@ -84,7 +84,7 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {  // fpin 
       if (geometry->itemType(i) == lefiGeomRectE) {
         tmp_pin.phys.resize(tmp_pin.phys.size() + 1);  // create a temporary object inline
         Tech_cell::Physical_pin &tmp_phy = tmp_pin.phys.back();
-        const lefiGeomRect *     rect    = geometry->getRect(i);
+        const lefiGeomRect      *rect    = geometry->getRect(i);
 
         std::string metal_name_str(geometry->lefiGeometries::getLayer(i - 1));
         if (strncmp(metal_name_str.c_str(), "Metal", 5) == 0)
@@ -109,7 +109,7 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {  //
   auto *tlib = (Tech_library *)ud;                                            // convert void* into Tech_library*
   inti, j, k;
   lefiSpacingTable *spTable;
-  lefiParallel *    parallel;
+  lefiParallel     *parallel;
 
   if (strcmp(flayer->name(), "OVERLAP") == 0) {
     return 0;  // do nothing when layer name = OVERLAP
@@ -197,7 +197,7 @@ int lef_via_cb(lefrCallbackType_e c, lefiVia *fvia, lefiUserData ud) {  // fvia 
   }
   return 0;
 }
-void lef_parsing(Tech_library *tlib, std::string lef_file_name) {
+void lef_parsing(Tech_library *tlib, const std::string &lef_file_name) {
   tlib->clear_tech_lib();
 
   const char *lef_file = lef_file_name.c_str();
@@ -342,7 +342,7 @@ int def_row_cb(defrCallbackType_e type, defiRow *frow, defiUserData ud) {
   return 0;
 }
 
-void def_parsing(Def_info &dinfo, std::string def_file_name) {
+void def_parsing(Def_info &dinfo, const std::string &def_file_name) {
   const char *def_file = def_file_name.c_str();
   defrInit();  // initialize the reader, This routine must be called first
 

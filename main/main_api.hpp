@@ -21,7 +21,7 @@ public:
     Pass::eprp.parser_warn(format, args...);
   }
 
-  static void setup(std::function<void(Eprp &)> fn) { fn(Pass::eprp); }
+  static void setup(const std::function<void(Eprp &)>& fn) { fn(Pass::eprp); }
 
   static void parse_inline(std::string_view line) { Pass::eprp.parse_inline(line); }
 

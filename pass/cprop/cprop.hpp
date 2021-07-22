@@ -30,7 +30,7 @@ protected:
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> get_value(const Node &node) const;
 
-  void add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &key, Node_pin &pin);
+  void add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const std::string &key, Node_pin &pin);
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -45,7 +45,7 @@ protected:
   void replace_node(Node &node, const Lconst &result);
   void replace_logic_node(Node &node, const Lconst &result);
 
-  void try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node);
+  void try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, Node &sub_node, Node &tup_node);
   void try_connect_lgcpp(const Node &node);
 
   // Tuple methods
@@ -58,7 +58,7 @@ protected:
   void reconnect_tuple_get(Node &node);
 
   Node_pin expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges,
-                                      std::shared_ptr<Lgtuple const> node_tup);
+                                      const std::shared_ptr<Lgtuple const> &node_tup);
 
   // handle tuple issues but allowed to "mutate" the node
   void tuple_shl_mut(Node &node);
@@ -76,7 +76,7 @@ protected:
   void scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
 
   // io construction
-  void try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> tup);
+  void try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup);
 
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);

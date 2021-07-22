@@ -355,7 +355,7 @@ VarPtr VCDWriter::register_passed_var(const std::string &scope, const std::strin
   return pvar;
 }
 // -----------------------------
-bool VCDWriter::change(VarPtr var, const VarValue &value, bool reg) {
+bool VCDWriter::change(const VarPtr &var, const VarValue &value, bool reg) {
   if (global_timestamp < timestamp)
     throw VCDPhaseException{utils::format("Out of order value change var '%s'", var->name.c_str())};
   else if (closed)

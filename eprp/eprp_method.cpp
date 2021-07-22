@@ -4,7 +4,7 @@
 #include "elab_scanner.hpp"
 #include "fmt/format.h"
 
-Eprp_method::Eprp_method(const std::string &_name, const std::string &_help, const std::function<void(Eprp_var &var)> _method)
+Eprp_method::Eprp_method(const std::string &_name, const std::string &_help, const std::function<void(Eprp_var &var)> &_method)
     : name(_name), help(_help), method(_method){};
 
 bool Eprp_method::has_label(const std::string &label) const { return labels.find(label) != labels.end(); }

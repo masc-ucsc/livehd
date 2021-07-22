@@ -34,7 +34,7 @@ std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> Cprop::get_value(const Node
   return std::make_tuple(invalid_pin, nullptr);
 }
 
-void Cprop::add_pin_with_check(std::shared_ptr<Lgtuple> tup, const std::string &key, Node_pin &dpin) {
+void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const std::string &key, Node_pin &dpin) {
   tup->add(key, dpin);
 
   if (likely(!dpin.is_type_tup())) {
@@ -538,7 +538,7 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result) {
   node.del_node();
 }
 
-void Cprop::try_connect_tuple_to_sub(std::shared_ptr<Lgtuple const> tup, Node &sub_node, Node &tup_node) {
+void Cprop::try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, Node &sub_node, Node &tup_node) {
   I(sub_node.is_type_sub_present());
   I(tup_node.get_type_op() == Ntype_op::TupAdd);
 
@@ -1791,7 +1791,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
 }
 
 Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges,
-                                           std::shared_ptr<Lgtuple const> node_tup) {
+                                           const std::shared_ptr<Lgtuple const> &node_tup) {
   I(!hier);
   I(node_tup);
   I(node_tup->is_correct());
@@ -2136,7 +2136,7 @@ void Cprop::do_trans(Lgraph *lg) {
   // clean_io(lg);
 }
 
-void Cprop::try_create_graph_output(Node &node, std::shared_ptr<Lgtuple const> tup) {
+void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup) {
   I(!hier);
   I(tup->is_correct());
 

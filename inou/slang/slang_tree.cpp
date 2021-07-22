@@ -169,7 +169,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       // already done
     } else if (member.kind == slang::SymbolKind::Net) {
       const auto &ns   = member.as<slang::NetSymbol>();
-      auto *      expr = ns.getInitializer();
+      auto       *expr = ns.getInitializer();
       if (expr) {
         std::string_view lhs_var = create_lnast_var(member.name);
 
@@ -456,7 +456,7 @@ std::string_view Slang_tree::create_bit_and_stmts(std::string_view a_var, std::s
   return res_var;
 }
 
-std::string_view Slang_tree::create_bit_or_stmts(std::vector<std::string_view> var) {
+std::string_view Slang_tree::create_bit_or_stmts(const std::vector<std::string_view> &var) {
   std::string_view res_var;
   Lnast_nid        lid;
 
@@ -671,7 +671,7 @@ std::string_view Slang_tree::process_expression(const slang::Expression &expr) {
   }
 
   if (expr.kind == slang::ExpressionKind::IntegerLiteral) {
-    const auto &                      il    = expr.as<slang::IntegerLiteral>();
+    const auto                       &il    = expr.as<slang::IntegerLiteral>();
     auto                              svint = il.getValue();
     slang::SmallVectorSized<char, 32> buffer;
     if (!svint.hasUnknown() && svint.getMinRepresentedBits() < 8) {
@@ -744,7 +744,7 @@ std::string_view Slang_tree::process_expression(const slang::Expression &expr) {
   }
 
   if (expr.kind == slang::ExpressionKind::Conversion) {
-    const auto &       conv    = expr.as<slang::ConversionExpression>();
+    const auto        &conv    = expr.as<slang::ConversionExpression>();
     const slang::Type *to_type = conv.type;
 
     auto res = process_expression(conv.operand());  // NOTHING TO DO? (the dp_assign handles it?)

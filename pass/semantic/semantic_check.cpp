@@ -38,7 +38,7 @@ bool Semantic_check::is_a_number(std::string_view node_name) {
   return true;
 }
 
-bool Semantic_check::in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name) {
+bool Semantic_check::in_write_list(const FlatHashMap &dict, std::string_view node_name, std::string_view stmt_name) {
   for (auto node : dict) {
     if (node.first == node_name && node.second == stmt_name) {
       return true;
@@ -47,7 +47,7 @@ bool Semantic_check::in_write_list(FlatHashMap dict, std::string_view node_name,
   return false;
 }
 
-bool Semantic_check::in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name) {
+bool Semantic_check::in_read_list(const FlatHashMap &dict, std::string_view node_name, std::string_view stmt_name) {
   for (auto node : dict) {
     if (node.first == node_name && node.second == stmt_name) {
       return true;

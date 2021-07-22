@@ -61,7 +61,7 @@ protected:
   std::string_view create_pick_bit_stmts(std::string_view a_var, std::string_view pos);
   std::string_view create_sext_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
-  std::string_view create_bit_or_stmts(std::vector<std::string_view> var);
+  std::string_view create_bit_or_stmts(const std::vector<std::string_view>& var);
   std::string_view create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
   std::string_view create_shl_stmts(std::string_view a_var, std::string_view b_var);
   void             create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);

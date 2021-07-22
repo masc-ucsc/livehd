@@ -33,7 +33,7 @@ private:
   void save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data);
 
 public:
-  void do_from_lnast(std::shared_ptr<Lnast> lnast, std::string_view dot_postfix = "");
+  void do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_view dot_postfix = "");
   void do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix = "");
   void do_hierarchy(Lgraph *g);
 

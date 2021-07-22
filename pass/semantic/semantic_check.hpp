@@ -50,8 +50,8 @@ protected:
   bool is_a_number(std::string_view node_name);
 
   // Existence Check Functions
-  bool             in_write_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
-  bool             in_read_list(FlatHashMap dict, std::string_view node_name, std::string_view stmt_name);
+  bool             in_write_list(const FlatHashMap& dict, std::string_view node_name, std::string_view stmt_name);
+  bool             in_read_list(const FlatHashMap& dict, std::string_view node_name, std::string_view stmt_name);
   bool             in_lhs_list(Lnast_nid node_name);
   bool             in_inefficient_LNAST(std::string_view node_name);
   bool             in_output_vars(std::string_view node_name);

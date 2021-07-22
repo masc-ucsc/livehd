@@ -27,7 +27,7 @@ protected:
   inline static std::mutex lgs_mutex;
 
   struct Graph_attributes {
-    Lgraph *    lg;
+    Lgraph     *lg;
     std::string source;  // File were this module came from. If file updated (all the associated Lgraphs must be deleted). If empty,
                          // it ies not present (blackbox)
     Lg_type_id version;  // In which sequence order were the graphs last modified
@@ -87,13 +87,13 @@ protected:
 
   static Lgraph *try_find_lgraph_int(std::string_view path, std::string_view name);
   static Lgraph *try_find_lgraph_int(std::string_view path, Lg_type_id lgid);
-  Lgraph *       try_find_lgraph_int(std::string_view name) const;
-  Lgraph *       try_find_lgraph_int(Lg_type_id lgid) const;
+  Lgraph        *try_find_lgraph_int(std::string_view name) const;
+  Lgraph        *try_find_lgraph_int(Lg_type_id lgid) const;
 
-  Sub_node &      reset_sub_int(std::string_view name, std::string_view source);
-  Sub_node &      setup_sub_int(std::string_view name, std::string_view source);
-  Sub_node &      setup_sub_int(std::string_view name);
-  Sub_node *      ref_sub_int(Lg_type_id lgid);
+  Sub_node       &reset_sub_int(std::string_view name, std::string_view source);
+  Sub_node       &setup_sub_int(std::string_view name, std::string_view source);
+  Sub_node       &setup_sub_int(std::string_view name);
+  Sub_node       *ref_sub_int(Lg_type_id lgid);
   const Sub_node &get_sub_int(Lg_type_id lgid) const;
 
   Lg_type_id add_name_int(std::string_view name, std::string_view source);
@@ -313,8 +313,8 @@ public:
   absl::Span<const Tech_layer> get_layer() const { return absl::MakeSpan(layer_list); };
   absl::Span<const Tech_via>   get_via() const { return absl::MakeSpan(via_list); };
 
-  void each_lgraph(std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
-  void each_lgraph(std::string_view match, std::function<void(Lg_type_id lgid, std::string_view name)> f1) const;
+  void each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const;
+  void each_lgraph(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const;
 
   void reload() {
     std::lock_guard<std::mutex> guard(lgs_mutex);
