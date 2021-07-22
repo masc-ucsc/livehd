@@ -554,8 +554,8 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
 	std::string upper_val, lower_val;
   for (const auto& e : pin.get_node().inp_edges_ordered()) {
     if (e.sink.get_pid()==2){
-      num_of_bits = Lconst(const_num);  // get_the val of const
       const_num = e.driver.get_node().get_type_const().to_pyrope();
+      num_of_bits = Lconst(e.driver.get_node().get_type_const());  // get_the val of const
       if(is_hex(const_num)) {
         const_bin = hex_to_bin(const_num);
         upper_val = std::to_string(range_high(const_bin));
