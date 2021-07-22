@@ -374,6 +374,7 @@ void lezSAT::assume(int id) {
       }
       if (op == OpOr) {
         std::vector<int> clause;
+        clause.reserve(args.size());
         for (int arg : args) clause.push_back(bind(arg));
         cnfClauses.push_back(clause);
         cnfClausesCount++;
@@ -404,6 +405,7 @@ void lezSAT::add_clause(const std::vector<int> &args) {
 
 void lezSAT::add_clause(const std::vector<int> &args, bool argsPolarity, int a, int b, int c) {
   std::vector<int> clause;
+  clause.reserve(args.size());
   for (auto arg : args) clause.push_back(argsPolarity ? +arg : -arg);
   if (a != 0)
     clause.push_back(a);
@@ -536,6 +538,7 @@ int lezSAT::bind(int id, bool auto_freeze) {
 
     if (op == OpIFF) {
       std::vector<int> invArgs;
+      invArgs.reserve(args.size());
       for (auto arg : args) invArgs.push_back(NOT(arg));
       int sub1 = expression(OpAnd, args);
       int sub2 = expression(OpAnd, invArgs);
@@ -607,30 +610,35 @@ bool lezSAT::solver(const std::vector<int> &, std::vector<bool> &, const std::ve
 
 std::vector<int> lezSAT::vec_const(const std::vector<bool> &bits) {
   std::vector<int> vec;
+  vec.reserve(bits.size());
   for (auto bit : bits) vec.push_back(bit ? CONST_TRUE : CONST_FALSE);
   return vec;
 }
 
 std::vector<int> lezSAT::vec_const_signed(int64_t value, int numBits) {
   std::vector<int> vec;
+  vec.reserve(numBits);
   for (int i = 0; i < numBits; i++) vec.push_back(((value >> i) & 1) != 0 ? CONST_TRUE : CONST_FALSE);
   return vec;
 }
 
 std::vector<int> lezSAT::vec_const_unsigned(uint64_t value, int numBits) {
   std::vector<int> vec;
+  vec.reserve(numBits);
   for (int i = 0; i < numBits; i++) vec.push_back(((value >> i) & 1) != 0 ? CONST_TRUE : CONST_FALSE);
   return vec;
 }
 
 std::vector<int> lezSAT::vec_var(int numBits) {
   std::vector<int> vec;
+  vec.reserve(numBits);
   for (int i = 0; i < numBits; i++) vec.push_back(literal());
   return vec;
 }
 
 std::vector<int> lezSAT::vec_var(std::string name, int numBits) {
   std::vector<int> vec;
+  vec.reserve(numBits);
   for (int i = 0; i < numBits; i++) {
     vec.push_back(VAR(name + my_int_to_string(i)));
   }
@@ -658,12 +666,14 @@ std::vector<int> lezSAT::vec_pick(const std::vector<int> &vec1, int U32Const, in
 std::vector<int> lezSAT::vec_pass(const std::vector<int> &vec1) {
   std::vector<int> vec;
 
+  vec.reserve(vec1.size());
   for (auto bit : vec1) vec.push_back(bit);
   return vec;
 }
 
 std::vector<int> lezSAT::vec_not(const std::vector<int> &vec1) {
   std::vector<int> vec;
+  vec.reserve(vec1.size());
   for (auto bit : vec1) vec.push_back(NOT(bit));
   return vec;
 }
@@ -1526,6 +1536,7 @@ int lezSAT::onehot(const std::vector<int> &vec, bool max_only) {
     // create binary vector
     int              num_bits = clog2(vec.size());
     std::vector<int> bits;
+    bits.reserve(num_bits);
     for (int k = 0; k < num_bits; k++) bits.push_back(literal());
 
     // add at-most-one clauses using binary encoding

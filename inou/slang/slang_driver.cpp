@@ -151,6 +151,7 @@ bool loadAllSources(Compilation& compilation, SourceManager& sourceManager, cons
     return ok;
 
   std::vector<fs::path> directories;
+  directories.reserve(libDirs.size());
   for (auto& dir : libDirs) directories.emplace_back(widen(dir));
 
   flat_hash_set<string_view> uniqueExtensions;
