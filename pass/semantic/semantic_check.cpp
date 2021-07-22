@@ -478,9 +478,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       rhs_list.push_back(rhs_args);
 
     } else if (node_type.is_tuple()) {
-      int num_of_ref    = 0;
-      int num_of_assign = 0;
-      int num_of_const  = 0;
+      int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
 
@@ -497,11 +495,9 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
           rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_const()) {
-          num_of_const += 1;
           add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
           // rhs_args.push_back(lnidx_opr_child);
         } else if (node_type_child.is_assign()) {
-          num_of_assign += 1;
           check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
         } else {
           // Invalid Node Type
@@ -641,14 +637,11 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
 }
 
 void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::string_view stmt_name) {
-  int cond_count  = 0;
-  int stmts_count = 0;
   for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_stmts()) {
       std::string_view new_stmt_name = lnast->get_name(lnidx_opr_child);
-      stmts_count += 1;
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
 
@@ -659,7 +652,6 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
         }
       }
     } else if (ntype_child.is_ref() || ntype_child.is_const()) {
-      cond_count += 1;
       add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
     } else {
       // Invalid Node Type
