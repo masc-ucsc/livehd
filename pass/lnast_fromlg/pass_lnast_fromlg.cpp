@@ -588,13 +588,13 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
   }
 
   switch (pin.get_node().get_type_op()) {
-    case Ntype_op::Get_mask: {
+    case Ntype_op::Get_mask: {// getmask goes to SRA, SRA needs the dpin name; put the tmp as the output pin name of the get_mask node!
       node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
-      auto tmp_GM = create_temp_var(lnast);
+      auto tmp_GM = lnast.add_string(dpin_get_name(pin));//create_temp_var(lnast);
       lnast.add_child(node_idx, Lnast_node::create_ref(tmp_GM));  // Dest
       for (const auto& e : pin.get_node().inp_edges_ordered()) {
         if (e.driver.get_node().get_type_op() == Ntype_op::Const) {
-          lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));//FIXME: this is ok for GM but need to correct for SM (for LL LN)//create mask and value from these!
+          lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));
         } else {
           attach_child(lnast, node_idx, e.driver);
         }
