@@ -427,13 +427,10 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
   }
   fmt::print("func_call 1st child: {}\n", lhs);
   absl::StrAppend(&buffer_to_print, indent());
-  if (!is_temp_var(lhs)) {
-    absl::StrAppend(&buffer_to_print, lhs, " = ");  // lhs and assignment op to further assign the func name and arguments to lhs
-  }
 
   curr_index = lnast->get_sibling_next(curr_index);
-  absl::StrAppend(&buffer_to_print, lnast->get_name(curr_index));  // printitng the func name(the func called)
-  fmt::print("func_call 2nd child: {}\n", lnast->get_name(curr_index));
+  auto funcname = lnast->get_name(curr_index);
+  fmt::print("func_call 2nd child: {}\n", funcname);
 
   curr_index = lnast->get_sibling_next(curr_index);
   auto ref   = lnast->get_name(curr_index);
@@ -443,8 +440,15 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
       ref = map_it->second;
     }
   }
-  absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref), lnast_to->stmt_sep());  // parameters for the func call
   fmt::print("func_call 3rd child: {}\n", ref);
+  
+  if (is_temp_var(lhs)) {  //|| !op_is_unary) {
+    ref_map.insert(std::pair<std::string, std::string>(lhs, absl::StrCat(funcname, lnast_to->ref_name(ref))));
+  } else {
+    absl::StrAppend(&buffer_to_print, lhs, " = ");  // lhs and assignment op to further assign the func name and arguments to lhs
+    absl::StrAppend(&buffer_to_print, funcname);  // printitng the func name(the func called)
+    absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref), lnast_to->stmt_sep());  // parameters for the func call
+  }
 }
 //-------------------------------------------------------------------------------------
 // Process the "if" node:
