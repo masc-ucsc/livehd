@@ -39,7 +39,7 @@ std::string Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
   return get_scaped_name(dpin.get_wire_name());
 }
 
-std::string Cgen_verilog::get_scaped_name(std::string_view name) {
+std::string Cgen_verilog::get_scaped_name(const std::string &name) {
   if (name[0] == '%') {
     if (name[1] == '.') {
       name = name.substr(2);
@@ -57,7 +57,7 @@ std::string Cgen_verilog::get_scaped_name(std::string_view name) {
       return absl::StrCat("\\", name, " ");
   }
 
-  return std::string{name};
+  return name;
 }
 
 std::string Cgen_verilog::get_append_to_name(const std::string &name, std::string_view ext) const {

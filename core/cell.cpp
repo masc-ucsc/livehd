@@ -30,7 +30,7 @@ Ntype::_init::_init() {
 
       sink_pid2name[pid][op] = pin_name;
 
-      auto [it, inserted] = name2pid.insert({std::string(pin_name), pid});
+      auto [it, inserted] = name2pid.emplace(pin_name, pid);
       if (!inserted) {
         I(it->second == pid);  // same name should always have same PID
       }
@@ -83,13 +83,14 @@ Ntype::_init::_init() {
   }
 
   int pos = 0;
-  for (auto e : cell_name) {
+  for (auto e : cell_name_sv) {
+    cell_name[pos]   = mmap_lib::str(e);
     cell_name_map[e] = static_cast<Ntype_op>(pos);
     ++pos;
   }
 }
 
-constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
+constexpr mmap_lib::str Ntype::get_sink_name_slow(Ntype_op op, int pid) {
   switch (op) {
     case Ntype_op::Invalid: return "invalid"; break;
     case Ntype_op::Sum:
@@ -257,7 +258,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
   return "invalid";
 }
 
-bool Ntype::has_sink(Ntype_op op, std::string_view str) {
+bool Ntype::has_sink(Ntype_op op, mmap_lib::str str) {
   auto it = name2pid.find(str);
   if (it == name2pid.end()) {
     if (std::isdigit(str[0]) && is_unlimited_sink(op))

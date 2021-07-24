@@ -272,7 +272,7 @@ public:
   constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
   Node_pin(Lgraph *_g, const Compact &comp);
-  Node_pin(std::string_view path, const Compact_flat &comp);
+  Node_pin(const mmap_lib::str &path, const Compact_flat &comp);
   Node_pin(Lgraph *_g, const Compact_driver &comp);
   Node_pin(Lgraph *_g, const Compact_class &comp);
   Node_pin(Lgraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
@@ -400,16 +400,16 @@ public:
   std::string debug_name() const;
   std::string get_wire_name() const;
 
-  void             set_name(std::string_view wname);
-  void             reset_name(std::string_view wname);
+  void             set_name(const mmap_lib::str &wname);
+  void             reset_name(const mmap_lib::str &wname);
   void             del_name();
-  std::string_view get_name() const;
+  mmap_lib::str get_name() const;
   bool             has_name() const;
-  static Node_pin  find_driver_pin(Lgraph *top, std::string_view wname);
-  std::string_view get_pin_name() const;
+  static Node_pin  find_driver_pin(Lgraph *top, mmap_lib::str wname);
+  mmap_lib::str get_pin_name() const;
 
-  void             set_prp_vname(std::string_view prp_vname);
-  std::string_view get_prp_vname() const;
+  void             set_prp_vname(const mmap_lib::str &prp_vname);
+  mmap_lib::str get_prp_vname() const;
   bool             has_prp_vname() const;
   void             dump_all_prp_vname() const;
 
@@ -427,7 +427,7 @@ public:
   void set_sign();
   bool is_unsign() const;
 
-  std::string_view get_type_sub_pin_name() const;
+  mmap_lib::str get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
   Bits_t get_offset() const;

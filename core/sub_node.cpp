@@ -2,7 +2,7 @@
 
 #include "sub_node.hpp"
 
-void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
+void Sub_node::copy_from(const mmap_lib::str &new_name, Lg_type_id new_lgid, const Sub_node &sub) {
   name                   = new_name;
   lgid                   = new_lgid;
   io_pins                = sub.io_pins;

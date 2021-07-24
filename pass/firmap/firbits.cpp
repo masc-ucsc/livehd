@@ -1001,16 +1001,16 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
 void Firmap::analysis_fir_const(Node &node, FBMap &fbmap) {
   Bits_t      bits;
   bool        sign;
-  std::string const_str = (std::string)node.setup_driver_pin("Y").get_name();
+  auto        const_str = node.setup_driver_pin("Y").get_name();
   auto        pos1      = const_str.find("ubits");  // ex: 0ubits8
   auto        pos2      = const_str.find("sbits");
   I(pos1 != std::string_view::npos || pos2 != std::string_view::npos);
   if (pos1 != std::string_view::npos) {
     sign = false;
-    bits = std::stoi(const_str.substr(pos1 + 5));
+    bits = const_str.substr(pos1 + 5).to_i();
   } else {
     sign = true;
-    bits = std::stoi(const_str.substr(pos2 + 5));
+    bits = const_str.substr(pos2 + 5).to_i();
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits, sign));
 }

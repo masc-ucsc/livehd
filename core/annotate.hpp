@@ -31,10 +31,10 @@ struct Ann_name {
 using Ann_node_pin_offset = Attribute<Ann_name::offset, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, Bits_t> >;
 
 using Ann_node_pin_name
-    = Attribute<Ann_name::pin_name, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, std::string_view> >;
+    = Attribute<Ann_name::pin_name, Node_pin, mmap_lib::bimap<Node_pin::Compact_class_driver, mmap_lib::str> >;
 
 using Ann_node_pin_prp_vname
-    = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, std::string_view> >;
+    = Attribute<Ann_name::prp_vname, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, mmap_lib::str> >;
 
 using Ann_node_pin_ssa = Attribute<Ann_name::ssa, Node_pin, mmap_lib::map<Node_pin::Compact_class_driver, uint32_t> >;
 
@@ -42,9 +42,9 @@ using Ann_node_pin_delay = Attribute<Ann_name::delay, Node_pin, mmap_lib::map<No
 
 using Ann_node_pin_unsign = Attribute<Ann_name::unsign, Node_pin, mmap_lib::map<Node_pin::Compact_driver, bool> >;
 
-using Ann_node_name = Attribute<Ann_name::nodename, Node, mmap_lib::bimap<Node::Compact_class, std::string_view> >;
+using Ann_node_name = Attribute<Ann_name::nodename, Node, mmap_lib::bimap<Node::Compact_class, mmap_lib::str> >;
 
-using Ann_inst_name = Attribute<Ann_name::instname, Node, mmap_lib::map<Node::Compact, std::string_view> >;
+using Ann_inst_name = Attribute<Ann_name::instname, Node, mmap_lib::map<Node::Compact, mmap_lib::str> >;
 
 using Ann_node_place = Attribute<Ann_name::nodeplace, Node, mmap_lib::map<Node::Compact, Ann_place> >;
 

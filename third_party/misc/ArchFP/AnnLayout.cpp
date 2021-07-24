@@ -18,8 +18,6 @@ void annLayout::addComponent(FPObject* comp, int count) {
 }
 
 bool annLayout::insert_obj(size_t idx) {
-  
-
   return true;
 }
 

@@ -28,6 +28,12 @@ Lnast::~Lnast() {
   memblock_fd = -1;
 }
 
+std::string_view Lnast::add_string(const mmap_lib::str &str) {
+  string_pool.emplace_back(new std::string(str.to_s()));
+  auto *str_ptr = string_pool.back();
+  return *str_ptr;
+}
+
 std::string_view Lnast::add_string(std::string_view sview) {
   string_pool.emplace_back(new std::string(sview));
   auto *str_ptr = string_pool.back();

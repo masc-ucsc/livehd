@@ -81,7 +81,7 @@ void bagLayout::recalcSize() {
   // Go through the layout components and find the containers width and height.
   width  = 0;
   height = 0;
-  for (int i = 0; i < getComponentCount(); i++) {
+  for (auto i = 0u; i < getComponentCount(); i++) {
     FPObject* comp = getComponent(i);
     width          = std::max(width, comp->getX() + comp->getWidth());
     height         = std::max(height, comp->getY() + comp->getHeight());

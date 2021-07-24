@@ -48,7 +48,7 @@ protected:
   void        add_int(const std::string &key, const std::shared_ptr<Lgtuple const>& tup);
   static void reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin);
 
-  std::tuple<std::string_view, bool> get_flop_name(const Node &flop) const;
+  std::tuple<mmap_lib::str, bool> get_flop_name(const Node &flop) const;
 
   static bool                      add_pending(Node &node, std::vector<std::pair<std::string_view, Node_pin>> &pending_entries,
                                                std::string_view entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin);

@@ -45,8 +45,8 @@ public:
 
   struct IO_pin {
     IO_pin() : dir(Direction::Invalid), graph_io_pos(Port_invalid) {}
-    IO_pin(std::string_view _name, Direction _dir, Port_ID _graph_io_pos) : name(_name), dir(_dir), graph_io_pos(_graph_io_pos) {}
-    std::string           name;
+    IO_pin(const mmap_lib::str _name, Direction _dir, Port_ID _graph_io_pos) : name(_name), dir(_dir), graph_io_pos(_graph_io_pos) {}
+    mmap_lib::str         name;
     Direction             dir;
     Port_ID               graph_io_pos;
     std::vector<Tech_pin> phys;  // There could be more than one location per pin
@@ -67,13 +67,13 @@ public:
   };
 
 private:
-  std::string   name;
+  mmap_lib::str   name;
   Lg_type_id    lgid;
   Physical_cell phys;
 
   std::vector<IO_pin> io_pins;
 
-  absl::flat_hash_map<std::string, Port_ID> name2id;
+  absl::flat_hash_map<mmap_lib::str, Port_ID> name2id;
   std::vector<Port_ID>                      graph_pos2instance_pid;
   std::vector<Port_ID>                      deleted;
 
@@ -100,7 +100,7 @@ public:
   Sub_node(const Sub_node &s) = default;
   Sub_node &operator=(const Sub_node &) = delete;
 
-  void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
+  void copy_from(const mmap_lib::str new_name, Lg_type_id new_lgid, const Sub_node &sub);
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);
@@ -113,14 +113,14 @@ public:
     name2id.clear();
   }
 
-  void reset(std::string_view _name, Lg_type_id _lgid) {
+  void reset(const mmap_lib::str &_name, Lg_type_id _lgid) {
     name = _name;
     lgid = _lgid;
 
     reset_pins();
   }
 
-  void rename(std::string_view _name) {
+  void rename(const mmap_lib::str &_name) {
     I(!is_invalid());
     I(name != _name);
     name = _name;
@@ -150,20 +150,20 @@ public:
     return lgid;
   }
 
-  std::string_view get_name() const {
+  mmap_lib::str get_name() const {
     I(lgid);
     return name;
   }
 
-  Port_ID add_input_pin(std::string_view io_name, Port_ID graph_pos = Port_invalid) {
+  Port_ID add_input_pin(const mmap_lib::str &io_name, Port_ID graph_pos = Port_invalid) {
     return add_pin(io_name, Direction::Input, graph_pos);
   }
 
-  Port_ID add_output_pin(std::string_view io_name, Port_ID graph_pos = Port_invalid) {
+  Port_ID add_output_pin(const mmap_lib::str &io_name, Port_ID graph_pos = Port_invalid) {
     return add_pin(io_name, Direction::Output, graph_pos);
   }
 
-  Port_ID add_pin(std::string_view io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
+  Port_ID add_pin(const mmap_lib::str &io_name, Direction dir, Port_ID graph_pos = Port_invalid) {
     I(lgid);
     I(!has_pin(io_name));
     I(io_name != "%");  // reserved for default output
@@ -205,7 +205,7 @@ public:
   }
   void del_pin(Port_ID instance_pid);
 
-  Port_ID map_graph_pos(std::string_view io_name, Direction dir, Port_ID graph_pos) {
+  Port_ID map_graph_pos(const mmap_lib::str &io_name, Direction dir, Port_ID graph_pos) {
     I(graph_pos);  // 0 possition is also not used (to catch bugs)
     I(has_pin(io_name));
 
@@ -229,15 +229,14 @@ public:
 
   void populate_graph_pos();
 
-  bool has_pin(std::string_view io_name) const {
+  bool has_pin(const mmap_lib::str &io_name) const {
     I(lgid);
     const auto it = name2id.find(io_name);
     if (it == name2id.end()) {
       return io_name == "%" || io_name == "$";
     }
 
-    return !io_pins[it->second]
-                .is_invalid();  // It could be deleted and name preserved to remap to the same pin again in the future
+    return !io_pins[it->second].is_invalid();  // It could be deleted and name preserved to remap
   }
   bool has_graph_pos_pin(Port_ID graph_pos) const {
     I(lgid);
@@ -248,14 +247,14 @@ public:
     return io_pins.size() > instance_pid && !io_pins[instance_pid].is_invalid();
   }
 
-  Port_ID get_instance_pid(std::string_view io_name) const {
+  Port_ID get_instance_pid(const mmap_lib::str &io_name) const {
     if (io_name == "$" || io_name == "%")
       return 0;
     has_pin(io_name);
     return name2id.at(io_name);
   }
 
-  Port_ID get_io_pos(std::string_view io_name) const {
+  Port_ID get_io_pos(const mmap_lib::str &io_name) const {
     auto instance_pid = get_instance_pid(io_name);
     return io_pins[instance_pid].graph_io_pos;
   }
@@ -282,14 +281,14 @@ public:
     return io_pins[instance_pid].graph_io_pos;
   }
 
-  const IO_pin &get_pin(std::string_view io_name) const {
+  const IO_pin &get_pin(const mmap_lib::str &io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
     return io_pins[instance_pid];
   }
 
-  const IO_pin &get_graph_output_io_pin(std::string_view io_name) const {
+  const IO_pin &get_graph_output_io_pin(const mmap_lib::str &io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
@@ -297,7 +296,7 @@ public:
     return io_pins[instance_pid];
   }
 
-  const IO_pin &get_graph_input_io_pin(std::string_view io_name) const {
+  const IO_pin &get_graph_input_io_pin(const mmap_lib::str &io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
@@ -305,20 +304,20 @@ public:
     return io_pins[instance_pid];
   }
 
-  Port_ID get_graph_io_pos(std::string_view io_name) const {
+  Port_ID get_graph_io_pos(const mmap_lib::str &io_name) const {
     I(has_pin(io_name));
     auto instance_pid = name2id.at(io_name);
     I(io_pins[instance_pid].name == io_name);
     return io_pins[instance_pid].graph_io_pos;
   }
 
-  std::string_view get_name_from_instance_pid(Port_ID instance_pid) const {
+  mmap_lib::str get_name_from_instance_pid(Port_ID instance_pid) const {
     if (!has_instance_pin(instance_pid))
       return "INVALID_PID";
     return io_pins[instance_pid].name;
   }
 
-  std::string_view get_name_from_graph_pos(Port_ID graph_pos) const {
+  mmap_lib::str get_name_from_graph_pos(Port_ID graph_pos) const {
     I(has_graph_pos_pin(graph_pos));  // The pos does not seem to exist
     return io_pins[graph_pos2instance_pid[graph_pos]].name;
   }
@@ -333,7 +332,7 @@ public:
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Input;
   }
 
-  bool is_input(std::string_view io_name) const {
+  bool is_input(const mmap_lib::str &io_name) const {
     if (io_name == "$")
       return true;
 
@@ -354,7 +353,7 @@ public:
     return io_pins[graph_pos2instance_pid[graph_pos]].dir == Direction::Output;
   }
 
-  bool is_output(std::string_view io_name) const {
+  bool is_output(const mmap_lib::str &io_name) const {
     if (io_name == "%")
       return true;
 
@@ -365,7 +364,7 @@ public:
     return io_pins[it->second].is_output();
   }
 
-  void add_phys_pin(std::string_view io_name, const Tech_pin &ppin) {
+  void add_phys_pin(const mmap_lib::str &io_name, const Tech_pin &ppin) {
     I(has_pin(io_name));
     add_phys_pin_int(name2id.at(io_name), ppin);
   }

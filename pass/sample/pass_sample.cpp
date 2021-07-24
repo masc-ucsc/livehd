@@ -161,8 +161,9 @@ void Pass_sample::annotate_placement(Lgraph *g) {
   Ann_node_place::clear(g);  // Not needed, but clears all the previous placement info
 
   for (auto node : g->forward()) {
-    auto *p = node.ref_place();
-    p->replace(x_pos++, 0.0, 1.0, 0.0);
+    auto p = node.get_place();
+    p.replace(x_pos++, 0.0, 1.0, 0.0);
+    node.set_place(p);
   }
 
   for (auto node : g->fast()) {
@@ -170,7 +171,7 @@ void Pass_sample::annotate_placement(Lgraph *g) {
     fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
-    auto *place = node.ref_place();
+    auto place = node.get_place();
     fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_x());
   }
 }

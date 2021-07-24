@@ -113,7 +113,7 @@ public:
     constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
     // Can not be constexpr find current_g
-    Node get_node(std::string_view path) const { return Node(path, *this); }
+    Node get_node(const mmap_lib::str &path) const { return Node(path, *this); }
 
     constexpr bool is_invalid() const { return nid == 0; }
 
@@ -177,7 +177,7 @@ public:
   constexpr Node() : top_g(nullptr), current_g(nullptr), nid(0) {}
 
   Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
-  Node(std::string_view path, const Compact_flat &comp);
+  Node(const mmap_lib::str &path, const Compact_flat &comp);
   Node(Lgraph *_g, const Compact_flat &comp);
   Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
   constexpr Node(Lgraph *_g, const Compact_class &comp)
@@ -228,8 +228,8 @@ public:
   Node_pin get_driver_pin_raw(Port_ID pid) const;
   Node_pin get_sink_pin_raw(Port_ID pid) const;
 
-  Node_pin get_driver_pin_slow(std::string_view pname) const;
-  Node_pin get_driver_pin(std::string_view pname) const {
+  Node_pin get_driver_pin_slow(const mmap_lib::str &pname) const;
+  Node_pin get_driver_pin(const mmap_lib::str &pname) const {
     assert(pname.size());
     if (unlikely(is_type_sub() && pname != "%")) {
       return get_driver_pin_slow(pname);
@@ -237,8 +237,8 @@ public:
     I(!Ntype::is_multi_driver(get_type_op()));               // Use direct pid for multidriver
     return Node_pin(top_g, current_g, hidx, nid, 0, false);  // could be invalid if not setup
   }
-  Node_pin get_sink_pin_slow(std::string_view pname) const;
-  Node_pin get_sink_pin(std::string_view pname) const {
+  Node_pin get_sink_pin_slow(const mmap_lib::str &pname) const;
+  Node_pin get_sink_pin(const mmap_lib::str &pname) const {
     assert(pname.size());
     if (unlikely(is_type_sub() && pname != "$")) {
       return get_sink_pin_slow(pname);
@@ -248,8 +248,8 @@ public:
       return get_sink_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
   }
-  Node_pin setup_driver_pin_slow(std::string_view name) const;
-  Node_pin setup_driver_pin(std::string_view pname) const {
+  Node_pin setup_driver_pin_slow(const mmap_lib::str &name) const;
+  Node_pin setup_driver_pin(const mmap_lib::str &pname) const {
     assert(pname.size());
     if (unlikely(is_type_sub() && pname != "%")) {
       return setup_driver_pin_slow(pname);
@@ -260,8 +260,8 @@ public:
   Node_pin setup_driver_pin_raw(Port_ID pid) const;
   Node_pin setup_driver_pin() const;
 
-  Node_pin setup_sink_pin_slow(std::string_view name);
-  Node_pin setup_sink_pin(std::string_view pname) {
+  Node_pin setup_sink_pin_slow(const mmap_lib::str &name);
+  Node_pin setup_sink_pin(const mmap_lib::str &pname) {
     assert(pname.size());
     if (unlikely(is_type_sub() && pname != "$")) {
       return setup_sink_pin_slow(pname);
@@ -298,7 +298,7 @@ public:
   void   set_type_lut(const Lconst &lutid);
   Lconst get_type_lut() const;
 
-  std::string_view get_type_name() const;
+  mmap_lib::str    get_type_name() const;
   Ntype_op         get_type_op() const;
   void             set_type(const Ntype_op op);
   void             set_type(const Ntype_op op, Bits_t bits);
@@ -337,8 +337,8 @@ public:
 
   void nuke();  // Delete all the pins, edges, and attributes of this node
 
-  bool is_sink_connected(std::string_view v) const;
-  bool is_driver_connected(std::string_view v) const;
+  bool is_sink_connected(const mmap_lib::str &v) const;
+  bool is_driver_connected(const mmap_lib::str &v) const;
 
   Node_pin_iterator out_connected_pins() const;
   Node_pin_iterator inp_connected_pins() const;
@@ -366,15 +366,15 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
-  std::string default_instance_name() const;
+  mmap_lib::str default_instance_name() const;
 
   // user-defined node instance name (1 per node instance)
-  void             set_instance_name(std::string_view iname);
-  std::string_view get_instance_name() const;
+  void             set_instance_name(const mmap_lib::str &iname);
+  mmap_lib::str    get_instance_name() const;
   bool             has_instance_name() const;
 
   // non-hierarchical node name (1 for all nodes)
-  void             set_name(std::string_view iname);
+  void             set_name(const mmap_lib::str &iname);
   std::string      get_name() const;
   std::string      create_name() const;
   bool             has_name() const;

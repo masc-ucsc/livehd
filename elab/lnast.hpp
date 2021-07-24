@@ -204,6 +204,7 @@ public:
 
   void ssa_trans() { do_ssa_trans(mmap_lib::Tree_index::root()); };
 
+  std::string_view add_string(const mmap_lib::str &str);
   std::string_view add_string(std::string_view str);
   std::string_view add_string(const std::string &str);
 

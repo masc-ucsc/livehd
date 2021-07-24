@@ -89,9 +89,9 @@ void Node_tree::dump() const {
     std::string indent(index.level, ' ');
     const auto& id = get_data(index);
 
-    std::string name;
+    mmap_lib::str name;
     if (id.is_invalid()) {
-      name = "(root module)";
+      name = mmap_lib::str("(root module)");
     } else {
       if (id.has_instance_name()) {
         name = id.get_instance_name();

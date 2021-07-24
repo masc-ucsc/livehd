@@ -110,7 +110,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(std::string_view path, const Compact_flat &comp)
+Node::Node(const mmap_lib::str &path, const Compact_flat &comp)
     : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
   I(nid);
   top_g = Graph_library::try_find_lgraph(path, comp.lgid);
@@ -144,7 +144,7 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
+Node_pin Node::get_driver_pin_slow(const mmap_lib::str &pname) const {
   I(is_type_sub());
   I(pname != "%");
 
@@ -162,7 +162,7 @@ Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
-Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
+Node_pin Node::get_sink_pin_slow(const mmap_lib::str &pname) const {
   I(is_type_sub());
   I(pname != "$");
 
@@ -180,7 +180,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
-Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
+Node_pin Node::setup_driver_pin_slow(const mmap_lib::str &name) const {
   I(is_type_sub());
   I(name != "%");
 
@@ -198,7 +198,7 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
-bool Node::is_sink_connected(std::string_view pname) const {
+bool Node::is_sink_connected(mmap_lib:str pname) const {
   if (!is_type_sub()) {
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
@@ -225,7 +225,7 @@ bool Node::is_sink_connected(std::string_view pname) const {
   return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
 }
 
-bool Node::is_driver_connected(std::string_view pname) const {
+bool Node::is_driver_connected(const mmap_lib::str &pname) const {
   if (!is_type_sub()) {
     auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
@@ -252,7 +252,7 @@ bool Node::is_driver_connected(std::string_view pname) const {
   return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
 }
 
-Node_pin Node::setup_sink_pin_slow(std::string_view name) {
+Node_pin Node::setup_sink_pin_slow(const mmap_lib::str &name) {
   I(is_type_sub());
   I(name != "$");
 
@@ -344,7 +344,7 @@ Node_pin Node::setup_driver_pin() const {
 }
 
 Ntype_op         Node::get_type_op() const { return current_g->get_type_op(nid); }
-std::string_view Node::get_type_name() const { return Ntype::get_name(current_g->get_type_op(nid)); }
+mmap_lib::str    Node::get_type_name() const { return Ntype::get_name(current_g->get_type_op(nid)); }
 
 void Node::set_type(const Ntype_op op) {
   I(op != Ntype_op::Sub && op != Ntype_op::Const && op != Ntype_op::LUT);  // do not set type directly, call set_type_const ....
@@ -494,15 +494,15 @@ Node Node::create_const(const Lconst &value) const {
   return node;
 }
 
-void Node::set_name(std::string_view iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
+void Node::set_name(const mmap_lib::str &iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
 
-void Node::set_instance_name(std::string_view iname) { Ann_inst_name::ref(current_g)->set(get_compact(), iname); }
+void Node::set_instance_name(const mmap_lib::str &iname) { Ann_inst_name::ref(current_g)->set(get_compact(), iname); }
 
-std::string_view Node::get_instance_name() const { return Ann_inst_name::ref(current_g)->get(get_compact()); }
+mmap_lib::str Node::get_instance_name() const { return Ann_inst_name::ref(current_g)->get(get_compact()); }
 
 bool Node::has_instance_name() const { return Ann_inst_name::ref(current_g)->has(get_compact()); }
 
-std::string Node::default_instance_name() const {
+mmap_lib::str Node::default_instance_name() const {
   std::string name{"i"};
 
   if (is_hierarchical()) {
@@ -510,13 +510,13 @@ std::string Node::default_instance_name() const {
   }
 
   if (has_name()) {
-    absl::StrAppend(&name, get_name());
+    absl::StrAppend(&name, get_name().to_s());
     return name;
   }
 
   absl::StrAppend(&name, "_nid", std::to_string(nid));
 
-  return name;
+  return mmap_lib::str(name);
 }
 
 std::string Node::create_name() const {

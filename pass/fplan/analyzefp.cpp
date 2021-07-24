@@ -30,7 +30,8 @@ void Pass_fplan_analyzefp::setup() {
 }
 
 std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
-  return n.has_instance_name() ? std::string(n.get_instance_name()) : std::string(n.default_instance_name());
+  // FIXME: better to not use std::string use mmap_lib::str directly
+  return n.has_instance_name() ? n.get_instance_name().to_s() : n.default_instance_name().to_s();
 }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {

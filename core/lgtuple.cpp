@@ -372,7 +372,7 @@ void Lgtuple::add_int(const std::string &key, const std::shared_ptr<Lgtuple cons
 }
 
 void Lgtuple::reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin) {
-  flop.setup_driver_pin().reset_name(flop_name);
+  flop.setup_driver_pin().reset_name(mmap_lib::str(flop_name));
 
   auto s_din = flop.setup_sink_pin("din");
 
@@ -1345,7 +1345,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
           // NOTE: all the pins but the IOs should have the constraints already.
           // This Attr could be set always but slower and redundant
           for (auto &attr_it : tup_list[i]->get_level_attributes(e.first)) {
-            if (Ntype::has_sink(Ntype_op::Flop, attr_it.first.substr(2)))
+            if (Ntype::has_sink(Ntype_op::Flop, mmap_lib::str(attr_it.first.substr(2))))
               continue;  // Do not create attr for flop config (handled in cprop directly)
 
             fmt::print("adding attr:{}\n", attr_it.first);
@@ -1374,9 +1374,9 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   return mux_list;
 }
 
-std::tuple<std::string_view, bool> Lgtuple::get_flop_name(const Node &flop) const {
+std::tuple<mmap_lib::str, bool> Lgtuple::get_flop_name(const Node &flop) const {
   bool             first_flop = true;
-  std::string_view flop_root_name;
+  mmap_lib::str    flop_root_name;
   if (flop.get_driver_pin().has_name()) {
     flop_root_name = flop.get_driver_pin().get_name();
     if (has_dpin(flop_root_name))

@@ -416,6 +416,18 @@ public:
 #pragma GCC diagnostic pop
     return a[0] == b[0] && a[1] == b[1];  // 16byte compare
   }
+  bool operator<(const str &rhs) const {
+
+    if (is_sso() && rhs.is_sso()) {
+      std::string_view lhs_sv(ref_base_sso(), size());
+      std::string_view rhs_sv(rhs.ref_base_sso(), rhs.size());
+
+      return lhs_sv < rhs_sv;
+    }
+    // FIXME: no need to create string
+
+    return to_s() < rhs.to_s();
+  }
 
 #if 1
   // const char* && std::string will go through this one
@@ -465,6 +477,11 @@ public:
   template <std::size_t N>
   constexpr bool operator!=(const char (&rhs)[N]) const {
     return !(*this == rhs);
+  }
+
+  constexpr char front() const {
+    assert(size());
+    return data & 0xFF;
   }
 
   char operator[](std::size_t pos) const {
@@ -988,9 +1005,15 @@ public:
     h ^= h >> 33;
     return static_cast<size_t>(h);
   }
+
+  template <typename H>
+    friend H AbslHashValue(H h, const str &s) {
+      return H::combine(std::move(h), s.hash());
+    };
 };
 
-bool operator==(const std::string_view &a, const mmap_lib::str &b) {
+
+inline bool operator==(const std::string_view &a, const mmap_lib::str &b) {
   return b == a;
 }
 
@@ -1000,3 +1023,20 @@ bool operator==(const char (&a)[N], const mmap_lib::str &b) {
 }
 
 }  // namespace mmap_lib
+
+#include "fmt/format.h"
+
+template <> struct fmt::formatter<mmap_lib::str>: formatter<string_view> {
+  // parse is inherited from formatter<string_view>.
+  template <typename FormatContext>
+  auto format(mmap_lib::str c, FormatContext& ctx) {
+    return formatter<string_view>::format(c.to_s(), ctx);
+  }
+};
+
+#include <iostream>
+
+inline std::ostream &operator <<(std::ostream &o, const mmap_lib::str &str) {
+  return o << str.to_s();
+}
+
