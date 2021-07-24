@@ -562,9 +562,13 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
         upper_val = std::to_string(range_high(const_bin));
         lower_val = std::to_string(range_low(const_bin));
       } else {
-        // num is in decimal
-        lower_val = "0";
-        upper_val = std::to_string(num_of_bits.get_bits() - 2);
+        //num is in decimal
+        lower_val = "0"; 
+        if(const_num=="-1") {//FIXME: remove when cprop.cpp has its get_mask related fixmes done.
+          upper_val = std::to_string(num_of_bits.get_bits());
+        } else {
+          upper_val = std::to_string(num_of_bits.get_bits()-2);
+        }
       }
       break;
     }
@@ -973,7 +977,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   // Create tuple names for submodule IO.
   std::string_view out_tup_name;
   if (!pin.get_node().has_name()) {
-    I(false, "\n\nERROR: for debug; not expecting to enter this code-part\n\n");
+   // I(false, "\n\nERROR: for debug; not expecting to enter this code-part\n\n");
     // 15-9 out_tup_name = dpin_get_name(pin);//TODO: check the type_op and assign prefix of "out"
     dpin_set_map_name(pin, create_temp_var(lnast));
     out_tup_name = lnast.add_string(absl::StrCat("out", dpin_get_name(pin)));
@@ -982,10 +986,11 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   } else {
     std::vector<std::string_view> out_node_name
         = absl::StrSplit(pin.get_node().get_name(), ':');  // du to commit: embed return variable name to subgraph node name
+    fmt::print("\npin.get_node().get_name() is: {} \n",pin.get_node().get_name() );
     out_tup_name = lnast.add_string(out_node_name[0]);
   }
   auto inp_tup_name = create_temp_var(lnast);
-  fmt::print("instance_name:{}, subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
+  //fmt::print("instance_name:{}, \n subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // auto out_tup_name = lnast.add_string(pin.get_node().get_name());
 
