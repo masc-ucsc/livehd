@@ -305,11 +305,14 @@ private:
   }
 
   void sign_extend(int sign_index = (w_ - 1)) {
-    int  sign_offset = sign_index % kWordSize;
-    int  sign_word   = ui.word_index(sign_index);
-    bool is_neg      = (ui.words_[sign_word] >> sign_offset) & 1;
-    ui.words_[sign_word]
-        = (static_cast<int64_t>(ui.words_[sign_word]) << (kWordSize - sign_offset - 1)) >> (kWordSize - sign_offset - 1);
+    const int  sign_offset = sign_index % kWordSize;
+    const int  sign_word   = ui.word_index(sign_index);
+    const bool is_neg      = (ui.words_[sign_word] >> sign_offset) & 1;
+
+    const auto word      = static_cast<uint64_t>(ui.words_[sign_word]);
+    const auto sign      = static_cast<uint64_t>(1) << sign_offset;
+    ui.words_[sign_word] = ((word & (sign + sign - 1)) ^ sign) - sign;
+
     for (int i = sign_word + 1; i < ui.NW; i++) {
       ui.words_[i] = is_neg ? -1 : 0;
     }
