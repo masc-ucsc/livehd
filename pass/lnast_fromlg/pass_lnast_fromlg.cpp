@@ -725,10 +725,10 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
     auto temp_var = create_temp_var(lnast);
     temp_vars.emplace_back(temp_var);
 
-    auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_eq());
-    lnast.add_child(eq_idx, Lnast_node::create_ref(temp_var));
-    attach_child(lnast, eq_idx, sel_pin);
-    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(i))));
+   // auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_eq());
+   // lnast.add_child(eq_idx, Lnast_node::create_ref(temp_var));
+   // attach_child(lnast, eq_idx, sel_pin);//this should be directly used !!!
+   // lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(std::to_string(i))));
   }
 
   // Specify var being assigned to is in upper scope (not in if-else scope)
@@ -742,7 +742,8 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   // Specify cond + create stmt for each mux val, except last.
   auto if_node = lnast.add_child(parent_node, Lnast_node::create_if());
   while (mux_vals.size() > 1) {
-    lnast.add_child(if_node, Lnast_node::create_ref(temp_vars.front()));
+    attach_child(lnast, if_node, sel_pin);
+    //lnast.add_child(if_node, Lnast_node::create_ref(temp_vars.front()));
     temp_vars.erase(temp_vars.begin());
 
     auto stmt_idx = lnast.add_child(if_node, Lnast_node::create_stmts());
