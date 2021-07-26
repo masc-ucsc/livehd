@@ -1688,6 +1688,21 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
   } else {
     child_at_idx = ast->get_child(idx_start_ast);
   }
+
+  Lnast_node src_var;  // tmp or lhs_var
+
+  if (lhs_node.is_invalid()) {
+    auto data_var = ast->get_data(lhs_var_idx);
+    if (data_var.rule_id == Prp_rule_reference) {
+      src_var = Lnast_node::create_ref(get_token(data_var.token_entry));
+    }else{
+      // There was a foo.bar.xxx@(...) sequence
+      src_var = eval_tuple(lhs_var_idx, idx_nxt_ln);
+    }
+  } else {
+    src_var = lhs_node;
+  }
+
   Lnast_node sel_rhs;
 
   bool sel_exists = false;
@@ -1703,19 +1718,12 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
       sel_rhs = eval_tuple(select_expr_idx, idx_nxt_ln);
 
       in_lhs = tmp;
-      ;
+
       sel_exists = true;
     }
   }
 
   Lnast_node retnode;
-  Lnast_node src_var;  // tmp or lhs_var
-
-  if (lhs_node.is_invalid()) {
-    src_var = Lnast_node::create_ref(get_token(ast->get_data(lhs_var_idx).token_entry));
-  } else {
-    src_var = lhs_node;
-  }
 
   // create bit select node
   mmap_lib::Tree_index idx_sel_root;
