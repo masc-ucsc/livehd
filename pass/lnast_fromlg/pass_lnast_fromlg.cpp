@@ -980,7 +980,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   if (!pin.get_node().has_name()) {
    // I(false, "\n\nERROR: for debug; not expecting to enter this code-part\n\n");
     // 15-9 out_tup_name = dpin_get_name(pin);//TODO: check the type_op and assign prefix of "out"
-    dpin_set_map_name(pin, create_temp_var(lnast));
+    //MAYBE//dpin_set_map_name(pin, create_temp_var(lnast));
     //out_tup_name = lnast.add_string(absl::StrCat("out", dpin_get_name(pin)));
     out_tup_name = lnast.add_string(dpin_get_name(pin));
   } else {
@@ -1012,13 +1012,13 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   lnast.add_child(func_call_node, Lnast_node::create_ref(inp_tup_name));
 
   // Create output
-  for (const auto& dpin : pin.get_node().out_connected_pins()) {
-    auto port_name  = dpin.get_type_sub_pin_name();
-    auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_attr_get());
-    attach_child(lnast, idx_dotasg, dpin);
-    lnast.add_child(idx_dotasg, Lnast_node::create_ref(out_tup_name));
-    lnast.add_child(idx_dotasg, Lnast_node::create_ref(lnast.add_string(port_name)));
-  }
+//  for (const auto& dpin : pin.get_node().out_connected_pins()) {
+//    auto port_name  = dpin.get_type_sub_pin_name();
+//    auto idx_dotasg = lnast.add_child(parent_node, Lnast_node::create_attr_get());
+//    attach_child(lnast, idx_dotasg, dpin);
+//    lnast.add_child(idx_dotasg, Lnast_node::create_ref(out_tup_name));
+//    lnast.add_child(idx_dotasg, Lnast_node::create_ref(lnast.add_string(port_name)));
+//  }
 }
 
 // FIXME: NOT WORKING, IN PROGRESS
