@@ -10,6 +10,7 @@ cmake_external(
     cmake_options = [
         "-GNinja",
         "-DSLANG_INCLUDE_TESTS=OFF",
+        "-DSLANG_INCLUDE_TOOLS=OFF",
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
     ],
     lib_source = ":all",
