@@ -1534,3 +1534,71 @@ TEST_F(Lconst_test, lconst_sext) {
   EXPECT_EQ(Lconst("0b10111").sext_op(2), Lconst(-1)); // 0sb111 == -1
 }
 
+Lconst bit_implies(Lconst tmp1, Lconst tmp2){
+  return ((tmp1.not_op()).or_op(tmp2));
+}
+
+TEST_F(Lconst_test, get_set_mask_equivalence) {
+  
+  Lrand<size_t> rnd;
+  for(int i = 0; i < 36; i++){ //dozens of random size_t for testing
+    Lconst a(rnd.any());
+    Lconst b(rnd.any());
+    Lconst c(rnd.any());
+    Lconst X(rnd.any());
+    Lconst Y(rnd.any());
+    
+    // 1- get_mask(get_mask(X,a),b)) == get_mask(X, set_mask(a=a,val=-1,mask=b))
+    // EXPECT_EQ((X.get_mask_op(a)).get_mask_op(b), X.get_mask_op(a.set_mask_op(b, Lconst(-1)))); fails, set_mask neg value assertion
+    
+    // 2- get_mask(0,b) == 0
+    EXPECT_EQ(Lconst(0).get_mask_op(b), Lconst(0));
+
+    // 3- get_mask(-1,b) && b>0 == b
+    EXPECT_EQ(Lconst(-1).get_mask_op(b), b); //fails, works with masks of all 1's
+
+    // 4- get_mask(a,-1) && a>0 == a
+    EXPECT_EQ(a.get_mask_op(Lconst(-1)), a);
+
+    // 5- get_mask(a,0) == 0
+    EXPECT_EQ(a.get_mask_op(Lconst(0)), Lconst(0));
+
+    // 6- set_mask(a=0,val=X,mask=b) == get_mask(X,b)
+    EXPECT_EQ(Lconst(0).set_mask_op(b, X), X.get_mask_op(b)); //works with masks of all 1's, fails otherwise
+
+    // 7- set_mask(a=X,val=Y,mask=-1) == Y
+    EXPECT_EQ(X.set_mask_op(Lconst(-1), Y), Y);
+
+    // 8- set_mask(a=X,val=Y,mask=0) == X
+    EXPECT_EQ(X.set_mask_op(Lconst(0), Y), X);
+
+    // 9- Since set_mask(a=X,val=-1,mask=b) == X | b
+    //EXPECT_EQ(X.set_mask_op(b, Lconst(-1)), X.or_op(b)); fails, set_mask neg value assertion
+    // 9.1- get_mask(or(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=-1,mask=b),c) -> get_mask(-1,c) (if c>0 -> c)
+    auto tmp1 = ((X.or_op(b)).get_mask_op(c)).and_op(b);
+    EXPECT_EQ(bit_implies(tmp1, c), c);
+
+
+    // 10- Since set_mask(a=X,val=0,mask=b) == X & b
+    EXPECT_EQ(X.set_mask_op(b, Lconst(0)), X.and_op(b));
+    // 10.1- get_mask(and(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=0,mask=b),c) -> get_mask(0,c) -> c
+    tmp1 = ((X.and_op(b)).get_mask_op(c)).and_op(b);
+    EXPECT_EQ(bit_implies(tmp1, c), c);
+
+    // 11- get_mask(set_mask(a=Y,val=X,mask=a),b) && a bit_implies b -> get_mask(X,b)
+    tmp1 = ((Y.set_mask_op(a, X)).get_mask_op(b)).and_op(a);
+    EXPECT_EQ(bit_implies(tmp1, b), X.get_mask_op(b));
+
+    // 12- get_mask(set_mask(a=Y,val=X,mask=a),b) && ~a bit_implies b -> get_mask(Y,b)
+    tmp1 = ((Y.set_mask_op(a, X)).get_mask_op(b)).and_op(a.not_op());
+    EXPECT_EQ(bit_implies(tmp1, b), Y.get_mask_op(b));
+
+    // 13- set_mask(a=get_mask(Y,a),val=X,mask=b) && popcount(a) < popcount(b) -> get_mask(X,b)
+    tmp1 = (Y.get_mask_op(a)).set_mask_op(b, X);
+
+    // 14- eq(get_mask(X,b), c) and b bit_implies c == ror(get_mask(X,b))
+    
+    
+  }
+}
+
