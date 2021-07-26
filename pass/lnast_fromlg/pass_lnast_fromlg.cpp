@@ -580,7 +580,7 @@ void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node
   auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(gm_tup_node, Lnast_node::create_ref(tmp_varr));
 
-  if (num_of_bits.get_bits() == 2) {
+  if (num_of_bits.get_bits() == 2 || num_of_bits.get_bits() == 1) {
     lnast.add_child(gm_tup_node, Lnast_node::create_const("0"));
   } else {
     auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
