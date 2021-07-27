@@ -663,6 +663,51 @@ std::vector<int> lezSAT::vec_pick(const std::vector<int> &vec1, int U32Const, in
   return vec;
 }
 
+
+// mask is also a vector, retaining the sign
+// If data has a bit i = 0, but mask has bit i = 1, bit i will be retained and not collapsed
+std::vector<int> vec_get_mask( std::vector<int> data, std::vector<int> mask )
+{
+	auto data_len = data.size();
+	auto mask_len = mask.size();
+
+	if (mask_len < data_len)
+	{
+		auto diff = data_len - mask_len;
+    std::vector <int> resized_mask (diff, mask[mask_len-1]);
+		resized_mask.insert(resized_mask.end(), mask.begin(), mask.end());
+    mask = resized_mask;
+	}	
+	else if (data_len < mask_len)
+	{
+		auto diff = mask_len - data_len;
+    std::vector <int> resized_data (diff, data[data_len-1]);
+		resized_data.insert(resized_data.end(), data.begin(), data.end());
+    data = resized_data;
+	}
+
+  std::vector<int> out;
+	for (size_t i = 0; i < mask.size() ; i++)
+	{
+		if (mask[i])
+			out.push_back(data[i]);
+	}	
+	return out;
+}
+
+std::vector<int> vec_set_mask(std::vector<int> a, std::vector<int> mask, std::vector<int> value)
+{ 
+  for (size_t i = 1; i <= mask.size(); i++)
+  {
+    if (mask[mask.size() - i])
+    {
+      if ((i < a.size()) && (i < value.size()))
+        a[a.size() - i] = value[value.size() - i];
+    }
+  }
+  return a;
+}
+
 std::vector<int> lezSAT::vec_pass(const std::vector<int> &vec1) {
   std::vector<int> vec;
 
