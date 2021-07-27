@@ -139,12 +139,12 @@ private:
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {
 public:
-  void        setup(const std::vector<int> &config_vec) {}
+  void        setup(const std::vector<int>& /* config_vec */) {}
   inline void start() {}
 
-  inline void sample(std::vector<uint64_t> &results) {}
+  inline void sample(std::vector<uint64_t>& /* results */) {}
 
-  inline void stop(std::vector<uint64_t> &results) {}
+  inline void stop(std::vector<uint64_t>& /* results */) {}
 
   bool is_working() const { return false; }
 
