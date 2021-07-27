@@ -2,6 +2,7 @@
 
 #include "graph_core.hpp"
 
+#include <random>
 #include <string>
 #include <vector>
 
@@ -90,7 +91,7 @@ TEST_F(Setup_graph_core, trivial_ops_insert1) {
     auto m = gc.create_node();
     nodes.emplace_back(m);
   }
-  std::random_shuffle(nodes.begin(), nodes.end());
+  std::shuffle(nodes.begin(), nodes.end(), std::knuth_b());
 
   auto n=0u;
   for(const auto &m:nodes) {
@@ -212,7 +213,7 @@ TEST_F(Setup_graph_core, delete_edge) {
     auto m = gc.create_node();
     nodes.emplace_back(m);
   }
-  std::random_shuffle(nodes.begin(), nodes.end());
+  std::shuffle(nodes.begin(), nodes.end(), std::knuth_b());
 
   std::vector<uint32_t> sink_nodes;
   std::vector<uint32_t> driver_nodes;
@@ -230,8 +231,8 @@ TEST_F(Setup_graph_core, delete_edge) {
   EXPECT_EQ(gc.get_num_pin_inputs (m1), driver_nodes.size());
 
 #if 1
-  std::random_shuffle(  sink_nodes.begin(),   sink_nodes.end());
-  std::random_shuffle(driver_nodes.begin(), driver_nodes.end());
+  std::shuffle(  sink_nodes.begin(),   sink_nodes.end(), std::knuth_b());
+  std::shuffle(driver_nodes.begin(), driver_nodes.end(), std::knuth_b());
 
   //gc.dump(m1);
 
