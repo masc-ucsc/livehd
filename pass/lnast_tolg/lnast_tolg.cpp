@@ -1222,95 +1222,71 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
 void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget) {
   auto c0_aget       = lnast->get_first_child(lnidx_aget);
   auto c1_aget       = lnast->get_sibling_next(c0_aget);
-  auto c2_aget       = lnast->get_sibling_next(c1_aget);
+  auto cn_aget       = lnast->get_last_child(lnidx_aget);
   auto c0_aget_name  = lnast->get_sname(c0_aget);
   auto c0_aget_vname = lnast->get_vname(c0_aget);
 
-  std::string attr_field;
-  {
-    auto it_aset = c2_aget;
+  std::string hier_fields_cat_name;
+  auto attr_vname = lnast->get_vname(cn_aget);
+  auto it_aset = c1_aget;
 
-    while (!it_aset.is_invalid()) {
-      I(lnast->get_type(it_aset).is_const());  // How can it be a ref?? foo.a.b.c.__xxx (a/b/c/__xxx must be consts)
-      auto vname2 = lnast->get_vname(it_aset);
-      if (attr_field.empty()) {
-        attr_field = vname2;
-      } else {
-        absl::StrAppend(&attr_field, ".", vname2);
-      }
-      if (vname2 == "__create_flop") {
-        auto flop_node = lg->create_node(Ntype_op::Flop);
-        flop_node.get_driver_pin().set_name(lnast->get_vname(c1_aget));
-        name2dpin[c0_aget_name] = flop_node.setup_driver_pin();
-
-        if (!is_tmp_var(c0_aget_vname))
-          setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-
-        auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
-        if (!flop_din_driver_pin.is_invalid()) {  // flop has some previous attribute set
-          flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
-          // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
-          auto driver_vname = lnast->get_vname(c1_aget);
-          I(vname2tuple_head.find(driver_vname) != vname2tuple_head.end());
-          auto tup_head_node = vname2tuple_head[driver_vname];
-          driver_var2wire_nodes[driver_vname].push_back(tup_head_node);
-        } else {  // if no previous attribute set, use the normal __last_value flow
-          auto driver_vname = lnast->get_vname(c1_aget);
-          driver_var2wire_nodes[driver_vname].push_back(flop_node);
-        }
-
-        it_aset = lnast->get_sibling_next(it_aset);
-        if (!it_aset.is_invalid()) {
-          Pass::error("attribute {} must be the last in the entry {}\n", vname2, attr_field);
-        }
-        return;
-      }
-
-      if (vname2 == "__last_value") {
-        Node wire_node;
-        wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
-        wire_node.get_driver_pin().set_name(lnast->get_vname(c1_aget));
-        name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
-
-        if (!is_tmp_var(c0_aget_vname))
-          setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
-
-        auto driver_vname = lnast->get_vname(c1_aget);
-        driver_var2wire_nodes[driver_vname].push_back(wire_node);
-
-        it_aset = lnast->get_sibling_next(it_aset);
-        if (!it_aset.is_invalid()) {
-          Pass::error("attribute {} must be the last in the entry {}\n", vname2, attr_field);
-        }
-        return;
-      }
-
-      it_aset = lnast->get_sibling_next(it_aset);
+  while (it_aset != cn_aget) {
+    if (hier_fields_cat_name.empty()) {
+      hier_fields_cat_name = lnast->get_vname(it_aset);
+    } else {
+      absl::StrAppend(&hier_fields_cat_name, ".", lnast->get_vname(it_aset));
     }
+    it_aset = lnast->get_sibling_next(it_aset);
   }
 
-  Node node = lg->create_node(Ntype_op::AttrGet);
 
-  {
-    // set outputs
-    auto node_dpin = node.setup_driver_pin();
-    node_dpin.set_name(c0_aget_name);
-    name2dpin[c0_aget_name] = node_dpin;
+  if (attr_vname == "__create_flop") {
+    auto flop_node = lg->create_node(Ntype_op::Flop);
+    flop_node.get_driver_pin().set_name(hier_fields_cat_name);
+    name2dpin[c0_aget_name] = flop_node.setup_driver_pin();
 
     if (!is_tmp_var(c0_aget_vname))
-      setup_dpin_ssa(node_dpin, c0_aget_vname, lnast->get_subs(c0_aget));
+      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
+
+    auto flop_din_driver_pin = setup_ref_node_dpin(lg, c1_aget);
+    if (!flop_din_driver_pin.is_invalid()) {  // flop has some previous attribute set
+      flop_din_driver_pin.connect_sink(flop_node.setup_sink_pin("din"));
+      // put the head of the tuple chain as the wire_node that will be driven by the largest ssa later
+      auto driver_vname = lnast->get_vname(c1_aget);
+      I(vname2tuple_head.find(driver_vname) != vname2tuple_head.end());
+      auto tup_head_node = vname2tuple_head[driver_vname];
+      driver_var2wire_nodes[driver_vname].push_back(tup_head_node);
+    } else {  // if no previous attribute set, use the normal __last_value flow
+      auto driver_vname = lnast->get_vname(c1_aget);
+      driver_var2wire_nodes[driver_vname].push_back(flop_node);
+    }
+
+    it_aset = lnast->get_sibling_next(it_aset);
+    if (!it_aset.is_invalid()) {
+      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
+    }
+    return;
   }
 
-  {
-    auto vn_spin = node.setup_sink_pin("parent");  // variable name
+  if (attr_vname == "__last_value") {
+    Node wire_node;
+    wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
+    // wire_node.get_driver_pin().set_name(lnast->get_vname(c1_aget));
+    wire_node.get_driver_pin().set_name(hier_fields_cat_name);
+    name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
-    Node_pin vn_dpin = setup_ref_node_dpin(lg, c1_aget);
-    lg->add_edge(vn_dpin, vn_spin);
+    if (!is_tmp_var(c0_aget_vname))
+      setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
+
+    auto driver_vname = lnast->get_vname(c1_aget);
+    driver_var2wire_nodes[driver_vname].push_back(wire_node);
+
+    it_aset = lnast->get_sibling_next(it_aset);
+    if (!it_aset.is_invalid()) {
+      Pass::error("attribute {} must be the last in the entry {}\n", attr_vname, hier_fields_cat_name);
+    }
+    return;
   }
-
-  auto af_spin = node.setup_sink_pin("field");  // attribute field
-  auto af_dpin = setup_field_dpin(lg, attr_field);
-  lg->add_edge(af_dpin, af_spin);
 }
 
 bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {

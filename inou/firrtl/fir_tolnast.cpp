@@ -2020,6 +2020,8 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Modul
   auto idx_stmts = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
 
   // Iterate over I/O of the module.
+  // FIXME->sh: maybe only this method needs mutex protection if all other global object is just "READ" in the ListStatementInfo?
+  //            -> no, as far as I know, at least Memory interface will be "WRITEN" in the ListStatementInfo
   for (int i = 0; i < user_module.port_size(); i++) {
     const firrtl::FirrtlPB_Port& port = user_module.port(i);
     ListPortInfo(*lnast, port, idx_stmts);
@@ -2178,8 +2180,7 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
  * contents of this into Lgraph form. */
 void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule& emod) {
   // Figure out all of mods IO and their respective bw + dir.
-  std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>>
-      port_list;  // Terms are as follows: name, direction, # of bits, sign.
+  std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> port_list;  // Terms are as follows: name, direction, # of bits, sign.
   for (int i = 0; i < emod.port_size(); i++) {
     auto port = emod.port(i);
     create_io_list(port.type(), port.direction(), port.id(), port_list);

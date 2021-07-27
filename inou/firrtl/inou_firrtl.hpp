@@ -26,6 +26,7 @@
 #include "pass.hpp"
 
 class Inou_firrtl : public Pass {
+// class Inou_firrtl {
 protected:
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, std::string> op2firsub;
   inline static std::mutex                                                              lgs_mutex;
@@ -41,12 +42,12 @@ protected:
                                              const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
 
   // Helper Functions (for handling specific cases)
-  void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
   uint32_t get_bit_count(const firrtl::FirrtlPB_Type &type);
-  void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
-  void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
-  void     setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
-  void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  void create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, const std::string &port_id, bool is_signed);
+  void init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
+  void setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, const std::string &id, Lnast_nid &parent_node);
+  void setup_register_bits_scalar(Lnast &lnast, const std::string &id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
+  void create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void split_hier_name(std::string_view hier_name, std::vector<std::pair<std::string_view, Inou_firrtl::Leaf_type>> &hier_subnames);
   void split_hier_name(std::string_view full_name, std::vector<std::string_view> &hier_subnames);
   void set_leaf_type(std::string_view subname, std::string_view hier_name, size_t prev,

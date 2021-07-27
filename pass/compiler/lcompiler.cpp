@@ -16,7 +16,6 @@ void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &l
 
 void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
-  
 
   fmt::print("---------------- Pyrope -> LNAST-SSA ({})------------------- \n", ln->get_top_module_name());
   ln->ssa_trans();
