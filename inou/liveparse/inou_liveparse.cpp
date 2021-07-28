@@ -17,7 +17,7 @@ void Inou_liveparse::do_tolg() {
 
   for (auto f : files.split(',')) {
     if (f.ends_with(".v") || f.ends_with(".sv")) {
-      chunker_v.parse_file(f);
+      chunker_v.parse_file(f.to_s());
     } else if (f.ends_with(".prp")) {
       error("inou.liveparse chunkify Pyrope not implemented yet {}", f);
       return;

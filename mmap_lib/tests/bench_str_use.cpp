@@ -467,7 +467,7 @@ void pstr_starts_with() {
 void bench_str_cmp() {
   {
     for(auto sz=2;sz<512;sz=sz*2) {
-      mmap_lib::str::clear();
+      mmap_lib::str::nuke();
 
       int conta = 0;
       std::vector<mmap_lib::str> v;
@@ -558,7 +558,7 @@ void bench_str_cmp() {
 int main(int argc, char** argv) {
 
   mmap_lib::str::setup();
-  mmap_lib::str::clear();
+  mmap_lib::str::nuke();
 
 #ifdef BENCH
   bench_str_cmp();

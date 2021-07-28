@@ -121,12 +121,42 @@ unknown. This binary representation allows for faster operations with uknowns
 In C++ generated simulation, the computation can be 2 or 4 bit logic. Inside
 LGraph/LNAST, the computation is always 4 bit logic.
 
+## node_type_area
+
+The node_type_area is a "property" for each cell type (not per instance). It
+should be a per class attribute (not instance attribute). A small difference
+with normal attributes is that "base" cell types have also this property, not
+only the tech file. A tech file could also add area properties, so not just for
+cells.
+
+* Rename/rework node_type_area (sub_area.hpp).
+* Populate the default areas for each cell (this should add cells like `__sum`
+  to the sub_node.
+* It is not a plain attribute because the value depends on the cell use. E.g: a
+  sum with 2 bits is different than a sub with 100 bits.
+* There should be also be an option to have a per-instance area modification
+  (factor?) but most cells should not have this, maybe some sub_node instances)
+
+* Summary: create a new sub_area class that tracks area per cell sub_node
+  instance, and allows to adjust area per instance in some cases. The
+  floorplanner could use this enhanced capability to track area.
+
 ## mmap_lib::str
 
 * Do more mmap_lib::str::concat cases (eg: concat with an integer). Optimize for speed.
 * Add non-persistent mmap_str option (only for non-sso). mmap_lib::pstr ?
 * Unclear what is better to pass mmap_lib (const mmap_lib &str) OR (mmap_lib str). Benchmark?
 * Go over all the absl::Str. Most of them could be replaced/avoided with mmap_lib::str::concat ....
+* create a mmap_str::str(int val). Equivalent to str(std::to_string(val)) without intermediate step
+* mmap_str_test is a test abd a bench. Split the bench to bench_str and convert the rest to google test
+
+### lnast
+
+* Once non-persistent mmap_str, convert the remaining std::string_views (lnast,...)
+
+### firrtl pass
+
+* It makes sense to keep it as std::string_view (no need to use mmap_str in the internal traversal)
 
 ## pass/fplan
 
@@ -136,7 +166,6 @@ LGraph/LNAST, the computation is always 4 bit logic.
 * node_tree is only used by pass/fplan. Move from core to pass/fplan
 * Lots of variable declarations c-style (early in the method, then assigned later. Use later on first assign)
 * Only classes can start with upper case (Name2Count -> name2count)
-* Rename/rework node_type_area to be an attribute (ann_area.hpp)
 * Classes should start uppercase. E.g: Ntype_area::dim
 * There are several uses of mmap_lib::map that should be converted to absl::flat_hash_map (only persistent should use mmap_lib). E.g: hint_map should not be persistent
 

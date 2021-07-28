@@ -22,10 +22,9 @@
 Chunkify_verilog::Chunkify_verilog(const mmap_lib::str &_path) : path(_path) { library = Graph_library::instance(path); }
 
 int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
-  std::string sfilename(filename);
-  int         fd = open(sfilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  int         fd = open(filename.to_s().c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
-    throw scan_error(*this, "could not open {} for output", sfilename);
+    throw scan_error(*this, "could not open {} for output", filename);
   }
 
   return fd;
@@ -35,7 +34,7 @@ bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, const mmap
   if (elab_path.empty())
     return false;
 
-  const std::string elab_filename = elab_chunk_dir + "/" + std::string(module_name) + ".v";
+  const std::string elab_filename = elab_chunk_dir.to_s() + "/" + module_name.to_s() + ".v";
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
@@ -189,7 +188,7 @@ void Chunkify_verilog::elaborate() {
         if (in_module) {
           throw scan_error(*this, "unexpected nested modules");
         }
-        scan_format_append(in_module_text);
+        format_append(in_module_text);
         scan_next();
         absl::StrAppend(&module_name, scan_text());
         module_io_pos = 1;
@@ -250,9 +249,9 @@ void Chunkify_verilog::elaborate() {
     }
 
     if (!in_module && !endmodule_found) {
-      scan_format_append(not_in_module_text);
+      format_append(not_in_module_text);
     } else {
-      scan_format_append(in_module_text);
+      format_append(in_module_text);
       if (endmodule_found) {
         bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {

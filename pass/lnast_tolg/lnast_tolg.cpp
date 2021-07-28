@@ -8,7 +8,7 @@
 #include "cprop.hpp"
 #include "pass.hpp"
 
-Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : module_name(_module_name), path(_path) {
+Lnast_tolg::Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str &_path) : module_name(_module_name), path(_path) {
   setup_lnast_to_lgraph_primitive_type_mapping();
   tuple_assign_str = "tuple_assign";
 }
@@ -483,7 +483,7 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
   }
 }
 
-Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, std::string_view input_field) {
+Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, const mmap_lib::str &input_field) {
   auto tup_get_inp = lg->create_node(Ntype_op::TupGet);
   auto tn_spin     = tup_get_inp.setup_sink_pin("parent");
   auto tn_dpin     = name2dpin["$"];
@@ -506,7 +506,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
   int                            i = 0;
   absl::flat_hash_map<int, Node> tg_map;
   std::string                    c0_tg_name;
-  std::string_view               c0_tg_vname;
+  const mmap_lib::str &              c0_tg_vname;
   int8_t                         c0_tg_subs = 0;
 
   for (const auto &child : lnast->children(lnidx_tg)) {
@@ -665,7 +665,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
   }
 }
 
-void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, std::string_view full_inp_hier_name) {
+void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
   auto pos          = full_inp_hier_name.find_last_of('.');
   auto last_subname = full_inp_hier_name.substr(pos + 1);
 
@@ -899,7 +899,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
 }
 
 // either tuple root or tuple key(str) fit in this case
-Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
+Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, const mmap_lib::str &ref_name) {
   static Node_pin invalid_dpin;
   if (ref_name.find_first_not_of("0123456789") == std::string::npos)
     return invalid_dpin;
@@ -915,7 +915,7 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
   return invalid_dpin;
 }
 
-Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view ref_vname, int16_t subs) {
+Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, const mmap_lib::str &ref_vname, int16_t subs) {
   (void)lg;  // FIXME: remove arg
   if (subs == 0) {
     auto     ref_name = absl::StrCat(ref_vname, "_", subs);
@@ -930,7 +930,7 @@ Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view ref_
   return name2dpin[chain_tail_name];
 }
 
-Node_pin Lnast_tolg::setup_field_dpin(Lgraph *lg, std::string_view field_name) {
+Node_pin Lnast_tolg::setup_field_dpin(Lgraph *lg, const mmap_lib::str &field_name) {
   auto it2 = field2dpin.find(field_name);
   if (it2 != field2dpin.end()) {
     return it2->second;
@@ -943,7 +943,7 @@ Node_pin Lnast_tolg::setup_field_dpin(Lgraph *lg, std::string_view field_name) {
 }
 
 // for operator, we must create a new node and dpin as it represents a new gate in the netlist
-Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, std::string_view fir_func_name) {
+Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, const mmap_lib::str &fir_func_name) {
   auto lhs       = lnast->get_first_child(lnidx_opr);
   auto lhs_name  = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
@@ -1124,7 +1124,7 @@ Ntype_op Lnast_tolg::decode_lnast_op(const Lnast_nid &lnidx_opr) {
   return it->second;
 }
 
-Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
+Node_pin Lnast_tolg::create_const(Lgraph *lg, const mmap_lib::str &const_str) {
 #if 0
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
@@ -1299,19 +1299,6 @@ bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
     }
   }
   return false;
-}
-
-void Lnast_tolg::split_hier_name(std::string_view full_name, std::vector<std::string_view> &hier_io_subnames) {
-  auto start = 0u;
-  auto end   = full_name.find('.');
-  while (end != std::string_view::npos) {
-    std::string_view token = full_name.substr(start, end - start);
-    hier_io_subnames.emplace_back(token);
-    start = end + 1;  //
-    end   = full_name.find('.', start);
-  }
-  std::string_view token = full_name.substr(start, end - start);
-  hier_io_subnames.emplace_back(token);
 }
 
 void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
@@ -1508,12 +1495,12 @@ void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
   lg->add_edge(rst_dpin, rst_spin);
 }
 
-void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, std::string_view var_name, uint16_t subs) {
+void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, const mmap_lib::str &var_name, uint16_t subs) {
   dpin.set_ssa(subs);
   dpin.set_prp_vname(var_name);
 }
 
-void Lnast_tolg::create_out_ta(Lgraph *lg, std::string_view field_name, Node_pin &val_dpin) {
+void Lnast_tolg::create_out_ta(Lgraph *lg, const mmap_lib::str &field_name, Node_pin &val_dpin) {
   auto tup_add = lg->create_node(Ntype_op::TupAdd);
   auto tn_dpin = setup_tuple_ref(lg, "%");  // might come from TupAdd
   if (!tn_dpin.is_invalid()) {
@@ -1697,7 +1684,7 @@ void Lnast_tolg::try_create_flattened_inp(Lgraph *lg) {
   }
 }
 
-void Lnast_tolg::handle_inp_tg_runtime_idx(std::string_view hier_name, Node &chain_head, Node &cur_tg) {
+void Lnast_tolg::handle_inp_tg_runtime_idx(const mmap_lib::str &hier_name, Node &chain_head, Node &cur_tg) {
   // (1) iterate and remove previous TGs in the same chain
   for (auto itr : inp_artifacts[chain_head.get_compact()]) {
     if (!itr.is_invalid() && itr != cur_tg) {
@@ -1716,7 +1703,7 @@ void Lnast_tolg::handle_inp_tg_runtime_idx(std::string_view hier_name, Node &cha
   return;
 }
 
-void Lnast_tolg::create_ginp_as_runtime_idx(Lgraph *lg, std::string_view hier_name, Node &chain_head, Node &cur_tg) {
+void Lnast_tolg::create_ginp_as_runtime_idx(Lgraph *lg, const mmap_lib::str &hier_name, Node &chain_head, Node &cur_tg) {
   // (1) iterate and remove previous TGs in the same chain
   for (auto itr : inp_artifacts[chain_head.get_compact()]) {
     if (!itr.is_invalid() && itr != cur_tg) {

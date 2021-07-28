@@ -17,6 +17,19 @@ protected:
 
   Graph_library *library;
 
+  void format_append(std::string &text) const {
+    assert(scanner_pos < token_list.size());
+    if (scanner_pos > 0) {
+      if (token_list[scanner_pos - 1].line != token_list[scanner_pos].line) {
+        absl::StrAppend(&text, "\n", token_list[scanner_pos].get_text());
+        return;
+      }
+      absl::StrAppend(&text, " ", token_list[scanner_pos].get_text());
+      return;
+    }
+    absl::StrAppend(&text, token_list[scanner_pos].get_text());
+  }
+
   int open_write_file(const mmap_lib::str &filename) const;
 
   bool is_same_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const;

@@ -163,7 +163,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
   auto ntype = pin.get_node().get_type_op();
   if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
     // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
-    const mmap_lib::str &pin_name = lnast.add_string(dpin_get_name(pin));
+    std::string_view pin_name = lnast.add_string(dpin_get_name(pin).to_s());
     // to add #x = #x.__create_flop
     auto temp_decl_var_name = create_temp_var(lnast);
 
@@ -222,7 +222,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     return;
   }
 
-  const mmap_lib::str &name;
+  mmap_lib::str name;
   auto             bw = pin.get_bits();
   // if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
   if ((bw > 0) & (dpin_get_name(pin).substr(0, 3) != "___")) {
@@ -265,7 +265,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   }
 }
 
-void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, const std::string_view& pin_name,
+void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, std::string_view pin_name,
                                      const uint32_t& bits) {
   /*creates subtree in LN for the "dot" and corresponding "assign" to depict bw
    *          dot                    assign
@@ -1273,13 +1273,12 @@ const mmap_lib::str &Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
  * else (dpin has name) modulate the name as per need and assing to the map */
 void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, const mmap_lib::str &name_part) {
   auto ccd  = dpin.get_compact_class_driver();
-  auto name = name_part;
   if (dpin_name_map.find(ccd) != dpin_name_map.end()) {
     // if (key present) overwrite the value
     dpin_name_map[ccd] = name_part;
   } else {                                              // insert in map
     I(dpin_name_map.find(ccd) == dpin_name_map.end());  // assert that the pin entry is not already in map.
-    dpin_name_map.emplace(ccd, name);                   // emplace does not reset; if it is already set, it just returns the val
+    dpin_name_map.emplace(ccd, name_part);              // emplace does not reset; if it is already set, it just returns the val
   }
   // dpin_name_map.emplace(ccd, name);//emplace does not reset; if it is already set, it just returns the val
 }

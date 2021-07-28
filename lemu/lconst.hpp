@@ -81,12 +81,12 @@ protected:
 
 public:
 
-  Lconst(absl::Span<unsigned char> v);
-  Lconst(std::string_view txt);
-  Lconst(const mmap_lib::str &txt);
-  Lconst(Number v);
-  Lconst(int64_t v);
-  // Lconst(int64_t v, Bits_t bits);
+  explicit Lconst(absl::Span<unsigned char> v);
+  explicit Lconst(std::string_view txt);
+  explicit Lconst(const mmap_lib::str &txt);
+  explicit Lconst(Number v);
+  Lconst(int64_t v); // not explicit to allow easy Lconst(x) < 0 operations
+
   Lconst();
 
   static Lconst string(std::string_view txt);

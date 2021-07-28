@@ -17,7 +17,7 @@ protected:
 
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
-  static Attr get_key_attr(std::string_view key);
+  static Attr get_key_attr(const mmap_lib::str &key);
 
   bool                                                         not_finished;
   absl::flat_hash_map<Node_pin::Compact_class, Bitwidth_range> bwmap;  // bwmap indexing with dpin_compact_class, nid

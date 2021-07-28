@@ -23,19 +23,14 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
   Lbench      b("inou.PYROPE_parse_to_lnast");
   Inou_pyrope p(var);
 
-  for (auto f : absl::StrSplit(p.files, ',')) {
+  for (auto f : p.files.split(',')) {
     Prp_lnast converter;
-    converter.parse_file(f);
+    converter.parse_file(f.to_s());
 
-    std::string name{f};
-    auto        found_path = name.find_last_of('/');
-    if (found_path != std::string::npos)
-      name = name.substr(found_path + 1);
+    auto basename       = f.get_str_after_last_if_exists('/');
+    auto basename_noext = basename.get_str_before_first('.');
 
-    auto found_dot = name.find_last_of('.');
-    if (found_dot != std::string::npos)
-      name = name.substr(0, found_dot);
-    auto lnast = converter.prp_ast_to_lnast(name);
+    auto lnast = converter.prp_ast_to_lnast(basename_noext);
     var.add(std::move(lnast));
   }
 }

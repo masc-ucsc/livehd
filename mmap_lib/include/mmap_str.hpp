@@ -364,6 +364,8 @@ protected:
     return n;
   }
 
+  constexpr str(uint64_t a, uint64_t b) : size_ctrl(a), ptr_or_start(a>>32), data(b) {}
+
 public:
   constexpr str() : size_ctrl(1), ptr_or_start(0), data(0) {}
   constexpr str(char c) : size_ctrl((static_cast<uint32_t>(c)<<8) | 3), ptr_or_start(0), data(0) {
@@ -584,8 +586,8 @@ public:
     return true;
   }
 
-#if 0
-  bool ends_with(std::string_view en) const {
+#if 1
+  bool ends_with(const std::string &en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
 
@@ -875,6 +877,32 @@ public:
     return str(s);
   }
 
+// Extension over the  Bit Twiddling Hacks By Sean Eron Anderson seander@cs.stanford.edu
+#define has_byte_uppercase(x) \
+(((((((~0ULL)/255)*(127+(91))) - ((x)&((~0ULL)/255)*127))&(~(x))) & (((x)&((~0ULL)/255)*127) + (((~0ULL)/255)*(127-(64)))))&(((~0ULL)/255)*128))
+
+  str to_lower() const {
+    if (is_sso()) {
+      // the fist byte is size. Since it is SSO it can not be between A (64) and Z (91)
+      // The bytes over the size are irrelevant (but they should be zero, so also out of range)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+      const uint64_t *a_orig = (const uint64_t *)(this);
+      const uint64_t *b_orig = a_orig+1;
+#pragma GCC diagnostic pop
+      uint64_t a = (has_byte_uppercase(*a_orig)>>2) | (*a_orig);
+      uint64_t b = (has_byte_uppercase(*b_orig)>>2) | (*b_orig);
+
+      return str(a,b);
+    }
+
+    auto s = to_s();
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+      return std::tolower(c);
+    });
+    return str(s);
+  }
+
   static str concat(const str &a, const str &b) {
     auto ret = a.append(b);
     return ret;
@@ -900,12 +928,43 @@ public:
     return str(s);
   }
 
-  static str concat(const str &a, std::string_view b, const std::string &c) {
+  static str concat(const str &a, std::string_view b, std::string_view c) {
     std::string s;
     s.reserve(a.size()+b.size()+c.size());
     s.append(a.to_s());
     s.append(b.data(), b.size());
     s.append(c.data(), c.size());
+
+    return str(s);
+  }
+
+  static str concat(const str &a, std::string_view b, const str &c, std::string_view d) {
+    std::string s;
+    s.reserve(a.size()+b.size()+c.size()+d.size());
+    s.append(a.to_s());
+    s.append(b.data(), b.size());
+    s.append(c.to_s());
+    s.append(d.data(), d.size());
+
+    return str(s);
+  }
+
+  static str concat(const str &a, const str &b, int64_t val) {
+    std::string s;
+    s.reserve(a.size()+b.size()+10);
+    s.append(a.to_s());
+    s.append(b.to_s());
+    s.append(std::to_string(val));
+
+    return str(s);
+  }
+
+  static str concat(int64_t val, const str &b, const str &c) {
+    std::string s;
+    s.reserve(b.size()+c.size()+10);
+    s.append(std::to_string(val));
+    s.append(b.to_s());
+    s.append(c.to_s());
 
     return str(s);
   }
@@ -956,10 +1015,26 @@ public:
     return substr(pos+1);
   }
 
+  str get_str_after_last_if_exists(const char chr) const {
+    auto pos = rfind(chr);
+    if (pos==std::string::npos)
+      return *this;
+
+    return substr(pos+1);
+  }
+
   str get_str_after_first(const char chr) const {
     auto pos = find(chr);
     if (pos==std::string::npos)
       return str();
+
+    return substr(pos+1);
+  }
+
+  str get_str_after_first_if_exists(const char chr) const {
+    auto pos = find(chr);
+    if (pos==std::string::npos)
+      return *this;
 
     return substr(pos+1);
   }

@@ -13,8 +13,6 @@ void Lnast_node::dump() const {
 }
 
 Lnast::~Lnast() {
-  for (auto *ptr : string_pool) delete ptr;
-
   if (memblock_fd == -1)
     return;
 
@@ -26,24 +24,6 @@ Lnast::~Lnast() {
 
   memblock    = "";
   memblock_fd = -1;
-}
-
-std::string_view Lnast::add_string(const mmap_lib::str &str) {
-  string_pool.emplace_back(new std::string(str.to_s()));
-  auto *str_ptr = string_pool.back();
-  return *str_ptr;
-}
-
-std::string_view Lnast::add_string(std::string_view sview) {
-  string_pool.emplace_back(new std::string(sview));
-  auto *str_ptr = string_pool.back();
-  return *str_ptr;
-}
-
-std::string_view Lnast::add_string(const std::string &str) {
-  string_pool.emplace_back(new std::string(str));
-  auto *str_ptr = string_pool.back();
-  return *str_ptr;
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
@@ -58,11 +38,11 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
     top_sts_nid = get_first_child(top_nid);
   }
 
-  std::string tmp_str = "0b?";
-  std::string err_var = "err_var";
+  mmap_lib::str tmp_str = "0b?";
+  mmap_lib::str err_var = "err_var";
   auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(Etoken()));
-  add_child(asg_nid, Lnast_node::create_ref(add_string(err_var)));
-  undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(add_string(tmp_str)));
+  add_child(asg_nid, Lnast_node::create_ref(err_var));
+  undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(tmp_str));
 
   Phi_rtable top_phi_resolve_table;
   phi_resolve_tables[top_sts_nid] = top_phi_resolve_table;
@@ -372,7 +352,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   if (!paired_nid.is_invalid())
     paired_type = get_type(paired_nid);
 
-  std::string ta_asg_str = "tuple_assign";
+  mmap_lib::str ta_asg_str = "tuple_assign";
 
   // hier_TA but is actually doing __bits set
   auto last_token  = get_token(get_last_child(selc_nid)).get_text();
@@ -463,7 +443,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     //     && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
     //   ref_data(selc_nid)->type = Lnast_ntype::create_assign();
     //   auto asg_nid             = selc_nid;  // better code reading
-    //   ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
+    //   ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, ta_asg_str);
     //   auto c0_asg              = get_first_child(asg_nid);
     //   auto c1_asg              = get_sibling_next(c0_asg);
     //   auto c2_asg              = get_sibling_next(c1_asg);
@@ -560,7 +540,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   //   }
 
   //   ref_data(old_tg)->type  = Lnast_ntype::create_assign();
-  //   ref_data(old_tg)->token = Etoken(0, 0, 0, 0, add_string(ta_asg_str));
+  //   ref_data(old_tg)->token = Etoken(0, 0, 0, 0, ta_asg_str);
   //   /* auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI")); */
   //   auto asg_nid = selc_nid;  // better code reading
   //   auto c0_asg  = get_first_child(asg_nid);
@@ -572,7 +552,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // }
 }
 
-bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name,
+bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, const mmap_lib:str &ref_name,
                                                               const Lnast_nid &src_if_nid) {
   if (get_parent(psts_nid).is_root()) {
     auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
@@ -581,7 +561,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
       if (is_output(ref_name)) {
         auto prev_sib_if     = get_sibling_prev(src_if_nid);
         auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
-        add_child(tup_pre_declare, Lnast_node::create_ref(add_string(ref_name)));
+        add_child(tup_pre_declare, Lnast_node::create_ref(ref_name));
         add_child(tup_pre_declare, get_data(undefined_var_nid));
         return true;
       }
@@ -969,8 +949,8 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-std::string_view Lnast::create_tmp_var() {
-  auto tmp_var_name = add_string(absl::StrCat("___T", tmp_var_cnt));
+const mmap_lib:str &Lnast::create_tmp_var() {
+  auto tmp_var_name = absl::StrCat("___T", tmp_var_cnt);
   tmp_var_cnt++;
   return tmp_var_name;
 }
@@ -1001,7 +981,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
     }
   }
 
-  std::vector<std::string_view> var_list;
+  std::vector<mmap_lib::str> var_list;
   for (auto const &[vname, t_nid] : true_table) {
     if (true_table.empty())  // it might be empty due to the erase from previous for loop
       break;
@@ -1034,7 +1014,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
   }
 }
 
-Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_nid &psts_nid, bool false_path) {
+Lnast_nid Lnast::get_complement_nid(const mmap_lib:str &brother_name, const Lnast_nid &psts_nid, bool false_path) {
   auto brother_nid = check_phi_table_parents_chain(brother_name, psts_nid);
   if (brother_nid == Lnast_nid()) {
     auto        if_nid                   = get_parent(psts_nid);
@@ -1046,7 +1026,7 @@ Lnast_nid Lnast::get_complement_nid(std::string_view brother_name, const Lnast_n
   return brother_nid;
 }
 
-Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, const Lnast_nid &psts_nid) {
+Lnast_nid Lnast::check_phi_table_parents_chain(const mmap_lib:str &target_name, const Lnast_nid &psts_nid) {
   auto &parent_table = phi_resolve_tables[psts_nid];
   if (parent_table.find(target_name) != parent_table.end())
     return parent_table[target_name];
@@ -1169,22 +1149,22 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   phi_resolve_table[lhs_name]   = lhs_nid;  // for a variable string, always update to latest Lnast_nid
 }
 
-bool Lnast::is_in_bw_table(const std::string_view name) { return from_lgraph_bw_table.contains((std::string)name); }
+bool Lnast::is_in_bw_table(const mmap_lib:str &name) { return from_lgraph_bw_table.contains(name); }
 
-uint32_t Lnast::get_bitwidth(const std::string_view name) {
+uint32_t Lnast::get_bitwidth(const mmap_lib:str &name) {
   I(is_in_bw_table(name));
-  return from_lgraph_bw_table[(std::string)name];
+  return from_lgraph_bw_table[name];
 }
 
-void Lnast::set_bitwidth(const std::string_view name, const uint32_t bitwidth) {
+void Lnast::set_bitwidth(const mmap_lib:str &name, const uint32_t bitwidth) {
   I(bitwidth > 0);
-  from_lgraph_bw_table[(std::string)name] = bitwidth;
+  from_lgraph_bw_table[name] = bitwidth;
 }
 
 void Lnast::dump() const {
   for (const auto &it : depth_preorder()) {
     const auto &node = get_data(it);
-    std::string indent{"    "};
+    mmap_lib::str indent{"    "};
     for (int i = 0; i < it.level; ++i) indent += "    ";
 
     if (node.type.is_ref()

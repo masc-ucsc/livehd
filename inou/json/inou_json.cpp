@@ -29,7 +29,7 @@ Inou_json::Inou_json(const Eprp_var &var) : Pass("inou.json", var) {}
 void Inou_json::fromlg(Eprp_var &var) {
   Inou_json p(var);
 
-  auto odir = var.get("odir");
+  mmap_lib::str odir(var.get("odir"));
   bool ok   = p.setup_directory(odir);
   if (!ok) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
@@ -37,7 +37,7 @@ void Inou_json::fromlg(Eprp_var &var) {
   }
 
   for (const auto &g : var.lgs) {
-    auto file = absl::StrCat(odir, "/", g->get_name().to_s(), ".json");
+    auto file = mmap_lib::str::concat(odir, "/", g->get_name(), ".json");
 
     to_json(g, file);
   }

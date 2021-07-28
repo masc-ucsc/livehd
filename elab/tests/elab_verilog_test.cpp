@@ -132,7 +132,7 @@ public:
     std::string_view module;
     while (!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
-        std::string token{scan_text()};
+        const auto &token = scan_text();
 
         std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c) {
           return std::tolower(c);

@@ -158,19 +158,20 @@ TEST_F(Setup_mmap_map_test, string_key) {
     int conta = 0;
     for (int i = 0; i < 10000; i++) {
       int              sz     = rng.max(0xFFFFF);
-      std::string      sz_str = "base" + std::to_string(sz) + "foo";
-      std::string_view key{sz_str};
+      std::string      sz_std = "base" + std::to_string(sz) + "foo";
+      std::string_view key{sz_std};
+      mmap_lib::str    key_str(key);
 
-      if (map.has(key)) {
+      if (map.has(key_str)) {
         EXPECT_EQ(map2.count(key), 1);
         continue;
       }
 
       conta++;
 
-      EXPECT_TRUE(!map.has(key));
-      map.set(key, sz);
-      EXPECT_TRUE(map.has(key));
+      EXPECT_TRUE(!map.has(key_str));
+      map.set(key_str, sz);
+      EXPECT_TRUE(map.has(key_str));
 
       EXPECT_EQ(map2.count(key), 0);
       map2[key] = sz;
@@ -216,19 +217,20 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
     conta = 0;
     for (int i = 0; i < 10000; i++) {
       int              sz     = rng.max(0xFFFF);
-      std::string      sz_str = std::to_string(sz) + "foo";
-      std::string_view key{sz_str};
+      std::string      sz_std = std::to_string(sz) + "foo";
+      std::string_view key{sz_std};
+      mmap_lib::str    key_str(key);
 
-      if (map.has(key)) {
+      if (map.has(key_str)) {
         EXPECT_EQ(map2.count(key), 1);
         continue;
       }
 
       conta++;
 
-      EXPECT_TRUE(!map.has(key));
-      map.set(key, sz);
-      EXPECT_TRUE(map.has(key));
+      EXPECT_TRUE(!map.has(key_str));
+      map.set(key_str, sz);
+      EXPECT_TRUE(map.has(key_str));
 
       EXPECT_EQ(map2.count(key), 0);
       map2[key] = sz;

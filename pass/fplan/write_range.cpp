@@ -39,6 +39,8 @@ Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass
   const uint8_t start = static_cast<uint8_t>(Ntype_op::Invalid) + 1;
   const uint8_t end   = static_cast<uint8_t>(Ntype_op::Last_invalid);
 
+#if 0
+  // FIXME: See docs/cleanup.md node_type_area TODO to re-enable this code
   Ntype_area na(mmap_lib::str(path));
 
   for (uint8_t op = start; op < end; op++) {
@@ -50,6 +52,7 @@ Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass
       // fmt::print("{}\t{:.3f}\t{:.3f}\t{:.3f}\n", Ntype::get_name(nop), area, min_ar, max_ar);
     }
   }
+#endif
 }
 
 void Pass_fplan_write_range::pass(Eprp_var& var) { Pass_fplan_write_range w(var); }

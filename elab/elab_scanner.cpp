@@ -61,7 +61,7 @@ void Elab_scanner::setup_translate() {
   translate['\\'] = Token_id_backslash;
 }
 
-void Elab_scanner::add_token(Etoken &t) {
+void Elab_scanner::add_token(Etoken::Tracker &t) {
   if (t.tok == Token_id_nop) {
     token_list_spaced = true;
     I(!trying_merge);
@@ -71,7 +71,8 @@ void Elab_scanner::add_token(Etoken &t) {
   if (likely(!trying_merge || token_list_spaced)) {
     trying_merge      = false;
     token_list_spaced = false;
-    token_list.push_back(t);
+    assert(memblock_size>=t.pos2);
+    token_list.emplace_back(t, memblock);
     return;
   }
 
@@ -126,7 +127,8 @@ void Elab_scanner::add_token(Etoken &t) {
   }
 
   token_list_spaced = false;
-  token_list.push_back(t);
+  assert(memblock_size>=t.pos2);
+  token_list.emplace_back(t, memblock);
 }
 
 void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
@@ -178,7 +180,8 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   buffer_name = filename;
 
   if (sb.st_size == 0) {
-    memblock = std::string_view("");
+    memblock      = 0;
+    memblock_size = 0;
     throw parser_error(*this, "file {} seems empty. Nothing to parse", filename);
   }
 
@@ -187,8 +190,11 @@ void Elab_scanner::parse_setup(std::string_view filename) {
     throw parser_error(*this, "parse mmap failed for file {} with size {}", filename, sb.st_size);
   }
 
-  memblock = std::string_view(b, sb.st_size);
-  err_tracker::sot_log("{}\n", memblock);  // this is the correct(original) version
+  memblock = b;
+  memblock_size= = sb.st_size;
+
+  // THIS CAN BE HUGE!! err_tracker::sot_log("{}\n", memblock);  // this is the correct(original) version
+
   buffer_name = filename;
 
   token_list.clear();
@@ -220,12 +226,12 @@ void Elab_scanner::parse_step() {
   bool in_singleline_comment = false;
   int  in_multiline_comment  = 0;  // Nesting support
 
-  Etoken t;
-  t.clear(Token_id_nop, 0, std::string_view{&memblock[0], 0});
+  Etoken::Tracker t;
+  t.clear(Token_id_nop, 0);
 
   bool starting_comment  = false;  // Only for comments to avoid /*/* nested back to back */*/
   bool finishing_comment = false;  // Only for comments to avoid /*/* nested back to back */*/
-  for (size_t pos = 0; pos < memblock.size(); pos++) {
+  for (size_t pos = 0; pos < memblock_size; pos++) {
     char c = memblock[pos];
 
     t.adjust_token_size(pos);
@@ -233,7 +239,7 @@ void Elab_scanner::parse_step() {
       nlines++;
       if (!in_comment && t.tok != Token_id_nop) {
         add_token(t);
-        t.clear(pos, nlines, std::string_view(&memblock[pos], 0));
+        t.clear(pos, nlines);
         trying_merge = false;
       } else {
         starting_comment      = false;
@@ -246,13 +252,13 @@ void Elab_scanner::parse_step() {
           }
 
           add_token(t);
-          t.clear(pos, nlines, std::string_view(&memblock[pos], 0));
+          t.clear(pos, nlines);
           trying_merge = false;
         }
       }
       if (in_string_pos) {
         add_token(t);
-        t.clear(pos, nlines, std::string_view(&memblock[pos], 0));
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
@@ -265,8 +271,8 @@ void Elab_scanner::parse_step() {
       if (!in_comment) {
         constexpr size_t len1 = std::char_traits<char>::length("synopsys ");
         size_t           npos = pos + 1;
-        while (memblock[npos] == ' ' && npos < memblock.size()) npos++;
-        if ((npos + len1) < memblock.size()) {
+        while (memblock[npos] == ' ' && npos < memblock_size) npos++;
+        if ((npos + len1) < memblock_size) {
           if (strncmp(&memblock[npos], "synopsys ", len1) == 0) {
             t.tok = Token_id_synopsys;
           }
@@ -278,7 +284,7 @@ void Elab_scanner::parse_step() {
       assert(!finishing_comment);
     } else if (unlikely(!finishing_comment
                         && ((last_c == '/' && c == '*')
-                            || (last_c == '(' && c == '*' && (memblock.size() > pos) && memblock[pos + 1] != ')'
+                            || (last_c == '(' && c == '*' && (memblock_size > pos) && memblock[pos + 1] != ')'
                                 && token_list.size() && token_list.back().tok != Token_id_at)))) {
       t.tok        = Token_id_comment;
       trying_merge = false;
@@ -306,15 +312,15 @@ void Elab_scanner::parse_step() {
       finishing_comment = false;
 
       if (in_singleline_comment) {
-        if (!is_newline(memblock[pos]) && (pos + 1) < memblock.size()) {
+        if (!is_newline(memblock[pos]) && (pos + 1) < memblock_size) {
           // TODO: Convert this to a word base (not byte based) skip
-          while (!is_newline(memblock[pos + 1]) && (pos + 3) < memblock.size()) pos++;
+          while (!is_newline(memblock[pos + 1]) && (pos + 3) < memblock_size) pos++;
         }
       } else {
-        if (!is_newline(memblock[pos]) && memblock[pos] != '*' && memblock[pos] != '/' && (pos + 3) < memblock.size()) {
+        if (!is_newline(memblock[pos]) && memblock[pos] != '*' && memblock[pos] != '/' && (pos + 3) < memblock_size) {
           // TODO: Convert this to a word base (not byte based) skip
           while (!is_newline(memblock[pos + 1]) && memblock[pos + 1] != '*' && memblock[pos + 1] != '/'
-                 && (pos + 3) < memblock.size())
+                 && (pos + 3) < memblock_size)
             pos++;
         }
       }
@@ -322,14 +328,14 @@ void Elab_scanner::parse_step() {
     } else if (unlikely(in_string_pos)) {
       if (c == '"' && last_c != '\\') {
         add_token(t);
-        t.clear(pos, nlines, std::string_view(&memblock[pos], 0));
+        t.clear(pos, nlines);
         trying_merge = false;
 
         in_string_pos = false;
       }
     } else if (unlikely(c == '"' && last_c != '\\')) {
       add_token(t);
-      t.reset(Token_id_string, pos + 1, nlines, std::string_view(&memblock[pos + 1], 1));
+      t.reset(Token_id_string, pos + 1, nlines);
       trying_merge = false;
 
       in_string_pos = true;
@@ -338,7 +344,7 @@ void Elab_scanner::parse_step() {
       finishing_comment = false;
 
       add_token(t);
-      t.reset(nt, pos, nlines, std::string_view(&memblock[pos], 1));
+      t.reset(nt, pos, nlines);
       trying_merge = translate[c].try_merge;
     }
 
@@ -346,7 +352,7 @@ void Elab_scanner::parse_step() {
   }  // end of token_list building
 
   if (t.tok != Token_id_nop) {
-    t.adjust_token_size(memblock.size());
+    t.adjust_token_size(memblock_size);
     add_token(t);
   }
 
@@ -366,7 +372,8 @@ Elab_scanner::Elab_scanner() {
   n_errors     = 0;
   n_warnings   = 0;
 
-  memblock    = "";
+  memblock      = 0;
+  memblock_size = 0
   memblock_fd = -1;
 }
 
@@ -374,12 +381,13 @@ void Elab_scanner::unregister_memblock() {
   if (memblock_fd == -1)
     return;
 
-  int ok = munmap((void *)memblock.data(), memblock.size());
+  int ok = munmap((void *)memblock, memblock_size);
   I(ok == 0);
   close(memblock_fd);
 
-  memblock    = "";
-  memblock_fd = -1;
+  memblock      = 0;
+  memblock_size = 0;
+  memblock_fd   = -1;
 }
 
 Elab_scanner::~Elab_scanner() { unregister_memblock(); }
@@ -400,19 +408,6 @@ bool Elab_scanner::scan_prev() {
   scanner_pos = scanner_pos - 1;
 
   return true;
-}
-
-void Elab_scanner::scan_format_append(std::string &text) const {
-  assert(scanner_pos < token_list.size());
-  if (scanner_pos > 0) {
-    if (token_list[scanner_pos - 1].line != token_list[scanner_pos].line) {
-      absl::StrAppend(&text, "\n", token_list[scanner_pos].get_text());
-      return;
-    }
-    absl::StrAppend(&text, " ", token_list[scanner_pos].get_text());
-    return;
-  }
-  absl::StrAppend(&text, token_list[scanner_pos].get_text());
 }
 
 uint32_t Elab_scanner::scan_line() const {
@@ -479,8 +474,8 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
       break;
     }
   }
-  size_t line_pos_end = memblock.size();
-  for (size_t i = token_list[max_pos].pos1; i < memblock.size(); i++) {
+  size_t line_pos_end = memblock_size;
+  for (size_t i = token_list[max_pos].pos1; i < memblock_size; i++) {
     if (is_newline(memblock[i])) {
       line_pos_end = i;
       break;

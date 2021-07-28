@@ -14,6 +14,8 @@
 #include "fmt/format.h"
 #include "iassert.hpp"
 
+#include "mmap_str.hpp"
+
 using Token_id = uint8_t;
 
 using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
@@ -81,56 +83,64 @@ constexpr Token_id Token_id_keyword_last  = 254;
 
 class Etoken {
 protected:
-  std::string_view text;
+  mmap_lib::str text;
+
+  struct Tracker {
+    Token_id tok;   // Token (identifier, if, while...)
+    uint64_t pos1;  // start position in original memblock
+    uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
+    uint32_t line;  // line of code
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) { }
+
+    void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
+      tok  = _tok;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+    }
+    void clear(uint64_t _pos1, uint32_t _line) {
+      tok  = Token_id_nop;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+    }
+
+    void adjust_token_size(uint64_t end_pos) {
+      GI(tok != Token_id_nop, end_pos >= pos2);
+      pos2 = end_pos;
+    }
+  };
 
 public:
   constexpr Etoken() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
-  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
+  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, const mmap_lib::str &_text) {
     tok  = _tok;
     pos1 = _pos1;
     pos2 = _pos2;
     line = _line;
     text = _text;
   }
-  void reset(Token_id _tok, uint64_t _pos1, uint32_t _line, std::string_view _text) {
-    tok  = _tok;
-    pos1 = _pos1;
-    pos2 = _pos1;  // FIXME->sh: you reset the token so the length of the token
-                   // should be 0, pos2 follows pos1
-    line = _line;
-    text = _text;
-  }
-  void clear(uint64_t _pos1, uint32_t _line, std::string_view _text) {
-    tok  = Token_id_nop;
-    pos1 = _pos1;
-    pos2 = _pos1;  // FIXME->sh: you clear the token so the length of the token
-                   // should be 0, pos2 follows pos1
-    line = _line;
-    text = _text;
+  Etoken(const Tracker &t, const char *memblock) {
+    tok  = t.tok;
+    pos1 = t.pos1;
+    pos2 = t.pos2;
+    line = t.line;
+    assert(pos2>pos1); // empty token otherwise
+    text = mmap_lib::str(memblock+pos1 , pos2-pos1);
   }
 
   void fuse_token(Token_id new_tok, const Etoken &t2) {
-    I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
     tok = new_tok;
 
     auto new_len = text.size() + t2.text.size();
-    pos2         = pos2 + 1;
-    text         = std::string_view{text.data(), new_len};
+    pos2         = pos2 + t2.text.size();
+    text         = mmap_lib::str::concat(text, t2.text);
   }
 
   void append_token(const Etoken &t2) {
-    I(text.data() + text.size() == t2.text.data());  // t2 must be continuous (otherwise, create new token)
-
     auto new_len = text.size() + t2.text.size();
-    pos2         = pos2 + 1;
-    text         = std::string_view{text.data(), new_len};
-  }
-
-  void adjust_token_size(uint64_t end_pos) {
-    GI(tok != Token_id_nop,
-       end_pos >= pos2);  // FIXME->sh: check correctness of pos2
-    auto new_len = end_pos - pos2;
-    text         = std::string_view{text.data(), new_len};
+    pos2         = pos2 + t2.text.size();
+    text         = mmap_lib::str::concat(text, t2.text);
   }
 
   Token_id tok;   // Token (identifier, if, while...)
@@ -138,7 +148,7 @@ public:
   uint64_t pos2;  // end position in original memblock for debugging
   uint32_t line;  // line of code
 
-  std::string_view get_text() const { return text; }
+  const mmap_lib::str &get_text() const { return text; }
 };
 
 class Elab_scanner {
@@ -149,9 +159,10 @@ protected:
   Token_list token_list;
 
 private:
-  std::string buffer_name;
+  mmap_lib::str    buffer_name;
 
-  std::string_view memblock;
+  const char      *memblock;
+  size_t           memblock_size;
   int              memblock_fd;
   void             unregister_memblock();
 
@@ -192,20 +203,15 @@ private:
 
   void add_token(Etoken &t);
 
-  void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
+  void scan_raw_msg(const mmap_lib::str &cat, const mmap_lib::str &text, bool third) const;
 
-  void parse_setup(std::string_view filename);
+  void parse_setup(const mmap_lib::str &filename);
   void parse_setup();
   void parse_step();
 
 protected:
-  std::pair<std::string_view, int> transfer_memblock_ownership() {
-    std::pair<std::string_view, int> p{memblock, memblock_fd};
-    memblock_fd = -1;
-    return p;
-  }
-  std::string_view get_memblock() const { return memblock; }
-  std::string_view get_filename() const {
+  std::string_view get_memblock() const { assert(memblock); return std::string_view(memblock, memblock_size); }
+  mmap_lib::str get_filename() const {
     I(memblock_fd != -1);
     return buffer_name;
   }
@@ -278,14 +284,14 @@ public:
     return token_list[scanner_pos].tok;
   }
 
-  std::string_view scan_prev_text() const {
+  const mmap_lib::str &scan_prev_text() const {
     size_t p = scanner_pos - 1;
     if (scanner_pos <= 0)
       p = 0;
     return token_list[p].get_text();
   }
 
-  std::string_view scan_next_text() const {
+  const mmap_lib::str &scan_next_text() const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size() - 1;
@@ -299,7 +305,7 @@ public:
     return token_list[p].tok == tok;
   }
 
-  std::string_view scan_peep_text(int offset) const {
+  const mmap_lib::str &scan_peep_text(int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
@@ -309,14 +315,12 @@ public:
     return token_list[p].get_text();
   }
 
-  void scan_format_append(std::string &text) const;
-
-  inline std::string_view scan_text(const Token_entry te) const {
+  inline const mmap_lib::str &scan_text(const Token_entry te) const {
     I(token_list.size() > te);
     return token_list[te].get_text();
   }
 
-  std::string_view scan_text() const { return token_list[scanner_pos].get_text(); }
+  const mmap_lib::str &scan_text() const { return token_list[scanner_pos].get_text(); }
   uint32_t         scan_line() const;
 
   size_t get_token_pos() const { return token_list[scan_token_entry()].pos1; }
@@ -344,21 +348,22 @@ public:
     ;
   }
 
-  void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
+  void patch_pass(const absl::flat_hash_map<mmap_lib::str, Token_id> &keywords);
 
   void patch_pass() {
-    absl::flat_hash_map<std::string, Token_id> no_keywords;
+    absl::flat_hash_map<mmap_lib::str, Token_id> no_keywords;
     patch_pass(no_keywords);
   }
 
-  void parse_file(std::string_view filename) {
+  void parse_file(const mmap_lib::str &filename) {
     parse_setup(filename);
     parse_step();
   }
 
   void parse_inline(std::string_view txt) {
     parse_setup();
-    memblock = txt;
+    memblock      = txt.data();
+    memblock_size = txt.size();
     parse_step();
   }
 

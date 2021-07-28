@@ -46,7 +46,7 @@ void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_l
 
   auto pos_dpin = pos_spin.get_driver_pin();
   if (pos_dpin.is_type_const()) {
-    auto v = pos_dpin.get_type_const().to_string();
+    auto v = pos_dpin.get_type_const().to_str();
     if (!Lgtuple::is_root_attribute(v)) {
       tup->set_issue();
       tuple_issues = true;
@@ -427,7 +427,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
-    Lconst result("-1");
+    Lconst result(-1);
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
       result = result.and_op(c);
@@ -475,7 +475,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     replace_node(node, result);
   } else if (op == Ntype_op::Mult) {
-    Lconst result("1");
+    Lconst result(1);
     for (auto &i : inp_edges_ordered) {
       auto c = i.driver.get_node().get_type_const();
       result = result.mult_op(c);
@@ -946,7 +946,7 @@ void Cprop::tuple_subgraph(const Node &node) {
   auto *sub_lg = node.ref_library()->try_find_lgraph(sub.get_lgid());
   if (sub_lg == nullptr || sub_lg->is_empty()) {
     mmap_lib::str sub_name{sub.get_name()};
-    if (sub_name.size() > 2 && sub_name.substr(0, 2) == "__") {
+    if (sub_name.starts_with("__")) {
       auto cell_name  = sub_name.substr(2);
       auto cell_ntype = Ntype::get_op(cell_name);
       if (cell_ntype != Ntype_op::Invalid) {

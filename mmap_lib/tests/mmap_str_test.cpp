@@ -44,7 +44,7 @@ class Mmap_str_test : public ::testing::Test {
 public:
   void SetUp() override {
     mmap_lib::str::setup();
-    mmap_lib::str::clear();
+    mmap_lib::str::nuke();
 
     srand(time(0));
     uint8_t t_len = 0u;
@@ -85,7 +85,7 @@ public:
   }
 
   void TearDown() override {
-    mmap_lib::str::clear();
+    mmap_lib::str::nuke();
   }
 
   // wrapper for .at() since vectors are private
@@ -264,7 +264,7 @@ TEST_F(Mmap_str_test, starts_ends_with) {
     EXPECT_TRUE(temp.starts_with(stable_sw));
 
     EXPECT_TRUE(temp.ends_with(check_ew));
-    EXPECT_TRUE(temp.ends_with(sv_check_ew));
+    EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
     EXPECT_TRUE(temp.ends_with(stable_ew));
   }
 
@@ -320,16 +320,16 @@ TEST_F(Mmap_str_test, starts_ends_with) {
 
     if (end_ew == temp.size()) {
       EXPECT_TRUE(temp.ends_with(check_ew));
-      EXPECT_TRUE(temp.ends_with(sv_check_ew));
+      EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
       EXPECT_TRUE(temp.ends_with(stable_ew));
     } else {
       if (orig.substr(orig.size() - stable_ew.size()) == stable_ew) {
         EXPECT_TRUE(temp.ends_with(check_ew));
-        EXPECT_TRUE(temp.ends_with(sv_check_ew));
+        EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
         EXPECT_TRUE(temp.ends_with(stable_ew));
       } else {
         EXPECT_FALSE(temp.ends_with(check_ew));
-        EXPECT_FALSE(temp.ends_with(sv_check_ew));
+        EXPECT_FALSE(temp.ends_with(mmap_lib::str(sv_check_ew)));
         EXPECT_FALSE(temp.ends_with(stable_ew));
       }
     }
@@ -352,7 +352,6 @@ TEST_F(Mmap_str_test, to_s_to_i) {
 TEST_F(Mmap_str_test, concat_append) {
   for (auto i = 0; i < RNDN; ++i) {
     std::string      one = s_get(i), two = s_get((i + 1) % RNDN);
-    std::string_view sv1 = one, sv2 = two;
     mmap_lib::str sone(one); 
     mmap_lib::str stwo(two);
     mmap_lib::str sthree(one);
@@ -421,14 +420,15 @@ TEST_F(Mmap_str_test, find_rfind) {
 
     std::string      stable_c = curr.substr(start, end);
     std::string      stable_n = next.substr(start2, end2);
-    std::string_view c_sv     = stable_c;
-    std::string_view n_sv     = stable_n;
     mmap_lib::str    curr_str(curr);
     mmap_lib::str    next_str(next);
     mmap_lib::str    curr_sub(stable_c);
     mmap_lib::str    next_sub(stable_n);
 
 #if 0
+    std::string_view c_sv     = stable_c;
+    std::string_view n_sv     = stable_n;
+
     std::cout << "curr_str: ";
     curr_str.print_string();
     std::cout << "\ncurr_sub: ";
@@ -493,6 +493,21 @@ TEST_F(Mmap_str_test, substr) {
     EXPECT_EQ(curr_sub, curr_sub_ref);
     EXPECT_EQ(next_sub, next_sub_ref);
   }
+}
+
+TEST_F(Mmap_str_test, to_lower) {
+
+  mmap_lib::str short_lower("this is short");
+  mmap_lib::str short_upper("A Short Test Z");
+
+  EXPECT_EQ(short_lower, short_lower.to_lower());
+  EXPECT_EQ("a short test z", short_upper.to_lower());
+
+  mmap_lib::str long_upper("We Also nEeD to TeSt a LONG sentence to CHECK overfloWS");
+
+  EXPECT_EQ("we also need to test a long sentence to check overflows", long_upper.to_lower());
+
+  fmt::print("1[{}] 2[{}]\n", short_upper.to_lower(), long_upper.to_lower());
 }
 
 TEST_F(Mmap_str_test, split) {
