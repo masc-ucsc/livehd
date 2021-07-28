@@ -21,11 +21,11 @@ protected:
   Lrand<bool> rbool;
   Lrand<int>  rint;
 
-  mmap_lib::map<std::string_view, Node_pin> track_n1_inp_connected_pins;
-  mmap_lib::map<std::string_view, Node_pin> track_n2_inp_connected_pins;
+  mmap_lib::map<mmap_lib::str, Node_pin> track_n1_inp_connected_pins;
+  mmap_lib::map<mmap_lib::str, Node_pin> track_n2_inp_connected_pins;
 
-  mmap_lib::map<std::string_view, Node_pin> track_n1_out_connected_pins;
-  mmap_lib::map<std::string_view, Node_pin> track_n2_out_connected_pins;
+  mmap_lib::map<mmap_lib::str, Node_pin> track_n1_out_connected_pins;
+  mmap_lib::map<mmap_lib::str, Node_pin> track_n2_out_connected_pins;
 
   mmap_lib::map<XEdge::Compact, int> track_edge_count;
 
@@ -107,7 +107,9 @@ protected:
 #endif
   }
 
-  Node_pin add_n1_setup_driver_pin(const std::string& pname) {
+  Node_pin add_n1_setup_driver_pin(const std::string& pname_std) {
+    mmap_lib::str pname(pname_std);
+
     const auto &it = track_n1_out_connected_pins.find(pname);
     if (it == track_n1_out_connected_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
@@ -136,7 +138,9 @@ protected:
     return dpin;
   }
 
-  Node_pin add_n2_setup_sink_pin(const std::string& pname) {
+  Node_pin add_n2_setup_sink_pin(const std::string& pname_std) {
+    mmap_lib::str pname(pname_std);
+
     const auto &it = track_n2_inp_connected_pins.find(pname);
     if (it == track_n2_inp_connected_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));

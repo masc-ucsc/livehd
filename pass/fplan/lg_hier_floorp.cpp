@@ -12,7 +12,7 @@ Lg_hier_floorp::Lg_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(
 // can't return geogLayouts since ArchFP calls totalArea on components, which breaks if geogLayouts have no children (returns 0 for
 // area)
 FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
-  const std::string_view path = root_lg->get_path();
+  auto path = root_lg->get_path();
 
   // count and load subnodes only
   absl::flat_hash_map<Lgraph*, unsigned int> sub_lg_count;
@@ -23,7 +23,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
   });
 
   FPContainer* l = new annLayout(sub_lg_count.size());
-  l->setName(lg->get_name().data());
+  l->setName(lg->get_name());
 
   if (sub_lg_count.empty()) {
     l->setType(Ntype_op::Const);

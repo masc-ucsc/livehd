@@ -37,7 +37,7 @@ void Inou_json::fromlg(Eprp_var &var) {
   }
 
   for (const auto &g : var.lgs) {
-    auto file = absl::StrCat(odir, "/", g->get_name(), ".json");
+    auto file = absl::StrCat(odir, "/", g->get_name().to_s(), ".json");
 
     to_json(g, file);
   }

@@ -25,7 +25,8 @@ protected:
     mkdir("lgdb_attr", 0755);
     top = Lgraph::create("lgdb_attr", "top", "-");
     for (int i = 0; i < 1024; i++) {
-      subs[i] = Lgraph::create("lgdb_attr", "sub_" + std::to_string(i), "-");
+      mmap_lib::str lg_name(std::string("sub_") + std::to_string(i));
+      subs[i] = Lgraph::create("lgdb_attr", lg_name, "-");
     }
 
     for (int i = 0; i < 1000000; i++) {

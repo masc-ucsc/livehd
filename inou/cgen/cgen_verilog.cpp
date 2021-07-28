@@ -39,7 +39,9 @@ std::string Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
   return get_scaped_name(dpin.get_wire_name());
 }
 
-std::string Cgen_verilog::get_scaped_name(const std::string &name) {
+std::string Cgen_verilog::get_scaped_name(const std::string &_name) {
+  std::string name = _name;
+
   if (name[0] == '%') {
     if (name[1] == '.') {
       name = name.substr(2);
@@ -684,7 +686,7 @@ void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
           dpin.invalidate();
       }
       if (!dpin.is_invalid()) {
-        absl::StrAppend(&buffer, first_entry ? "" : ",", ".", io_pin.name, "(", get_wire_or_const(dpin), ")\n");
+        absl::StrAppend(&buffer, first_entry ? "" : ",", ".", io_pin.name.to_s(), "(", get_wire_or_const(dpin), ")\n");
         first_entry = false;
       }
     }
@@ -927,9 +929,9 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
 std::tuple<std::string, int> Cgen_verilog::setup_file(Lgraph *lg) const {
   std::string filename;
   if (odir.empty()) {
-    filename = absl::StrCat(lg->get_name(), ".v");
+    filename = absl::StrCat(lg->get_name().to_s(), ".v");
   } else {
-    filename = absl::StrCat(odir, "/", lg->get_name(), ".v");
+    filename = absl::StrCat(odir, "/", lg->get_name().to_s(), ".v");
   }
 
   int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);

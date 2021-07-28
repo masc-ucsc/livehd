@@ -44,7 +44,7 @@ Bits_t Lconst::read_bits(std::string_view txt) {
   return tmp;
 }
 
-Lconst::Container Lconst::serialize() const {
+mmap_lib::str Lconst::serialize() const {
   Container     v;
   unsigned char c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   v.emplace_back(c);
@@ -54,7 +54,7 @@ Lconst::Container Lconst::serialize() const {
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 8);
 
-  return v;
+  return mmap_lib::str(v.data(), v.size());
 }
 
 uint64_t Lconst::hash() const {
@@ -88,7 +88,8 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
   }
 }
 
-Lconst::Lconst(const Container &v) {
+Lconst Lconst::unserialize(const mmap_lib::str &v) {
+
   I(v.size() > 4);  // invalid otherwise
 
   uint8_t  c0 = v[0];
@@ -96,14 +97,20 @@ Lconst::Lconst(const Container &v) {
   uint32_t c2 = v[2];
   uint32_t c3 = v[3];
 
-  explicit_str = (c0 & 0x10) ? true : false;
+  auto res_explicit_str = (c0 & 0x10) ? true : false;
 
-  bits = (c1 << 16) | (c2 << 8) | c3;
+  auto res_bits = (c1 << 16) | (c2 << 8) | c3;
 
-  boost::multiprecision::import_bits(num, v.begin() + 4, v.end());
+  Number res_num;
+
+  auto str = v.to_s();
+
+  boost::multiprecision::import_bits(res_num, str.begin() + 4, str.end());
   if (c0 & 0x01) {  // negative
-    num = -num;
+    res_num = -res_num;
   }
+
+  return Lconst(res_explicit_str, res_bits, res_num);
 }
 
 Lconst::Lconst() {
@@ -123,6 +130,7 @@ Lconst::Lconst(Number v) {
   num          = v;
   bits         = calc_num_bits();
 }
+
 
 Lconst Lconst::string(std::string_view orig_txt) {
   Lconst lc;
@@ -184,6 +192,10 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
   }
 
   return lc;
+}
+
+Lconst::Lconst(const mmap_lib::str &orig_txt)
+  : Lconst(std::string_view(orig_txt.to_s().data(),orig_txt.size())) {
 }
 
 Lconst::Lconst(std::string_view orig_txt) {
@@ -947,6 +959,15 @@ std::string Lconst::to_string() const {
   }
   I(explicit_str);  // either has_unknowns() or is_string()
   return to_string(num);
+}
+
+mmap_lib::str Lconst::to_str() const {
+  if (is_i()) {
+    auto val = std::to_string(to_i());
+    return mmap_lib::str(val);
+  }
+  I(explicit_str);  // either has_unknowns() or is_string()
+  return mmap_lib::str(to_string(num));
 }
 
 std::string Lconst::to_string_no_xz() const {

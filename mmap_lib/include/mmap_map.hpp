@@ -139,6 +139,32 @@
 // umul
 namespace mmap_lib {
 
+template <typename T>
+struct is_array_serializable {
+  template <typename U>
+  static constexpr decltype(std::declval<U>().data(), bool()) test_data(int) {
+    return true;
+  }
+
+  template <typename U>
+  static constexpr bool test_data(...) {
+    return false;
+  }
+
+  template <typename U>
+  static constexpr decltype(std::declval<U>().size(), bool()) test_size(int) {
+    return true;
+  }
+
+  template <typename U>
+  static constexpr bool test_size(...) {
+    return false;
+  }
+
+  // std::string can work too but it can easily do copies all over. Not worth it for performance reasons
+  static constexpr bool value = test_data<T>(int()) && test_size<T>(int()) && !std::is_same<T, std::string>::value;
+};
+
 namespace detail {
 #if defined(__SIZEOF_INT128__)
 #define mmap_map_UMULH(a, b) static_cast<uint64_t>((static_cast<unsigned __int128>(a) * static_cast<unsigned __int128>(b)) >> 64u)
@@ -391,6 +417,8 @@ private:
   static_assert(!std::is_same<T, std::string>::value, "mmap_lib::map uses mmap_lib::str as value (not std::string)\n");
   static_assert(!std::is_same<Key, std::string_view>::value, "mmap_lib::map uses mmap_lib::str as key (not std::string_view)\n");
   static_assert(!std::is_same<T, std::string_view>::value, "mmap_lib::map uses mmap_lib::str as value (not std::string_view)\n");
+  static_assert(!is_array_serializable<Key>::value, "mmap_lib::map can not have an array for key (first)\n");
+  static_assert(!is_array_serializable<T>::value, "mmap_lib::map can not have an array for contents (second)\n");
 
   static_assert(MaxLoadFactor100 > 10 && MaxLoadFactor100 < 100, "MaxLoadFactor100 needs to be >10 && < 100");
 
@@ -1121,8 +1149,6 @@ public:
     return iterator{this, mKeyVals, mInfo, fast_forward_tag{}};
   }
   [[nodiscard]] const_iterator begin() const {
-    ref_lock();
-
     return cbegin();
   }
   [[nodiscard]] const_iterator cbegin() const {
@@ -1154,7 +1180,7 @@ public:
   }
 
   iterator erase(const_iterator& pos) {
-    ref_lock();
+    assert(ref_locked);
 
     // its safe to perform const cast here
     return erase(iterator{this, const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});

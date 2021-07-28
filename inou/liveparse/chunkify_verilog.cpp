@@ -31,11 +31,11 @@ int Chunkify_verilog::open_write_file(std::string_view filename) const {
   return fd;
 }
 
-bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view text1, std::string_view text2) const {
+bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_view text1, std::string_view text2) const {
   if (elab_path.empty())
     return false;
 
-  const std::string elab_filename = elab_chunk_dir + "/" + std::string(module) + ".v";
+  const std::string elab_filename = elab_chunk_dir + "/" + std::string(module_name) + ".v";
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
@@ -50,7 +50,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module, std::string_view te
 
   char *memblock2 = (char *)mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  // Read only mmap
   if (memblock2 == MAP_FAILED) {
-    Inou_liveparse::error(fmt::format("mmap failed?? for {}", module));
+    Inou_liveparse::error(fmt::format("mmap failed?? for {}", module_name));
     close(fd);
     return false;
   }
@@ -164,7 +164,7 @@ void Chunkify_verilog::elaborate() {
   bool last_input  = false;
   bool last_output = false;
 
-  std::string module;
+  std::string module_name;
   Port_ID     module_io_pos = 1;
 
   // This has to be cut&pasted to each file
@@ -191,11 +191,11 @@ void Chunkify_verilog::elaborate() {
         }
         scan_format_append(in_module_text);
         scan_next();
-        absl::StrAppend(&module, scan_text());
+        absl::StrAppend(&module_name, scan_text());
         module_io_pos = 1;
         in_module     = true;
 
-        sub = &library->reset_sub(module, source);
+        sub = &library->reset_sub(mmap_lib::str(module_name), mmap_lib::str(source));
         I(sub);
 
       } else if (txt == "input") {
@@ -254,11 +254,11 @@ void Chunkify_verilog::elaborate() {
     } else {
       scan_format_append(in_module_text);
       if (endmodule_found) {
-        bool same = is_same_file(module, not_in_module_text, in_module_text);
+        bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
-          write_file(chunk_dir + "/" + module + ".v", not_in_module_text, in_module_text);
+          write_file(chunk_dir + "/" + module_name + ".v", not_in_module_text, in_module_text);
         }
-        module.clear();
+        module_name.clear();
         in_module_text.clear();
       }
     }

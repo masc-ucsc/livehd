@@ -74,12 +74,12 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
 
     if (nodes.HasMember("input_name")) {
       fmt::print("DEBUG:: input name is : {} \n", nodes["input_name"].GetString());
-      g->add_graph_input(nodes["input_name"].GetString(), 0, 0);  // FIXME: set original_pos and bits
+      g->add_graph_input(mmap_lib::str(nodes["input_name"].GetString()), 0, 0);  // FIXME: set original_pos and bits
     }
 
     if (nodes.HasMember("output_name")) {
       fmt::print("DEBUG:: output name is : {} \n", nodes["output_name"].GetString());
-      g->add_graph_output(nodes["output_name"].GetString(), 0, 0);  // FIXME: must remember original_pos and set bits
+      g->add_graph_output(mmap_lib::str(nodes["output_name"].GetString()), 0, 0);  // FIXME: must remember original_pos and set bits
     }
 
     if (nodes.HasMember("outputs")) {
@@ -102,7 +102,7 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
         }
 
         auto     dst_pid = output_edge["sink_pid"].GetString();
-        Node_pin dpin    = last_node.setup_driver_pin(dst_pid);
+        Node_pin dpin    = last_node.setup_driver_pin(map_lib::str(dst_pid));
         Node_pin spin    = dst_node.setup_sink_pin(src_pid);
         if (output_edge.HasMember("bits")) {
           g->add_edge(dpin, spin, output_edge["bits"].GetInt());

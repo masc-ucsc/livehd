@@ -375,8 +375,8 @@ public:
 
   // non-hierarchical node name (1 for all nodes)
   void             set_name(const mmap_lib::str &iname);
-  std::string      get_name() const;
-  std::string      create_name() const;
+  mmap_lib::str    get_name() const;
+  mmap_lib::str    create_name() const;
   bool             has_name() const;
 
   void             set_place(const Ann_place &p);

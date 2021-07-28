@@ -938,32 +938,22 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
+Bitwidth::Attr Bitwidth::get_key_attr(mmap_lib::str key) {
   // FIXME: code duplicated in Firmap. Create a separate class for Attr
-  const auto sz = key.size();
 
-  if (sz < 5)
-    return Attr::Set_other;
-
-  if (key.substr(sz - 5, sz) == "__max")
+  if (key.ends_with("__max"))
     return Attr::Set_max;
 
-  if (key.substr(sz - 5, sz) == "__min")
+  if (key.ends_with("__min"))
     return Attr::Set_min;
 
-  if (sz < 7)
-    return Attr::Set_other;
-
-  if (key.substr(sz - 7, sz) == "__ubits")
+  if (key.ends_with("__ubits"))
     return Attr::Set_ubits;
 
-  if (key.substr(sz - 7, sz) == "__sbits")
+  if (key.ends_with("__sbits"))
     return Attr::Set_sbits;
 
-  if (sz < 11)
-    return Attr::Set_other;
-
-  if (key.substr(sz - 11, sz) == "__dp_assign")
+  if (key.ends_with("__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
@@ -1074,7 +1064,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
   auto attr_dpin = node_attr.get_driver_pin("Y");
 
-  std::string_view dpin_name;
+  mmap_lib::str dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
@@ -1196,7 +1186,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     return;
 
   auto             attr_dpin = node_attr.get_driver_pin("Y");
-  std::string_view dpin_name;
+  mmap_lib::str  dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 

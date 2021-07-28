@@ -19,7 +19,7 @@ protected:
     int           fwd_pos;
     int           bwd_pos;
     bool          leaf;
-    std::string   name;
+    mmap_lib::str name;
   };
 
   mmap_lib::tree<Node_data> tree;
@@ -84,13 +84,13 @@ protected:
         int n_outputs = rint.between(1, 2);
         int max_pos   = 0;
         for (int i = 0; i < n_inputs; ++i) {
-          std::string name = std::string("i") + std::to_string(i);
+          mmap_lib::str name(std::string("i") + std::to_string(i));
           int         pos  = max_pos + rint.between(1, 5);
           max_pos          = pos;
           sub_lg->add_graph_input(name, pos, rint.max(60));
         }
         for (int i = 0; i < n_outputs; ++i) {
-          std::string name = std::string("o") + std::to_string(i);
+          mmap_lib::str name(std::string("o") + std::to_string(i));
           int         pos  = max_pos + rint.between(1, 5);
           max_pos          = pos;
           sub_lg->add_graph_output(name, pos, rint.max(60));
@@ -174,7 +174,7 @@ protected:
       }
     }
 
-    lg_root->get_library().each_lgraph([this](Lg_type_id lgid, std::string_view name) {
+    lg_root->get_library().each_lgraph([this](Lg_type_id lgid, const mmap_lib::str &name) {
       (void)lgid;
       Lgraph *lg = Lgraph::open(lg_root->get_path(), name);
       I(lg);
@@ -285,11 +285,11 @@ protected:
       data->leaf    = tree.is_leaf(index);
       if (data->leaf) {
         std::string name("leaf_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data->name = name;
+        data->name = mmap_lib::str(name);
         n_leafs++;
       } else {
         std::string name("node_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data->name = name;
+        data->name = mmap_lib::str(name);
       }
       ++pos;
     }

@@ -91,7 +91,7 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   g->each_local_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
 
-    Lgraph *sub_lg = Lgraph::open(path, lgid);
+    Lgraph *sub_lg = Lgraph::open(path, Lg_type_id(lgid));
     if (!sub_lg)
       return;
     if (sub_lg->is_empty()) {
@@ -172,13 +172,13 @@ void Pass_sample::annotate_placement(Lgraph *g) {
   }
   for (auto node : g->forward()) {
     auto place = node.get_place();
-    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place->get_x());
+    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place.get_x());
   }
 }
 
 void Pass_sample::create_sample_graph(Lgraph *g) {
-  auto        lg_path = g->get_path();
-  std::string lg_source{g->get_library().get_source(g->get_lgid())};  // must be string because create can free it
+  auto  lg_path = g->get_path();
+  auto  lg_source{g->get_library().get_source(g->get_lgid())};
 
   Lgraph *lg = Lgraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample Lgraph...\n");

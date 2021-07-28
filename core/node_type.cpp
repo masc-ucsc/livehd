@@ -8,11 +8,14 @@
 
 static_assert(static_cast<int>(Ntype_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 
-Lgraph_Node_Type::Lgraph_Node_Type(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+Lgraph_Node_Type::Lgraph_Node_Type(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept
     : Lgraph_Base(_path, _name, _lgid, _lib)
-    , const_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_const"))
-    , subid_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_subid"))
-    , lut_map(_path, absl::StrCat("lg_", std::to_string(_lgid), "_lut")) {}
+    , const_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_const"))
+    , subid_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_subid"))
+    , lut_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_lut")) {
+
+
+}
 
 void Lgraph_Node_Type::clear() {
   const_map.clear();
@@ -66,7 +69,7 @@ const Sub_node &Lgraph_Node_Type::get_type_sub_node(Index_id nid) const {
   return library->get_sub(sub_lgid);
 }
 
-const Sub_node &Lgraph_Node_Type::get_type_sub_node(std::string_view sub_name) const {
+const Sub_node &Lgraph_Node_Type::get_type_sub_node(const mmap_lib::str &sub_name) const {
   I(name != sub_name);  // No recursion
   return library->get_sub(sub_name);
 }
@@ -77,7 +80,7 @@ Sub_node *Lgraph_Node_Type::ref_type_sub_node(Index_id nid) {
   return library->ref_sub(sub_lgid);
 }
 
-Sub_node *Lgraph_Node_Type::ref_type_sub_node(std::string_view sub_name) {
+Sub_node *Lgraph_Node_Type::ref_type_sub_node(const mmap_lib::str &sub_name) {
   I(name != sub_name);  // No recursion
   return library->ref_sub(sub_name);
 }
@@ -93,12 +96,12 @@ void Lgraph_Node_Type::set_type_lut(Index_id nid, const Lconst &lutid) {
 Lconst Lgraph_Node_Type::get_type_lut(Index_id nid) const {
   I(node_internal[nid].get_type() == Ntype_op::LUT);
 
-  return Lconst(lut_map.get(Node::Compact_class(nid)));
+  return Lconst::unserialize(lut_map.get(Node::Compact_class(nid)));
 }
 
 Lconst Lgraph_Node_Type::get_type_const(Index_id nid) const {
 
-  return Lconst(const_map.get(Node::Compact_class(nid)));
+  return Lconst::unserialize(const_map.get(Node::Compact_class(nid)));
 }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
@@ -111,6 +114,6 @@ void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
   node_internal.ref_unlock();
 }
 
-void Lgraph_Node_Type::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Lconst(sv)); }
+void Lgraph_Node_Type::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst(sv)); }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }

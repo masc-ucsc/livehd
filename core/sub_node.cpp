@@ -15,7 +15,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
   writer.Uint64(lgid);
 
   writer.Key("name");
-  writer.String(name.c_str());
+  writer.String(name.to_s().c_str());
 
   writer.Key("io_pins");
   writer.StartArray();
@@ -28,7 +28,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.StartObject();
 
     writer.Key("name");
-    writer.String(pin.name.c_str());
+    writer.String(pin.name.to_s().c_str());
 
     if (pin.graph_io_pos != Port_invalid) {
       writer.Key("graph_io_pos");
@@ -61,7 +61,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   // fmt::print("DEBUG18 old lgid:{}, new lgid:{}\n", lgid, entry["lgid"].GetUint64());
   lgid            = entry["lgid"].GetUint64();
   std::string str = entry["name"].GetString();
-  name            = str;
+  name            = mmap_lib::str(str);
 
   io_pins.resize(1);  // No id ZERO
 
@@ -92,7 +92,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     }
     size_t instance_pid = io_pin["instance_pid"].GetUint();
 
-    auto io_name     = io_pin["name"].GetString();
+    auto io_name     = mmap_lib::str(io_pin["name"].GetString());
     name2id[io_name] = instance_pid;
     if (io_pins.size() <= instance_pid)
       io_pins.resize(instance_pid + 1);

@@ -136,7 +136,9 @@ TEST_F(Setup_graphs_test, annotate1a) {
 TEST_F(Setup_graphs_test, annotate1b) {
   for (auto node : top->forward()) {
     EXPECT_TRUE(!node.has_place());
-    EXPECT_EQ(node.ref_place()->get_x(), 0);
+    Ann_place p;
+    node.set_place(p);
+    EXPECT_EQ(node.get_place().get_x(), 0);
     EXPECT_TRUE(node.has_place());
   }
   for (const auto &node : top->forward()) {
@@ -145,11 +147,17 @@ TEST_F(Setup_graphs_test, annotate1b) {
 }
 
 TEST_F(Setup_graphs_test, annotated) {
+
   for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
-      EXPECT_EQ(dpin.get_node().ref_place()->get_x(), 0);
-      EXPECT_EQ(dpin.get_node().ref_place()->get_y(), 0);
+      if (!dpin.get_node().has_place()) {
+        Ann_place p;
+        dpin.get_node().set_place(p);
+      }
+
+      EXPECT_EQ(dpin.get_node().get_place().get_x(), 0);
+      EXPECT_EQ(dpin.get_node().get_place().get_y(), 0);
       if (dpin.has_name() && dpin.get_name() == "b")
         EXPECT_EQ(dpin.get_offset(), 3);
       else
@@ -163,20 +171,21 @@ TEST_F(Setup_graphs_test, annotated) {
     x_val++;
     y_val += 3;
 
-    auto *place1 = node.ref_place();
-    place1->replace(x_val, y_val, 0, 0);
-    EXPECT_EQ(place1->get_x(), x_val);
+    auto place1 = node.get_place();
+    place1.replace(x_val, y_val, 0, 0);
+    EXPECT_EQ(place1.get_x(), x_val);
+    node.set_place(place1);
 
-    auto *place2 = node.ref_place();
-    EXPECT_EQ(place2->get_x(), x_val);
+    auto place2 = node.get_place();
+    EXPECT_EQ(place2.get_x(), x_val);
+    node.set_place(place2);
 
     auto place3 = node.get_place();
     EXPECT_EQ(place3.get_x(), x_val);
 
-    auto &place4 = node.get_place();
+    auto place4 = node.get_place();
     EXPECT_EQ(place4.get_x(), x_val);
-    EXPECT_EQ(&place4, place1);
-    EXPECT_EQ(&place4, place2);
+    EXPECT_EQ(place4, place2);
   }
 
   for (auto node : top->backward()) {

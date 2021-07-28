@@ -282,7 +282,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lg
       }
       I(level == it->second);
 
-      auto *lg = Lgraph::open(path, it->first);
+      auto *lg = Lgraph::open(path, Lg_type_id(it->first));
       if (lg != nullptr && !lg->is_empty())
         next_round.emplace_back(lg);
       it = visited.erase(it);

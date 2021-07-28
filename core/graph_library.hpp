@@ -53,7 +53,7 @@ protected:
   using Name2id            = absl::flat_hash_map<mmap_lib::str, Lg_type_id::type>;
   using Recycled_id        = absl::flat_hash_set<uint64_t>;
 
-  const std::string path;
+  const mmap_lib::str path;
   const std::string library_file;
 
   // Begin protected for MT
@@ -88,7 +88,7 @@ protected:
   static Lgraph *try_find_lgraph_int(const mmap_lib::str & path, const mmap_lib::str &name);
   static Lgraph *try_find_lgraph_int(const mmap_lib::str & path, Lg_type_id lgid);
   Lgraph *       try_find_lgraph_int(const mmap_lib::str &name) const;
-  Lgraph *       try_find_lgraph_int(Lg_type_id lgid) const;
+  Lgraph *       try_find_lgraph_int(const Lg_type_id lgid) const;
 
   Sub_node &      reset_sub_int(const mmap_lib::str &name, const mmap_lib::str &source);
   Sub_node &      setup_sub_int(const mmap_lib::str &name, const mmap_lib::str &source);
@@ -173,7 +173,7 @@ public:
     return try_find_lgraph_int(name);
   }
 
-  Lgraph *try_find_lgraph(Lg_type_id lgid) const {
+  Lgraph *try_find_lgraph(const Lg_type_id lgid) const {
     // WARNING: This is a frequent case to build netlists (designed to not require lock)
     // std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(lgid);

@@ -8,7 +8,7 @@
 #include "node_pin.hpp"
 
 Hierarchy_tree::Hierarchy_tree(Lgraph *_top)
-    : mmap_lib::tree<Hierarchy_data>(_top->get_path(), absl::StrCat(_top->get_name(), "_htree")), top(_top) {}
+    : mmap_lib::tree<Hierarchy_data>(_top->get_path().to_s(), absl::StrCat(_top->get_name().to_s(), "_htree")), top(_top) {}
 
 Lgraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
   I(!hidx.is_invalid());  // no hierarchical should not call this

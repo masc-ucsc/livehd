@@ -15,9 +15,9 @@
 #include "lgedgeiter.hpp"
 #include "lgraph_base_core.hpp"
 
-Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
+Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_Node_Type(_path, _name, _lgid, _lib), htree(this) {
-  I(!absl::StrContains(_name, '/'));  // No path in name
+  I(!_name.contains('/'));  // No path in name
   I(_name == get_name());
 }
 
@@ -26,9 +26,9 @@ Lgraph::~Lgraph() {
   library->unregister(name, lgid, this);
 }
 
-bool Lgraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
+bool Lgraph::exists(const mmap_lib::str &path, const mmap_lib::str &name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
-Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string_view source) {
+Lgraph *Lgraph::create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source) {
   auto *lib = Graph_library::instance(path);
   I(lib);
   auto *lg = lib->setup_lgraph(name, source);
@@ -37,10 +37,9 @@ Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string
   return lg;
 }
 
-Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
-  std::string lg_source{get_library().get_source(get_lgid())};  // string, create can free it
-  auto        lg_name = absl::StrCat(new_lg_name);
-  Lgraph     *new_lg  = Lgraph::create(get_path(), lg_name, lg_source);
+Lgraph *Lgraph::clone_skeleton(const mmap_lib::str &new_lg_name) {
+  auto  lg_source = get_library().get_source(get_lgid());
+  auto  *new_lg   = Lgraph::create(get_path(), new_lg_name, lg_source);
 
   auto *new_sub = new_lg->ref_self_sub_node();
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
@@ -61,7 +60,7 @@ Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
   return new_lg;
 }
 
-Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
+Lgraph *Lgraph::open(const mmap_lib::str &path, Lg_type_id lgid) {
   auto *lib = Graph_library::instance(path);
   if (unlikely(lib == nullptr))
     return nullptr;
@@ -74,13 +73,10 @@ Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
   if (!lib->exists(lgid))
     return nullptr;
 
-  auto        name = lib->get_name(lgid);
-  std::string source{lib->get_source(lgid)};
-
-  return lib->setup_lgraph(name, source);
+  return lib->setup_lgraph(lib->get_name(lgid), lib->get_source(lgid));
 }
 
-Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
+Lgraph *Lgraph::open(const mmap_lib::str &path, const mmap_lib::str &name) {
   Lgraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
     return lg;
@@ -93,12 +89,10 @@ Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
   if (unlikely(!lib->has_name(name)))
     return nullptr;
 
-  std::string source{lib->get_source(name)};
-
-  return lib->setup_lgraph(name, source);
+  return lib->setup_lgraph(name, lib->get_source(name));
 }
 
-void Lgraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
+void Lgraph::rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest) {
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if (valid)
     warn("lgraph::rename find original graph {} in path {}", orig, path);
@@ -135,28 +129,28 @@ void Lgraph::sync() {
   Lgraph_Base::sync();  // last. Removes lock at the end
 }
 
-Node_pin Lgraph::get_graph_input(std::string_view str) {
+Node_pin Lgraph::get_graph_input(const mmap_lib::str &str) {
   I(get_self_sub_node().is_input(str));  // The input does not exist, do not call get_input
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
 }
 
-Node_pin Lgraph::get_graph_output(std::string_view str) {
+Node_pin Lgraph::get_graph_output(const mmap_lib::str &str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
 }
 
-Node_pin Lgraph::get_graph_output_driver_pin(std::string_view str) {
+Node_pin Lgraph::get_graph_output_driver_pin(const mmap_lib::str &str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
 }
 
-bool Lgraph::has_graph_input(std::string_view io_name) const {
+bool Lgraph::has_graph_input(const mmap_lib::str &io_name) const {
   if (!get_self_sub_node().is_input(io_name))
     return false;
 
@@ -166,7 +160,7 @@ bool Lgraph::has_graph_input(std::string_view io_name) const {
   return (idx != 0);
 }
 
-bool Lgraph::has_graph_output(std::string_view io_name) const {
+bool Lgraph::has_graph_output(const mmap_lib::str &io_name) const {
   if (!get_self_sub_node().is_output(io_name))
     return false;
 
@@ -1295,9 +1289,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   return Node(this, Hierarchy_tree::root_index(), nid);
 }
 
-Node Lgraph::create_node_sub(std::string_view sub_name_sv) {
-  std::string sub_name{sub_name_sv};  // This function can trigger remaps. Remember string, not pointer
-  I(name != sub_name);                // It can not point to itself (in fact, no recursion of any type)
+Node Lgraph::create_node_sub(const mmap_lib::str &sub_name) {
 
   auto  nid = create_node().get_nid();
   auto &sub = library->setup_sub(sub_name);

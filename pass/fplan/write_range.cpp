@@ -27,10 +27,10 @@ void Pass_fplan_write_range::setup() {
 }
 
 Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass.fplan", var) {
-  float min_ar   = std::stof(var.get("min_ar").data());
-  float max_ar   = std::stof(var.get("max_ar").data());
-  float min_area = std::stof(var.get("min_area").data());
-  float max_area = std::stof(var.get("max_area").data());
+  float min_ar   = std::stof(std::string(var.get("min_ar")));
+  float max_ar   = std::stof(std::string(var.get("max_ar")));
+  float min_area = std::stof(std::string(var.get("min_area")));
+  float max_area = std::stof(std::string(var.get("max_area")));
 
   std::default_random_engine            g;
   std::uniform_real_distribution<float> rd(min_area, max_area);
@@ -39,7 +39,7 @@ Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass
   const uint8_t start = static_cast<uint8_t>(Ntype_op::Invalid) + 1;
   const uint8_t end   = static_cast<uint8_t>(Ntype_op::Last_invalid);
 
-  Ntype_area na(path);
+  Ntype_area na(mmap_lib::str(path));
 
   for (uint8_t op = start; op < end; op++) {
     const Ntype_op nop = static_cast<Ntype_op>(op);

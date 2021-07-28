@@ -185,7 +185,7 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
 void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_type_const().to_string();
+  auto key      = dpin_key.get_type_const().to_str();
   auto attr     = get_key_attr(key);
   if (attr == Attr::Set_other) {
     return;  // don't care
@@ -305,38 +305,38 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
   fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact_class_driver(), fb_lhs);
 }
 
-Firmap::Attr Firmap::get_key_attr(std::string_view key) {
+Firmap::Attr Firmap::get_key_attr(const mmap_lib::str &key) {
   // FIXME: code duplicated in bitwidth. Create a separate class for Attr
   const auto sz = key.size();
 
   if (sz < 5)
     return Attr::Set_other;
 
-  if (key.substr(sz - 5, sz) == "__max")
+  if (key.ends_with("__max"))
     return Attr::Set_max;
 
-  if (key.substr(sz - 5, sz) == "__min")
+  if (key.ends_with("__min"))
     return Attr::Set_min;
 
   if (sz < 7)
     return Attr::Set_other;
 
-  if (key.substr(sz - 7, sz) == "__ubits")
+  if (key.ends_with("__ubits"))
     return Attr::Set_ubits;
 
-  if (key.substr(sz - 7, sz) == "__sbits")
+  if (key.ends_with("__sbits"))
     return Attr::Set_sbits;
 
   if (sz < 11)
     return Attr::Set_other;
 
-  if (key.substr(sz - 11, sz) == "__dp_assign")
+  if (key.ends_with("__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
 }
 
-void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
+void Firmap::analysis_fir_ops(Node &node, const mmap_lib::str &op, FBMap &fbmap) {
   // TODO: Create a map that indexed by op and returns a std::function (faster)
 
   auto inp_edges = node.inp_edges();

@@ -16,7 +16,7 @@ protected:
 
   absl::flat_hash_map<Node_pin::Compact_class_driver, std::string> dpin_name_map;
 
-  void do_trans(Lgraph* g, Eprp_var& var, std::string_view module_name);
+  void do_trans(Lgraph* g, Eprp_var& var, const mmap_lib::str &module_name);
 
   void initial_tree_coloring(Lgraph* g, Lnast& lnast);
   void begin_transformation(Lgraph* g, Lnast& lnast, Lnast_nid& ln_node);
@@ -51,13 +51,13 @@ protected:
   // void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
   void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, const std::string_view& pin_name, const uint32_t& bits);
 
-  std::string_view create_temp_var(Lnast& lnast, std::string_view str_prefix = "___");
-  bool             has_prefix(std::string_view test_string);
+  const mmap_lib::str &create_temp_var(Lnast& lnast, const mmap_lib::str &str_prefix = "___");
+  bool             has_prefix(const mmap_lib::str &test_string);
   bool             has_prefix(const std::string& test_string);
 
-  std::string_view dpin_get_name(const Node_pin dpin);
-  void             dpin_set_map_name(const Node_pin dpin, std::string_view name_part);
-  std::string_view get_new_seq_name(Lnast& lnast);
+  const mmap_lib::str &dpin_get_name(const Node_pin dpin);
+  void             dpin_set_map_name(const Node_pin dpin, const mmap_lib::str &name_part);
+  const mmap_lib::str &get_new_seq_name(Lnast& lnast);
 
 public:
   static void trans(Eprp_var& var);

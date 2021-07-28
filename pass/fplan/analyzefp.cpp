@@ -70,7 +70,7 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
 }
 
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
-  Lgraph* root = Lgraph::open(path, var.get("top"));
+  Lgraph* root = Lgraph::open(path, mmap_lib::str(var.get("top")));
   if (root == nullptr) {
     error("cannot find top level lgraph!");
   }

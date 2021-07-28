@@ -25,7 +25,7 @@ protected:
   // absl::flat_hash_map<Node_pin, std::vector<Node_pin>>     spinmap_xorr;
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
-  static Attr     get_key_attr(std::string_view key);
+  static Attr     get_key_attr(const mmap_lib::str &key);
   FBMap::iterator get_fbits_from_hierarchy(XEdge &e);
 
   // lg_op
@@ -36,7 +36,7 @@ protected:
   void analysis_lg_attr_set_propagate(Node &node, FBMap &fbmap);
   void analysis_lg_flop(Node &node, FBMap &fbmap);
   void analysis_lg_mux(Node &node, FBMap &fbmap);
-  void analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap);
+  void analysis_fir_ops(Node &node, const mmap_lib::str &op, FBMap &fbmap);
   // fir_op
   void analysis_fir_const(Node &node, FBMap &fbmap);
   void analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
@@ -63,15 +63,15 @@ protected:
   void analysis_fir_tail(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
 
   // fir_op->lg_ops
-  void map_node_fir_ops(Node &node, std::string_view op, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap, XorrMap &spinmap_xorr);
+  void map_node_fir_ops(Node &node, const mmap_lib::str &op, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap, XorrMap &spinmap_xorr);
   void map_node_fir_const(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_add(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_sub(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_mul(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_div(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_rem(Node &node, Lgraph *new_lg, PinMap &pinmap);
-  void map_node_fir_lt_gt(Node &node, Lgraph *new_lg, std::string_view op, PinMap &pinmap);
-  void map_node_fir_leq_geq(Node &node, Lgraph *new_lg, std::string_view op, PinMap &pinmap);
+  void map_node_fir_lt_gt(Node &node, Lgraph *new_lg, const mmap_lib::str &op, PinMap &pinmap);
+  void map_node_fir_leq_geq(Node &node, Lgraph *new_lg, const mmap_lib::str &op, PinMap &pinmap);
   void map_node_fir_eq(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_neq(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_as_uint(Node &node, Lgraph *new_lg, PinMap &pinmap);
@@ -84,7 +84,7 @@ protected:
   void map_node_fir_dshr(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_cvt(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_neg(Node &node, Lgraph *new_lg, PinMap &pinmap);
-  void map_node_fir_and_or_xor(Node &node, Lgraph *new_lg, std::string_view op, PinMap &pinmap);
+  void map_node_fir_and_or_xor(Node &node, Lgraph *new_lg, const mmap_lib::str &op, PinMap &pinmap);
   void map_node_fir_orr(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_bits(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_not(Node &node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap);

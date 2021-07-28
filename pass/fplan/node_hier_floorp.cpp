@@ -20,7 +20,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
 
   FPContainer* l = makeNode(hint_map, tidx, lg->size());
 
-  const std::string_view path = root_lg->get_path();
+  const auto path = root_lg->get_path();
 
   // count instances of leaves and subnodes for later use
   absl::flat_hash_map<Lgraph*, unsigned int>  sub_lg_count;
@@ -74,7 +74,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
 
       if (!na.has_dim(op)) {
         std::string errstr = "node type ";
-        errstr.append(Ntype::get_name(op));
+        errstr.append(Ntype::get_name(op).to_s());
         errstr.append(" has no area information!");
         throw std::runtime_error(errstr);
       }
@@ -97,7 +97,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
     }
   }
 
-  l->setName(lg->get_name().data());
+  l->setName(lg->get_name());
   l->setType(Ntype_op::Sub);  // treat nodes placed by us as subnodes
 
   return l;

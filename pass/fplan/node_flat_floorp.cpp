@@ -21,7 +21,7 @@ void Node_flat_floorp::load() {
   for (auto n : nt.get_root_lg()->fast(true)) {
     Ntype_op op = n.get_type_op();
 
-    std::string_view name;
+    mmap_lib::str name;
     if (n.has_name()) {
       name = n.get_name();
     } else {
@@ -35,7 +35,7 @@ void Node_flat_floorp::load() {
 
       if (!(narea.has_dim(op))) {
         std::string errstr = "node type ";
-        errstr.append(Ntype::get_name(op));
+        errstr.append(Ntype::get_name(op).to_s());
         errstr.append(" has no area information!");
         throw std::runtime_error(errstr);
       }

@@ -14,9 +14,9 @@
 
 class Setup_lgraph : public ::testing::Test {
 protected:
-  std::map<std::string, int> name2pos;
-  std::map<std::string, int> name2bits;
-  std::set<int>              posinput;
+  std::map<mmap_lib::str, int> name2pos;
+  std::map<mmap_lib::str, int> name2bits;
+  std::set<int>                posinput;
 
   std::set<int> posused;
 
@@ -62,7 +62,9 @@ protected:
     name2bits.erase(name);
   }
 
-  void add_input(Lgraph *lg, const std::string &name) {
+  void add_input(Lgraph *lg, const std::string &name_std) {
+    mmap_lib::str name{name_std};
+
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
 
@@ -93,7 +95,9 @@ protected:
     EXPECT_TRUE(lg->has_graph_input(name));
   }
 
-  void add_output(Lgraph *lg, const std::string &name) {
+  void add_output(Lgraph *lg, const std::string &name_std) {
+    mmap_lib::str name{name_std};
+
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
 

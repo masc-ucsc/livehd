@@ -49,7 +49,7 @@ public:
   virtual std::string getName() const { return name; }
   virtual Ntype_op    getType() const { return type; }
   virtual int         getCount() const { return count; }
-  std::string         getUniqueName() const;
+  mmap_lib::str       getUniqueName() const;
 
   virtual double totalArea() { return area * count; }
 

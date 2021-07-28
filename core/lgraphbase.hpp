@@ -23,7 +23,6 @@ private:
 protected:
   mmap_lib::vector<Node_internal> node_internal;
 
-  static inline constexpr std::string_view unknown_io = "unknown";
   Graph_library *                          library;
 
   absl::flat_hash_map<uint32_t, uint32_t> idx_insert_cache;
@@ -67,7 +66,7 @@ public:
 
   Lgraph_Base(const Lgraph_Base &) = delete;
 
-  explicit Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
+  explicit Lgraph_Base(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
   virtual ~Lgraph_Base();
 
   virtual void clear();

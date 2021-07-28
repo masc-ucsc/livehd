@@ -6,6 +6,7 @@
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
 #include "iassert.hpp"
+#include "mmap_str.hpp"
 
 using Bits_t               = uint32_t;  // bits type (future use)
 constexpr int    Bits_bits = 17;
@@ -76,12 +77,13 @@ protected:
   const Number &get_num() const { return num; }
   void          adjust(const Lconst &o);
 
-public:
   using Container = std::vector<unsigned char>;
 
+public:
+
   Lconst(absl::Span<unsigned char> v);
-  Lconst(const Container &v);
   Lconst(std::string_view txt);
+  Lconst(const mmap_lib::str &txt);
   Lconst(Number v);
   Lconst(int64_t v);
   // Lconst(int64_t v, Bits_t bits);
@@ -92,7 +94,9 @@ public:
   static Lconst unknown_positive(Bits_t nbits);
   static Lconst unknown_negative(Bits_t nbits);
 
-  Container serialize() const;
+  static Lconst unserialize(const mmap_lib::str &v);
+  mmap_lib::str serialize() const;
+
   uint64_t  hash() const;
 
   void                 dump() const;
@@ -146,6 +150,7 @@ public:
 
   std::string to_yosys(bool do_unsign = false) const;
   std::string to_verilog() const;
+  mmap_lib::str  to_str() const;
   std::string to_string() const;
   std::string to_string_no_xz() const;
   std::string to_pyrope() const;

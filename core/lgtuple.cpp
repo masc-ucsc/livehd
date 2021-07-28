@@ -1,12 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lgtuple.hpp"
+
+#include "absl/container/flat_hash_map.h"
 
 #include <algorithm>
-#include <charconv>
 
+#include "lgtuple.hpp"
 #include "lgraph.hpp"
 #include "likely.hpp"
+
+using namespace std::literals;
 
 // Custom sort, to make _ ordered first. This helps to get attributes first which helps to speedup some algorithms in lgtuple
 static bool inline compare_less(char c1, char c2) {
@@ -14,25 +17,24 @@ static bool inline compare_less(char c1, char c2) {
   return (c1 == '_' || c1 < c2) && c2 != '_';
 }
 
-static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
-  // return lhs.first < rhs.first;
+static bool tuple_sort(const std::pair<mmap_lib::str, Node_pin> &lhs, const std::pair<mmap_lib::str, Node_pin> &rhs) {
 
-  auto l     = lhs.first.begin();
-  auto l_end = lhs.first.end();
-  auto r     = rhs.first.begin();
-  auto r_end = rhs.first.end();
+  auto l     = 0u;
+  auto l_end = lhs.first.size();
+  auto r     = 0u;
+  auto r_end = rhs.first.size();
 
   while (l != l_end && r != r_end) {
-    if (*l == ':') {  // Skip : from things like :3:id. Then we can sort bundles like (a=..., 333) // ":0:a" < "1"
+    if (lhs.first[l] == ':') {  // Skip : from things like :3:id. Then we can sort bundles like (a=..., 333) // ":0:a" < "1"
       ++l;
       continue;
     }
-    if (*r == ':') {
+    if (rhs.first[r] == ':') {
       ++r;
       continue;
     }
-    if (*l != *r) {
-      auto v = compare_less(*l, *r);
+    if (lhs.first[l] != rhs.first[r]) {
+      auto v = compare_less(lhs.first[l], rhs.first[r]);
       return v;
     }
     ++l;
@@ -44,7 +46,7 @@ static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::p
   return v;
 }
 
-std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
+std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(const mmap_lib::str &a, const mmap_lib::str &b, size_t a_pos, size_t b_pos) {
   I(a[a_pos] == ':');
   I(b[b_pos] != ':');
 
@@ -96,7 +98,7 @@ std::tuple<bool, size_t, size_t> Lgtuple::match_int_advance(std::string_view a, 
   return std::make_tuple(true, a_pos, b_pos);
 }
 
-std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::string_view b) {
+std::tuple<bool, bool, size_t> Lgtuple::match_int(const mmap_lib::str &a, const mmap_lib::str &b) {
   auto a_last_section = 0u;
   auto b_last_section = 0u;
   auto a_pos          = 0u;
@@ -175,21 +177,21 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
   return std::make_tuple(a_match, b_match, b_pos);
 }
 
-void Lgtuple::append_field(std::string &a, std::string_view b) {
+mmap_lib::str Lgtuple::append_field(const mmap_lib::str &a, const mmap_lib::str &b) {
   if (a.empty())
-    a = b;
-  else
-    absl::StrAppend(&a, ".", b);
+    return b;
+
+  return mmap_lib::str::concat(a, ".", b);
 }
 
-void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
+std::tuple<mmap_lib::str, mmap_lib::str> Lgtuple::learn_fix_int(const mmap_lib::str &a, const mmap_lib::str &b) {
   auto a_last_section = 0u;
   auto b_last_section = 0u;
   auto a_pos          = 0u;
   auto b_pos          = 0u;
 
-  std::string new_a;
-  std::string new_b;
+  mmap_lib::str new_a;
+  mmap_lib::str new_b;
 
   bool a_last_match;
   bool b_last_match;
@@ -205,11 +207,11 @@ void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
       }
       I(b[b_pos] == '.');
       if (a[a_last_section] == ':') {
-        append_field(new_a, a.substr(a_last_section, a_pos - a_last_section));
-        append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
+        new_a = append_field(new_a, a.substr(a_last_section, a_pos - a_last_section));
+        new_b = append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
       } else {
-        append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
-        append_field(new_b, b.substr(b_last_section, b_pos - b_last_section));
+        new_a = append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
+        new_b = append_field(new_b, b.substr(b_last_section, b_pos - b_last_section));
       }
       ++a_pos;
       ++b_pos;
@@ -243,12 +245,12 @@ void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
           b_last_match = m;
           break;
         }
-        append_field(new_a, a.substr(a_last_section, a_last_section - a_pos));
+        new_a = append_field(new_a, a.substr(a_last_section, a_last_section - a_pos));
         ++a_pos;
         ++b_pos;
         a_last_section = a_pos;
         b_last_section = b_pos;
-        append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
+        new_b = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
       } else {
         I(a[a_pos] == ':');
         ++a_pos;  // skip first
@@ -271,8 +273,8 @@ void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
           b_last_match = false;
           break;
         }
-        append_field(new_a, a.substr(b_last_section, b_last_section - b_pos));
-        append_field(new_b, a.substr(b_last_section, b_last_section - b_pos));
+        new_a = append_field(new_a, a.substr(b_last_section, b_last_section - b_pos));
+        new_b = append_field(new_b, a.substr(b_last_section, b_last_section - b_pos));
         ++a_pos;
         ++b_pos;
         a_last_section = a_pos;
@@ -299,30 +301,29 @@ void Lgtuple::learn_fix_int(std::string &a, std::string &b) {
   // Finish the rest of the swap (if match) and add the rest
   if (a_last_match) {
     I(b[b_last_section] == ':');
-    append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
+    new_a = append_field(new_a, b.substr(b_last_section, b_pos - b_last_section));
     if (a_pos < a.size()) {
       I(a[a_pos] == '.');
-      append_field(new_a, a.substr(a_pos + 1));  // +1 to skip .
+      new_a = append_field(new_a, a.substr(a_pos + 1));  // +1 to skip .
     }
   } else {
-    append_field(new_a, a.substr(a_last_section));
+    new_a = append_field(new_a, a.substr(a_last_section));
   }
   if (b_last_match) {
     I(a[a_last_section] == ':');
-    append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
+    new_b = append_field(new_b, a.substr(a_last_section, a_pos - a_last_section));
     if (b_pos < b.size()) {
       I(b[b_pos] == '.');
-      append_field(new_b, b.substr(b_pos + 1));  // +1 to skip .
+      new_b = append_field(new_b, b.substr(b_pos + 1));  // +1 to skip .
     }
   } else {
-    append_field(new_b, b.substr(b_last_section));
+    new_b = append_field(new_b, b.substr(b_last_section));
   }
 
-  std::swap(a, new_a);
-  std::swap(b, new_b);
+  return std::make_tuple(new_a, new_b);
 }
 
-bool Lgtuple::match(std::string_view a, std::string_view b) {
+bool Lgtuple::match(const mmap_lib::str &a, const mmap_lib::str &b) {
   if (a == b)
     return true;
   if (a.empty()) {
@@ -339,7 +340,7 @@ bool Lgtuple::match(std::string_view a, std::string_view b) {
   return m1 && m2;  // both reach the end in match_int
 }
 
-size_t Lgtuple::match_first_partial(std::string_view a, std::string_view b) {
+size_t Lgtuple::match_first_partial(const mmap_lib::str &a, const mmap_lib::str &b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)m2;
   if (m1)
@@ -347,13 +348,13 @@ size_t Lgtuple::match_first_partial(std::string_view a, std::string_view b) {
   return 0;
 }
 
-bool Lgtuple::match_either_partial(std::string_view a, std::string_view b) {
+bool Lgtuple::match_either_partial(const mmap_lib::str &a, const mmap_lib::str &b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)x;
   return m1 || m2;  // either reached the end it match_int
 }
 
-void Lgtuple::add_int(const std::string &key, const std::shared_ptr<Lgtuple const>& tup) {
+void Lgtuple::add_int(const mmap_lib::str &key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
     I(!has_dpin(key));  // It was deleted before
@@ -364,14 +365,14 @@ void Lgtuple::add_int(const std::string &key, const std::shared_ptr<Lgtuple cons
   bool root = is_root_attribute(key);
   for (auto &ent : tup->key_map) {
     if (root) {
-      key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
+      key_map.emplace_back(mmap_lib::str::concat(ent.first, ".", key), ent.second);
     } else {
-      key_map.emplace_back(absl::StrCat(key, ".", ent.first), ent.second);
+      key_map.emplace_back(mmap_lib::str::concat(key, ".", ent.first), ent.second);
     }
   }
 }
 
-void Lgtuple::reconnect_flop_if_needed(Node &flop, const std::string &flop_name, Node_pin &dpin) {
+void Lgtuple::reconnect_flop_if_needed(Node &flop, const mmap_lib::str &flop_name, Node_pin &dpin) {
   flop.setup_driver_pin().reset_name(mmap_lib::str(flop_name));
 
   auto s_din = flop.setup_sink_pin("din");
@@ -386,26 +387,26 @@ void Lgtuple::reconnect_flop_if_needed(Node &flop, const std::string &flop_name,
   s_din.connect_driver(dpin);
 }
 
-int Lgtuple::get_first_level_pos(std::string_view key) {
+int Lgtuple::get_first_level_pos(const mmap_lib::str &key) {
   if (key.empty())
     return -1;
 
-  if (key[0] == ':') {
-    key = key.substr(1);
+  auto skip=0u;
+
+  if (key[skip] == ':') {
+    ++skip;
   }
 
-  if (!std::isdigit(key[0])) {
+  if (!std::isdigit(key[skip])) {
     return -1;
   }
 
-  int x = 0;
-  std::from_chars(key.data(), key.data() + key.size(), x);
-  return x;
+  return key.substr(skip).to_i();
 }
 
-std::string_view Lgtuple::get_first_level_name(std::string_view key) {
+mmap_lib::str Lgtuple::get_first_level_name(const mmap_lib::str &key) {
   auto dot_pos = key.find('.');
-  if (key.size() > 0 && key[0] != ':') {
+  if (key.size() > 0 && key.front() != ':') {
     if (dot_pos == std::string::npos)
       return key;
     return key.substr(0, dot_pos);
@@ -417,101 +418,94 @@ std::string_view Lgtuple::get_first_level_name(std::string_view key) {
   return key.substr(1 + 1 + n, dot_pos - 1 - 1 - n);
 }
 
-std::string_view Lgtuple::get_canonical_name(std::string_view key) {
-#if 0
-  // Remove 0.0.0.xxxx 
-  while (key.size() > 0 && key[0] == '0') {
-    if (key.substr(0, 2) == "0.") {
-      key = key.substr(2);
-    } else {
-      if (key == "0")
-        key = "";
-      break;
-    }
-  }
-#endif
+mmap_lib::str Lgtuple::get_canonical_name(const mmap_lib::str &key) {
+
+  mmap_lib::str key2{key};
 
   // Remove xxx.0.0.0
-  while (key.size() > 1 && key.back() == '0') {
-    auto sz = key.size();
-    if (key.substr(sz - 2, sz) == ".0") {
-      key = key.substr(0, sz - 2);
+  while (key2.size() > 1 && key2.back() == '0') {
+    auto sz = key2.size();
+    if (key2.substr(sz - 2, sz) == ".0") {
+      key2 = key2.substr(0, sz - 2);
       continue;
     }
     break;
   }
 
-  if (key == "0")
-    key = "";
+  if (key2 == "0")
+    key2 = "";
 
-  return key;
+  return key2;
 }
 
-std::string_view Lgtuple::get_last_level(std::string_view key) {
-  auto n = key.find_last_of('.');
-  if (n == std::string_view::npos)
+mmap_lib::str Lgtuple::get_last_level(const mmap_lib::str &key) {
+  auto n = key.rfind('.');
+  if (n == std::string::npos)
     return key;
 
   I(n != 0);  // name can not start with a .
   return key.substr(n + 1);
 }
 
-std::string_view Lgtuple::get_all_but_last_level(std::string_view key) {
-  auto n = key.find_last_of('.');
-  if (n != std::string_view::npos) {
+mmap_lib::str Lgtuple::get_all_but_last_level(const mmap_lib::str &key) {
+  auto n = key.rfind('.');
+  if (n != std::string::npos) {
     return key.substr(0, n);
   }
 
-  return "";
+  return mmap_lib::str("");
 }
 
-std::pair<Port_ID, std::string_view> Lgtuple::convert_key_to_io(std::string_view key) {
-  if (key[0] == '$' || key[0] == '%') {
-    key = key.substr(1);
-  }
-  if (key[0] == '.')
-    key = key.substr(1);
+std::pair<Port_ID, mmap_lib::str> Lgtuple::convert_key_to_io(const mmap_lib::str &key) {
+  size_t skip=0;
 
-  if (key[0] != ':') {
+  if (key[skip] == '$' || key[skip] == '%') {
+    ++skip;
+  }
+  if (key[skip] == '.')
+    ++skip;
+
+  if (key[skip] != ':') {
     return std::pair(Port_invalid, key);
   }
-  key = key.substr(1);
 
-  if (!std::isdigit(key[0])) {
-    Lgraph::error("name should have digit after position specified :digits: not {}\n", key);
+  auto key2 = key.substr(skip);
+
+  if (!std::isdigit(key2.front())) {
+    Lgraph::error("name should have digit after position specified :digits: not {}\n", key2);
   }
 
-  auto n = key.find_first_of(':');
+  auto n = key2.find(':');
   if (n == std::string::npos) {
-    Lgraph::error("name should have a format like :digits:name not {}\n", key);
+    Lgraph::error("name should have a format like :digits:name not {}\n", key2);
   }
 
-  int x = 0;
-  std::from_chars(key.data(), key.data() + n, x);
+  auto x = key2.to_i();
+  I(x == key2.substr(0,n).to_i());
 
-  return std::pair(static_cast<Port_ID>(x), key.substr(n + 1));
+  return std::pair(static_cast<Port_ID>(x), key2.substr(n + 1));
 }
 
-std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
-  auto n = key.find_first_of('.');
-  if (n != std::string_view::npos) {
+mmap_lib::str Lgtuple::get_all_but_first_level(const mmap_lib::str &key) {
+  auto n = key.find('.');
+  if (n != std::string::npos) {
     return key.substr(n + 1);
   }
 
-  return "";  // empty if no dot left
+  return mmap_lib::str("");  // empty if no dot left
 }
 
-std::string Lgtuple::learn_fix(std::string_view a) {
-  std::string key{a};
+mmap_lib::str Lgtuple::learn_fix(const mmap_lib::str &a) {
+  mmap_lib::str key{a};
 
   for (auto &e : key_map) {
-    learn_fix_int(key, e.first);
+    std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
 
   return key;
 }
 
-const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
+const Node_pin &Lgtuple::get_dpin(const mmap_lib::str &key) const {
   for (auto &e : key_map) {
     if (match(e.first, key))
       return e.second;
@@ -535,7 +529,7 @@ const Node_pin &Lgtuple::get_dpin() const {
   return key_map[pos].second;
 }
 
-bool Lgtuple::has_dpin(std::string_view key) const {
+bool Lgtuple::has_dpin(const mmap_lib::str &key) const {
   for (auto &e : key_map) {
     if (match(e.first, key))
       return true;
@@ -543,7 +537,7 @@ bool Lgtuple::has_dpin(std::string_view key) const {
   return false;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
+std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const mmap_lib::str &key) const {
   if (key.empty()) {
     return std::make_shared<Lgtuple>(*this);
   }
@@ -553,17 +547,17 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   std::shared_ptr<Lgtuple> tup;
 
   for (auto &e : key_map) {
-    std::string_view entry(e.first);
+    const mmap_lib::str &entry(e.first);
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0)
       continue;
     I(entry[e_pos] != '.');  // . not included
 
     if (!tup) {
-      std::string key_with_pos{key};
-      std::string expanded{e.first};
-      learn_fix_int(key_with_pos, expanded);
-      tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key_with_pos));
+      mmap_lib::str key_with_pos{key};
+      mmap_lib::str expanded{e.first};
+      std::tie(key_with_pos, expanded) = learn_fix_int(key_with_pos, expanded);
+      tup = std::make_shared<Lgtuple>(mmap_lib::str::concat(name, ".", key_with_pos));
     }
 
     if (e_pos >= entry.size()) {
@@ -572,7 +566,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
       auto key2 = entry.substr(e_pos);
       I(!key2.empty());
       if (is_root_attribute(key2)) {
-        tup->key_map.emplace_back(absl::StrCat("0.", key2), e.second);
+        tup->key_map.emplace_back(mmap_lib::str::concat("0."sv, key2), e.second);
       } else {
         tup->key_map.emplace_back(key2, e.second);
       }
@@ -591,7 +585,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
 
   int pos = 0;
   for (const auto &e : tup->key_map) {
-    std::string_view e_name{e.first};
+    mmap_lib::str e_name{e.first};
     (void)e_name;
     auto e_node = e.second.get_node();
     if (!e_node.is_type_const()) {
@@ -605,7 +599,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
     } else {
       txt = v.to_string();
     }
-    auto dpin = get_dpin(txt);
+    auto dpin = get_dpin(mmap_lib::str(txt));
     if (dpin.is_invalid()) {
       Lgraph::info("tuple {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, txt);
       return nullptr;
@@ -622,7 +616,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
   return ret_tup;
 }
 
-void Lgtuple::del(std::string_view key) {
+void Lgtuple::del(const mmap_lib::str &key) {
   if (key.empty()) {
     key_map.clear();
     return;
@@ -639,7 +633,7 @@ void Lgtuple::del(std::string_view key) {
   bool is_attr_key = is_root_attribute(key);
 
   for (auto &e : key_map) {
-    std::string_view entry{e.first};
+    mmap_lib::str entry{e.first};
     if (entry.empty()) {
       if (is_attr_key) {
         new_map.emplace_back(std::move(e));
@@ -667,7 +661,7 @@ void Lgtuple::del(std::string_view key) {
   key_map.swap(new_map);
 }
 
-void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
+void Lgtuple::add(const mmap_lib::str &key, const std::shared_ptr<Lgtuple const>& tup) {
   I(!key.empty());
 
   correct = correct && tup->correct;
@@ -679,11 +673,11 @@ void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tu
   bool tup_scalar = tup->is_scalar();
 
   for (const auto &e : tup->key_map) {
-    std::string_view key2;
+    mmap_lib::str key2;
     // Remove 0. from tup if tup is scalar
-    if (tup_scalar && e.first[0] == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
+    if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
       if (e.first.size() == 1)
-        key2 = "";  // remove "0"
+        key2 = mmap_lib::str("");  // remove "0"
       else
         key2 = e.first.substr(2);  // remove "0."
     } else {
@@ -693,20 +687,20 @@ void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tu
     if (key2.empty()) {
       add(key, e.second);
     } else {
-      auto key3 = absl::StrCat(key, ".", key2);
+      auto key3 = mmap_lib::str::concat(key, ".", key2);
       add(key3, e.second);
     }
   }
 }
 
-void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
+void Lgtuple::add(const mmap_lib::str &key, const Node_pin &dpin) {
   I(!key.empty());
 
-  std::string uncanonical_key{key};
+  mmap_lib::str uncanonical_key{key};
   bool        pending_adjust = false;
   if (is_scalar()) {
     if (key.substr(0, 2) == "__" && key[3] != '_') {  // is_root_attribute BUT not with 0.__xxx
-      uncanonical_key = absl::StrCat("0.", key);
+      uncanonical_key = mmap_lib::str::concat("0."sv, key);
     } else {
       pending_adjust = true;
     }
@@ -733,13 +727,13 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
     // a.c.xx...
     // a.b.foo.1.bar ....
 
-    std::string_view key_part{fixed_key};
+    mmap_lib::str key_part{fixed_key};
     if (is_attribute(fixed_key)) {
       key_part = get_all_but_last_level(fixed_key);
     }
     for (auto &e : key_map) {
-      std::string_view fpart{e.first};
-      std::string_view lpart;
+      mmap_lib::str fpart{e.first};
+      mmap_lib::str lpart;
       if (is_attribute(e.first)) {
         fpart = get_all_but_last_level(e.first);
         lpart = get_last_level(e.first);
@@ -751,9 +745,9 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
       // NOTE: full match foo.bar == foo not foo.bar == foo match
       if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
         if (lpart.empty())
-          e.first = absl::StrCat(fpart, ".0");
+          e.first = mmap_lib::str::concat(fpart, ".0"sv);
         else
-          e.first = absl::StrCat(fpart, ".0.", lpart);
+          e.first = mmap_lib::str::concat(fpart, ".0.", lpart);
         if (e.first == fixed_key) {
           e.second = dpin;
           return;
@@ -789,11 +783,11 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
 bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
   bool ok = true;
 
-  std::vector<std::pair<std::string, Node_pin>> delayed_numbers;
+  std::vector<std::pair<mmap_lib::str, Node_pin>> delayed_numbers;
 
   for (auto &it : tup->key_map) {
     if (has_dpin(it.first)) {
-      if (std::isdigit(it.first[0]) && is_single_level(it.first)) {
+      if (std::isdigit(it.first.front()) && is_single_level(it.first)) {
         delayed_numbers.emplace_back(it.first, it.second);
         continue;
       }
@@ -812,10 +806,10 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
     auto max_pos = 0;
     for (const auto &e : key_map) {
       int x = 0;
-      if (std::isdigit(e.first[0])) {
-        std::from_chars(e.first.data(), e.first.data() + e.first.size(), x);
-      } else if (e.first[0] == ':' && std::isdigit(e.first[1])) {
-        std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
+      if (e.first.is_i()) {
+        x = e.first.to_i();
+      } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
+        x = e.first.substr(1).to_i();
       } else {
         dump();
         Lgraph::info("can not concat tuple pin to tuple unordered {} field {}", get_name(), e.first);
@@ -825,9 +819,10 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
         max_pos = x;
     }
     for (const auto &e : delayed_numbers) {
-      int x = 0;
-      std::from_chars(e.first.data(), e.first.data() + e.first.size(), x);
-      key_map.emplace_back(std::to_string(x + max_pos + 1), e.second);
+      auto x = e.first.to_i();
+      mmap_lib::str new_key(std::to_string(x + max_pos + 1));
+
+      key_map.emplace_back(new_key, e.second);
     }
   }
 
@@ -974,7 +969,7 @@ Node_pin Lgtuple::flatten() const {
         auto attr_set_node = result_node.create(Ntype_op::AttrSet);
         attr_set_node.setup_sink_pin("parent").connect_driver(last_non_attr_dpin);
         attr_set_node.setup_sink_pin("value").connect_driver(e.second);
-        attr_set_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string(attr_txt)));
+        attr_set_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string(attr_txt.to_s())));
 
         last_non_attr_dpin = attr_set_node.setup_driver_pin();
       }
@@ -1008,8 +1003,8 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple co
   return new_tup;
 }
 
-bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string_view, Node_pin>> &pending_entries,
-                          std::string_view entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
+bool Lgtuple::add_pending(Node &node, std::vector<std::pair<mmap_lib::str, Node_pin>> &pending_entries,
+                          const mmap_lib::str &entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
   I(!entry_txt.empty());
 
   if (!sbits_dpin.is_invalid()) {
@@ -1039,12 +1034,12 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
   // Each field in the LHS must have a size
   auto rhs_node = rhs_dpin.get_node();
 
-  std::vector<std::pair<std::string_view, Node_pin>> pending_entries;
+  std::vector<std::pair<mmap_lib::str, Node_pin>> pending_entries;
   {
     Node_pin         sbits_dpin;
     Node_pin         ubits_dpin;
     int              pending_pos = -1;  // <0, no pending
-    std::string_view non_attr_field;
+    mmap_lib::str non_attr_field;
 
     for (auto i = 0u; i < key_map.size(); ++i) {
       const auto &e = key_map[i];
@@ -1165,10 +1160,10 @@ bool Lgtuple::concat(const Node_pin &dpin) {
   auto max_pos = 0;
   for (const auto &e : key_map) {
     int x = 0;
-    if (std::isdigit(e.first[0])) {
-      std::from_chars(e.first.data(), e.first.data() + e.first.size(), x);
-    } else if (e.first[0] == ':' && std::isdigit(e.first[1])) {
-      std::from_chars(e.first.data() + 1, e.first.data() + e.first.size() - 1, x);
+    if (e.first.is_i()) {
+      x = e.first.to_i();
+    } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
+      x = e.first.substr(1).to_i();
     } else {
       dump();
       Lgraph::info("can not concat pin:{} to tuple unordered {} field {}", dpin.debug_name(), get_name(), e.first);
@@ -1178,7 +1173,9 @@ bool Lgtuple::concat(const Node_pin &dpin) {
       max_pos = x;
   }
 
-  key_map.emplace_back(std::to_string(max_pos + 1), dpin);
+  mmap_lib::str new_key(std::to_string(max_pos + 1));
+
+  key_map.emplace_back(new_key, dpin);
 
   return true;
 }
@@ -1198,7 +1195,7 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   auto fixing_tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
 
   // find all the possible keys
-  absl::flat_hash_map<std::string, Node_pin> key_entries;
+  absl::flat_hash_map<mmap_lib::str, Node_pin> key_entries;
   bool                                       first_iter = true;
   for (const auto &tup : tup_list) {
     if (!tup->is_correct())
@@ -1223,10 +1220,10 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
 
   for (const auto &it : key_entries) {
     bool        found = false;
-    std::string key{it.first};
+    mmap_lib::str key{it.first};
 
     for (auto &e : fixing_tup->key_map) {
-      learn_fix_int(key, e.first);
+      std::tie(key, e.first) = learn_fix_int(key, e.first);
       if (key == e.first) {
         e.first = key;                // Put new expanded name
         if (is_attribute(e.first)) {  // Attributes merge if invalid from others
@@ -1354,7 +1351,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
             auto attr_node = dpin.create(Ntype_op::AttrSet);
             {
               auto attr     = get_last_level(attr_it.first);
-              auto key_dpin = dpin.create_const(Lconst::string(attr)).setup_driver_pin();
+              auto key_dpin = dpin.create_const(Lconst::string(attr.to_s())).setup_driver_pin();
               attr_node.setup_sink_pin("field").connect_driver(key_dpin);
             }
             { attr_node.setup_sink_pin("value").connect_driver(attr_it.second); }
@@ -1383,7 +1380,7 @@ std::tuple<mmap_lib::str, bool> Lgtuple::get_flop_name(const Node &flop) const {
       first_flop = false;  // Do not allow to use flop directly
 
     auto n = flop_root_name.find('.');
-    if (n != std::string_view::npos)
+    if (n != std::string::npos)
       flop_root_name = flop_root_name.substr(0, n);
   } else {
     flop_root_name = name;
@@ -1441,14 +1438,14 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) con
   return std::tuple(ret_tup, pending_iterations);
 }
 
-std::pair<std::string_view, std::string> Lgtuple::get_flop_attr_name(std::string_view flop_root_name, std::string_view cname) {
+std::pair<mmap_lib::str, mmap_lib::str> Lgtuple::get_flop_attr_name(const mmap_lib::str &flop_root_name, const mmap_lib::str &cname) {
   auto attr = get_attribute(cname);
 
-  std::string new_flop_name;
+  mmap_lib::str new_flop_name;
   if (attr.empty()) {
-    new_flop_name = absl::StrCat(flop_root_name, ".", cname);
+    new_flop_name = mmap_lib::str::concat(flop_root_name, ".", cname);
   } else {
-    new_flop_name = absl::StrCat(flop_root_name, ".", get_all_but_last_level(cname));
+    new_flop_name = mmap_lib::str::concat(flop_root_name, ".", get_all_but_last_level(cname));
   }
 
   return std::pair(attr, new_flop_name);
@@ -1467,7 +1464,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   auto *lg = flop.get_class_lgraph();
 
   std::vector<Node>                             all_flops;
-  std::vector<std::pair<std::string, Node_pin>> multi_flop_attrs;
+  std::vector<std::pair<mmap_lib::str, Node_pin>> multi_flop_attrs;
 
   for (auto &e : key_map) {
     auto [attr, new_flop_name] = get_flop_attr_name(flop_root_name, e.first);
@@ -1497,7 +1494,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
     I(is_root_attribute(attr));  // Anything like __initial.3 should become 3.__initial
     if (Ntype::has_sink(Ntype_op::Flop, attr.substr(2))) {
-      auto new_flop_name_with_attr = absl::StrCat(flop_root_name, ".", e.first);
+      auto new_flop_name_with_attr = mmap_lib::str::concat(flop_root_name, ".", e.first);
       multi_flop_attrs.emplace_back(new_flop_name_with_attr, e.second);
       continue;
     }
@@ -1527,7 +1524,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
     auto attr_node = flop_node.create(Ntype_op::AttrSet);
     {
-      auto key_dpin = flop_node.create_const(Lconst::string(get_last_level(attr))).setup_driver_pin();
+      auto key_dpin = flop_node.create_const(Lconst::string(get_last_level(attr).to_s())).setup_driver_pin();
       attr_node.setup_sink_pin("field").connect_driver(key_dpin);
     }
     { attr_node.setup_sink_pin("value").connect_driver(e.second); }
@@ -1575,10 +1572,10 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   return ret_tup;
 }
 
-std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std::string_view key) const {
+std::vector<std::pair<mmap_lib::str, Node_pin>> Lgtuple::get_level_attributes(const mmap_lib::str &key) const {
   I(!is_root_attribute(key));
 
-  std::vector<std::pair<std::string, Node_pin>> v;
+  std::vector<std::pair<mmap_lib::str, Node_pin>> v;
 
   if (key.empty() || is_scalar()) {
     for (const auto &e : key_map) {
@@ -1591,7 +1588,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
   }
 
   for (const auto &e : key_map) {
-    std::string_view entry{e.first};
+    mmap_lib::str entry{e.first};
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0 || e_pos >= entry.size())
       continue;
@@ -1631,11 +1628,11 @@ bool Lgtuple::is_ordered() const {
   return true;
 }
 
-std::string_view Lgtuple::get_scalar_name() const {
-  std::string_view sname;
+mmap_lib::str Lgtuple::get_scalar_name() const {
+  mmap_lib::str sname;
 
   for (const auto &e : key_map) {
-    std::string_view s;
+    mmap_lib::str s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
     } else {
@@ -1653,7 +1650,7 @@ bool Lgtuple::is_trivial_scalar() const {
   auto conta = 0;
 
   for (const auto &e : key_map) {
-    std::string_view field{e.first};
+    mmap_lib::str field{e.first};
 
     if (is_attribute(field)) {
       field = get_all_but_last_level(field);

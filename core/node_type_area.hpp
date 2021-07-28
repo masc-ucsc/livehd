@@ -13,7 +13,7 @@ public:
   };
 
   Ntype_area() = delete;  // don't want to create new area maps all the time
-  Ntype_area(const std::string_view path) : type_area_map(path, "node_type_areas") {}
+  Ntype_area(const mmap_lib::str &path) : type_area_map(path.to_s(), "node_type_areas") {}
 
   void       set_dim(Ntype_op op, const dim& d) { type_area_map.set(op, d); }
   const dim& get_dim(Ntype_op op) const {

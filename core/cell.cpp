@@ -8,6 +8,9 @@
 Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
+
+  mmap_lib::str::setup();
+
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
       e[op] = Port_invalid;

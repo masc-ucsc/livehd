@@ -119,7 +119,7 @@ protected:
       (void)base2;
       (void)force_recycle;
 
-      assert(base+4==base2);
+      assert(base-4==base2);
       return false; // No GC the common STR maps
     }
 
@@ -187,7 +187,7 @@ protected:
       return &base[pos];
     }
 
-    void clear() {
+    void nuke() {
       if (base==nullptr)
         return;
 
@@ -239,10 +239,10 @@ protected:
       return key2sv_vector.get_data(pos);
     }
 
-    void clear() {
+    void nuke() {
       map.clear();
-      key2sv_vector.clear();
-      map_vector.clear();
+      key2sv_vector.nuke();
+      map_vector.nuke();
     }
 
     void setup(const std::string &new_name) {
@@ -373,8 +373,8 @@ public:
     mut_ref().setup("lgdb_strmap");
   }
 
-  static void clear() {
-    mut_ref().clear();
+  static void nuke() {
+    mut_ref().nuke();
   }
 
   template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
@@ -403,6 +403,14 @@ public:
     }
   }
 
+  str(void *txt, size_t sz) {
+    if (sz<=15) {
+      set_sso(static_cast<const char *>(txt), sz);
+    }else{
+      set_non_sso(static_cast<const char *>(txt), sz);
+    }
+  }
+
   [[nodiscard]] constexpr std::size_t size_sso() const { assert(size_ctrl&1); return (size_ctrl>>1) & 0xF; }
   [[nodiscard]] constexpr std::size_t size() const { return size_ctrl&1? (size_ctrl>>1) & 0xF : (size_ctrl>>1); }
   [[nodiscard]] constexpr std::size_t max_size() const { return 65535; }
@@ -424,9 +432,11 @@ public:
 
       return lhs_sv < rhs_sv;
     }
-    // FIXME: no need to create string
 
-    return to_s() < rhs.to_s();
+    if ((*this)[0] == rhs[0])
+      return to_s() < rhs.to_s();
+
+    return (*this)[0] < rhs[0];
   }
 
 #if 1
@@ -481,7 +491,16 @@ public:
 
   constexpr char front() const {
     assert(size());
+    if (is_sso()) {
+      const char *base = ref_base_sso();
+      return *base;
+    }
     return data & 0xFF;
+  }
+
+  char back() const {
+    assert(size());
+    return (*this)[size()-1];
   }
 
   char operator[](std::size_t pos) const {
@@ -628,6 +647,15 @@ public:
       }
     }
     return std::string::npos;
+  }
+
+  template <std::size_t N>
+  constexpr bool contains(const char (&s)[N]) const {
+    return find(s) != std::string::npos;
+  }
+
+  bool contains(char c) const {
+    return find(c) != std::string::npos;
   }
 
   std::size_t rfind(const str &v, std::size_t pos = 0) const {
@@ -848,6 +876,36 @@ public:
   static str concat(const str &a, const str &b) {
     auto ret = a.append(b);
     return ret;
+  }
+
+  static str concat(const str &a, std::string_view b, const str &c) {
+    std::string s;
+    s.reserve(a.size()+b.size()+c.size());
+    s.append(a.to_s());
+    s.append(b.data(), b.size());
+    s.append(c.to_s());
+
+    return str(s);
+  }
+
+  static str concat(std::string_view a, str b, const std::string &c) {
+    std::string s;
+    s.reserve(a.size()+b.size()+c.size());
+    s.append(a.data(), a.size());
+    s.append(b.to_s());
+    s.append(c.data(), c.size());
+
+    return str(s);
+  }
+
+  static str concat(const str &a, std::string_view b, const std::string &c) {
+    std::string s;
+    s.reserve(a.size()+b.size()+c.size());
+    s.append(a.to_s());
+    s.append(b.data(), b.size());
+    s.append(c.data(), c.size());
+
+    return str(s);
   }
 
   static str concat(std::string_view a, const str &b) {

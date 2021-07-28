@@ -6,14 +6,17 @@
 #include <mutex>
 
 #include "absl/container/flat_hash_map.h"
+
 #include "lgraph.hpp"
 #include "mmap_bimap.hpp"
 #include "mmap_map.hpp"
+#include "mmap_str.hpp"
 
 template <const char *Name, typename Base, typename Attr_data>
 class Attribute {
-  inline static std::mutex                                    lgs_mutex;
-  inline static absl::flat_hash_map<std::string, Attr_data *> lg2attr;
+  inline static std::mutex  lgs_mutex;
+
+  inline static absl::flat_hash_map<std::pair<mmap_lib::str, mmap_lib::str>, Attr_data *> lg2attr;
 
   inline static thread_local const Lgraph *last_lg   = nullptr;
   inline static thread_local Attr_data *   last_attr = nullptr;
@@ -32,8 +35,7 @@ class Attribute {
   static void setup_table(const Lgraph *lg) {
     last_lg = lg;
 
-    const auto key = absl::StrCat(lg->get_unique_name(), Name);
-    // fmt::print("key:{} attr:{} lg:{}\n", key, Name, (void *)lg);
+    const auto key = std::pair(lg->get_unique_name(), mmap_lib::str(Name));
 
     std::lock_guard<std::mutex> guard(lgs_mutex);
 
@@ -41,7 +43,7 @@ class Attribute {
     if (likely(it != lg2attr.end())) {
       last_attr = it->second;
     } else {
-      last_attr    = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
+      last_attr    = new Attr_data(lg->get_path().to_s(), get_filename(lg->get_lgid()));
       lg2attr[key] = last_attr;
     }
   };
@@ -68,7 +70,7 @@ public:
     {
       std::lock_guard<std::mutex> guard(lgs_mutex);
 
-      const auto key = absl::StrCat(lg->get_unique_name(), Name);
+      const auto key = std::pair(lg->get_unique_name(), mmap_lib::str(Name));
       I(lg2attr[key] == last_attr);
       lg2attr.erase(key);
     }
@@ -87,7 +89,7 @@ public:
     }
     return;  // FIXME: Why does this create a deadlock/livelock with OPT only??? (not needed beyond asan, but it should not happen)
 
-    const auto key = absl::StrCat(lg->get_unique_name(), Name);
+    const auto key = std::pair(lg->get_unique_name(), mmap_lib::str(Name));
 
     std::lock_guard<std::mutex> guard(lgs_mutex);
 

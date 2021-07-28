@@ -8,7 +8,7 @@ std::ostream& operator<<(std::ostream& s, dummyComponent& c) {
 
 dummyComponent::dummyComponent(Ntype_op typeArg) {
   type = typeArg;
-  name = std::string(Ntype::get_name(type));
+  name = Ntype::get_name(type).to_s();
 }
 
 dummyComponent::dummyComponent(const std::string& nameArg) {

@@ -15,7 +15,7 @@ Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx)
 }
 
 Node_pin::Node_pin(const mmap_lib::str &path, const Compact_flat &comp) {
-  current_g = Lgraph::open(path, comp.lgid);
+  current_g = Lgraph::open(path, Lg_type_id(comp.lgid));
   top_g     = current_g;
 
   hidx = Hierarchy_tree::invalid_index();
@@ -337,7 +337,7 @@ void Node_pin::dump_all_prp_vname() const {
   for (const auto &it : *ref) {
     if (current_g->is_valid_node_pin(it.first.idx)) {
       Node_pin a(current_g, it.first);
-      fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), ref->get_sview(it.second));
+      fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), it.second);
     }
   }
 }
@@ -361,20 +361,20 @@ std::string Node_pin::debug_name() const {
   std::string name;
   if (!sink)
     if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
-      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver());
+      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver()).to_s();
 
   const auto node = get_node();
   if (name.empty()) {
     if (node.is_type_sub()) {
-      name = node.get_type_sub_node().get_name_from_instance_pid(pid);
+      name = node.get_type_sub_node().get_name_from_instance_pid(pid).to_s();
     } else if (node.is_type_const()) {
       name = node.get_type_const().to_pyrope();
       return absl::StrCat("pin_", "n", std::to_string(node.nid), "_", name);
     } else if (node.has_name()) {
-      name = node.get_name();
+      name = node.get_name().to_s();
     } else {
       if (is_sink()) {
-        name = Ntype::get_sink_name(node.get_type_op(), pid);
+        name = Ntype::get_sink_name(node.get_type_op(), pid).to_s();
       } else {
         if (Ntype::is_multi_driver(node.get_type_op()))
           name = std::to_string(pid);
@@ -393,7 +393,7 @@ std::string Node_pin::debug_name() const {
                       sink ? "s" : "d",
                       std::to_string(pid),
                       "_lg",
-                      current_g->get_name());
+                      current_g->get_name().to_s());
 }
 
 std::string Node_pin::get_wire_name() const {
@@ -410,11 +410,11 @@ std::string Node_pin::get_wire_name() const {
   std::string name;
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "lg", current_g->get_name(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    absl::StrAppend(&name, "lg", current_g->get_name().to_s(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
   }
 
   if (has_name()) {
-    absl::StrAppend(&name, get_name());
+    absl::StrAppend(&name, get_name().to_s());
     return name;
   }
 

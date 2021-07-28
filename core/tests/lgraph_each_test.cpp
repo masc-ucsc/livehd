@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/strings/match.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgraph.hpp"
@@ -25,13 +24,13 @@ protected:
   Lgraph *gc32 = 0;  // Grand child from 3, 2nd
   Lgraph *top2 = 0;
 
-  absl::flat_hash_map<std::string, int> children;
+  absl::flat_hash_map<mmap_lib::str, int> children;
 
   void add_child(Lgraph *parent, Lgraph *child, std::string_view iname, bool randomize) {
     Node node;
 
     if (child) {
-      auto str = absl::StrCat(parent->get_name(), ":", child->get_name());
+      auto str = mmap_lib::str::concat(parent->get_name(), ":", child->get_name());
       children[str]++;
 
       if (rand_r(&rseed) & 1)  // Should be the same because the lgraph is already created
@@ -40,7 +39,7 @@ protected:
         node = parent->create_node_sub(child->get_name());
 
     } else {
-      children[absl::StrCat(parent->get_name(), ":", iname)]++;
+      children[mmap_lib::str::concat(parent->get_name(), ":", iname)]++;
 
       node = parent->create_node_sub(iname);
 
@@ -81,11 +80,14 @@ protected:
     int inps = rand_r(&rseed) % 4;  // 0..3 inputs
     int pos  = 0;
     for (int j = 0; j < inps; j++) {
-      g->add_graph_input(("i" + std::to_string(j)).c_str(), pos++, rand_r(&rseed) & 15);
+      mmap_lib::str io_name("i" + std::to_string(j));
+
+      g->add_graph_input(io_name, pos++, rand_r(&rseed) & 15);
     }
     inps = rand_r(&rseed) % 5;  // 0..4 outputs
     for (int j = 0; j < inps; j++) {
-      g->add_graph_output(("o" + std::to_string(j)), pos++, rand_r(&rseed) & 15);
+      mmap_lib::str io_name("o" + std::to_string(j));
+      g->add_graph_output(io_name, pos++, rand_r(&rseed) & 15);
     }
   }
 
@@ -152,7 +154,7 @@ protected:
       std::string lg_name{"lg_name"};
       lg_name += std::to_string(i);
 
-      auto *lg = Lgraph::create("lgdb_lgraph_each", lg_name, "nosource");
+      auto *lg = Lgraph::create("lgdb_lgraph_each", mmap_lib::str(lg_name), "nosource");
       add_io(lg);
 
       for (int j = rnd_cells.any(); j > 0; --j) {
@@ -179,7 +181,7 @@ protected:
 };
 
 TEST_F(Setup_graphs_test, each_local_sub) {
-  absl::flat_hash_map<std::string, int> children2;
+  absl::flat_hash_map<mmap_lib::str, int> children2;
 
   for (auto &parent : lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
@@ -189,15 +191,15 @@ TEST_F(Setup_graphs_test, each_local_sub) {
 
       ASSERT_NE(child, nullptr);
 
-      std::string_view iname = "NONAME";
+      mmap_lib::str iname("NONAME");
       if (node.has_name())
         iname = node.get_name();
 
       fmt::print("parent:{} child:{} iname:{}\n", parent->get_name(), child->get_name(), iname);
 
-      EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
+      EXPECT_TRUE(children.find(mmap_lib::str::concat(parent->get_name(), ":", child->get_name())) != children.end());
 
-      auto id = absl::StrCat(parent->get_name(), ":", child->get_name());
+      auto id = mmap_lib::str::concat(parent->get_name(), ":", child->get_name());
       if (children2.find(id) == children2.end())
         children2[id] = 1;
       else
@@ -205,22 +207,22 @@ TEST_F(Setup_graphs_test, each_local_sub) {
     });
   }
 
-  for (auto &c : children) {
-    if (!absl::StrContains(c.first, "cell"))
-      EXPECT_EQ(c.second, children2[c.first]);
-    else
+  for (const auto &c : children) {
+    if (c.first.contains("cell"))
       EXPECT_NE(c.second, children2[c.first]);
-  }
-  for (auto &c : children2) {
-    if (!absl::StrContains(c.first, "cell"))
-      EXPECT_EQ(c.second, children[c.first]);
     else
+      EXPECT_EQ(c.second, children2[c.first]);
+  }
+  for (const auto &c : children2) {
+    if (c.first.contains("cell"))
       EXPECT_NE(c.second, children[c.first]);
+    else
+      EXPECT_EQ(c.second, children[c.first]);
   }
 }
 
 TEST_F(Setup_graphs_test, each_local_sub_twice) {
-  absl::flat_hash_map<std::string, int> children2;
+  absl::flat_hash_map<mmap_lib::str, int> children2;
 
   for (auto &parent : lgs) {
     fmt::print("checking parent:{}\n", parent->get_name());
@@ -230,11 +232,11 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
 
       ASSERT_NE(child, nullptr);
 
-      EXPECT_TRUE(children.find(absl::StrCat(parent->get_name(), ":", child->get_name())) != children.end());
+      EXPECT_TRUE(children.find(mmap_lib::str::concat(parent->get_name(), ":", child->get_name())) != children.end());
 
-      auto id = absl::StrCat(parent->get_name(), ":", child->get_name());
+      auto id = mmap_lib::str::concat(parent->get_name(), ":", child->get_name());
 
-      std::string_view iname = "NONAME";
+      mmap_lib::str iname("NONAME");
       if (node.has_name())
         iname = node.get_name();
       fmt::print("parent:{} child:{} iname:{} id:{}\n", parent->get_name(), child->get_name(), iname, id);
@@ -247,16 +249,16 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
   }
 
   for (auto &c : children) {
-    if (!absl::StrContains(c.first, "cell"))
-      EXPECT_EQ(c.second, children2[c.first]);
-    else
+    if (c.first.contains("cell"))
       EXPECT_NE(c.second, children2[c.first]);
+    else
+      EXPECT_EQ(c.second, children2[c.first]);
   }
   for (auto &c : children2) {
-    if (!absl::StrContains(c.first, "cell"))
-      EXPECT_EQ(c.second, children[c.first]);
-    else
+    if (c.first.contains("cell"))
       EXPECT_NE(c.second, children[c.first]);
+    else
+      EXPECT_EQ(c.second, children[c.first]);
   }
 }
 

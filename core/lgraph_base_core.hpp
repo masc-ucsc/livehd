@@ -58,23 +58,23 @@ class Lgraph_base_core {
 protected:
   class Setup_path {
   private:
-    static std::string last_path;  // Just try to optimize to avoid too many frequent syscalls
+    static mmap_lib::str last_path;  // Just try to optimize to avoid too many frequent syscalls
 
   public:
-    Setup_path(std::string_view path);
+    Setup_path(const mmap_lib::str &path);
   };
 
   Setup_path        _p;  // Must be first in base object
-  std::string       path;
-  std::string       name;
-  const std::string unique_name;
-  const std::string long_name;
+  mmap_lib::str       path;
+  mmap_lib::str       name;
+  const mmap_lib::str unique_name;
+  const mmap_lib::str long_name;
   const Lg_type_id  lgid;
 
   bool locked;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
+  explicit Lgraph_base_core(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid);
   virtual ~Lgraph_base_core(){};
 
 public:
@@ -83,11 +83,9 @@ public:
   virtual void clear();
   virtual void sync();
 
-  const std::string& get_unique_name() const { return unique_name; }
-
-  std::string_view get_name() const { return std::string_view(name); }
+  mmap_lib::str get_unique_name() const { return unique_name; }
+  mmap_lib::str get_name() const { return name; }
+  mmap_lib::str get_path() const { return path; }
 
   const Lg_type_id get_lgid() const { return lgid; }
-
-  std::string_view get_path() const { return path; }
 };

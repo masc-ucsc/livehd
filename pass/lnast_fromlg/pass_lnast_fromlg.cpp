@@ -39,7 +39,7 @@ void Pass_lnast_fromlg::trans(Eprp_var& var) {
   }
 }
 
-void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, std::string_view module_name) {
+void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, const mmap_lib::str &module_name) {
   if (var.has_label("bw_in_ln")) {
     if (var.get("bw_in_ln") == "false") {
       put_bw_in_ln = false;
@@ -163,7 +163,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
   auto ntype = pin.get_node().get_type_op();
   if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
     // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
-    std::string_view pin_name = lnast.add_string(dpin_get_name(pin));
+    const mmap_lib::str &pin_name = lnast.add_string(dpin_get_name(pin));
     // to add #x = #x.__create_flop
     auto temp_decl_var_name = create_temp_var(lnast);
 
@@ -177,7 +177,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
     lnast.add_child(asg_decl_node, Lnast_node::create_ref(temp_decl_var_name));
 
     // to create #x_q = #x // test case: firrtl_tail3.prp
-    std::string_view pin_nam_q   = lnast.add_string(absl::StrCat(pin_name, "_q"));
+    const mmap_lib::str &pin_nam_q   = lnast.add_string(absl::StrCat(pin_name, "_q"));
     auto             q_decl_node = lnast.add_child(ln_node, Lnast_node::create_assign());
     lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_nam_q));
     lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_name));
@@ -222,7 +222,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     return;
   }
 
-  std::string_view name;
+  const mmap_lib::str &name;
   auto             bw = pin.get_bits();
   // if ((bw > 0) & (pin.get_name().substr(0,3) != "___")) {
   if ((bw > 0) & (dpin_get_name(pin).substr(0, 3) != "___")) {
@@ -468,7 +468,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
   }
 
   bool             only_one_pin = false;
-  std::string_view concat_name;
+  const mmap_lib::str &concat_name;
   if (dpins.size() == 1) {
     // Only one element... No concatenation required.
     only_one_pin = true;
@@ -812,8 +812,8 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
   I(has_din && has_clk);  // A flop at least has to have the input and clock, others are optional/have defaults.
 
-  // std::string_view pin_name = lnast.add_string(pin.get_name());
-  std::string_view pin_name = lnast.add_string(dpin_get_name(pin));
+  // const mmap_lib::str &pin_name = lnast.add_string(pin.get_name());
+  const mmap_lib::str &pin_name = lnast.add_string(dpin_get_name(pin));
 
   // Set __clk_pin
   /* FIXME: Currently, this is commented out since LN->LG does not support __clk_pin attribute.
@@ -907,7 +907,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
   // to have %out=#x_q insteasd of #x. test case: firrtl_tail3.prp
-  std::string_view pin_name_q = lnast.add_string(absl::StrCat(pin_name, "_q"));
+  const mmap_lib::str &pin_name_q = lnast.add_string(absl::StrCat(pin_name, "_q"));
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name_q));
   // lnast.add_child(idx_dot_q, Lnast_node::create_const("__q_pin"));
 
@@ -938,7 +938,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   }
   I(has_din && has_en);  // A latch at least has to have the din and enable.
 
-  std::string_view pin_name = lnast.add_string(dpin_get_name(pin));  // lnast.add_string(pin.get_name());
+  const mmap_lib::str &pin_name = lnast.add_string(dpin_get_name(pin));  // lnast.add_string(pin.get_name());
 
   // Set __latch = true
   auto tmp_var  = create_temp_var(lnast);
@@ -976,7 +976,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   const auto& sub = pin.get_node().get_type_sub_node();
 
   // Create tuple names for submodule IO.
-  std::string_view out_tup_name;
+  const mmap_lib::str &out_tup_name;
   if (!pin.get_node().has_name()) {
    // I(false, "\n\nERROR: for debug; not expecting to enter this code-part\n\n");
     // 15-9 out_tup_name = dpin_get_name(pin);//TODO: check the type_op and assign prefix of "out"
@@ -1252,7 +1252,7 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
 /* If a driver pin's name includes a "%" and is not an output of the
  * design, then it's an SSA variable. Thus, if it is an SSA variable
  * I need to remove the "%". */
-std::string_view Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
+const mmap_lib::str &Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
   auto ccd = dpin.get_compact_class_driver();
   auto it  = dpin_name_map.find(ccd);
 
@@ -1271,7 +1271,7 @@ std::string_view Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
 
 /* if (dpin doesn't have name) assign a temp var to pin and keep in map
  * else (dpin has name) modulate the name as per need and assing to the map */
-void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, std::string_view name_part) {
+void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, const mmap_lib::str &name_part) {
   auto ccd  = dpin.get_compact_class_driver();
   auto name = name_part;
   if (dpin_name_map.find(ccd) != dpin_name_map.end()) {
@@ -1284,19 +1284,19 @@ void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, std::string_view 
   // dpin_name_map.emplace(ccd, name);//emplace does not reset; if it is already set, it just returns the val
 }
 
-std::string_view Pass_lnast_fromlg::get_new_seq_name(Lnast& lnast) {
+const mmap_lib::str &Pass_lnast_fromlg::get_new_seq_name(Lnast& lnast) {
   auto seq_name = lnast.add_string(absl::StrCat("SEQ", seq_count));
   seq_count++;
   return seq_name;
 }
 
-std::string_view Pass_lnast_fromlg::create_temp_var(Lnast& lnast, std::string_view str_prefix) {
+const mmap_lib::str &Pass_lnast_fromlg::create_temp_var(Lnast& lnast, const mmap_lib::str &str_prefix) {
   auto temp_var_name = lnast.add_string(absl::StrCat(str_prefix, "L", temp_var_count));
   temp_var_count++;
   return temp_var_name;
 }
 
-bool Pass_lnast_fromlg::has_prefix(std::string_view test_string) {
+bool Pass_lnast_fromlg::has_prefix(const mmap_lib::str &test_string) {
   return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
 }
 bool Pass_lnast_fromlg::has_prefix(const std::string& test_string) {

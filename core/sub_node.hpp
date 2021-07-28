@@ -93,14 +93,14 @@ private:
 
 public:
   Sub_node() {
-    name.clear();
+    name = mmap_lib::str();
     expunge();
   }
 
   Sub_node(const Sub_node &s) = default;
   Sub_node &operator=(const Sub_node &) = delete;
 
-  void copy_from(const mmap_lib::str new_name, Lg_type_id new_lgid, const Sub_node &sub);
+  void copy_from(const mmap_lib::str &new_name, Lg_type_id new_lgid, const Sub_node &sub);
 
   void to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer) const;
   void from_json(const rapidjson::Value &entry);

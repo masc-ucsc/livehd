@@ -102,7 +102,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
     : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
   I(nid);
   auto *lib = _g->ref_library();
-  top_g     = lib->try_find_lgraph(comp.lgid);
+  top_g     = lib->try_find_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
   I(top_g);
@@ -113,7 +113,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
 Node::Node(const mmap_lib::str &path, const Compact_flat &comp)
     : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
   I(nid);
-  top_g = Graph_library::try_find_lgraph(path, comp.lgid);
+  top_g = Graph_library::try_find_lgraph(path, Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
   I(top_g);
@@ -198,7 +198,7 @@ Node_pin Node::setup_driver_pin_slow(const mmap_lib::str &name) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, false);
 }
 
-bool Node::is_sink_connected(mmap_lib:str pname) const {
+bool Node::is_sink_connected(const mmap_lib::str &pname) const {
   if (!is_type_sub()) {
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
@@ -266,9 +266,8 @@ Node_pin Node::setup_sink_pin_slow(const mmap_lib::str &name) {
 
   Port_ID pid;
 
-  if (std::isdigit(name[0])) {
-    int pos = 0;
-    std::from_chars(name.data(), name.data() + name.size(), pos);
+  if (name.is_i()) {
+    int pos = name.to_i();
 
     if (!sub.has_instance_pin(pos))
       return Node_pin();  // invalid pin
@@ -506,32 +505,32 @@ mmap_lib::str Node::default_instance_name() const {
   std::string name{"i"};
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "_lg", current_g->get_name(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    absl::StrAppend(&name, "_lg", current_g->get_name().to_s(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
   }
 
   if (has_name()) {
-    absl::StrAppend(&name, get_name().to_s());
-    return name;
+    if (name.empty())
+      return get_name();
+
+    return mmap_lib::str::concat(name, get_name());
   }
 
-  absl::StrAppend(&name, "_nid", std::to_string(nid));
-
-  return mmap_lib::str(name);
+  return mmap_lib::str::concat(name, std::string("_nid") + std::to_string(nid));
 }
 
-std::string Node::create_name() const {
+mmap_lib::str Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end())
     return ref->get_val(it);
 
-  auto        cell_name = Ntype::get_name(get_type_op());
-  std::string sig       = absl::StrCat("lg_", cell_name, std::to_string(nid));
+  auto cell_name = Ntype::get_name(get_type_op());
+  auto sig       = mmap_lib::str::concat("lg_", cell_name, std::to_string(nid));
   ref->set(get_compact_class(), sig);
   return sig;
 }
 
-std::string      Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
+mmap_lib::str Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
 
 std::string Node::debug_name() const {
 #ifndef NDEBUG
@@ -549,19 +548,20 @@ std::string Node::debug_name() const {
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
-    name = ref->get_val(it);
+    name = it->second.to_s();
   }
 
   if (is_type_sub()) {
-    if (name.find(get_type_sub_node().get_name()) == std::string::npos) {  // filter out unnecessary module name
-      absl::StrAppend(&name, get_type_sub_node().get_name());
+    auto n = get_type_sub_node().get_name().to_s();
+    if (name.find(n) == std::string::npos) {  // filter out unnecessary module name
+      absl::StrAppend(&name, n);
     }
   }
 
-  auto cell_name = Ntype::get_name(get_type_op());
+  auto cell_name = Ntype::get_name(get_type_op()).to_s();
   if (name.empty())
-    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
-  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
+    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name().to_s());
+  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name().to_s());
 }
 
 bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }
@@ -569,9 +569,8 @@ bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_
 void Node::set_place(const Ann_place &p) { Ann_node_place::ref(top_g)->set(get_compact(), p); }
 
 const Ann_place Node::get_place() const {
-  auto *data = Ann_node_place::ref(top_g)->ref(get_compact());
-  I(data);
-  return *data;
+  auto data = Ann_node_place::ref(top_g)->get(get_compact());
+  return data;
 }
 
 Bits_t Node::get_bits() const {
