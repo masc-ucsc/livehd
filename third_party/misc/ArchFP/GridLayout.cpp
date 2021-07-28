@@ -63,15 +63,12 @@ void gridLayout::outputHotSpotLayout(std::ostream& o, double startX, double star
     return;
   }
 
-  double      compWidth, compHeight;
-  std::string compName;
   FPObject*   obj = getComponent(0);
-  compWidth       = obj->getWidth();
-  compHeight      = obj->getHeight();
-  compName        = obj->getName();
+  auto compWidth       = obj->getWidth();
+  auto compHeight      = obj->getHeight();
 
-  int         compCount = xCount * yCount;
-  std::string GridName  = getUniqueName();
+  int     compCount = xCount * yCount;
+  auto    GridName  = getUniqueName();
   o << "# " << GridName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
     << ", area=" << area << "mm²\n";
   o << "# start " << GridName << " " << Ntype::get_name(getType()) << " grid " << compCount << " " << xCount << " " << yCount
@@ -93,12 +90,9 @@ unsigned int gridLayout::outputLGraphLayout(Node_tree& tree, Tree_index tidx, do
     throw std::invalid_argument("Attempt to output a grid with other than one component.\n");
   }
 
-  double      compWidth, compHeight;
-  std::string compName;
   FPObject*   obj = getComponent(0);
-  compWidth       = obj->getWidth();
-  compHeight      = obj->getHeight();
-  compName        = obj->getName();
+  auto compWidth       = obj->getWidth();
+  auto compHeight      = obj->getHeight();
 
   int compNum = 1;
 

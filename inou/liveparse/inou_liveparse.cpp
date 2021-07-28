@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "inou_liveparse.hpp"
 
-#include "absl/strings/substitute.h"
 #include "chunkify_verilog.hpp"
 
 void setup_inou_liveparse() { Inou_liveparse::setup(); }
@@ -16,10 +15,10 @@ Inou_liveparse::Inou_liveparse(const Eprp_var &var) : Pass("inou.liveparse", var
 void Inou_liveparse::do_tolg() {
   Chunkify_verilog chunker_v(path);
 
-  for (const auto &f : absl::StrSplit(files, ',')) {
-    if (absl::EndsWith(f, ".v") || absl::EndsWith(f, ".sv")) {
+  for (auto f : files.split(',')) {
+    if (f.ends_with(".v") || f.ends_with(".sv")) {
       chunker_v.parse_file(f);
-    } else if (absl::EndsWith(f, ".prp")) {
+    } else if (f.ends_with(".prp")) {
       error("inou.liveparse chunkify Pyrope not implemented yet {}", f);
       return;
     } else {

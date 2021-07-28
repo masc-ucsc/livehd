@@ -21,16 +21,11 @@ private:
 
 protected:
   absl::flat_hash_map<Node::Compact, std::shared_ptr<Lgtuple const>> node2tuple;  // node to the most up-to-dated tuple chain
-  absl::flat_hash_map<std::string_view, Node_pin>                    oname2dpin;
-  absl::flat_hash_map<std::string, Node_pin>                         reg_name2qpin;
-  absl::flat_hash_map<std::string, std::pair<std::string, Node_pin>> reg_attr_map;
-  absl::flat_hash_map<std::string, std::vector<Node_pin>>            reg_name2sink_pins;
-  absl::flat_hash_set<Node::Compact>                                 dont_touch;
   absl::flat_hash_set<Node::Compact>                                 tuple_done;
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> get_value(const Node &node) const;
 
-  void add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const std::string &key, Node_pin &pin);
+  void add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_lib::str &key, Node_pin &pin);
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -57,7 +52,7 @@ protected:
   void reconnect_tuple_add(Node &node);
   void reconnect_tuple_get(Node &node);
 
-  Node_pin expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges,
+  Node_pin expand_data_and_attributes(Node &node, const mmap_lib::str &key_name, XEdge_iterator &pending_out_edges,
                                       const std::shared_ptr<Lgtuple const> &node_tup);
 
   // handle tuple issues but allowed to "mutate" the node
@@ -81,7 +76,7 @@ protected:
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
 
-  std::tuple<std::string, std::string> get_tuple_name_key(const Node &node) const;
+  std::tuple<mmap_lib::str, mmap_lib::str> get_tuple_name_key(const Node &node) const;
 
   void scalar_pass(Lgraph *orig);
   void tuple_pass(Lgraph *orig);

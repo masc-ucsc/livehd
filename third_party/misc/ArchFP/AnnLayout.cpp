@@ -92,7 +92,7 @@ bool annLayout::layout(FPOptimization opt, double targetAR) {
 
 void annLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
-  std::string layoutName = getUniqueName();
+  auto layoutName = getUniqueName();
   o << "# " << layoutName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
     << ", area=" << area << "mm²\n";
   o << "# start " << layoutName << " " << Ntype::get_name(getType()) << " ann " << getComponentCount() << "\n";

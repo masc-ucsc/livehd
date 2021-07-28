@@ -13,8 +13,8 @@ class Code_gen {
 protected:
   // Lnast *top;
   std::shared_ptr<Lnast>             lnast;
-  std::string_view                   path;
-  std::string_view                   odir;
+  mmap_lib::str                      path;
+  mmap_lib::str                      odir;
   std::string                        buffer_to_print = "";
   std::map<std::string, std::string> ref_map;
   // enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
@@ -25,8 +25,8 @@ private:
   std::vector<std::string_view>      const_vect;
 
 public:
-  Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path,
-           std::string_view _odir);
+  Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, const mmap_lib::str &_path,
+           const mmap_lib::str &_odir);
   // virtual void generate() = 0;
   void        generate();
   void        do_stmts(const mmap_lib::Tree_index& stmt_node_index);

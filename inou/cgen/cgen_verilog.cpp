@@ -13,7 +13,7 @@
 #include "mmap_gc.hpp"
 #include "pass.hpp"
 
-Cgen_verilog::Cgen_verilog(bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
+Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str &_odir) : verbose(_verbose), odir(_odir) {
   if (reserved_keyword.empty()) {
     reserved_keyword.insert("reg");
     reserved_keyword.insert("input");
@@ -762,7 +762,7 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
       auto reset_dpin = node.get_sink_pin("reset").get_driver_pin();
       if (reset_dpin.is_type_const()) {
         auto reset_const = reset_dpin.get_node().get_type_const();
-        if (reset_const != Lconst(0) && reset_const != Lconst("false")) {
+        if (reset_const != Lconst(0) && reset_const != Lconst::string("false")) {
           Pass::info("flop reset is hardwired to value:{}. (weird)", reset_const.to_pyrope());
           reset = reset_const.to_verilog();  // hardcoded value???
         }
@@ -931,7 +931,7 @@ std::tuple<std::string, int> Cgen_verilog::setup_file(Lgraph *lg) const {
   if (odir.empty()) {
     filename = absl::StrCat(lg->get_name().to_s(), ".v");
   } else {
-    filename = absl::StrCat(odir, "/", lg->get_name().to_s(), ".v");
+    filename = absl::StrCat(odir.to_s(), "/", lg->get_name().to_s(), ".v");
   }
 
   int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);

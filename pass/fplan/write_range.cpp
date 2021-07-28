@@ -45,7 +45,8 @@ Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass
     const Ntype_op nop = static_cast<Ntype_op>(op);
     if (Ntype::is_synthesizable(nop)) {
       float area = rd(g);
-      na.set_dim(nop, {min_ar, max_ar, area});
+      Ntype_area::dim dim{min_ar, max_ar, area};
+      na.set_dim(nop, dim);
       // fmt::print("{}\t{:.3f}\t{:.3f}\t{:.3f}\n", Ntype::get_name(nop), area, min_ar, max_ar);
     }
   }

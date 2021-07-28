@@ -102,8 +102,8 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
         }
 
         auto     dst_pid = output_edge["sink_pid"].GetString();
-        Node_pin dpin    = last_node.setup_driver_pin(map_lib::str(dst_pid));
-        Node_pin spin    = dst_node.setup_sink_pin(src_pid);
+        Node_pin dpin    = last_node.setup_driver_pin(mmap_lib::str(dst_pid));
+        Node_pin spin    = dst_node.setup_sink_pin(mmap_lib::str(src_pid));
         if (output_edge.HasMember("bits")) {
           g->add_edge(dpin, spin, output_edge["bits"].GetInt());
         } else {

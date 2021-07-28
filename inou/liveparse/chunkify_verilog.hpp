@@ -9,24 +9,24 @@ class Sub_node;
 
 class Chunkify_verilog : public Elab_scanner {
 protected:
-  std::string_view path;
-  std::string_view elab_path;
+  mmap_lib::str path;
+  mmap_lib::str elab_path;
 
-  std::string chunk_dir;
-  std::string elab_chunk_dir;
+  mmap_lib::str chunk_dir;
+  mmap_lib::str elab_chunk_dir;
 
   Graph_library *library;
 
-  int open_write_file(std::string_view filename) const;
+  int open_write_file(const mmap_lib::str &filename) const;
 
-  bool is_same_file(std::string_view filename, std::string_view text1, std::string_view text2) const;
+  bool is_same_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const;
 
-  void write_file(std::string_view filename, std::string_view text1, std::string_view text2) const;
-  void write_file(std::string_view filename, std::string_view text) const;
+  void write_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const;
+  void write_file(const mmap_lib::str &filename, const mmap_lib::str &text) const;
 
-  void add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos);
+  void add_io(Sub_node *sub, bool input, const mmap_lib::str &io_name, Port_ID pos);
 
 public:
-  Chunkify_verilog(std::string_view outd);
+  Chunkify_verilog(const mmap_lib::str &outd);
   void elaborate();
 };

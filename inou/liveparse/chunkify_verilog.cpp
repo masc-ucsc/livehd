@@ -19,9 +19,9 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 
-Chunkify_verilog::Chunkify_verilog(std::string_view _path) : path(_path) { library = Graph_library::instance(path); }
+Chunkify_verilog::Chunkify_verilog(const mmap_lib::str &_path) : path(_path) { library = Graph_library::instance(path); }
 
-int Chunkify_verilog::open_write_file(std::string_view filename) const {
+int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
   std::string sfilename(filename);
   int         fd = open(sfilename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
@@ -31,7 +31,7 @@ int Chunkify_verilog::open_write_file(std::string_view filename) const {
   return fd;
 }
 
-bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_view text1, std::string_view text2) const {
+bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, const mmap_lib::str &text1, const mmap_lib::str &text2) const {
   if (elab_path.empty())
     return false;
 
@@ -67,7 +67,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
   return n == 0;  // same file if n==0
 }
 
-void Chunkify_verilog::write_file(std::string_view filename, std::string_view text1, std::string_view text2) const {
+void Chunkify_verilog::write_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const {
   int fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -84,7 +84,7 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
   close(fd);
 }
 
-void Chunkify_verilog::write_file(std::string_view filename, std::string_view text) const {
+void Chunkify_verilog::write_file(const mmap_lib::str &filename, const mmap_lib::str &text) const {
   auto fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -97,7 +97,7 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
   close(fd);
 }
 
-void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos) {
+void Chunkify_verilog::add_io(Sub_node *sub, bool input, const mmap_lib::str &io_name, Port_ID pos) {
   I(sub);
 
   auto dir = input ? Sub_node::Direction::Input : Sub_node::Direction::Output;
@@ -110,10 +110,10 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-  std::string parse_path = absl::StrCat(path, "/parse/");  // Keep trailing /
-  if (access(parse_path.c_str(), F_OK) != 0) {
-    std::string spath(path);
-    int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  auto parse_path = mmap_lib::str::concat(path, "/parse/");  // Keep trailing /
+  if (access(parse_path.to_s().c_str(), F_OK) != 0) {
+    auto  spath = path.to_s();
+    int     err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
       throw scan_error(*this, "could not create {} directory", path);
     }
@@ -146,11 +146,11 @@ void Chunkify_verilog::elaborate() {
   bench_name.append(format_name);
   Lbench bench(bench_name);
 
-  auto source = absl::StrCat(parse_path, "file_", format_name);
+  auto source = mmap_lib::str::concat(parse_path, "file_", format_name);
 
   write_file(source, get_memblock());
 
-  chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
+  chunk_dir = mmap_lib::str::concat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
   elab_chunk_dir.clear();

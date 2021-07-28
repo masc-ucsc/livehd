@@ -70,7 +70,7 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
 }
 
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
-  Lgraph* root = Lgraph::open(path, mmap_lib::str(var.get("top")));
+  Lgraph* root = Lgraph::open(mmap_lib::str(path), mmap_lib::str(var.get("top")));
   if (root == nullptr) {
     error("cannot find top level lgraph!");
   }
@@ -133,7 +133,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
       if ((n.has_instance_name() && n.get_instance_name() == name) || (n.default_instance_name() == name)) {
         found = true;
 
-        mmap_lib::map<Node::Compact, GeographyHint> hint_map(path, "node_hints");
+        mmap_lib::map<Node::Compact, GeographyHint> hint_map(path.to_s(), "node_hints");
 
         std::string_view hint = var.get("hint");
         if (hint != "") {

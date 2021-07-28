@@ -20,7 +20,7 @@ class Graphviz {
 private:
   // const bool bits;
   const bool        verbose;
-  const std::string odir;
+  const mmap_lib::str odir;
 
   absl::flat_hash_map<int, std::string> color2rgb;
 
@@ -37,5 +37,5 @@ public:
   void do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix = "");
   void do_hierarchy(Lgraph *g);
 
-  Graphviz(bool _bits, bool _verbose, std::string_view _odir);
+  Graphviz(bool _bits, bool _verbose, mmap_lib::str _odir);
 };

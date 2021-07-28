@@ -34,7 +34,7 @@ std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> Cprop::get_value(const Node
   return std::make_tuple(invalid_pin, nullptr);
 }
 
-void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const std::string &key, Node_pin &dpin) {
+void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_lib::str &key, Node_pin &dpin) {
   tup->add(key, dpin);
 
   if (likely(!dpin.is_type_tup())) {
@@ -593,8 +593,8 @@ void Cprop::try_connect_lgcpp(const Node &node) {
 #endif
 }
 
-std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node) const {
-  std::string key_name;
+std::tuple<mmap_lib::str, mmap_lib::str> Cprop::get_tuple_name_key(const Node &node) const {
+  mmap_lib::str key_name;
   if (node.is_sink_connected("field")) {
     auto node2 = node.get_sink_pin("field").get_driver_node();
     if (node2.is_type_const()) {
@@ -602,7 +602,7 @@ std::tuple<std::string, std::string> Cprop::get_tuple_name_key(const Node &node)
     }
   }
 
-  std::string tup_name;
+  mmap_lib::str tup_name;
   if (node.setup_driver_pin("Y").has_name()) {
     tup_name = node.setup_driver_pin("Y").get_name();
   } else {
@@ -658,7 +658,7 @@ void Cprop::tuple_mux_mut(Node &node) {
 
   bool        some_tuple_found = false;
   bool        some_pending     = false;
-  std::string scalar_field;
+  mmap_lib::str scalar_field;
   for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
     auto tup        = find_lgtuple(inp_edges_ordered[i].driver);
     tup_list[i - 1] = tup;
@@ -945,7 +945,7 @@ void Cprop::tuple_subgraph(const Node &node) {
 
   auto *sub_lg = node.ref_library()->try_find_lgraph(sub.get_lgid());
   if (sub_lg == nullptr || sub_lg->is_empty()) {
-    std::string sub_name{sub.get_name()};
+    mmap_lib::str sub_name{sub.get_name()};
     if (sub_name.size() > 2 && sub_name.substr(0, 2) == "__") {
       auto cell_name  = sub_name.substr(2);
       auto cell_ntype = Ntype::get_op(cell_name);
@@ -1029,7 +1029,7 @@ void Cprop::tuple_subgraph(const Node &node) {
   if (it2 != node2tuple.end())
     return;
 
-  std::string method;
+  mmap_lib::str method;
   if (node.has_name()) {
     method = node.get_name();
   } else {
@@ -1257,7 +1257,7 @@ bool Cprop::tuple_tuple_get(const Node &node) {
   I(node_tup->is_correct());
 
   bool        is_attr_get = false;
-  std::string main_field{key_name};
+  mmap_lib::str main_field{key_name};
   if (Lgtuple::is_attribute(key_name)) {
     main_field  = Lgtuple::get_all_but_last_level(key_name);
     is_attr_get = true;
@@ -1342,7 +1342,7 @@ void Cprop::tuple_attr_set(const Node &node) {
     auto node_dpin = node.get_driver_pin();
 
     node_tup = std::make_shared<Lgtuple>(parent_tup->get_name());
-    std::string_view parent_key;
+    mmap_lib::str parent_key;
     for (const auto &e : parent_tup->get_map()) {
       if (!Lgtuple::is_attribute(e.first)) {
         parent_key = e.first;
@@ -1539,8 +1539,8 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
         continue;
       }
 
-      std::string_view pin_name;
-      int              pin_pid = 0;
+      mmap_lib::str pin_name;
+      int           pin_pid = 0;
       if (Ntype::is_single_sink(cell_ntype)) {
         pin_pid  = 0;
         pin_name = Ntype::get_sink_name(cell_ntype, 0);
@@ -1607,7 +1607,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
   const auto &sub = node.get_type_sub_node();
 
-  std::string sub_name{sub.get_name()};
+  mmap_lib::str sub_name{sub.get_name()};
   if (sub_name.size() > 2 && sub_name.substr(0, 2) == "__") {
     auto cell_name  = sub_name.substr(2);
     auto cell_ntype = Ntype::get_op(cell_name);
@@ -1790,7 +1790,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
   }
 }
 
-Node_pin Cprop::expand_data_and_attributes(Node &node, const std::string &key_name, XEdge_iterator &pending_out_edges,
+Node_pin Cprop::expand_data_and_attributes(Node &node, const mmap_lib::str &key_name, XEdge_iterator &pending_out_edges,
                                            const std::shared_ptr<Lgtuple const> &node_tup) {
   I(!hier);
   I(node_tup);
@@ -2150,7 +2150,7 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
       continue;
     }
 
-    std::string_view out_name{it.first};
+    mmap_lib::str out_name{it.first};
     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
       out_name = out_name.substr(2);
     }

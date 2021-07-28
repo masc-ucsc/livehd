@@ -35,9 +35,9 @@ void FPObject::outputHotSpotLayout(std::ostream& o, double startX, double startY
 
 mmap_lib::str FPObject::getUniqueName() const {
   if (name == " " || name == "")
-    return mmap_lib::str(name);
+    return name;
 
-  return mmap_lib::str(name + std::to_string(Name2Count(name)));
+  return mmap_lib::str::concat(name, std::to_string(Name2Count(name.to_s())));
 }
 
 double FPObject::calcX(double startX) const {

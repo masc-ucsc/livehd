@@ -120,3 +120,23 @@ unknown. This binary representation allows for faster operations with uknowns
 
 In C++ generated simulation, the computation can be 2 or 4 bit logic. Inside
 LGraph/LNAST, the computation is always 4 bit logic.
+
+## mmap_lib::str
+
+* Do more mmap_lib::str::concat cases (eg: concat with an integer). Optimize for speed.
+* Add non-persistent mmap_str option (only for non-sso). mmap_lib::pstr ?
+* Unclear what is better to pass mmap_lib (const mmap_lib &str) OR (mmap_lib str). Benchmark?
+* Go over all the absl::Str. Most of them could be replaced/avoided with mmap_lib::str::concat ....
+
+## pass/fplan
+
+* Many methods/variables use camelCase, it should be camel_case
+* "int" is used all over. Even for things that should be size_t (size of stuff)
+* std::string is used quite a bit. It should be mmap_lib::str (look for to_s, they should be gone too)
+* node_tree is only used by pass/fplan. Move from core to pass/fplan
+* Lots of variable declarations c-style (early in the method, then assigned later. Use later on first assign)
+* Only classes can start with upper case (Name2Count -> name2count)
+* Rename/rework node_type_area to be an attribute (ann_area.hpp)
+* Classes should start uppercase. E.g: Ntype_area::dim
+* There are several uses of mmap_lib::map that should be converted to absl::flat_hash_map (only persistent should use mmap_lib). E.g: hint_map should not be persistent
+

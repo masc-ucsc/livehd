@@ -8,8 +8,8 @@
 
 class Cgen_verilog {
 private:
-  const bool        verbose;
-  const std::string odir;
+  const bool          verbose;
+  const mmap_lib::str odir;
 
   using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, std::string>;
 
@@ -51,5 +51,5 @@ private:
 public:
   void do_from_lgraph(Lgraph *lg_parent);
 
-  Cgen_verilog(bool _verbose, std::string_view _odir);
+  Cgen_verilog(bool _verbose, const mmap_lib::str &_odir);
 };

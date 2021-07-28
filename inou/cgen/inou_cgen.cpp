@@ -22,7 +22,7 @@ void Inou_cgen::setup() {
 void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
   Inou_cgen pp(var);
 
-  Cgen_verilog p(pp.verbose, pp.get_odir(var));
+  Cgen_verilog p(pp.verbose, mmap_lib::str(pp.get_odir(var)));
 
   for (const auto &l : var.lgs) {
     p.do_from_lgraph(l);

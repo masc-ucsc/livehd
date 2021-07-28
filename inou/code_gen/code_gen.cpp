@@ -16,8 +16,8 @@
 //-------------------------------------------------------------------------------------
 // Constructor:
 //
-Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, std::string_view _path,
-                   std::string_view _odir)
+Code_gen::Code_gen(Inou_code_gen::Code_gen_type code_gen_type, std::shared_ptr<Lnast> _lnast, const mmap_lib::str &_path,
+                   const mmap_lib::str &_odir)
     : lnast(std::move(_lnast)), path(_path), odir(_odir) {
   if (code_gen_type == Inou_code_gen::Code_gen_type::Type_prp) {
     lnast_to = std::make_unique<Prp_parser>();
@@ -82,7 +82,7 @@ void Code_gen::generate() {
 
   // for odir part:
   auto fname = lnast->get_top_module_name();
-  lnast_to->result_in_odir(fname, odir, buffer_to_print);
+  lnast_to->result_in_odir(fname, odir.to_s(), buffer_to_print);
 }
 
 //-------------------------------------------------------------------------------------

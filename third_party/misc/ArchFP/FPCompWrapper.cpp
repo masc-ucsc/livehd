@@ -30,7 +30,7 @@ FPCompWrapper::FPCompWrapper(dummyComponent* comp, double minAR, double maxAR, d
   maxAspectRatio = maxAR;
   area           = areaArg;
   count          = countArg;
-  name           = comp->getName();
+  name           = mmap_lib::str(comp->getName());
   type           = comp->getType();
 }
 
@@ -42,7 +42,7 @@ FPCompWrapper::FPCompWrapper(std::string nameArg, double xArg, double yArg, doub
   minAspectRatio = width / height;
   maxAspectRatio = width / height;
   count          = 1;
-  name           = DC->getName();
+  name           = mmap_lib::str(DC->getName());
   type           = DC->getType();
 }
 

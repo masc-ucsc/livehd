@@ -383,11 +383,11 @@ public:
   }
 
   template <std::size_t N, typename = std::enable_if_t<(N - 1) >= 16>, typename = void>
-  str(const char (&s)[N]) {
+  explicit str(const char (&s)[N]) {
     set_non_sso(s, N-1);
   }
 
-  str(std::string_view sv) {
+  explicit str(std::string_view sv) {
     if (sv.size()<=15) {
       set_sso(sv.data(),sv.size());
     }else{
@@ -395,7 +395,7 @@ public:
     }
   }
 
-  str(const char *txt, size_t sz) {
+  explicit str(const char *txt, size_t sz) {
     if (sz<=15) {
       set_sso(txt, sz);
     }else{
@@ -403,7 +403,7 @@ public:
     }
   }
 
-  str(void *txt, size_t sz) {
+  explicit str(void *txt, size_t sz) {
     if (sz<=15) {
       set_sso(static_cast<const char *>(txt), sz);
     }else{
@@ -584,6 +584,7 @@ public:
     return true;
   }
 
+#if 0
   bool ends_with(std::string_view en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
@@ -601,6 +602,7 @@ public:
     }
     return true;
   }
+#endif
 
   std::size_t find(const str &v, std::size_t pos = 0) const {
     if (pos>=size())

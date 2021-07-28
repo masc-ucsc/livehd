@@ -19,18 +19,18 @@ protected:
   const std::string pass_name;
 
   // Common names used by many passes
-  const std::string files;
-  const std::string path;
-  const std::string odir;
+  const mmap_lib::str files;
+  const mmap_lib::str path;
+  const mmap_lib::str odir;
 
-  const std::string get_files(const Eprp_var &var) const;
-  const std::string get_path(const Eprp_var &var) const;
-  const std::string get_odir(const Eprp_var &var) const;
+  mmap_lib::str get_files(const Eprp_var &var) const;
+  mmap_lib::str get_path(const Eprp_var &var) const;
+  mmap_lib::str get_odir(const Eprp_var &var) const;
 
   static void register_pass(Eprp_method &method);
   static void register_inou(std::string_view pname, Eprp_method &method);
 
-  bool setup_directory(std::string_view dir) const;
+  bool setup_directory(const mmap_lib::str &dir) const;
 
   Pass(std::string_view _pass_name, const Eprp_var &var);
 

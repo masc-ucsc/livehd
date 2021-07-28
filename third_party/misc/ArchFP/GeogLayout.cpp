@@ -41,10 +41,15 @@ bool geogLayout::layoutHelper(double remWidth, double remHeight, double curX, do
   if (itemCount == 0 && centerItemsCount > 0) {
     // First find out if there are repeating units that need a grid to layout.
     // We will do this by finding the GCD of the counts in the collection of components.
-    int gcd = centerItems[0]->getCount();
-    for (int i = 1; i < centerItemsCount; i++) gcd = GCD(gcd, centerItems[i]->getCount());
+    auto gcd = centerItems[0]->getCount();
+
+    for (int i = 1; i < centerItemsCount; ++i) {
+      gcd = GCD(gcd, centerItems[i]->getCount());
+    }
+
     bagLayout* BL = new bagLayout(centerItemsCount);
-    for (int i = 0; i < centerItemsCount; i++) {
+
+    for (int i = 0; i < centerItemsCount; ++i) {
       FPObject* item = centerItems[i];
       BL->addComponent(item, item->getCount() / gcd);
     }
@@ -218,7 +223,7 @@ bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
   if (getComponentCount() != 0) {
     std::cerr << "Non empty item list after recursive layout in geographic layout.\n";
     std::cerr << "Remaining Component count=" << getComponentCount() << "\n";
-    for (int i = 0; i < getComponentCount(); i++)
+    for (auto i = 0u; i < getComponentCount(); i++)
       std::cerr << "Component " << i << " is of type " << getComponent(i)->getName() << "\n";
     throw std::runtime_error("non-empty item list!");
   }
@@ -245,14 +250,16 @@ bool geogLayout::layout(const FPOptimization opt, const double targetAR) {
 
 void geogLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
-  std::string layoutName = getUniqueName();
+  auto layoutName = getUniqueName();
   o << "# " << layoutName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height
     << ", area=" << area << "mm²\n";
   o << "# start " << layoutName << " " << Ntype::get_name(getType()) << " geog " << getComponentCount() << "\n";
-  for (int i = 0; i < getComponentCount(); i++) {
+
+  for (auto i = 0u; i < getComponentCount(); ++i) {
     FPObject* obj = getComponent(i);
     obj->outputHotSpotLayout(o, x + startX, y + startY);
   }
+
   o << "# end " << layoutName << "\n";
   popMirrorContext();
 }

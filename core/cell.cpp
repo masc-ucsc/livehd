@@ -87,8 +87,9 @@ Ntype::_init::_init() {
 
   int pos = 0;
   for (auto e : cell_name_sv) {
-    cell_name[pos]   = mmap_lib::str(e);
-    cell_name_map[e] = static_cast<Ntype_op>(pos);
+    auto e_str           = mmap_lib::str(e);
+    cell_name[pos]       = e_str;
+    cell_name_map[e_str] = static_cast<Ntype_op>(pos);
     ++pos;
   }
 }

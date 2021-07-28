@@ -4,12 +4,13 @@
 
 // Eprp Pass::eprp;
 
-const std::string Pass::get_files(const Eprp_var &var) const {
-  std::string _files;
+mmap_lib::str Pass::get_files(const Eprp_var &var) const {
+  mmap_lib::str _files;
   if (var.has_label("files")) {
-    _files = var.get("files");
-    for (auto f : absl::StrSplit(_files, ',')) {
-      if (access(std::string(f).c_str(), F_OK) == -1) {
+    _files = mmap_lib::str(var.get("files"));
+
+    for (auto f : _files.split(',')) {
+      if (access(f.to_s().c_str(), F_OK) == -1) {
         _files = "/INVALID";
         error("{} could not access file:{}", pass_name, f);
       }
@@ -21,11 +22,11 @@ const std::string Pass::get_files(const Eprp_var &var) const {
   return _files;  // eg.: returns "inou/cfg/tests/nested_if.prp"
 }
 
-const std::string Pass::get_path(const Eprp_var &var) const {
-  std::string _path;
+mmap_lib::str Pass::get_path(const Eprp_var &var) const {
+  mmap_lib::str _path;
 
   if (var.has_label("path")) {
-    _path = var.get("path");
+    _path = mmap_lib::str(var.get("path"));
     if (!setup_directory(_path)) {
       _path = "/INVALID";
       error("{} could not gain access to path:{}", pass_name, _path);
@@ -37,11 +38,11 @@ const std::string Pass::get_path(const Eprp_var &var) const {
   return _path;
 }
 
-const std::string Pass::get_odir(const Eprp_var &var) const {
-  std::string _odir;
+mmap_lib::str Pass::get_odir(const Eprp_var &var) const {
+  mmap_lib::str _odir;
 
   if (var.has_label("odir")) {
-    _odir = var.get("odir");
+    _odir = mmap_lib::str(var.get("odir"));
     if (!setup_directory(_odir)) {
       _odir = "/INVALID";
       error("{} could not gain access to odir:{}", pass_name, _odir);
@@ -92,13 +93,13 @@ void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
   eprp.register_method(method);
 }
 
-bool Pass::setup_directory(std::string_view dir) const {
+bool Pass::setup_directory(const mmap_lib::str &dir) const {
   if (dir == ".")
     return true;
 
   struct stat sb;
 
-  std::string sdir(dir);
+  std::string sdir(dir.to_s());
 
   if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
     return true;

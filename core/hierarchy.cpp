@@ -18,7 +18,7 @@ Lgraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
 
   I(data.lgid);
 
-  auto *lg = Lgraph::open(get_path(), data.lgid);
+  auto *lg = Lgraph::open(mmap_lib::str(get_path()), data.lgid);
   I(lg);
   return lg;
 }
@@ -35,7 +35,7 @@ Node Hierarchy_tree::get_instance_up_node(const Hierarchy_index &hidx) const {
     lg = top;
   } else {
     const auto &up_data = get_data(up_hidx);
-    lg                  = Lgraph::open(get_path(), up_data.lgid);
+    lg                  = Lgraph::open(mmap_lib::str(get_path()), up_data.lgid);
     I(top != lg);
   }
   I(lg);
