@@ -1,0 +1,14 @@
+cff-version: 1.1.0
+message: "You may use the following information to cite this project."
+authors:
+  - name: Micro Architecture at Santa Cruz (MASC) group
+    city: Santa Cruz
+    region: California
+    country: USA
+    website: https://masc.soe.ucsc.edu
+title: LiveHD
+abstract: "A Productive Live Hardware Development Flow"
+doi: 10.1109/MM.2020.2996508
+license: BSD-3-Clause
+version: 0.0.0
+date-released: 2020-05-22
