@@ -13,17 +13,6 @@ void Lnast_node::dump() const {
 }
 
 Lnast::~Lnast() {
-  if (memblock_fd == -1)
-    return;
-
-  if (memblock.size()) {
-    int ok = ::munmap((void *)memblock.data(), memblock.size());
-    I(ok == 0);
-  }
-  close(memblock_fd);
-
-  memblock    = "";
-  memblock_fd = -1;
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
@@ -352,7 +341,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   if (!paired_nid.is_invalid())
     paired_type = get_type(paired_nid);
 
-  mmap_lib::str ta_asg_str = "tuple_assign";
+  // mmap_lib::str ta_asg_str = "tuple_assign";
 
   // hier_TA but is actually doing __bits set
   auto last_token  = get_token(get_last_child(selc_nid)).get_text();
@@ -552,7 +541,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // }
 }
 
-bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, const mmap_lib:str &ref_name,
+bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, const mmap_lib::str &ref_name,
                                                               const Lnast_nid &src_if_nid) {
   if (get_parent(psts_nid).is_root()) {
     auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
@@ -949,10 +938,8 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-const mmap_lib:str &Lnast::create_tmp_var() {
-  auto tmp_var_name = absl::StrCat("___T", tmp_var_cnt);
-  tmp_var_cnt++;
-  return tmp_var_name;
+mmap_lib::str Lnast::create_tmp_var() {
+  return mmap_lib::str::concat(mmap_lib::str("___T"), tmp_var_cnt++);
 }
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
@@ -1014,7 +1001,7 @@ void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table,
   }
 }
 
-Lnast_nid Lnast::get_complement_nid(const mmap_lib:str &brother_name, const Lnast_nid &psts_nid, bool false_path) {
+Lnast_nid Lnast::get_complement_nid(const mmap_lib::str &brother_name, const Lnast_nid &psts_nid, bool false_path) {
   auto brother_nid = check_phi_table_parents_chain(brother_name, psts_nid);
   if (brother_nid == Lnast_nid()) {
     auto        if_nid                   = get_parent(psts_nid);
@@ -1026,7 +1013,7 @@ Lnast_nid Lnast::get_complement_nid(const mmap_lib:str &brother_name, const Lnas
   return brother_nid;
 }
 
-Lnast_nid Lnast::check_phi_table_parents_chain(const mmap_lib:str &target_name, const Lnast_nid &psts_nid) {
+Lnast_nid Lnast::check_phi_table_parents_chain(const mmap_lib::str &target_name, const Lnast_nid &psts_nid) {
   auto &parent_table = phi_resolve_tables[psts_nid];
   if (parent_table.find(target_name) != parent_table.end())
     return parent_table[target_name];
@@ -1149,14 +1136,14 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   phi_resolve_table[lhs_name]   = lhs_nid;  // for a variable string, always update to latest Lnast_nid
 }
 
-bool Lnast::is_in_bw_table(const mmap_lib:str &name) { return from_lgraph_bw_table.contains(name); }
+bool Lnast::is_in_bw_table(const mmap_lib::str &name) { return from_lgraph_bw_table.contains(name); }
 
-uint32_t Lnast::get_bitwidth(const mmap_lib:str &name) {
+uint32_t Lnast::get_bitwidth(const mmap_lib::str &name) {
   I(is_in_bw_table(name));
   return from_lgraph_bw_table[name];
 }
 
-void Lnast::set_bitwidth(const mmap_lib:str &name, const uint32_t bitwidth) {
+void Lnast::set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth) {
   I(bitwidth > 0);
   from_lgraph_bw_table[name] = bitwidth;
 }
@@ -1164,8 +1151,8 @@ void Lnast::set_bitwidth(const mmap_lib:str &name, const uint32_t bitwidth) {
 void Lnast::dump() const {
   for (const auto &it : depth_preorder()) {
     const auto &node = get_data(it);
-    mmap_lib::str indent{"    "};
-    for (int i = 0; i < it.level; ++i) indent += "    ";
+    mmap_lib::str indent;
+    indent = indent.append(it.level*4+4,' ');
 
     if (node.type.is_ref()
         && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case

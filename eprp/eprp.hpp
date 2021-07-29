@@ -11,7 +11,7 @@
 
 class Eprp : public Elab_scanner {
 protected:
-  std::map<std::string, Eprp_method, eprp_casecmp_str> methods;
+  std::map<mmap_lib::str, Eprp_method, eprp_casecmp_str> methods;
 
   Eprp_pipe pipe;
 
@@ -34,10 +34,12 @@ protected:
 
   void eat_comments();
 
-  bool rule_path(std::string &path);
-  bool rule_label_path(const std::string &cmd_line, Eprp_var &next_var);
+  std::pair<bool,mmap_lib::str> rule_path();
+  std::pair<bool, mmap_lib::str> rule_cmd_line();
+
+  bool rule_label_path(const mmap_lib::str &cmd_line, Eprp_var &next_var);
+
   bool rule_reg(bool first);
-  bool rule_cmd_line(std::string &path);
   bool rule_cmd_full();
   bool rule_pipe();
   bool rule_cmd_or_reg(bool first);
@@ -54,15 +56,15 @@ public:
     methods.insert({method.get_name(), method});
   }
 
-  bool has_method(const std::string &cmd) const { return methods.find(cmd) != methods.end(); }
+  bool has_method(const mmap_lib::str &cmd) const { return methods.find(cmd) != methods.end(); }
 
-  void run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields);
+  void run_cmd(const mmap_lib::str &cmd, const Eprp_var &cmd_var_fields);
 
   bool readline(const char *line);
 
-  const std::string &get_command_help(const std::string &cmd) const;
+  mmap_lib::str get_command_help(const mmap_lib::str &cmd) const;
 
-  void get_commands(const std::function<void(const std::string &, const std::string &)> &fn) const;
-  void get_labels(const std::string                                                                  &cmd,
-                  const std::function<void(const std::string &, const std::string &, bool required)> &fn) const;
+  void get_commands(const std::function<void(const mmap_lib::str &, const mmap_lib::str &)> &fn) const;
+  void get_labels(const mmap_lib::str &cmd,
+                  const std::function<void(const mmap_lib::str &, const mmap_lib::str &, bool required)> &fn) const;
 };

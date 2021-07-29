@@ -1,12 +1,11 @@
 #pragma once
 
-#include <string>
-#include <vector>
+#include "mmap_str.hpp"
 
 // List of useful methods for parsers in lgraph
 class Eprp_utils {
 public:
-  static std::string get_exe_path();
+  static mmap_lib::str get_exe_path();
 
-  static void clean_dir(std::string_view dir);
+  static void clean_dir(const mmap_lib::str &dir);
 };

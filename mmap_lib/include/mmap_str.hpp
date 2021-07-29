@@ -877,6 +877,16 @@ public:
     return str(s);
   }
 
+  str append(size_t sz, char c) const {
+    if (sz==0)
+      return *this;
+
+    auto s = to_s();
+    s.append(sz,c);
+
+    return str(s);
+  }
+
 // Extension over the  Bit Twiddling Hacks By Sean Eron Anderson seander@cs.stanford.edu
 #define has_byte_uppercase(x) \
 (((((((~0ULL)/255)*(127+(91))) - ((x)&((~0ULL)/255)*127))&(~(x))) & (((x)&((~0ULL)/255)*127) + (((~0ULL)/255)*(127-(64)))))&(((~0ULL)/255)*128))

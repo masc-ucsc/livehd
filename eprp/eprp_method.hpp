@@ -9,31 +9,31 @@ class Eprp_method {
 private:
 protected:
   struct Label_attr {
-    Label_attr(const std::string &_help, bool _required, const std::string &_value)
+    Label_attr(const mmap_lib::str &_help, bool _required, const mmap_lib::str &_value)
         : help(_help), default_value(_value), required(_required){};
-    const std::string help;
-    const std::string default_value;
+    const mmap_lib::str help;
+    const mmap_lib::str default_value;
     const bool        required;
   };
-  void add_label(const std::string &attr, const std::string &help, bool required, const std::string &default_value = "");
-  const std::string name;
+  void add_label(const mmap_lib::str &attr, const mmap_lib::str &help, bool required, const mmap_lib::str &default_value = "");
+  const mmap_lib::str name;
 
 public:
-  absl::flat_hash_map<std::string, Label_attr> labels;
+  absl::flat_hash_map<mmap_lib::str, Label_attr> labels;
 
-  const std::string &get_name() const { return name; }
+  const mmap_lib::str &get_name() const { return name; }
 
-  const std::string                        help;
+  const mmap_lib::str                        help;
   const std::function<void(Eprp_var &var)> method;
 
-  Eprp_method(const std::string &_name, const std::string &_help, const std::function<void(Eprp_var &var)> &_method);
+  Eprp_method(const mmap_lib::str &_name, const mmap_lib::str &_help, const std::function<void(Eprp_var &var)> &_method);
 
-  bool check_labels(const Eprp_var &var, std::string &err_msg) const;
+  std::pair<bool, mmap_lib::str> check_labels(const Eprp_var &var) const;
 
-  bool has_label(const std::string &label) const;
-  void add_label_optional(const std::string &attr, const std::string &help_txt, const std::string &default_value = "") {
+  bool has_label(const mmap_lib::str &label) const;
+  void add_label_optional(const mmap_lib::str &attr, const mmap_lib::str &help_txt, const mmap_lib::str &default_value = "") {
     add_label(attr, help_txt, false, default_value);
   };
-  void               add_label_required(const std::string &attr, const std::string &help_txt) { add_label(attr, help_txt, true); };
-  const std::string &get_label_help(const std::string &label) const;
+  void               add_label_required(const mmap_lib::str &attr, const mmap_lib::str &help_txt) { add_label(attr, help_txt, true); };
+  mmap_lib::str get_label_help(const mmap_lib::str &label) const;
 };

@@ -15,11 +15,10 @@ void Pipe_step::run(Eprp_var &last_cmd_var) {
       last_cmd_var.add(label.first, label.second.default_value);
   }
 
-  std::string err_msg;
-  bool        err = m.check_labels(last_cmd_var, err_msg);
+  auto [err, err_msg] = m.check_labels(last_cmd_var);
   if (err) {
     fmt::print("error:{}\n", err_msg);
-    throw std::runtime_error(std::string(err_msg));
+    throw std::runtime_error(err_msg.to_s());
     return;
   }
 

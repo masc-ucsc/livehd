@@ -27,13 +27,12 @@ public:
   static void files2(Eprp_var &var) {
     auto files = var.get("nofiles");
 
-    std::vector<std::string> svector = absl::StrSplit(files, ',');
-
-    for (const auto &v : svector) {
+    for (const auto &v : files.split(',')) {
       fmt::print(" {}", v);
     }
     fmt::print("\n");
 
+    const auto svector = files.split(',');
     EXPECT_EQ(svector.size(), 4);
 
     EXPECT_EQ(svector[0], "g3xx");
@@ -95,32 +94,34 @@ public:
 protected:
   Eprp eprp;
   void SetUp() override {
-    Eprp_method m1("test1.xyz.generate", "Generate a random test/method call to foo", &test1::foo);
-    m1.add_label_required("lgdb", "lgraph directory");
-    m1.add_label_optional("graph_name", "another super duper attribute");
+    Eprp_method m1(mmap_lib::str("test1.xyz.generate"), mmap_lib::str("Generate a random test/method call to foo"), &test1::foo);
+    m1.add_label_required("lgdb", mmap_lib::str("lgraph directory"));
+    m1.add_label_optional("graph_name", mmap_lib::str("another super duper attribute"));
 
-    EXPECT_STREQ(m1.get_label_help("lgdb").c_str(), "lgraph directory");
+    EXPECT_EQ(m1.get_label_help("lgdb").to_s(), "lgraph directory");
     EXPECT_TRUE(m1.has_label("graph_name"));
-    EXPECT_FALSE(m1.has_label("graph_name_not_there"));
+    EXPECT_FALSE(m1.has_label(mmap_lib::str("graph_name_not_there")));
 
     Eprp_var    var;
-    std::string txt;
-    EXPECT_TRUE(m1.check_labels(var, txt));
-    EXPECT_FALSE(txt.empty());
+
+    auto [ok1, txt1] = m1.check_labels(var);
+    EXPECT_TRUE(ok1);
+    EXPECT_FALSE(txt1.empty());
 
     var.add("lgdb", "potato");
-    txt.clear();
-    EXPECT_FALSE(m1.check_labels(var, txt));
-    EXPECT_TRUE(txt.empty());
+    auto [ok2, txt2] = m1.check_labels(var);
 
-    Eprp_method m2("test1.fff.test", "fff::is_equal call", &test1::is_equal);
-    m2.add_label_optional("lgdb", "lgraph directory", "lgdb");
-    m2.add_label_optional("check1", "check1 super duper attribute", "lgdb");
-    m2.add_label_required("check2", "check2 super duper attribute");
+    EXPECT_FALSE(ok2);
+    EXPECT_TRUE(txt2.empty());
 
-    Eprp_method m3("test1.pass", "pass value through", &test1::pass);
-    m3.add_label_required("check1", "check1 super duper attribute");
-    m3.add_label_required("check2", "check2 super duper attribute");
+    Eprp_method m2(mmap_lib::str("test1.fff.test"), mmap_lib::str("fff::is_equal call"), &test1::is_equal);
+    m2.add_label_optional("lgdb", mmap_lib::str("lgraph directory"), "lgdb");
+    m2.add_label_optional("check1", mmap_lib::str("check1 super duper attribute"), "lgdb");
+    m2.add_label_required("check2", mmap_lib::str("check2 super duper attribute"));
+
+    Eprp_method m3("test1.pass", mmap_lib::str("pass value through"), &test1::pass);
+    m3.add_label_required("check1", mmap_lib::str("check1 super duper attribute"));
+    m3.add_label_required("check2", mmap_lib::str("check2 super duper attribute"));
 
     eprp.register_method(m1);
     eprp.register_method(m2);
@@ -133,7 +134,7 @@ public:
 protected:
   Eprp eprp;
   void SetUp() override {
-    Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
+    Eprp_method m1("test1.files2", mmap_lib::str("Generate a random test/method call to foo"), &test1::files2);
     m1.add_label_required("nofiles", "list of files");
 
     eprp.register_method(m1);

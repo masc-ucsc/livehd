@@ -438,8 +438,8 @@ TEST_F(Edge_test, trivial_delete2) {
 
   auto *sub1 = g2->ref_library()->ref_sub("n1");
   auto *sub2 = g2->ref_library()->ref_sub("n2");
-  sub1->add_output_pin(" quite a long name with % spaces both ends ", Port_invalid);
-  sub2->add_input_pin(" uff this is bad too% ", Port_invalid);
+  sub1->add_output_pin(mmap_lib::str(" quite a long name with % spaces both ends "), Port_invalid);
+  sub2->add_input_pin(mmap_lib::str(" uff this is bad too% "), Port_invalid);
 
   g2->ref_library()->sync_all();
 
@@ -460,11 +460,11 @@ TEST_F(Edge_test, trivial_delete2) {
   EXPECT_EQ(nn2.inp_edges().size(), 0);
   EXPECT_EQ(nn2.out_edges().size(), 0);
 
-  auto dpin = nn1.setup_driver_pin(" quite a long name with % spaces both ends ");
-  auto spin = nn2.setup_sink_pin(" uff this is bad too% ");
+  auto dpin = nn1.setup_driver_pin(mmap_lib::str(" quite a long name with % spaces both ends "));
+  auto spin = nn2.setup_sink_pin(mmap_lib::str(" uff this is bad too% "));
 
-  EXPECT_EQ(dpin, nn1.get_driver_pin(" quite a long name with % spaces both ends "));
-  EXPECT_EQ(spin, nn2.get_sink_pin(" uff this is bad too% "));
+  EXPECT_EQ(dpin, nn1.get_driver_pin(mmap_lib::str(" quite a long name with % spaces both ends ")));
+  EXPECT_EQ(spin, nn2.get_sink_pin(mmap_lib::str(" uff this is bad too% ")));
 
   g2->add_edge(dpin, spin, 33);
 
@@ -505,11 +505,11 @@ TEST_F(Edge_test, trivial_delete3) {
 
   auto *sub1 = g2->ref_library()->ref_sub("n1");
   auto *sub2 = g2->ref_library()->ref_sub("n2");
-  sub1->add_output_pin(" another % $ # long name ", Port_invalid);
+  sub1->add_output_pin(mmap_lib::str(" another % $ # long name "), Port_invalid);
   sub2->add_input_pin("foo", Port_invalid);
 
-  nn1.setup_driver_pin(" another % $ # long name ");
-  g2->add_edge(nn1.get_driver_pin(" another % $ # long name "), nn2.setup_sink_pin("foo"));
+  nn1.setup_driver_pin(mmap_lib::str(" another % $ # long name "));
+  g2->add_edge(nn1.get_driver_pin(mmap_lib::str(" another % $ # long name ")), nn2.setup_sink_pin("foo"));
 
   for (auto &inp : nn2.inp_edges()) {
     inp.del_edge();

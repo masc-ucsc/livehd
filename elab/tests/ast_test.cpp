@@ -37,10 +37,11 @@ public:
 
       if (cmd == "up") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        std::string val{scan_text()};
+        const auto &val = scan_text();
         scan_next();
 
-        auto    rid_int = std::atoi(val.c_str());
+        EXPECT_TRUE(val.is_i());
+        auto    rid_int = val.to_i();
         Rule_id rid     = static_cast<Rule_id>(rid_int);
 
         ast->up(rid);
@@ -48,10 +49,10 @@ public:
         ast->down();
       } else if (cmd == "add") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        std::string val{scan_text()};
+        auto val = scan_text(); // const auto & better but KEPT on purpose to test copy too
         scan_next();
 
-        auto    rid_int = std::atoi(val.c_str());
+        auto    rid_int = val.to_i();
         Rule_id rid     = static_cast<Rule_id>(rid_int);
 
         ast->add(rid, scan_token_entry());

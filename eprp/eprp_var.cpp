@@ -41,19 +41,17 @@ void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move
 
 void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(lnast); }
 
-void Eprp_var::add(const std::string &name, std::string_view value) {
-  if (name == "files") {
-    std::vector<std::string> svector = absl::StrSplit(value, ',');
+void Eprp_var::add(const mmap_lib::str &name, const mmap_lib::str &value) {
 
-    for (const auto &v : svector) {
-      const std::string file{v};
-      if (access(file.c_str(), R_OK) == -1) {
+  if (name == "files") {
+    for (const auto &v : value.split(',')) {
+      if (access(v.to_s().c_str(), R_OK) == -1) {
         fmt::print("ERROR: file {} is not accessible (skipping)\n", v);
         throw std::runtime_error("not valid file");
       }
     }
   } else if (name == "path") {
-    const std::string path{value};
+    auto path = value.to_s();
     if (access(path.c_str(), R_OK) == -1) {
       mkdir(path.c_str(), 0755);
       if (access(path.c_str(), R_OK) == -1) {
@@ -62,8 +60,10 @@ void Eprp_var::add(const std::string &name, std::string_view value) {
       }
     }
   }
+
   dict[name] = value;
 }
+
 void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new) {
   // lnast_old.swap(lnast_new);
 
@@ -81,17 +81,16 @@ void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<
   // lnasts[indx] = lnast_new;
 }
 
-void Eprp_var::delete_label(const std::string &name) {
+void Eprp_var::delete_label(const mmap_lib::str &name) {
   auto it = dict.find(name);
   if (it != dict.end())
     dict.erase(it);
 }
 
-std::string_view Eprp_var::get(const std::string &name) const {
+mmap_lib::str Eprp_var::get(const mmap_lib::str &name) const {
   const auto &elem = dict.find(name);
   if (elem == dict.end()) {
-    static const std::string empty("");
-    return empty;
+    return mmap_lib::str();
   }
   return elem->second;
 }

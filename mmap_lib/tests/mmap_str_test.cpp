@@ -498,10 +498,10 @@ TEST_F(Mmap_str_test, substr) {
 TEST_F(Mmap_str_test, to_lower) {
 
   mmap_lib::str short_lower("this is short");
-  mmap_lib::str short_upper("A Short Test Z");
+  mmap_lib::str short_upper("A Short!3 Test Z");
 
   EXPECT_EQ(short_lower, short_lower.to_lower());
-  EXPECT_EQ("a short test z", short_upper.to_lower());
+  EXPECT_EQ("a short!3 test z", short_upper.to_lower());
 
   mmap_lib::str long_upper("We Also nEeD to TeSt a LONG sentence to CHECK overfloWS");
 

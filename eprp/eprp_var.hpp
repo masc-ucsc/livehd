@@ -12,15 +12,15 @@
 #include "absl/container/flat_hash_map.h"
 #include "lnast.hpp"
 
-struct eprp_casecmp_str : public std::binary_function<const std::string, const std::string, bool> {
-  bool operator()(const std::string &lhs, const std::string &rhs) const { return strcasecmp(lhs.c_str(), rhs.c_str()) < 0; }
+struct eprp_casecmp_str : public std::binary_function<const mmap_lib::str, const mmap_lib::str, bool> {
+  bool operator()(const mmap_lib::str &lhs, const mmap_lib::str &rhs) const { return lhs.to_lower() < rhs.to_lower(); }
 };
 
 class Lgraph;
 
 class Eprp_var {
 public:
-  using Eprp_dict   = absl::flat_hash_map<const std::string, std::string>;
+  using Eprp_dict   = absl::flat_hash_map<mmap_lib::str, mmap_lib::str>;
   using Eprp_lgs    = std::vector<Lgraph *>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
@@ -45,18 +45,21 @@ public:
   void add(Lgraph *lg);
   void add(std::unique_ptr<Lnast> lnast);
   void add(const std::shared_ptr<Lnast> &lnast);
-  void add(const std::string &name, std::string_view value);
+  void add(const mmap_lib::str &name, const mmap_lib::str &value);
   void replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new);
+
+#if 0
   template <typename Str>
-  std::enable_if_t<std::is_convertible_v<std::string_view, Str>, void> add(const Str &name, std::string_view value) {
-    add(std::string(name), value);
+  std::enable_if_t<std::is_convertible_v<mmap_lib::str_view, Str>, void> add(const Str &name, mmap_lib::str_view value) {
+    add(mmap_lib::str(name), value);
   }
+#endif
 
-  void delete_label(const std::string &name);
+  void delete_label(const mmap_lib::str &name);
 
-  bool             has_label(const std::string &name) const { return dict.find(name) != dict.end(); };
-  std::string_view get(const std::string &name) const;
-  // const std::string get(const std::string &name, const std::string &def_val) const;
+  bool             has_label(const mmap_lib::str &name) const { return dict.find(name) != dict.end(); };
+  mmap_lib::str    get(const mmap_lib::str &name) const;
+  // const mmap_lib::str get(const mmap_lib::str &name, const mmap_lib::str &def_val) const;
 
   void clear() {
     dict.clear();

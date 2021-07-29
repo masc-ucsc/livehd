@@ -11,15 +11,16 @@ void Eprp::eat_comments() {
 }
 
 // rule_path = (\. | alnum | / | "asdad.." | \,)+
-bool Eprp::rule_path(std::string &path) {
+std::pair<bool,mmap_lib::str> Eprp::rule_path() {
   assert(!scan_is_end());
 
   if (!(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
         || scan_is_token(Token_id_div)))
-    return false;
+    return std::make_pair(false, mmap_lib::str());
 
+  mmap_lib::str path;
   do {
-    absl::StrAppend(&path, scan_text());
+    path = path.append(scan_text());
 
     ast->add(Eprp_rule_path, scan_token_entry());
 
@@ -34,11 +35,11 @@ bool Eprp::rule_path(std::string &path) {
   } while (scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
            || scan_is_token(Token_id_comma) || scan_is_token(Token_id_div));
 
-  return true;
+  return std::make_pair(true, path);
 }
 
 // rule_label_path = label path
-bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
+bool Eprp::rule_label_path(const mmap_lib::str &cmd_line, Eprp_var &next_var) {
   if (!(scan_is_token(Token_id_alnum) && scan_is_next_token(1, Token_id_colon)))
     return false;
 
@@ -55,9 +56,8 @@ bool Eprp::rule_label_path(const std::string &cmd_line, Eprp_var &next_var) {
     throw scan_error(*this, "the {} field in {} command has no argument", label, cmd_line);
   }
 
-  std::string path;
   ast->down();
-  bool ok = rule_path(path);
+  auto [ok, path] = rule_path();
   ast->up(Eprp_rule_label_path);
   if (!ok) {
     if (scan_is_token(Token_id_register)) {
@@ -81,15 +81,16 @@ bool Eprp::rule_reg(bool /* first */) {
 }
 
 // rule_cmd_line = alnum (dot alnum)*
-bool Eprp::rule_cmd_line(std::string &path) {
+std::pair<bool, mmap_lib::str> Eprp::rule_cmd_line() {
   if (scan_is_end())
-    return false;
+    return std::make_pair(false, mmap_lib::str());
 
   if (!scan_is_token(Token_id_alnum))
-    return false;
+    return std::make_pair(false, mmap_lib::str());
 
+  mmap_lib::str path;
   do {
-    absl::StrAppend(&path, scan_text());  // Add the Token_id_alnum
+    path = path.append(scan_text());
     ast->add(Eprp_rule_cmd_line, scan_token_entry());
 
     bool ok1 = scan_next();
@@ -99,7 +100,7 @@ bool Eprp::rule_cmd_line(std::string &path) {
     if (!scan_is_token(Token_id_dot))
       break;
 
-    absl::StrAppend(&path, scan_text());  // Add the Token_id_dot
+    path = mmap_lib::str::concat(path, scan_text());
     ast->add(Eprp_rule_cmd_line, scan_token_entry());
 
     bool ok2 = scan_next();
@@ -110,15 +111,14 @@ bool Eprp::rule_cmd_line(std::string &path) {
 
   eat_comments();
 
-  return true;
+  return std::make_pair(true, path);
 }
 
 // rule_cmd_full =rule_cmd_line rule_label_path*
 bool Eprp::rule_cmd_full() {
-  std::string cmd_line;
 
   ast->down();
-  bool cmd_found = rule_cmd_line(cmd_line);
+  auto [cmd_found, cmd_line] = rule_cmd_line();
   ast->up(Eprp_rule_cmd_full);
   if (!cmd_found)
     return false;
@@ -237,7 +237,7 @@ void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parse
   fmt::print("level:{} pos:{} te:{} rid:{} txt:{}\n", self.level, self.pos, node.token_entry, node.rule_id, txt);
 
   if (node.rule_id == Eprp_rule_cmd_or_reg) {
-    std::string children_txt;
+    mmap_lib::str children_txt;
 
     // HERE: Children should iterate FAST, over all the children recursively
     // HERE: Move this iterate over children as a handle_command
@@ -245,9 +245,9 @@ void Eprp::process_ast_handler(const mmap_lib::Tree_index &self, const Ast_parse
     for (const auto &ti : ast->children(self)) {
       auto txt2 = scan_text(ast->get_data(ti).token_entry);
       if (ast->get_data(ti).rule_id == Eprp_rule_label_path)
-        absl::StrAppend(&children_txt, " ", txt2, ":");
+        children_txt = mmap_lib::str::concat(children_txt, " ", txt2, ":");
       else
-        absl::StrAppend(&children_txt, txt2);
+        children_txt = mmap_lib::str::concat(children_txt, txt2);
     }
 
     fmt::print("  children: {}\n", children_txt);
@@ -262,7 +262,7 @@ void Eprp::process_ast() {
   ast->each_bottom_up_fast(std::bind(&Eprp::process_ast_handler, this, std::placeholders::_1, std::placeholders::_2));
 }
 
-void Eprp::run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields) {
+void Eprp::run_cmd(const mmap_lib::str &cmd, const Eprp_var &cmd_var_fields) {
   const auto &it = methods.find(cmd);
   if (it == methods.end()) {
     throw parser_error(*this, "method {} not registered", cmd);
@@ -271,24 +271,23 @@ void Eprp::run_cmd(const std::string &cmd, const Eprp_var &cmd_var_fields) {
   pipe.add_command(it->second, cmd_var_fields);
 }
 
-const std::string &Eprp::get_command_help(const std::string &cmd) const {
+mmap_lib::str Eprp::get_command_help(const mmap_lib::str &cmd) const {
   const auto &it = methods.find(cmd);
   if (it == methods.end()) {
-    static const std::string empty = "";
-    return empty;
+    return mmap_lib::str();
   }
 
   return it->second.help;
 }
 
-void Eprp::get_commands(const std::function<void(const std::string &, const std::string &)> &fn) const {
+void Eprp::get_commands(const std::function<void(const mmap_lib::str &, const mmap_lib::str &)> &fn) const {
   for (const auto &v : methods) {
     fn(v.first, v.second.help);
   }
 }
 
-void Eprp::get_labels(const std::string                                                                  &cmd,
-                      const std::function<void(const std::string &, const std::string &, bool required)> &fn) const {
+void Eprp::get_labels(const mmap_lib::str                                                                  &cmd,
+                      const std::function<void(const mmap_lib::str &, const mmap_lib::str &, bool required)> &fn) const {
   const auto &it = methods.find(cmd);
   if (it == methods.end())
     return;

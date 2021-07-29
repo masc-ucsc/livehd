@@ -61,7 +61,7 @@ void Elab_scanner::setup_translate() {
   translate['\\'] = Token_id_backslash;
 }
 
-void Elab_scanner::add_token(Etoken::Tracker &t) {
+void Elab_scanner::add_token(const Etoken::Tracker &t) {
   if (t.tok == Token_id_nop) {
     token_list_spaced = true;
     I(!trying_merge);
@@ -80,23 +80,23 @@ void Elab_scanner::add_token(Etoken::Tracker &t) {
   Etoken &last_tok = token_list.back();
 
   if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
-    token_list.back().fuse_token(Token_id_pipe, t);
+    token_list.back().fuse_token(Token_id_pipe, '>');
     return;
   } else if (t.tok == Token_id_eq) {    // <=
     if (last_tok.tok == Token_id_lt) {  // <=
-      token_list.back().fuse_token(Token_id_le, t);
+      token_list.back().fuse_token(Token_id_le, '=');
       return;
     } else if (last_tok.tok == Token_id_gt) {  // >=
-      token_list.back().fuse_token(Token_id_ge, t);
+      token_list.back().fuse_token(Token_id_ge, '=');
       return;
     } else if (last_tok.tok == Token_id_eq) {  // ==
-      token_list.back().fuse_token(Token_id_same, t);
+      token_list.back().fuse_token(Token_id_same, '=');
       return;
     } else if (last_tok.tok == Token_id_bang) {  // !=
-      token_list.back().fuse_token(Token_id_diff, t);
+      token_list.back().fuse_token(Token_id_diff, '=');
       return;
     } else if (last_tok.tok == Token_id_colon) {  // :=
-      token_list.back().fuse_token(Token_id_coloneq, t);
+      token_list.back().fuse_token(Token_id_coloneq, '=');
       return;
     }
   } else if (t.tok == Token_id_qmark) {
@@ -104,24 +104,38 @@ void Elab_scanner::add_token(Etoken::Tracker &t) {
       auto last_txt = last_tok.get_text();
       if (last_txt.size() && last_txt[0] == '0') {
         if (last_txt.size() >= 2 && (last_txt[1] == 'b' || last_txt[1] == 'B')) {
-          token_list.back().fuse_token(Token_id_alnum, t);
+          token_list.back().fuse_token(Token_id_alnum, '?');
           return;
         }
       }
     }
   } else if (t.tok == Token_id_alnum) {
+
     if (last_tok.tok == Token_id_pound) {  // #foo
-      token_list.back().fuse_token(Token_id_register, t);
+      const char extra_char = memblock[t.pos1];
+      assert(t.pos2 == t.pos1+1);
+
+      token_list.back().fuse_token(Token_id_register, extra_char);
       return;
     } else if (last_tok.tok == Token_id_percent) {  // %foo
-      token_list.back().fuse_token(Token_id_output, t);
+      const char extra_char = memblock[t.pos1];
+      assert(t.pos2 == t.pos1+1);
+
+      token_list.back().fuse_token(Token_id_output, extra_char);
       return;
     } else if (last_tok.tok == Token_id_dollar) {  // $foo
-      token_list.back().fuse_token(Token_id_input, t);
+      const char extra_char = memblock[t.pos1];
+      assert(t.pos2 == t.pos1+1);
+
+      token_list.back().fuse_token(Token_id_input, extra_char);
       return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
                || last_tok.tok == Token_id_input) {  // foo
-      token_list.back().append_token(t);
+
+      std::string_view extra_txt(memblock+t.pos1, t.pos2-t.pos1);
+      I(token_list.back().pos2 == t.pos1);
+
+      token_list.back().append_token(extra_txt);
       return;
     }
   }
@@ -131,7 +145,7 @@ void Elab_scanner::add_token(Etoken::Tracker &t) {
   token_list.emplace_back(t, memblock);
 }
 
-void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<mmap_lib::str, Token_id> &keywords) {
   for (size_t i = 0; i < token_list.size(); ++i) {
     auto &t = token_list[i];
     if (t.tok != Token_id_alnum)
@@ -139,7 +153,7 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
 
     I(t.get_text().size() > 0);  // at least a character
 
-    std::string_view txt = t.get_text();
+    const auto &txt = t.get_text();
 
     if (isdigit(txt[0])) {
       t.tok = Token_id_num;
@@ -163,12 +177,12 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
   }
 }
 
-void Elab_scanner::parse_setup(std::string_view filename) {
+void Elab_scanner::parse_setup(const mmap_lib::str &filename) {
   if (memblock_fd == -1) {
     unregister_memblock();
   }
 
-  memblock_fd = open(std::string(filename).c_str(), O_RDONLY);
+  memblock_fd = open(filename.to_s().c_str(), O_RDONLY);
   if (memblock_fd < 0) {
     throw parser_error(*this, "::parse could not open file {}", filename);
   }
@@ -190,8 +204,8 @@ void Elab_scanner::parse_setup(std::string_view filename) {
     throw parser_error(*this, "parse mmap failed for file {} with size {}", filename, sb.st_size);
   }
 
-  memblock = b;
-  memblock_size= = sb.st_size;
+  memblock      = b;
+  memblock_size = sb.st_size;
 
   // THIS CAN BE HUGE!! err_tracker::sot_log("{}\n", memblock);  // this is the correct(original) version
 
@@ -373,7 +387,7 @@ Elab_scanner::Elab_scanner() {
   n_warnings   = 0;
 
   memblock      = 0;
-  memblock_size = 0
+  memblock_size = 0;
   memblock_fd = -1;
 }
 

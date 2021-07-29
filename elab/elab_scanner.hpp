@@ -85,6 +85,7 @@ class Etoken {
 protected:
   mmap_lib::str text;
 
+public:
   struct Tracker {
     Token_id tok;   // Token (identifier, if, while...)
     uint64_t pos1;  // start position in original memblock
@@ -111,7 +112,6 @@ protected:
     }
   };
 
-public:
   constexpr Etoken() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
   Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, const mmap_lib::str &_text) {
     tok  = _tok;
@@ -129,18 +129,16 @@ public:
     text = mmap_lib::str(memblock+pos1 , pos2-pos1);
   }
 
-  void fuse_token(Token_id new_tok, const Etoken &t2) {
+  void fuse_token(Token_id new_tok, const char extra_char) {
     tok = new_tok;
 
-    auto new_len = text.size() + t2.text.size();
-    pos2         = pos2 + t2.text.size();
-    text         = mmap_lib::str::concat(text, t2.text);
+    pos2         = pos2 + 1;
+    text         = text.append(extra_char);
   }
 
-  void append_token(const Etoken &t2) {
-    auto new_len = text.size() + t2.text.size();
-    pos2         = pos2 + t2.text.size();
-    text         = mmap_lib::str::concat(text, t2.text);
+  void append_token(std::string_view t2) {
+    pos2         = pos2 + t2.size();
+    text         = mmap_lib::str::concat(text, t2);
   }
 
   Token_id tok;   // Token (identifier, if, while...)
@@ -201,9 +199,9 @@ private:
 
   void setup_translate();
 
-  void add_token(Etoken &t);
+  void add_token(const Etoken::Tracker &t);
 
-  void scan_raw_msg(const mmap_lib::str &cat, const mmap_lib::str &text, bool third) const;
+  void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
   void parse_setup(const mmap_lib::str &filename);
   void parse_setup();

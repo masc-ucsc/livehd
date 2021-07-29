@@ -20,7 +20,7 @@
 #include <libproc.h>
 #endif
 
-std::string Eprp_utils::get_exe_path() {
+mmap_lib::str Eprp_utils::get_exe_path() {
   char exePath[PATH_MAX] = {
       0,
   };
@@ -39,9 +39,8 @@ std::string Eprp_utils::get_exe_path() {
       break;
     }
   }
-  std::string path(exePath, 0, len);
 
-  return path;
+  return mmap_lib::str(exePath, len);
 }
 
 static int rm_file(const char *pathname, const struct stat *sbuf, int type, struct FTW *ftwb) {
@@ -57,11 +56,11 @@ static void clean_dir_thread(char *path) {
   free(path);
 }
 
-void Eprp_utils::clean_dir(std::string_view dir) {
+void Eprp_utils::clean_dir(const mmap_lib::str &dir) {
   if (dir == "")
     return;
 
-  const std::string path(dir.data(), dir.size());  // null terminated
+  const std::string path = dir.to_s();
 
   DIR *dirp = opendir(path.c_str());
   if (dirp == nullptr) {

@@ -179,7 +179,7 @@ protected:
 TEST_F(Setup_lgraph, add_remove_inputs) {
   Lbench b("core.LgRAPH_add_remove_inputs");
 
-  std::string_view lgdb = "lgdb_lgraph_test";
+  mmap_lib::str lgdb("lgdb_lgraph_test");
 
   Eprp_utils::clean_dir(lgdb);
 

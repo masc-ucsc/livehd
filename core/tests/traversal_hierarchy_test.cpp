@@ -46,7 +46,7 @@ protected:
         index_order.emplace_back(index);
     });
 
-    lg_root = Lgraph::create("lgdb_hierarchy_test", "node_l0p0", "hierarchy_test");
+    lg_root = Lgraph::create("lgdb_hier_test", "node_l0p0", "hierarchy_test");
     lg_root->add_graph_output("o0", 0, 17);
     lg_root->add_graph_input("i0", 1, 31);
 
@@ -68,14 +68,14 @@ protected:
       auto        parent_index = tree.get_parent(index);
       const auto &parent_data  = tree.get_data(parent_index);
 
-      Lgraph *parent_lg = Lgraph::open("lgdb_hierarchy_test", parent_data.name);
+      Lgraph *parent_lg = Lgraph::open("lgdb_hier_test", parent_data.name);
       I(parent_lg);
       Node node;
       if (data.leaf && rbool.any()) {
         node = parent_lg->create_node(Ntype_op::Sum, 10);
       } else {
         node           = parent_lg->create_node_sub(data.name);
-        Lgraph *sub_lg = Lgraph::create("lgdb_hierarchy_test", data.name, "hierarchy_test");
+        Lgraph *sub_lg = Lgraph::create("lgdb_hier_test", data.name, "hierarchy_test");
         I(sub_lg);
         I(node.get_class_lgraph() == parent_lg);
         I(node.get_type_sub() == sub_lg->get_lgid());
@@ -122,7 +122,7 @@ protected:
 
       // const auto &parent_index = tree.get_parent(curr_index);
       // const auto &parent_data = tree.get_data(parent_index);
-      // Lgraph *parent_lg = Lgraph::open("lgdb_hierarchy_test", parent_data.name);
+      // Lgraph *parent_lg = Lgraph::open("lgdb_hier_test", parent_data.name);
 
       auto &curr_node = node_order[i];
       auto &prev_node = node_order[i - 1];
@@ -135,7 +135,7 @@ protected:
         I(prev_data.leaf);
         dpin = prev_node.setup_driver_pin();
       } else {
-        Lgraph *prev_lg = Lgraph::open("lgdb_hierarchy_test", prev_data.name);
+        Lgraph *prev_lg = Lgraph::open("lgdb_hier_test", prev_data.name);
         I(prev_node.get_class_lgraph() != prev_lg);
         dpin = prev_node.setup_driver_pin("o0");
         I(prev_node.get_type_op() == Ntype_op::Sub);
@@ -149,7 +149,7 @@ protected:
         else
           spin = curr_node.setup_sink_pin("B");
       } else {
-        Lgraph *curr_lg = Lgraph::open("lgdb_hierarchy_test", curr_data.name);
+        Lgraph *curr_lg = Lgraph::open("lgdb_hier_test", curr_data.name);
         I(curr_node.get_class_lgraph() != curr_lg);
         spin = curr_node.setup_sink_pin("i0");
         I(curr_node.get_type_op() == Ntype_op::Sub);
@@ -220,7 +220,7 @@ protected:
 
     for (const auto &node : node_order) {
       if (node.is_type_sub()) {
-        Lgraph *sub_lg = Lgraph::open("lgdb_hierarchy_test", node.get_type_sub());
+        Lgraph *sub_lg = Lgraph::open("lgdb_hier_test", node.get_type_sub());
         I(sub_lg);
         auto inp_pin = sub_lg->get_graph_input("i0");
         I(inp_pin.has_outputs());

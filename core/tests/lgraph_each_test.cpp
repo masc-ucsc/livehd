@@ -26,7 +26,7 @@ protected:
 
   absl::flat_hash_map<mmap_lib::str, int> children;
 
-  void add_child(Lgraph *parent, Lgraph *child, std::string_view iname, bool randomize) {
+  void add_child(Lgraph *parent, Lgraph *child, const mmap_lib::str &iname, bool randomize) {
     Node node;
 
     if (child) {
@@ -94,21 +94,21 @@ protected:
   std::vector<Lgraph *> lgs;
 
   void SetUp() override {
-    top = Lgraph::create("lgdb_lgraph_each", "top", "nosource");
+    top = Lgraph::create("lgdb_lg_each", "top", "nosource");
     ASSERT_NE(top, nullptr);
-    c1 = Lgraph::create("lgdb_lgraph_each", "c1", "nosource");
+    c1 = Lgraph::create("lgdb_lg_each", "c1", "nosource");
     ASSERT_NE(c1, nullptr);
-    c2 = Lgraph::create("lgdb_lgraph_each", "c2", "nosource");
+    c2 = Lgraph::create("lgdb_lg_each", "c2", "nosource");
     ASSERT_NE(c2, nullptr);
-    c3 = Lgraph::create("lgdb_lgraph_each", "c3", "nosource");
+    c3 = Lgraph::create("lgdb_lg_each", "c3", "nosource");
     ASSERT_NE(c3, nullptr);
-    gc11 = Lgraph::create("lgdb_lgraph_each", "gc11", "nosource");
+    gc11 = Lgraph::create("lgdb_lg_each", "gc11", "nosource");
     ASSERT_NE(gc11, nullptr);
-    gc31 = Lgraph::create("lgdb_lgraph_each", "gc31", "nosource");
+    gc31 = Lgraph::create("lgdb_lg_each", "gc31", "nosource");
     ASSERT_NE(gc31, nullptr);
-    gc32 = Lgraph::create("lgdb_lgraph_each", "gc32", "nosource");
+    gc32 = Lgraph::create("lgdb_lg_each", "gc32", "nosource");
     ASSERT_NE(gc32, nullptr);
-    top2 = Lgraph::create("lgdb_lgraph_each", "top2", "nosource");
+    top2 = Lgraph::create("lgdb_lg_each", "top2", "nosource");
     ASSERT_NE(top2, nullptr);
 
     lgs.push_back(top);
@@ -154,16 +154,16 @@ protected:
       std::string lg_name{"lg_name"};
       lg_name += std::to_string(i);
 
-      auto *lg = Lgraph::create("lgdb_lgraph_each", mmap_lib::str(lg_name), "nosource");
+      auto *lg = Lgraph::create("lgdb_lg_each", mmap_lib::str(lg_name), "nosource");
       add_io(lg);
 
       for (int j = rnd_cells.any(); j > 0; --j) {
-        auto i_name = lg_name + "_cell_" + std::to_string(j);
+        mmap_lib::str i_name(lg_name + "_cell_" + std::to_string(j));
         add_child(lg, nullptr, i_name, randomize);
       }
 
       for (int j = 0; j < 2; ++j) {
-        auto  i_name    = lg_name + "_" + std::to_string(j);
+        mmap_lib::str  i_name(lg_name + "_" + std::to_string(j));
         auto *parent_lg = lgs[rnd.any()];
         add_child(parent_lg, lg, i_name, randomize);
       }
