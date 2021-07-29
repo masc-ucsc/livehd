@@ -705,7 +705,10 @@ void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
 
 //-------------------------------------------------------------------------------------
 // processing get_mask operator
-
+// example: x@(0) is like:
+// get mask: { ref: ___L1 , ref: x , const:0 }
+// or equivalently
+// tup_add: {ref:___L0, const: 0} ; get mask: { ref: ___L1 , ref: x , ref: ___L0 }
 void Code_gen::do_get_mask(const mmap_lib::Tree_index& gmask_node_index) {
   fmt::print("node:get_mask\n");
 
@@ -727,17 +730,23 @@ void Code_gen::do_get_mask(const mmap_lib::Tree_index& gmask_node_index) {
 
   auto        key = gmask_str_vect.front();
   std::string val;
-
+  bool ref_is_ref = false;
   for (unsigned i = 1; i < gmask_str_vect.size(); i++) {
     auto ref    = gmask_str_vect[i];
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
+			ref_is_ref = true;
       ref = map_it->second;
-    }
+    } else {
+			ref_is_ref = false;
+		}
 
-    absl::StrAppend(&val, ref.to_s(), lnast_to->gmask_op());
+		//absl::StrAppend(&val, ref.to_s(), ((i==1)?lnast_to->gmask_op():""), ((i>1)?"":"(") );
+    absl::StrAppend(&val, ((!ref_is_ref&&i>1)?"(":"") , ref.to_s(), ((i==1)?lnast_to->gmask_op():""));
   }
-  val.pop_back();
+  //val.pop_back();
+  absl::StrAppend(&val, (ref_is_ref?"":")") );
+  //absl::StrAppend(&val, ")") ;
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
