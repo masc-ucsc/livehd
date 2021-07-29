@@ -2105,39 +2105,24 @@ void Inou_firrtl::AddPortToSub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_p
 void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB_Type& type, uint8_t dir,
                                const std::string& port_id, Sub_node& sub, uint64_t& inp_pos, uint64_t& out_pos) {
   switch (type.type_case()) {
-    case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
-      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
-      mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, type.uint_type().width().value(), dir, false});
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kSintType: {  // SInt type
-      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
-      mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, type.sint_type().width().value(), dir, true});
-      break;
-    }
+    case firrtl::FirrtlPB_Type::kUintType:     // UInt type
+    case firrtl::FirrtlPB_Type::kSintType:     // SInt type
+    case firrtl::FirrtlPB_Type::kResetType:    // Reset type
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
+      // mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset type
       AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
+      // mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       async_rst_names.insert(port_id);
       break;
     }
-    case firrtl::FirrtlPB_Type::kResetType: {  // Reset type
-      AddPortToSub(sub, inp_pos, out_pos, port_id, dir);
-      mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
-      mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
-      break;
-    }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
-      const firrtl::FirrtlPB_Type_BundleType btype = type.bundle_type();
+      auto &btype = type.bundle_type();
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         if (btype.field(i).is_flipped()) {
           uint8_t new_dir = 0;
@@ -2155,7 +2140,6 @@ void Inou_firrtl::AddPortToMap(const std::string& mod_id, const firrtl::FirrtlPB
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
-      // FIXME: How does mod_to_io_map interact with a vector?
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
@@ -2206,7 +2190,7 @@ void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule
   // Add them to the map to let us know what ports exist in this module.
   for (const auto& elem : port_list) {
     mod_to_io_dir_map[std::make_pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
-    mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem), std::get<3>(elem)});
+    // mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem), std::get<3>(elem)});
   }
 }
 
@@ -2268,7 +2252,7 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
 void Inou_firrtl::IterateCircuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, const std::string& file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     mod_to_io_dir_map.clear();
-    mod_to_io_map.clear();
+    // mod_to_io_map.clear();
     emod_to_param_map.clear();
 
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);

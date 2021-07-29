@@ -195,9 +195,7 @@ private:
   absl::flat_hash_map<std::string, std::string> inst_to_mod_map;
   // Maps (module name + I/O name) pair to direction of that I/O in that module.
   absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t> mod_to_io_dir_map;
-  /* Used when a submodule inst is created, have to specify bw of all IO in module.
-     Maps module name to list of tuples of (signal name + signal biwdith + signal dir + sign). */
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t, bool>>> mod_to_io_map;
+
   // Map used by external modules to indicate parameters names + values.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
 
