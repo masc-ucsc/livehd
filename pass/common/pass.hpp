@@ -16,7 +16,7 @@ static_assert(__cplusplus >= 201703L, "C++ 17 support is required. Please upgrad
 
 class Pass {
 protected:
-  const std::string pass_name;
+  mmap_lib::str pass_name;
 
   // Common names used by many passes
   const mmap_lib::str files;
@@ -28,11 +28,11 @@ protected:
   mmap_lib::str get_odir(const Eprp_var &var) const;
 
   static void register_pass(Eprp_method &method);
-  static void register_inou(std::string_view pname, Eprp_method &method);
+  static void register_inou(const mmap_lib::str &pname, Eprp_method &method);
 
   bool setup_directory(const mmap_lib::str &dir) const;
 
-  Pass(std::string_view _pass_name, const Eprp_var &var);
+  Pass(const mmap_lib::str &_pass_name, const Eprp_var &var);
 
 public:
   static inline Eprp eprp;

@@ -68,7 +68,7 @@ protected:
     return base+1;
   }
 
-  const char *ref_base_sso() const {
+  constexpr const char *ref_base_sso() const {
     assert(size_ctrl&1);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
@@ -291,7 +291,7 @@ protected:
   static inline Pool &mut_ref() { return pool; }
 
 
-  constexpr void set_sso(const char *s, size_t N) {
+  constexpr inline void set_sso(const char *s, size_t N) {
     assert(N<16);
 
     size_ctrl    = (N<<1) | 1;
@@ -307,6 +307,22 @@ protected:
         data         |= val<<(8*(i-7));
       }
     }
+  }
+
+  constexpr char get_sso(size_t N) const {
+    assert(N<16);
+
+    char ch=0;
+
+    if (N<3) {
+      ch = size_ctrl>>(8*(N+1));
+    }else if (N < 7) {
+      ch = ptr_or_start>>(8*(N-3));
+    }else{
+      ch = data>>(8*(N-7));
+    }
+
+    return ch;
   }
 
   void set_non_sso(const char *s, size_t N) {
@@ -380,7 +396,7 @@ public:
   }
 
   template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
-  constexpr str(const char (&s)[N]){
+  constexpr str(const char (&s)[N]) : size_ctrl(0), ptr_or_start(0), data(0) {
     set_sso(s,N-1);
   }
 
@@ -395,6 +411,12 @@ public:
     }else{
       set_non_sso(sv.data(),sv.size());
     }
+  }
+
+  explicit str(int64_t v) {
+    auto val_str = std::to_string(v);
+    assert(val_str.size()<=15);
+    set_sso(val_str.data(), val_str.size());
   }
 
   explicit str(const char *txt, size_t sz) {
@@ -419,12 +441,7 @@ public:
   [[nodiscard]] constexpr bool        empty() const { return size_ctrl==1; }
 
   constexpr bool operator==(const str &rhs) const {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-    const uint64_t *a = (const uint64_t *)(this);
-    const uint64_t *b = (const uint64_t *)(&rhs);
-#pragma GCC diagnostic pop
-    return a[0] == b[0] && a[1] == b[1];  // 16byte compare
+    return size_ctrl == rhs.size_ctrl && ptr_or_start == rhs.ptr_or_start && data == rhs.data;
   }
   bool operator<(const str &rhs) const {
 
@@ -441,7 +458,7 @@ public:
     return (*this)[0] < rhs[0];
   }
 
-#if 1
+#if 0
   // const char* && std::string will go through this one
   bool operator==(const std::string_view rhs) const {
     const auto sz = size();
@@ -470,32 +487,29 @@ public:
   }
 #endif
 
-  template <std::size_t N>
+  template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
   bool operator==(const char (&rhs)[N]) const {
-    if ((N-1)>15) {
-      str str_rhs(rhs); // SSO constexpr optimized
-      return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data == str_rhs.data;
-    }
-    std::string_view sv(rhs,N-1);
-    return (*this == sv);
+    str str_rhs(rhs); // SSO constexpr optimized
+    return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data == str_rhs.data;
   }
 
   constexpr bool operator!=(const str &rhs) const {
     return !(*this == rhs);
   }
 
+#if 0
   bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
   template <std::size_t N>
   constexpr bool operator!=(const char (&rhs)[N]) const {
     return !(*this == rhs);
   }
+#endif
 
   constexpr char front() const {
     assert(size());
     if (is_sso()) {
-      const char *base = ref_base_sso();
-      return *base;
+      return (size_ctrl>>8) & 0xFF;
     }
     return data & 0xFF;
   }
@@ -545,7 +559,7 @@ public:
   }
 
   // const char * && std::string will come through here
-  bool starts_with(std::string_view st) const {
+  bool starts_with_sv(std::string_view st) const {
     if (MMAP_LIB_LIKELY(st.size() > size()))
       return false;
 
@@ -586,8 +600,7 @@ public:
     return true;
   }
 
-#if 1
-  bool ends_with(const std::string &en) const {
+  bool ends_with_sv(const std::string &en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
 
@@ -604,7 +617,6 @@ public:
     }
     return true;
   }
-#endif
 
   std::size_t find(const str &v, std::size_t pos = 0) const {
     if (pos>=size())
@@ -736,14 +748,37 @@ public:
     return s;
   }
 
-  int to_i() const {  // convert to integer
+  constexpr int to_i() const {  // convert to integer
     if (is_sso()) {
-      int result;
+      int result=0;
+#if 0
+#ifndef NDEBUG
+      for (std::size_t i=0u;i<size();++i) {
+        constexpr char ch = get_sso(i);
+        assert(ch >= '0' && ch <= '9');
+      }
+#endif
+      // unroll loop to allow constexpr (I want a for constexpr ... to replace this nasty code)
+      result   = result * 10 + (get_sso(0)-'0');
+      result   = result * 10 + (get_sso(1)-'0');
+      result   = result * 10 + (get_sso(2)-'0');
+      result   = result * 10 + (get_sso(3)-'0');
+      result   = result * 10 + (get_sso(4)-'0');
+      result   = result * 10 + (get_sso(5)-'0');
+      result   = result * 10 + (get_sso(6)-'0');
+      result   = result * 10 + (get_sso(7)-'0');
+      result   = result * 10 + (get_sso(8)-'0');
+      result   = result * 10 + (get_sso(9)-'0');
+      result   = result * 10 + (get_sso(10)-'0');
+      result   = result * 10 + (get_sso(11)-'0');
+      result   = result * 10 + (get_sso(12)-'0');
+      result   = result * 10 + (get_sso(13)-'0');
+      result   = result * 10 + (get_sso(14)-'0');
+#endif
       const auto *base = ref_base_sso();
       if (size()==0 || !std::isdigit(base[0]))
         return 0;
       std::from_chars(base, base + size_sso(), result);
-
       return result;
     }
     assert(false); // overflow non SSO is a TOO long integer
@@ -817,7 +852,7 @@ public:
     return s;
   }
 
-  str append(std::string_view b) const {
+  str append_sv(std::string_view b) const {
     auto new_size = size() + b.size();
     if (new_size< 16) {
       str s{*this};
@@ -873,6 +908,14 @@ public:
   str append(char c) const {
     auto s = to_s();
     s.append(1,c);
+
+    return str(s);
+  }
+
+  str prepend(char c) const {
+    std::string s;
+    s.append(1,c);
+    s.append(to_s());
 
     return str(s);
   }
@@ -986,7 +1029,7 @@ public:
 
   static str concat(const str &a, std::string_view b) {
     str ret{a};
-    return ret.append(b);
+    return ret.append_sv(b);
   }
 
   static str concat(std::string_view sv1, std::string_view sv2) {
@@ -1157,10 +1200,11 @@ public:
     };
 };
 
-
+#if 0
 inline bool operator==(const std::string_view &a, const mmap_lib::str &b) {
   return b == a;
 }
+#endif
 
 template <std::size_t N>
 bool operator==(const char (&a)[N], const mmap_lib::str &b) {

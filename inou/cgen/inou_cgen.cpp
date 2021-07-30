@@ -13,9 +13,9 @@ Inou_cgen::Inou_cgen(const Eprp_var &var) : Pass("inou.cgen", var) {
 }
 
 void Inou_cgen::setup() {
-  Eprp_method m1("inou.cgen.verilog", "export verilog from an Lgraph", &Inou_cgen::to_cgen_verilog);
+  Eprp_method m1(mmap_lib::str("inou.cgen.verilog"), mmap_lib::str("export verilog from an Lgraph"), &Inou_cgen::to_cgen_verilog);
 
-  m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
+  m1.add_label_optional("verbose", mmap_lib::str("dump bits and wirename (true/false)"), "false");
   register_inou("cgen", m1);
 }
 

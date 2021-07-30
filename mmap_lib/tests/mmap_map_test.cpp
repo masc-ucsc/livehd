@@ -61,7 +61,7 @@ TEST_F(Setup_mmap_map_test, string_data) {
       EXPECT_TRUE(map.has(key));
 
       const auto val = it.second;
-      EXPECT_EQ(val, std::to_string(it.first) + "foo");
+      EXPECT_EQ(val, mmap_lib::str(std::to_string(it.first) + "foo"));
       conta--;
     }
     map.ref_unlock();
@@ -131,7 +131,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
       EXPECT_EQ(txt1, txt2);
       EXPECT_EQ(txt1, txt4);
 
-      auto val = map.get(it.first);
+      auto val = map.get(it.first).to_s();
       EXPECT_EQ(val, std::to_string(it.first) + "foo");
       conta--;
     }
@@ -181,7 +181,7 @@ TEST_F(Setup_mmap_map_test, string_key) {
     map.ref_lock();
     for (const auto &it : map) {
       (void)it;
-      EXPECT_EQ(it.first, "base" + std::to_string(it.second) + "foo");
+      EXPECT_EQ(it.first, mmap_lib::str("base" + std::to_string(it.second) + "foo"));
       EXPECT_EQ(map2.count(it.first.to_s()), 1);
       conta--;
     }
@@ -244,7 +244,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
     map.ref_lock();
     for (const auto &it : map) {
       (void)it;
-      EXPECT_EQ(map.get_key(it), std::to_string(it.second) + "foo");
+      EXPECT_EQ(map.get_key(it), mmap_lib::str(std::to_string(it.second) + "foo"));
       EXPECT_EQ(map2.count(it.first.to_s()), 1);
       conta--;
     }
@@ -488,7 +488,7 @@ TEST_F(Setup_mmap_map_test, lots_of_strings) {
       auto str2 = bimap.get_val(i);
       auto i2   = bimap.get_key(mmap_lib::str(str));
 
-      EXPECT_EQ(str, str2);
+      EXPECT_EQ(str, str2.to_s());
       EXPECT_EQ(i, i2);
     }
   }

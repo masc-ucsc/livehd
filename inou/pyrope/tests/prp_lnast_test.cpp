@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
   Prp_lnast converter;
 
   Lbench b("inou.PYROPE_prp_lnast_parse");
-  converter.parse_file(argv[1]);
+  converter.parse_file(mmap_lib::str(argv[1]));
   b.end();
 
   Lbench b2("inou.PYROPE_prp_lnast_convert");

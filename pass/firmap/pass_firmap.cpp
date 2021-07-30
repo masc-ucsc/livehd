@@ -10,8 +10,8 @@
 static Pass_plugin sample("pass_firmap", Pass_firmap::setup);
 
 void Pass_firmap::setup() {
-  Eprp_method m1("pass.firmap", "firrtl_op bitwidth inference and lgraph nodes", &Pass_firmap::trans);
-  m1.add_label_optional("hier", "hierarchical firrtl map", "true");
+  Eprp_method m1("pass.firmap", mmap_lib::str("firrtl_op bitwidth inference and lgraph nodes"), &Pass_firmap::trans);
+  m1.add_label_optional("hier", mmap_lib::str("hierarchical firrtl map"), "true");
 
   register_pass(m1);
 }

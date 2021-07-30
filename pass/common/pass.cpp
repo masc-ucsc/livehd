@@ -54,7 +54,7 @@ mmap_lib::str Pass::get_odir(const Eprp_var &var) const {
   return _odir;
 }
 
-Pass::Pass(std::string_view _pass_name, const Eprp_var &var)
+Pass::Pass(const mmap_lib::str &_pass_name, const Eprp_var &var)
     : pass_name(_pass_name), files(get_files(var)), path(get_path(var)), odir(get_odir(var)) {}
 
 void Pass::register_pass(Eprp_method &method) {
@@ -65,24 +65,21 @@ void Pass::register_pass(Eprp_method &method) {
          || method.get_name().substr(0, 5) == "inou.");
 }
 
-void Pass::register_inou(std::string_view _pname, Eprp_method &method) {
+void Pass::register_inou(const mmap_lib::str &pname, Eprp_method &method) {
   // All the inou should start with inou.*
-  const std::string pname{_pname};
 
-  assert(method.get_name().compare(0, pname.size() + 5, std::string{"inou." + pname}) == 0);
-
-  if (method.get_name() == std::string{"inou." + pname + ".tolg"}) {
+  if (method.get_name() == mmap_lib::str::concat("inou.", pname, ".tolg")) {
     method.add_label_optional("path", "lgraph path", "lgdb");
     method.add_label_required("files", "input file[s]");
-  } else if (method.get_name() == std::string{"inou." + pname + ".fromlg"}) {
-    method.add_label_optional("odir", "output directory", ".");
-  } else if (method.get_name() == std::string{"inou." + pname + ".fromlnast"}) {  // for dot
+  } else if (method.get_name() == mmap_lib::str::concat("inou.", pname, ".fromlg")) {
+    method.add_label_optional("odir", mmap_lib::str("output directory"), ".");
+  } else if (method.get_name() == mmap_lib::str::concat("inou.", pname, ".fromlnast")) {  // for dot
     method.add_label_required("files", "input file[s]");
-    method.add_label_optional("odir", "output directory", ".");
-  } else if (method.get_name().rfind(std::string{"inou." + pname}, 0) == 0) {
+    method.add_label_optional("odir", mmap_lib::str("output directory"), ".");
+  } else if (method.get_name().rfind(mmap_lib::str::concat(mmap_lib::str("inou."), pname), 0) == 0) {
     method.add_label_optional("path", "lgraph path", "lgdb");
     method.add_label_optional("files", "input file[s]");
-    method.add_label_optional("odir", "output directory", ".");
+    method.add_label_optional("odir", mmap_lib::str("output directory"), ".");
   } else {
     assert(false);
     // inou methods should be inou.name.tolg or inou.name.fromlg or inou.name generic for passes that handle one way only

@@ -6,7 +6,7 @@
 void setup_inou_liveparse() { Inou_liveparse::setup(); }
 
 void Inou_liveparse::setup() {
-  Eprp_method m1("inou.liveparse", "liveparse and chunkify verilog/pyrope files", &Inou_liveparse::tolg);
+  Eprp_method m1("inou.liveparse", mmap_lib::str("liveparse and chunkify verilog/pyrope files"), &Inou_liveparse::tolg);
   register_inou("liveparse", m1);
 }
 
@@ -17,7 +17,7 @@ void Inou_liveparse::do_tolg() {
 
   for (auto f : files.split(',')) {
     if (f.ends_with(".v") || f.ends_with(".sv")) {
-      chunker_v.parse_file(f.to_s());
+      chunker_v.parse_file(f);
     } else if (f.ends_with(".prp")) {
       error("inou.liveparse chunkify Pyrope not implemented yet {}", f);
       return;

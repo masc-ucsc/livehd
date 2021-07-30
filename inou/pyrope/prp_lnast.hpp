@@ -20,11 +20,12 @@ protected:
   absl::flat_hash_set<Rule_id>                               expr_rules;
 
   // std::list<std::string> temp_vars;
-  std::string      last_temp_var;
+  int              last_temp_var_counter;
+  mmap_lib::str    last_temp_var;
   Lnast_node       current_return_node;
   const Lnast_node lnast_node_invalid;
 
-  std::string get_temp_string();
+  mmap_lib::str get_temp_string();
   Lnast_node  get_lnast_temp_ref();
 
   void translate_code_blocks(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Rule_id term_rule = Prp_invalid,
@@ -69,7 +70,7 @@ protected:
   inline uint8_t maybe_child_expr(mmap_lib::Tree_index idx);
   inline void    create_simple_lhs_expr(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln, Lnast_node rhs_node);
   inline Lnast_node create_const_node(mmap_lib::Tree_index idx);
-  inline bool       is_decimal(std::string_view number);
+  inline bool       is_decimal(const mmap_lib::str &number);
 
   inline void generate_op_map();
   inline void generate_expr_rules();
@@ -81,5 +82,5 @@ protected:
 public:
   Prp_lnast();
 
-  std::unique_ptr<Lnast> prp_ast_to_lnast(std::string_view module_name);
+  std::unique_ptr<Lnast> prp_ast_to_lnast(const mmap_lib::str &module_name);
 };

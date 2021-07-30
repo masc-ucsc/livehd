@@ -19,23 +19,25 @@ protected:
 
   void format_append(std::string &text) const {
     assert(scanner_pos < token_list.size());
+    auto txt = token_list[scanner_pos].get_text().to_s();
+
     if (scanner_pos > 0) {
       if (token_list[scanner_pos - 1].line != token_list[scanner_pos].line) {
-        absl::StrAppend(&text, "\n", token_list[scanner_pos].get_text());
+        absl::StrAppend(&text, "\n", txt);
         return;
       }
-      absl::StrAppend(&text, " ", token_list[scanner_pos].get_text());
+      absl::StrAppend(&text, " ", txt);
       return;
     }
-    absl::StrAppend(&text, token_list[scanner_pos].get_text());
+    absl::StrAppend(&text, txt);
   }
 
   int open_write_file(const mmap_lib::str &filename) const;
 
-  bool is_same_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const;
+  bool is_same_file(const mmap_lib::str &filename, std::string_view text1, std::string_view text2) const;
 
-  void write_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const;
-  void write_file(const mmap_lib::str &filename, const mmap_lib::str &text) const;
+  void write_file(const mmap_lib::str &filename, std::string_view text1, std::string_view text2) const;
+  void write_file(const mmap_lib::str &filename, std::string_view text) const;
 
   void add_io(Sub_node *sub, bool input, const mmap_lib::str &io_name, Port_ID pos);
 

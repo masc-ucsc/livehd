@@ -14,7 +14,7 @@ protected:
   uint64_t seq_count      = 0;
   bool     put_bw_in_ln   = true;
 
-  absl::flat_hash_map<Node_pin::Compact_class_driver, std::string> dpin_name_map;
+  absl::flat_hash_map<Node_pin::Compact_class_driver, mmap_lib::str> dpin_name_map;
 
   void do_trans(Lgraph* g, Eprp_var& var, const mmap_lib::str &module_name);
 
@@ -28,11 +28,7 @@ protected:
   void        attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
   void        attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void        attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  bool        is_hex(const std::string& test_string);
-  std::string hex_to_bin(std::string hex_str);
-  int         range_low(std::string binstr);
-  int         range_high(std::string binstr);
+  void        attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void        attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void        attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
   void        attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
@@ -48,12 +44,10 @@ protected:
   void attach_cond_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
 
   void handle_io(Lgraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
-  // void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, const std::string_view& pin_name, const uint32_t& bits);
-  void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, const std::string_view& pin_name, const uint32_t& bits);
+  void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, const mmap_lib::str &pin_name, const uint32_t& bits);
 
   const mmap_lib::str &create_temp_var(Lnast& lnast, const mmap_lib::str &str_prefix = "___");
   bool             has_prefix(const mmap_lib::str &test_string);
-  bool             has_prefix(const std::string& test_string);
 
   const mmap_lib::str &dpin_get_name(const Node_pin dpin);
   void             dpin_set_map_name(const Node_pin dpin, const mmap_lib::str &name_part);

@@ -30,7 +30,7 @@ int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
   return fd;
 }
 
-bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, const mmap_lib::str &text1, const mmap_lib::str &text2) const {
+bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, std::string_view text1, std::string_view text2) const {
   if (elab_path.empty())
     return false;
 
@@ -66,7 +66,7 @@ bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, const mmap
   return n == 0;  // same file if n==0
 }
 
-void Chunkify_verilog::write_file(const mmap_lib::str &filename, const mmap_lib::str &text1, const mmap_lib::str &text2) const {
+void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_view text1, std::string_view text2) const {
   int fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -83,7 +83,7 @@ void Chunkify_verilog::write_file(const mmap_lib::str &filename, const mmap_lib:
   close(fd);
 }
 
-void Chunkify_verilog::write_file(const mmap_lib::str &filename, const mmap_lib::str &text) const {
+void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_view text) const {
   auto fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -109,8 +109,8 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, const mmap_lib::str &io
 }
 
 void Chunkify_verilog::elaborate() {
-  auto parse_path = mmap_lib::str::concat(path, "/parse/");  // Keep trailing /
-  if (access(parse_path.to_s().c_str(), F_OK) != 0) {
+  auto parse_path = path.to_s() + "/parse/";  // Keep trailing /
+  if (access(parse_path.c_str(), F_OK) != 0) {
     auto  spath = path.to_s();
     int     err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
@@ -128,7 +128,7 @@ void Chunkify_verilog::elaborate() {
   if (is_parse_inline()) {
     format_name = "inline";
   } else {
-    format_name = get_filename();
+    format_name = get_filename().to_s();
 
     for (char &c : format_name) {
       if (c == '/')
@@ -138,32 +138,30 @@ void Chunkify_verilog::elaborate() {
 
   std::string bench_name;
   bench_name.append("inou.LIVEPARSE_");
-  bench_name.append(path.data());
+  bench_name.append(path.to_s());
   bench_name.append("_");
   bench_name.append(std::to_string(get_token_pos()));
   bench_name.append("_");
   bench_name.append(format_name);
   Lbench bench(bench_name);
 
-  auto source = mmap_lib::str::concat(parse_path, "file_", format_name);
+  mmap_lib::str source(parse_path + "file_" + format_name);
 
   write_file(source, get_memblock());
 
-  chunk_dir = mmap_lib::str::concat(parse_path, "chunk_", format_name);
+  chunk_dir = mmap_lib::str(parse_path + "chunk_" + format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
-  elab_chunk_dir.clear();
+  elab_chunk_dir = mmap_lib::str();
   if (!elab_path.empty()) {
-    elab_chunk_dir.append(elab_path);
-    elab_chunk_dir.append("/parse/chunk_");
-    elab_chunk_dir.append(format_name);
+    elab_chunk_dir = mmap_lib::str::concat(elab_path, "/parse/chunk_", format_name);
   }
 
   bool in_module   = false;
   bool last_input  = false;
   bool last_output = false;
 
-  std::string module_name;
+  mmap_lib::str module_name;
   Port_ID     module_io_pos = 1;
 
   // This has to be cut&pasted to each file
@@ -190,11 +188,11 @@ void Chunkify_verilog::elaborate() {
         }
         format_append(in_module_text);
         scan_next();
-        absl::StrAppend(&module_name, scan_text());
+        module_name = mmap_lib::str::concat(module_name, scan_text());
         module_io_pos = 1;
         in_module     = true;
 
-        sub = &library->reset_sub(mmap_lib::str(module_name), mmap_lib::str(source));
+        sub = &library->reset_sub(module_name, mmap_lib::str(source));
         I(sub);
 
       } else if (txt == "input") {
@@ -221,14 +219,8 @@ void Chunkify_verilog::elaborate() {
                || scan_is_token(Token_id_comment)) {  // Before Token_id_comma
       if (last_input || last_output) {
         if (in_module && scan_is_prev_token(Token_id_alnum) && inside_task_function == 0) {
-#if 1
-          // FIXME: bug in char_array prevents to use sview. Delete this once we move to Lgraph 0.2 (mmap_map/mmap_bimap)
-          std::string label{scan_prev_text()};
-#else
-          auto label = scan_prev_text();
-#endif
 
-          add_io(sub, last_input, label, module_io_pos);
+          add_io(sub, last_input, scan_prev_text(), module_io_pos);
 
           module_io_pos++;
         }
@@ -255,9 +247,10 @@ void Chunkify_verilog::elaborate() {
       if (endmodule_found) {
         bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
-          write_file(chunk_dir + "/" + module_name + ".v", not_in_module_text, in_module_text);
+          auto outfile = mmap_lib::str(chunk_dir.to_s() + "/" + module_name.to_s() + ".v");
+          write_file(outfile, not_in_module_text, in_module_text);
         }
-        module_name.clear();
+        module_name = mmap_lib::str();
         in_module_text.clear();
       }
     }

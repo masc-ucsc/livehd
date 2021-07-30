@@ -24,18 +24,18 @@ void Inou_code_gen::setup() {
 
   /* register_inou("code_gen", m2); */
 
-  Eprp_method m3("inou.code_gen.verilog", "lnast -> generate verilog", &Inou_code_gen::to_verilog);
-  m3.add_label_optional("odir", "path to put the verilog[s]", ".");
+  Eprp_method m3(mmap_lib::str("inou.code_gen.verilog"), mmap_lib::str("lnast -> generate verilog"), &Inou_code_gen::to_verilog);
+  m3.add_label_optional("odir", mmap_lib::str("path to put the verilog[s]"), ".");
 
   register_inou("code_gen", m3);
 
-  Eprp_method m4("inou.code_gen.prp", "lnast -> generate pyrope", &Inou_code_gen::to_prp);
-  m4.add_label_optional("odir", "path to put the pyrope[s]", ".");
+  Eprp_method m4(mmap_lib::str("inou.code_gen.prp"), mmap_lib::str("lnast -> generate pyrope"), &Inou_code_gen::to_prp);
+  m4.add_label_optional("odir", mmap_lib::str("path to put the pyrope[s]"), ".");
 
   register_inou("code_gen", m4);
 
-  Eprp_method m5("inou.code_gen.cpp", "lnast -> generate cpp", &Inou_code_gen::to_cpp);
-  m5.add_label_optional("odir", "path to put the cpp[s}", ".");
+  Eprp_method m5(mmap_lib::str("inou.code_gen.cpp"), mmap_lib::str("lnast -> generate cpp"), &Inou_code_gen::to_cpp);
+  m5.add_label_optional("odir", mmap_lib::str("path to put the cpp[s}"), ".");
 
   register_inou("code_gen", m5);
 }

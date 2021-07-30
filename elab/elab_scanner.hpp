@@ -156,7 +156,6 @@ public:
 protected:
   Token_list token_list;
 
-private:
   mmap_lib::str    buffer_name;
 
   const char      *memblock;

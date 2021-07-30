@@ -17,10 +17,10 @@
 static Pass_plugin sample("inou_json", Inou_json::setup);
 
 void Inou_json::setup() {
-  Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json::tolg);
+  Eprp_method m1("inou.json.tolg", mmap_lib::str("import from json to lgraph"), &Inou_json::tolg);
   register_inou("json", m1);
 
-  Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json::fromlg);
+  Eprp_method m2(mmap_lib::str("inou.json.fromlg"), mmap_lib::str("export from lgraph to json"), &Inou_json::fromlg);
   register_inou("json", m2);
 }
 
@@ -60,17 +60,16 @@ void Inou_json::tolg(Eprp_var &var) {
   }
 
   std::vector<Lgraph *> lgs;
-  for (const auto &f : absl::StrSplit(files, ',')) {
-    std::string_view name = f.substr(f.find_last_of("/\\") + 1);
-    if (absl::EndsWith(name, ".json")) {
+  for (const auto &f : files.split(',')) {
+    auto name = f.get_str_after_last_if_exists('/');
+    if (name.ends_with(".json")) {
       name = name.substr(0, name.size() - 5);  // remove .json
     } else {
       error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));
       continue;
     }
 
-    std::string fname(f);
-    FILE *      pFile = fopen(fname.c_str(), "rb");
+    FILE *      pFile = fopen(f.to_s().c_str(), "rb");
     if (pFile == 0) {
       Pass::error("Inou_json::tolg could not open {} file", f);
       continue;

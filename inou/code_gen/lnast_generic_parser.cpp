@@ -13,44 +13,48 @@
 #include "code_gen_all_lang.hpp"
 #include "lnast_map.hpp"
 
-std::string Prp_parser::ref_name(const std::string &prp_term, bool) const { return prp_term; }
+std::string Prp_parser::ref_name(const mmap_lib::str &prp_term, bool) const { return prp_term.to_s(); }
 
-std::string Prp_parser::ref_name(std::string_view prp_term, bool) const { return std::string(prp_term); }
+mmap_lib::str Prp_parser::ref_name_str(const mmap_lib::str &prp_term, bool) const { return prp_term; }
 
-std::string Cpp_parser::ref_name(const std::string &prp_term, bool strct) const {
-  if (Code_gen_all_lang::has_prefix(prp_term)) {
-    if (Code_gen_all_lang::is_output(prp_term) && strct == true) {
-      return (absl::StrCat("outputs.", prp_term.substr(1)));
-    }
-    return prp_term.substr(1);
-  } else
+std::string Cpp_parser::ref_name(const mmap_lib::str &prp_term, bool strct) const {
+  if (!Code_gen_all_lang::has_prefix(prp_term)) {
+    return prp_term.to_s();
+  }
+
+  if (Code_gen_all_lang::is_output(prp_term) && strct == true) {
+    return absl::StrCat("outputs.", prp_term.substr(1).to_s());
+  }
+
+  return prp_term.substr(1).to_s();
+}
+
+mmap_lib::str Cpp_parser::ref_name_str(const mmap_lib::str &prp_term, bool strct) const {
+  if (!Code_gen_all_lang::has_prefix(prp_term)) {
     return prp_term;
+  }
+
+  if (Code_gen_all_lang::is_output(prp_term) && strct == true) {
+    return mmap_lib::str::concat(mmap_lib::str("outputs."), prp_term.substr(1));
+  }
+
+  return prp_term.substr(1);
 }
 
-std::string Cpp_parser::ref_name(std::string_view prp_term, bool strct) const {
+
+std::string Ver_parser::ref_name(const mmap_lib::str &prp_term, bool) const {
   if (Code_gen_all_lang::has_prefix(prp_term)) {
-    std::string _prp_term = std::string(prp_term);
-    if (Code_gen_all_lang::is_output(prp_term) && strct == true) {
-      return (absl::StrCat("outputs.", _prp_term.substr(1)));
-    }
-    return _prp_term.substr(1);
-  } else
-    return std::string(prp_term);
+    return prp_term.substr(1).to_s();
+  }
+  return prp_term.to_s();
 }
 
-std::string Ver_parser::ref_name(const std::string &prp_term, bool) const {
+mmap_lib::str Ver_parser::ref_name_str(const mmap_lib::str &prp_term, bool) const {
   if (Code_gen_all_lang::has_prefix(prp_term)) {
     return prp_term.substr(1);
-  } else
-    return prp_term;
-}
+  }
 
-std::string Ver_parser::ref_name(std::string_view prp_term, bool) const {
-  if (Code_gen_all_lang::has_prefix(prp_term)) {
-    std::string _prp_term = std::string(prp_term);
-    return _prp_term.substr(1);
-  } else
-    return std::string(prp_term);
+  return prp_term;
 }
 
 std::string_view Prp_parser::stmt_sep() const { return stmt_separator; }
@@ -237,31 +241,39 @@ std::string Cpp_parser::set_main_fstart(const std::string &basename, const std::
   return absl::StrCat(txt_to_print, main_file_final_str);
 }
 
-bool Cpp_parser::set_convert_parameters(const std::string &key, const std::string &ref) {
-  // convert parameters to cpp format
-  // currently supports .__bits only
-  assert(key.size() >= 1);
-  if (key[0] == '$') {  // it is i/p
-    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("$."));
-    if (!absl::StrContains(_key[1], "clock")) {
-      inp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
-      if (inps_csv.empty())
-        absl::StrAppend(&inps_csv, "UInt<", ref, "> ", _key[1]);
-      else
-        absl::StrAppend(&inps_csv, ", UInt<", ref, "> ", _key[1]);
-    } else {  // TODO: add for reset also
-      sys_clock      = _key[1];
-      sys_clock_bits = ref;
-    }
-  } else if (key[0] == '%') {  // it is o/p
-    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("%."));
-    outp_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
-  } else if (key[0] == '#') {  // it is register
-    std::vector<std::string> _key = absl::StrSplit(key, absl::ByAnyChar("#."));
-    reg_bw.insert(std::pair<std::string, std::string>(_key[1], ref));
-  } else {  // TODO: print error!
+bool Cpp_parser::set_convert_parameters(const mmap_lib::str &key, const std::string &ref) {
+
+  if (!Code_gen_all_lang::has_prefix(key)) {
     return false;
   }
+
+  std::string no_prefix_key;
+  if (key[1]=='.')
+    no_prefix_key = key.substr(2).to_s();
+  else
+    no_prefix_key = key.substr(1).to_s();
+
+  assert(key.size() >= 1);
+  if (key[0] == '$') {  // it is i/p
+
+    if (no_prefix_key == "clock") {
+      sys_clock      = no_prefix_key;
+      sys_clock_bits = ref;
+    }else{
+      inp_bw.insert(std::pair<std::string, std::string>(no_prefix_key, ref));
+      if (inps_csv.empty())
+        absl::StrAppend(&inps_csv, "UInt<", ref, "> ", no_prefix_key);
+      else
+        absl::StrAppend(&inps_csv, ", UInt<", ref, "> ", no_prefix_key);
+    }
+  } else if (key[0] == '%') {  // it is o/p
+    outp_bw.insert(std::pair<std::string, std::string>(no_prefix_key, ref));
+  } else if (key[0] == '#') {  // it is register
+    reg_bw.insert(std::pair<std::string, std::string>(no_prefix_key, ref));
+  } else {
+    assert(false);
+  }
+
   return true;
 }
 
@@ -364,8 +376,8 @@ std::string Ver_parser::set_final_print(const std::string &, const std::string &
 }
 
 // odir related functions:
-void Prp_parser::result_in_odir(std::string_view fname, std::string_view odir, const std::string &buffer_to_print) const {
-  auto file = absl::StrCat(odir, "/", fname, ".", lang_type);
+void Prp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const {
+  auto file = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", lang_type);
   int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.code_gen unable to create {}", file);
@@ -379,9 +391,9 @@ void Prp_parser::result_in_odir(std::string_view fname, std::string_view odir, c
   close(fd);
 }
 
-void Cpp_parser::result_in_odir(std::string_view fname, std::string_view odir, const std::string &) const {
+void Cpp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &) const {
   // for header file
-  auto supp_f  = absl::StrCat(odir, "/", fname, ".", supp_ftype);
+  auto supp_f  = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", supp_ftype);
   int  supp_fd = ::open(supp_f.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (supp_fd < 0) {
     Pass::error("inou.code_gen unable to create header file {}", supp_f);
@@ -395,7 +407,7 @@ void Cpp_parser::result_in_odir(std::string_view fname, std::string_view odir, c
   close(supp_fd);
 
   // for cpp file
-  auto file = absl::StrCat(odir, "/", fname, ".", lang_type);
+  auto file = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", lang_type);
   int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.code_gen unable to create {}", file);
@@ -409,9 +421,9 @@ void Cpp_parser::result_in_odir(std::string_view fname, std::string_view odir, c
   close(fd);
 }
 
-void Ver_parser::result_in_odir(std::string_view fname, std::string_view odir, const std::string &buffer_to_print) const {
+void Ver_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const {
   // TODO: currently as per prp. change as required.
-  auto file = absl::StrCat(odir, "/", fname, ".", lang_type);
+  auto file = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", lang_type);
   int  fd   = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.code_gen unable to create {}", file);
@@ -425,27 +437,26 @@ void Ver_parser::result_in_odir(std::string_view fname, std::string_view odir, c
   close(fd);
 }
 
-std::string Prp_parser::set_make_unsigned(const std::string &sec_child) {
-  unsigned_vars.push_back(sec_child);
-  return absl::StrCat(sec_child, ".__unsigned = true", std::string(stmt_sep()));
+void Prp_parser::set_make_unsigned(const mmap_lib::str &sec_child) {
+  unsigned_vars.insert(sec_child);
 }
 
-std::string Cpp_parser::set_make_unsigned(const std::string &sec_child) {
-  unsigned_vars.push_back(sec_child);
-  return "";
-}
-std::string Ver_parser::set_make_unsigned(const std::string &sec_child) {
-  unsigned_vars.push_back(sec_child);
-  return "";
+void Cpp_parser::set_make_unsigned(const mmap_lib::str &sec_child) {
+  unsigned_vars.insert(sec_child);
 }
 
-bool Prp_parser::is_unsigned(const std::string &var_name) const {
-  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name) != unsigned_vars.end());
+void Ver_parser::set_make_unsigned(const mmap_lib::str &sec_child) {
+  unsigned_vars.insert(sec_child);
 }
 
-bool Cpp_parser::is_unsigned(const std::string &var_name) const {
-  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name) != unsigned_vars.end());
+bool Prp_parser::is_unsigned(const mmap_lib::str &var_name) const {
+  return unsigned_vars.contains(var_name);
 }
-bool Ver_parser::is_unsigned(const std::string &var_name) const {
-  return (std::find(unsigned_vars.begin(), unsigned_vars.end(), var_name) != unsigned_vars.end());
+
+bool Cpp_parser::is_unsigned(const mmap_lib::str &var_name) const {
+  return unsigned_vars.contains(var_name);
+}
+
+bool Ver_parser::is_unsigned(const mmap_lib::str &var_name) const {
+  return unsigned_vars.contains(var_name);
 }

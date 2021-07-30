@@ -1970,24 +1970,24 @@ bool Prp::go_back(uint64_t num_tok) {
 }
 
 void Prp::ast_handler() {
-  std::string rule_name;
   for (const auto &it : ast->depth_preorder()) {
     auto node       = ast->get_data(it);
-    rule_name       = rule_id_to_string(node.rule_id);
+    auto rule_name  = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
     (void)token_text;
+    (void)rule_name;
     PRINT_AST("Rule name: {}, Etoken text: {}, Tree level: {}\n", rule_name, token_text, it.level);
   }
 }
 
 void Prp::ast_dump(mmap_lib::Tree_index tree_idx) const {
   for (const auto &index : ast->depth_preorder(tree_idx)) {
-    std::string indent(index.level, ' ');
     const auto &d          = ast->get_data(index);
     auto        rule_name  = rule_id_to_string(d.rule_id);
     auto        token_text = scan_text(d.token_entry);
 
-    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent.c_str(), index.level, index.pos, d.rule_id, rule_name, token_text);
+    std::string indent(index.level, ' ');
+    fmt::print("{} l:{} p:{} rule_id:{}/{} txt:{}\n", indent, index.level, index.pos, d.rule_id, rule_name, token_text);
   }
 }
 
@@ -2219,7 +2219,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   return false;
 }
 
-std::string Prp::rule_id_to_string(Rule_id rid) const {
+std::string_view Prp::rule_id_to_string(Rule_id rid) {
   switch (rid) {
     case Prp_invalid: return "Invalid";
     case Prp_rule: return "Program";

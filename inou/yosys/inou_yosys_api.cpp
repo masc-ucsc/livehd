@@ -57,7 +57,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
       do_read_str = "inou_yosys_write.ys";
 
     for (const auto &e : alt_paths) {
-      auto test = main_path + e + do_read_str;
+      auto test = main_path.to_s() + e + do_read_str;
       if (access(test.c_str(), R_OK) != -1) {
         script_file = test;
         break;
@@ -210,13 +210,13 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     return;
   }
 
-  const std::string techmap{var.get("techmap")};
-  const std::string abc{var.get("abc")};
-  const std::string top{var.get("top")};
-  const std::string lib{var.get("liberty")};
+  const auto techmap{var.get("techmap")};
+  const auto abc{var.get("abc")};
+  const auto top{var.get("top")};
+  const auto lib{var.get("liberty")};
 
   mustache::data vars;
-  vars.set("path", std::string(path));
+  vars.set("path", path.to_s());
 
   mustache::data filelist{mustache::data::type::list};
   for (const auto &f : absl::StrSplit(files, ',')) {

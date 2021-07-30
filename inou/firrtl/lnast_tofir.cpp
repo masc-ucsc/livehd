@@ -18,9 +18,9 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
 
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    std::string n{lnast->get_name(mmap_lib::Tree_index::root())};
+    auto n = lnast->get_name(mmap_lib::Tree_index::root());
 
-    top_msg->set_name(n);  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
+    top_msg->set_name(n.to_s());  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
   }
 
   // fir_design.PrintDebugString();
@@ -40,7 +40,7 @@ void Inou_firrtl::do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB
 
   constexpr auto top      = mmap_lib::Tree_index::root();
   const auto     stmts    = ln->get_first_child(top);
-  const auto     top_name = (std::string)ln->get_name(top);
+  const auto     top_name = ln->get_name(top);
 
   firrtl::FirrtlPB_Module            *mod  = circuit->add_module();
   firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
@@ -477,7 +477,7 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
   } else if (ln.get_name(field) == "__q_pin") {
     // For FIRRTL, this is just the same lhs = tup
     firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id((std::string)ln.get_name(tup).substr(1));  // Remove 1st char since it's a '#'
+    rhs_ref->set_id(ln.get_name(tup).substr(1).to_s());  // Remove 1st char since it's a '#'
     auto expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_reference(rhs_ref);
     make_assignment(ln, lhs, expr, fstmt);
@@ -733,17 +733,19 @@ std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnid
   return "";
 }
 
-std::string Inou_firrtl::strip_prefixes(const std::string_view str) {
-  std::string temp = (std::string)str;
-  while ((temp.substr(0, 1) == "$") || (temp.substr(0, 1) == "%") || (temp.substr(0, 1) == "#")) {
-    temp.replace(0, 1, "");  // Remove first char from a string
-  }
+mmap_lib::str Inou_firrtl::strip_prefixes(const mmap_lib::str &str) {
 
-  if (temp.substr(0, 3) == "_._") {
-    temp = temp.substr(2);
-  }
+  auto skip=0u;
 
-  return temp;
+  auto ch = str.front();
+  if (ch == '$' || ch == '%' || ch == '#')
+    skip=1;
+  else if (ch=='_' && str.substr(0,3) == "_._")
+    skip=3;
+
+  if (skip)
+    return str.substr(skip);
+  return str;
 }
 
 /* If the LHS of some sort of statement that does assigning

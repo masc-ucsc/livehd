@@ -388,6 +388,22 @@ void Lconst::adjust(const Lconst &o) {
   bits         = calc_num_bits(num);
 }
 
+std::pair<int,int> Lconst::get_mask_range() const {
+
+  if (is_mask())  // continuous sequence of ones. Nice
+    return std::make_pair(0,get_bits()-1);
+
+  auto trail = get_trailing_zeroes();
+  if (trail==0)
+    return std::make_pair(-1,-1); // No continuous range
+
+  auto v2 = rsh_op(trail);
+  if (v2.is_mask())  // continuous sequence of ones. Nice
+    return std::make_pair(trail, v2.get_bits()-1);
+
+  return std::make_pair(-1,-1); // No continuous range
+}
+
 Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
 Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bits)); }
 

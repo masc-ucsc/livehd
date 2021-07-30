@@ -142,6 +142,8 @@ public:
   bool is_mask() const { return ((num + 1) & (num)) == 0; }
   bool is_power2() const { return ((num - 1) & (num)) == 0; }
 
+  std::pair<int,int> get_mask_range() const;
+
   Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
   size_t popcount() const;
 

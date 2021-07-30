@@ -120,7 +120,7 @@ public:
     return c[0] >= 'a' && c[0] <= 'z';
   }
 
-  static inline constexpr int get_sink_pid(Ntype_op op, mmap_lib::str str) {
+  static inline constexpr int get_sink_pid(Ntype_op op, const mmap_lib::str &str) {
     auto c = str.front();
     // Common case speedup
     if (c >= 'a' && c <= 'f') {
@@ -129,7 +129,8 @@ public:
       assert(get_sink_name(op, pid) == str);
       return pid;
     }
-    if (str == "$") {
+    if (c == '$') {
+      assert(str.size()==1);
       assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == 0);
       return 0;
     }

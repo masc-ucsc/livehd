@@ -83,9 +83,9 @@ public:
   virtual void clear();
   virtual void sync();
 
-  mmap_lib::str get_unique_name() const { return unique_name; }
-  mmap_lib::str get_name() const { return name; }
-  mmap_lib::str get_path() const { return path; }
+  const mmap_lib::str &get_unique_name() const { return unique_name; }
+  const mmap_lib::str &get_name() const { return name; }
+  const mmap_lib::str &get_path() const { return path; }
 
   const Lg_type_id get_lgid() const { return lgid; }
 };

@@ -2,7 +2,7 @@
 
 #include "inou_json.hpp"
 
-void to_json(Lgraph *lg, const std::string &filename) {
+void to_json(Lgraph *lg, const mmap_lib::str &filename) {
   (void)lg;
   (void)filename;
 }

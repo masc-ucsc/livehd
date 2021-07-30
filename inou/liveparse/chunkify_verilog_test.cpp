@@ -76,7 +76,7 @@ void test_throw() {
   mkdir("lgdb", 0755);
   mkdir("lgdb/noaccess_dir", 0000);
 
-  Chunkify_verilog chunker("lgdb/noaccess_dir");
+  Chunkify_verilog chunker(mmap_lib::str("lgdb/noaccess_dir"));
   chunker.parse_inline(test2_verilog.c_str());
 }
 

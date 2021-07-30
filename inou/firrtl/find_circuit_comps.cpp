@@ -103,7 +103,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
   } else if (tup_node_name == "memory2") {
     // memory2 tuple helps map memory1 temp names to port names
     auto             first = true;
-    std::string_view tup_name;
+    mmap_lib::str tup_name;
     for (const auto &child : ln.children(tup_node)) {
       if (first) {
         tup_name = ln.get_name(child);
@@ -124,7 +124,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
 
   } else {  // should be memory3
     // memory3 tuple is the actual memory + attrs (.__port, .__size, ...)
-    std::string_view mem_name;
+    //std::string_view mem_name;
     Lnast_nid        ports_rhs, size_rhs;
     auto             first = true;
     for (const auto &child : ln.children(tup_node)) {
@@ -152,7 +152,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
     auto type = CreateTypeObject(0);  // leave bw as implicit for now
 
     auto mem_stmt = new firrtl::FirrtlPB_Statement_Memory();
-    mem_stmt->set_id((std::string)mem_name.substr(1));
+    //mem_stmt->set_id(mem_name.substr(1).to_s());
     mem_stmt->set_allocated_type(type);
     mem_stmt->set_uint_depth(size_val);
 
@@ -191,7 +191,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           // help determine memory statement's read_under_write policy
         } else if (attr_str.substr(0, 2) == "__") {
           auto mem_id_ref = new firrtl::FirrtlPB_Expression_Reference();
-          mem_id_ref->set_id((std::string)mem_name.substr(1));
+          //mem_id_ref->set_id(mem_name.substr(1).to_s());
           auto mem_id_expr = new firrtl::FirrtlPB_Expression();
           mem_id_expr->set_allocated_reference(mem_id_ref);
 
@@ -254,7 +254,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     if (io_map.contains(name.substr(1)))
       return;
     auto port = umod->add_port();
-    port->set_id((std::string)name.substr(1));
+    port->set_id(name.substr(1).to_s());
     // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name.substr(1))) {
@@ -271,14 +271,14 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     else
       port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT);
 
-    io_map[(std::string)name.substr(1)] = port;
+    io_map[name.substr(1)] = port;
 
   } else if (name.substr(0, 1) == "#") {
     // # = register
     if (reg_wire_map.contains(name.substr(1)))
       return;
     auto reg = new firrtl::FirrtlPB_Statement_Register();
-    reg->set_id((std::string)name.substr(1));
+    reg->set_id(name.substr(1).to_s());
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -301,15 +301,15 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_register_(reg);
-    reg_wire_map[(std::string)name.substr(1)] = fstmt;
+    reg_wire_map[name.substr(1)] = fstmt;
 
   } else if (name.substr(0, 3) == "_._") {
     // _._ = wire
-    auto new_name = absl::StrCat("_", name.substr(3));
+    auto new_name = name.substr(3).prepend('_');
     if (reg_wire_map.contains(new_name))
       return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
-    wire->set_id(new_name);
+    wire->set_id(new_name.to_s());
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -331,7 +331,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     // if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
     //  return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
-    wire->set_id((std::string)name);  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
+    wire->set_id(name.to_s());  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -344,7 +344,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
     auto fstmt = umod->add_statement();
     fstmt->set_allocated_wire(wire);
-    reg_wire_map[(std::string)name] = fstmt;
+    reg_wire_map[name] = fstmt;
   }
 }
 
@@ -377,8 +377,8 @@ void Inou_firrtl::CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrt
   // 2. Create submodule instance with this name
   auto inst        = new firrtl::FirrtlPB_Statement_Instance();
   auto submod_name = ConvergeFCallName(ln.get_name(func_out), ln.get_name(func_inp));
-  inst->set_id((std::string)submod_name);
-  inst->set_module_id((std::string)ln.get_name(mod_name));
+  inst->set_id(submod_name.to_s());
+  inst->set_module_id(ln.get_name(mod_name).to_s());
 
   auto fstmt = umod->add_statement();
   fstmt->set_allocated_instance(inst);
@@ -389,17 +389,17 @@ void Inou_firrtl::CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrt
  * Thus, we must specify what name we will use. In general, take
  * output tuple name and make that the standard (means changing
  * input tuple names to match output tuple when seen in LNAST). */
-std::string_view Inou_firrtl::ConvergeFCallName(const std::string_view func_out, const std::string_view func_inp) {
+mmap_lib::str Inou_firrtl::ConvergeFCallName(const mmap_lib::str &func_out, const mmap_lib::str &func_inp) {
   if (func_inp.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_" && func_inp.substr(4) == func_out.substr(4)) {
     // Specific case from FIRRTL->LNAST translation.
     // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo
-    wire_rename_map[(std::string)func_inp] = func_inp.substr(4);
-    wire_rename_map[(std::string)func_out] = func_out.substr(4);
+    wire_rename_map[func_inp] = func_inp.substr(4);
+    wire_rename_map[func_out] = func_out.substr(4);
     return func_out.substr(4);
     ;
   } else {
     // Change the map (which alters some wire names)
-    wire_rename_map[(std::string)func_inp] = (std::string)func_out;
+    wire_rename_map[func_inp] = func_out;
     return func_out;
   }
 }

@@ -12,14 +12,10 @@ dummyComponent::dummyComponent(Ntype_op typeArg) {
 }
 
 dummyComponent::dummyComponent(const std::string& nameArg) {
-  type = Ntype_op::Sub;
+  type = Ntype::get_op(mmap_lib::str(nameArg));
+  if (type == Ntype_op::Invalid)
+    type = Ntype_op::Sub;
   name = nameArg;
-  for (int i = 1; i < static_cast<int>(Ntype_op::Last_invalid); i++) {
-    if (nameArg == Ntype::get_name(static_cast<Ntype_op>(i))) {
-      type = static_cast<Ntype_op>(i);
-      break;
-    }
-  }
 }
 
 void dummyComponent::myPrint() { std::cout << "Component: " << getName() << " is of type: " << Ntype::get_name(getType()) << "\n"; }

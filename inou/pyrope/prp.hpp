@@ -208,7 +208,7 @@ protected:
   };
 
   debug_statistics         debug_stat{0, 0, 0, 0, 0, 0, 0, 0};
-  std::vector<std::string> ast_call_trace;
+  std::vector<mmap_lib::str> ast_call_trace;
 
   uint64_t tokens_consumed = 0;
   uint64_t base_token      = 0;  // where do comments at the beginning end
@@ -217,10 +217,10 @@ protected:
   uint64_t cur_pos         = 0;
 
   std::unique_ptr<Ast_parser>                ast;
-  absl::flat_hash_map<std::string, Token_id> pyrope_keyword;
+  absl::flat_hash_map<mmap_lib::str, Token_id> pyrope_keyword;
   absl::flat_hash_map<Token_id, uint16_t>
                            ws_map;  // two uint8_ts 0 = no whitespace, 1 = whitespace, 2 = whitespace + comments, 3 = line break
-  std::vector<std::string> rule_call_stack;
+  std::vector<mmap_lib::str> rule_call_stack;
   uint64_t                 term_token = 1;
 
   void elaborate();
@@ -299,7 +299,7 @@ protected:
   inline bool unconsume_token();
   inline bool consume_token();
   bool        go_back(uint64_t num_tok);
-  std::string rule_id_to_string(Rule_id rid) const;
+  static std::string_view rule_id_to_string(Rule_id rid);
 
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);

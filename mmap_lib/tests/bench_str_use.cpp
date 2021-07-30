@@ -23,6 +23,23 @@
 #define STARTS_WITH       1
 #endif
 
+
+int cgen_do_sv(const std::string_view s) {
+  return s[0];
+}
+
+int cgen_do_sv_ptr(const std::string_view &s) {
+  return s[0];
+}
+
+int cgen_do_str(const mmap_lib::str s) {
+  return s.front();
+}
+
+int cgen_do_str_ptr(const mmap_lib::str &s) {
+  return s.front();
+}
+
 #if CTOR_TESTS
 void test_ctor(mmap_lib::str ts, const char* rs) {
 
@@ -118,13 +135,13 @@ void mmap_pstr_ctor_tests() {
 template <std::size_t N>
 bool test_eq(mmap_lib::str ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ts == rs) == ans;
+  return (ts == mmap_lib::str(rs)) == ans;
 }
 
 template <std::size_t N>
 bool test_neq(mmap_lib::str ts, const char (&rs)[N], bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ts != rs) == ans;
+  return (ts != mmap_lib::str(rs)) == ans;
 }
 
 bool test_eq(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt) {
@@ -140,12 +157,18 @@ bool test_neq(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt) {
 
 bool test_eq(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls == rs) == ans;
+  if (ls == mmap_lib::str(rs))
+    assert(ls.to_s() == rs);
+
+  return (ls == mmap_lib::str(rs)) == ans;
 }
 
 bool test_neq(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return (ls != rs) == ans;
+  if (ls != mmap_lib::str(rs))
+    assert(ls.to_s() != rs);
+
+  return (ls != mmap_lib::str(rs)) == ans;
 }
 
 void pstrVchar_eqeq_tests() {
@@ -393,7 +416,7 @@ bool test_starts_with(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt
 
 bool test_starts_with(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return ls.starts_with(rs) == ans;
+  return ls.starts_with_sv(rs) == ans;
 }
 
 void pstr_starts_with() {

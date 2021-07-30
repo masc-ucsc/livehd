@@ -153,36 +153,36 @@ TEST_F(Mmap_str_test, random_ctor_cmp) {
     EXPECT_EQ(n_s3, n_s2);
 
     EXPECT_TRUE(c_s1 == c_s2);
-    EXPECT_TRUE(c_s1 == c_st);
-    EXPECT_TRUE(c_s1 == c_sv);
-    EXPECT_TRUE(c_s1 == c_st.c_str());
+    EXPECT_TRUE(c_s1 == mmap_lib::str(c_st));
+    EXPECT_TRUE(c_s1 == mmap_lib::str(c_sv));
+    EXPECT_TRUE(c_s1 == mmap_lib::str(c_st.c_str()));
 
     EXPECT_FALSE(c_s1 != c_s2);
-    EXPECT_FALSE(c_s1 != c_st);
-    EXPECT_FALSE(c_s1 != c_sv);
-    EXPECT_FALSE(c_s1 != c_st.c_str());
+    EXPECT_FALSE(c_s1 != mmap_lib::str(c_st));
+    EXPECT_FALSE(c_s1 != mmap_lib::str(c_sv));
+    EXPECT_FALSE(c_s1 != mmap_lib::str(c_st.c_str()));
 
     // tests for next and curr
     if (c_st == n_st) {
       EXPECT_FALSE(c_s1 != n_s1);
-      EXPECT_FALSE(c_s1 != n_st);
-      EXPECT_FALSE(c_s1 != n_sv);
-      EXPECT_FALSE(c_s1 != n_st.c_str());
+      EXPECT_FALSE(c_s1 != mmap_lib::str(n_st));
+      EXPECT_FALSE(c_s1 != mmap_lib::str(n_sv));
+      EXPECT_FALSE(c_s1 != mmap_lib::str(n_st.c_str()));
 
       EXPECT_TRUE(n_s1 == c_s1);
-      EXPECT_TRUE(n_s1 == c_st);
-      EXPECT_TRUE(n_s1 == c_sv);
-      EXPECT_TRUE(n_s1 == c_st.c_str());
+      EXPECT_TRUE(n_s1 == mmap_lib::str(c_st));
+      EXPECT_TRUE(n_s1 == mmap_lib::str(c_sv));
+      EXPECT_TRUE(n_s1 == mmap_lib::str(c_st.c_str()));
     } else {
       EXPECT_TRUE(c_s1 != n_s1);
-      EXPECT_TRUE(c_s1 != n_st);
-      EXPECT_TRUE(c_s1 != n_sv);
-      EXPECT_TRUE(c_s1 != n_st.c_str());
+      EXPECT_TRUE(c_s1 != mmap_lib::str(n_st));
+      EXPECT_TRUE(c_s1 != mmap_lib::str(n_sv));
+      EXPECT_TRUE(c_s1 != mmap_lib::str(n_st.c_str()));
 
       EXPECT_FALSE(n_s1 == c_s1);
-      EXPECT_FALSE(n_s1 == c_st);
-      EXPECT_FALSE(n_s1 == c_sv);
-      EXPECT_FALSE(n_s1 == c_st.c_str());
+      EXPECT_FALSE(n_s1 == mmap_lib::str(c_st));
+      EXPECT_FALSE(n_s1 == mmap_lib::str(c_sv));
+      EXPECT_FALSE(n_s1 == mmap_lib::str(c_st.c_str()));
     }
   }
 }
@@ -260,12 +260,12 @@ TEST_F(Mmap_str_test, starts_ends_with) {
 #endif
 
     EXPECT_TRUE(temp.starts_with(check_sw));
-    EXPECT_TRUE(temp.starts_with(sv_check_sw));
-    EXPECT_TRUE(temp.starts_with(stable_sw));
+    EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
+    EXPECT_TRUE(temp.starts_with_sv(stable_sw));
 
     EXPECT_TRUE(temp.ends_with(check_ew));
     EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-    EXPECT_TRUE(temp.ends_with(stable_ew));
+    EXPECT_TRUE(temp.ends_with_sv(stable_ew));
   }
 
   // TRUE AND FALSE
@@ -304,33 +304,33 @@ TEST_F(Mmap_str_test, starts_ends_with) {
 
     if (start_sw == 0) {
       EXPECT_TRUE(temp.starts_with(check_sw));
-      EXPECT_TRUE(temp.starts_with(sv_check_sw));
-      EXPECT_TRUE(temp.starts_with(stable_sw));
+      EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
+      EXPECT_TRUE(temp.starts_with_sv(stable_sw));
     } else {
       if (orig.substr(0, stable_sw.size()) == stable_sw) {
         EXPECT_TRUE(temp.starts_with(check_sw));
-        EXPECT_TRUE(temp.starts_with(sv_check_sw));
-        EXPECT_TRUE(temp.starts_with(stable_sw));
+        EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
+        EXPECT_TRUE(temp.starts_with_sv(stable_sw));
       } else {
         EXPECT_FALSE(temp.starts_with(check_sw));
-        EXPECT_FALSE(temp.starts_with(sv_check_sw));
-        EXPECT_FALSE(temp.starts_with(stable_sw));
+        EXPECT_FALSE(temp.starts_with_sv(sv_check_sw));
+        EXPECT_FALSE(temp.starts_with_sv(stable_sw));
       }
     }
 
     if (end_ew == temp.size()) {
       EXPECT_TRUE(temp.ends_with(check_ew));
       EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-      EXPECT_TRUE(temp.ends_with(stable_ew));
+      EXPECT_TRUE(temp.ends_with_sv(stable_ew));
     } else {
       if (orig.substr(orig.size() - stable_ew.size()) == stable_ew) {
         EXPECT_TRUE(temp.ends_with(check_ew));
         EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-        EXPECT_TRUE(temp.ends_with(stable_ew));
+        EXPECT_TRUE(temp.ends_with_sv(stable_ew));
       } else {
         EXPECT_FALSE(temp.ends_with(check_ew));
         EXPECT_FALSE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-        EXPECT_FALSE(temp.ends_with(stable_ew));
+        EXPECT_FALSE(temp.ends_with_sv(stable_ew));
       }
     }
   }
@@ -498,14 +498,15 @@ TEST_F(Mmap_str_test, substr) {
 TEST_F(Mmap_str_test, to_lower) {
 
   mmap_lib::str short_lower("this is short");
-  mmap_lib::str short_upper("A Short!3 Test Z");
+  mmap_lib::str short_upper("A Short!3 TstZ");
 
   EXPECT_EQ(short_lower, short_lower.to_lower());
-  EXPECT_EQ("a short!3 test z", short_upper.to_lower());
+  EXPECT_EQ("a short!3 tstz", short_upper.to_lower());
 
   mmap_lib::str long_upper("We Also nEeD to TeSt a LONG sentence to CHECK overfloWS");
 
-  EXPECT_EQ("we also need to test a long sentence to check overflows", long_upper.to_lower());
+  EXPECT_EQ(mmap_lib::str("we also need to test a long sentence to check overflows"), long_upper.to_lower());
+  EXPECT_EQ("we also need to test a long sentence to check overflows", long_upper.to_lower().to_s());
 
   fmt::print("1[{}] 2[{}]\n", short_upper.to_lower(), long_upper.to_lower());
 }
@@ -552,6 +553,13 @@ TEST_F(Mmap_str_test, split) {
       longg_nd += '-';  // adding token
     }
   }
+}
+
+TEST_F(Mmap_str_test, compile_time_code) {
+
+  constexpr mmap_lib::str xx("constexpr");
+  static_assert(xx == mmap_lib::str("constexpr"));
+
 }
 
 TEST_F(Mmap_str_test, get_str_before_after) {

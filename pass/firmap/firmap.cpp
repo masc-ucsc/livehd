@@ -16,9 +16,9 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   Lbench b("pass.firmap");
 
-  auto        lg_name = lg->get_name();
-  std::string lg_source{lg->get_library().get_source(lg->get_lgid())};
-  Lgraph *    new_lg = Lgraph::create(lg->get_path(), lg_name.substr(9), lg_source);
+  auto    lg_name   = lg->get_name();
+  auto    lg_source = lg->get_library().get_source(lg->get_lgid());
+  Lgraph *new_lg    = Lgraph::create(lg->get_path(), lg_name.substr(9), lg_source);
 
   I(pinmaps.find(lg) != pinmaps.end());  // call add_map_entry first (needed for multithreaded)
 

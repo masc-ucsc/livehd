@@ -274,19 +274,3 @@ bool Ntype::has_sink(Ntype_op op, mmap_lib::str str) {
   return sink_pid2name[it->second][static_cast<int>(op)] == str;
 }
 
-#ifdef NDEBUG
-// asserts break the constexpr check
-//
-// This should be compile time constants (check assembly)
-int cell_code_check_code1() {
-  constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Sum, "B");
-  static_assert(pid == 1);
-  return pid;
-}
-
-int cell_code_check_code2() {
-  constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Mux, "321");
-  static_assert(pid == 321);
-  return pid;
-}
-#endif

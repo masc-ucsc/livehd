@@ -240,3 +240,15 @@ TEST_F(Setup_graphs_test, annotate2_hier) {
     used[it.second] = true;
   }
 }
+
+TEST_F(Setup_graphs_test, cell_trivials) {
+
+#ifdef NDEBUG
+  // costexpr propagates only when OPT is enabled
+  constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Sum, "B");
+  static_assert(pid == 1);
+#endif
+
+  auto pid2 = Ntype::get_sink_pid(Ntype_op::Mux, "321");
+  EXPECT_EQ(pid2, 321);
+}

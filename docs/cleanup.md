@@ -150,9 +150,65 @@ cells.
 * create a mmap_str::str(int val). Equivalent to str(std::to_string(val)) without intermediate step
 * mmap_str_test is a test abd a bench. Split the bench to bench_str and convert the rest to google test
 
+* Code generation phase (code_gen, cgen...) can not effectively use mmap_str because the comparison is irrelevant and keeping in a map is a HUGE overhead for growing strings (large). Maybe we should have 3 modes:
+
+1-SSO (<=15 strings)
+2-unique (16..256?)
+3-large  (256..) this do not have a pointer (maybe the persistent vs transient?, transient SSO or large)
+
+Do we create a rope for large strings?
+
+rope node:
+  left  = 40bit ptr
+  right = 40bit ptr
+  weight = 48bits 
+
+ Splay tree? (similar to rope but dyn-rebalance. Good because we tend to add at the end frequently)
+
+ Splay trees do not serialize
+
+### call
+
+When passing as argument use "const mmap_lib::str". (One mem op less than "const mmap_lib::str &"
+
+int cgen_do_str(const mmap_lib::str s) { // BETTER
+  return s.front();
+}
+
+int cgen_do_str_ptr(const mmap_lib::str &s) { // MORE CODE
+  return s.front();
+}
+
+ Disassembly of section .text._Z11cgen_do_strN8mmap_lib3strE:
+ 1899
+ 1900 0000000000000000 <_Z11cgen_do_strN8mmap_lib3strE>:
+ 1901   ¦0: 89 f8                 mov    %edi,%eax
+ 1902   ¦2: c1 e8 08              shr    $0x8,%eax
+ 1903   ¦5: 83 e7 01              and    $0x1,%edi
+ 1904   ¦8: 0f 44 c6              cmove  %esi,%eax
+ 1905   ¦b: 0f be c0              movsbl %al,%eax
+ 1906   ¦e: c3                    retq
+ 1907
+ 1908 Disassembly of section .text._Z15cgen_do_str_ptrRKN8mmap_lib3strE:
+ 1909
+ 1910 0000000000000000 <_Z15cgen_do_str_ptrRKN8mmap_lib3strE>:
+ 1911   ¦0: 8b 07                 mov    (%rdi),%eax
+ 1912   ¦2: a8 01                 test   $0x1,%al
+ 1913   ¦4: 75 0a                 jne    10 <_Z15cgen_do_str_ptrRKN8mmap_lib3strE+0x10>
+ 1914   ¦6: 0f b6 47 08           movzbl 0x8(%rdi),%eax
+ 1915   ¦a: 0f be c0              movsbl %al,%eax
+ 1916   ¦d: c3                    retq
+ 1917   ¦e: 66 90                 xchg   %ax,%ax
+ 1918   10: 0f b6 c4              movzbl %ah,%eax
+ 1919   13: 0f be c0              movsbl %al,%eax
+ 1920   16: c3                    retq
+
+
+
 ### lnast
 
 * Once non-persistent mmap_str, convert the remaining std::string_views (lnast,...)
+* LNAST should have lconst too. E.g: create_const(Lconst) not a create_const(string). This will allow lnast copy prop and avoid translation back and forth.
 
 ### firrtl pass
 

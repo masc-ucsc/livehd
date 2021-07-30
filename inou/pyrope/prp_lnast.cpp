@@ -6,8 +6,8 @@
 #include "pass.hpp"
 
 Prp_lnast::Prp_lnast() {
-  in_lhs        = false;
-  last_temp_var = get_temp_string();
+  in_lhs                = false;
+  last_temp_var_counter = 1;
 }
 
 void Prp_lnast::dump(mmap_lib::Tree_index idx) const {
@@ -23,36 +23,17 @@ void Prp_lnast::dump(mmap_lib::Tree_index idx) const {
   }
 }
 
-std::string Prp_lnast::get_temp_string() {
-  static std::string current_temp_var = "___a";
+mmap_lib::str Prp_lnast::get_temp_string() {
+  static mmap_lib::str current_temp_var("___t");
 
-  int carry     = 1;
-  int pos       = current_temp_var.size() - 1;
-  last_temp_var = current_temp_var;
-
-  while (current_temp_var[pos] != '_') {
-    int headroom = 'z' - current_temp_var[pos];
-    carry -= headroom;
-    if (carry > 0) {
-      current_temp_var[pos] = 'a';
-    } else {
-      current_temp_var[pos] += carry + headroom;
-
-      return current_temp_var;
-    }
-    pos--;
-  }
-
-  if (carry > 0) {
-    current_temp_var.insert(pos + 1, "a");
-  }
-  return current_temp_var;
+  return mmap_lib::str::concat(current_temp_var, last_temp_var_counter++);
 }
 
 Lnast_node Prp_lnast::get_lnast_temp_ref() {
-  auto str = get_temp_string();
+  last_temp_var = get_temp_string();
 
-  return Lnast_node::create_ref(lnast->add_string(str));
+  // Remember last_temp_var becuase chained expressions use it
+  return Lnast_node::create_ref(last_temp_var);
 }
 
 /*
@@ -961,7 +942,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
 
   Lnast_node  op_node_last;
   bool        last_op_valid = false;
-  std::string last_op_overload_name;
+  mmap_lib::str last_op_overload_name;
   while (!child_cur.is_invalid()) {
     const auto &child_cur_data = ast->get_data(child_cur);
     PRINT_DBG_LN("Rule name: {}, etoken text: {}\n",
@@ -1053,7 +1034,7 @@ Lnast_node Prp_lnast::eval_expression(mmap_lib::Tree_index idx_start_ast, mmap_l
           if (op_node.type.get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
             last_op_overload_name = op_node.token.get_text();
           } else {
-            last_op_overload_name.clear();
+            last_op_overload_name = mmap_lib::str();
           }
           last_op_valid = true;
           operator_stack.emplace_back(op_node);
@@ -1159,8 +1140,7 @@ Lnast_node Prp_lnast::eval_sub_expression(mmap_lib::Tree_index idx_start_ast, Ln
   auto operator_idx = ast->get_sibling_next(op0_idx);  // can only be + or -
   auto op1_idx      = ast->get_sibling_next(operator_idx);
 
-  auto lnast_temp0 = lnast->add_string(last_temp_var);
-  auto op0         = Lnast_node::create_ref(lnast_temp0);
+  auto op0         = Lnast_node::create_ref(last_temp_var);
 
   auto op1 = eval_rule(op1_idx, idx_nxt_ln);
 
@@ -1611,9 +1591,9 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
     auto txt = select_fields[i].token.get_text();
     if (txt.substr(0, 2) == "__" && txt[3] != '_') {
       if (is_attr) {
-        std::string v_all;
+        mmap_lib::str v_all;
         for (const auto &v : select_fields) {
-          absl::StrAppend(&v_all, ".", v.token.get_text());
+          v_all = mmap_lib::str::concat(v_all, ".", v.token.get_text());
         }
         Pass::error("Illegal to have attribute {} in the middle {}\n", txt, v_all);
       }
@@ -1819,8 +1799,8 @@ Lnast_node Prp_lnast::eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_li
 /*
  * Main function
  */
-std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(std::string_view module_name) {
-  lnast = std::make_unique<Lnast>(module_name, transfer_memblock_ownership());
+std::unique_ptr<Lnast> Prp_lnast::prp_ast_to_lnast(const mmap_lib::str &module_name) {
+  lnast = std::make_unique<Lnast>(module_name);
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
@@ -2033,7 +2013,7 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
       uint64_t    string_length   = 0;
       auto        cur_token_entry = ast->get_data(idx_cur_string).token_entry;
       auto        cur_token       = get_token(cur_token_entry);
-      std::string new_token_text  = "";
+      mmap_lib::str new_token_text;
       auto        string_start    = cur_token.pos1;
       while (scan_text(cur_token_entry) != "\'") {
         if (string_length != 0) {
@@ -2042,12 +2022,12 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
           new_token_text.append(spaces_needed, ' ');
         }
         string_length += cur_token.get_text().size();
-        absl::StrAppend(&new_token_text, std::string(cur_token.get_text()));
+        new_token_text = mmap_lib::str::concat(new_token_text, cur_token.get_text());
         idx_cur_string  = ast->get_sibling_next(idx_cur_string);
         cur_token_entry = ast->get_data(idx_cur_string).token_entry;
         cur_token       = get_token(cur_token_entry);
       }
-      auto new_token_view = lnast->add_string(new_token_text);
+      auto new_token_view = new_token_text;
       return Lnast_node::create_const(new_token_view, cur_token.line, string_start, string_start + string_length + 1);
     }
   } else {  // we need to add the datatype to the token string if it's implicit (decimal only)
@@ -2059,9 +2039,7 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
     }
     auto token = get_token(node_token_entry);
     if (negative) {
-      std::string decimal_string;
-      decimal_string.assign(absl::StrCat("-", token.get_text()));
-      auto ln_decimal_view = lnast->add_string(decimal_string);
+      auto ln_decimal_view = token.get_text().prepend('-');
       return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
     } else {
       return Lnast_node::create_const(token);
@@ -2069,7 +2047,7 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
   }
 }
 
-inline bool Prp_lnast::is_decimal(std::string_view number) {
+inline bool Prp_lnast::is_decimal(const mmap_lib::str &number) {
   if (number.size() < 3)  // must have at least 0x/n/b(something), otherwise it must be decimal
     return true;
   if (number[0] == 't' || number[2] == 'l') {

@@ -21,4 +21,4 @@ public:
 };
 
 void from_json(Lgraph *g, rapidjson::Document &document);
-void to_json(Lgraph *lg, const std::string &filename);
+void to_json(Lgraph *lg, const mmap_lib::str &filename);

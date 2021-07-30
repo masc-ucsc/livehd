@@ -10,10 +10,10 @@
 static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
 void Pass_bitwidth::setup() {
-  Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
+  Eprp_method m1("pass.bitwidth", mmap_lib::str("MIT algorithm for bitwidth optimization"), &Pass_bitwidth::trans);
 
-  m1.add_label_optional("max_iterations", "maximum number of iterations to try", "3");
-  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
+  m1.add_label_optional("max_iterations", mmap_lib::str("maximum number of iterations to try"), "3");
+  m1.add_label_optional("hier", mmap_lib::str("hierarchical bitwidth"), "false");
 
   register_pass(m1);
 }
@@ -27,8 +27,14 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   else
     hier = false;
 
-  bool ok = absl::SimpleAtoi(miters, &max_iterations);
-  if (!ok || max_iterations > 100 || max_iterations <= 0) {
+  if (!miters.is_i()) {
+    error("pass.bitwidth max_iterations:{} should be bigger than zero and less than 100", miters);
+    return;
+  }
+
+  max_iterations = miters.to_i();
+
+  if (max_iterations > 100 || max_iterations <= 0) {
     error("pass.bitwidth max_iterations:{} should be bigger than zero and less than 100", max_iterations);
     return;
   }

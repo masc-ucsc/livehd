@@ -37,7 +37,7 @@ public:
 
     EXPECT_EQ(svector[0], "g3xx");
     EXPECT_EQ(svector[1], "./f1/f1.v");
-    EXPECT_EQ(svector[2], "xotato/../bar.prp");
+    EXPECT_EQ(svector[2], mmap_lib::str("xotato/../bar.prp"));
     EXPECT_EQ(svector[3], "potato/bar.v");
   }
 
@@ -134,6 +134,8 @@ public:
 protected:
   Eprp eprp;
   void SetUp() override {
+    mmap_lib::str::setup();
+
     Eprp_method m1("test1.files2", mmap_lib::str("Generate a random test/method call to foo"), &test1::files2);
     m1.add_label_required("nofiles", "list of files");
 

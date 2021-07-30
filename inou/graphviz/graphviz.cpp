@@ -14,14 +14,15 @@ Graphviz::Graphviz(bool _bits, bool _verbose, mmap_lib::str _odir) : verbose(_ve
   (void)_bits;
 }
 
-void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
-  std::string file;
-  if (dot_postfix == "")
-    file = absl::StrCat(odir.to_s(), "/", name, ".dot");
-  else
-    file = absl::StrCat(odir.to_s(), "/", name, ".", dot_postfix, ".dot");
+void Graphviz::save_graph(const mmap_lib::str &name, std::string_view dot_postfix, const std::string &data) {
+  mmap_lib::str file = mmap_lib::str::concat(odir, "/", name);
 
-  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  if (dot_postfix == "")
+    file = mmap_lib::str::concat(file, mmap_lib::str(".dot"));
+  else
+    file = mmap_lib::str::concat(file, std::string(".") + std::string(dot_postfix) + ".dot");
+
+  int fd = ::open(file.to_s().c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz unable to create {}", file);
     return;
@@ -325,8 +326,8 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
       continue;
 
     // get parent data for link
-    auto        p = lnast->get_parent(itr);
-    std::string pname(lnast->get_data(p).token.get_text());
+    auto  p     = lnast->get_parent(itr);
+    auto  pname = lnast->get_data(p).token.get_text();
 
     auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);

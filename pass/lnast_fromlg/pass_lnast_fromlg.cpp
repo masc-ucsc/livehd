@@ -21,9 +21,9 @@
 static Pass_plugin sample("pass_lnast_fromlg", Pass_lnast_fromlg::setup);
 
 void Pass_lnast_fromlg::setup() {
-  Eprp_method m1("pass.lnast_fromlg", "translates Lgraph to LNAST", &Pass_lnast_fromlg::trans);
+  Eprp_method m1("pass.lnast_fromlg", mmap_lib::str("translates Lgraph to LNAST"), &Pass_lnast_fromlg::trans);
   // For bw_in_ln, if __bits are not put in the LNAST then they can be accessed using bw_table in LNAST.
-  m1.add_label_optional("bw_in_ln", "true/false: put __ubits or __sbits nodes in LNAST?", "true");
+  m1.add_label_optional("bw_in_ln", mmap_lib::str("true/false: put __ubits or __sbits nodes in LNAST?"), "true");
   register_pass(m1);
 }
 
@@ -163,7 +163,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
   auto ntype = pin.get_node().get_type_op();
   if (ntype == Ntype_op::Flop || ntype == Ntype_op::Fflop || ntype == Ntype_op::Latch) {
     // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
-    std::string_view pin_name = lnast.add_string(dpin_get_name(pin).to_s());
+    auto pin_name = dpin_get_name(pin);
     // to add #x = #x.__create_flop
     auto temp_decl_var_name = create_temp_var(lnast);
 
@@ -246,7 +246,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
     case Ntype_op::Xor: attach_binaryop_node(lnast, parent_node, pin); break;
     case Ntype_op::Not: attach_not_node(lnast, parent_node, pin); break;
     case Ntype_op::Get_mask:
-    case Ntype_op::Set_mask: attach_ordered_node(lnast, parent_node, pin); break;
+    case Ntype_op::Set_mask: attach_mask_node(lnast, parent_node, pin); break;
     case Ntype_op::Sum: attach_sum_node(lnast, parent_node, pin); break;
     case Ntype_op::LT:
     case Ntype_op::GT: attach_compar_node(lnast, parent_node, pin); break;
@@ -265,7 +265,7 @@ void Pass_lnast_fromlg::attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, co
   }
 }
 
-void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, std::string_view pin_name,
+void Pass_lnast_fromlg::add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, std::string pin_name,
                                      const uint32_t& bits) {
   /*creates subtree in LN for the "dot" and corresponding "assign" to depict bw
    *          dot                    assign
@@ -295,7 +295,7 @@ void Pass_lnast_fromlg::handle_io(Lgraph* lg, Lnast_nid& parent_lnast_node, Lnas
    *  $x   __ubits 7    (note that the $ would be % if it was an output)*/
 
   auto                                  inp_io_node = lg->get_graph_input_node();
-  absl::flat_hash_set<std::string_view> inps_visited;
+  absl::flat_hash_set<mmap_lib::str> inps_visited;
   for (const auto& edge : inp_io_node.out_edges()) {
     I(edge.driver.has_name());
     auto pin_name = edge.driver.get_name();
@@ -474,7 +474,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
     only_one_pin = true;
 
   } else {
-    absl::flat_hash_set<std::string_view> interm_names;
+    absl::flat_hash_set<mmap_lib::str> interm_names;
     while (dpins.size() > 1) {
       bits_to_shift -= dpins.front().get_bits();
       auto interm_name = create_temp_var(lnast);
@@ -500,10 +500,12 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
 
   auto ntype = pid1_pin.get_node().get_type_op();
   if (ntype == Ntype_op::And) {
-    // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
-    std::string rhs_2pow = "0b";
-    for (uint32_t i = 0; i < total_bits; i++) {
-      absl::StrAppend(&rhs_2pow, "1");
+    mmap_lib::str rhs_2pos;
+    {
+      // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
+      str::string rhs_2pow_str = "0b";
+      rhs_2pow_str.append(total_bits, '1');
+      rhs_2pow == mmap_lib::str(rhs_2pow_str);
     }
 
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_eq());
@@ -513,7 +515,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
     } else {
       lnast.add_child(eq_idx, Lnast_node::create_ref(concat_name));
     }
-    lnast.add_child(eq_idx, Lnast_node::create_const(lnast.add_string(rhs_2pow)));
+    lnast.add_child(eq_idx, Lnast_node::create_const(rhs_2pow));
 
   } else if (ntype == Ntype_op::Or) {
     // OrReduc is same as ConcatVal != 0
@@ -546,87 +548,82 @@ void Pass_lnast_fromlg::attach_not_node(Lnast& lnast, Lnast_nid& parent_node, co
   attach_children_to_node(lnast, not_node, pin);
 }
 
-void Pass_lnast_fromlg::attach_ordered_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  Lnast_nid node_idx;
+void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
 
-  auto        num_of_bits = Lconst(pin.get_node().get_type_name());
-  std::string const_num;
-  std::string const_bin;
-  std::string upper_val, lower_val;
-  for (const auto& e : pin.get_node().inp_edges_ordered()) {
-    if (e.sink.get_pid() == 2) {
-      const_num   = e.driver.get_node().get_type_const().to_pyrope();
-      num_of_bits = Lconst(e.driver.get_node().get_type_const());  // get_the val of const
-      if (is_hex(const_num)) {
-        const_bin = hex_to_bin(const_num);
-        upper_val = std::to_string(range_high(const_bin));
-        lower_val = std::to_string(range_low(const_bin));
-      } else {
-        //num is in decimal
-        lower_val = "0"; 
-        if(const_num=="-1") {//FIXME: remove when cprop.cpp has its get_mask related fixmes done.
-          upper_val = std::to_string(num_of_bits.get_bits());
-        } else {
-          upper_val = std::to_string(num_of_bits.get_bits()-2);
-        }
-      }
-      break;
-    }
+  Lconst const_mask;
+
+  {
+    auto mask_driver_node = pin.get_node().get_sink_pin("mask").get_driver_node();
+
+    I(mask_driver_node.is_type_const()); // FIXME: the mask can also be a non-const value
+
+    const_mask = mask_driver_node.get_type_const();
   }
 
-  auto tmp_varr = create_temp_var(lnast);
+  auto mask_tmp = create_temp_var(lnast);
 
-  // creating the ytuple_add rangees
   auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-  lnast.add_child(gm_tup_node, Lnast_node::create_ref(tmp_varr));
+  lnast.add_child(gm_tup_node, Lnast_node::create_ref(mask_tmp));
 
-  if (num_of_bits.get_bits() == 2 || num_of_bits.get_bits() == 1) {
-    lnast.add_child(gm_tup_node, Lnast_node::create_const("0"));
-  } else {
-    auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-    lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
-    lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(lnast.add_string(lower_val)));  //"0");
-    auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
-    lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
-    lnast.add_child(
-        asg_rang_end_node,
-        Lnast_node::create_const(lnast.add_string(upper_val)));  // std::to_string(num_of_bits.get_bits() - 2))));  //"-2" because
-                                                                 // the const "1" had num_of_bits.get_bits() = 2
+  {
+    auto [range_begin, range_end] = const_mask.get_mask_range();
+    if (range_begin<0 || range_end<0) { // no continuous range (just do a list of bits)
+      for(auto b=0u;b<const_mask.get_bits();++b) {
+        auto bit_mask = Lconst(1)<<b;
+        if (const_mask.and_op(bit_mask) != 0) {
+          lnast.add_child(gm_tup_node, Lnast_node::create_const(mmap_lib::str(b)));
+        }
+      }
+    }else{
+      {
+        auto asg_rang_begin_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
+        lnast.add_child(asg_rang_begin_node, Lnast_node::create_const("__range_begin"));
+        lnast.add_child(asg_rang_begin_node, Lnast_node::create_const(range_begin));
+      }
+      {
+        auto asg_rang_end_node = lnast.add_child(gm_tup_node, Lnast_node::create_assign());
+        lnast.add_child(asg_rang_end_node, Lnast_node::create_const("__range_end"));
+        lnast.add_child(asg_rang_end_node, Lnast_node::create_const(range_end));
+      }
+    }
   }
 
   switch (pin.get_node().get_type_op()) {
-    case Ntype_op::Get_mask: {  // getmask goes to SRA, SRA needs the dpin name; put the tmp as the output pin name of the get_mask
-                                // node!
-      node_idx    = lnast.add_child(parent_node, Lnast_node::create_get_mask());
-      auto tmp_GM = lnast.add_string(dpin_get_name(pin));         // create_temp_var(lnast);
-      lnast.add_child(node_idx, Lnast_node::create_ref(tmp_GM));  // Dest
-      for (const auto& e : pin.get_node().inp_edges_ordered()) {
-        if (e.driver.get_node().get_type_op() == Ntype_op::Const) {
-          lnast.add_child(node_idx, Lnast_node::create_ref(tmp_varr));
-        } else {
-          attach_child(lnast, node_idx, e.driver);
-        }
-      }
-      break;
+    case Ntype_op::Get_mask: {
+
+      auto sra_tmp = create_temp_var(lnast);
+      auto sra_idx = lnast.add_child(parent_node, Lnast_node::create_shl());
+      lnast.add_child(sra_idx, Lnast_node::create_ref(sra_tmp));
+      lnast.add_child(sra_idx, Lnast_node::create_const(mmap_lib::str("1")));
+      lnast.add_child(sra_idx, Lnast_node::create_ref(mask_tmp));
+
+      auto node_idx = lnast.add_child(parent_node, Lnast_node::create_get_mask());
+      lnast.add_child(node_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+
+      // add "a" pin to get_mask
+      auto a_driver_pin = pin.get_node().get_sink_pin("a").get_driver_pin();
+      attach_child(lnast, node_idx, a_driver_pin);
+
+      // add "mask" pin to get_mask
+      lnast.add_child(node_idx, Lnast_node::create_ref(sra_tmp));
     }
     case Ntype_op::Set_mask: {
-      node_idx = lnast.add_child(parent_node, Lnast_node::create_set_mask());
-      for (const auto& e : pin.get_node().inp_edges_ordered()) {
-        if (e.sink.get_pid() == 0) {
-          attach_child(lnast, node_idx, e.driver);
-          attach_child(lnast, node_idx, e.driver);
-        } else if (e.sink.get_pid() == 2) {
-          lnast.add_child(
-              node_idx,
-              Lnast_node::create_ref(
-                  tmp_varr));  // FIXME: this is ok for GM but need to correct for SM (for LL LN)//create mask and value from these!
-        } else {
-          attach_child(lnast, node_idx, e.driver);
-        }
-      }
-      break;
+      auto node_idx = lnast.add_child(parent_node, Lnast_node::create_set_mask());
+
+      lnast.add_child(node_idx, Lnast_node::create_ref(dpin_get_name(pin)));
+
+      // add "a" pin to get_mask
+      auto a_driver_pin = pin.get_node().get_sink_pin("a").get_driver_pin();
+      attach_child(lnast, node_idx, a_driver_pin);
+
+      // add "mask" pin to get_mask
+      lnast.add_child(node_idx, Lnast_node::create_ref(mask_tmp));
+
+      // add "value" pin to get_mask
+      auto value_driver_pin = pin.get_node().get_sink_pin("value").get_driver_pin();
+      attach_child(lnast, node_idx, value_driver_pin);
     }
-    default: Pass::error("Error: invalid node type in attach_ordered_node");
+    default: Pass::error("Error: invalid node type in attach_mask_node");
   }
 }
 
@@ -661,7 +658,7 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
   } else {
     /*If there is more than 1 comparison that needs to be done, then we have create each
         separate comparison then & them all together. */
-    std::vector<std::string_view> temp_var_list;
+    std::vector<mmap_lib::str> temp_var_list;
     for (const auto& apin : a_pins) {
       for (const auto& bpin : b_pins) {
         Lnast_nid comp_node;
@@ -720,7 +717,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
 
   // Set up each cond value
   // cond "==1" comes from here: (remove these add_child if want to remove that)
-  std::vector<std::string_view> temp_vars;
+  std::vector<mmap_lib::str> temp_vars;
   for (long unsigned int i = 1; i < mux_vals.size(); i++) {
     auto temp_var = create_temp_var(lnast);
     temp_vars.emplace_back(temp_var);
@@ -984,7 +981,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     //out_tup_name = lnast.add_string(absl::StrCat("out", dpin_get_name(pin)));
     out_tup_name = lnast.add_string(dpin_get_name(pin));
   } else {
-    std::vector<std::string_view> out_node_name
+    std::vector<mmap_lib::str> out_node_name
         = absl::StrSplit(pin.get_node().get_name(), ':');  // du to commit: embed return variable name to subgraph node name
     fmt::print("\npin.get_node().get_name() is: {} \n",pin.get_node().get_name() );
     out_tup_name = lnast.add_string(out_node_name[0]);
@@ -1093,7 +1090,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       {addr_q.size(), clk_q.size(), din_q.size(), fwd_q.size(), lat_q.size(), wmask_q.size(), pose_q.size(), wmode_q.size()});
 
   // Create a tuple for each memory port.
-  absl::flat_hash_set<std::pair<std::string_view, std::string_view>> port_temp_name_list;
+  absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>> port_temp_name_list;
   for (uint64_t i = 0; i < port_count; i++) {
     /* FIXME: This tuple having the name "memory[1/2/3]" is important to the LN->FIR interface,
      * specifically to help with identifying things related to memory. This is hacky... */
@@ -1296,94 +1293,8 @@ const mmap_lib::str &Pass_lnast_fromlg::create_temp_var(Lnast& lnast, const mmap
 }
 
 bool Pass_lnast_fromlg::has_prefix(const mmap_lib::str &test_string) {
-  return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
-}
-bool Pass_lnast_fromlg::has_prefix(const std::string& test_string) {
-  return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
+  auto ch = test_string.front();
+
+  return ch == '$' || ch == '#' || ch == '%';
 }
 
-bool Pass_lnast_fromlg::is_hex(const std::string& test_string) {
-  if (absl::StartsWith(test_string, "0x")) {
-    return true;
-  }
-  return false;
-}
-
-std::string Pass_lnast_fromlg::hex_to_bin(std::string hex_str) {
-  if (absl::StartsWith(hex_str, "0x")) {
-    hex_str = hex_str.substr(2);  // removes "0x" from beginning
-  }
-  long int    i       = 0;
-  std::string bin_str = "";
-  while (hex_str[i]) {
-    switch (hex_str[i]) {
-      case '0': absl::StrAppend(&bin_str, "0000"); break;
-      case '1': absl::StrAppend(&bin_str, "0001"); break;
-      case '2': absl::StrAppend(&bin_str, "0010"); break;
-      case '3': absl::StrAppend(&bin_str, "0011"); break;
-      case '4': absl::StrAppend(&bin_str, "0100"); break;
-      case '5': absl::StrAppend(&bin_str, "0101"); break;
-      case '6': absl::StrAppend(&bin_str, "0110"); break;
-      case '7': absl::StrAppend(&bin_str, "0111"); break;
-      case '8': absl::StrAppend(&bin_str, "1000"); break;
-      case '9': absl::StrAppend(&bin_str, "1001"); break;
-      case 'A':
-      case 'a': absl::StrAppend(&bin_str, "1010"); break;
-      case 'B':
-      case 'b': absl::StrAppend(&bin_str, "1011"); break;
-      case 'C':
-      case 'c': absl::StrAppend(&bin_str, "1100"); break;
-      case 'D':
-      case 'd': absl::StrAppend(&bin_str, "1101"); break;
-      case 'E':
-      case 'e': absl::StrAppend(&bin_str, "1110"); break;
-      case 'F':
-      case 'f': absl::StrAppend(&bin_str, "1111"); break;
-      default: Pass::error("Error: Invalid hexadecimal digit.\n");
-    }
-    i++;
-  }
-  return bin_str;
-}
-int Pass_lnast_fromlg::range_high(std::string binstr) {
-  bool     cont     = true;
-  long int i        = 0;
-  int      msb_high = binstr.length() - 1;
-  while (binstr[i] && cont == true) {
-    switch (binstr[i]) {
-      case '0': {
-        msb_high -= 1;
-        break;
-      }
-      default: {
-        cont = false;
-        break;
-      }
-    }
-    i++;
-  }
-
-  return msb_high;
-}
-
-int Pass_lnast_fromlg::range_low(std::string binstr) {
-  bool        cont        = true;
-  long int    j           = 0;
-  int         lsb_high    = 0;
-  std::string bin_str_rev = std::string(binstr.rbegin(), binstr.rend());
-
-  while (bin_str_rev[j] && cont == true) {
-    switch (bin_str_rev[j]) {
-      case '0': {
-        lsb_high += 1;
-        break;
-      }
-      default: {
-        cont = false;
-        break;
-      }
-    }
-    j++;
-  }
-  return lsb_high;
-}

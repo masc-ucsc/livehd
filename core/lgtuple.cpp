@@ -593,13 +593,13 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
       return nullptr;
     }
     auto        v = e_node.get_type_const();
-    std::string txt;
+    mmap_lib::str txt;
     if (v.is_i()) {
-      txt = std::to_string(v.to_i());
+      txt = mmap_lib::str(v.to_i());
     } else {
-      txt = v.to_string();
+      txt = v.to_str();
     }
-    auto dpin = get_dpin(mmap_lib::str(txt));
+    auto dpin = get_dpin(txt);
     if (dpin.is_invalid()) {
       Lgraph::info("tuple {} can not be indexed with {} key:{} with value {}", get_name(), tup->get_name(), e.first, txt);
       return nullptr;
@@ -1516,7 +1516,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
         I(!attr2_dpin.is_invalid());
         I(attr2_dpin.is_type_const());
-        auto attr2 = attr2_dpin.get_type_const().to_string();
+        auto attr2 = attr2_dpin.get_type_const().to_str();
         if (attr2 == attr)
           continue;  // same attribute already set (can it have different value??)
       }

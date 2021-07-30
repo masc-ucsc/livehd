@@ -78,8 +78,8 @@ protected:
   static bool is_register(const mmap_lib::str &name) { return name.front() == '#'; }
   static bool is_input(const mmap_lib::str & name) { return name.front() == '$'; }
   static bool is_output(const mmap_lib::str & name) { return name.front() == '%'; }
-  static bool is_bool_true(const mmap_lib::str & name) { return name.starts_with("true"); }
-  static bool is_bool_false(const mmap_lib::str & name) { return name.starts_with("false"); }
+  static bool is_bool_true(const mmap_lib::str & name) { return name.starts_with(mmap_lib::str("true")); }
+  static bool is_bool_false(const mmap_lib::str & name) { return name.starts_with(mmap_lib::str("false")); }
   static bool is_scalar(Node_pin dpin) { return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
 
   // FIXME: this are always constant (REMOVE and side effects too)

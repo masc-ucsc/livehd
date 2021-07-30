@@ -4,6 +4,8 @@
 #include <string>
 #include <string_view>
 
+#include "mmap_str.hpp"
+
 #include "absl/strings/str_cat.h"
 #include "code_gen.hpp"
 #include "lnast_ntype.hpp"
@@ -34,7 +36,7 @@ public:
 
   // TODO: func def related parameters: need to make language specific! currently as per pyrope:
   std::string_view func_begin() const { return ""; }
-  std::string_view func_name(std::string_view func_name) const { return func_name; }
+  std::string      func_name(const mmap_lib::str &func_name) const { return func_name.to_s(); }
   std::string_view param_start(bool param_exist) const {
     if (param_exist)
       return " = |(";
@@ -70,7 +72,7 @@ public:
   std::string_view while_cond_end() const { return ") "; }
 
   // TODO: select related parameters: need to make language specific! currently as per pyrope:
-  std::string_view select_init(const std::string &select_type) const {
+  std::string_view select_init(const mmap_lib::str &select_type) const {
     if (select_type == "bit")
       return "[[";
     else if (select_type == "tuple_add")
@@ -78,7 +80,7 @@ public:
     else
       return "[";
   }
-  std::string_view select_end(const std::string &select_type) const {
+  std::string_view select_end(const mmap_lib::str &select_type) const {
     if (select_type == "bit")
       return "]]";
     else if (select_type == "tuple_add")
@@ -87,16 +89,17 @@ public:
       return "]";
   }
 
-  // this func is to truncate the %/$/# during cpp or verilog conversion
-  bool has_prefix(std::string_view test_string) const {
-    return (test_string.find('$') == 0 || test_string.find('#') == 0 || test_string.find('%') == 0);
+  bool has_prefix(const mmap_lib::str &test_string) const {
+    auto ch = test_string.front();
+    return ch == '$' || ch == '#' || ch == '%';
   }
-  bool is_output(std::string_view test_string) const { return (test_string.find('%') == 0); }
 
-  // if you do not want "outputs." to appear before the output variable in cpp, then use "false" as second parameter
-  virtual std::string ref_name(std::string_view prp_term, bool strct = true) const = 0;
-  // if you do not want "outputs." to appear before the output variable in cpp, then use "false" as second parameter
-  virtual std::string ref_name(const std::string &prp_term, bool strct = true) const = 0;
+  bool is_output(const mmap_lib::str &test_string) const {
+    return test_string.front() == '%';
+  }
+
+  virtual std::string ref_name(const mmap_lib::str &prp_term, bool strct = true) const = 0;
+  virtual mmap_lib::str ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const = 0;
 
   // in verilog, assign stmt starts with assign keyword. thus this function.
   virtual std::string_view assign_node_strt() const { return ""; }
@@ -117,7 +120,7 @@ public:
   };  // the other arg is basename_s
 
   // FIXME:renau. Several methods have no variable name. Use it as a way to explain what is the arg
-  virtual bool set_convert_parameters(const std::string &, const std::string &) {
+  virtual bool set_convert_parameters(const mmap_lib::str &, const std::string &) {
     return false;
   };  // 1st param is key and 2nd is ref
 
@@ -127,12 +130,11 @@ public:
 
   virtual int indent_final_system() const { return 0; };
 
-  // odir related:
-  virtual void result_in_odir(std::string_view fname, std::string_view odir, const std::string &buffer_to_print) const = 0;
+  virtual void result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const = 0;
 
   virtual void set_for_vcd_comb(std::string_view, std::string_view){};
 
   // For tposs:
-  virtual std::string set_make_unsigned(const std::string &sec_child) = 0;
-  virtual bool        is_unsigned(const std::string &var_name) const  = 0;
+  virtual void        set_make_unsigned(const mmap_lib::str &sec_child) = 0;
+  virtual bool        is_unsigned(const mmap_lib::str &var_name) const = 0;
 };
