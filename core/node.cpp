@@ -502,10 +502,10 @@ mmap_lib::str Node::get_instance_name() const { return Ann_inst_name::ref(curren
 bool Node::has_instance_name() const { return Ann_inst_name::ref(current_g)->has(get_compact()); }
 
 mmap_lib::str Node::default_instance_name() const {
-  std::string name{"i"};
+  mmap_lib::str name{"i"};
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "_lg", current_g->get_name().to_s(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    name = mmap_lib::str::concat("i_lg", current_g->get_name(), std::string("_hidx") + std::to_string(hidx.level) + std::string("_") + std::to_string(hidx.pos));
   }
 
   if (has_name()) {

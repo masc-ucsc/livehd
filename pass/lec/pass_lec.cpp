@@ -27,7 +27,7 @@
 static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
 void Pass_lec::setup() {
-  Eprp_method m1("pass.lec", "Checks if all the Lgraph outputs are satisfiable", &Pass_lec::work);
+  Eprp_method m1("pass.lec", mmap_lib::str("Checks if all the Lgraph outputs are satisfiable"), &Pass_lec::work);
 
   register_pass(m1);
 }

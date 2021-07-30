@@ -6,7 +6,7 @@
 #include "ann_place.hpp"
 
 void Pass_fplan_checkfp::setup() {
-  auto c = Eprp_method("pass.fplan.checkfp", "checks floorplan information stored in LiveHD hierarchy", &Pass_fplan_checkfp::pass);
+  auto c = Eprp_method(mmap_lib::str("pass.fplan.checkfp"), mmap_lib::str("checks floorplan information stored in LiveHD hierarchy"), &Pass_fplan_checkfp::pass);
 
   register_pass(c);
 }

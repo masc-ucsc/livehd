@@ -33,9 +33,9 @@ protected:
 
   enum class Leaf_type { Const_num, Const_str, Ref };
   //----------- FOR toLNAST ----------
-  mmap_lib::str create_tmp_var(Lnast &lnast);
-  mmap_lib::str create_tmp_mut_var(Lnast &lnast);
-  mmap_lib::str      get_full_name(const mmap_lib::str &term, const bool is_rhs);
+  mmap_lib::str    create_tmp_var();
+  mmap_lib::str    create_tmp_mut_var();
+  mmap_lib::str    get_full_name(const mmap_lib::str &term, const bool is_rhs);
   void             setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void             declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void             setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, const mmap_lib::str &reg_raw_name,
@@ -148,7 +148,7 @@ protected:
   void                                  handle_clock_attr(Lnast &ln, const mmap_lib::str &var_name, const Lnast_nid &rhs);
   void                                  handle_async_attr(Lnast &ln, const mmap_lib::str &var_name, const Lnast_nid &rhs);
   void                                  handle_reset_attr(Lnast &ln, const mmap_lib::str &var_name, const Lnast_nid &rhs);
-  firrtl::FirrtlPB_Expression_SubField *make_subfield_expr(mmap_lib::str name);
+  firrtl::FirrtlPB_Expression_SubField *make_subfield_expr(const mmap_lib::str &name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, const mmap_lib::str &firrtl_op);
   void    make_assignment(Lnast &ln, const Lnast_nid &lnidx_lhs, firrtl::FirrtlPB_Expression *expr_rhs,

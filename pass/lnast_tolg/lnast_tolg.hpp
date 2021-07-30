@@ -21,17 +21,17 @@ public:
 private:
   inline static std::mutex lgs_mutex;
   std::shared_ptr<Lnast>   lnast;
-  mmap_lib::str          module_name;
-  mmap_lib::str          path;
-  std::string              tuple_assign_str;
+  mmap_lib::str            module_name;
+  mmap_lib::str            path;
+  mmap_lib::str            tuple_assign_str;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string, Node_pin>                  name2dpin;  // for scalar variable
-  absl::flat_hash_set<std::string>                            inlined_func_names; 
-  absl::flat_hash_map<std::string, Node_pin>                  field2dpin;
-  absl::flat_hash_map<mmap_lib::str, std::vector<Node>>    driver_var2wire_nodes;  // for __last_value temporarily wire nodes
+  absl::flat_hash_map<mmap_lib::str, Node_pin>                name2dpin;  // for scalar variable
+  absl::flat_hash_set<mmap_lib::str>                          inlined_func_names; 
+  absl::flat_hash_map<mmap_lib::str, Node_pin>                field2dpin;
+  absl::flat_hash_map<mmap_lib::str, std::vector<Node>>       driver_var2wire_nodes;  // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>        inp2leaf_tg_spins;
-  absl::flat_hash_map<std::string, Node>                      vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
+  absl::flat_hash_map<mmap_lib::str, Node>                    vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
 
 protected:
@@ -88,7 +88,7 @@ protected:
     return true;
   }  // (std::isdigit(name.at(0)) || name.at(0) == '-'); }
   static bool is_err_var_undefined(const mmap_lib::str & name) {
-    I(name.substr(0, 17) != "err_var_undefined");
+    I(name.substr(0, 17) != mmap_lib::str("err_var_undefined"));
     return false;
   }
 
@@ -112,12 +112,12 @@ protected:
 
   void     try_create_flattened_inp(Lgraph *lg);
   void     post_process_ginp_attr_connections(Lgraph *lg);
-  void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, std::string hier_name, Node &chain_head);
+  void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, const mmap_lib::str &hier_name, Node &chain_head);
   Node_pin create_const(Lgraph *lg, const mmap_lib::str & const_str);
 
   // attribute related
   // bool is_new_var_chain(const Lnast_nid &lnidx_opr);
-  bool check_is_attrset_ta(Node &node, std::string &var_name, std::string &attr_name, Lconst &bits, Node &chain_head);
+  bool check_is_attrset_ta(Node &node, const mmap_lib::str &var_name, const mmap_lib::str &attr_name, Lconst &bits, Node &chain_head);
   bool check_is_tup_assign(Node node) { return !node.setup_sink_pin("value").is_connected(); };
   bool is_hier_inp_bits_set(const Lnast_nid &lnidx_ta);
   bool is_tuple_struct_ta(const Lnast_nid &lnidx_ta);

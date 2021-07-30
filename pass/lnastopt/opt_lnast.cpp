@@ -95,7 +95,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
       if (val_it == level_forward_val.end()) {
         auto ref_it = level_forward_ref.find(rhs);
         if (ref_it != level_forward_ref.end()) {
-          auto ln_txt = ln->add_string(ref_it->second);
+          auto ln_txt = ref_it->second;
           auto lnode  = Lnast_node::create_ref(ln_txt);
           ln->set_data(child, lnode);
         }
@@ -137,7 +137,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
 #ifdef LNAST_REWRITE
   if (simplified) {
     I(!const_pos.is_invalid());
-    auto ln_txt = ln->add_string(result.to_pyrope());
+    auto ln_txt = mmap_lib::str(result.to_pyrope());
     auto lnode  = Lnast_node::create_const(ln_txt);
     ln->set_data(const_pos, lnode);
   }
@@ -166,7 +166,7 @@ void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid
 
   auto val_it = level_forward_val.find(rhs);
   if (val_it != level_forward_val.end()) {
-    auto ln_txt = ln->add_string(val_it->second.to_pyrope());
+    auto ln_txt = val_it->second.to_str();
     auto lnode  = Lnast_node::create_const(ln_txt);
     ln->set_data(rhs_id, lnode);
 
@@ -176,7 +176,7 @@ void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid
 
   auto ref_it = level_forward_ref.find(rhs);
   if (ref_it != level_forward_ref.end()) {
-    auto ln_txt = ln->add_string(ref_it->second);
+    auto ln_txt = ref_it->second;
     auto lnode  = Lnast_node::create_ref(ln_txt);
     ln->set_data(rhs_id, lnode);
 

@@ -566,7 +566,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const mmap_lib::str &key) const 
       auto key2 = entry.substr(e_pos);
       I(!key2.empty());
       if (is_root_attribute(key2)) {
-        tup->key_map.emplace_back(mmap_lib::str::concat("0."sv, key2), e.second);
+        tup->key_map.emplace_back(mmap_lib::str::concat("0.", key2), e.second);
       } else {
         tup->key_map.emplace_back(key2, e.second);
       }
@@ -700,7 +700,7 @@ void Lgtuple::add(const mmap_lib::str &key, const Node_pin &dpin) {
   bool        pending_adjust = false;
   if (is_scalar()) {
     if (key.substr(0, 2) == "__" && key[3] != '_') {  // is_root_attribute BUT not with 0.__xxx
-      uncanonical_key = mmap_lib::str::concat("0."sv, key);
+      uncanonical_key = mmap_lib::str::concat("0.", key);
     } else {
       pending_adjust = true;
     }

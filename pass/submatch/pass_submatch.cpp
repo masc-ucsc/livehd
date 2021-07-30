@@ -14,7 +14,7 @@
 static Pass_plugin sample("pass_submatch", pass_submatch::setup);
 
 void pass_submatch::setup() {
-  Eprp_method m1("pass.submatch", "Find identical subgraphs", &pass_submatch::work);
+  Eprp_method m1("pass.submatch", mmap_lib::str("Find identical subgraphs"), &pass_submatch::work);
 
   register_pass(m1);
 }

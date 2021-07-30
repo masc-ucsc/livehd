@@ -49,17 +49,17 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     size_t      argidx;
     bool        single_graph_mode = false;
     bool        hierarchy         = false;
-    std::string name;
-    std::string path = "lgdb";
+    mmap_lib::str name;
+    mmap_lib::str path("lgdb");
 
     for (argidx = 1; argidx < args.size(); argidx++) {
       if (args[argidx] == "-name") {
         single_graph_mode = true;
-        name              = args[++argidx];
+        name              = mmap_lib::str(args[++argidx]);
         continue;
       }
       if (args[argidx] == "-path") {
-        path = args[++argidx];
+        path = mmap_lib::str(args[++argidx]);
         continue;
       }
       if (args[argidx] == "-hierarchy") {
@@ -78,7 +78,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     if (single_graph_mode) {
       Lgraph *lg = Lgraph::open(path, name);
       if (lg == 0) {
-        log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
+        log_error("could not open graph %s in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
       } else {
         lgs.push_back(lg);
       }

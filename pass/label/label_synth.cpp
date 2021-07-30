@@ -6,7 +6,7 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
-Label_synth::Label_synth(bool _verbose, bool _hier, std::string_view alg) : verbose(_verbose), hier(_hier) {
+Label_synth::Label_synth(bool _verbose, bool _hier, const mmap_lib::str &alg) : verbose(_verbose), hier(_hier) {
   if (alg == "pipe") {
     synth = false;
   } else if (alg == "synth") {

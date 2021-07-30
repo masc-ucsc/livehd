@@ -104,7 +104,7 @@ void Firmap::clone_edges_fir_xorr(Node &node, PinMap &pinmap, XorrMap &spinmap_x
   }
 }
 
-void Firmap::map_node_fir_ops(Node &node, std::string_view op, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap,
+void Firmap::map_node_fir_ops(Node &node, const mmap_lib::str &op, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap,
                               XorrMap &spinmap_xorr) {
   // TODO: Create a map that indexed by op and returns a std::function (faster)
 
@@ -390,7 +390,7 @@ void Firmap::map_node_fir_andr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   }
 }
 
-void Firmap::map_node_fir_and_or_xor(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
+void Firmap::map_node_fir_and_or_xor(Node &old_node, Lgraph *new_lg, const mmap_lib::str & op, PinMap &pinmap) {
   Node new_node_logic;
   if (op == "__fir_and") {
     new_node_logic = new_lg->create_node(Ntype_op::And);
@@ -619,7 +619,7 @@ void Firmap::map_node_fir_eq(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 }
 
 // A geq B == ~(A lt B) ; A leq B == ~(A gt B)
-void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
+void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, const mmap_lib::str & op, PinMap &pinmap) {
   Node new_node_not = new_lg->create_node(Ntype_op::Not);
   Node new_node_cmp;
   if (op == "__fir_leq")
@@ -642,7 +642,7 @@ void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, std::string_vi
   }
 }
 
-void Firmap::map_node_fir_lt_gt(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
+void Firmap::map_node_fir_lt_gt(Node &old_node, Lgraph *new_lg, const mmap_lib::str & op, PinMap &pinmap) {
   Node new_node;
   if (op == "__fir_lt")
     new_node = new_lg->create_node(Ntype_op::LT);

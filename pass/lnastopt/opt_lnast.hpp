@@ -10,9 +10,9 @@
 
 class Opt_lnast {
 protected:
-  int                                           level;
-  absl::flat_hash_map<std::string, std::string> level_forward_ref;
-  absl::flat_hash_map<std::string, Lconst>      level_forward_val;
+  int                                               level;
+  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> level_forward_ref;
+  absl::flat_hash_map<mmap_lib::str, Lconst>        level_forward_val;
 
   void process_plus(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_assign(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);

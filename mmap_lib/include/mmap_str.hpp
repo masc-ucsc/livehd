@@ -506,7 +506,7 @@ public:
   }
 #endif
 
-  constexpr char front() const {
+  [[nodiscard]] constexpr char front() const {
     assert(size());
     if (is_sso()) {
       return (size_ctrl>>8) & 0xFF;
@@ -514,7 +514,7 @@ public:
     return data & 0xFF;
   }
 
-  char back() const {
+  [[nodiscard]] char back() const {
     assert(size());
     return (*this)[size()-1];
   }
@@ -535,7 +535,7 @@ public:
     return ref().get_char(ptr_or_start + pos - n);
   }
 
-  bool starts_with(const str &st) const {
+  [[nodiscard]] bool starts_with(const str &st) const {
     if (MMAP_LIB_LIKELY(st.size() > size()))
       return false;
 
@@ -559,7 +559,7 @@ public:
   }
 
   // const char * && std::string will come through here
-  bool starts_with_sv(std::string_view st) const {
+  [[nodiscard]] bool starts_with_sv(std::string_view st) const {
     if (MMAP_LIB_LIKELY(st.size() > size()))
       return false;
 
@@ -578,7 +578,7 @@ public:
   }
 
   // checks if *this pstr ends with en
-  bool ends_with(const str &en) const {
+  [[nodiscard]] bool ends_with(const str &en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
 
@@ -600,7 +600,7 @@ public:
     return true;
   }
 
-  bool ends_with_sv(const std::string &en) const {
+  [[nodiscard]] bool ends_with_sv(const std::string &en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
 
@@ -618,7 +618,7 @@ public:
     return true;
   }
 
-  std::size_t find(const str &v, std::size_t pos = 0) const {
+  [[nodiscard]] std::size_t find(const str &v, std::size_t pos = 0) const {
     if (pos>=size())
       return std::string::npos;
 
@@ -636,7 +636,7 @@ public:
     return std::string::npos;
   }
 
-  std::size_t find(char c, std::size_t pos = 0) const {
+  [[nodiscard]] std::size_t find(char c, std::size_t pos = 0) const {
     if (pos >= size())
       return std::string::npos;
     for (size_t i = pos; i < size(); i++) {
@@ -670,11 +670,11 @@ public:
     return find(s) != std::string::npos;
   }
 
-  bool contains(char c) const {
+  [[nodiscard]] bool contains(char c) const {
     return find(c) != std::string::npos;
   }
 
-  std::size_t rfind(const str &v, std::size_t pos = 0) const {
+  [[nodiscard]] std::size_t rfind(const str &v, std::size_t pos = 0) const {
     int position = size() - 1;
     if (pos != 0)
       position = pos;
@@ -695,7 +695,7 @@ public:
     return std::string::npos;
   }
 
-  std::size_t rfind(char c, std::size_t pos = std::string::npos) const {
+  [[nodiscard]] std::size_t rfind(char c, std::size_t pos = std::string::npos) const {
     int position;
     if (pos == std::string::npos)
       position = size() - 1;
@@ -735,7 +735,7 @@ public:
     return std::string::npos;
   }
 
-  std::string to_s() const {  // convert to string
+  [[nodiscard]] std::string to_s() const {  // convert to string
     if (is_sso()) {
       return std::string(ref_base_sso(), size_sso());
     }
@@ -748,7 +748,7 @@ public:
     return s;
   }
 
-  constexpr int to_i() const {  // convert to integer
+  [[nodiscard]] constexpr int to_i() const {  // convert to integer
     if (is_sso()) {
       int result=0;
 #if 0
@@ -785,7 +785,7 @@ public:
     return 0;
   }
 
-  bool is_i() const {
+  [[nodiscard]] bool is_i() const {
     if (!is_sso())
       return false;
     int result;
@@ -852,7 +852,7 @@ public:
     return s;
   }
 
-  str append_sv(std::string_view b) const {
+  [[nodiscard]] str append_sv(std::string_view b) const {
     auto new_size = size() + b.size();
     if (new_size< 16) {
       str s{*this};
@@ -905,14 +905,14 @@ public:
     return s;
   }
 
-  str append(char c) const {
+  [[nodiscard]] str append(char c) const {
     auto s = to_s();
     s.append(1,c);
 
     return str(s);
   }
 
-  str prepend(char c) const {
+  [[nodiscard]] str prepend(char c) const {
     std::string s;
     s.append(1,c);
     s.append(to_s());
@@ -920,7 +920,7 @@ public:
     return str(s);
   }
 
-  str append(size_t sz, char c) const {
+  [[nodiscard]] str append(size_t sz, char c) const {
     if (sz==0)
       return *this;
 
@@ -934,7 +934,7 @@ public:
 #define has_byte_uppercase(x) \
 (((((((~0ULL)/255)*(127+(91))) - ((x)&((~0ULL)/255)*127))&(~(x))) & (((x)&((~0ULL)/255)*127) + (((~0ULL)/255)*(127-(64)))))&(((~0ULL)/255)*128))
 
-  str to_lower() const {
+  [[nodiscard]] str to_lower() const {
     if (is_sso()) {
       // the fist byte is size. Since it is SSO it can not be between A (64) and Z (91)
       // The bytes over the size are irrelevant (but they should be zero, so also out of range)
@@ -956,12 +956,12 @@ public:
     return str(s);
   }
 
-  static str concat(const str &a, const str &b) {
+  [[nodiscard]] static str concat(const str &a, const str &b) {
     auto ret = a.append(b);
     return ret;
   }
 
-  static str concat(const str &a, std::string_view b, const str &c) {
+  [[nodiscard]] static str concat(const str &a, std::string_view b, const str &c) {
     std::string s;
     s.reserve(a.size()+b.size()+c.size());
     s.append(a.to_s());
@@ -971,7 +971,7 @@ public:
     return str(s);
   }
 
-  static str concat(std::string_view a, str b, const std::string &c) {
+  [[nodiscard]] static str concat(std::string_view a, str b, const std::string &c) {
     std::string s;
     s.reserve(a.size()+b.size()+c.size());
     s.append(a.data(), a.size());
@@ -981,7 +981,7 @@ public:
     return str(s);
   }
 
-  static str concat(const str &a, std::string_view b, std::string_view c) {
+  [[nodiscard]] static str concat(const str &a, std::string_view b, std::string_view c) {
     std::string s;
     s.reserve(a.size()+b.size()+c.size());
     s.append(a.to_s());
@@ -991,7 +991,7 @@ public:
     return str(s);
   }
 
-  static str concat(const str &a, std::string_view b, const str &c, std::string_view d) {
+  [[nodiscard]] static str concat(const str &a, std::string_view b, const str &c, std::string_view d) {
     std::string s;
     s.reserve(a.size()+b.size()+c.size()+d.size());
     s.append(a.to_s());
@@ -1002,7 +1002,7 @@ public:
     return str(s);
   }
 
-  static str concat(const str &a, const str &b, int64_t val) {
+  [[nodiscard]] static str concat(const str &a, const str &b, int64_t val) {
     std::string s;
     s.reserve(a.size()+b.size()+10);
     s.append(a.to_s());
@@ -1012,7 +1012,7 @@ public:
     return str(s);
   }
 
-  static str concat(int64_t val, const str &b, const str &c) {
+  [[nodiscard]] static str concat(int64_t val, const str &b, const str &c) {
     std::string s;
     s.reserve(b.size()+c.size()+10);
     s.append(std::to_string(val));
@@ -1022,17 +1022,19 @@ public:
     return str(s);
   }
 
-  static str concat(std::string_view a, const str &b) {
+#if 0
+  [[nodiscard]] static str concat(std::string_view a, const str &b) {
     str ret{a};
     return ret.append(b);
   }
+#endif
 
-  static str concat(const str &a, std::string_view b) {
+  [[nodiscard]] static str concat(const str &a, std::string_view b) {
     str ret{a};
     return ret.append_sv(b);
   }
 
-  static str concat(std::string_view sv1, std::string_view sv2) {
+  [[nodiscard]] static str concat(std::string_view sv1, std::string_view sv2) {
     std::string s;
     s.reserve(sv1.size()+sv2.size()+1);
     s.append(sv1.data(), sv1.size());
@@ -1041,7 +1043,7 @@ public:
     return str(s);
   }
 
-  std::vector<str> split(const char chr) const {
+  [[nodiscard]] std::vector<str> split(const char chr) const {
     std::vector<str> vec;
 
     auto pos=0u;
@@ -1060,7 +1062,7 @@ public:
   }
 
   // str created from these will have same template as original str
-  str get_str_after_last(const char chr) const {
+  [[nodiscard]] str get_str_after_last(const char chr) const {
     auto pos = rfind(chr);
     if (pos==std::string::npos)
       return str();
@@ -1068,7 +1070,7 @@ public:
     return substr(pos+1);
   }
 
-  str get_str_after_last_if_exists(const char chr) const {
+  [[nodiscard]] str get_str_after_last_if_exists(const char chr) const {
     auto pos = rfind(chr);
     if (pos==std::string::npos)
       return *this;
@@ -1076,7 +1078,7 @@ public:
     return substr(pos+1);
   }
 
-  str get_str_after_first(const char chr) const {
+  [[nodiscard]] str get_str_after_first(const char chr) const {
     auto pos = find(chr);
     if (pos==std::string::npos)
       return str();
@@ -1084,7 +1086,7 @@ public:
     return substr(pos+1);
   }
 
-  str get_str_after_first_if_exists(const char chr) const {
+  [[nodiscard]] str get_str_after_first_if_exists(const char chr) const {
     auto pos = find(chr);
     if (pos==std::string::npos)
       return *this;
@@ -1092,7 +1094,7 @@ public:
     return substr(pos+1);
   }
 
-  str get_str_before_last(const char chr) const {
+  [[nodiscard]] str get_str_before_last(const char chr) const {
     auto pos = rfind(chr);
     if (pos==std::string::npos)
       return *this;
@@ -1100,7 +1102,7 @@ public:
     return substr(0,pos);
   }
 
-  str get_str_before_first(const char chr) const {
+  [[nodiscard]] str get_str_before_first(const char chr) const {
     auto pos = find(chr);
     if (pos==std::string::npos)
       return *this;
@@ -1108,7 +1110,7 @@ public:
     return substr(0,pos);
   }
 
-  str substr(size_t start) const {
+  [[nodiscard]] str substr(size_t start) const {
 
     str s;
 
@@ -1141,7 +1143,7 @@ public:
     return str(base+start-ptr_offset, size()-start);
   }
 
-  str substr(size_t start, size_t max_size) const {
+  [[nodiscard]] str substr(size_t start, size_t max_size) const {
 
     if ((start+max_size)>=size() || max_size == std::string::npos)
       return substr(start);
@@ -1180,7 +1182,7 @@ public:
     return concat(sv_first, sv_last.substr(0,new_size-sv_first.size()));
   }
 
-  constexpr size_t hash() const {
+  [[nodiscard]] constexpr size_t hash() const {
     uint64_t h = size_ctrl;
     h <<= 32;
     h  |= ptr_or_start;

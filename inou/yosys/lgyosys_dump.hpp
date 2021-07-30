@@ -41,16 +41,16 @@ private:
 
   bool hierarchy;
 
-  std::string unique_name(Lgraph *g, const std::string &test) {
-    std::string tmp;
+  mmap_lib::str unique_name(Lgraph *g, const std::string &test) {
+    mmap_lib::str tmp;
     assert(test.size() >= 1);
     if (test[0] == '\\')
-      tmp = &test[1];
+      tmp = mmap_lib::str(test.substr(1));
     else
-      tmp = test;
+      tmp = mmap_lib::str(test);
 
     while (true) {
-      tmp = absl::StrCat(test, "_", std::to_string(ids++));
+      tmp = mmap_lib::str(absl::StrCat(test, "_", std::to_string(ids++)));
 
       if (Ann_node_pin_name::ref(g)->has_val(tmp))
         continue;
@@ -61,7 +61,7 @@ private:
     }
   }
 
-  RTLIL::IdString next_id(Lgraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg"))); }
+  RTLIL::IdString next_id(Lgraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg").to_s())); }
 
   // FIXME: any way of merging these two?
   typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &,

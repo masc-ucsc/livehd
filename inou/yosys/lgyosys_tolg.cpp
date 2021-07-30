@@ -52,11 +52,12 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     I(!wire->port_output);  // any bidirectional port?
     I(wire->name.c_str()[0] == '\\');
     Node_pin pin;
-    if (g->has_graph_input(&wire->name.c_str()[1])) {
-      pin = g->get_graph_input(&wire->name.c_str()[1]);
+    mmap_lib::str wname(&wire->name.c_str()[1]);
+    if (g->has_graph_input(wname)) {
+      pin = g->get_graph_input(wname);
       I(pin.get_bits() == wire->width);
     } else {
-      pin = g->add_graph_input(&wire->name.c_str()[1], wire->port_id, wire->width);
+      pin = g->add_graph_input(wname, wire->port_id, wire->width);
     }
     if (wire->start_offset) {
       pin.set_offset(wire->start_offset);
@@ -355,7 +356,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
   }
 
   if (!cell->hasPort(name)) {
-    return g->create_node_const(Lconst("0bx")).setup_driver_pin();
+    return g->create_node_const("0b?").setup_driver_pin();
   }
 
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);
@@ -445,7 +446,7 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
 
         // skip chisel generated names
         && wire->name.str().rfind("\\_GEN_") != 0 && wire->name.str().rfind("\\_T_") != 0) {
-      pin.set_name(&wire->name.c_str()[1]);
+      pin.set_name(mmap_lib::str(&wire->name.c_str()[1]));
     }
   }
 
@@ -640,18 +641,18 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
     Sub_node *sub = nullptr;
 
     if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) {  // sub_cell type
-      std::string_view mod_name(&(cell->type.c_str()[1]));
+      mmap_lib::str mod_name(&(cell->type.c_str()[1]));
 
       sub = &g->ref_library()->setup_sub(mod_name);
     }
 
     for (const auto &conn : cell->connections()) {
       if (sub) {
-        std::string pin_name(&(conn.first.c_str()[1]));
+        mmap_lib::str pin_name(&(conn.first.c_str()[1]));
 
-        if (isdigit(pin_name[0])) {
+        if (pin_name.is_i()) {
           // hardcoded pin position
-          int pos = atoi(pin_name.c_str());
+          int pos = pin_name.to_i();
 
           if (!sub->has_instance_pin(pos)) {
             if (cell->output(conn.first)) {
@@ -1223,8 +1224,10 @@ static void process_connect_outputs(RTLIL::Module *module, Lgraph *g) {
 
   // we need to connect global outputs to the cell that drives it
   for (auto *wire : pending_outputs) {
-    if (!g->has_graph_output(&wire->name.c_str()[1]))
-      g->add_graph_output(&wire->name.c_str()[1], wire->port_id, wire->width);
+    mmap_lib::str wname(&wire->name.c_str()[1]);
+
+    if (!g->has_graph_output(wname))
+      g->add_graph_output(wname, wire->port_id, wire->width);
 
     if (wire2pin.find(wire) == wire2pin.end())
       continue;
@@ -1235,7 +1238,7 @@ static void process_connect_outputs(RTLIL::Module *module, Lgraph *g) {
     if (dpin3.is_graph_output())
       continue;
 
-    Node_pin spin = g->get_graph_output(&wire->name.c_str()[1]);
+    Node_pin spin = g->get_graph_output(wname);
     g->add_edge(dpin3, spin);  // , wire->width);
 
     auto dpin = spin.change_to_driver_from_graph_out_sink();
@@ -1566,7 +1569,7 @@ static void process_cells(RTLIL::Module *module, Lgraph *g) {
       if (cell->hasPort(ID::Q)) {
         const RTLIL::Wire *wire = cell->getPort(ID::Q).chunks()[0].wire;
         if (wire) {
-          exit_node.setup_driver_pin().set_name(wire->name.str());
+          exit_node.setup_driver_pin().set_name(mmap_lib::str(wire->name.str()));
         }
       }
 

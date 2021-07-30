@@ -9,21 +9,21 @@
 #include "mmap_map.hpp"
 
 void Pass_fplan_analyzefp::setup() {
-  auto a = Eprp_method("pass.fplan.analyzefp",
-                       "return information about a given floorplan within a livehd hierarchy",
+  auto a = Eprp_method(mmap_lib::str("pass.fplan.analyzefp"),
+                       mmap_lib::str("return information about a given floorplan within a livehd hierarchy"),
                        &Pass_fplan_analyzefp::pass);
 
-  a.add_label_required("top", "top level module in floorplan");
-  a.add_label_required("nodes", "modules to analyze, or \"dump\" to dump node names");
+  a.add_label_required("top", mmap_lib::str("top level module in floorplan"));
+  a.add_label_required("nodes", mmap_lib::str("modules to analyze, or \"dump\" to dump node names"));
 
-  a.add_label_optional("hint", "set a geographical hint for the specified node", "");
+  a.add_label_optional("hint", mmap_lib::str("set a geographical hint for the specified node"), "");
   a.add_label_optional(
       "report",
-      "return information about the most recent floorplan, valid options are \"regularity\", \"hpwl\", and \"all\".",
+      mmap_lib::str("return information about the most recent floorplan, valid options are \"regularity\", \"hpwl\", and \"all\"."),
       "");
 
   a.add_label_optional("path",
-                       "lgdb directory to analyze",
+                       mmap_lib::str("lgdb directory to analyze"),
                        "lgdb");  // can't pass lgraphs because lgraph names are the same per instance
 
   register_pass(a);
@@ -75,14 +75,14 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
     error("cannot find top level lgraph!");
   }
 
-  std::vector<std::string_view> names;
+  std::vector<mmap_lib::str> names;
 
   auto   nodestr = var.get("nodes");
   size_t starti  = 0;
   size_t len     = 0;
 
   for (size_t i = 0; i < nodestr.size(); i++) {
-    const char c = nodestr.at(i);
+    const char c = nodestr[i];
     len++;
 
     if (i == nodestr.size() - 1) {
@@ -135,9 +135,9 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
         mmap_lib::map<Node::Compact, GeographyHint> hint_map(path.to_s(), "node_hints");
 
-        std::string_view hint = var.get("hint");
+        auto hint = var.get("hint");
         if (hint != "") {
-          GeographyHint hint_enum = nameToHint(hint);
+          GeographyHint hint_enum = nameToHint(hint.to_s());
           if (hint_enum == InvalidHint) {
             error("invalid hint type!");
           }
@@ -172,7 +172,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
         fmt::print("\n");
 
-        std::string_view action = var.get("report");
+        auto action = var.get("report");
         if (action == "hpwl" || action == "all") {
           // TODO: write hpwl pass
         }
@@ -189,7 +189,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
     if (!found) {
       std::string errstr = "cannot locate module ";
-      errstr += name.data();
+      errstr += name.to_s();
       errstr += "!";
       error(errstr);
     }

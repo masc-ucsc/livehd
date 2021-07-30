@@ -5,17 +5,17 @@
 static Pass_plugin sample("pass.lnast_tolg", Pass_lnast_tolg::setup);
 
 void Pass_lnast_tolg::setup() {
-  Eprp_method m1("pass.lnast_tolg", " front-end language lnast -> lgraph", &Pass_lnast_tolg::tolg);
-  m1.add_label_optional("path", "path to output the lgraph[s] to", "lgdb");
+  Eprp_method m1(mmap_lib::str("pass.lnast_tolg"), mmap_lib::str("front-end language lnast -> lgraph"), &Pass_lnast_tolg::tolg);
+  m1.add_label_optional("path", mmap_lib::str("path to output the lgraph[s] to"), "lgdb");
   register_pass(m1);
 
-  Eprp_method m2("pass.lnast_tolg.dbg_lnast_ssa",
-                 " perform the LNAST SSA transformation, only for debug purpose",
+  Eprp_method m2(mmap_lib::str("pass.lnast_tolg.dbg_lnast_ssa"),
+                 mmap_lib::str("perform the LNAST SSA transformation, only for debug purpose"),
                  &Pass_lnast_tolg::dbg_lnast_ssa);
   register_pass(m2);
 }
 
-Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var &var) : Pass("pass.lnast_tolg", var) {}
+Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var &var) : Pass(mmap_lib::str("pass.lnast_tolg"), var) {}
 
 void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
   for (const auto &lnast : var.lnasts) lnast->ssa_trans();

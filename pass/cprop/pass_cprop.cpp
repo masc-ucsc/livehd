@@ -7,9 +7,9 @@
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
 
 void Pass_cprop::setup() {
-  Eprp_method m1("pass.cprop", "in-place copy propagation", &Pass_cprop::optimize);
-  m1.add_label_optional("hier", "hierarchical copy-propagation", "false");
-  m1.add_label_optional("gioc", "global io connection", "false");
+  Eprp_method m1("pass.cprop", mmap_lib::str("in-place copy propagation"), &Pass_cprop::optimize);
+  m1.add_label_optional("hier", mmap_lib::str("hierarchical copy-propagation"), "false");
+  m1.add_label_optional("gioc", mmap_lib::str("global io connection"), "false");
 
   register_pass(m1);
 }
