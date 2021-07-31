@@ -613,7 +613,7 @@ public:
     return ref().get_char(ptr_or_start + pos - n);
   }
 
-  template <typename T>
+  template <typename T, typename = std::enable_if_t<!std::is_same_v<T,const char *const>>>
   [[nodiscard]] bool starts_with(const T st) const {
     if (MMAP_LIB_LIKELY(st.size() > size()))
       return false;
@@ -632,8 +632,13 @@ public:
     return true;
   }
 
+  template <std::size_t N>
+  [[nodiscard]] bool starts_with(const char (&v)[N]) const {
+    return starts_with(std::string_view(v,N-1));
+  }
+
   // checks if *this pstr ends with en
-  template <typename T>
+  template <typename T, typename = std::enable_if_t<!std::is_same_v<T,const char *const>>>
   [[nodiscard]] bool ends_with(const T en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
@@ -654,6 +659,11 @@ public:
       }
     }
     return true;
+  }
+
+  template <std::size_t N>
+  [[nodiscard]] bool ends_with(const char (&v)[N]) const {
+    return ends_with(std::string_view(v,N-1));
   }
 
   template <typename T, typename = std::enable_if_t<!std::is_same_v<T,const char *const>>>
