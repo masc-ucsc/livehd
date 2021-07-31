@@ -27,8 +27,8 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
     top_sts_nid = get_first_child(top_nid);
   }
 
-  mmap_lib::str tmp_str = "0b?";
-  mmap_lib::str err_var = "err_var";
+  mmap_lib::str tmp_str("0b?");
+  mmap_lib::str err_var("err_var");
   auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(Etoken()));
   add_child(asg_nid, Lnast_node::create_ref(err_var));
   undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(tmp_str));
@@ -1071,11 +1071,16 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   return;
 }
 
-bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const {
   I(get_type(opr_nid).is_select());
-  auto &selc_lrhs_table = selc_lrhs_tables[psts_nid];
-  if (selc_lrhs_table.find(opr_nid) != selc_lrhs_table.end())
-    return selc_lrhs_table[opr_nid].first;
+
+  const auto it = selc_lrhs_tables.find(psts_nid);
+  if (it == selc_lrhs_tables.end())
+    return false;
+
+  const auto it2 = it->second.find(opr_nid);
+  if (it2 != it->second.end())
+    return it2->second.first;
 
   I(false);
   return false;
@@ -1136,11 +1141,13 @@ void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid 
   phi_resolve_table[lhs_name]   = lhs_nid;  // for a variable string, always update to latest Lnast_nid
 }
 
-bool Lnast::is_in_bw_table(const mmap_lib::str &name) { return from_lgraph_bw_table.contains(name); }
+bool Lnast::is_in_bw_table(const mmap_lib::str &name) const { return from_lgraph_bw_table.contains(name); }
 
-uint32_t Lnast::get_bitwidth(const mmap_lib::str &name) {
+uint32_t Lnast::get_bitwidth(const mmap_lib::str &name) const {
   I(is_in_bw_table(name));
-  return from_lgraph_bw_table[name];
+  const auto it = from_lgraph_bw_table.find(name);
+  I(it != from_lgraph_bw_table.end());
+  return it->second;
 }
 
 void Lnast::set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth) {
@@ -1156,19 +1163,19 @@ void Lnast::dump() const {
 
     if (node.type.is_ref()
         && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case
-      fmt::print("({:<1},{:<6}) {} {:<8} {}___{}\n",
+      fmt::print("({:<1},{:<6}) {} {:<8}: {}___{}\n",
                  it.level,
                  it.pos,
                  indent,
-                 absl::StrCat(node.type.to_s(), ":"),
+                 node.type.to_str(),
                  node.token.get_text(),
                  node.subs);
     } else {
-      fmt::print("({:<1},{:<6}) {} {:<8} {}    \n",
+      fmt::print("({:<1},{:<6}) {} {:<8}: {}    \n",
                  it.level,
                  it.pos,
                  indent,
-                 absl::StrCat(node.type.to_s(), ":"),
+                 node.type.to_str(),
                  node.token.get_text());
     }
   }

@@ -57,8 +57,24 @@ protected:
 
   uint32_t             size_ctrl;
   uint32_t             ptr_or_start;
-  uint64_t             data;
+  uint64_t             data_storage;
 
+  char *data() {
+    assert(size_ctrl&1);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+    char *base = (char *)(this);
+#pragma GCC diagnostic pop
+    return base+1;
+  }
+  const char *data() const {
+    assert(size_ctrl&1);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+    char *base = (char *)(this);
+#pragma GCC diagnostic pop
+    return base+1;
+  }
   char *ref_base_sso() {
     assert(size_ctrl&1);
 #pragma GCC diagnostic push
@@ -81,7 +97,7 @@ protected:
     assert(!(size_ctrl&1)); // not SSO
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-    char *base = (char *)(&data);
+    char *base = (char *)(&data_storage);
 #pragma GCC diagnostic pop
     return base;
   }
@@ -90,7 +106,7 @@ protected:
     assert(!(size_ctrl&1)); // not SSO
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-    const char *base = (const char *)(&data);
+    const char *base = (const char *)(&data_storage);
 #pragma GCC diagnostic pop
     return base;
   }
@@ -296,7 +312,7 @@ protected:
 
     size_ctrl    = (N<<1) | 1;
     ptr_or_start = 0;
-    data         = 0;
+    data_storage = 0;
     for(auto i=0u;i<N;++i) {
       uint64_t val = s[i];
       if (i<3) {
@@ -304,7 +320,7 @@ protected:
       }else if (i < 7) {
         ptr_or_start |= val<<(8*(i-3));
       }else{
-        data         |= val<<(8*(i-7));
+        data_storage |= val<<(8*(i-7));
       }
     }
   }
@@ -319,7 +335,7 @@ protected:
     }else if (N < 7) {
       ch = ptr_or_start>>(8*(N-3));
     }else{
-      ch = data>>(8*(N-7));
+      ch = data_storage>>(8*(N-7));
     }
 
     return ch;
@@ -330,13 +346,13 @@ protected:
 
     size_ctrl    = N<<1;
     ptr_or_start = 0;
-    data         = 0;
+    data_storage         = 0;
 
     auto ptr_offset = get_n_data_chars();
 
     for(auto i=0u;i<ptr_offset;++i) {
       uint64_t d = s[i];
-      data |= d<<(8*i);
+      data_storage |= d<<(8*i);
     }
 
     // WARNING: insert_find last because it can remap the *s
@@ -380,12 +396,57 @@ protected:
     return n;
   }
 
-  constexpr str(uint64_t a, uint64_t b) : size_ctrl(a), ptr_or_start(a>>32), data(b) {}
+  constexpr str(uint64_t a, uint64_t b) : size_ctrl(a), ptr_or_start(a>>32), data_storage(b) {}
+
+  template <typename T>
+  [[nodiscard]] std::size_t rfind_int(const T v, std::size_t pos, size_t sz) const {
+    int position = size() - 1;
+    if (pos != 0)
+      position = pos;
+    char   first    = v[0];
+    for (int i = (size() - sz); i >= 0; i--) {
+      if ((first == (*this)[i]) && ((i + sz) <= size())) {
+        if (sz == 1)
+          return i;
+        size_t k = 0;
+        for (int j = i; k < sz && j < static_cast<int>(i + sz); j++, k++) {
+          if ((*this)[j] != v[k])
+            break;
+          if ((j == static_cast<int>(i + sz - 1)) && (i <= position))
+            return i;
+        }
+      }
+    }
+    return std::string::npos;
+  }
+
+  template <typename T>
+  [[nodiscard]] std::size_t find_int(const T v, std::size_t pos, size_t sz) const {
+    pos = find(v[0], pos);
+    if (pos>=size())
+      return std::string::npos;
+
+    char first = v[0];
+    for (size_t i = pos; i < size(); i++) {
+      if ((first == (*this)[i]) && ((i + sz) <= size())) {
+        for (size_t j = i, k = 0; j < i + sz; j++, k++) {
+          if ((*this)[j] != v[k])
+            break;
+          if (j == (i + sz - 1))
+            return i;
+        }
+      }
+    }
+
+    return std::string::npos;
+  }
 
 public:
-  constexpr str() : size_ctrl(1), ptr_or_start(0), data(0) {}
-  constexpr str(char c) : size_ctrl((static_cast<uint32_t>(c)<<8) | 3), ptr_or_start(0), data(0) {
+  constexpr str() : size_ctrl(1), ptr_or_start(0), data_storage(0) {}
+#if 0
+  constexpr str(char c) : size_ctrl((static_cast<uint32_t>(c)<<8) | 3), ptr_or_start(0), data_storage(0) {
   }
+#endif
 
   static void setup() {
     mut_ref().setup("lgdb_strmap");
@@ -396,27 +457,37 @@ public:
   }
 
   template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
-  constexpr str(const char (&s)[N]) : size_ctrl(0), ptr_or_start(0), data(0) {
+  constexpr str(const char (&s)[N]) : size_ctrl(0), ptr_or_start(0), data_storage(0) {
     set_sso(s,N-1);
   }
 
+  str(int64_t v) {
+    auto val_str = std::to_string(v);
+    assert(val_str.size()<=15);
+    set_sso(val_str.data(), val_str.size());
+  }
+
   template <std::size_t N, typename = std::enable_if_t<(N - 1) >= 16>, typename = void>
-  explicit str(const char (&s)[N]) {
+  str(const char (&s)[N]) {
     set_non_sso(s, N-1);
   }
 
-  explicit str(std::string_view sv) {
+  // Explicit creators
+  explicit str(size_t sz, char c) {
+    std::string s(sz,c);
+    if (s.size()<=15) {
+      set_sso(s.data(),s.size());
+    }else{
+      set_non_sso(s.data(),s.size());
+    }
+  }
+
+  str(const std::string_view sv) {
     if (sv.size()<=15) {
       set_sso(sv.data(),sv.size());
     }else{
       set_non_sso(sv.data(),sv.size());
     }
-  }
-
-  explicit str(int64_t v) {
-    auto val_str = std::to_string(v);
-    assert(val_str.size()<=15);
-    set_sso(val_str.data(), val_str.size());
   }
 
   explicit str(const char *txt, size_t sz) {
@@ -435,15 +506,27 @@ public:
     }
   }
 
+#if 0
+  // ambiguity
+  str &operator=(const std::string &s) {
+    if (s.size()<=15)
+      set_sso(s.data(),s.size()-1);
+    else
+      set_non_sso(s.data(),s.size()-1);
+
+    return *this;
+  }
+#endif
+
   [[nodiscard]] constexpr std::size_t size_sso() const { assert(size_ctrl&1); return (size_ctrl>>1) & 0xF; }
   [[nodiscard]] constexpr std::size_t size() const { return size_ctrl&1? (size_ctrl>>1) & 0xF : (size_ctrl>>1); }
   [[nodiscard]] constexpr std::size_t max_size() const { return 65535; }
   [[nodiscard]] constexpr bool        empty() const { return size_ctrl==1; }
 
-  constexpr bool operator==(const str &rhs) const {
-    return size_ctrl == rhs.size_ctrl && ptr_or_start == rhs.ptr_or_start && data == rhs.data;
+  constexpr bool operator==(const str rhs) const {
+    return size_ctrl == rhs.size_ctrl && ptr_or_start == rhs.ptr_or_start && data_storage == rhs.data_storage;
   }
-  bool operator<(const str &rhs) const {
+  bool operator<(const str rhs) const {
 
     if (is_sso() && rhs.is_sso()) {
       std::string_view lhs_sv(ref_base_sso(), size());
@@ -458,8 +541,6 @@ public:
     return (*this)[0] < rhs[0];
   }
 
-#if 0
-  // const char* && std::string will go through this one
   bool operator==(const std::string_view rhs) const {
     const auto sz = size();
     if (rhs.size() != sz)
@@ -477,7 +558,7 @@ public:
       uint64_t d = rhs[i];
       rhs_data |= d<<(8*i);
     }
-    if (data != rhs_data)
+    if (data_storage != rhs_data)
       return false;
 
     std::string_view self_end_sv = ref().get_sv(ptr_or_start, sz-ptr_offset);
@@ -485,33 +566,30 @@ public:
       return false;
     return true;
   }
-#endif
 
   template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
   bool operator==(const char (&rhs)[N]) const {
     str str_rhs(rhs); // SSO constexpr optimized
-    return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data == str_rhs.data;
+    return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data_storage == str_rhs.data_storage;
   }
 
-  constexpr bool operator!=(const str &rhs) const {
+  constexpr bool operator!=(const str rhs) const {
     return !(*this == rhs);
   }
 
-#if 0
   bool operator!=(std::string_view rhs) const { return !(*this == rhs); }
 
   template <std::size_t N>
   constexpr bool operator!=(const char (&rhs)[N]) const {
     return !(*this == rhs);
   }
-#endif
 
   [[nodiscard]] constexpr char front() const {
     assert(size());
     if (is_sso()) {
       return (size_ctrl>>8) & 0xFF;
     }
-    return data & 0xFF;
+    return data_storage & 0xFF;
   }
 
   [[nodiscard]] char back() const {
@@ -535,31 +613,8 @@ public:
     return ref().get_char(ptr_or_start + pos - n);
   }
 
-  [[nodiscard]] bool starts_with(const str &st) const {
-    if (MMAP_LIB_LIKELY(st.size() > size()))
-      return false;
-
-    if (st.size() == size()) {
-      return *this == st; // faster path
-    }
-
-    if (is_sso()) {
-      assert(st.is_sso());
-      const auto *base_st   = st.ref_base_sso();
-      const auto *base_self = ref_base_sso();
-      return memcmp(base_self, base_st, st.size_sso())==0;
-    }
-
-    for (auto i = 0u; i < st.size(); ++i) {
-      if ((*this)[i] != st[i]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // const char * && std::string will come through here
-  [[nodiscard]] bool starts_with_sv(std::string_view st) const {
+  template <typename T>
+  [[nodiscard]] bool starts_with(const T st) const {
     if (MMAP_LIB_LIKELY(st.size() > size()))
       return false;
 
@@ -578,7 +633,8 @@ public:
   }
 
   // checks if *this pstr ends with en
-  [[nodiscard]] bool ends_with(const str &en) const {
+  template <typename T>
+  [[nodiscard]] bool ends_with(const T en) const {
     if (MMAP_LIB_LIKELY(en.size() > size()))
       return false;
 
@@ -587,8 +643,8 @@ public:
     }
 
     if (is_sso()) {
-      auto *base_en   = en.ref_base_sso();
-      auto *base_self = ref_base_sso() + size() - en.size();
+      const auto *base_en   = en.data();
+      const auto *base_self = ref_base_sso() + size() - en.size();
       return memcmp(base_self, base_en, en.size())==0;
     }
 
@@ -600,102 +656,75 @@ public:
     return true;
   }
 
-  [[nodiscard]] bool ends_with_sv(const std::string &en) const {
-    if (MMAP_LIB_LIKELY(en.size() > size()))
-      return false;
+  template <typename T, typename = std::enable_if_t<!std::is_same_v<T,const char *const>>>
+  [[nodiscard]] std::size_t find(const T v, std::size_t pos = 0) const {
+    return find_int(v, pos, v.size());
+  }
 
+  template <std::size_t N>
+  [[nodiscard]] std::size_t find(const char (&v)[N], std::size_t pos = 0) const {
+    return find_int(v, pos, N-1);
+  }
+
+// Extension over the  Bit Twiddling Hacks By Sean Eron Anderson seander@cs.stanford.edu
+#define word_has_zero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
+#define word_has_value(x,n) (word_has_zero((x) ^ (((~0UL)/255) * (n))))
+#define dword_has_zero(v) (((v) - 0x0101010101010101ULL) & ~(v) & 0x8080808080808080ULL)
+#define dword_has_value(x,n) (dword_has_zero((x) ^ (((~0ULL)/255) * (n))))
+
+  [[nodiscard]] std::size_t find(char ch, std::size_t pos = 0) const {
     if (is_sso()) {
-      auto *base_en   = en.data();
-      auto *base_self = ref_base_sso() + size_sso() - en.size();
-      return memcmp(base_self, base_en, en.size())==0;
-    }
-
-    for (size_t j = size() - en.size(), i = 0u; j < size(); ++j, ++i) {
-      if ((*this)[j] != en[i]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  [[nodiscard]] std::size_t find(const str &v, std::size_t pos = 0) const {
-    if (pos>=size())
-      return std::string::npos;
-
-    char first = v[0];
-    for (size_t i = pos; i < size(); i++) {
-      if ((first == (*this)[i]) && ((i + v.size()) <= size())) {
-        for (size_t j = i, k = 0; j < i + v.size(); j++, k++) {
-          if ((*this)[j] != v[k])
-            break;
-          if (j == (i + v.size() - 1))
-            return i;
+      if (pos<3) {
+        auto a = word_has_value(size_ctrl>>(pos*8+8),ch);
+        if (a) { // match found
+          return pos + __builtin_ctz(a)/8;
         }
+        pos = 3;
       }
+      if (pos < 7) {
+        auto b = word_has_value(ptr_or_start>>((pos-3)*8),ch);
+        if (b) { // match found
+          return pos+__builtin_ctz(b)/8;
+        }
+        pos = 7;
+      }
+      auto c = dword_has_value(data_storage>>(pos-7)*8,ch);
+      if (c) { // match found
+        return pos+__builtin_ctzll(c)/8;
+      }
+      return std::string::npos;
     }
-    return std::string::npos;
-  }
 
-  [[nodiscard]] std::size_t find(char c, std::size_t pos = 0) const {
     if (pos >= size())
       return std::string::npos;
     for (size_t i = pos; i < size(); i++) {
-      if ((*this)[i] == c)
+      if ((*this)[i] == ch)
         return i;
     }
     return std::string::npos;
   }
 
-  template <std::size_t N>
-  constexpr std::size_t find(const char (&s)[N], std::size_t pos = 0) {
-    if (pos>=size() || (N-1)==0)
-      return std::string::npos;
-
-    char first = s[0];
-    for (size_t i = pos; i < size(); i++) {
-      if ((first == (*this)[i]) && ((i + N - 1) <= size())) {
-        for (size_t j = i, k = 0; j < i + N - 1; j++, k++) {
-          if ((*this)[j] != s[k])
-            break;
-          if (j == (i + N - 1 - 1))
-            return i;
-        }
-      }
-    }
-    return std::string::npos;
+  template <typename T>
+  constexpr bool contains(const T s) const {
+    return find(s) != std::string::npos;
   }
 
   template <std::size_t N>
   constexpr bool contains(const char (&s)[N]) const {
-    return find(s) != std::string::npos;
+    return find(std::string_view(s,N-1)) != std::string::npos;
   }
 
-  [[nodiscard]] bool contains(char c) const {
-    return find(c) != std::string::npos;
+  template <typename T, typename = std::enable_if_t<!std::is_same_v<T,const char *const>>>
+  [[nodiscard]] std::size_t rfind(const T v, std::size_t pos = 0) const {
+    return rfind_int(v,pos,v.size());
   }
 
-  [[nodiscard]] std::size_t rfind(const str &v, std::size_t pos = 0) const {
-    int position = size() - 1;
-    if (pos != 0)
-      position = pos;
-    char   first    = v[0];
-    for (int i = (size() - v.size()); i >= 0; i--) {
-      if ((first == (*this)[i]) && ((i + v.size()) <= size())) {
-        if (v.size() == 1)
-          return i;
-        size_t k = 0;
-        for (int j = i; k < v.size() && j < static_cast<int>(i + v.size()); j++, k++) {
-          if ((*this)[j] != v[k])
-            break;
-          if ((j == static_cast<int>(i + v.size() - 1)) && (i <= position))
-            return i;
-        }
-      }
-    }
-    return std::string::npos;
+  template <std::size_t N>
+  [[nodiscard]] std::size_t rfind(const char (&v)[N], std::size_t pos = 0) const {
+    return rfind_int(v,pos,N-1);
   }
 
-  [[nodiscard]] std::size_t rfind(char c, std::size_t pos = std::string::npos) const {
+  [[nodiscard]] std::size_t rfind(char ch, std::size_t pos = std::string::npos) const {
     int position;
     if (pos == std::string::npos)
       position = size() - 1;
@@ -703,35 +732,9 @@ public:
       position = static_cast<int>(pos);
 
     for (int i = position; i >= 0; i--) {
-      if ((*this)[i] == c)
+      if ((*this)[i] == ch)
         return i;
     }
-    return std::string::npos;
-  }
-
-  template <std::size_t N>
-  constexpr std::size_t rfind(const char (&s)[N], std::size_t pos = std::string::npos) {
-    int position;
-    if (pos == std::string::npos)
-      position = size() - 1;
-    else
-      position = static_cast<int>(pos);
-
-    char   first    = s[0];
-    for (int i = (size() - N - 1); i >= 0; i--) {
-      if ((first == (*this)[i]) && ((i + N - 1) <= size())) {
-        if (N == 1)
-          return i;
-        size_t k = 0;
-        for (int j = i; k < N-1 && j < static_cast<int>(i + N - 1); j++, k++) {
-          if ((*this)[j] != s[k])
-            break;
-          if ((j == static_cast<int>(i + N - 1 - 1)) && (i <= position))
-            return i;
-        }
-      }
-    }
-
     return std::string::npos;
   }
 
@@ -751,30 +754,6 @@ public:
   [[nodiscard]] constexpr int to_i() const {  // convert to integer
     if (is_sso()) {
       int result=0;
-#if 0
-#ifndef NDEBUG
-      for (std::size_t i=0u;i<size();++i) {
-        constexpr char ch = get_sso(i);
-        assert(ch >= '0' && ch <= '9');
-      }
-#endif
-      // unroll loop to allow constexpr (I want a for constexpr ... to replace this nasty code)
-      result   = result * 10 + (get_sso(0)-'0');
-      result   = result * 10 + (get_sso(1)-'0');
-      result   = result * 10 + (get_sso(2)-'0');
-      result   = result * 10 + (get_sso(3)-'0');
-      result   = result * 10 + (get_sso(4)-'0');
-      result   = result * 10 + (get_sso(5)-'0');
-      result   = result * 10 + (get_sso(6)-'0');
-      result   = result * 10 + (get_sso(7)-'0');
-      result   = result * 10 + (get_sso(8)-'0');
-      result   = result * 10 + (get_sso(9)-'0');
-      result   = result * 10 + (get_sso(10)-'0');
-      result   = result * 10 + (get_sso(11)-'0');
-      result   = result * 10 + (get_sso(12)-'0');
-      result   = result * 10 + (get_sso(13)-'0');
-      result   = result * 10 + (get_sso(14)-'0');
-#endif
       const auto *base = ref_base_sso();
       if (size()==0 || !std::isdigit(base[0]))
         return 0;
@@ -800,59 +779,8 @@ public:
     return true;
   }
 
-  [[nodiscard]] str append(const str &b) const {
-    auto new_size = size() + b.size();
-    if (new_size< 16) {
-      str s{*this};
-
-      char *base = s.ref_base_sso() + s.size_sso();
-      memcpy(base, b.ref_base_sso(), b.size_sso());
-
-      s.size_ctrl >>=1;
-      s.size_ctrl  += b.size_sso();
-      s.size_ctrl <<=1;
-      s.size_ctrl  |=1;
-
-      return s;
-    }
-
-    auto n = (new_size & 0x7) + 1; // bytes in data
-
-    str s;
-    s.size_ctrl = new_size<<1;
-
-    auto bytes_from_a = 0u;
-    auto bytes_from_b = 0u;
-    for(auto i=0u;i<n;++i) {
-      uint64_t v;
-      if (size()>i) {
-        ++bytes_from_a;
-        v=(*this)[i];
-      }else {
-        v=b[i-size()];
-        ++bytes_from_b;
-      }
-
-      v <<= (i*8);
-      s.data |= v;
-    }
-
-    assert(n == (bytes_from_a + bytes_from_b));
-
-    char txt[new_size-n+1];
-    auto pos=0u;
-
-    pos += fill_txt(bytes_from_a, txt);
-    pos += b.fill_txt(bytes_from_b, txt+pos);
-
-    assert(pos == new_size-n); // no zero
-
-    s.ptr_or_start = mut_ref().insert_find(txt, pos);
-
-    return s;
-  }
-
-  [[nodiscard]] str append_sv(std::string_view b) const {
+  template<typename T>
+  [[nodiscard]] str append(const T b) const {
     auto new_size = size() + b.size();
     if (new_size< 16) {
       str s{*this};
@@ -886,7 +814,7 @@ public:
       }
 
       v <<= (i*8);
-      s.data |= v;
+      s.data_storage |= v;
     }
 
     assert(n == (bytes_from_a + bytes_from_b));
@@ -895,8 +823,14 @@ public:
     auto pos=0u;
 
     pos += fill_txt(bytes_from_a, txt);
-    memcpy(txt+pos, b.data() + bytes_from_b, b.size()-bytes_from_b);
-    pos += b.size()-bytes_from_b;
+    if constexpr (std::is_same_v<T, mmap_lib::str>) {
+      pos += b.fill_txt(bytes_from_b, txt+pos);
+    }else if constexpr (std::is_same_v<T, std::string_view> || std::is_same_v<T, std::string>) {
+      memcpy(txt+pos, b.data() + bytes_from_b, b.size()-bytes_from_b);
+      pos += b.size()-bytes_from_b;
+    }else{
+      assert(false); // only mmap_lib::str/string/string_view objects to append
+    }
 
     assert(pos == new_size-n); // no zero
 
@@ -905,27 +839,27 @@ public:
     return s;
   }
 
-  [[nodiscard]] str append(char c) const {
+  [[nodiscard]] str append(char ch) const {
     auto s = to_s();
-    s.append(1,c);
+    s.append(1,ch);
 
     return str(s);
   }
 
-  [[nodiscard]] str prepend(char c) const {
+  [[nodiscard]] str prepend(char ch) const {
     std::string s;
-    s.append(1,c);
+    s.append(1,ch);
     s.append(to_s());
 
     return str(s);
   }
 
-  [[nodiscard]] str append(size_t sz, char c) const {
+  [[nodiscard]] str append(size_t sz, char ch) const {
     if (sz==0)
       return *this;
 
     auto s = to_s();
-    s.append(sz,c);
+    s.append(sz,ch);
 
     return str(s);
   }
@@ -950,97 +884,430 @@ public:
     }
 
     auto s = to_s();
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-      return std::tolower(c);
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char ch) {
+      return std::tolower(ch);
     });
     return str(s);
   }
 
-  [[nodiscard]] static str concat(const str &a, const str &b) {
-    auto ret = a.append(b);
-    return ret;
-  }
+  template <typename T1, typename T2>
+  [[nodiscard]] static str concat(const T1 a, const T2 b) {
+    std::string_view a_sv;
+    std::string      a_s;
+    if constexpr (std::is_same_v<T1, std::string_view>) {
+      a_sv = a;
+    }else if constexpr (std::is_same_v<T1, std::string>) {
+      a_sv = std::string_view(a.data(),a.size());
+    }else if constexpr (std::is_same_v<T1, const char *>) {
+      a_sv = std::string_view(a);
+    }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
+      a_s = a.to_s();
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else if constexpr (std::is_same_v<T1, int>) {
+      a_s = std::to_string(a);
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
 
-  [[nodiscard]] static str concat(const str &a, std::string_view b, const str &c) {
+    std::string_view b_sv;
+    std::string      b_s;
+    if constexpr (std::is_same_v<T2, std::string_view>) {
+      b_sv = b;
+    }else if constexpr (std::is_same_v<T2, std::string>) {
+      b_sv = std::string_view(b.data(),b.size());
+    }else if constexpr (std::is_same_v<T2, const char *>) {
+      b_sv = std::string_view(b);
+    }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
+      b_s = b.to_s();
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else if constexpr (std::is_same_v<T2, int>) {
+      b_s = std::to_string(b);
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
     std::string s;
-    s.reserve(a.size()+b.size()+c.size());
-    s.append(a.to_s());
-    s.append(b.data(), b.size());
-    s.append(c.to_s());
+    s.reserve(a_sv.size()+b_sv.size());
+    s.append(a_sv.data(), a_sv.size());
+    s.append(b_sv.data(), b_sv.size());
 
-    return str(s);
+    return mmap_lib::str(s);
   }
 
-  [[nodiscard]] static str concat(std::string_view a, str b, const std::string &c) {
+  template <typename T1, typename T2, typename T3>
+  [[nodiscard]] static str concat(const T1 a, const T2 b, const T3 c) {
+    std::string_view a_sv;
+    std::string      a_s;
+    if constexpr (std::is_same_v<T1, std::string_view>) {
+      a_sv = a;
+    }else if constexpr (std::is_same_v<T1, std::string>) {
+      a_sv = std::string_view(a.data(),a.size());
+    }else if constexpr (std::is_same_v<T1, const char *>) {
+      a_sv = std::string_view(a);
+    }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
+      a_s = a.to_s();
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else if constexpr (std::is_same_v<T1, int>) {
+      a_s = std::to_string(a);
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view b_sv;
+    std::string      b_s;
+    if constexpr (std::is_same_v<T2, std::string_view>) {
+      b_sv = b;
+    }else if constexpr (std::is_same_v<T2, std::string>) {
+      b_sv = std::string_view(b.data(),b.size());
+    }else if constexpr (std::is_same_v<T2, const char *>) {
+      b_sv = std::string_view(b);
+    }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
+      b_s = b.to_s();
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else if constexpr (std::is_same_v<T2, int>) {
+      b_s = std::to_string(b);
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view c_sv;
+    std::string      c_s;
+    if constexpr (std::is_same_v<T3, std::string_view>) {
+      c_sv = c;
+    }else if constexpr (std::is_same_v<T3, std::string>) {
+      c_sv = std::string_view(c.data(),c.size());
+    }else if constexpr (std::is_same_v<T3, const char *>) {
+      c_sv = std::string_view(c);
+    }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
+      c_s = c.to_s();
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else if constexpr (std::is_same_v<T3, int>) {
+      c_s = std::to_string(c);
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
     std::string s;
-    s.reserve(a.size()+b.size()+c.size());
-    s.append(a.data(), a.size());
-    s.append(b.to_s());
-    s.append(c.data(), c.size());
+    s.reserve(a_sv.size()+b_sv.size()+c_sv.size());
+    s.append(a_sv.data(), a_sv.size());
+    s.append(b_sv.data(), b_sv.size());
+    s.append(c_sv.data(), c_sv.size());
 
-    return str(s);
+    return mmap_lib::str(s);
   }
 
-  [[nodiscard]] static str concat(const str &a, std::string_view b, std::string_view c) {
+  template <typename T1, typename T2, typename T3, typename T4>
+  [[nodiscard]] static str concat(const T1 a, const T2 b, const T3 c, const T4 d) {
+    std::string_view a_sv;
+    std::string      a_s;
+    if constexpr (std::is_same_v<T1, std::string_view>) {
+      a_sv = a;
+    }else if constexpr (std::is_same_v<T1, std::string>) {
+      a_sv = std::string_view(a.data(),a.size());
+    }else if constexpr (std::is_same_v<T1, const char *>) {
+      a_sv = std::string_view(a);
+    }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
+      a_s = a.to_s();
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else if constexpr (std::is_same_v<T1, int>) {
+      a_s = std::to_string(a);
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view b_sv;
+    std::string      b_s;
+    if constexpr (std::is_same_v<T2, std::string_view>) {
+      b_sv = b;
+    }else if constexpr (std::is_same_v<T2, std::string>) {
+      b_sv = std::string_view(b.data(),b.size());
+    }else if constexpr (std::is_same_v<T2, const char *>) {
+      b_sv = std::string_view(b);
+    }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
+      b_s = b.to_s();
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else if constexpr (std::is_same_v<T2, int>) {
+      b_s = std::to_string(b);
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view c_sv;
+    std::string      c_s;
+    if constexpr (std::is_same_v<T3, std::string_view>) {
+      c_sv = c;
+    }else if constexpr (std::is_same_v<T3, std::string>) {
+      c_sv = std::string_view(c.data(),c.size());
+    }else if constexpr (std::is_same_v<T3, const char *>) {
+      c_sv = std::string_view(c);
+    }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
+      c_s = c.to_s();
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else if constexpr (std::is_same_v<T3, int>) {
+      c_s = std::to_string(c);
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view d_sv;
+    std::string      d_s;
+    if constexpr (std::is_same_v<T4, std::string_view>) {
+      d_sv = d;
+    }else if constexpr (std::is_same_v<T4, std::string>) {
+      d_sv = std::string_view(d.data(),d.size());
+    }else if constexpr (std::is_same_v<T4, const char *>) {
+      d_sv = std::string_view(d);
+    }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
+      d_s = d.to_s();
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else if constexpr (std::is_same_v<T4, int>) {
+      d_s = std::to_string(d);
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
     std::string s;
-    s.reserve(a.size()+b.size()+c.size());
-    s.append(a.to_s());
-    s.append(b.data(), b.size());
-    s.append(c.data(), c.size());
+    s.reserve(a_sv.size()+b_sv.size()+c_sv.size()+d_sv.size());
+    s.append(a_sv.data(), a_sv.size());
+    s.append(b_sv.data(), b_sv.size());
+    s.append(c_sv.data(), c_sv.size());
+    s.append(d_sv.data(), d_sv.size());
 
-    return str(s);
+    return mmap_lib::str(s);
   }
 
-  [[nodiscard]] static str concat(const str &a, std::string_view b, const str &c, std::string_view d) {
+  template <typename T1, typename T2, typename T3, typename T4, typename T5>
+  [[nodiscard]] static str concat(const T1 a, const T2 b, const T3 c, const T4 d, const T5 e) {
+    std::string_view a_sv;
+    std::string      a_s;
+    if constexpr (std::is_same_v<T1, std::string_view>) {
+      a_sv = a;
+    }else if constexpr (std::is_same_v<T1, std::string>) {
+      a_sv = std::string_view(a.data(),a.size());
+    }else if constexpr (std::is_same_v<T1, const char *>) {
+      a_sv = std::string_view(a);
+    }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
+      a_s = a.to_s();
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else if constexpr (std::is_same_v<T1, int>) {
+      a_s = std::to_string(a);
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view b_sv;
+    std::string      b_s;
+    if constexpr (std::is_same_v<T2, std::string_view>) {
+      b_sv = b;
+    }else if constexpr (std::is_same_v<T2, std::string>) {
+      b_sv = std::string_view(b.data(),b.size());
+    }else if constexpr (std::is_same_v<T2, const char *>) {
+      b_sv = std::string_view(b);
+    }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
+      b_s = b.to_s();
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else if constexpr (std::is_same_v<T2, int>) {
+      b_s = std::to_string(b);
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view c_sv;
+    std::string      c_s;
+    if constexpr (std::is_same_v<T3, std::string_view>) {
+      c_sv = c;
+    }else if constexpr (std::is_same_v<T3, std::string>) {
+      c_sv = std::string_view(c.data(),c.size());
+    }else if constexpr (std::is_same_v<T3, const char *>) {
+      c_sv = std::string_view(c);
+    }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
+      c_s = c.to_s();
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else if constexpr (std::is_same_v<T3, int>) {
+      c_s = std::to_string(c);
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view d_sv;
+    std::string      d_s;
+    if constexpr (std::is_same_v<T4, std::string_view>) {
+      d_sv = d;
+    }else if constexpr (std::is_same_v<T4, std::string>) {
+      d_sv = std::string_view(d.data(),d.size());
+    }else if constexpr (std::is_same_v<T4, const char *>) {
+      d_sv = std::string_view(d);
+    }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
+      d_s = d.to_s();
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else if constexpr (std::is_same_v<T4, int>) {
+      d_s = std::to_string(d);
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view e_sv;
+    std::string      e_s;
+    if constexpr (std::is_same_v<T5, std::string_view>) {
+      e_sv = e;
+    }else if constexpr (std::is_same_v<T5, std::string>) {
+      e_sv = std::string_view(e.data(),e.size());
+    }else if constexpr (std::is_same_v<T5, const char *>) {
+      e_sv = std::string_view(e);
+    }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
+      e_s = e.to_s();
+      e_sv = std::string_view(e_s.data(), e_s.size());
+    }else if constexpr (std::is_same_v<T5, int>) {
+      e_s = std::to_string(e);
+      e_sv = std::string_view(e_s.data(), e_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
     std::string s;
-    s.reserve(a.size()+b.size()+c.size()+d.size());
-    s.append(a.to_s());
-    s.append(b.data(), b.size());
-    s.append(c.to_s());
-    s.append(d.data(), d.size());
+    s.reserve(a_sv.size()+b_sv.size()+c_sv.size()+d_sv.size()+e_sv.size());
+    s.append(a_sv.data(), a_sv.size());
+    s.append(b_sv.data(), b_sv.size());
+    s.append(c_sv.data(), c_sv.size());
+    s.append(d_sv.data(), d_sv.size());
+    s.append(e_sv.data(), e_sv.size());
 
-    return str(s);
+    return mmap_lib::str(s);
   }
 
-  [[nodiscard]] static str concat(const str &a, const str &b, int64_t val) {
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
+  [[nodiscard]] static str concat(const T1 a, const T2 b, const T3 c, const T4 d, const T5 e, const T6 f) {
+    std::string_view a_sv;
+    std::string      a_s;
+    if constexpr (std::is_same_v<T1, std::string_view>) {
+      a_sv = a;
+    }else if constexpr (std::is_same_v<T1, std::string>) {
+      a_sv = std::string_view(a.data(),a.size());
+    }else if constexpr (std::is_same_v<T1, const char *>) {
+      a_sv = std::string_view(a);
+    }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
+      a_s = a.to_s();
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else if constexpr (std::is_same_v<T1, int>) {
+      a_s = std::to_string(a);
+      a_sv = std::string_view(a_s.data(), a_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view b_sv;
+    std::string      b_s;
+    if constexpr (std::is_same_v<T2, std::string_view>) {
+      b_sv = b;
+    }else if constexpr (std::is_same_v<T2, std::string>) {
+      b_sv = std::string_view(b.data(),b.size());
+    }else if constexpr (std::is_same_v<T2, const char *>) {
+      b_sv = std::string_view(b);
+    }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
+      b_s = b.to_s();
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else if constexpr (std::is_same_v<T2, int>) {
+      b_s = std::to_string(b);
+      b_sv = std::string_view(b_s.data(), b_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view c_sv;
+    std::string      c_s;
+    if constexpr (std::is_same_v<T3, std::string_view>) {
+      c_sv = c;
+    }else if constexpr (std::is_same_v<T3, std::string>) {
+      c_sv = std::string_view(c.data(),c.size());
+    }else if constexpr (std::is_same_v<T3, const char *>) {
+      c_sv = std::string_view(c);
+    }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
+      c_s = c.to_s();
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else if constexpr (std::is_same_v<T3, int>) {
+      c_s = std::to_string(c);
+      c_sv = std::string_view(c_s.data(), c_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view d_sv;
+    std::string      d_s;
+    if constexpr (std::is_same_v<T4, std::string_view>) {
+      d_sv = d;
+    }else if constexpr (std::is_same_v<T4, std::string>) {
+      d_sv = std::string_view(d.data(),d.size());
+    }else if constexpr (std::is_same_v<T4, const char *>) {
+      d_sv = std::string_view(d);
+    }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
+      d_s = d.to_s();
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else if constexpr (std::is_same_v<T4, int>) {
+      d_s = std::to_string(d);
+      d_sv = std::string_view(d_s.data(), d_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view e_sv;
+    std::string      e_s;
+    if constexpr (std::is_same_v<T5, std::string_view>) {
+      e_sv = e;
+    }else if constexpr (std::is_same_v<T5, std::string>) {
+      e_sv = std::string_view(e.data(),e.size());
+    }else if constexpr (std::is_same_v<T5, const char *>) {
+      e_sv = std::string_view(e);
+    }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
+      e_s = e.to_s();
+      e_sv = std::string_view(e_s.data(), e_s.size());
+    }else if constexpr (std::is_same_v<T5, int>) {
+      e_s = std::to_string(e);
+      e_sv = std::string_view(e_s.data(), e_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
+    std::string_view f_sv;
+    std::string      f_s;
+    if constexpr (std::is_same_v<T6, std::string_view>) {
+      f_sv = f;
+    }else if constexpr (std::is_same_v<T6, std::string>) {
+      f_sv = std::string_view(f.data(),f.size());
+    }else if constexpr (std::is_same_v<T6, const char *>) {
+      f_sv = std::string_view(f);
+    }else if constexpr (std::is_same_v<T6, mmap_lib::str>) {
+      f_s = f.to_s();
+      f_sv = std::string_view(f_s.data(), f_s.size());
+    }else if constexpr (std::is_same_v<T6, int>) {
+      f_s = std::to_string(f);
+      f_sv = std::string_view(f_s.data(), f_s.size());
+    }else{
+      assert(false); // Convert to mmap_lib::str the 1st argument (or extend the class)
+    }
+
     std::string s;
-    s.reserve(a.size()+b.size()+10);
-    s.append(a.to_s());
-    s.append(b.to_s());
-    s.append(std::to_string(val));
+    s.reserve(a_sv.size()+b_sv.size()+c_sv.size()+d_sv.size()+e_sv.size()+f_sv.size());
+    s.append(a_sv.data(), a_sv.size());
+    s.append(b_sv.data(), b_sv.size());
+    s.append(c_sv.data(), c_sv.size());
+    s.append(d_sv.data(), d_sv.size());
+    s.append(e_sv.data(), e_sv.size());
+    s.append(f_sv.data(), f_sv.size());
 
-    return str(s);
-  }
-
-  [[nodiscard]] static str concat(int64_t val, const str &b, const str &c) {
-    std::string s;
-    s.reserve(b.size()+c.size()+10);
-    s.append(std::to_string(val));
-    s.append(b.to_s());
-    s.append(c.to_s());
-
-    return str(s);
-  }
-
-#if 0
-  [[nodiscard]] static str concat(std::string_view a, const str &b) {
-    str ret{a};
-    return ret.append(b);
-  }
-#endif
-
-  [[nodiscard]] static str concat(const str &a, std::string_view b) {
-    str ret{a};
-    return ret.append_sv(b);
-  }
-
-  [[nodiscard]] static str concat(std::string_view sv1, std::string_view sv2) {
-    std::string s;
-    s.reserve(sv1.size()+sv2.size()+1);
-    s.append(sv1.data(), sv1.size());
-    s.append(sv2.data(), sv2.size());
-
-    return str(s);
+    return mmap_lib::str(s);
   }
 
   [[nodiscard]] std::vector<str> split(const char chr) const {
@@ -1133,7 +1400,7 @@ public:
       s.size_ctrl = (sc<<1);
 
       // adjust data (beginning of string)
-      s.data = data >> (8*start);
+      s.data_storage = data_storage >> (8*start);
 
       return s;
     }
@@ -1189,7 +1456,7 @@ public:
     h ^= h >> 33;
     h *= 0xff51afd7ed558ccd;
     h ^= h >> 33;
-    h ^= data;
+    h ^= data_storage;
     h ^= h >> 33;
     h *= 0xc4ceb9fe1a85ec53;
     h ^= h >> 33;
@@ -1197,7 +1464,7 @@ public:
   }
 
   template <typename H>
-    friend H AbslHashValue(H h, const str &s) {
+    friend H AbslHashValue(H h, const str s) {
       return H::combine(std::move(h), s.hash());
     };
 };
@@ -1229,5 +1496,9 @@ template <> struct fmt::formatter<mmap_lib::str>: formatter<string_view> {
 
 inline std::ostream &operator <<(std::ostream &o, const mmap_lib::str &str) {
   return o << str.to_s();
+}
+
+inline mmap_lib::str operator"" _str (const char *s, std::size_t sz) {
+  return mmap_lib::str(s, sz);
 }
 

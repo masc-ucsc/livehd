@@ -317,21 +317,21 @@ protected:
 
 public:
   Prp() {
-    pyrope_keyword["if"]     = Pyrope_id_if;
-    pyrope_keyword["else"]   = Pyrope_id_else;
-    pyrope_keyword["for"]    = Pyrope_id_for;
-    pyrope_keyword["while"]  = Pyrope_id_while;  // FUTURE
-    pyrope_keyword["elif"]   = Pyrope_id_elif;
-    pyrope_keyword["return"] = Pyrope_id_return;
-    pyrope_keyword["unique"] = Pyrope_id_unique;
-    pyrope_keyword["when"]   = Pyrope_id_when;
-    pyrope_keyword["then"]   = Pyrope_id_then;
-    pyrope_keyword["try"]    = Pyrope_id_try;
+    pyrope_keyword["if"_str]     = Pyrope_id_if;
+    pyrope_keyword["else"_str]   = Pyrope_id_else;
+    pyrope_keyword["for"_str]    = Pyrope_id_for;
+    pyrope_keyword["while"_str]  = Pyrope_id_while;  // FUTURE
+    pyrope_keyword["elif"_str]   = Pyrope_id_elif;
+    pyrope_keyword["return"_str] = Pyrope_id_return;
+    pyrope_keyword["unique"_str] = Pyrope_id_unique;
+    pyrope_keyword["when"_str]   = Pyrope_id_when;
+    pyrope_keyword["then"_str]   = Pyrope_id_then;
+    pyrope_keyword["try"_str]    = Pyrope_id_try;
 
-    pyrope_keyword["and"] = Pyrope_id_and;
-    pyrope_keyword["or"]  = Pyrope_id_or;
-    pyrope_keyword["not"] = Pyrope_id_not;
-    pyrope_keyword["xor"] = Pyrope_id_xor;
+    pyrope_keyword["and"_str] = Pyrope_id_and;
+    pyrope_keyword["or"_str]  = Pyrope_id_or;
+    pyrope_keyword["not"_str] = Pyrope_id_not;
+    pyrope_keyword["xor"_str] = Pyrope_id_xor;
 
     // pyrope_keyword["C"]       = Pyrope_id_c;
     // pyrope_keyword["I"]       = Pyrope_id_assertion;
@@ -339,18 +339,18 @@ public:
     // pyrope_keyword["yield"]   = Pyrope_id_yield;
     // pyrope_keyword["waitfor"] = Pyrope_id_waitfor;
 
-    pyrope_keyword["intersect"] = Pyrope_id_intersect;
-    pyrope_keyword["union"]     = Pyrope_id_union;
-    pyrope_keyword["until"]     = Pyrope_id_until;
-    pyrope_keyword["by"]        = Pyrope_id_by;
+    pyrope_keyword["intersect"_str] = Pyrope_id_intersect;
+    pyrope_keyword["union"_str]     = Pyrope_id_union;
+    pyrope_keyword["until"_str]     = Pyrope_id_until;
+    pyrope_keyword["by"_str]        = Pyrope_id_by;
     // pyrope_keyword["punch"]     = Pyrope_id_punch;
 
-    pyrope_keyword["false"] = Pyrope_id_false;
-    pyrope_keyword["FALSE"] = Pyrope_id_FALSE;
-    pyrope_keyword["true"]  = Pyrope_id_true;
-    pyrope_keyword["TRUE"]  = Pyrope_id_TRUE;
+    pyrope_keyword["false"_str] = Pyrope_id_false;
+    pyrope_keyword["FALSE"_str] = Pyrope_id_FALSE;
+    pyrope_keyword["true"_str]  = Pyrope_id_true;
+    pyrope_keyword["TRUE"_str]  = Pyrope_id_TRUE;
 
-    pyrope_keyword["default"] = Pyrope_id_default;
+    pyrope_keyword["default"_str] = Pyrope_id_default;
   }
 
   enum Prp_rules : Rule_id {

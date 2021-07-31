@@ -15,26 +15,28 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<mmap_lib::str, Lnast_n
 
 // tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type)                                                                                \
-  static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, "")); } \
-  static Lnast_node create##type(const mmap_lib::str &sview, uint32_t line_num) {                                  \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));                          \
+  static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, ""_str)); } \
+  static Lnast_node create##type(const mmap_lib::str str) {                                                 \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, str));                                 \
   }                                                                                                            \
-  static Lnast_node create##type(const mmap_lib::str &sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) {    \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));                    \
+  static Lnast_node create##type(const mmap_lib::str str, uint32_t line_num) {                                  \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, str));                          \
+  }                                                                                                            \
+  static Lnast_node create##type(const mmap_lib::str str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {    \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, str));                    \
   }                                                                                                            \
   static Lnast_node create##type(const Etoken &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
 
 #define CREATE_LNAST_NODE_sv(type)                                                                          \
-  static Lnast_node create##type(const mmap_lib::str &sview) {                                                  \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, sview));                              \
+  static Lnast_node create##type(std::string_view sview) {                                                  \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, mmap_lib::str(sview)));               \
   }                                                                                                         \
-  static Lnast_node create##type(const mmap_lib::str &sview, uint32_t line_num) {                               \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));                       \
+  static Lnast_node create##type(std::string_view sview, uint32_t line_num) {                               \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, mmap_lib::str(sview)));        \
   }                                                                                                         \
-  static Lnast_node create##type(const mmap_lib::str &sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));                 \
+  static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
+    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, mmap_lib::str(sview)));  \
   }                                                                                                         \
-  static Lnast_node create##type(const Etoken &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
 
 struct Lnast_node {
   Lnast_ntype type;
@@ -108,11 +110,18 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_tuple_delete)
   CREATE_LNAST_NODE(_select)
 
-  CREATE_LNAST_NODE_sv(_ref) CREATE_LNAST_NODE_sv(_const)
+  CREATE_LNAST_NODE(_ref)
+  // CREATE_LNAST_NODE_sv(_ref)
+  CREATE_LNAST_NODE(_const)
+  // CREATE_LNAST_NODE_sv(_const)
 
-      CREATE_LNAST_NODE(_assert) CREATE_LNAST_NODE(_err_flag)
+  CREATE_LNAST_NODE(_assert)
+  CREATE_LNAST_NODE(_err_flag)
 
-          CREATE_LNAST_NODE(_tuple_add) CREATE_LNAST_NODE(_tuple_get) CREATE_LNAST_NODE(_attr_set) CREATE_LNAST_NODE(_attr_get)
+  CREATE_LNAST_NODE(_tuple_add)
+  CREATE_LNAST_NODE(_tuple_get)
+  CREATE_LNAST_NODE(_attr_set)
+  CREATE_LNAST_NODE(_attr_get)
 };
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
@@ -195,35 +204,33 @@ public:
   explicit Lnast(const mmap_lib::str &_module_name) : top_module_name(_module_name), source_filename("") {}
   explicit Lnast(const mmap_lib::str &_module_name, const mmap_lib::str &_file_name)
       : top_module_name(_module_name), source_filename(_file_name) {}
-//  explicit Lnast(const mmap_lib::str &_module_name, std::pair<mmap_lib::str, int> o) : top_module_name(_module_name), source_filename(""){}
-// explicit Lnast(const mmap_lib::str &_module_name, const mmap_lib::str &_file_name, std::pair<mmap_lib::str, int> o) : top_module_name(_module_name), source_filename(_file_name) {}
 
   void ssa_trans() { do_ssa_trans(mmap_lib::Tree_index::root()); };
 
   const mmap_lib::str &get_top_module_name() const { return top_module_name; }
   const mmap_lib::str &get_source() const { return source_filename; }
 
-  bool             is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  bool             is_register(const mmap_lib::str &name) { return name.front() == '#'; }
-  bool             is_output(const mmap_lib::str &name) { return name.front() == '%'; }
-  bool             is_input(const mmap_lib::str &name) { return name.front() == '$'; }
-  const mmap_lib::str &get_name(const Lnast_nid &nid) { return get_data(nid).token.get_text(); }
-  const mmap_lib::str &get_vname(const Lnast_nid &nid) {
+  bool             is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const;
+  static bool      is_register(const mmap_lib::str &name) { return name.front() == '#'; }
+  static bool      is_output(const mmap_lib::str &name) { return name.front() == '%'; }
+  static bool      is_input(const mmap_lib::str &name) { return name.front() == '$'; }
+  const mmap_lib::str &get_name(const Lnast_nid &nid) const { return get_data(nid).token.get_text(); }
+  const mmap_lib::str &get_vname(const Lnast_nid &nid) const {
     return get_data(nid).token.get_text();
-  }  // better expression for Lgraph
-     // passes
-  Lnast_ntype get_type(const Lnast_nid &nid) { return get_data(nid).type; }
-  int16_t     get_subs(const Lnast_nid &nid) { return get_data(nid).subs; }
-  Etoken      get_token(const Lnast_nid &nid) { return get_data(nid).token; }
-  mmap_lib::str get_sname(const Lnast_nid &nid) {  // sname = ssa name
+  }
+
+  Lnast_ntype get_type(const Lnast_nid &nid) const { return get_data(nid).type; }
+  int16_t     get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
+  Etoken      get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
+  mmap_lib::str get_sname(const Lnast_nid &nid) const {  // sname = ssa name
     if (get_type(nid).is_const())
       return get_name(nid);
-    return mmap_lib::str::concat(get_name(nid), "_", get_subs(nid));
+    return mmap_lib::str::concat(get_name(nid), "_"_str, get_subs(nid));
   }
 
   // bitwidth table functions
-  bool     is_in_bw_table(const mmap_lib::str &name);
-  uint32_t get_bitwidth(const mmap_lib::str &name);
+  bool     is_in_bw_table(const mmap_lib::str &name) const;
+  uint32_t get_bitwidth(const mmap_lib::str &name) const;
   void     set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth);
 
   void dump() const;

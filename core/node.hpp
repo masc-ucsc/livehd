@@ -248,6 +248,7 @@ public:
       return get_sink_pin_raw(pid);
     return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
   }
+
   Node_pin setup_driver_pin_slow(const mmap_lib::str &name) const;
   Node_pin setup_driver_pin(const mmap_lib::str &pname) const {
     assert(pname.size());

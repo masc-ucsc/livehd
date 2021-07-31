@@ -260,12 +260,12 @@ TEST_F(Mmap_str_test, starts_ends_with) {
 #endif
 
     EXPECT_TRUE(temp.starts_with(check_sw));
-    EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
-    EXPECT_TRUE(temp.starts_with_sv(stable_sw));
+    EXPECT_TRUE(temp.starts_with(sv_check_sw));
+    EXPECT_TRUE(temp.starts_with(stable_sw));
 
     EXPECT_TRUE(temp.ends_with(check_ew));
     EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-    EXPECT_TRUE(temp.ends_with_sv(stable_ew));
+    EXPECT_TRUE(temp.ends_with(stable_ew));
   }
 
   // TRUE AND FALSE
@@ -304,33 +304,33 @@ TEST_F(Mmap_str_test, starts_ends_with) {
 
     if (start_sw == 0) {
       EXPECT_TRUE(temp.starts_with(check_sw));
-      EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
-      EXPECT_TRUE(temp.starts_with_sv(stable_sw));
+      EXPECT_TRUE(temp.starts_with(sv_check_sw));
+      EXPECT_TRUE(temp.starts_with(stable_sw));
     } else {
       if (orig.substr(0, stable_sw.size()) == stable_sw) {
         EXPECT_TRUE(temp.starts_with(check_sw));
-        EXPECT_TRUE(temp.starts_with_sv(sv_check_sw));
-        EXPECT_TRUE(temp.starts_with_sv(stable_sw));
+        EXPECT_TRUE(temp.starts_with(sv_check_sw));
+        EXPECT_TRUE(temp.starts_with(stable_sw));
       } else {
         EXPECT_FALSE(temp.starts_with(check_sw));
-        EXPECT_FALSE(temp.starts_with_sv(sv_check_sw));
-        EXPECT_FALSE(temp.starts_with_sv(stable_sw));
+        EXPECT_FALSE(temp.starts_with(sv_check_sw));
+        EXPECT_FALSE(temp.starts_with(stable_sw));
       }
     }
 
     if (end_ew == temp.size()) {
       EXPECT_TRUE(temp.ends_with(check_ew));
       EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-      EXPECT_TRUE(temp.ends_with_sv(stable_ew));
+      EXPECT_TRUE(temp.ends_with(stable_ew));
     } else {
       if (orig.substr(orig.size() - stable_ew.size()) == stable_ew) {
         EXPECT_TRUE(temp.ends_with(check_ew));
         EXPECT_TRUE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-        EXPECT_TRUE(temp.ends_with_sv(stable_ew));
+        EXPECT_TRUE(temp.ends_with(stable_ew));
       } else {
         EXPECT_FALSE(temp.ends_with(check_ew));
         EXPECT_FALSE(temp.ends_with(mmap_lib::str(sv_check_ew)));
-        EXPECT_FALSE(temp.ends_with_sv(stable_ew));
+        EXPECT_FALSE(temp.ends_with(stable_ew));
       }
     }
   }
@@ -492,6 +492,33 @@ TEST_F(Mmap_str_test, substr) {
     // find(const str& a)
     EXPECT_EQ(curr_sub, curr_sub_ref);
     EXPECT_EQ(next_sub, next_sub_ref);
+  }
+}
+
+TEST_F(Mmap_str_test, find_c) {
+
+  {
+    mmap_lib::str    str("this is short");
+    std::string_view sv("this is short");
+
+    for(auto i=0u;i<sv.size();++i) {
+      for(auto j=0u;j<sv.size();++j) {
+        EXPECT_EQ(sv[i], str[i]);
+        EXPECT_EQ(sv.find(sv[i],j), str.find(str[i],j));
+      }
+    }
+  }
+
+  {
+    mmap_lib::str    str(" a much loNger Sentence with @123");
+    std::string_view sv(" a much loNger Sentence with @123");
+
+    for(auto i=0u;i<sv.size();++i) {
+      for(auto j=0u;j<sv.size();++j) {
+        EXPECT_EQ(sv[i], str[i]);
+        EXPECT_EQ(sv.find(sv[i],j), str.find(str[i],j));
+      }
+    }
   }
 }
 

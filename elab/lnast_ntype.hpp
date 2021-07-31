@@ -173,7 +173,7 @@ protected:
 public:
   constexpr Lnast_ntype() : val(Lnast_ntype_invalid) {}
 
-  std::string_view to_s() const { return namemap[val]; }
+  mmap_lib::str to_str() const { return mmap_lib::str(namemap[val]); }
 
   Lnast_ntype_int get_raw_ntype() const { return val; }
 

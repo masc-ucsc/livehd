@@ -220,7 +220,7 @@ void Elab_scanner::parse_setup() {
   }
 
   memblock_fd = -1;
-  buffer_name = "inline";
+  buffer_name = "inline"_str;
 
   token_list.clear();
 }

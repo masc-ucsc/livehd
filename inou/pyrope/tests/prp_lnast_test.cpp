@@ -16,7 +16,7 @@ int main(int argc, char **argv) {
   b.end();
 
   Lbench b2("inou.PYROPE_prp_lnast_convert");
-  auto   lnast = converter.prp_ast_to_lnast("test");
+  auto   lnast = converter.prp_ast_to_lnast("test"_str);
   b2.end();
 
   fmt::print("AST to LNAST output:\n\n");

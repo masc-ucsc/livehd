@@ -566,7 +566,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const mmap_lib::str &key) const 
       auto key2 = entry.substr(e_pos);
       I(!key2.empty());
       if (is_root_attribute(key2)) {
-        tup->key_map.emplace_back(mmap_lib::str::concat("0.", key2), e.second);
+        tup->key_map.emplace_back(mmap_lib::str::concat("0."_str, key2), e.second);
       } else {
         tup->key_map.emplace_back(key2, e.second);
       }
@@ -1639,7 +1639,7 @@ mmap_lib::str Lgtuple::get_scalar_name() const {
       s = e.first;
     }
     if (!sname.empty() && sname != s)
-      return "";
+      return mmap_lib::str();
     sname = s;
   }
 

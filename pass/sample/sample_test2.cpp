@@ -9,13 +9,17 @@
 #include "gtest/gtest.h"
 #include "lgraph.hpp"
 #include "pass_sample.hpp"
+#include "mmap_str.hpp"
 
 class SampleMainTest : public ::testing::Test {
 protected:
-  void SetUp() override {}
+  void SetUp() override {
+    mmap_lib::str::setup();
+  }
 };
 
 TEST_F(SampleMainTest, EmptyLgraph) {
+  mmap_lib::str::setup();
   Eprp_utils::clean_dir("pass_test_lgdb");
 
   Lgraph *g = Lgraph::create("pass_test_lgdb", "empty", "nosource");

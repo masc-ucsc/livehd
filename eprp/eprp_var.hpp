@@ -59,7 +59,6 @@ public:
 
   bool             has_label(const mmap_lib::str &name) const { return dict.find(name) != dict.end(); };
   mmap_lib::str    get(const mmap_lib::str &name) const;
-  // const mmap_lib::str get(const mmap_lib::str &name, const mmap_lib::str &def_val) const;
 
   void clear() {
     dict.clear();

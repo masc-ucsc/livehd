@@ -416,7 +416,7 @@ bool test_starts_with(mmap_lib::str ls, mmap_lib::str rs, bool ans, uint8_t &cnt
 
 bool test_starts_with(mmap_lib::str ls, std::string_view rs, bool ans, uint8_t &cnt) {
   ++cnt;
-  return ls.starts_with_sv(rs) == ans;
+  return ls.starts_with(rs) == ans;
 }
 
 void pstr_starts_with() {

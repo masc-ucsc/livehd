@@ -207,7 +207,7 @@ void Inou_firrtl::setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type 
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        setup_register_bits(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
+        setup_register_bits(lnast, type.vector_type().type(), mmap_lib::str::concat(id, ".", i), parent_node);
       }
       break;
     }
@@ -242,9 +242,9 @@ void Inou_firrtl::setup_register_bits_scalar(Lnast &lnast, const mmap_lib::str &
                                              bool is_signed) {
 
   if (bitwidth > 0) {
-    auto value_node = Lnast_node::create_const(std::to_string(bitwidth));
+    auto value_node = Lnast_node::create_const(bitwidth);
     auto extension  = is_signed ? ".__sbits" : ".__ubits";
-    CreateTupAddFromStr(lnast, parent_node, absl::StrCat(id, extension), value_node);
+    CreateTupAddFromStr(lnast, parent_node, mmap_lib::str::concat(id, extension), value_node);
   }
 }
 
@@ -304,11 +304,11 @@ void Inou_firrtl::InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl
 
   firrtl::FirrtlPB_Type din_type = cmem.type_and_depth().data_type();
   if (din_type.type_case() == firrtl::FirrtlPB_Type::kBundleType || din_type.type_case() == firrtl::FirrtlPB_Type::kVectorType) {
-    collect_memory_data_struct_hierarchy(cmem.id(), din_type, "");
+    collect_memory_data_struct_hierarchy(mmap_lib::str(cmem.id()), din_type, "");
     wensize_init = din_type.vector_type().size();
   } else if (din_type.type_case() == firrtl::FirrtlPB_Type::kUintType) {
     auto bits = get_bit_count(din_type);
-    mem2din_fields[cmem.id()].emplace_back(absl::StrCat(".", bits));  // encode .bits at the end of hier-fields
+    mem2din_fields[mmap_lib::str(cmem.id())].emplace_back(mmap_lib::str::concat(".", bits));  // encode .bits at the end of hier-fields
   } else {
     I(false);
   }
@@ -332,11 +332,11 @@ void Inou_firrtl::InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl
   auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   auto temp_var_str = create_tmp_var();
   lnast.add_child(idx_attr_get, Lnast_node::create_ref(temp_var_str));
-  lnast.add_child(idx_attr_get, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_interface_args")));
+  lnast.add_child(idx_attr_get, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_interface_args"_str)));
   lnast.add_child(idx_attr_get, Lnast_node::create_const("__last_value"));
 
   auto idx_fncall = lnast.add_child(parent_node, Lnast_node::create_func_call());
-  lnast.add_child(idx_fncall, Lnast_node::create_ref(mmap_lib::str(cmem.id(), "_res")));
+  lnast.add_child(idx_fncall, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_res")));
   lnast.add_child(idx_fncall, Lnast_node::create_ref("__memory"));
   lnast.add_child(idx_fncall, Lnast_node::create_ref(temp_var_str));
 
@@ -354,7 +354,7 @@ void Inou_firrtl::InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl
   lnast.add_child(idx_asg_mfwd, Lnast_node::create_const(fwd));  // note: initialized
 
   auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-  lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_latency"))));
+  lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_latency")));
 
   auto idx_asg_mwensize = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg_mwensize, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_wensize")));
@@ -371,16 +371,16 @@ void Inou_firrtl::InitCMemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl
   auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
   lnast.add_child(idx_if, Lnast_node::create_ref("true"));
   auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_stmts());
-  mem2initial_idx.insert_or_assign(cmem.id(), idx_stmts);
+  mem2initial_idx.insert_or_assign(mmap_lib::str(cmem.id()), idx_stmts);
 
-  mem2port_cnt.insert_or_assign(cmem.id(), -1);
-  mem2rd_latency.insert_or_assign(cmem.id(), rd_latency);
+  mem2port_cnt.insert_or_assign(mmap_lib::str(cmem.id()), -1);
+  mem2rd_latency.insert_or_assign(mmap_lib::str(cmem.id()), rd_latency);
 }
 
 void Inou_firrtl::HandleMportDeclaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport) {
   // (void) parent_node;
-  auto mem_name = mport.memory_id();
-  mport2mem.insert_or_assign(mport.id(), mem_name);
+  auto mem_name = mmap_lib::str(mport.memory_id());
+  mport2mem.insert_or_assign(mmap_lib::str(mport.id()), mem_name);
 
   mem2port_cnt[mem_name]++;
   auto clk_str         = ReturnExprString(lnast, mport.expression(), parent_node, true);
@@ -442,10 +442,10 @@ void Inou_firrtl::HandleMportDeclaration(Lnast &lnast, Lnast_nid &parent_node, c
                  FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // noly need to initialize mem_din[wr_port] when you are sure it's a write mport
     InitMemDin(lnast, mem_name, port_cnt_str);
-    I(mport2mask_bitvec.find(mport.id()) == mport2mask_bitvec.end());
-    I(mport2mask_cnt.find(mport.id()) == mport2mask_cnt.end());
-    mport2mask_bitvec.insert_or_assign(mport.id(), 1);
-    mport2mask_cnt.insert_or_assign(mport.id(), 0);
+    I(mport2mask_bitvec.find(mmap_lib::str(mport.id())) == mport2mask_bitvec.end());
+    I(mport2mask_cnt.find(mmap_lib::str(mport.id())) == mport2mask_cnt.end());
+    mport2mask_bitvec.insert_or_assign(mmap_lib::str(mport.id()), 1);
+    mport2mask_cnt.insert_or_assign(mmap_lib::str(mport.id()), 0);
   } else {
     // need to initialize both mem_din[wr_port] mem_res[res_port] when you are not sure the port type
     InitMemRes(lnast, mem_name, port_cnt_str);
@@ -495,7 +495,7 @@ void Inou_firrtl::InitMemDin(Lnast &lnast, const mmap_lib::str &mem_name, const 
   auto  it                   = mem2din_fields.find(mem_name);
   I(it != mem2din_fields.end());
 
-  if (it->second.at(0) == ".") {  // din is scalar, the din_fields starts with something like .17
+  if (it->second.front() == '.') {  // din is scalar, the din_fields starts with something like .17
     auto idx_ta_mdin_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mdin_ini, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_din")));
     lnast.add_child(idx_ta_mdin_ini, Lnast_node::create_const(port_cnt_str));
@@ -505,11 +505,11 @@ void Inou_firrtl::InitMemDin(Lnast &lnast, const mmap_lib::str &mem_name, const 
     for (const auto &hier_full_name : hier_full_names) {  // hier_full_name example: foo.bar.baz.20, the last field is bit
       fmt::print("hier_name:{}\n", hier_full_name);
       std::vector<mmap_lib::str> hier_sub_names;
-      auto                          found = hier_full_name.find_last_of('.');  // get rid of last bit field
+      auto  found = hier_full_name.rfind('.');
       split_hier_name(hier_full_name.substr(0, found), hier_sub_names);
 
       auto idx_ta_mdin_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
-      lnast.add_child(idx_ta_mdin_ini, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_din"))));
+      lnast.add_child(idx_ta_mdin_ini, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_din")));
       lnast.add_child(idx_ta_mdin_ini, Lnast_node::create_const(port_cnt_str));
 
       for (const auto &sub_name : hier_sub_names)
@@ -527,14 +527,14 @@ void Inou_firrtl::create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statem
   /*            dot                       assign                      fn_call
    *      /      |        \                / \                     /     |     \
    * ___F0 itup_[inst_name] __last_value   F1 ___F0  otup_[inst_name] [mod_name]  F1 */
-  auto temp_var_name2 = absl::StrCat("F", std::to_string(++tmp_var_cnt));
+  auto temp_var_name2 = mmap_lib::str::concat("F", std::to_string(++tmp_var_cnt));
 
-  auto inst_name = inst.id();
-  if (inst.id().substr(0, 2) == "_T") {
-    inst_name = absl::StrCat("_.", inst_name);
+  auto inst_name = mmap_lib::str(inst.id());
+  if (inst_name.substr(0, 2) == "_T") {
+    inst_name = mmap_lib::str::concat("_.", inst_name);
   }
-  auto inp_name = mmap_lib::str(absl::StrCat("itup_", inst_name));
-  auto out_name = mmap_lib::str(absl::StrCat("otup_", inst_name));
+  auto inp_name = mmap_lib::str::concat("itup_", inst_name);
+  auto out_name = mmap_lib::str::concat("otup_", inst_name);
 
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name2));
@@ -548,13 +548,13 @@ void Inou_firrtl::create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statem
 
   /* Also, I need to record this module instance in
    * a map that maps instance name to module name. */
-  inst_to_mod_map[inst.id()] = inst.module_id();
+  inst_to_mod_map[mmap_lib::str(inst.id())] = mmap_lib::str(inst.module_id());
 
   // If any parameters exist (for ext module), specify those.
   // NOTE->hunter: We currently specify parameters the same way as inputs.
-  for (const auto &param : emod_to_param_map[inst.module_id()]) {
+  for (const auto &param : emod_to_param_map[mmap_lib::str(inst.module_id())]) {
     auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    if (isdigit(param.second[0])) {
+    if (std::isdigit(param.second[0])) {
       lnast.add_child(idx_dot_p, Lnast_node::create_const(param.second));
     } else {
       lnast.add_child(idx_dot_p, Lnast_node::create_ref(param.second));
@@ -687,7 +687,7 @@ void Inou_firrtl::HandleConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_P
 void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                                       const mmap_lib::str &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
-  I(op.arg_size() == 1 & &op.const__size() == 2);
+  I(op.arg_size() == 1 && op.const__size() == 2);
 
   auto lhs_str       = lhs;
   auto e1_str        = ReturnExprString(lnast, op.arg(0), parent_node, true);
@@ -695,14 +695,14 @@ void Inou_firrtl::HandleExtractBitsOp(Lnast &lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_bits_exct, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_bits_exct, Lnast_node::create_const("__fir_bits"));
   lnast.add_child(idx_bits_exct, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_bits_exct, Lnast_node::create_const(op.const_(0).value()));
-  lnast.add_child(idx_bits_exct, Lnast_node::create_const(op.const_(1).value()));
+  lnast.add_child(idx_bits_exct, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
+  lnast.add_child(idx_bits_exct, Lnast_node::create_const(mmap_lib::str(op.const_(1).value())));
 }
 
 void Inou_firrtl::HandleHeadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                                const mmap_lib::str &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
-  I(op.arg_size() == 1 & &op.const__size() == 1);
+  I(op.arg_size() == 1 && op.const__size() == 1);
 
   auto lhs_str  = lhs;
   auto e1_str   = ReturnExprString(lnast, op.arg(0), parent_node, true);
@@ -710,13 +710,13 @@ void Inou_firrtl::HandleHeadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_P
   lnast.add_child(idx_head, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_head, Lnast_node::create_const("__fir_head"));
   lnast.add_child(idx_head, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_head, Lnast_node::create_const(op.const_(0).value()));
+  lnast.add_child(idx_head, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
 }
 
 void Inou_firrtl::HandleTailOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                                const mmap_lib::str &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
-  I(op.arg_size() == 1 & &op.const__size() == 1);
+  I(op.arg_size() == 1 && op.const__size() == 1);
   auto lhs_str = lhs;
   auto e1_str  = ReturnExprString(lnast, op.arg(0), parent_node, true);
 
@@ -724,7 +724,7 @@ void Inou_firrtl::HandleTailOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_P
   lnast.add_child(idx_tail, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_tail, Lnast_node::create_const("__fir_tail"));
   lnast.add_child(idx_tail, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_tail, Lnast_node::create_const(op.const_(0).value()));
+  lnast.add_child(idx_tail, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
 }
 
 void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
@@ -746,7 +746,7 @@ void Inou_firrtl::HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression
 void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                               const mmap_lib::str &lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
-  I(op.arg_size() == 1 & &op.const__size() == 1);
+  I(op.arg_size() == 1 && op.const__size() == 1);
 
   auto lhs_str = lhs;
   auto e1_str  = ReturnExprString(lnast, op.arg(0), parent_node, true);
@@ -755,7 +755,7 @@ void Inou_firrtl::HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_Pr
   lnast.add_child(idx_pad, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_pad, Lnast_node::create_const("__fir_pad"));
   lnast.add_child(idx_pad, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_pad, Lnast_node::create_const(op.const_(0).value()));
+  lnast.add_child(idx_pad, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
 }
 
 void Inou_firrtl::HandleTwoExprPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
@@ -794,12 +794,12 @@ void Inou_firrtl::HandleStaticShiftOp(Lnast &lnast, const firrtl::FirrtlPB_Expre
   lnast.add_child(idx_shift, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_shift, Lnast_node::create_const(sub_it->second));
   lnast.add_child(idx_shift, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_shift, Lnast_node::create_const(op.const_(0).value()));
+  lnast.add_child(idx_shift, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
 }
 
 void Inou_firrtl::HandleTypeConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                                    const mmap_lib::str &lhs) {
-  I(op.arg_size() == 1 & &op.const__size() == 0);
+  I(op.arg_size() == 1 && op.const__size() == 0);
   auto lhs_str = lhs;
   auto e1_str  = ReturnExprString(lnast, op.arg(0), parent_node, true);
 
@@ -829,22 +829,22 @@ void Inou_firrtl::HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expressi
   auto flattened_str  = FlattenExpression(lnast, parent_node, expr);
   auto alter_full_str = get_full_name(flattened_str, is_rhs);
 
-  if (alter_full_str[0] == '$') {
-    flattened_str = absl::StrCat("$", flattened_str);
-  } else if (alter_full_str[0] == '%') {
-    flattened_str = absl::StrCat("%", flattened_str);
+  if (alter_full_str.front() == '$') {
+    flattened_str = flattened_str.prepend('$');
+  } else if (alter_full_str.front() == '%') {
+    flattened_str = flattened_str.prepend('%');
   } else if (alter_full_str.substr(0, 3) == "_#_") {  // note: use _#_ to judge is a reg_qpin without split_hier_name again
     if (is_rhs) {
       flattened_str = alter_full_str;
     } else {
-      flattened_str = absl::StrCat("#", flattened_str);
+      flattened_str = flattened_str.prepend('#');
     }
-  } else if (alter_full_str[0] == '#') {
+  } else if (alter_full_str.front() == '#') {
     if (is_rhs) {
       I(false);
       flattened_str = alter_full_str.substr(1);
     } else {
-      flattened_str = absl::StrCat("#", flattened_str);
+      flattened_str = flattened_str.prepend('#');
     }
   } else if (mport2mem.count(alter_full_str.substr(0, alter_full_str.find('.')))) {
     // FIXME-sh: the mport name is not necessary at the head, it might be used as an index
@@ -863,7 +863,7 @@ void Inou_firrtl::HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expressi
     // note: instead of using alter_full_str, I use flattened_str.
     auto inst_name = flattened_str.substr(0, flattened_str.find('.'));
     if (inst_name.substr(0, 2) == "_T")
-      inst_name = absl::StrCat("_.", inst_name);
+      inst_name = mmap_lib::str::concat("_.", inst_name);
 
     auto        str_without_inst = flattened_str.substr(flattened_str.find('.') + 1);
     auto        first_field_name = str_without_inst.substr(0, str_without_inst.find('.'));
@@ -880,9 +880,9 @@ void Inou_firrtl::HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expressi
 
     if (is_hier_io) {
       if (dir == 1) {  // PORT_DIRECTION_IN
-        flattened_str = absl::StrCat("itup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
+        flattened_str = mmap_lib::str::concat("itup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
       } else if (dir == 2) {
-        flattened_str = absl::StrCat("otup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
+        flattened_str = mmap_lib::str::concat("otup_", inst_name, ".", first_field_name, ".", str_without_inst_and_io);
       } else {
         Pass::error("direction unknown of {}\n", flattened_str);
         I(false);
@@ -982,16 +982,16 @@ void Inou_firrtl::set_leaf_type(const mmap_lib::str &subname, const mmap_lib::st
                                 std::vector<std::pair<mmap_lib::str, Inou_firrtl::Leaf_type>> &hier_subnames) {
   if (prev == 0) {
     hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));
-  } else if (full_name.at(prev - 1) == '.') {
-    auto first_char = subname.at(0);
-    if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+  } else if (full_name[prev - 1] == '.') {
+    auto first_char = subname.front();
+    if (std::isdigit(first_char) || first_char == '-' || first_char == '+') {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));
     } else {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_str));
     }
-  } else if (full_name.at(prev - 1) == '[') {
-    auto first_char = subname.at(0);
-    if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+  } else if (full_name[prev - 1] == '[') {
+    auto first_char = subname.front();
+    if (std::isdigit(first_char) || first_char == '-' || first_char == '+') {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Const_num));
     } else {
       hier_subnames.emplace_back(std::make_pair(subname, Leaf_type::Ref));
@@ -1003,7 +1003,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name, std::vector<mm
   std::size_t prev = 0;
   std::size_t pos;
 
-  while ((pos = full_name.find_first_of(".[", prev)) != std::string::npos) {
+  while ((pos = full_name.rfind(".[", prev)) != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1014,7 +1014,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name, std::vector<mm
     prev = pos + 1;
   }
 
-  if (prev < full_name.length()) {
+  if (prev < full_name.size()) {
     auto subname = full_name.substr(prev, std::string::npos);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
@@ -1028,7 +1028,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name,
   std::size_t prev = 0;
   std::size_t pos;
 
-  while ((pos = full_name.find_first_of(".[", prev)) != std::string::npos) {
+  while ((pos = full_name.rfind(".[", prev)) != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1039,7 +1039,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name,
     prev = pos + 1;
   }
 
-  if (prev < full_name.length()) {
+  if (prev < full_name.size()) {
     auto subname = full_name.substr(prev, std::string::npos);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
@@ -1054,7 +1054,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name,
 // note: "#" prefix need to be ready if the full_name is a register
 void Inou_firrtl::CreateTupGetFromStr(Lnast &ln, Lnast_nid &parent_node, const mmap_lib::str &full_name,
                                       const Lnast_node &dest_node) {
-  I((absl::StrContains(full_name, '.')));
+  I(full_name.contains('.'));
   I(!dest_node.is_invalid());
 
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
@@ -1084,7 +1084,7 @@ void Inou_firrtl::CreateTupGetFromStr(Lnast &ln, Lnast_nid &parent_node, const m
 
 void Inou_firrtl::CreateTupAddFromStr(Lnast &ln, Lnast_nid &parent_node, const mmap_lib::str &full_name,
                                       const Lnast_node &value_node) {
-  I((absl::StrContains(full_name, '.')));
+  I(full_name.contains('.'));
 
   std::vector<std::pair<mmap_lib::str, Inou_firrtl::Leaf_type>> hier_subnames;
   split_hier_name(full_name, hier_subnames);
@@ -1124,7 +1124,7 @@ mmap_lib::str Inou_firrtl::FlattenExpression(Lnast &ln, Lnast_nid &parent_node, 
     return mmap_lib::str::concat(FlattenExpression(ln, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
 
   } else if (expr.has_reference()) {
-    return expr.reference().id();
+    return mmap_lib::str(expr.reference().id());
 
   }
 
@@ -1140,7 +1140,7 @@ mmap_lib::str Inou_firrtl::FlattenExpression(Lnast &ln, Lnast_nid &parent_node, 
  * and the bitwidth of it (if the bw is 0, that means the bitwidth will be inferred later.
  */
 void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const mmap_lib::str &port_id,
-                                 std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> &vec) {
+                                 std::vector<std::tuple<mmap_lib::str, uint8_t, uint32_t, bool>> &vec) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
       vec.emplace_back(port_id, dir, type.uint_type().width().value(), false);
@@ -1206,7 +1206,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir,
 void Inou_firrtl::ListPortInfo(Lnast &lnast, const firrtl::FirrtlPB_Port &port, Lnast_nid parent_node) {
   // Terms in port_list as follows: <name, direction, bits, sign>
   std::vector<std::tuple<mmap_lib::str, uint8_t, uint32_t, bool>> port_list;
-  create_io_list(port.type(), port.direction(), port.id(), port_list);
+  create_io_list(port.type(), port.direction(), mmap_lib::str(port.id()), port_list);
 
   for (auto val : port_list) {
     auto port_name = std::get<0>(val);
@@ -1241,7 +1241,7 @@ void Inou_firrtl::record_all_input_hierarchy(const mmap_lib::str &port_name) {
   while (pos != std::string::npos) {
     mmap_lib::str  port_name2 = port_name.substr(0, pos);
     input_names.insert(port_name2);
-    pos = port_name2.find_last_of('.');
+    pos = port_name2.rfind('.');
   }
 }
 
@@ -1250,7 +1250,7 @@ void Inou_firrtl::record_all_output_hierarchy(const mmap_lib::str &port_name) {
   while (pos != std::string::npos) {
     auto port_name2 = port_name.substr(0, pos);
     output_names.insert(port_name2);
-    pos = port_name2.find_last_of('.');
+    pos = port_name2.rfind('.');
   }
 }
 
@@ -1381,7 +1381,7 @@ void Inou_firrtl::InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression
   auto lhs_str = get_full_name(lhs_noprefixes, false);
   switch (rhs_expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
-      auto tmp_rhs_str = rhs_expr.reference().id();
+      auto tmp_rhs_str = mmap_lib::str(rhs_expr.reference().id());
       if (mport2mem.count(tmp_rhs_str)) {
         HandleRdMportUsage(lnast, parent_node, tmp_rhs_str);
       }
@@ -1396,7 +1396,7 @@ void Inou_firrtl::InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression
         lnast.add_child(idx_attr_get, Lnast_node::create_const("__last_value"));
         rhs_str = temp_var_str;
       } else {
-        rhs_str = get_full_name(rhs_expr.reference().id(), true);
+        rhs_str = get_full_name(mmap_lib::str(rhs_expr.reference().id()), true);
       }
 
       // note: hiFirrtl might have bits mismatch between lhs and rhs. To solve
@@ -1426,7 +1426,7 @@ void Inou_firrtl::InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression
       Lnast_nid idx_asg;
       idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
       lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-      auto str_val = rhs_expr.uint_literal().value().value();
+      auto str_val = mmap_lib::str(rhs_expr.uint_literal().value().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(str_val));
       break;
     }
@@ -1435,7 +1435,7 @@ void Inou_firrtl::InitialExprAdd(Lnast &lnast, const firrtl::FirrtlPB_Expression
       idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
 
       lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-      auto str_val = rhs_expr.sint_literal().value().value();
+      auto str_val = mmap_lib::str(rhs_expr.sint_literal().value().value());
       lnast.add_child(idx_asg, Lnast_node::create_const(str_val));
       break;
     }
@@ -1494,15 +1494,15 @@ mmap_lib::str Inou_firrtl::ReturnExprString(Lnast &lnast, const firrtl::FirrtlPB
   mmap_lib::str expr_string;
   switch (expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
-      expr_string = get_full_name(expr.reference().id(), is_rhs);
+      expr_string = get_full_name(mmap_lib::str(expr.reference().id()), is_rhs);
       break;
     }
     case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
-      expr_string = mmap_lib::str(absl::StrCat(expr.uint_literal().value().value(), "ubits", expr.uint_literal().width().value()));
+      expr_string = mmap_lib::str::concat(expr.uint_literal().value().value(), "ubits", expr.uint_literal().width().value());
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
-      expr_string = mmap_lib::str(absl::StrCat(expr.sint_literal().value().value(), "sbits", expr.uint_literal().width().value()));
+      expr_string = mmap_lib::str::concat(expr.sint_literal().value().value(), "sbits", expr.uint_literal().width().value());
       break;
     }
     case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf
@@ -1558,7 +1558,7 @@ void Inou_firrtl::AttachExprStrToNode(Lnast &lnast, const mmap_lib::str &access_
 
   auto first_char = access_str.front();
 
-  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+  if (std::isdigit(first_char) || first_char == '-' || first_char == '+') {
     // Represents an integer value.
     lnast.add_child(parent_node, Lnast_node::create_const(access_str));
   } else {
@@ -1571,17 +1571,17 @@ void Inou_firrtl::AttachExprStrToNode(Lnast &lnast, const mmap_lib::str &access_
 // TODO: Attach
 //
 void Inou_firrtl::setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
-  auto flop_qpin_var = absl::StrCat("_#_", stmt.register_().id(), "_q");
+  auto flop_qpin_var = mmap_lib::str::concat("_#_", stmt.register_().id(), "_q");
   auto idx_asg2      = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg2, Lnast_node::create_ref(flop_qpin_var));
-  lnast.add_child(idx_asg2, Lnast_node::create_ref(mmap_lib::str(absl::StrCat("#", stmt.register_().id()))));
+  lnast.add_child(idx_asg2, Lnast_node::create_ref(mmap_lib::str::concat("#", stmt.register_().id())));
 
-  reg2qpin.insert_or_assign(stmt.register_().id(), flop_qpin_var);
+  reg2qpin.insert_or_assign(mmap_lib::str(stmt.register_().id()), flop_qpin_var);
 }
 
 void Inou_firrtl::declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt) {
   auto idx_attget         = lnast.add_child(parent_node, Lnast_node::create_attr_get());
-  auto full_register_name = mmap_lib::str(absl::StrCat("#", stmt.register_().id()));
+  auto full_register_name = mmap_lib::str::concat("#", stmt.register_().id());
   auto tmp_var_str        = create_tmp_var();
   lnast.add_child(idx_attget, Lnast_node::create_ref(tmp_var_str));
   lnast.add_child(idx_attget, Lnast_node::create_ref(full_register_name));
@@ -1602,17 +1602,17 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
   Lnast_node value_node;
 
   if (resete_case == firrtl::FirrtlPB_Expression::kUintLiteral || resete_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
-    auto str_val = resete.uint_literal().value().value();
+    auto str_val = mmap_lib::str(resete.uint_literal().value().value());
     value_node   = Lnast_node::create_const(str_val);
     if (str_val == "0")
       tied0_reset = true;
   } else if (resete_case == firrtl::FirrtlPB_Expression::kReference) {
-    auto ref_str = get_full_name(resete.reference().id(), true);
+    auto ref_str = get_full_name(mmap_lib::str(resete.reference().id()), true);
     value_node   = Lnast_node::create_ref(ref_str);
   }
 
   if (!value_node.is_invalid())
-    CreateTupAddFromStr(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset"), value_node);
+    CreateTupAddFromStr(lnast, parent_node, mmap_lib::str::concat("#", reg_raw_name, ".__reset"), value_node);
 
   if (tied0_reset) {
     return;
@@ -1622,10 +1622,10 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
 
   auto inite_case = inite.expression_case();
   if (inite_case == firrtl::FirrtlPB_Expression::kUintLiteral || inite_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
-    auto str_val = inite.uint_literal().value().value();
+    auto str_val = mmap_lib::str(inite.uint_literal().value().value());
     initial_node = Lnast_node::create_const(str_val);
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
-    auto ref_str = inite.reference().id();
+    auto ref_str = mmap_lib::str(inite.reference().id());
     auto empty_tup_add_op  = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var());
     lnast.add_child(empty_tup_add_op, empty_tup_add_var);
@@ -1638,22 +1638,22 @@ void Inou_firrtl::setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node
   }
 
   if (!initial_node.is_invalid())
-    CreateTupAddFromStr(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"), initial_node);
+    CreateTupAddFromStr(lnast, parent_node, mmap_lib::str::concat("#", reg_raw_name, ".__initial"), initial_node);
 }
 
 void Inou_firrtl::ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node) {
   switch (stmt.statement_case()) {
     case firrtl::FirrtlPB_Statement::kWire: {
-      wire_names.insert(stmt.wire().id());
-      init_wire_dots(lnast, stmt.wire().type(), stmt.wire().id(), parent_node);
+      wire_names.insert(mmap_lib::str(stmt.wire().id()));
+      init_wire_dots(lnast, stmt.wire().type(), mmap_lib::str(stmt.wire().id()), parent_node);
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
-      setup_register_bits(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()), parent_node);
+      setup_register_bits(lnast, stmt.register_().type(), mmap_lib::str::concat("#", stmt.register_().id()), parent_node);
 
-      setup_register_reset_init(lnast, parent_node, stmt.register_().id(), stmt.register_().reset(), stmt.register_().init());
+      setup_register_reset_init(lnast, parent_node, mmap_lib::str(stmt.register_().id()), stmt.register_().reset(), stmt.register_().init());
       declare_register(lnast, parent_node, stmt);
       setup_register_q_pin(lnast, parent_node, stmt);
       break;
@@ -1663,7 +1663,7 @@ void Inou_firrtl::ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {
-      memory_names.insert(stmt.cmemory().id());
+      memory_names.insert(mmap_lib::str(stmt.cmemory().id()));
       fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
       InitCMemory(lnast, parent_node, stmt.cmemory());
       break;
@@ -1677,7 +1677,7 @@ void Inou_firrtl::ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kNode: {  // Node -- nodes are simply named intermediates in a circuit
-      InitialExprAdd(lnast, stmt.node().expression(), parent_node, stmt.node().id());
+      InitialExprAdd(lnast, stmt.node().expression(), parent_node, mmap_lib::str(stmt.node().id()));
       break;
     }
     case firrtl::FirrtlPB_Statement::kWhen: {
@@ -1785,7 +1785,7 @@ void Inou_firrtl::ListStatementInfo(Lnast &lnast, const firrtl::FirrtlPB_Stateme
       break;
     }
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
-      auto id = stmt.is_invalid().expression().reference().id();
+      auto id = mmap_lib::str(stmt.is_invalid().expression().reference().id());
       auto it = wire_names.find(id);
       if (it != wire_names.end()) {
         is_invalid_table.insert(id);
@@ -1847,7 +1847,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast &lnast, Lnast_nid &parent_node) 
       auto ta_tmp_var_str    = create_tmp_var();
       auto idx_tg            = lnast.add_child(parent_node, Lnast_node::create_tuple_get());
       lnast.add_child(idx_tg, Lnast_node::create_ref(tg_tmp_var_str));
-      lnast.add_child(idx_tg, Lnast_node::create_ref(mmap_lib::str(mem_name, "_din")));
+      lnast.add_child(idx_tg, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_din")));
       lnast.add_child(idx_tg, Lnast_node::create_const(pcnt));
 
       auto idx_empty_ta = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
@@ -1918,7 +1918,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast &lnast, Lnast_nid &parent_node) 
 // Create basis of LNAST tree. Set root to "top" and have "stmts" be top's child.
 void Inou_firrtl::ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, const mmap_lib::str &file_name) {
   fmt::print("Module (user): {}\n", fmodule.user_module().id());
-  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(fmodule.user_module().id(), file_name);
+  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(mmap_lib::str(fmodule.user_module().id()), file_name);
 
   const firrtl::FirrtlPB_Module_UserModule &user_module = fmodule.user_module();
 
@@ -1959,21 +1959,29 @@ void Inou_firrtl::PopulateAllModsIO(Eprp_var &var, const firrtl::FirrtlPB_Circui
     if (circuit.module(i).has_external_module()) {
       /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
        * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
-      auto     sub     = AddModToLibrary(var, circuit.module(i).external_module().id(), file_name);
+      auto     sub     = AddModToLibrary(var, mmap_lib::str(circuit.module(i).external_module().id()), file_name);
       uint64_t inp_pos = 0;
       uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
         auto port = circuit.module(i).external_module().port(j);
-        AddPortToMap(circuit.module(i).external_module().id(), port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
+        AddPortToMap(
+            mmap_lib::str(circuit.module(i).external_module().id())
+            ,port.type()
+            ,port.direction()
+            ,mmap_lib::str(port.id())
+            ,sub
+            ,inp_pos
+            ,out_pos
+            );
       }
       continue;
     } else if (circuit.module(i).has_user_module()) {
-      auto     sub     = AddModToLibrary(var, circuit.module(i).user_module().id(), file_name);
+      auto     sub     = AddModToLibrary(var, mmap_lib::str(circuit.module(i).user_module().id()), file_name);
       uint64_t inp_pos = 0;
       uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
-        AddPortToMap(circuit.module(i).user_module().id(), port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
+        AddPortToMap(mmap_lib::str(circuit.module(i).user_module().id()), port.type(), port.direction(), mmap_lib::str(port.id()), sub, inp_pos, out_pos);
       }
     } else {
       Pass::error("Module not set.");
@@ -2035,9 +2043,9 @@ void Inou_firrtl::AddPortToMap(const mmap_lib::str &mod_id, const firrtl::Firrtl
             new_dir = 1;
           }
           I(new_dir != 0);
-          AddPortToMap(mod_id, btype.field(i).type(), new_dir, port_id + "." + btype.field(i).id(), sub, inp_pos, out_pos);
+          AddPortToMap(mod_id, btype.field(i).type(), new_dir, mmap_lib::str::concat(port_id, ".", btype.field(i).id()), sub, inp_pos, out_pos);
         } else {
-          AddPortToMap(mod_id, btype.field(i).type(), dir, port_id + "." + btype.field(i).id(), sub, inp_pos, out_pos);
+          AddPortToMap(mod_id, btype.field(i).type(), dir, mmap_lib::str::concat(port_id, ".", btype.field(i).id()), sub, inp_pos, out_pos);
         }
       }
       break;
@@ -2045,7 +2053,7 @@ void Inou_firrtl::AddPortToMap(const mmap_lib::str &mod_id, const firrtl::Firrtl
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        AddPortToMap(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
+        AddPortToMap(mod_id, type.vector_type().type(), dir, mmap_lib::str::concat(port_id, ".", i), sub, inp_pos, out_pos);
       }
       break;
     }
@@ -2070,7 +2078,7 @@ void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule
   std::vector<std::tuple<mmap_lib::str, uint8_t, uint32_t, bool>> port_list;  // Terms are as follows: name, direction, # of bits, sign.
   for (int i = 0; i < emod.port_size(); i++) {
     auto port = emod.port(i);
-    create_io_list(port.type(), port.direction(), port.id(), port_list);
+    create_io_list(port.type(), port.direction(), mmap_lib::str(port.id()), port_list);
   }
 
   // Figure out what the value for each parameter is, add to map.
@@ -2083,22 +2091,26 @@ void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule
       case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kDouble:
         param_str = emod.parameter(j).double_();
         break;
-      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kString: param_str = emod.parameter(j).string(); break;
-      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kRawString: param_str = emod.parameter(j).raw_string(); break;
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kString: 
+        param_str = mmap_lib::str(emod.parameter(j).string()); 
+        break;
+      case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kRawString: 
+        param_str = mmap_lib::str(emod.parameter(j).raw_string()); 
+        break;
       default: I(false);
     }
-    emod_to_param_map[emod.defined_name()].insert({emod.parameter(j).id(), param_str});
+    emod_to_param_map[mmap_lib::str(emod.defined_name())].insert({mmap_lib::str(emod.parameter(j).id()), param_str});
   }
 
   // Add them to the map to let us know what ports exist in this module.
   for (const auto &elem : port_list) {
-    mod_to_io_dir_map[std::make_pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
+    mod_to_io_dir_map[std::make_pair(mmap_lib::str(emod.defined_name()), mmap_lib::str(std::get<0>(elem)))] = std::get<1>(elem);
     // mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem), std::get<3>(elem)});
   }
 }
 
 mmap_lib::str Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt &bigint) {
-  if (bigint.value().length() == 0) {
+  if (bigint.value().size() == 0) {
     return mmap_lib::str("0b0");
   }
 
@@ -2107,9 +2119,9 @@ mmap_lib::str Inou_firrtl::ConvertBigIntToStr(const firrtl::FirrtlPB_BigInt &big
     mmap_lib::str bit_str;
     for (int j = 0; j < 8; j++) {
       if (bigint_char % 2) {
-        bit_str.prepend('1');
+        bit_str = bit_str.prepend('1');
       } else {
-        bit_str.prepend('0');
+        bit_str = bit_str.prepend('0');
       }
       bigint_char >>= 1;
     }

@@ -87,7 +87,7 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_select()) {
       I(false);  // have been converted to tuple chain
     } else if (ntype.is_err_flag()) {
-      I(lnast->get_name(lnidx) == "err_var_undefined");
+      I(lnast->get_name(lnidx) == mmap_lib::str("err_var_undefined"));
       continue;
     } else {
       lnast->dump();
@@ -162,7 +162,6 @@ void Lnast_tolg::process_ast_concat_op(Lgraph *lg, const Lnast_nid &lnidx_concat
   auto lhs_name  = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
   auto opd1_name = lnast->get_sname(opd1);
-  auto opd2_name = lnast->get_sname(opd2);
   // lhs = opd1 ++ opd2, both opd1 and opd2 could be either a scalar or a tuple
 
   // create TupAdd, concat both tail of opd1 and opd2, name it with old opd1_name (a = a ++ b) or new lhs_name (c = a ++ b)
@@ -347,7 +346,7 @@ void Lnast_tolg::process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx_dp_
   auto rhs_dp_name = lnast->get_sname(rhs_dp);
   auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
   auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
-  auto attr_vname  = "__dp_assign";
+  auto attr_vname  = mmap_lib::str("__dp_assign");
 
   if (name2dpin.find(rhs_dp_name) == name2dpin.end()) {
     process_ast_assign_op(lg, lnidx_dp_assign);
@@ -506,7 +505,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
   int                            i = 0;
   absl::flat_hash_map<int, Node> tg_map;
   mmap_lib::str                  c0_tg_name;
-  const mmap_lib::str &          c0_tg_vname;
+  mmap_lib::str                  c0_tg_vname;
   int8_t                         c0_tg_subs = 0;
 
   for (const auto &child : lnast->children(lnidx_tg)) {

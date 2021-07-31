@@ -28,10 +28,10 @@
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 
-static CellTypes                        ct_all;
-static absl::flat_hash_set<size_t>      driven_signals;
-static absl::flat_hash_set<std::string> cell_port_inputs;
-static absl::flat_hash_set<std::string> cell_port_outputs;
+static CellTypes                          ct_all;
+static absl::flat_hash_set<size_t>        driven_signals;
+static absl::flat_hash_set<mmap_lib::str> cell_port_inputs;
+static absl::flat_hash_set<mmap_lib::str> cell_port_outputs;
 
 typedef std::pair<const RTLIL::Wire *, int> Wire_bit;
 
@@ -105,15 +105,15 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
   // Sz => high z
   // Sa => don't care (not sure what is the diff between Sa and Sx
   // Sm => used internally by Yosys
-  std::string val("0b");
+  mmap_lib::str val("0b");
   if (!is_signed && data[data.size() - 1] == RTLIL::S1) {
-    absl::StrAppend(&val, "0");
+    val = val.prepend('0');
   }
   for (size_t i = data.size(); i > 0; i--) {
     switch (data[i - 1]) {
-      case RTLIL::S0: absl::StrAppend(&val, "0"); break;
-      case RTLIL::S1: absl::StrAppend(&val, "1"); break;
-      default: absl::StrAppend(&val, "x"); break;
+      case RTLIL::S0: val = val.prepend('0'); break;
+      case RTLIL::S1: val = val.prepend('1'); break;
+      default: val = val.prepend('?'); break;
     }
   }
 
@@ -344,8 +344,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
     if (v.is_fully_def() && v.size() < 30) {
       return g->create_node_const(v.as_int()).setup_driver_pin();
     }
-    std::string v_str("0b");
-    v_str += v.as_string();
+    auto v_str = mmap_lib::str::concat("0b", v.as_string());
     return g->create_node_const(v_str).setup_driver_pin();
   }
   bool is_signed = true;  // signed by default
@@ -555,7 +554,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
   return node;
 }
 
-static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
+static bool is_black_box_output(const RTLIL::Module *mod, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
@@ -570,7 +569,7 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
   if (wire->port_input)
     return false;
 
-  std::string cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
+  mmap_lib::str cell_port(absl::StrCat(cell->type.str(), "_:_", port_name.str()));
 
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
     fprintf(stderr, "WARNING: lgyosys_tolg guessing that cell %s pin %s is an output\n", cell->name.c_str(), port_name.c_str());
@@ -586,12 +585,12 @@ static bool is_black_box_output(const RTLIL::Module *module, const RTLIL::Cell *
       cell->type.str(),
       port_name.str());
 
-  log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
+  log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), mod->name.c_str(), cell->type.c_str());
   I(false);  // TODO: is it possible to resolve this case?
   return false;
 }
 
-static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
+static bool is_black_box_input(const RTLIL::Module *mod, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
@@ -606,7 +605,7 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
   if (wire->port_input)
     return true;
 
-  std::string cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
+  mmap_lib::str cell_port(absl::StrCat(cell->type.str(), "_:_", port_name.str()));
 
   // Opposite of is_black_box_output
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
@@ -623,13 +622,13 @@ static bool is_black_box_input(const RTLIL::Module *module, const RTLIL::Cell *c
       cell->type.str(),
       port_name.str());
 
-  log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), module->name.c_str(), cell->type.c_str());
+  log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), mod->name.c_str(), cell->type.c_str());
   I(false);  // TODO: is it possible to resolve this case?
   return false;
 }
 
-static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g) {
-  for (auto cell : module->cells()) {
+static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
+  for (auto cell : mod->cells()) {
     if (cell->type == "$mem") {
       cell2node[cell] = resolve_memory(g, cell);
       continue;
@@ -682,9 +681,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
               } else {
                 fprintf(stderr,
                         "Warning: impossible to figure out direction in module %s cell type %s pin_name to %s\n",
-                        module->name.c_str(),
+                        mod->name.c_str(),
                         cell->type.c_str(),
-                        pin_name.c_str());
+                        pin_name.to_s().c_str());
                 continue;
               }
             }
@@ -694,13 +693,13 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
             continue;
 
 #ifndef NDEBUG
-          printf("module %s cell type %s has output pin_name %s\n", module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+          printf("module %s cell type %s has output pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.to_s().c_str());
 #endif
         } else {
           if (!sub->has_pin(pin_name)) {
-            if (cell->input(conn.first) || is_black_box_input(module, cell, conn.first))
+            if (cell->input(conn.first) || is_black_box_input(mod, cell, conn.first))
               sub->add_input_pin(pin_name);
-            else if (cell->output(conn.first) || is_black_box_output(module, cell, conn.first))
+            else if (cell->output(conn.first) || is_black_box_output(mod, cell, conn.first))
               sub->add_output_pin(pin_name);
           }
 
@@ -708,7 +707,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
             continue;
 
 #ifndef NDEBUG
-          printf("module %s submodule %s has pin_name %s\n", module->name.c_str(), cell->type.c_str(), pin_name.c_str());
+          printf("module %s submodule %s has pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.to_s().c_str());
 #endif
         }
 
@@ -722,7 +721,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
 
       Node_pin driver_pin;
       if (node.is_type_sub()) {
-        std::string pin_name(&(conn.first.c_str()[1]));
+        mmap_lib::str pin_name(&(conn.first.c_str()[1]));
         driver_pin = node.setup_driver_pin(pin_name);
       } else {
         driver_pin = node.setup_driver_pin();
@@ -769,7 +768,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *module, Lgraph *g)
               auto dpin = wire2pin[wire];
               fmt::print("partial wire {} from module {} cell type {} (switching to partial node:{})\n",
                          wire->name.c_str(),
-                         module->name.c_str(),
+                         mod->name.c_str(),
                          cell->type.c_str(),
                          dpin.get_node().debug_name());
             }
@@ -821,8 +820,8 @@ static void dump_partially_assigned() {
   }
 }
 
-static void process_assigns(RTLIL::Module *module, Lgraph *g) {
-  for (const auto &conn : module->connections()) {
+static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
+  for (const auto &conn : mod->connections()) {
     const RTLIL::SigSpec lhs = conn.first;
     const RTLIL::SigSpec rhs = conn.second;
 
@@ -1219,8 +1218,8 @@ static void process_partially_assigned(Lgraph *g) {
   process_partially_assigned_self_chains(g);
 }
 
-static void process_connect_outputs(RTLIL::Module *module, Lgraph *g) {
-  (void)module;
+static void process_connect_outputs(RTLIL::Module *mod, Lgraph *g) {
+  (void)mod;
 
   // we need to connect global outputs to the cell that drives it
   for (auto *wire : pending_outputs) {
@@ -1250,8 +1249,8 @@ static void process_connect_outputs(RTLIL::Module *module, Lgraph *g) {
   }
 }
 
-static void process_cells(RTLIL::Module *module, Lgraph *g) {
-  for (auto cell : module->cells()) {
+static void process_cells(RTLIL::Module *mod, Lgraph *g) {
+  for (auto cell : mod->cells()) {
     // log("Looking for cell %s:\n", cell->type.c_str());
 
     I(cell2node.find(cell) != cell2node.end());
@@ -1758,7 +1757,7 @@ static void process_cells(RTLIL::Module *module, Lgraph *g) {
         exit_node.set_type(Ntype_op::Sum, y_bits);
       }
 
-      std::string_view b{"A"};
+      mmap_lib::str b{"A"};
       if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0)
         b = "B";
 
@@ -2163,12 +2162,12 @@ static void process_cells(RTLIL::Module *module, Lgraph *g) {
         if (ss.size() == 0)
           continue;
 
-        std::string name(&conn.first.c_str()[1]);
+        mmap_lib::str name(&conn.first.c_str()[1]);
 
         if (sub.is_output(name))
           continue;
         if (!sub.is_input(name)) {
-          log_error("sub:%s does not have pin:%s as input\n", std::string(sub.get_name()).c_str(), name.c_str());
+          log_error("sub:%s does not have pin:%s as input\n", sub.get_name().to_s().c_str(), name.to_s().c_str());
         }
 
         Node_pin spin = exit_node.setup_sink_pin(name);
@@ -2220,11 +2219,11 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     // parse options
     size_t      argidx;
-    std::string path = "lgdb";
+    mmap_lib::str path("lgdb");
 
     for (argidx = 1; argidx < args.size(); argidx++) {
       if (args[argidx] == "-path") {
-        path = args[++argidx];
+        path = mmap_lib::str(args[++argidx]);
         continue;
       }
       break;
@@ -2241,27 +2240,27 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     auto library = Graph_library::instance(path);
 
     for (auto &it : design->modules_) {
-      RTLIL::Module *module = it.second;
-      auto          *g      = library->try_find_lgraph(&module->name.c_str()[1]);
+      RTLIL::Module *mod = it.second;
+      auto          *g      = library->try_find_lgraph(&mod->name.c_str()[1]);
       if (g == nullptr) {
-        g = ::Lgraph::create(path, &module->name.c_str()[1], "-");
+        g = ::Lgraph::create(path, &mod->name.c_str()[1], "-");
       }
       Sub_node *sub = g->ref_self_sub_node();
 
-      for (const auto &port : module->ports) {
-        RTLIL::Wire *wire = module->wire(port);
+      for (const auto &port : mod->ports) {
+        RTLIL::Wire *wire = mod->wire(port);
         std::string  wire_name(&wire->name.c_str()[1]);
 
-        std::string cell_port = absl::StrCat(module->name.str(), "_:_", wire->name.str());
+        mmap_lib::str cell_port(absl::StrCat(mod->name.str(), "_:_", wire->name.str()));
         if (wire->port_input && !wire->port_output) {
-          // fmt::print("mod:{} inp:{}\n", module->name.str(), wire->name.str());
+          // fmt::print("mod:{} inp:{}\n", mod->name.str(), wire->name.str());
           cell_port_inputs.insert(cell_port);
           if (sub->has_pin(wire_name))
             sub->map_graph_pos(wire_name, Sub_node::Direction::Input, wire->port_id);
           else
             g->add_graph_input(wire_name, wire->port_id, wire->width);
         } else if (!wire->port_input && wire->port_output) {
-          // fmt::print("mod:{} out:{}\n", module->name.str(), wire->name.str());
+          // fmt::print("mod:{} out:{}\n", mod->name.str(), wire->name.str());
           cell_port_outputs.insert(cell_port);
           if (sub->has_pin(wire_name))
             sub->map_graph_pos(wire_name, Sub_node::Direction::Output, wire->port_id);
@@ -2269,24 +2268,24 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             g->add_graph_output(wire_name, wire->port_id, wire->width);
         } else {
           ::Lgraph::error("inou.yosys.tolg: mod:{} bidirectional:{} NOT supported by livehd\n",
-                          module->name.str(),
+                          mod->name.str(),
                           wire->name.str());
         }
       }
     }
 
     for (auto &it : design->modules_) {
-      RTLIL::Module *module = it.second;
+      RTLIL::Module *mod = it.second;
       if (design->selected_module(it.first)) {
-        const std::string mod_name(&(module->name.c_str()[1]));
+        const std::string mod_name(&(mod->name.c_str()[1]));
 #ifndef NDEBUG
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
         Lbench b("inou.YOSYS_tolg_" + mod_name);
 
-        for (const auto &port : module->ports) {
-          RTLIL::Wire *wire = module->wire(port);
+        for (const auto &port : mod->ports) {
+          RTLIL::Wire *wire = mod->wire(port);
           std::string  wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {
             pending_outputs.emplace_back(wire);
@@ -2296,11 +2295,11 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         auto *g = library->try_find_lgraph(mod_name);
         I(g);
 
-        process_cell_drivers_intialization(module, g);
-        process_assigns(module, g);
-        process_cells(module, g);
+        process_cell_drivers_intialization(mod, g);
+        process_assigns(mod, g);
+        process_cells(mod, g);
         process_partially_assigned(g);
-        process_connect_outputs(module, g);
+        process_connect_outputs(mod, g);
 
         wire2pin.clear();
         cell2node.clear();

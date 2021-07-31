@@ -9,7 +9,7 @@ Eprp_method::Eprp_method(const mmap_lib::str &_name, const mmap_lib::str &_help,
 
 bool Eprp_method::has_label(const mmap_lib::str &label) const { return labels.find(label) != labels.end(); }
 
-void Eprp_method::add_label(const mmap_lib::str &attr, const mmap_lib::str &help_txt, bool required, const mmap_lib::str &default_value) {
+void Eprp_method::add_label(const mmap_lib::str &attr, const mmap_lib::str &help_txt, bool required, const mmap_lib::str default_value) {
   labels.insert({attr, {help_txt, required, default_value}});
 }
 

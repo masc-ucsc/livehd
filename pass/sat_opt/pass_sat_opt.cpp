@@ -24,7 +24,7 @@ and add SAT formula to the solver based on node type
 static Pass_plugin sample("pass_sat_opt", Pass_sat_opt::setup);
 
 void Pass_sat_opt::setup() {
-  Eprp_method m1("pass.sat_opt", "Checks if MSBs of all the Lgraph node outputs are satisfiable", &Pass_sat_opt::work);
+  Eprp_method m1("pass.sat_opt", mmap_lib::str("Checks if MSBs of all the Lgraph node outputs are satisfiable"), &Pass_sat_opt::work);
 
   register_pass(m1);
 }

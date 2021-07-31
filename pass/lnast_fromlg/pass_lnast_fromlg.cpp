@@ -466,7 +466,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
   }
 
   bool             only_one_pin = false;
-  const mmap_lib::str &concat_name;
+  mmap_lib::str concat_name;
   if (dpins.size() == 1) {
     // Only one element... No concatenation required.
     only_one_pin = true;
@@ -498,13 +498,8 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
 
   auto ntype = pid1_pin.get_node().get_type_op();
   if (ntype == Ntype_op::And) {
-    mmap_lib::str rhs_2pos;
-    {
-      // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
-      str::string rhs_2pow_str = "0b";
-      rhs_2pow_str.append(total_bits, '1');
-      rhs_2pow == mmap_lib::str(rhs_2pow_str);
-    }
+    mmap_lib::str rhs_2pow("0b");
+    rhs_2pow = rhs_2pow.append(total_bits, '1'); // AndReduc is same as ConcatVal == 2^(bw(ConcatVal)) - 1
 
     auto eq_idx = lnast.add_child(parent_node, Lnast_node::create_eq());
     lnast.add_child(eq_idx, Lnast_node::create_ref(dpin_get_name(pid1_pin)));
@@ -728,10 +723,9 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   // Specify var being assigned to is in upper scope (not in if-else scope)
   auto asg_idx_i = lnast.add_child(parent_node, Lnast_node::create_assign());
   auto pin_name  = dpin_get_name(pin);  // it should be with _._
+
   lnast.add_child(asg_idx_i, Lnast_node::create_ref(pin_name));
-  auto const_str = std::to_string(pin.get_bits());
-  //  auto const_str = dpin_get_name(pin);//fails 3 tests
-  lnast.add_child(asg_idx_i, Lnast_node::create_const(const_str));
+  lnast.add_child(asg_idx_i, Lnast_node::create_const(pin.get_bits()));
 
   // Specify cond + create stmt for each mux val, except last.
   auto if_node = lnast.add_child(parent_node, Lnast_node::create_if());

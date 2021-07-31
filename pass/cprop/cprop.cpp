@@ -615,7 +615,7 @@ std::tuple<mmap_lib::str, mmap_lib::str> Cprop::get_tuple_name_key(const Node &n
   }
 
   if (tup_name.empty()) {
-    tup_name = node.debug_name();
+    tup_name = node.default_instance_name();
   }
 
   return std::make_tuple(tup_name, key_name);
@@ -968,10 +968,10 @@ void Cprop::tuple_subgraph(const Node &node) {
                 if (Lgtuple::is_attribute(e.first))
                   continue;
 
-                auto l = Lgtuple::get_first_level_name(e.first);
-                if (strncasecmp(l.data(), "addr", l.size()) == 0) {
+                auto l = Lgtuple::get_first_level_name(e.first).to_lower();
+                if (l == "addr") {
                   ++n_ports;
-                } else if (strncasecmp(l.data(), "rdport", l.size()) == 0) {
+                } else if (l=="rdport") {
                   if (!e.second.is_type_const()) {
                     node_tup->set_issue();
                     continue;  // Maybe later

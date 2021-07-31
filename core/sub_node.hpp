@@ -313,7 +313,7 @@ public:
 
   mmap_lib::str get_name_from_instance_pid(Port_ID instance_pid) const {
     if (!has_instance_pin(instance_pid))
-      return "INVALID_PID";
+      return "INVALID_PID"_str;
     return io_pins[instance_pid].name;
   }
 

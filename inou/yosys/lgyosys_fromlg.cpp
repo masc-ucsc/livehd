@@ -83,13 +83,13 @@ struct LG2Yosys_Pass : public Yosys::Pass {
         lgs.push_back(lg);
       }
       if (!hierarchy) {
-        log("converting graph %s in path %s\n.", name.c_str(), path.c_str());
+        log("converting graph %s in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
       } else {
-        log("converting graph %s and all its subgraphs in path %s\n.", name.c_str(), path.c_str());
+        log("converting graph %s and all its subgraphs in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
       }
     } else {
       // FIXME: create lgraph::open_all(path);
-      log("converting all graphs in path %s.\n", path.c_str());
+      log("converting all graphs in path %s.\n", path.to_s().c_str());
     }
 
     std::set<Lgraph *> generated;

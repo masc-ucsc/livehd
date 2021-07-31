@@ -143,6 +143,7 @@ cells.
 
 ## mmap_lib::str
 
+* Remove the mmap_lib::str("some string") (most are not needed once not explicit conversion is enabled)
 * Do more mmap_lib::str::concat cases (eg: concat with an integer). Optimize for speed.
 * Add non-persistent mmap_str option (only for non-sso). mmap_lib::pstr ?
 * Unclear what is better to pass mmap_lib (const mmap_lib &str) OR (mmap_lib str). Benchmark?
@@ -150,11 +151,40 @@ cells.
 * create a mmap_str::str(int val). Equivalent to str(std::to_string(val)) without intermediate step
 * mmap_str_test is a test abd a bench. Split the bench to bench_str and convert the rest to google test
 
+* Reorg mmap_str to use a uint64_t instead of size_ctr & ptr_or_start. This allows for single word optimizations (E.g: find char sso). 
+
+* WHen in unique (overflow) allocate with 8byte alignment (put zeroes if needed). The reason is to allow word search
+
+* Optimize the find char for non SSO (once we have 8byte align).
+* Do a rfind optimized like the find char
+* Change the find to find first char with match, then use the local search (faster)
+
 * Code generation phase (code_gen, cgen...) can not effectively use mmap_str because the comparison is irrelevant and keeping in a map is a HUGE overhead for growing strings (large). Maybe we should have 3 modes:
 
 1-SSO (<=15 strings)
 2-unique (16..256?)
 3-large  (256..) this do not have a pointer (maybe the persistent vs transient?, transient SSO or large)
+
+
+If unique is 255 or less, we can have more bytes for data.
+
+ Unique (data: 8byte beginning string, 0x0 1byte, sz 1Byte, ptr: 6byte)
+ SSO    (data: 15bytes string,  1 byte sz)
+ large  (ptr: 8 byter, sz 6 bytes, 0b00 2 bytes)
+
+empty (last 8 bytes zero)
+last 2 zero bytes  -> large
+last 1 zero byte   -> unique
+last byte non-zero -> SSO 
+
+Both Unique and overflow have first byte at data[0]
+
+future get_n_data_chars()
+  return size when sso
+  return 1+(size&0xF)
+
+large ptr points to a "memory" not mmap struct/data head of a splay tree.
+The large are only serialized explicitly (not in mmap_lib key/value support)
 
 Do we create a rope for large strings?
 

@@ -74,7 +74,7 @@ public:
   void set_issue() const { correct = false; }
 
   bool has_dpin(const mmap_lib::str &key) const;
-  bool has_dpin() const { return has_dpin("0"); }
+  bool has_dpin() const { return has_dpin("0"_str); }
 
   static std::pair<Port_ID, mmap_lib::str> convert_key_to_io(const mmap_lib::str &key);
 
@@ -117,7 +117,7 @@ public:
     auto last = get_last_level(key);
     if (last.size() > 2 && last[0] == '_' && last[1] == '_' && last[2] != '_')
       return last;
-    return "";
+    return mmap_lib::str();
   }
 
   mmap_lib::str learn_fix(const mmap_lib::str &key);
@@ -138,7 +138,7 @@ public:
 
   void add(const Node_pin &dpin) {
     // clear everything that is not 0.__attr. Add 0
-    return add("0", dpin);
+    return add("0"_str, dpin);
   }
 
   bool                     concat(const std::shared_ptr<Lgtuple const>& tup2);

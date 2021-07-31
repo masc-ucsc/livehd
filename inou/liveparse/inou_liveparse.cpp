@@ -6,7 +6,7 @@
 void setup_inou_liveparse() { Inou_liveparse::setup(); }
 
 void Inou_liveparse::setup() {
-  Eprp_method m1("inou.liveparse", mmap_lib::str("liveparse and chunkify verilog/pyrope files"), &Inou_liveparse::tolg);
+  Eprp_method m1("inou.liveparse", "liveparse and chunkify verilog/pyrope files", &Inou_liveparse::tolg);
   register_inou("liveparse", m1);
 }
 

@@ -114,13 +114,13 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_tuple()) {
       do_tuple(curr_index);
     } else if (curr_node_type.is_select() || curr_node_type.is_attr_get()) {
-      do_select(curr_index, "selc");
+      do_select(curr_index, "selc"_str);
     } else if (curr_node_type.is_tuple_add()) {
-      do_select(curr_index, "tuple_add");
+      do_select(curr_index, "tuple_add"_str);
     } else if (curr_node_type.is_attr_set()) {
       Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
     } else if (curr_node_type.is_tuple_get()) {
-      do_select(curr_index, "tuple_get");
+      do_select(curr_index, "tuple_get"_str);
     } else if (curr_node_type.is_func_def()) {
       do_func_def(curr_index);
     } else if (curr_node_type.is_func_call()) {
@@ -134,9 +134,9 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_set_mask()) {
       do_set_mask(curr_index);
     } else if (curr_node_type.is_tuple_concat()) {
-      do_op(curr_index, "tup_concat");
+      do_op(curr_index, "tup_concat"_str);
     } else if (curr_node_type.is_primitive_op()) {
-      do_op(curr_index, "op");
+      do_op(curr_index, "op"_str);
     } else {
       fmt::print("WARNING, unhandled case\n");
     }
@@ -1100,7 +1100,7 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
     assert(false);
-    return "ERROR"; // ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
+    return "ERROR"_str; // ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
   } else if (is_const) {
     auto ret_tup_str = absl::StrCat(indent(), val, lnast_to->tuple_stmt_sep());
     return mmap_lib::str(ret_tup_str);
