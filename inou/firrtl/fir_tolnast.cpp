@@ -14,6 +14,7 @@
 #include "google/protobuf/util/time_util.h"
 #include "inou_firrtl.hpp"
 #include "lbench.hpp"
+#include "thread_pool.hpp"
 
 using google::protobuf::util::TimeUtil;
 
@@ -1941,14 +1942,24 @@ void Inou_firrtl::ListUserModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Modul
   }
 
   FinalMemInterfaceAssign(*lnast, idx_stmts);
-  var.add(std::move(lnast));
+
+  {
+    std::lock_guard<std::mutex> guard(eprp_mutex);  // guarding Lcompiler::lgs
+    var.add(std::move(lnast));
+  }
+
 }
 
 void Inou_firrtl::ListModuleInfo(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, const mmap_lib::str &file_name) {
   if (fmodule.has_external_module()) {
     GrabExtModuleInfo(fmodule.external_module());
   } else if (fmodule.has_user_module()) {
+    // multi-thread entry point
+
+    auto copied_inou_firrtl = *this;
+    // thread_pool.add(&Inou_firrtl::ListUserModuleInfo, this, var, fmodule, file_name);
     ListUserModuleInfo(var, fmodule, file_name);
+
   } else {
     Pass::error("Module not set.");
   }

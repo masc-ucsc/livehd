@@ -665,12 +665,13 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 }
 
 void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
-  auto pos          = full_inp_hier_name.find_last_of('.');
+  auto pos          = full_inp_hier_name.rfind('.');
   auto last_subname = full_inp_hier_name.substr(pos + 1);
 
   // if the last subname is not a number(not a constant), means the tuple is not array-like, it's impossilbe
   // future graph-inp will try to get the array-element from a dynamic index, so we don't need to construct the inp_ta
-  if (!std::isdigit(last_subname.at(0)))
+  // if (!std::isdigit(last_subname.at(0)))
+  if (last_subname.substr(0,1).is_i())
     return;
 
   auto tup_name  = full_inp_hier_name.substr(0, pos);
@@ -755,7 +756,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         auto        tup_add     = lg->create_node(Ntype_op::TupAdd);
 
         auto pos_spin = tup_add.setup_sink_pin("field");
-        auto pos_dpin = lg->create_node_const(Lconst::string(concatenated_field_str)).setup_driver_pin();
+        auto pos_dpin = lg->create_node_const(mmap_lib::str(concatenated_field_str)).setup_driver_pin();
         pos_dpin.connect_sink(pos_spin);
 
         auto val_spin = tup_add.setup_sink_pin("value");
@@ -795,7 +796,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        subs      = lnast->get_subs(c0_ta);
 
       // exclude invalid scalar->tuple cases
-      auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
+      // auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
 
       auto tup_add = lg->create_node(Ntype_op::TupAdd);
       auto tn_dpin = setup_ta_ref_previous_ssa(lg, tup_vname, subs);
@@ -919,7 +920,7 @@ Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, const mmap_lib::str &
   (void)lg;  // FIXME: remove arg
   if (subs == 0) {
     auto     ref_name = mmap_lib::str::concat(ref_vname, "_", subs);
-    Node_pin invalid_dpin
+    Node_pin invalid_dpin;
     name2dpin[ref_name] = invalid_dpin;
     return invalid_dpin;
   }
@@ -1728,7 +1729,8 @@ void Lnast_tolg::create_ginp_as_runtime_idx(Lgraph *lg, const mmap_lib::str &hie
   return;
 }
 
-void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, const mmap_lib::str &hier_name, Node &chain_head) {
+// void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, const mmap_lib::str &hier_name, Node &chain_head) {
+void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, mmap_lib::str hier_name, Node &chain_head) {
   auto cur_node  = cur_node_spin.get_node();
   auto cur_ntype = cur_node.get_type_op();
   bool is_leaf   = false;
@@ -1741,7 +1743,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
     }
   } else if (cur_ntype == Ntype_op::AttrSet) {
     if (cur_node.is_sink_connected("field")) {
-      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_string();
+      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_str();
       if (!Lgtuple::is_root_attribute(field_txt)) {
         auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
         hier_name = mmap_lib::str::concat(hier_name, ".", non_attr_field);
@@ -1757,11 +1759,11 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
 
     inp_artifacts[chain_head.get_compact()].insert(cur_node);  // only remove the artifact tup_gets
 
-    mmap_lib::str new_hier_name=hier_name;
+    mmap_lib::str new_hier_name = hier_name;
     if (cur_node.is_sink_connected("field")) {
       auto field_node = cur_node.get_sink_pin("field").get_driver_node();
       if (field_node.is_type_const()) {
-        auto field_name = field_node.get_type_const().to_string();
+        auto field_name = field_node.get_type_const().to_str();
         new_hier_name   = mmap_lib::str::concat(hier_name, ".", field_name);
       }
     }

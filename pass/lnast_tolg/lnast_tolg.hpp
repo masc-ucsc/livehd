@@ -112,7 +112,7 @@ protected:
 
   void     try_create_flattened_inp(Lgraph *lg);
   void     post_process_ginp_attr_connections(Lgraph *lg);
-  void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, const mmap_lib::str &hier_name, Node &chain_head);
+  void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, mmap_lib::str hier_name, Node &chain_head);
   Node_pin create_const(Lgraph *lg, const mmap_lib::str & const_str);
 
   // attribute related

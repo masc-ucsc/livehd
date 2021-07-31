@@ -29,7 +29,7 @@ class Inou_firrtl : public Pass {
 // class Inou_firrtl {
 protected:
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, mmap_lib::str> op2firsub;
-  inline static std::mutex                                                              lgs_mutex;
+  inline static std::mutex                                                                eprp_mutex;
 
   enum class Leaf_type { Const_num, Const_str, Ref };
   //----------- FOR toLNAST ----------

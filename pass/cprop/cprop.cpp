@@ -999,7 +999,7 @@ void Cprop::tuple_subgraph(const Node &node) {
             for (auto i = 0u; i < read_map.size(); ++i) {
               if (read_map[i]) {
                 fmt::print(" {}", i);
-                node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
+                node_tup->add(mmap_lib::str(i), node.setup_driver_pin_raw(i));
               }
             }
             fmt::print("\n");
@@ -1045,7 +1045,7 @@ void Cprop::tuple_subgraph(const Node &node) {
     }
     if (it.first->has_io_pos()) {
       auto pos = it.first->get_io_pos();
-      pin_name = absl::StrCat(":", pos, ":", pin_name);
+      pin_name = mmap_lib::str::concat(":", pos, ":", pin_name);
     }
     auto dpin = node.setup_driver_pin_raw(it.second);
     I(dpin == node.get_driver_pin(it.first->name));
@@ -1817,7 +1817,8 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const mmap_lib::str &key_
     auto af_spin   = attr_node.setup_sink_pin("field");
     auto av_spin   = attr_node.setup_sink_pin("value");
 
-    auto attr_key_node = node.create_const(Lconst::string(attr));
+    // auto attr_key_node = node.create_const(Lconst::string(attr));
+    auto attr_key_node = node.create_const(Lconst(mmap_lib::str(attr)));
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
     attr_key_dpin.connect_sink(af_spin);
 
