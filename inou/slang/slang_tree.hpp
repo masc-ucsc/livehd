@@ -1,10 +1,6 @@
 
 #pragma once
 
-#ifndef NDEBUG
-#define DEBUG
-#endif
-
 // clang-format off
 #include "slang/symbols/ASTVisitor.h"
 
