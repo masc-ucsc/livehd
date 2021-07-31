@@ -19,11 +19,12 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  mmap_lib::map<uint32_t, Lconst::Container> map(".", argv[1]);
+  mmap_lib::map<uint32_t, mmap_lib::str> map(".", argv[1]);
 
   for (const auto &it : map) {
-    const auto &key = map.get_key(it);
-    const auto  val = Lconst(map.get(it));
+    const auto &key    = it.first;
+    const auto val_raw = it.second;
+    const auto val     = Lconst::unserialize(val_raw);
     fmt::print("{}:{}\n", key, val.to_pyrope());
   }
 

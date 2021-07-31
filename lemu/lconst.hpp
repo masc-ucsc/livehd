@@ -82,7 +82,7 @@ protected:
 public:
 
   explicit Lconst(absl::Span<unsigned char> v);
-  explicit Lconst(std::string_view txt);
+  //explicit Lconst(std::string_view txt);
   explicit Lconst(const mmap_lib::str &txt);
   explicit Lconst(Number v);
   Lconst(int64_t v); // not explicit to allow easy Lconst(x) < 0 operations

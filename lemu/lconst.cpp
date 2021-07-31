@@ -194,11 +194,10 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
   return lc;
 }
 
-Lconst::Lconst(const mmap_lib::str &orig_txt)
-  : Lconst(std::string_view(orig_txt.to_s().data(),orig_txt.size())) {
-}
+Lconst::Lconst(const mmap_lib::str &orig_str) {
 
-Lconst::Lconst(std::string_view orig_txt) {
+  auto orig_txt = orig_str.to_s();
+
   explicit_str = false;
   bits         = 0;
   num          = 0;
