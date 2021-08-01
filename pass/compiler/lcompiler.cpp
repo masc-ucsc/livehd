@@ -149,9 +149,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
   
 
-  fmt::print("-------- {:<28} ({:<30}) -------- (LN-0)\n",
-             "Firrtl_Protobuf -> LNAST-SSA",
-             absl::StrCat("__firrtl_", ln->get_top_module_name()));
+  fmt::print("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", mmap_lib::str::concat("__firrtl_", ln->get_top_module_name()));
   ln->ssa_trans();
   gviz == true ? gv.do_from_lnast(ln) : void();
   
@@ -160,8 +158,8 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   // in the end, we should keep the original mod_name for the firrtl_op
   // mapped lgraph, so here I attached "__firrtl_" prefix for the firrtl_op_lgs
 
-  fmt::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", absl::StrCat("__firrtl_", ln->get_top_module_name()));
-  auto mod_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
+  fmt::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", mmap_lib::str::concat("__firrtl_", ln->get_top_module_name()));
+  auto mod_name = mmap_lib::str::concat("__firrtl_", ln->get_top_module_name());
 
   Lnast_tolg ln2lg(mod_name, path);
 

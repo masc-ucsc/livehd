@@ -8,7 +8,7 @@
 static Pass_plugin sample("pass_compiler", Pass_compiler::setup);
 
 void Pass_compiler::setup() {
-  Eprp_method m1("pass.compiler", "LiveHD multi-HDLs compilation, default language: Pyrope", &Pass_compiler::compile);
+  Eprp_method m1(mmap_lib::str("pass.compiler"), mmap_lib::str("LiveHD multi-HDLs compilation, default language: Pyrope"), &Pass_compiler::compile);
   m1.add_label_optional("path", "lgraph path", "lgdb");
   m1.add_label_optional("files", "files to process (comma separated)");
   m1.add_label_optional("firrtl", "is firrtl front-end");
@@ -23,12 +23,12 @@ Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {
 
 void Pass_compiler::compile(Eprp_var &var) {
   // Lbench b("pass.compile.front");
-  Pass_compiler    pc(var);
-  auto             path       = pc.get_path(var);
-  auto             odir       = pc.get_odir(var);
-  auto             top        = pc.check_option_top(var);
-  auto             gviz       = pc.check_option_gviz(var);
-  std::string_view get_firrtl = pc.check_option_firrtl(var);
+  Pass_compiler pc(var);
+  auto path       = pc.get_path(var);
+  auto odir       = pc.get_odir(var);
+  auto top        = pc.check_option_top(var);
+  auto gviz       = pc.check_option_gviz(var);
+  auto get_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -40,7 +40,8 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : absl::StrSplit(files, ',')) Pass::warn("todo: start from prp parser:{}", f);
+    for (auto f : files.mmap_lib::str::split(',')) 
+      Pass::warn("todo: start from prp parser:{}", f);
   }
 
   if (!get_firrtl.empty()) {
@@ -248,18 +249,18 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   return gviz_en;
 }
 
-std::string Pass_compiler::check_option_top(Eprp_var &var) {
-  std::string top;
+mmap_lib::str Pass_compiler::check_option_top(Eprp_var &var) {
+  mmap_lib::str top;
   if (var.has_label("top")) {
     top = var.get("top");
   }
   return top;
 }
-std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
-  std::string_view get_firrtl;
+mmap_lib::str Pass_compiler::check_option_firrtl(Eprp_var &var) {
+  mmap_lib::str get_firrtl;
   if (var.has_label("firrtl")) {
     auto fir = var.get("firrtl");
-    if (fir.compare("false") != 0 && fir.compare("0") != 0) {
+    if (fir != mmap_lib::str("false") && fir != mmap_lib::str("0")) {
       get_firrtl = fir;
     } else {
       get_firrtl = "";

@@ -20,9 +20,9 @@
 
 class Lcompiler {
 private:
-  const std::string_view path;
-  const std::string      odir;  // FIXME->sh: why not use string_view?
-  const std::string_view top;
+  mmap_lib::str path;
+  mmap_lib::str odir;  
+  mmap_lib::str top;
   const bool             gviz;
 
   // firrtl only tables
@@ -39,7 +39,7 @@ protected:
   std::vector<Lgraph *> lgs;
 
 public:
-  Lcompiler(std::string_view path, std::string_view odir, std::string_view top, bool gviz);
+  Lcompiler(mmap_lib::str path, mmap_lib::str odir, mmap_lib::str top, bool gviz);
 
   void do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &);
   void do_prp_local_cprop_bitwidth();
@@ -53,7 +53,7 @@ public:
   void fir_thread_cprop(Lgraph *lg);
   void fir_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
-  std::string_view      get_top() { return top; };
+  mmap_lib::str    get_top() { return top; };
   std::vector<Lgraph *> get_lgraphs() { return lgs; }
 
   std::vector<Lgraph *> wait_all() {
