@@ -27,9 +27,6 @@ public:
   const std::function<void(Eprp_var &var)> method;
 
   Eprp_method(const mmap_lib::str &_name, const mmap_lib::str &_help, const std::function<void(Eprp_var &var)> &_method);
-  Eprp_method(std::string_view _name, std::string_view _help, const std::function<void(Eprp_var &var)> &_method)
-    :Eprp_method(mmap_lib::str(_name), mmap_lib::str(_help), _method) {
-  }
 
   std::pair<bool, mmap_lib::str> check_labels(const Eprp_var &var) const;
 

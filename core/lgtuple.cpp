@@ -597,7 +597,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
     if (v.is_i()) {
       txt = mmap_lib::str(v.to_i());
     } else {
-      txt = v.to_str();
+      txt = v.to_pyrope();
     }
     auto dpin = get_dpin(txt);
     if (dpin.is_invalid()) {
@@ -873,7 +873,7 @@ std::pair<Node, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dp
       bits_dpin = add_node.setup_driver_pin();
     } else {
       auto attr_node = result_node.create(Ntype_op::AttrGet);
-      attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string("__sbits")));
+      attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::from_string("__sbits")));
       attr_node.setup_sink_pin("parent").connect_driver(dpin);
 
       bits_dpin = attr_node.setup_driver_pin();
@@ -969,7 +969,7 @@ Node_pin Lgtuple::flatten() const {
         auto attr_set_node = result_node.create(Ntype_op::AttrSet);
         attr_set_node.setup_sink_pin("parent").connect_driver(last_non_attr_dpin);
         attr_set_node.setup_sink_pin("value").connect_driver(e.second);
-        attr_set_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::string(attr_txt.to_s())));
+        attr_set_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::from_string(attr_txt)));
 
         last_non_attr_dpin = attr_set_node.setup_driver_pin();
       }
@@ -1351,7 +1351,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
             auto attr_node = dpin.create(Ntype_op::AttrSet);
             {
               auto attr     = get_last_level(attr_it.first);
-              auto key_dpin = dpin.create_const(Lconst::string(attr.to_s())).setup_driver_pin();
+              auto key_dpin = dpin.create_const(Lconst::from_string(attr)).setup_driver_pin();
               attr_node.setup_sink_pin("field").connect_driver(key_dpin);
             }
             { attr_node.setup_sink_pin("value").connect_driver(attr_it.second); }
@@ -1516,7 +1516,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         auto attr2_dpin = parent_node.get_sink_pin("field").get_driver_pin();
         I(!attr2_dpin.is_invalid());
         I(attr2_dpin.is_type_const());
-        auto attr2 = attr2_dpin.get_type_const().to_str();
+        auto attr2 = attr2_dpin.get_type_const().to_pyrope();
         if (attr2 == attr)
           continue;  // same attribute already set (can it have different value??)
       }
@@ -1524,7 +1524,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
     auto attr_node = flop_node.create(Ntype_op::AttrSet);
     {
-      auto key_dpin = flop_node.create_const(Lconst::string(get_last_level(attr).to_s())).setup_driver_pin();
+      auto key_dpin = flop_node.create_const(Lconst::from_string(get_last_level(attr))).setup_driver_pin();
       attr_node.setup_sink_pin("field").connect_driver(key_dpin);
     }
     { attr_node.setup_sink_pin("value").connect_driver(e.second); }

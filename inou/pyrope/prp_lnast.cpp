@@ -2019,7 +2019,7 @@ inline Lnast_node Prp_lnast::create_const_node(mmap_lib::Tree_index idx) {
         if (string_length != 0) {
           // insert space(s)
           auto spaces_needed = cur_token.pos1 - (string_start + string_length);
-          new_token_text.append(spaces_needed, ' ');
+          new_token_text = new_token_text.append(spaces_needed, ' ');
         }
         string_length += cur_token.get_text().size();
         new_token_text = mmap_lib::str::concat(new_token_text, cur_token.get_text());

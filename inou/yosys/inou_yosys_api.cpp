@@ -213,7 +213,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   const auto techmap{var.get("techmap")};
   const auto abc{var.get("abc")};
   const auto top{var.get("top")};
-  const auto lib{var.get("liberty")};
+  //const auto lib{var.get("liberty")};
 
   mustache::data vars;
   vars.set("path", path.to_s());

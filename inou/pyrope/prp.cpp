@@ -2219,7 +2219,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   return false;
 }
 
-std::string_view Prp::rule_id_to_string(Rule_id rid) {
+mmap_lib::str Prp::rule_id_to_string(Rule_id rid) {
   switch (rid) {
     case Prp_invalid: return "Invalid";
     case Prp_rule: return "Program";
@@ -2278,7 +2278,7 @@ std::string_view Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_overload_notation: return "Overload notation";
     case Prp_rule_overload_name: return "Overload name";
     case Prp_rule_function_pipe: return "Function pipe";
-    default: return fmt::format("{}", rid);
+    default: return mmap_lib::str(fmt::format("{}", rid));
   }
 }
 

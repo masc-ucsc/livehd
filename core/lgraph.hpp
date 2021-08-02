@@ -218,7 +218,7 @@ public:
   Node create_node(const Ntype_op op, Bits_t bits);
 
   Node create_node_const(const Lconst &value);
-  Node create_node_const(const mmap_lib::str &val) { return create_node_const(Lconst(val)); }
+  Node create_node_const(const mmap_lib::str &val) { return create_node_const(Lconst::from_pyrope(val)); }
   Node create_node_const(int64_t val) { return create_node_const(Lconst(val)); }
 
   Node create_node_lut(const Lconst &value);

@@ -32,25 +32,6 @@ private:
          -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
          -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
          -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-  constexpr static int char_to_shift_mode[256] = {
-      /* 00 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* 10 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* 20 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* 30 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* 40 */ 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
-      /* 50 */ 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0,
-      /* 60 */ 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
-      /* 70 */ 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0,
-      /* 80 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* 90 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* A0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* B0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* C0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* D0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* E0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      /* F0 */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-  static Bits_t read_bits(std::string_view txt);
 
 protected:
   using Number = boost::multiprecision::cpp_int;
@@ -60,7 +41,7 @@ protected:
   Bits_t bits;
   Number num;
 
-  std::string_view skip_underscores(std::string_view txt) const;
+  mmap_lib::str skip_underscores(const mmap_lib::str txt) const;
 
   Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {}
 
@@ -72,24 +53,32 @@ protected:
     return msb(-num - 1) + 2;
   }
   Bits_t             calc_num_bits() const { return calc_num_bits(num); }
-  static std::string to_string(Number num);
 
   const Number &get_num() const { return num; }
   void          adjust(const Lconst &o);
 
-  using Container = std::vector<unsigned char>;
+  static std::pair<mmap_lib::str, mmap_lib::str> match_binary(const Lconst &l, const Lconst &r);
+
+  static mmap_lib::str to_string(Number num);
+  mmap_lib::str to_string() const { // use to_pyrope, to_verilog not the to_str directly
+    I(explicit_str);
+    return to_string(num);
+  }
 
 public:
+  using Container = mmap_lib::str;
 
   explicit Lconst(absl::Span<unsigned char> v);
-  explicit Lconst(std::string_view txt); // FIXME: TO DELETE
-  explicit Lconst(const mmap_lib::str &txt);
   explicit Lconst(Number v);
   Lconst(int64_t v); // not explicit to allow easy Lconst(x) < 0 operations
 
   Lconst();
 
-  static Lconst string(std::string_view txt);
+  // TODO for from_verilog from_firrtl ...
+  static Lconst from_pyrope(const mmap_lib::str txt);
+  static Lconst from_binary(const mmap_lib::str txt, bool unsigned_result);
+  static Lconst from_string(const mmap_lib::str txt);
+
   static Lconst unknown(Bits_t nbits);
   static Lconst unknown_positive(Bits_t nbits);
   static Lconst unknown_negative(Bits_t nbits);
@@ -105,6 +94,8 @@ public:
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
   [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
+
+  Lconst to_known_rand() const;
 
   [[nodiscard]] Lconst sext_op(Bits_t bits) const;
   [[nodiscard]] Lconst get_mask_op() const;
@@ -122,7 +113,7 @@ public:
   [[nodiscard]] Lconst not_op() const;
   [[nodiscard]] Lconst concat_op(const Lconst &o) const;
 
-  [[nodiscard]] int eq_op(const Lconst &o) const;
+  [[nodiscard]] Lconst eq_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst adjust_bits(Bits_t amount) const;
 
@@ -137,10 +128,27 @@ public:
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '1');
   }
+  bool is_positive() const {
+    if (!explicit_str)
+      return num >= 0;
+
+    if (!has_unknowns())
+      return false;
+
+    uint8_t msb = static_cast<uint8_t>(num);
+    return (msb == '0');
+  }
+  bool has_unknown_sign() const {
+    return has_unknowns() && static_cast<uint8_t>(num) == '?';
+  }
+  bool is_fully_unkown() const {
+    return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?';
+  }
+
   bool is_false() const { return num == 0; }
-  bool is_string() const { return explicit_str && (bits & 0x7) == 0 && bits >= calc_num_bits(num); }
-  bool is_mask() const { return ((num + 1) & (num)) == 0; }
-  bool is_power2() const { return ((num - 1) & (num)) == 0; }
+  bool is_string() const { return explicit_str && !has_unknowns(); }
+  bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
+  bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
 
   std::pair<int,int> get_mask_range() const;
 
@@ -150,13 +158,10 @@ public:
   bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
   int64_t to_i() const;                                         // must fit in int or exception raised
 
-  std::string to_yosys(bool do_unsign = false) const;
-  std::string to_verilog() const;
-  mmap_lib::str  to_str() const;
-  std::string to_string() const;
-  std::string to_string_no_xz() const;
-  std::string to_pyrope() const;
-  std::string to_firrtl() const;
+  mmap_lib::str to_binary() const;
+  mmap_lib::str to_verilog() const;
+  mmap_lib::str to_pyrope() const;
+  mmap_lib::str to_firrtl() const;
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }

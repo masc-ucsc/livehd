@@ -114,6 +114,6 @@ void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
   node_internal.ref_unlock();
 }
 
-void Lgraph_Node_Type::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst(sv)); }
+void Lgraph_Node_Type::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }

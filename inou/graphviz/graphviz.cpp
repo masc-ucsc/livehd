@@ -327,7 +327,6 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
 
     // get parent data for link
     auto  p     = lnast->get_parent(itr);
-    // auto  pname = lnast->get_data(p).token.get_text();
 
     auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);

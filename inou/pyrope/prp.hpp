@@ -299,7 +299,7 @@ protected:
   inline bool unconsume_token();
   inline bool consume_token();
   bool        go_back(uint64_t num_tok);
-  static std::string_view rule_id_to_string(Rule_id rid);
+  static mmap_lib::str rule_id_to_string(Rule_id rid);
 
   uint8_t check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, Token_entry>> &), uint64_t *sub_cnt,
                          std::list<std::tuple<Rule_id, Token_entry>> &loc_list);

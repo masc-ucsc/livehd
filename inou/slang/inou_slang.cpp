@@ -40,7 +40,7 @@ void Inou_slang::work(Eprp_var &var) {
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
-    for (auto f : absl::StrSplit(txt, ',')) {
+    for (const auto f : txt.split(',')) {
       argv.push_back(strdup("-I"));
       argv.push_back(strdup(std::string(f).c_str()));
     }

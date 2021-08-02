@@ -1,8 +1,6 @@
 
 #include "lconst.hpp"
 
-#include "absl/strings/numbers.h"
-#include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
 #include "fmt/format.h"
@@ -11,41 +9,8 @@
 #include "lrand.hpp"
 #include "mmap_hash.hpp"
 
-std::string_view Lconst::skip_underscores(std::string_view txt) const {
-  if (txt.empty() || txt[0] != '_')
-    return txt;
-
-  for (auto i = 1u; i < txt.size(); ++i) {
-    if (txt[i] != '_') {
-      return txt.substr(i);
-    }
-  }
-  return txt;  // orig if only underscores
-}
-
-Bits_t Lconst::read_bits(std::string_view txt) {
-  if (txt.empty())
-    return 0;
-  if (!std::isdigit(txt[0]))
-    return 0;
-
-  unsigned int tmp = 0;
-  bool         ok  = absl::SimpleAtoi(txt, &tmp);
-  if (!ok && tmp == 0) {
-    throw std::runtime_error(fmt::format("ERROR: {} should have the number of bits in decimal after u", txt));
-  }
-  if (tmp <= 0) {
-    throw std::runtime_error(fmt::format("ERROR: {} the number of bits should be positive not {}", txt, tmp));
-  }
-  if (tmp >= Bits_max) {
-    throw std::runtime_error(fmt::format("ERROR: {} the number of bits is too big {}", txt, tmp));
-  }
-
-  return tmp;
-}
-
 mmap_lib::str Lconst::serialize() const {
-  Container     v;
+  std::vector<unsigned char> v;
   unsigned char c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   v.emplace_back(c);
   v.emplace_back(bits >> 16);
@@ -132,18 +97,227 @@ Lconst::Lconst(Number v) {
 }
 
 
-Lconst Lconst::string(std::string_view orig_txt) {
-  Lconst lc;
+Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
 
-  for (int i = orig_txt.size() - 1; i >= 0; --i) {
-    lc.num <<= 8;
-    lc.num += orig_txt[i];
+  // handle binary with special characters ?xZ...
+  mmap_lib::str bin;
+  if (unsigned_result) {
+    bin = "0"; // always unsigned, must have a leading 0 (implicit)
+  }else{
+    bin = "1";
+  }
+  bool unknown_found = false;
+
+  Number num;
+
+  for (auto i = 0u; i < txt.size(); ++i) {
+    const auto ch2 = txt[i];
+    if (ch2 == '_')
+      continue;
+
+    if (ch2 == '?' || ch2 == 'x') {
+      bin = bin.append('?');
+      unknown_found = true;
+    } else if (ch2 == 'z') {
+      bin = bin.append('z');
+      unknown_found = true;
+    } else if (ch2 == '0') {
+      if (bin != "0") { // remove too many leading zeroes
+        num = (num << 1);
+        bin = bin.append('0');
+      }
+    } else if (ch2 == '1') {
+      if (bin != "1") { // remove too many leading ones if signed
+        num = (num << 1) | 1;
+        bin = bin.append('1');
+      }
+    } else {
+      throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", txt, ch2));
+    }
   }
 
-  lc.bits         = orig_txt.size() * 8;
-  lc.explicit_str = true;
+  if (unknown_found) {
+    for (int i = bin.size() - 1; i >= 0; --i) {
+      num <<= 8;
+      num += bin[i];
+    }
 
-  return lc;
+    return Lconst(true, bin.size(), num);
+  }
+
+  if (!unsigned_result && bin.front() == '1') {
+    num = -1 - num;
+  }
+
+  for (int i = bin.size() - 1; i >= 0; --i) {
+    num <<= 8;
+    num += bin[i];
+  }
+
+  return Lconst(true, bin.size(), num);
+}
+
+Lconst Lconst::from_string(mmap_lib::str orig_txt) {
+  Number num;
+
+  for (int i = orig_txt.size() - 1; i >= 0; --i) {
+    num <<= 8;
+    num += orig_txt[i];
+  }
+
+  return Lconst(true, orig_txt.size() * 8, num);
+}
+
+Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
+
+  if (orig_txt.empty())
+    return Lconst();
+
+  mmap_lib::str txt = orig_txt.to_lower();
+
+  // Special cases
+  if (txt == "true") {
+    return Lconst(false, 1, -1);
+  } else if (txt == "false") {
+    return Lconst(false, 1, 0);
+  }
+
+  bool negative   = false;
+  auto skip_chars = 0u;
+
+  if (txt.front() == '-') {
+    negative   = true;
+    skip_chars = 1;
+  }else if (txt.front() == '+') {
+    skip_chars = 1;
+  }
+
+  auto shift_mode      = 0;
+  bool unsigned_result = false;
+
+  if (txt.size() >= (1+skip_chars) && std::isdigit(txt[skip_chars])) {
+    shift_mode = 10; // decimal (maybe not if starts with 0
+    if (txt.size()>= (2+skip_chars) && txt[skip_chars] == '0') {
+      ++skip_chars;
+      auto sel_ch = txt[skip_chars];
+      if (sel_ch == 's') {
+        // 0sb 0sx 0so (signed)
+        ++skip_chars;
+        sel_ch = txt[skip_chars];
+        I(!unsigned_result);
+      }else{
+        unsigned_result = true;
+      }
+
+      if (sel_ch == 'x') { // 0x or 0sx
+        shift_mode = 4;
+        ++skip_chars;
+      }else if (sel_ch == 'b') {
+        shift_mode = 2;
+        ++skip_chars;
+      }else if (sel_ch == 'd') {
+        shift_mode = 10; // BASE 10 decimal
+        ++skip_chars;
+      }else if (std::isdigit(sel_ch)) { // 0 or 0o or 0s or 0so
+        shift_mode = 3;
+      }else if (sel_ch == 'o') { // 0 or 0o or 0s or 0so
+        shift_mode = 3;
+        ++skip_chars;
+      }else{
+        throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding (leading {})\n", orig_txt, sel_ch));
+      }
+    }
+  }else{
+    int start_i = static_cast<int>(orig_txt.size());
+    int end_i   = 0;
+
+    if (orig_txt.size()>1 && orig_txt.front() == '\'' && orig_txt.back() == '\'') {
+      ++start_i;
+      --end_i;
+    }
+
+    Number num;
+    // alnum string (not number, still convert to num)
+    bool prev_escaped=false;
+    for (int i = start_i - 1; i >= end_i; --i) {
+      num <<= 8;
+      num += orig_txt[i];
+
+      if (orig_txt[i] == '\'' && !prev_escaped) {
+        throw std::runtime_error(fmt::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
+      }
+
+      if (orig_txt[i] == '\\') {
+        if (prev_escaped) // \\ sequence
+          prev_escaped = false;
+        else // \x sequence
+          prev_escaped = true;
+      }
+    }
+
+    return Lconst(true, (end_i-start_i) * 8, num);
+  }
+
+  Number num;
+
+  if (shift_mode == 10) { // decimal
+    for (auto i = skip_chars; i < txt.size(); ++i) {
+      auto v = char_to_val[(uint8_t)txt[i]];
+      if (likely(v >= 0)) {
+        num = (num * 10) + v;
+      } else {
+        if (txt[i] == '_')
+          continue;
+
+        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
+      }
+    }
+  }else if (shift_mode == 1) {  // 0b binary
+    auto v = from_binary(txt.substr(skip_chars), unsigned_result);
+    if (!negative)
+      return v;
+
+    num = -v.get_num();
+    return Lconst(false, calc_num_bits(num), num);
+  }else{
+    I(shift_mode == 3 || shift_mode == 4);  // octal or hexa
+
+    auto first_digit = -1;
+    for (auto i = skip_chars; i < txt.size(); ++i) {
+      if (txt[i] == '_')
+        continue;
+
+      auto v = char_to_val[(uint8_t)txt[i]];
+      if (unlikely(v >= 0)) {
+        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
+      }
+      if (first_digit<0) {
+        first_digit = v;
+      }
+
+      auto char_sa = char_to_bits[(uint8_t)txt[i]];
+      if (unlikely(char_sa > shift_mode)) {
+        throw std::runtime_error(
+            fmt::format("ERROR: {} invalid syntax for number {} bits needed for '{}'", orig_txt, char_sa, txt[i]));
+      }
+      num = (num << shift_mode) | v;
+    }
+
+    if (!unsigned_result) { // check if MSB is 1 for 2s complement
+      if (first_digit>>(shift_mode-1)) {
+        num = -1 - num;
+      }
+    }
+  }
+
+  if (negative) {
+    num = -num;
+    if (unsigned_result && num<0) {
+      throw std::runtime_error(fmt::format("ERROR: {} negative value but it must be unsigned\n", orig_txt));
+    }
+  }
+
+  return Lconst(false, calc_num_bits(num), num);
 }
 
 Lconst Lconst::unknown(Bits_t nbits) {
@@ -194,186 +368,6 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
   return lc;
 }
 
-Lconst::Lconst(const mmap_lib::str &orig_str) {
-
-  auto orig_txt = orig_str.to_s();
-
-  explicit_str = false;
-  bits         = 0;
-  num          = 0;
-
-  if (orig_txt.empty())
-    return;
-
-  // Skip leading _ as needed
-
-  std::string_view txt{orig_txt};
-
-  // Special cases
-  if (strncasecmp(txt.data(), "true", txt.size()) == 0) {
-    explicit_str = false;
-    bits         = 1;
-    num          = -1;
-    return;
-  } else if (strncasecmp(txt.data(), "false", txt.size()) == 0) {
-    explicit_str = false;
-    bits         = 1;
-    num          = 0;
-    return;
-  }
-
-  // default conversion
-  if (!txt.empty() && txt[0] == '_') {
-    auto txt2 = skip_underscores(txt);
-
-    if (std::isdigit(txt2[0]) || txt2[0] == '-' || txt2[0] == '+') {
-      txt = txt2;
-    }
-  }
-
-  bool negative = false;
-  if (txt[0] == '-') {  // negative (may be unsigned -1u)
-    negative = true;
-    txt      = skip_underscores(txt.substr(1));  // skip -
-  }
-
-  Bits_t nbits_used = 0;
-
-  int shift_mode = 0;
-  if (txt.size() > 2 && txt[0] == '0') {
-    shift_mode = char_to_shift_mode[(uint8_t)txt[1]];
-  }
-  if (shift_mode == 1 && negative) {
-    shift_mode   = 0;  // string
-    explicit_str = true;
-  }
-
-  bool unsign_set = false;
-
-  if (shift_mode) {
-    if (shift_mode == 1) {  // 0b binary
-      for (const auto ch : txt.substr(2)) {
-        if (ch == '0' || ch == '1' || ch == '_')
-          continue;
-
-        // handle binary with special characters ?xZ...
-        std::string bin = "0";  // any binary number is always positive
-        for (auto i = 2u; i < txt.size(); ++i) {
-          const auto ch2 = txt[i];
-          if (ch2 == '_')
-            continue;
-
-          if (ch2 == '?' || ch2 == 'x' || ch2 == 'X') {
-            bin.append(1, '?');
-          } else if (ch2 == 'Z' || ch2 == 'z') {
-            bin.append(1, 'z');
-          } else if (ch2 == '0') {
-            if (bin != "0")
-              bin.append(1, ch2);  // remove too many leading zeroes
-          } else if (ch2 == '1') {
-            bin.append(1, ch2);  // remove too many leading zeroes
-          } else {
-            throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", orig_txt, ch2));
-          }
-        }
-
-        for (int i = bin.size() - 1; i >= 0; --i) {
-          if (bin[i] == '_')
-            continue;
-          if (bin[i] == 'b')
-            break;  // delim for 0b reached
-
-          num <<= 8;
-          num += bin[i];
-          nbits_used++;
-        }
-        bits = nbits_used;
-
-        I(nbits_used <= bits);
-        explicit_str = true;
-
-        I(!negative);
-
-        return;
-      }
-    }
-    I(shift_mode == 1 || shift_mode == 3 || shift_mode == 4);  // binary or octal or hexa
-
-    for (auto i = 2u; i < txt.size(); ++i) {
-      auto v = char_to_val[(uint8_t)txt[i]];
-      if (likely(v >= 0)) {
-        auto char_sa = char_to_bits[(uint8_t)txt[i]];
-        if (unlikely(char_sa > shift_mode)) {
-          throw std::runtime_error(
-              fmt::format("ERROR: {} invalid syntax for number {} bits needed for '{}'", orig_txt, char_sa, txt[i]));
-          return;
-        }
-        num = (num << shift_mode) | v;
-        if (nbits_used == 0)  // leading zeroes adds 0 bits, leading 3 adds 2 bits...
-          nbits_used = char_sa;
-        else
-          nbits_used += shift_mode;
-        continue;
-      } else {
-        if (txt[i] == '_')
-          continue;
-
-        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
-      }
-    }
-    if (nbits_used == 0)
-      nbits_used = 1;
-  } else if (!explicit_str && (std::isdigit(txt[0]) || txt[0] == '-' || txt[0] == '+')) {
-    auto start_i = 0u;
-    if (txt.size() > 2 && txt[0] == '0' && (txt[1] == 'd' || txt[1] == 'D')) {
-      start_i = 2;
-    }
-    for (auto i = start_i; i < txt.size(); ++i) {
-      auto v = char_to_val[(uint8_t)txt[i]];
-      if (likely(v >= 0)) {
-        num = (num * 10) + v;
-      } else {
-        if (txt[i] == '_')
-          continue;
-
-        throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
-      }
-    }
-
-    nbits_used = calc_num_bits();
-  } else {
-    // alnum string (not number, still convert to num)
-    for (int i = orig_txt.size() - 1; i >= 0; --i) {
-      num <<= 8;
-      num += orig_txt[i];
-    }
-    bits         = orig_txt.size() * 8;
-    explicit_str = true;
-  }
-
-  if (bits && !explicit_str) {
-    if (num > 0 && bits < (nbits_used - 1)) {
-      throw std::runtime_error(
-          fmt::format("ERROR: {} bits set would truncate the positive value:{} which needs bits:{}\n", bits, orig_txt, nbits_used));
-    } else if (num < 0 && bits < nbits_used) {
-      throw std::runtime_error(
-          fmt::format("ERROR: {} bits set would truncate the negative value:{} which needs bits:{}\n", bits, orig_txt, nbits_used));
-    }
-  }
-
-  if (negative && !explicit_str) {
-    num = -num;
-  }
-
-  if (!explicit_str) {
-    if (num < 0 && unsign_set) {
-      throw std::runtime_error(fmt::format("ERROR: {} is negative and unsigned but bits not set to truncate\n", orig_txt));
-    }
-    bits = calc_num_bits();
-  }
-
-  I(bits);
-}
 
 void Lconst::dump() const {
   if (explicit_str)
@@ -386,6 +380,22 @@ void Lconst::adjust(const Lconst &o) {
   explicit_str = o.explicit_str && (bits == 0 || explicit_str);
   bits         = calc_num_bits(num);
 }
+
+std::pair<mmap_lib::str, mmap_lib::str> Lconst::match_binary(const Lconst &l, const Lconst &r) {
+
+  auto l_str = l.to_binary();
+  auto r_str = r.to_binary();
+  if (l_str.size()!=r_str.size()) {
+    if (l_str.size() > r_str.size()) {
+      r_str = r_str.append(l_str.size()-r_str.size(), r_str.back());
+    }else{
+      l_str = l_str.append(r_str.size()-l_str.size(), l_str.back());
+    }
+  }
+
+  return std::make_pair(l_str, r_str);
+}
+
 
 std::pair<int,int> Lconst::get_mask_range() const {
 
@@ -543,22 +553,22 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   }
 
   if (has_unknowns()) {
-    auto str = absl::StrCat("0b", to_string(res_num));  // Use the string to remove leading zeroes
-    return Lconst(str);
+    auto str = mmap_lib::str::concat("0b", to_string(res_num));  // Use the string to remove leading zeroes
+    return Lconst::from_pyrope(str);
   }
 
   if (!is_string())
     return Lconst(false, calc_num_bits(res_num), res_num);
 
-  std::string str;
+  mmap_lib::str str;
   while (res_num) {
     unsigned char ch = static_cast<unsigned char>(res_num & 0xFF);
     if (ch)  // remove zeroes from string
-      str.append(1, ch);
+      str = str.append(1, ch);
     res_num >>= 8;
   }
 
-  return string(str);
+  return from_string(str);
 }
 
 // set_mask(0xFFF, 0xF, 0xa) -> 0xFFa
@@ -629,65 +639,66 @@ Lconst Lconst::add_op(const Lconst &o) const {
   }
 
   if (has_unknowns() || o.has_unknowns()) {
-    std::string s_txt = to_yosys();
-    std::string o_txt = o.to_yosys();
+    auto s_txt = to_binary();
+    auto o_txt = o.to_binary();
 
     auto        max_size = std::max(s_txt.size(), o_txt.size());
-    std::string result;
-    result.resize(max_size + 1);  // +1 for carry
+    mmap_lib::str result("0b");
 
     char carry = '0';
     for (auto i = 0u; i < max_size; ++i) {
       auto n_ones     = 0;
-      auto n_zeroes   = 0;
       auto n_unknowns = 0;
-      if (i >= s_txt.size() || s_txt[i] == '0')
-        ++n_zeroes;
-      else if (s_txt[i] == '1')
+      if (i >= s_txt.size() || s_txt[i] == '0') {
+      }else if (s_txt[i] == '1'){
         ++n_ones;
-      else
+      }else{
         ++n_unknowns;
-
-      if (i >= o_txt.size() || o_txt[i] == '0')
-        ++n_zeroes;
-      else if (o_txt[i] == '1')
-        ++n_ones;
-      else
-        ++n_unknowns;
-
-      if (carry == '1')
-        ++n_ones;
-      else if (carry == '0')
-        ++n_zeroes;
-      else
-        ++n_unknowns;
-
-      if (n_unknowns == 0 && n_ones == 0) {
-        result[i] = '0';
-        carry     = '0';
-      } else if (n_unknowns == 0 && n_ones == 1) {
-        result[i] = '1';
-        carry     = '0';
-      } else if (n_unknowns == 0 && n_ones == 2) {
-        result[i] = '0';
-        carry     = '1';
-      } else if (n_unknowns == 0 && n_ones == 3) {
-        result[i] = '1';
-        carry     = '1';
-      } else if (n_unknowns == 1 && n_ones == 0) {
-        result[i] = '?';
-        carry     = '0';
-      } else if (n_unknowns == 1 && n_ones == 2) {
-        result[i] = '?';
-        carry     = '1';
-      } else {
-        result[i] = '?';
-        carry     = '?';
       }
-    }
-    result[max_size] = carry;
 
-    return Lconst(absl::StrCat("0b", result));
+      if (i >= o_txt.size() || o_txt[i] == '0') {
+      }else if (o_txt[i] == '1'){
+        ++n_ones;
+      }else{
+        ++n_unknowns;
+      }
+
+      if (carry == '1') {
+        ++n_ones;
+      }else if (carry == '0') {
+      }else{
+        ++n_unknowns;
+      }
+
+      unsigned char ch;
+      if (n_unknowns == 0 && n_ones == 0) {
+        ch    = '0';
+        carry = '0';
+      } else if (n_unknowns == 0 && n_ones == 1) {
+        ch    = '1';
+        carry = '0';
+      } else if (n_unknowns == 0 && n_ones == 2) {
+        ch    = '0';
+        carry = '1';
+      } else if (n_unknowns == 0 && n_ones == 3) {
+        ch    = '1';
+        carry = '1';
+      } else if (n_unknowns == 1 && n_ones == 0) {
+        ch    = '?';
+        carry = '0';
+      } else if (n_unknowns == 1 && n_ones == 2) {
+        ch    = '?';
+        carry = '1';
+      } else {
+        ch    = '?';
+        carry = '?';
+      }
+
+      result = result.append(ch);
+    }
+    result = result.append(carry);
+
+    return Lconst::from_pyrope(result);
   }
 
   Lconst res;
@@ -699,28 +710,23 @@ Lconst Lconst::add_op(const Lconst &o) const {
 
 Lconst Lconst::concat_op(const Lconst &o) const {
   if (unlikely(is_string() || o.is_string())) {
-    std::string str;
-    std::string o_str;
-    if (bits == 0)
-      // str == "";
-      str = "";
-    else if (is_string())
+    mmap_lib::str str;
+    mmap_lib::str o_str;
+    if (is_string())
       str = to_string();
     else if (is_i())
-      str = std::to_string(to_i());
+      str = mmap_lib::str(to_i());
     else
-      str = to_yosys();
+      str = to_binary();
 
-    if (o.bits == 0)
-      o_str = "";
-    else if (o.is_string())
+    if (o.is_string())
       o_str = o.to_string();
     else if (o.is_i())
-      o_str = std::to_string(o.to_i());
+      o_str = mmap_lib::str(o.to_i());
     else
-      o_str = o.to_yosys();
+      o_str = o.to_binary();
 
-    return Lconst(absl::StrCat(str, o_str));
+    return Lconst::from_string(mmap_lib::str::concat(str, o_str));
   }
 
   Number res_num = get_num() << o.get_bits() | o.get_num();
@@ -804,8 +810,7 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   if (has_unknowns()) {
     auto qmarks = to_pyrope();
-    qmarks.append(amount, '0');
-    return Lconst(qmarks);
+    return Lconst::from_pyrope(qmarks.append(amount, '0')); // TODO: faster just shift (but big changes once mask is set)
   }
 
   auto res_num = num << amount;
@@ -819,8 +824,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
 
   if (is_string()) {
     auto qmarks = to_pyrope();
-    auto s      = qmarks.substr(amount);
-    return Lconst(s);
+    return Lconst::from_pyrope(qmarks.substr(amount));
   }
 
   auto res_num = num >> amount;
@@ -835,41 +839,26 @@ Lconst Lconst::ror_op(const Lconst &o) const {
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
-  if (bits == 0)
-    return o;
-  if (o.bits == 0)
-    return *this;
+  if (unlikely(is_string() || o.is_string())) {
+    return Lconst::from_pyrope("0sb?");
+  }
 
   if (unlikely(has_unknowns() || o.has_unknowns())) {
-    auto        res_bits = std::max(bits, o.bits);
-    std::string str;
-    std::string o_str;
-    if (is_string())
-      str = to_string();
-    if (o.is_string())
-      o_str = o.to_string();
-    if (is_string() && o.is_string()) {
-      std::string      max_str;
-      std::string_view min_str;
-      if (str.size() > o_str.size()) {
-        max_str = str;
-        min_str = o_str;
-      } else {
-        max_str = o_str;
-        min_str = str;
-      }
-      for (auto i = 0u; i < min_str.size(); ++i) {
-        if (o_str[i] == '1' || str[i] == '1')
-          max_str[i] = '1';
-        else if (o_str[i] == '?' || str[i] == '?')
-          max_str[i] = '?';
-      }
 
-      return Lconst(absl::StrCat("0b", max_str));
+    auto [l_str,r_str] = match_binary(*this, o);
+
+    mmap_lib::str result;
+
+    for (auto i = 0u; i < l_str.size(); ++i) {
+      if (l_str[i] == '1' || r_str[i] == '1')
+        result = result.append('0');
+      else if (l_str[i] == '?' || r_str[i] == '?')
+        result = result.append('?');
+      else
+        result = result.append('0');
     }
-    std::string qmarks("0b");
-    qmarks.append(res_bits, '?');
-    return Lconst(qmarks);
+
+    return Lconst::from_binary(result, true);
   }
 
   Lconst res;
@@ -881,7 +870,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
 Lconst Lconst::not_op() const {
   if (unlikely(is_string())) {
-    throw std::runtime_error(fmt::format("ERROR: can not not strings {}", to_pyrope()));
+    throw std::runtime_error(fmt::format("ERROR: can not 'not' strings {}", to_pyrope()));
   }
 
   auto res_num = -1 - get_num();
@@ -891,35 +880,25 @@ Lconst Lconst::not_op() const {
 
 Lconst Lconst::and_op(const Lconst &o) const {
   if (unlikely(is_string() || o.is_string())) {
-    auto        res_bits = std::max(bits, o.bits);
-    std::string str;
-    std::string o_str;
-    if (is_string())
-      str = to_string();
-    if (o.is_string())
-      o_str = o.to_string();
-    if (is_string() && o.is_string()) {
-      std::string      max_str;
-      std::string_view min_str;
-      if (str.size() > o_str.size()) {
-        max_str = str;
-        min_str = o_str;
-      } else {
-        max_str = o_str;
-        min_str = str;
-      }
-      for (auto i = 0u; i < min_str.size(); ++i) {
-        if (o_str[i] == '0' || str[i] == '0')
-          max_str[i] = '0';
-        else if (o_str[i] == '?' || str[i] == '?')
-          max_str[i] = '?';
-      }
+    return Lconst::from_pyrope("0bs?");
+  }
 
-      return Lconst(absl::StrCat("0b", max_str));
+  if (unlikely(has_unknowns() || o.has_unknowns())) {
+
+    auto [l_str,r_str] = match_binary(*this, o);
+
+    mmap_lib::str result;
+
+    for (auto i = 0u; i < l_str.size(); ++i) {
+      if (l_str[i] == '0' || r_str[i] == '0')
+        result = result.append('0');
+      else if (l_str[i] == '?' || r_str[i] == '?')
+        result = result.append('?');
+      else
+        result = result.append('1');
     }
-    std::string qmarks("0b");
-    qmarks.append(res_bits, '?');
-    return Lconst(qmarks);
+
+    return Lconst::from_binary(result, true);
   }
 
   Lconst res;
@@ -929,22 +908,33 @@ Lconst Lconst::and_op(const Lconst &o) const {
   return res;
 }
 
-int Lconst::eq_op(const Lconst &o) const {
+Lconst Lconst::eq_op(const Lconst &o) const {
+  if (unlikely(is_string() && o.is_string())) {
+    return to_string() == o.to_string()?Lconst(-1):Lconst(0);
+  }
+
   if (unlikely(is_string() || o.is_string())) {
-    I(false);  // if any of them has ??, it can not be computed at compile time. Runtime random answer
+    return Lconst::from_pyrope("0sb?");
+  }
+
+  if (unlikely(has_unknowns() || o.has_unknowns())) {
+    auto [l_str,r_str] = match_binary(*this, o);
+
+    for (auto i = 0u; i < l_str.size(); ++i) {
+      if (l_str[i] == '0' || r_str[i] == '0')
+        continue;
+      if (l_str[i] == '1' || r_str[i] == '1')
+        continue;
+      if (l_str[i] == '?' || r_str[i] == '?')
+        return Lconst::from_pyrope("0sb?");
+      else
+        return Lconst(0);
+    }
+
+    return Lconst(-1);
   }
 
   return num == o.num ? -1 : 0;
-
-#if 0
-  auto b = num & o.num;  // zero-extend or drop bits from negative
-
-  if (num<0 && o.num>0)
-    return b == o.num;
-  if (num>0 && o.num<0)
-    return b == num;
-  return (b==num) && (b==o.num);
-#endif
 }
 
 Lconst Lconst::adjust_bits(Bits_t amount) const {
@@ -956,85 +946,92 @@ Lconst Lconst::adjust_bits(Bits_t amount) const {
   return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
-std::string Lconst::to_string(Number num) {
-  std::string str;
+mmap_lib::str Lconst::to_string(Number num) {
+  mmap_lib::str str;
   Number      tmp = num;
   while (tmp) {
-    unsigned char ch = static_cast<unsigned char>(tmp & 0xFF);
-    str.append(1, ch);
+    auto ch = static_cast<unsigned char>(tmp & 0xFF);
+    str = str.append(ch);
     tmp >>= 8;
   }
 
   return str;
 }
 
-std::string Lconst::to_string() const {
-  if (is_i()) {
-    return std::to_string(to_i());
-  }
-  I(explicit_str);  // either has_unknowns() or is_string()
-  return to_string(num);
-}
+Lconst Lconst::to_known_rand() const {
+  if (!has_unknowns())
+    return *this;
 
-mmap_lib::str Lconst::to_str() const {
-  if (is_i()) {
-    auto val = std::to_string(to_i());
-    return mmap_lib::str(val);
-  }
-  I(explicit_str);  // either has_unknowns() or is_string()
-  return mmap_lib::str(to_string(num));
-}
+  static Lrand<bool> rbool;
 
-std::string Lconst::to_string_no_xz() const {
   I(is_string());
-
-  std::string str;
+  mmap_lib::str str;
   Number      tmp = num;
   while (tmp) {
-    unsigned char ch = static_cast<unsigned char>(tmp & 0xFF);
-    if (ch == 'z' || ch == 'x')
-      str.append(1, '0');
+    auto ch = static_cast<unsigned char>(tmp & 0xFF);
+    if (ch == '?' || ch == 'z')
+      str = str.append(rbool.any()?'0':'1');
     else
-      str.append(1, ch);
+      str = str.append(ch);
     tmp >>= 8;
   }
-
-  return str;
+  auto sign = static_cast<unsigned char>(num & 0xFF);
+  if (sign=='?' || sign=='z')
+    return Lconst::from_binary(str,rbool.any());
+  return Lconst::from_binary(str,sign=='0');
 }
 
-std::string Lconst::to_pyrope() const {
+mmap_lib::str Lconst::to_pyrope() const {
   if (explicit_str) {
-    // Either string or 0b with special characters like ?xz
-    auto str = to_string();
-    if (is_string())
-      return absl::StrCat("'", str, "'");
+    auto str_no_underscore = to_string();
 
-    I(str[0] != '-');
-    auto str2 = absl::StrCat("0b", str);
-    return str2;
+    if (has_unknowns()) {
+      auto sign = static_cast<unsigned char>(num & 0xFF);
+
+      mmap_lib::str str;
+      if (sign=='0')
+        str = "0b";
+      else
+        str = "0sb";
+
+      str = str.append(str_no_underscore[0]);
+      for(auto i=1u;i<str_no_underscore.size();++i) {
+        if ((i % 4) == 0) {
+          str = str.append('_');
+        }
+        str = str.append(str_no_underscore[i]);
+      }
+
+      return str;
+    }
+
+    if (str_no_underscore.front()=='\'' && str_no_underscore.back() == '\'')
+      return str_no_underscore;
+
+    return mmap_lib::str::concat("'", str_no_underscore, "'");
   }
 
   const auto        v = get_num();
   std::stringstream ss;
 
-  bool print_hexa = v > 63;
+  bool print_hexa = v > 63 || v<-63;
   if (print_hexa) {
     ss << std::hex;
   }
 
-  std::string str;
   if (v < 0) {
-    str.append(1, '-');
     ss << -v;
-  } else {
-    ss << v;
+    if (print_hexa)
+      return mmap_lib::str::concat("0sx", ss.str());
+
+    return mmap_lib::str::concat("-",ss.str());
   }
+  ss << v;
 
   if (print_hexa)
-    absl::StrAppend(&str, "0x");
-  absl::StrAppend(&str, ss.str());
+    return mmap_lib::str::concat("0x", ss.str());
 
-  return str;
+  return mmap_lib::str(ss.str());
 }
 
 size_t Lconst::popcount() const {
@@ -1055,21 +1052,16 @@ size_t Lconst::popcount() const {
   return popcount;
 }
 
-std::string Lconst::to_firrtl() const {
-  /*Note->hunter: FIRRTL-Proto requires the string output
-   * here is a decimal value (no 0x or 0d allowed. Only #).
-   * Also means it can't have 'x' or 'z'. */
+mmap_lib::str Lconst::to_firrtl() const {
+  // Note->hunter: FIRRTL-Proto requires the string output here is a decimal
+  // value (no 0x or 0d allowed. Only #).  Also means it can't have 'x' or 'z'.
+
   Number v;
   if (explicit_str) {
-    // Either string or 0b with special characters like ?xz
-    auto str = to_string_no_xz();
     if (is_string())
-      return str;
+      return to_string();
 
-    I(str[0] != '-');
-    // Is in 0b form, need to convert from that.
-    auto temp_lconst = Lconst(str);
-    v                = temp_lconst.get_num();
+    v = to_known_rand().get_num();
   } else {
     v = get_num();
   }
@@ -1080,13 +1072,10 @@ std::string Lconst::to_firrtl() const {
   else
     ss << v;
 
-  std::string str;
   if (is_negative())
-    str.append(1, '-');
+    return mmap_lib::str::concat("-", ss.str());
 
-  absl::StrAppend(&str, ss.str());
-
-  return str;
+  return mmap_lib::str(ss.str());
 }
 
 int64_t Lconst::to_i() const {
@@ -1094,68 +1083,48 @@ int64_t Lconst::to_i() const {
   return static_cast<long int>(num);
 }
 
-std::string Lconst::to_yosys(bool do_unsign) const {
-  if (explicit_str) {
-    // Either string or 0b with special characters like ?xz
+mmap_lib::str Lconst::to_binary() const {
+  if (has_unknowns()) {
     return to_string();
   }
 
   auto v = get_num();
-  GI(do_unsign, v >= 0);
 
-  std::string txt;
-  auto        nbits = get_bits();
-  if (do_unsign)
-    --nbits;
-  for (auto i = 0u; i < nbits; ++i) {
+  mmap_lib::str txt;
+  for (auto i = 0u; i < get_bits(); ++i) {
     if (v & 1) {
-      txt.append(1, '1');
+      txt = txt.prepend('1');
     } else {
-      txt.append(1, '0');
+      txt = txt.prepend('0');
     }
     v = v >> 1;
   }
-  const std::string rev(txt.rbegin(), txt.rend());
 
-  return rev;
+  return txt;
 }
 
-std::string Lconst::to_verilog() const {
+mmap_lib::str Lconst::to_verilog() const {
   if (explicit_str) {
-    // Either string or 0b with special characters like ?xz
-    auto str = to_string();
-    if (str.size() * 8 == bits)
-      return absl::StrCat("\"", str, "\"");
+    if (has_unknowns()) {
+      auto sign = static_cast<unsigned char>(num & 0xFF);
 
-    I(str[0] != '-');
-    return absl::StrCat("'b", str);
-  }
+      if (sign=='0')
+        return mmap_lib::str::concat(get_bits(), "'b", to_string());
 
-  std::string str;
-  absl::StrAppend(&str, (int)bits);
-
-  // Hexa
-  auto v = get_num();
-  if (v < 0) {  // Negative
-    std::string txt;
-    for (auto i = 0u; i < get_bits(); ++i) {
-      if (v & 1) {
-        txt.append(1, '1');
-      } else {
-        txt.append(1, '0');
-      }
-      v = v >> 1;
+      return mmap_lib::str::concat(get_bits(), "'sb", to_string());
     }
-    const std::string rev(txt.rbegin(), txt.rend());
 
-    absl::StrAppend(&str, "'sb", rev);
-  } else {
-    std::stringstream ss;
-    ss << std::hex;
-    ss << v;
-
-    absl::StrAppend(&str, "'sh", ss.str());
+    return mmap_lib::str::concat("'", to_string(), "'");
   }
 
-  return str;
+  std::stringstream ss;
+  ss << std::hex;
+
+  if (num < 0) {
+    ss << -num;
+    return mmap_lib::str::concat(get_bits(), "'sh", ss.str());
+  }
+  ss << num;
+
+  return mmap_lib::str::concat(get_bits()-1, "'h", ss.str());
 }
