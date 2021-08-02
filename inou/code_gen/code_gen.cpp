@@ -741,12 +741,14 @@ void Code_gen::do_get_mask(const mmap_lib::Tree_index& gmask_node_index) {
 			ref_is_ref = false;
 		}
 
+<<<<<<< Updated upstream
 		//absl::StrAppend(&val, ref.to_s(), ((i==1)?lnast_to->gmask_op():""), ((i>1)?"":"(") );
     absl::StrAppend(&val, ((!ref_is_ref&&i>1)?"(":"") , ref.to_s(), ((i==1)?lnast_to->gmask_op():""));
+=======
+    absl::StrAppend(&val, ((!ref_is_ref&&i>1)?"(":"") , ref, ((i==1)?lnast_to->gmask_op():""));
+>>>>>>> Stashed changes
   }
-  //val.pop_back();
   absl::StrAppend(&val, (ref_is_ref?"":")") );
-  //absl::StrAppend(&val, ")") ;
 
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
