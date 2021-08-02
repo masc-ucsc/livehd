@@ -852,7 +852,7 @@ public:
   [[nodiscard]] str append(const T b) const {
     if constexpr (std::is_same_v<T, char> || std::is_same_v<T, unsigned char>) {
       return append(1,b);
-    }else if constexpr (std::is_same_v<T, char *>) {
+    }else if constexpr (std::is_same_v<T, char const*>) {
       auto sv = std::string_view(b);
       return append_array(sv);
     }else{
@@ -932,7 +932,7 @@ public:
       a_sv = a;
     }else if constexpr (std::is_same_v<T1, std::string>) {
       a_sv = std::string_view(a.data(),a.size());
-    }else if constexpr (std::is_same_v<T1, char *>) {
+    }else if constexpr (std::is_same_v<T1, char const*>) {
       a_sv = std::string_view(a);
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
@@ -950,7 +950,7 @@ public:
       b_sv = b;
     }else if constexpr (std::is_same_v<T2, std::string>) {
       b_sv = std::string_view(b.data(),b.size());
-    }else if constexpr (std::is_same_v<T2, char *>) {
+    }else if constexpr (std::is_same_v<T2, char const*>) {
       b_sv = std::string_view(b);
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
@@ -978,7 +978,7 @@ public:
       a_sv = a;
     }else if constexpr (std::is_same_v<T1, std::string>) {
       a_sv = std::string_view(a.data(),a.size());
-    }else if constexpr (std::is_same_v<T1, char *>) {
+    }else if constexpr (std::is_same_v<T1, char const*>) {
       a_sv = std::string_view(a);
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
@@ -996,7 +996,7 @@ public:
       b_sv = b;
     }else if constexpr (std::is_same_v<T2, std::string>) {
       b_sv = std::string_view(b.data(),b.size());
-    }else if constexpr (std::is_same_v<T2, char *>) {
+    }else if constexpr (std::is_same_v<T2, char const *>) {
       b_sv = std::string_view(b);
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
@@ -1014,7 +1014,7 @@ public:
       c_sv = c;
     }else if constexpr (std::is_same_v<T3, std::string>) {
       c_sv = std::string_view(c.data(),c.size());
-    }else if constexpr (std::is_same_v<T3, char *>) {
+    }else if constexpr (std::is_same_v<T3, char const*>) {
       c_sv = std::string_view(c);
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
@@ -1043,7 +1043,7 @@ public:
       a_sv = a;
     }else if constexpr (std::is_same_v<T1, std::string>) {
       a_sv = std::string_view(a.data(),a.size());
-    }else if constexpr (std::is_same_v<T1, char *>) {
+    }else if constexpr (std::is_same_v<T1, char const*>) {
       a_sv = std::string_view(a);
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
@@ -1061,7 +1061,7 @@ public:
       b_sv = b;
     }else if constexpr (std::is_same_v<T2, std::string>) {
       b_sv = std::string_view(b.data(),b.size());
-    }else if constexpr (std::is_same_v<T2, char *>) {
+    }else if constexpr (std::is_same_v<T2, char const*>) {
       b_sv = std::string_view(b);
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
@@ -1079,7 +1079,7 @@ public:
       c_sv = c;
     }else if constexpr (std::is_same_v<T3, std::string>) {
       c_sv = std::string_view(c.data(),c.size());
-    }else if constexpr (std::is_same_v<T3, char *>) {
+    }else if constexpr (std::is_same_v<T3, char const*>) {
       c_sv = std::string_view(c);
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
@@ -1097,7 +1097,7 @@ public:
       d_sv = d;
     }else if constexpr (std::is_same_v<T4, std::string>) {
       d_sv = std::string_view(d.data(),d.size());
-    }else if constexpr (std::is_same_v<T4, char *>) {
+    }else if constexpr (std::is_same_v<T4, char const*>) {
       d_sv = std::string_view(d);
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
@@ -1127,7 +1127,7 @@ public:
       a_sv = a;
     }else if constexpr (std::is_same_v<T1, std::string>) {
       a_sv = std::string_view(a.data(),a.size());
-    }else if constexpr (std::is_same_v<T1, char *>) {
+    }else if constexpr (std::is_same_v<T1, char const*>) {
       a_sv = std::string_view(a);
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
@@ -1145,7 +1145,7 @@ public:
       b_sv = b;
     }else if constexpr (std::is_same_v<T2, std::string>) {
       b_sv = std::string_view(b.data(),b.size());
-    }else if constexpr (std::is_same_v<T2, char *>) {
+    }else if constexpr (std::is_same_v<T2, char const*>) {
       b_sv = std::string_view(b);
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
@@ -1163,7 +1163,7 @@ public:
       c_sv = c;
     }else if constexpr (std::is_same_v<T3, std::string>) {
       c_sv = std::string_view(c.data(),c.size());
-    }else if constexpr (std::is_same_v<T3, char *>) {
+    }else if constexpr (std::is_same_v<T3, char const*>) {
       c_sv = std::string_view(c);
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
@@ -1181,7 +1181,7 @@ public:
       d_sv = d;
     }else if constexpr (std::is_same_v<T4, std::string>) {
       d_sv = std::string_view(d.data(),d.size());
-    }else if constexpr (std::is_same_v<T4, char *>) {
+    }else if constexpr (std::is_same_v<T4, char const*>) {
       d_sv = std::string_view(d);
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
@@ -1199,7 +1199,7 @@ public:
       e_sv = e;
     }else if constexpr (std::is_same_v<T5, std::string>) {
       e_sv = std::string_view(e.data(),e.size());
-    }else if constexpr (std::is_same_v<T5, char *>) {
+    }else if constexpr (std::is_same_v<T5, char const*>) {
       e_sv = std::string_view(e);
     }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
       e_s = e.to_s();
@@ -1230,7 +1230,7 @@ public:
       a_sv = a;
     }else if constexpr (std::is_same_v<T1, std::string>) {
       a_sv = std::string_view(a.data(),a.size());
-    }else if constexpr (std::is_same_v<T1, char *>) {
+    }else if constexpr (std::is_same_v<T1, char const*>) {
       a_sv = std::string_view(a);
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
@@ -1248,7 +1248,7 @@ public:
       b_sv = b;
     }else if constexpr (std::is_same_v<T2, std::string>) {
       b_sv = std::string_view(b.data(),b.size());
-    }else if constexpr (std::is_same_v<T2, char *>) {
+    }else if constexpr (std::is_same_v<T2, char const*>) {
       b_sv = std::string_view(b);
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
@@ -1266,7 +1266,7 @@ public:
       c_sv = c;
     }else if constexpr (std::is_same_v<T3, std::string>) {
       c_sv = std::string_view(c.data(),c.size());
-    }else if constexpr (std::is_same_v<T3, char *>) {
+    }else if constexpr (std::is_same_v<T3, char const*>) {
       c_sv = std::string_view(c);
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
@@ -1284,7 +1284,7 @@ public:
       d_sv = d;
     }else if constexpr (std::is_same_v<T4, std::string>) {
       d_sv = std::string_view(d.data(),d.size());
-    }else if constexpr (std::is_same_v<T4, char *>) {
+    }else if constexpr (std::is_same_v<T4, char const*>) {
       d_sv = std::string_view(d);
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
@@ -1302,7 +1302,7 @@ public:
       e_sv = e;
     }else if constexpr (std::is_same_v<T5, std::string>) {
       e_sv = std::string_view(e.data(),e.size());
-    }else if constexpr (std::is_same_v<T5, char *>) {
+    }else if constexpr (std::is_same_v<T5, char const*>) {
       e_sv = std::string_view(e);
     }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
       e_s = e.to_s();
@@ -1320,7 +1320,7 @@ public:
       f_sv = f;
     }else if constexpr (std::is_same_v<T6, std::string>) {
       f_sv = std::string_view(f.data(),f.size());
-    }else if constexpr (std::is_same_v<T6, char *>) {
+    }else if constexpr (std::is_same_v<T6, char const*>) {
       f_sv = std::string_view(f);
     }else if constexpr (std::is_same_v<T6, mmap_lib::str>) {
       f_s = f.to_s();
