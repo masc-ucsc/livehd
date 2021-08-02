@@ -748,7 +748,7 @@ public:
     return std::string::npos;
   }
 
-  [[nodiscard]] std::string to_s() const {  // convert to string
+  [[nodiscard]] std::string to_s() const {  // convert to std::string
     if (is_sso()) {
       return std::string(ref_base_sso(), size_sso());
     }

@@ -209,6 +209,7 @@ bool Pass_lnastfmt::is_ssa(const mmap_lib::str  &test_string) {
 
 Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, const std::shared_ptr<Lnast>& ln,
                                          const mmap_lib::Tree_index& it) {
+  (void) lnastfmted;
   // auto orig_node_token = ln->get_token(it);
   // auto orig_node_subs = ln->get_subs(it);
   auto       orig_node_name = ln->get_name(it);

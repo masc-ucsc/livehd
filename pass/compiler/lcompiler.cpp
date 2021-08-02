@@ -2,7 +2,7 @@
 
 #include "lcompiler.hpp"
 
-Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz)
+Lcompiler::Lcompiler(mmap_lib::str _path, mmap_lib::str _odir, mmap_lib::str _top, bool _gviz)
     : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {}
 
 void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &lnasts) {
@@ -176,7 +176,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 void Lcompiler::do_fir_cprop() {
   auto lgcnt                   = 0;
   auto hit                     = false;
-  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
+  auto top_name_before_mapping = mmap_lib::str::concat("__firrtl_", top);
 
   // hierarchical traversal
   for (auto &lg : lgs) {
@@ -243,7 +243,7 @@ void Lcompiler::setup_maps() {  // single-thread
 void Lcompiler::do_fir_firmap_bitwidth() {
   auto lgcnt                  = 0;
   auto hit                    = false;
-  auto top_name_before_firmap = absl::StrCat("__firrtl_", top);
+  auto top_name_before_firmap = mmap_lib::str::concat("__firrtl_", top);
 
   std::mutex                    lg_visited_mutex;
   absl::flat_hash_set<Lgraph *> lg_visited;
@@ -321,7 +321,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 void Lcompiler::do_fir_firbits() {
   auto lgcnt                   = 0;
   auto hit                     = false;
-  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
+  auto top_name_before_mapping = mmap_lib::str::concat("__firrtl_", top);
 
   // hierarchical traversal
   for (auto &lg : lgs) {
