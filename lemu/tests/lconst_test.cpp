@@ -68,6 +68,8 @@ protected:
 
 public:
   void SetUp() override {
+    mmap_lib::str::setup();
+
     a16u  = UInt<16>(0xcafe);
     b16u  = UInt<16>(0xbebe);
     a64u  = UInt<64>(0xe2bd5b4ff8b30fc8);
@@ -113,7 +115,7 @@ void print_method(const UInt<N> v) {
 
 TEST_F(Lconst_test, to_from_pyrope) {
 
-  auto v = Lconst::from_pyrope("0sxffffffffffffffffffffffffffffffffffffffffffffffe");
+  auto v = Lconst::from_pyrope("0sb11111111111111111111111111111111111111111111110");
   EXPECT_EQ(v.to_i(), -2);
   EXPECT_EQ(v.to_pyrope(), "-2");
 
@@ -123,14 +125,10 @@ TEST_F(Lconst_test, lvar_sizes) {
   auto l1 = Lconst::from_pyrope("-1");  // 0xFF or -1
   fmt::print("l1:{} bits:{}\n", l1.to_pyrope(), l1.get_bits());
   EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0xFF")));
-  EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0uxFF")));
-  EXPECT_EQ(Lconst::from_pyrope("true") , l1.eq_op(Lconst::from_pyrope("0sxFF")));
 
   EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_false());
 
   EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_false());
-  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0uxFFFFFFF")).is_false());
-  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("0sxFFFFFFF")).is_false());
 
   EXPECT_EQ(l1.get_bits(), 1);
 
@@ -969,6 +967,32 @@ TEST_F(Lconst_test, trivial_vals) {
 }
 
 TEST_F(Lconst_test, hexa_check) {
+
+  //auto v1 = Lconst::from_pyrope("0xdbd7b0ac8a3a5dcb7ada8e8a30ea6dc54ebe6bc7a37d2d8b2cd2a");
+  auto v1 = Lconst::from_pyrope("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
+
+  mmap_lib::str str("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
+
+  auto s1 = v1.serialize();
+
+  auto v2 = Lconst::unserialize(s1);
+
+#if 0
+  fmt::print("or:");
+  for(auto i=0u;i<s1.size();++i) {
+    fmt::print(":{}", (int)s1[i]);
+  }
+  fmt::print("\n");
+  fmt::print("v1:{}\n", v1.to_pyrope());
+  fmt::print("v2:{}\n", v2.to_pyrope());
+#endif
+
+  EXPECT_EQ(v1,v2);
+  EXPECT_EQ(v1.to_pyrope(),str);
+  EXPECT_EQ(v2.to_pyrope(),str);
+}
+
+TEST_F(Lconst_test, hexa_check_long) {
   Lbench b("lemu.LCONST_const_attr");
 
   unlink("lgdb_attr/c_map");
@@ -997,14 +1021,25 @@ TEST_F(Lconst_test, hexa_check) {
         rnd_list[i] = rnd_list[i].append(hex3_digits.any());
     }
     c_map.set(i, Lconst::from_pyrope(rnd_list[i]).serialize());
+
+    auto v1 = Lconst::from_pyrope(rnd_list[i]);
+    auto v2 = Lconst::unserialize(v1.serialize());
+    //fmt::print("raw:{}\n",rnd_list[i]);
+    //fmt::print("1  :{}\n",v1.to_pyrope());
+    //fmt::print("2  :{}\n",v2.to_pyrope());
+    //v1.dump();
+    //v2.dump();
+    EXPECT_EQ(v1, v2);
   }
 
   for (auto i = 0u; i < n_const; ++i) {
-    // fmt::print("num:{}\n",rnd_list[i]);
 
     { // CHECK that mmap works
       auto v1 = Lconst::unserialize(c_map.get(i));
       auto v2 = Lconst::from_pyrope(rnd_list[i]);
+      //fmt::print("raw:{}\n",rnd_list[i]);
+      //fmt::print("   :{}\n",v1.to_pyrope());
+      //fmt::print("   :{}\n",v2.to_pyrope());
       EXPECT_EQ(v1, v2);
     }
 
@@ -1016,8 +1051,8 @@ TEST_F(Lconst_test, hexa_check) {
       auto v1 = Lconst::from_pyrope(rnd_list[i]);
       auto v2 = Lconst::from_pyrope(v1.to_pyrope());
       EXPECT_EQ(v1,v2);
-      if (c>63) { // no short pyrope syntax
-        EXPECT_EQ(v1.to_pyrope(), rnd_list[i]);
+      if (c>63 && rnd_list[i][2] != '0') { // no short pyrope syntax, no 0x0... which will be shorter
+        EXPECT_EQ(v1.to_pyrope(), rnd_list[i].to_lower());
       }
     }
 
@@ -1062,39 +1097,26 @@ TEST_F(Lconst_test, dec_check) {
     boost::multiprecision::cpp_int c(rnd_list[i]);
 
     mmap_lib::str padded;
+    bool digit_found=false;
     for (const auto ch : rnd_list[i]) {
-      if (flip.any())
+      if (flip.any() && digit_found)
         padded = padded.append('_');
       padded = padded.append(ch);
-    }
-    if (flip.any()) {
-      bool is_sign = true;
-
-      if (flip.any()) {
-        auto nbits = 0;
-        if (c < 0)
-          nbits = msb(-c) + 1;
-        else if (c == 0)
-          nbits = 1;
-        else
-          nbits = msb(c) + 1;
-        if (is_sign)
-          nbits++;
-
-        if (flip.any()) {
-          nbits += num_digits.any();
-        }
-      }
+      if (std::isdigit(ch))
+        digit_found = true;
     }
 
     auto a1 = Lconst::from_pyrope(mmap_lib::str(rnd_list[i]));
     EXPECT_EQ(a1.get_raw_num(), c);
 
     auto a2 = Lconst::from_pyrope(padded);
+#if 0
     if (a2.get_raw_num() != c) {
+      fmt::print("PADDED:{}\n", padded);
       a2.dump();
       a1.dump();
     }
+#endif
     EXPECT_EQ(a2.get_raw_num(), c);
 
     auto fmt_a = a1.to_pyrope();
@@ -1123,12 +1145,12 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(Lconst::from_pyrope("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
   EXPECT_EQ(Lconst::from_string("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
   EXPECT_EQ(Lconst::from_pyrope("\'a longer chain of text").to_pyrope(), mmap_lib::str("'\'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), mmap_lib::str("''"));
+  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), mmap_lib::str("0"));
   EXPECT_EQ(Lconst::from_pyrope("''").to_pyrope(), mmap_lib::str("''"));
   EXPECT_EQ(Lconst::from_string("''").to_pyrope(), mmap_lib::str("''"));
   EXPECT_EQ(Lconst::from_string("''''").to_pyrope(), mmap_lib::str("''''")); // Lconst::from_pyrope("''''") raises an exception
 
-  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), mmap_lib::str("'__longer chain of text"));
+  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), mmap_lib::str("'__longer chain of text'"));
   EXPECT_EQ(Lconst::from_pyrope("_").to_pyrope(), mmap_lib::str("'_'"));
   EXPECT_EQ(Lconst::from_pyrope("a").to_pyrope(), mmap_lib::str("'a'"));
 
@@ -1212,7 +1234,7 @@ TEST_F(Lconst_test, binary) {
   }
 
   {
-    Lconst k = Lconst::from_pyrope("0sxFF");
+    Lconst k = Lconst::from_pyrope("0sb111111");
     EXPECT_EQ(k.to_pyrope(), "-1");
     EXPECT_EQ(k.to_verilog(), "1'sh1");  // hex positives
     EXPECT_EQ(k.to_binary(), "1");

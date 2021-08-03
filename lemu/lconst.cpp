@@ -19,8 +19,46 @@ mmap_lib::str Lconst::serialize() const {
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 8);
 
-  return mmap_lib::str(v.data(), v.size());
+  auto str = mmap_lib::str(v.data(), v.size());
+
+  Number res_num1;
+  boost::multiprecision::import_bits(res_num1, v.begin() + 4, v.end());
+
+  std::vector<unsigned char> v2;
+  for(auto i=0u;i<str.size();++i)
+    v2.emplace_back(str[i]);
+  Number res_num2;
+  boost::multiprecision::import_bits(res_num2, v2.begin() + 4, v2.end());
+
+  return str;
 }
+
+Lconst Lconst::unserialize(const mmap_lib::str &v) {
+
+  I(v.size() > 4);  // invalid otherwise
+
+  std::vector<unsigned char> v2;
+  for(auto i=0u;i<v.size();++i)
+    v2.emplace_back(v[i]);
+
+  uint8_t  c0 = v2[0];
+  uint32_t c1 = v2[1];
+  uint32_t c2 = v2[2];
+  uint32_t c3 = v2[3];
+
+  auto res_explicit_str = (c0 & 0x10) ? true : false;
+
+  auto res_bits = (c1 << 16) | (c2 << 8) | c3;
+
+  Number res_num;
+  boost::multiprecision::import_bits(res_num, v2.begin() + 4, v2.end());
+  if (c0 & 0x01) {  // negative
+    res_num = -res_num;
+  }
+
+  return Lconst(res_explicit_str, res_bits, res_num);
+}
+
 
 uint64_t Lconst::hash() const {
   std::vector<uint64_t> v;
@@ -51,31 +89,6 @@ Lconst::Lconst(absl::Span<unsigned char> v) {
   if (c0 & 0x01) {  // negative
     num = -num;
   }
-}
-
-Lconst Lconst::unserialize(const mmap_lib::str &v) {
-
-  I(v.size() > 4);  // invalid otherwise
-
-  uint8_t  c0 = v[0];
-  uint32_t c1 = v[1];
-  uint32_t c2 = v[2];
-  uint32_t c3 = v[3];
-
-  auto res_explicit_str = (c0 & 0x10) ? true : false;
-
-  auto res_bits = (c1 << 16) | (c2 << 8) | c3;
-
-  Number res_num;
-
-  auto str = v.to_s();
-
-  boost::multiprecision::import_bits(res_num, str.begin() + 4, str.end());
-  if (c0 & 0x01) {  // negative
-    res_num = -res_num;
-  }
-
-  return Lconst(res_explicit_str, res_bits, res_num);
 }
 
 Lconst::Lconst() {
@@ -146,15 +159,10 @@ Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
   }
 
   if (!unsigned_result && bin.front() == '1') {
-    num = -1 - num;
+    num = num-(Number(1)<<(bin.size()-1));
   }
 
-  for (int i = bin.size() - 1; i >= 0; --i) {
-    num <<= 8;
-    num += bin[i];
-  }
-
-  return Lconst(true, bin.size(), num);
+  return Lconst(false, calc_num_bits(num), num);
 }
 
 Lconst Lconst::from_string(mmap_lib::str orig_txt) {
@@ -201,9 +209,12 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
       ++skip_chars;
       auto sel_ch = txt[skip_chars];
       if (sel_ch == 's') {
-        // 0sb 0sx 0so (signed)
+        // 0sb (signed). Too confusing otherwise. is 0sx80 negative and 0sx10 also negative (where is the MSB?)
         ++skip_chars;
         sel_ch = txt[skip_chars];
+        if (sel_ch!='b') {
+          throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding only binary can be signed 0sb...\n", orig_txt));
+        }
         I(!unsigned_result);
       }else{
         unsigned_result = true;
@@ -213,7 +224,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
         shift_mode = 4;
         ++skip_chars;
       }else if (sel_ch == 'b') {
-        shift_mode = 2;
+        shift_mode = 1;
         ++skip_chars;
       }else if (sel_ch == 'd') {
         shift_mode = 10; // BASE 10 decimal
@@ -232,8 +243,8 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
     int end_i   = 0;
 
     if (orig_txt.size()>1 && orig_txt.front() == '\'' && orig_txt.back() == '\'') {
-      ++start_i;
-      --end_i;
+      --start_i;
+      ++end_i;
     }
 
     Number num;
@@ -243,7 +254,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
       num <<= 8;
       num += orig_txt[i];
 
-      if (orig_txt[i] == '\'' && !prev_escaped) {
+      if (orig_txt[i] == '\'' && !prev_escaped && i!=0) {
         throw std::runtime_error(fmt::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
       }
 
@@ -288,7 +299,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
         continue;
 
       auto v = char_to_val[(uint8_t)txt[i]];
-      if (unlikely(v >= 0)) {
+      if (unlikely(v < 0)) {
         throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
       if (first_digit<0) {
@@ -305,7 +316,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
 
     if (!unsigned_result) { // check if MSB is 1 for 2s complement
       if (first_digit>>(shift_mode-1)) {
-        num = -1 - num;
+        num = num - (Number(1)<<(calc_num_bits(num)-1));
       }
     }
   }
@@ -984,6 +995,8 @@ Lconst Lconst::to_known_rand() const {
 mmap_lib::str Lconst::to_pyrope() const {
   if (explicit_str) {
     auto str_no_underscore = to_string();
+    if (str_no_underscore.empty())
+      return mmap_lib::str("''");
 
     if (has_unknowns()) {
       auto sign = static_cast<unsigned char>(num & 0xFF);
@@ -1014,7 +1027,7 @@ mmap_lib::str Lconst::to_pyrope() const {
   const auto        v = get_num();
   std::stringstream ss;
 
-  bool print_hexa = v > 63 || v<-63;
+  bool print_hexa = v > 63;
   if (print_hexa) {
     ss << std::hex;
   }

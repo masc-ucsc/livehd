@@ -314,7 +314,7 @@ protected:
     ptr_or_start = 0;
     data_storage = 0;
     for(auto i=0u;i<N;++i) {
-      uint64_t val = s[i];
+      uint64_t val = static_cast<unsigned char>(s[i]);
       if (i<3) {
         size_ctrl    |= val<<(8*(i+1));
       }else if (i < 7) {
@@ -351,7 +351,7 @@ protected:
     auto ptr_offset = get_n_data_chars();
 
     for(auto i=0u;i<ptr_offset;++i) {
-      uint64_t d = s[i];
+      uint64_t d = static_cast<unsigned char>(s[i]);
       data_storage |= d<<(8*i);
     }
 
