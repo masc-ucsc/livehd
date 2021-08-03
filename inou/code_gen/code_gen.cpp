@@ -1149,9 +1149,9 @@ bool Code_gen::is_number(const mmap_lib::str &test_string) {
 
 //-------------------------------------------------------------------------------------
 mmap_lib::str Code_gen::process_number(const mmap_lib::str &num_string) {
-  Lconst lc(num_string);
+	auto lc = Lconst::from_pyrope(num_string);// lc(num_string);
   I(lc.is_i());
-  return lc.to_str(); // this can simplify the number a bit (language dependent, it may need to call to_pyrope/to_verilog/...
+  return mmap_lib::str(lc.to_pyrope()); // this can simplify the number a bit (language dependent, it may need to call to_pyrope/to_verilog/...
 }
 
 //-------------------------------------------------------------------------------------
