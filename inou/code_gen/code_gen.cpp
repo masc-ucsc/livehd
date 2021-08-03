@@ -217,14 +217,12 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
             }
           } else {
             hier_tup_vec.emplace_back(
-                mmap_lib::str(
-                  absl::StrCat(
+                mmap_lib::str::concat(
                     lnast_to->ref_name(key_sec)
                     ," "
                     ,lnast_to->debug_name_lang(assign_node_data.type)
                     ," "
                     ,lnast_to->ref_name(ref)
-                    )
                   )
                 );
           }
@@ -600,7 +598,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
         auto bw_num = Lconst::from_pyrope(ref);  //(int)log2(ref)+1;
 
         fmt::print("{}\n", bw_num.get_bits());
-        ref = mmap_lib::str(absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref.to_s(), ")"));
+        ref = mmap_lib::str::concat("UInt<", bw_num.get_bits(), ">(", ref.to_s(), ")");
       }
     }
 
@@ -1111,12 +1109,11 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
     assert(false);
     return "ERROR"_str; // ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
   } else if (is_const) {
-    auto ret_tup_str = absl::StrCat(indent(), val, lnast_to->tuple_stmt_sep());
-    return mmap_lib::str(ret_tup_str);
+    return mmap_lib::str::concat(indent(), val, lnast_to->tuple_stmt_sep());
   } else if (key == "__range_begin") {
-    return mmap_lib::str(absl::StrCat(val, "."));
+    return mmap_lib::str::concat(val, ".");
   } else if (key == "__range_end") {
-    return mmap_lib::str(absl::StrCat(".", val));
+    return mmap_lib::str::concat(".", val);
   } else {
     auto ret_tup_str
         = absl::StrCat(indent(), key.to_s(), " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->tuple_stmt_sep());
