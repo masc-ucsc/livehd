@@ -921,7 +921,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
 
 Lconst Lconst::eq_op(const Lconst &o) const {
   if (unlikely(is_string() && o.is_string())) {
-    return to_string() == o.to_string()?Lconst(-1):Lconst(0);
+    return to_string() == o.to_string() ? Lconst(-1) : Lconst(0);
   }
 
   if (unlikely(is_string() || o.is_string())) {
