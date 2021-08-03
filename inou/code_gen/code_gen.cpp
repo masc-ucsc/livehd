@@ -596,7 +596,9 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
       ref_is_const = true;
       if (lnast_to->is_unsigned(op_str_vect[i - 1])) {
         fmt::print("\nNow, op str vect i-1 is {} and ref is {}\n", op_str_vect[i - 1], ref);
-        auto bw_num = Lconst(ref);  //(int)log2(ref)+1;
+
+        auto bw_num = Lconst::from_pyrope(ref);  //(int)log2(ref)+1;
+
         fmt::print("{}\n", bw_num.get_bits());
         ref = mmap_lib::str(absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref.to_s(), ")"));
       }
