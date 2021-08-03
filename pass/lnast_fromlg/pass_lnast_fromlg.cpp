@@ -55,7 +55,7 @@ void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, const mmap_lib::str 
   handle_io(lg, idx_stmts, *lnast);
   // fmt::print("PRINTING the from_lg_bw_table:");
   // lnast->print_bitwidth_table();
-  initial_tree_coloring(lg, *lnast);
+  initial_tree_coloring(lg);
 
   begin_transformation(lg, *lnast, idx_stmts);
 
@@ -64,7 +64,7 @@ void Pass_lnast_fromlg::do_trans(Lgraph* lg, Eprp_var& var, const mmap_lib::str 
   var.add(std::move(lnast));
 }
 
-void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg, Lnast& lnast) {
+void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg) {
   for (const auto& node : lg->fast()) {
     auto node_editable = node;
     node_editable.set_color(WHITE);
@@ -80,7 +80,7 @@ void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg, Lnast& lnast) {
           auto temp_var_name = mmap_lib::str::concat("_._L", ++temp_var_count);
           dpin_set_map_name(dpin_editable, temp_var_name);
         } else {
-          dpin_set_map_name(dpin_editable, create_temp_var(lnast));
+          dpin_set_map_name(dpin_editable, create_temp_var());
         }
         if ((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
           dpin_set_map_name(dpin_editable, mmap_lib::str::concat("#", dpin_get_name(dpin_editable)));
@@ -165,7 +165,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
     // add this as : #x = #x.__create_flop. Because #x could be a normal variable as well. So you need to tell that it is a latch.
     auto pin_name = dpin_get_name(pin);
     // to add #x = #x.__create_flop
-    auto temp_decl_var_name = create_temp_var(lnast);
+    auto temp_decl_var_name = create_temp_var();
 
     auto dot_decl_node = lnast.add_child(ln_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_decl_node, Lnast_node::create_ref(temp_decl_var_name));
@@ -389,7 +389,7 @@ void Pass_lnast_fromlg::attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, co
     add_node  = lnast.add_child(parent_node, Lnast_node::create_plus());
     subt_node = lnast.add_child(parent_node, Lnast_node::create_minus());
 
-    auto intermediate_var_name = create_temp_var(lnast);
+    auto intermediate_var_name = create_temp_var();
     lnast.add_child(add_node, Lnast_node::create_ref(intermediate_var_name));
     lnast.add_child(subt_node, Lnast_node::create_ref(pin_name));
     lnast.add_child(subt_node, Lnast_node::create_ref(intermediate_var_name));
@@ -475,7 +475,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
     absl::flat_hash_set<mmap_lib::str> interm_names;
     while (dpins.size() > 1) {
       bits_to_shift -= dpins.front().get_bits();
-      auto interm_name = create_temp_var(lnast);
+      auto interm_name = create_temp_var();
       interm_names.insert(interm_name);
 
       auto idx_sl = lnast.add_child(parent_node, Lnast_node::create_shl());
@@ -485,7 +485,7 @@ void Pass_lnast_fromlg::attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node
       dpins.pop();
     }
 
-    auto temp_or_name = create_temp_var(lnast);
+    auto temp_or_name = create_temp_var();
     auto idx_or       = lnast.add_child(parent_node, Lnast_node::create_bit_or());
     lnast.add_child(idx_or, Lnast_node::create_ref(temp_or_name));
     for (auto& strv : interm_names) {
@@ -553,7 +553,7 @@ void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, c
     const_mask = mask_driver_node.get_type_const();
   }
 
-  auto mask_tmp = create_temp_var(lnast);
+  auto mask_tmp = create_temp_var();
 
   auto gm_tup_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(gm_tup_node, Lnast_node::create_ref(mask_tmp));
@@ -584,7 +584,7 @@ void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, c
   switch (pin.get_node().get_type_op()) {
     case Ntype_op::Get_mask: {
 
-      auto sra_tmp = create_temp_var(lnast);
+      auto sra_tmp = create_temp_var();
       auto sra_idx = lnast.add_child(parent_node, Lnast_node::create_shl());
       lnast.add_child(sra_idx, Lnast_node::create_ref(sra_tmp));
       lnast.add_child(sra_idx, Lnast_node::create_const(mmap_lib::str("1")));
@@ -664,7 +664,7 @@ void Pass_lnast_fromlg::attach_compar_node(Lnast& lnast, Lnast_nid& parent_node,
           case Ntype_op::GT: comp_node = lnast.add_child(parent_node, Lnast_node::create_gt()); break;
           default: Pass::error("Error: invalid node type in attach_compar_node");
         }
-        auto temp_var_name = create_temp_var(lnast);
+        auto temp_var_name = create_temp_var();
         temp_var_list.push_back(temp_var_name);
         lnast.add_child(comp_node, Lnast_node::create_ref(temp_var_name));
 
@@ -716,7 +716,7 @@ void Pass_lnast_fromlg::attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, co
   // cond "==1" comes from here: (remove these add_child if want to remove that)
   std::vector<mmap_lib::str> temp_vars;
   for (long unsigned int i = 1; i < mux_vals.size(); i++) {
-    auto temp_var = create_temp_var(lnast);
+    auto temp_var = create_temp_var();
     temp_vars.emplace_back(temp_var);
   }
 
@@ -813,7 +813,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
 
   if (has_async) {
-    auto temp_var_name = create_temp_var(lnast);
+    auto temp_var_name = create_temp_var();
 
     auto dot_sel_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_sel_node, Lnast_node::create_ref(temp_var_name));
@@ -826,7 +826,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
 
   if (has_reset) {
-    // auto temp_var_name = create_temp_var(lnast);
+    // auto temp_var_name = create_temp_var();
 
     auto dot_rst_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     // lnast.add_child(dot_rst_node, Lnast_node::create_ref(temp_var_name));
@@ -840,7 +840,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
 
   if (has_init) {
-    auto temp_var_name = create_temp_var(lnast);
+    auto temp_var_name = create_temp_var();
 
     auto dot_init_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_init_node, Lnast_node::create_ref(temp_var_name));
@@ -854,7 +854,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
 
   if (has_pola) {
     I(pin.get_node().get_type_op() != Ntype_op::Flop);
-    auto temp_var_name = create_temp_var(lnast);
+    auto temp_var_name = create_temp_var();
     auto dot_pol       = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(dot_pol, Lnast_node::create_ref(temp_var_name));
     lnast.add_child(dot_pol, Lnast_node::create_ref(pin_name));
@@ -890,7 +890,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
    * Lgraph to match the LHS of that dot node (so all future references to that
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
-  auto tmp_var_q = create_temp_var(lnast);
+  auto tmp_var_q = create_temp_var();
   auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
   // to have %out=#x_q insteasd of #x. test case: firrtl_tail3.prp
@@ -928,7 +928,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
   auto pin_name = dpin_get_name(pin);
 
   // Set __latch = true
-  auto tmp_var  = create_temp_var(lnast);
+  auto tmp_var  = create_temp_var();
   auto idx_dotl = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dotl, Lnast_node::create_ref(tmp_var));
   lnast.add_child(idx_dotl, Lnast_node::create_ref(pin_name));
@@ -949,7 +949,7 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
    * Lgraph to match the LHS of that dot node (so all future references to that
    * register are actually referencing the __q_pin).
    * FIXME: In the future, it may just be better to set reg __fwd = false and not do this. */
-  auto tmp_var_q = create_temp_var(lnast);
+  auto tmp_var_q = create_temp_var();
   auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name));
@@ -963,17 +963,17 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
   const auto& sub = pin.get_node().get_type_sub_node();
 
   // Create tuple names for submodule IO.
-  const mmap_lib::str &out_tup_name;
+  mmap_lib::str out_tup_name;
   if (!pin.get_node().has_name()) {
    // I(false, "\n\nERROR: for debug; not expecting to enter this code-part\n\n");
     // 15-9 out_tup_name = dpin_get_name(pin);//TODO: check the type_op and assign prefix of "out"
-    //MAYBE//dpin_set_map_name(pin, create_temp_var(lnast));
+    //MAYBE//dpin_set_map_name(pin, create_temp_var());
     out_tup_name = dpin_get_name(pin);
   } else {
     fmt::print("\npin.get_node().get_name() is: {} \n",pin.get_node().get_name());
     out_tup_name = pin.get_node().get_name().get_str_before_first(':');
   }
-  auto inp_tup_name = create_temp_var(lnast);
+  auto inp_tup_name = create_temp_var();
   //fmt::print("instance_name:{}, \n subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
 
   // Create + instantiate input tuple.
@@ -1071,7 +1071,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
     /* FIXME: This tuple having the name "memory[1/2/3]" is important to the LN->FIR interface,
      * specifically to help with identifying things related to memory. This is hacky... */
     auto idx_tuple     = lnast.add_child(parent_node, Lnast_node::create_tuple());
-    auto temp_var_name = create_temp_var(lnast);
+    auto temp_var_name = create_temp_var();
     port_temp_name_list.insert({"FIXME:GET_DPIN_NAME", temp_var_name});
     lnast.add_child(idx_tuple, Lnast_node::create_ref(temp_var_name));  // FIXME: how to get port name?
 
@@ -1124,7 +1124,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
 
   // Create a single tuple with each memory port instantiated in.
   auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple());
-  auto temp_var_name  = create_temp_var(lnast);
+  auto temp_var_name  = create_temp_var();
   lnast.add_child(idx_port_tuple, Lnast_node::create_ref(temp_var_name));
   for (const auto& it : port_temp_name_list) {
     auto idx_asg = lnast.add_child(idx_port_tuple, Lnast_node::create_assign());
@@ -1172,12 +1172,12 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
     if (has_prefix(dpin_name)) {
       I(false, "IO in lgraph should not have %/$");
     } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(mmap_lib::str("$", dpin_name)));
+      lnast.add_child(op_node, Lnast_node::create_ref(mmap_lib::str::concat("$", dpin_name)));
     }
   } else if (dpin.get_node().is_graph_output()) {
     auto name = dpin_get_name(dpin);
     if (name.front() != '%') {
-      name.prepend('%');
+      name = name.prepend('%');
     }
     auto out_driver_name = name;
     lnast.add_child(op_node,
@@ -1185,7 +1185,7 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
   } else if ((dpin.get_node().get_type_op() == Ntype_op::Flop)) {
     lnast.add_child(op_node, Lnast_node::create_ref(dpin_get_name(dpin)));
   } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
-    lnast.add_child(op_node, Lnast_node::create_const(mmap_lib::str(dpin.get_node().get_type_const().to_pyrope()));
+    lnast.add_child(op_node, Lnast_node::create_const(mmap_lib::str(dpin.get_node().get_type_const().to_pyrope())));
   } else {
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_ref(dpin_name));
@@ -1224,7 +1224,7 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
 /* If a driver pin's name includes a "%" and is not an output of the
  * design, then it's an SSA variable. Thus, if it is an SSA variable
  * I need to remove the "%". */
-const mmap_lib::str &Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
+const mmap_lib::str Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
 
   auto it = dpin_name_map.find(dpin.get_compact_class_driver());
 
@@ -1232,8 +1232,9 @@ const mmap_lib::str &Pass_lnast_fromlg::dpin_get_name(const Node_pin dpin) {
     return it->second;
   } else if (dpin.has_name()) {
     auto name = dpin.get_name();
-    if (name.front() == '%')
+    if (name.front() == '%') {
       return name.substr(1);
+    }
     return name;
   } else {
     I(false, "\n\nERROR: trying to fetch a name that is not present in dpin_name_map ans well as in lgraph as the dpin name\n\n");
@@ -1255,11 +1256,11 @@ void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, const mmap_lib::s
   // dpin_name_map.emplace(ccd, name);//emplace does not reset; if it is already set, it just returns the val
 }
 
-mmap_lib::str Pass_lnast_fromlg::get_new_seq_name(Lnast& lnast) {
+const mmap_lib::str Pass_lnast_fromlg::get_new_seq_name() {
   return mmap_lib::str::concat("SEQ", ++seq_count);
 }
 
-mmap_lib::str Pass_lnast_fromlg::create_temp_var(Lnast& lnast, const mmap_lib::str &str_prefix) {
+const mmap_lib::str Pass_lnast_fromlg::create_temp_var(const mmap_lib::str &str_prefix) {
   return mmap_lib::str::concat(str_prefix, "L", ++temp_var_count);
 }
 
