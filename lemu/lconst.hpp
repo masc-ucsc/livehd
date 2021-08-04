@@ -76,6 +76,11 @@ public:
 
   Lconst();
 
+  mmap_lib::str to_binary() const;
+  mmap_lib::str to_verilog() const;
+  mmap_lib::str to_pyrope() const;
+  mmap_lib::str to_firrtl() const;
+
   // TODO for from_verilog from_firrtl ...
   static Lconst from_pyrope(const mmap_lib::str txt);
   static Lconst from_binary(const mmap_lib::str txt, bool unsigned_result);
@@ -160,11 +165,6 @@ public:
 
   bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
   int64_t to_i() const;                                         // must fit in int or exception raised
-
-  mmap_lib::str to_binary() const;
-  mmap_lib::str to_verilog() const;
-  mmap_lib::str to_pyrope() const;
-  mmap_lib::str to_firrtl() const;
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }
