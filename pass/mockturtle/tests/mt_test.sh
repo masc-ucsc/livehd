@@ -85,7 +85,7 @@ do
   echo "Logic Equivalence Check"
   echo ""
 
-  ${LGCHECK} -r${PTS_PATH}/${pt}.v -i./mtlogs/${pt}_lutified.v
+  ${LGCHECK} -r ${PTS_PATH}/${pt}.v -i ./mtlogs/${pt}_lutified.v
   if [ $? -eq 0 ]; then
     echo "Successfully pass logic equivilence check!"
     echo "=========================================="

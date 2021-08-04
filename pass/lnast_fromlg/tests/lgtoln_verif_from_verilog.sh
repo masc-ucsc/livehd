@@ -120,7 +120,7 @@ do
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"
     echo "----------------------------------------------------"
-    ${LGCHECK} --implementation=${pt}.v --reference=./inou/yosys/tests/${pt}.v
+    ${LGCHECK} --implementation ${pt}.v --reference ./inou/yosys/tests/${pt}.v
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
     else

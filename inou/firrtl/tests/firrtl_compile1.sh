@@ -115,7 +115,7 @@ firrtl_test() {
         python3 ${POST_IO_RENAME} "tmp_firrtl/top_${pt}.v"  "tmp_firrtl/${pt}.gld.v"
     fi
 
-    ${LGCHECK} --top=${pt} --implementation="tmp_firrtl/top_${pt}.v" --reference="tmp_firrtl/${pt}.gld.v"
+    ${LGCHECK} --top ${pt} --implementation "tmp_firrtl/top_${pt}.v" --reference "tmp_firrtl/${pt}.gld.v"
     ret_val=$?
     if [ $ret_val -eq 0 ]; then
       echo "Successfully pass LEC!"

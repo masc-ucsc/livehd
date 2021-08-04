@@ -1,8 +1,5 @@
 #!/bin/bash
 
-TEMP=$(getopt -o t::l::y::b::I::d --long testdir::,logdir::,inou::,binary::,incdir::,debug,s_lgdb::,e_lgdb::,bounds::,top::,lib::,constr::,freq::,lgraph:: -n 'lgsetup' -- "$@")
-eval set -- "$TEMP"
-
 OPT_YOSYS="yosys"
 OPT_TESTDIR="./tests"
 OPT_LOGDIR="./logs"
@@ -93,7 +90,7 @@ while true ; do
                 "") shift 2 ;;
                 *) OPT_INOU_YOSYS=$2 ; shift 2 ;;
             esac ;;
-        --) shift ; break ;;
+        "") shift ; break ;;
         *) echo "Internal error!" ; exit 1 ;;
     esac
 done
@@ -129,7 +126,7 @@ elif [ "${OPT_FILES}" != "" ]; then
 		BASE=$(basename $a)
 	done
 else
-	echo "Specify a list of files to process. Either --testdir=foo or bar.v foo.v"
+	echo "Specify a list of files to process. Either --testdir foo or bar.v foo.v"
 	exit 4
 fi
 

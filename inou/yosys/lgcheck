@@ -5,9 +5,6 @@ if [ ${NO_CHECK}"x" == "1x" ]; then
   exit 0
 fi
 
-TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library::,top::,yosys:: -n 'lgcheck' -- "$@")
-eval set -- "$TEMP"
-
 if [ -x "bazel-bin/inou/yosys/yosys2" ]; then
   YOSYS="./bazel-bin/inou/yosys/yosys2"
 elif [ -x "inou/yosys/yosys2" ]; then
@@ -18,11 +15,9 @@ else
   YOSYS=$(which yosys)
 fi
 
-
 CELLLIB=""
 OPT_TOP=""
 OPT_DEBUG=""
-LIST_SET=""
 GOLD=""
 GATE=""
 while true ; do
@@ -55,33 +50,13 @@ while true ; do
         -d)
           shift 1 ;
           OPT_DEBUG=1 ;;
-        --)
-          LIST_SET="true"
-          shift
-          break
-          ;;
+        "") break ;;
         *)
           echo "Option $1 not recognized!"
           exit 1
           ;;
     esac
 done
-
-if [ "${LIST_SET}" == "true" ]; then
-  for var in "$@"
-  do
-    if [ "${GOLD}" == "" ]; then
-      GOLD=$var
-      echo "setting GOLD:$GOLD"
-    elif [ "${GATE}" == "" ]; then
-      GATE=$var
-      echo "setting GATE:$GATE"
-    else
-      echo "Too many files to check"
-      exit 3
-    fi
-  done
-fi
 
 if [ "${GATE}" == "" ]; then
   echo "implementation circuit not provided"
