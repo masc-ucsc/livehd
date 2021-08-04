@@ -117,11 +117,18 @@ Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
   if (unsigned_result) {
     bin = "0"; // always unsigned, must have a leading 0 (implicit)
   }else{
-    bin = "1";
+    // Look for the first not underscore character (this is the sign)
+    for (auto i = 0u; i < txt.size(); ++i) {
+      const auto ch2 = txt[i];
+      if (ch2 == '_')
+        continue;
+      bin = bin.append(ch2);
+      break;
+    }
   }
   bool unknown_found = false;
 
-  Number num;
+  Number num=0;
 
   for (auto i = 0u; i < txt.size(); ++i) {
     const auto ch2 = txt[i];
@@ -150,9 +157,10 @@ Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
   }
 
   if (unknown_found) {
+    num = 0;
     for (int i = bin.size() - 1; i >= 0; --i) {
       num <<= 8;
-      num += bin[i];
+      num |= static_cast<uint8_t>(bin[i]);
     }
 
     return Lconst(true, bin.size(), num);
@@ -184,9 +192,9 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
   mmap_lib::str txt = orig_txt.to_lower();
 
   // Special cases
-  if (txt == "true") {
+  if (txt == "true"_str) {
     return Lconst(false, 1, -1);
-  } else if (txt == "false") {
+  } else if (txt == "false"_str) {
     return Lconst(false, 1, 0);
   }
 
@@ -266,7 +274,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
       }
     }
 
-    return Lconst(true, (end_i-start_i) * 8, num);
+    return Lconst(true, (start_i-end_i) * 8, num);
   }
 
   Number num;
@@ -545,6 +553,7 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   }
 
   auto   max_bits = std::max(get_bits(), mask_bits);
+  assert(max_bits<Bits_max);
   Number src_num;
   if (num < 0) {
     I(!explicit_str);
@@ -1002,17 +1011,30 @@ mmap_lib::str Lconst::to_pyrope() const {
       auto sign = static_cast<unsigned char>(num & 0xFF);
 
       mmap_lib::str str;
-      if (sign=='0')
+      if (sign=='0') {
         str = "0b";
-      else
+      }else{
         str = "0sb";
+      }
 
-      str = str.append(str_no_underscore[0]);
+      size_t next_underscore;
+      auto xtra = get_bits()&3;
+      if (xtra) {
+        auto ndigits = 1+4-xtra;
+        str = str.append(ndigits, sign);
+        next_underscore = 4-ndigits;
+      }else{
+        str = str.append(sign);
+        next_underscore = 3;
+      }
+
       for(auto i=1u;i<str_no_underscore.size();++i) {
-        if ((i % 4) == 0) {
+        if (next_underscore==0) {
           str = str.append('_');
+          next_underscore = 4;
         }
         str = str.append(str_no_underscore[i]);
+        --next_underscore;
       }
 
       return str;
@@ -1122,19 +1144,19 @@ mmap_lib::str Lconst::to_verilog() const {
       auto sign = static_cast<unsigned char>(num & 0xFF);
 
       if (sign=='0')
-        return mmap_lib::str::concat(get_bits(), "'b", to_string());
+        return mmap_lib::str::concat(get_bits()-1, "'b", to_string().substr(1));
 
       return mmap_lib::str::concat(get_bits(), "'sb", to_string());
     }
 
-    return mmap_lib::str::concat("'", to_string(), "'");
+    return mmap_lib::str::concat("\"", to_string(), "\"");
   }
 
   std::stringstream ss;
   ss << std::hex;
 
   if (num < 0) {
-    ss << -num;
+    ss << (Number(1)<<get_bits())+num;
     return mmap_lib::str::concat(get_bits(), "'sh", ss.str());
   }
   ss << num;

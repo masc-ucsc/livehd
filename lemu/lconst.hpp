@@ -43,7 +43,9 @@ protected:
 
   mmap_lib::str skip_underscores(const mmap_lib::str txt) const;
 
-  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {}
+  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {
+    assert(d<Bits_max);
+  }
 
   static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)

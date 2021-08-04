@@ -209,7 +209,6 @@ protected:
 
       mmap_gc::delete_file(size);
       base = nullptr;
-      setup(name);
     }
 
     size_t get_size() const { return *size; }
@@ -307,13 +306,13 @@ protected:
   static inline Pool &mut_ref() { return pool; }
 
 
-  constexpr inline void set_sso(const char *s, size_t N) {
-    assert(N<16);
+  constexpr inline void set_sso(const char *s, size_t sz) {
+    assert(sz<16);
 
-    size_ctrl    = (N<<1) | 1;
+    size_ctrl    = (sz<<1) | 1;
     ptr_or_start = 0;
     data_storage = 0;
-    for(auto i=0u;i<N;++i) {
+    for(auto i=0u;i<sz;++i) {
       uint64_t val = static_cast<unsigned char>(s[i]);
       if (i<3) {
         size_ctrl    |= val<<(8*(i+1));
@@ -325,26 +324,26 @@ protected:
     }
   }
 
-  constexpr char get_sso(size_t N) const {
-    assert(N<16);
+  constexpr char get_sso(size_t sz) const {
+    assert(sz<16);
 
     char ch=0;
 
-    if (N<3) {
-      ch = size_ctrl>>(8*(N+1));
-    }else if (N < 7) {
-      ch = ptr_or_start>>(8*(N-3));
+    if (sz<3) {
+      ch = size_ctrl>>(8*(sz+1));
+    }else if (sz < 7) {
+      ch = ptr_or_start>>(8*(sz-3));
     }else{
-      ch = data_storage>>(8*(N-7));
+      ch = data_storage>>(8*(sz-7));
     }
 
     return ch;
   }
 
-  void set_non_sso(const char *s, size_t N) {
-    assert(N>=16);
+  void set_non_sso(const char *s, size_t sz) {
+    assert(sz>=16);
 
-    size_ctrl    = N<<1;
+    size_ctrl    = sz<<1;
     ptr_or_start = 0;
     data_storage         = 0;
 
@@ -515,9 +514,13 @@ public:
     mut_ref().nuke();
   }
 
-  template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
-  constexpr str(const char (&s)[N]) : size_ctrl(0), ptr_or_start(0), data_storage(0) {
-    set_sso(s,N-1);
+  template <std::size_t N>
+  constexpr str(const char (&s)[N]) {
+    if constexpr ((N-1)>=16) {
+      set_non_sso(s, (N-1));
+    }else{
+      set_sso(s,(N-1));
+    }
   }
 
   str(int64_t v) {
@@ -526,10 +529,6 @@ public:
     set_sso(val_str.data(), val_str.size());
   }
 
-  template <std::size_t N, typename = std::enable_if_t<(N - 1) >= 16>, typename = void>
-  str(const char (&s)[N]) {
-    set_non_sso(s, N-1);
-  }
 
   // Explicit creators
   explicit str(size_t sz, char c) {
@@ -626,10 +625,14 @@ public:
     return true;
   }
 
-  template <std::size_t N, typename = std::enable_if_t<(N - 1) <= 15>>
-  bool operator==(const char (&rhs)[N]) const {
-    str str_rhs(rhs); // SSO constexpr optimized
-    return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data_storage == str_rhs.data_storage;
+  template <std::size_t N>
+  constexpr bool operator==(const char (&rhs)[N]) const {
+    if constexpr ((N-1)<=15) {
+      str str_rhs(rhs,(N-1)); // SSO constexpr optimized
+      return size_ctrl == str_rhs.size_ctrl && ptr_or_start == str_rhs.ptr_or_start && data_storage == str_rhs.data_storage;
+    }else{
+      return *this == std::string_view(rhs, N-1);
+    }
   }
 
   constexpr bool operator!=(const str rhs) const {
@@ -693,7 +696,7 @@ public:
 
   template <std::size_t N>
   [[nodiscard]] bool starts_with(const char (&v)[N]) const {
-    return starts_with(std::string_view(v,N-1));
+    return starts_with(std::string_view(v,(N-1)));
   }
 
   // checks if *this pstr ends with en
@@ -722,7 +725,7 @@ public:
 
   template <std::size_t N>
   [[nodiscard]] bool ends_with(const char (&v)[N]) const {
-    return ends_with(std::string_view(v,N-1));
+    return ends_with(std::string_view(v,(N-1)));
   }
 
   template <typename T, typename = std::enable_if_t<!std::is_same_v<T,char *const>>>
@@ -732,7 +735,7 @@ public:
 
   template <std::size_t N>
   [[nodiscard]] std::size_t find(const char (&v)[N], std::size_t pos = 0) const {
-    return find_int(v, pos, N-1);
+    return find_int(v, pos, (N-1));
   }
 
 // Extension over the  Bit Twiddling Hacks By Sean Eron Anderson seander@cs.stanford.edu
@@ -780,7 +783,7 @@ public:
 
   template <std::size_t N>
   constexpr bool contains(const char (&s)[N]) const {
-    return find(std::string_view(s,N-1)) != std::string::npos;
+    return find(std::string_view(s,(N-1))) != std::string::npos;
   }
 
   template <typename T, typename = std::enable_if_t<!std::is_same_v<T,char *const>>>
@@ -790,7 +793,7 @@ public:
 
   template <std::size_t N>
   [[nodiscard]] std::size_t rfind(const char (&v)[N], std::size_t pos = 0) const {
-    return rfind_int(v,pos,N-1);
+    return rfind_int(v,pos,(N-1));
   }
 
   [[nodiscard]] std::size_t rfind(char ch, std::size_t pos = std::string::npos) const {
@@ -937,7 +940,7 @@ public:
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
       a_sv = std::string_view(a_s.data(), a_s.size());
-    }else if constexpr (std::is_same_v<T1, int>) {
+    }else if constexpr (std::is_integral_v<T1>) {
       a_s = std::to_string(a);
       a_sv = std::string_view(a_s.data(), a_s.size());
     }else{
@@ -955,7 +958,7 @@ public:
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
       b_sv = std::string_view(b_s.data(), b_s.size());
-    }else if constexpr (std::is_same_v<T2, int>) {
+    }else if constexpr (std::is_integral_v<T2>) {
       b_s = std::to_string(b);
       b_sv = std::string_view(b_s.data(), b_s.size());
     }else{
@@ -983,7 +986,7 @@ public:
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
       a_sv = std::string_view(a_s.data(), a_s.size());
-    }else if constexpr (std::is_same_v<T1, int>) {
+    }else if constexpr (std::is_integral_v<T1>) {
       a_s = std::to_string(a);
       a_sv = std::string_view(a_s.data(), a_s.size());
     }else{
@@ -1001,7 +1004,7 @@ public:
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
       b_sv = std::string_view(b_s.data(), b_s.size());
-    }else if constexpr (std::is_same_v<T2, int>) {
+    }else if constexpr (std::is_integral_v<T2>) {
       b_s = std::to_string(b);
       b_sv = std::string_view(b_s.data(), b_s.size());
     }else{
@@ -1019,7 +1022,7 @@ public:
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
       c_sv = std::string_view(c_s.data(), c_s.size());
-    }else if constexpr (std::is_same_v<T3, int>) {
+    }else if constexpr (std::is_integral_v<T3>) {
       c_s = std::to_string(c);
       c_sv = std::string_view(c_s.data(), c_s.size());
     }else{
@@ -1048,7 +1051,7 @@ public:
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
       a_sv = std::string_view(a_s.data(), a_s.size());
-    }else if constexpr (std::is_same_v<T1, int>) {
+    }else if constexpr (std::is_integral_v<T1>) {
       a_s = std::to_string(a);
       a_sv = std::string_view(a_s.data(), a_s.size());
     }else{
@@ -1066,7 +1069,7 @@ public:
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
       b_sv = std::string_view(b_s.data(), b_s.size());
-    }else if constexpr (std::is_same_v<T2, int>) {
+    }else if constexpr (std::is_integral_v<T2>) {
       b_s = std::to_string(b);
       b_sv = std::string_view(b_s.data(), b_s.size());
     }else{
@@ -1084,7 +1087,7 @@ public:
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
       c_sv = std::string_view(c_s.data(), c_s.size());
-    }else if constexpr (std::is_same_v<T3, int>) {
+    }else if constexpr (std::is_integral_v<T3>) {
       c_s = std::to_string(c);
       c_sv = std::string_view(c_s.data(), c_s.size());
     }else{
@@ -1102,7 +1105,7 @@ public:
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
       d_sv = std::string_view(d_s.data(), d_s.size());
-    }else if constexpr (std::is_same_v<T4, int>) {
+    }else if constexpr (std::is_integral_v<T4>) {
       d_s = std::to_string(d);
       d_sv = std::string_view(d_s.data(), d_s.size());
     }else{
@@ -1132,7 +1135,7 @@ public:
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
       a_sv = std::string_view(a_s.data(), a_s.size());
-    }else if constexpr (std::is_same_v<T1, int>) {
+    }else if constexpr (std::is_integral_v<T1>) {
       a_s = std::to_string(a);
       a_sv = std::string_view(a_s.data(), a_s.size());
     }else{
@@ -1150,7 +1153,7 @@ public:
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
       b_sv = std::string_view(b_s.data(), b_s.size());
-    }else if constexpr (std::is_same_v<T2, int>) {
+    }else if constexpr (std::is_integral_v<T2>) {
       b_s = std::to_string(b);
       b_sv = std::string_view(b_s.data(), b_s.size());
     }else{
@@ -1168,7 +1171,7 @@ public:
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
       c_sv = std::string_view(c_s.data(), c_s.size());
-    }else if constexpr (std::is_same_v<T3, int>) {
+    }else if constexpr (std::is_integral_v<T3>) {
       c_s = std::to_string(c);
       c_sv = std::string_view(c_s.data(), c_s.size());
     }else{
@@ -1186,7 +1189,7 @@ public:
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
       d_sv = std::string_view(d_s.data(), d_s.size());
-    }else if constexpr (std::is_same_v<T4, int>) {
+    }else if constexpr (std::is_integral_v<T4>) {
       d_s = std::to_string(d);
       d_sv = std::string_view(d_s.data(), d_s.size());
     }else{
@@ -1204,7 +1207,7 @@ public:
     }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
       e_s = e.to_s();
       e_sv = std::string_view(e_s.data(), e_s.size());
-    }else if constexpr (std::is_same_v<T5, int>) {
+    }else if constexpr (std::is_integral_v<T5>) {
       e_s = std::to_string(e);
       e_sv = std::string_view(e_s.data(), e_s.size());
     }else{
@@ -1235,7 +1238,7 @@ public:
     }else if constexpr (std::is_same_v<T1, mmap_lib::str>) {
       a_s = a.to_s();
       a_sv = std::string_view(a_s.data(), a_s.size());
-    }else if constexpr (std::is_same_v<T1, int>) {
+    }else if constexpr (std::is_integral_v<T1>) {
       a_s = std::to_string(a);
       a_sv = std::string_view(a_s.data(), a_s.size());
     }else{
@@ -1253,7 +1256,7 @@ public:
     }else if constexpr (std::is_same_v<T2, mmap_lib::str>) {
       b_s = b.to_s();
       b_sv = std::string_view(b_s.data(), b_s.size());
-    }else if constexpr (std::is_same_v<T2, int>) {
+    }else if constexpr (std::is_integral_v<T2>) {
       b_s = std::to_string(b);
       b_sv = std::string_view(b_s.data(), b_s.size());
     }else{
@@ -1271,7 +1274,7 @@ public:
     }else if constexpr (std::is_same_v<T3, mmap_lib::str>) {
       c_s = c.to_s();
       c_sv = std::string_view(c_s.data(), c_s.size());
-    }else if constexpr (std::is_same_v<T3, int>) {
+    }else if constexpr (std::is_integral_v<T3>) {
       c_s = std::to_string(c);
       c_sv = std::string_view(c_s.data(), c_s.size());
     }else{
@@ -1289,7 +1292,7 @@ public:
     }else if constexpr (std::is_same_v<T4, mmap_lib::str>) {
       d_s = d.to_s();
       d_sv = std::string_view(d_s.data(), d_s.size());
-    }else if constexpr (std::is_same_v<T4, int>) {
+    }else if constexpr (std::is_integral_v<T4>) {
       d_s = std::to_string(d);
       d_sv = std::string_view(d_s.data(), d_s.size());
     }else{
@@ -1307,7 +1310,7 @@ public:
     }else if constexpr (std::is_same_v<T5, mmap_lib::str>) {
       e_s = e.to_s();
       e_sv = std::string_view(e_s.data(), e_s.size());
-    }else if constexpr (std::is_same_v<T5, int>) {
+    }else if constexpr (std::is_integral_v<T5>) {
       e_s = std::to_string(e);
       e_sv = std::string_view(e_s.data(), e_s.size());
     }else{
@@ -1325,7 +1328,7 @@ public:
     }else if constexpr (std::is_same_v<T6, mmap_lib::str>) {
       f_s = f.to_s();
       f_sv = std::string_view(f_s.data(), f_s.size());
-    }else if constexpr (std::is_same_v<T6, int>) {
+    }else if constexpr (std::is_integral_v<T6>) {
       f_s = std::to_string(f);
       f_sv = std::string_view(f_s.data(), f_s.size());
     }else{
