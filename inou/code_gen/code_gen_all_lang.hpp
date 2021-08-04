@@ -18,7 +18,7 @@ public:
 
   virtual std::string_view stmt_sep() const                             = 0;
   virtual std::string_view get_lang_type() const                        = 0;
-  virtual std::string_view debug_name_lang(Lnast_ntype node_type) const = 0;
+  virtual const mmap_lib::str debug_name_lang(Lnast_ntype node_type) const = 0;
   std::string_view         dot_type_op() const { return "."; };
   std::string_view         str_qoute(bool is_str) const { return is_str ? "\"" : ""; /*if string then " is added*/ };
   std::string_view         gmask_op() const { return "@"; }
@@ -30,9 +30,9 @@ public:
   virtual std::string_view end_if_or_else() const { return "}\n"; }
 
   std::string_view start_cond() const { return "if ("; }
-  std::string_view tuple_stmt_sep() const { return ", "; }
-  std::string_view tuple_begin() const { return "("; }
-  std::string_view tuple_end() const { return ")"; }
+  const mmap_lib::str tuple_stmt_sep() const { return ", "; }
+  const mmap_lib::str tuple_begin() const { return "("; }
+  const mmap_lib::str tuple_end() const { return ")"; }
 
   // TODO: func def related parameters: need to make language specific! currently as per pyrope:
   std::string_view func_begin() const { return ""; }
@@ -72,7 +72,7 @@ public:
   std::string_view while_cond_end() const { return ") "; }
 
   // TODO: select related parameters: need to make language specific! currently as per pyrope:
-  std::string_view select_init(const mmap_lib::str &select_type) const {
+  mmap_lib::str select_init(const mmap_lib::str &select_type) const {
     if (select_type == "bit")
       return "[[";
     else if (select_type == "tuple_add")
@@ -80,7 +80,7 @@ public:
     else
       return "[";
   }
-  std::string_view select_end(const mmap_lib::str &select_type) const {
+  mmap_lib::str select_end(const mmap_lib::str &select_type) const {
     if (select_type == "bit")
       return "]]";
     else if (select_type == "tuple_add")
@@ -98,7 +98,7 @@ public:
     return test_string.front() == '%';
   }
 
-  virtual std::string ref_name(const mmap_lib::str &prp_term, bool strct = true) const = 0;
+  virtual std::string ref_name_std(const mmap_lib::str &prp_term, bool strct = true) const = 0;
   virtual mmap_lib::str ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const = 0;
 
   // in verilog, assign stmt starts with assign keyword. thus this function.

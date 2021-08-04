@@ -13,11 +13,11 @@
 #include "code_gen_all_lang.hpp"
 #include "lnast_map.hpp"
 
-std::string Prp_parser::ref_name(const mmap_lib::str &prp_term, bool) const { return prp_term.to_s(); }
+std::string Prp_parser::ref_name_std(const mmap_lib::str &prp_term, bool) const { return prp_term.to_s(); }
 
 mmap_lib::str Prp_parser::ref_name_str(const mmap_lib::str &prp_term, bool) const { return prp_term; }
 
-std::string Cpp_parser::ref_name(const mmap_lib::str &prp_term, bool strct) const {
+std::string Cpp_parser::ref_name_std(const mmap_lib::str &prp_term, bool strct) const {
   if (!Code_gen_all_lang::has_prefix(prp_term)) {
     return prp_term.to_s();
   }
@@ -42,7 +42,7 @@ mmap_lib::str Cpp_parser::ref_name_str(const mmap_lib::str &prp_term, bool strct
 }
 
 
-std::string Ver_parser::ref_name(const mmap_lib::str &prp_term, bool) const {
+std::string Ver_parser::ref_name_std(const mmap_lib::str &prp_term, bool) const {
   if (Code_gen_all_lang::has_prefix(prp_term)) {
     return prp_term.substr(1).to_s();
   }
@@ -65,9 +65,9 @@ std::string_view Prp_parser::get_lang_type() const { return lang_type; }
 std::string_view Cpp_parser::get_lang_type() const { return lang_type; }
 std::string_view Ver_parser::get_lang_type() const { return lang_type; }
 
-std::string_view Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_pyrope(node_type); }
-std::string_view Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_cpp(node_type); }
-std::string_view Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_verilog(node_type); }
+const mmap_lib::str Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return mmap_lib::str(Lnast_map::debug_name_pyrope(node_type)); }
+const mmap_lib::str Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return mmap_lib::str(Lnast_map::debug_name_cpp(node_type)); }
+const mmap_lib::str Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return mmap_lib::str(Lnast_map::debug_name_verilog(node_type)); }
 
 std::string_view Prp_parser::start_else_if() const { return ("} elif ("); }
 std::string_view Cpp_parser::start_else_if() const { return ("} else if ("); }

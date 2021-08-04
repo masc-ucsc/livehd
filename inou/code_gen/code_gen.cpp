@@ -112,7 +112,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
     } else if (curr_node_type.is_if()) {
       do_if(curr_index);
     } else if (curr_node_type.is_tuple()) {
-      do_tuple(curr_index);
+      Pass::error("\nUnexpected node \"tuple\" encountered in LN during code_gen.\n");
+      //do_tuple(curr_index);
     } else if (curr_node_type.is_select() || curr_node_type.is_attr_get()) {
       do_select(curr_index, "selc"_str);
     } else if (curr_node_type.is_tuple_add()) {
@@ -197,43 +198,43 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
     if (!param_converted) {
       auto ref_map_inst_res = ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(
           key,
-          lnast_to->ref_name(ref)));   // The pair::second element in the pair is set to true if a new element was inserted or false
+          lnast_to->ref_name_str(ref)));   // The pair::second element in the pair is set to true if a new element was inserted or false
                                        // if an equivalent key already existed.
       if (!ref_map_inst_res.second) {  // this means an equivalent key already exists.
         // so append to main buffer:  key value, assign op, ref value
         if (hier_tup_assign) {
           // fmt::print("hier_tup_assign is {} for hier_tup_vec: {}", hier_tup_assign, hier_tup_vec);
           // hier_tup_vec.push_back("str");
-          if (has_DblUndrScor(lnast_to->ref_name(key_sec))) {
+          if (has_DblUndrScor(lnast_to->ref_name_str(key_sec))) {
             //   assign:
             //       const: __range_begin
             //       const: 0
             if (key == "__range_begin") {
-              hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
+              hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));
             } else if (key == "__range_end") {
-              auto vec_replacement = mmap_lib::str::concat(hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
+              auto vec_replacement = mmap_lib::str::concat(hier_tup_vec.back(), ":", lnast_to->ref_name_str(ref));
               hier_tup_vec.pop_back();
               hier_tup_vec.emplace_back(vec_replacement);
             }
           } else {
             hier_tup_vec.emplace_back(
                 mmap_lib::str::concat(
-                    lnast_to->ref_name(key_sec)
+                    lnast_to->ref_name_str(key_sec)
                     ," "
                     ,lnast_to->debug_name_lang(assign_node_data.type)
                     ," "
-                    ,lnast_to->ref_name(ref)
+                    ,lnast_to->ref_name_str(ref)
                   )
                 );
           }
         } else {
           absl::StrAppend(&buffer_to_print
               ,indent()
-              ,lnast_to->ref_name(key_sec)
+              ,lnast_to->ref_name_std(key_sec)
               ," "
-              ,lnast_to->debug_name_lang(assign_node_data.type)
+              ,lnast_to->debug_name_lang(assign_node_data.type).to_s()
               ," "
-              ,lnast_to->ref_name(ref)
+              ,lnast_to->ref_name_std(ref)
               ,lnast_to->stmt_sep()
               );
         }
@@ -241,36 +242,36 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
     }
   } else {
     if (hier_tup_assign) {
-      if (has_DblUndrScor(lnast_to->ref_name(key))) {
+      if (has_DblUndrScor(lnast_to->ref_name_str(key))) {
         //   assign:
         //       const: __range_begin
         //       const: 0
         if (key == "__range_begin") {
-          hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
+          hier_tup_vec.emplace_back(lnast_to->ref_name_str(ref));
         } else if (key == "__range_end") {
-          auto vec_replacement = mmap_lib::str::concat(hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
+          auto vec_replacement = mmap_lib::str::concat(hier_tup_vec.back(), ":", lnast_to->ref_name_str(ref));
           hier_tup_vec.pop_back();
           hier_tup_vec.emplace_back(vec_replacement);
         }
       } else {
         hier_tup_vec.emplace_back(mmap_lib::str::concat(lnast_to->assign_node_strt(),
-                                               lnast_to->ref_name(key),
+                                               lnast_to->ref_name_str(key),
                                                " ",
                                                lnast_to->debug_name_lang(assign_node_data.type),
                                                " ",
-                                               lnast_to->ref_name(ref)));
+                                               lnast_to->ref_name_str(ref)));
       }
     } else {
       absl::StrAppend(&buffer_to_print,
                       indent(),
                       lnast_to->assign_node_strt(),
-                      lnast_to->ref_name(key),
+                      lnast_to->ref_name_std(key),
                       " ",
-                      lnast_to->debug_name_lang(assign_node_data.type),
+                      lnast_to->debug_name_lang(assign_node_data.type).to_s(),
                       " ",
-                      lnast_to->ref_name(ref),
+                      lnast_to->ref_name_std(ref),
                       lnast_to->stmt_sep());
-      lnast_to->set_for_vcd_comb(lnast_to->ref_name(key, 0), lnast_to->ref_name(key));
+      lnast_to->set_for_vcd_comb(lnast_to->ref_name_std(key, false), lnast_to->ref_name_std(key));
     }
   }
 }
@@ -291,7 +292,7 @@ void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
   }
   absl::StrAppend(&buffer_to_print,
                   lnast_to->while_cond_beg(),
-                  lnast_to->ref_name(ref),
+                  lnast_to->ref_name_std(ref),
                   lnast_to->while_cond_end(),
                   lnast_to->for_stmt_beg());
 
@@ -315,7 +316,7 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
   auto curr_index = lnast->get_sibling_next(stmt_index);
   absl::StrAppend(&buffer_to_print,
                   lnast_to->for_cond_beg(),
-                  lnast_to->ref_name(lnast->get_name(curr_index)),
+                  lnast_to->ref_name_std(lnast->get_name(curr_index)),
                   lnast_to->for_cond_mid());
 
   curr_index = lnast->get_sibling_next(curr_index);
@@ -326,7 +327,7 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
       ref = map_it->second;
     }
   }
-  absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref), lnast_to->for_cond_end());
+  absl::StrAppend(&buffer_to_print, lnast_to->ref_name_std(ref), lnast_to->for_cond_end());
 
   absl::StrAppend(&buffer_to_print, lnast_to->for_stmt_beg());
   indendation++;
@@ -369,7 +370,7 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
       if (parameters.empty())
         parameters = lnast->get_name(curr_index);
       else
-        parameters = mmap_lib::str::concat(parameters, lnast_to->func_param_sep(), lnast_to->ref_name(lnast->get_name(curr_index)));
+        parameters = mmap_lib::str::concat(parameters, lnast_to->func_param_sep(), lnast_to->ref_name_str(lnast->get_name(curr_index)));
       curr_index = lnast->get_sibling_next(curr_index);
     }
   } else {
@@ -448,11 +449,11 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
   fmt::print("func_call 3rd child: {}\n", ref);
 
   if (is_temp_var(lhs)) {  //|| !op_is_unary) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(lhs, mmap_lib::str::concat(funcname, lnast_to->ref_name(ref))));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(lhs, mmap_lib::str::concat(funcname, lnast_to->ref_name_str(ref))));
   } else {
     absl::StrAppend(&buffer_to_print, lhs.to_s(), " = ");  // lhs and assignment op to further assign the func name and arguments to lhs
     absl::StrAppend(&buffer_to_print, funcname.to_s());  // printitng the func name(the func called)
-    absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref), lnast_to->stmt_sep());  // parameters for the func call
+    absl::StrAppend(&buffer_to_print, lnast_to->ref_name_std(ref), lnast_to->stmt_sep());  // parameters for the func call
   }
 }
 //-------------------------------------------------------------------------------------
@@ -522,7 +523,7 @@ void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
-  absl::StrAppend(&buffer_to_print, lnast_to->ref_name(ref));
+  absl::StrAppend(&buffer_to_print, lnast_to->ref_name_std(ref));
   absl::StrAppend(&buffer_to_print, lnast_to->end_cond());
 }
 
@@ -606,10 +607,10 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
     if (op_type == "tup_concat") {
       val = mmap_lib::str::concat(val,
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const),
-                      lnast_to->ref_name(ref),
+                      lnast_to->ref_name_str(ref),
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const));
     } else {
-      val = val.append(lnast_to->ref_name(ref));
+      val = val.append(lnast_to->ref_name_str(ref));
     }
     if ((i + 1) != op_str_vect.size()
         && !op_is_unary) {  // check that another entry is left in op_str_vect && it is a binary operation
@@ -618,17 +619,17 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
   }
 
   if (is_temp_var(key)) {  //|| !op_is_unary) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(lnast_to->ref_name(val))));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(lnast_to->ref_name_str(val))));
   } else {
-    // absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ",
-    // lnast_to->ref_name(val), lnast_to->stmt_sep());
+    // absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name_str(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ",
+    // lnast_to->ref_name_str(val), lnast_to->stmt_sep());
     absl::StrAppend(&buffer_to_print,
                     indent(),
-                    lnast_to->ref_name(key),
+                    lnast_to->ref_name_std(key),
                     " ",
                     "=",
                     " ",
-                    lnast_to->ref_name(mmap_lib::str(val)),
+                    lnast_to->ref_name_std(mmap_lib::str(val)),
                     lnast_to->stmt_sep());
   }
 }
@@ -698,7 +699,7 @@ void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
   } else {
-    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(mmap_lib::str(val)), "=", smask_str_vect.back().to_s(), "\n");
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name_std(mmap_lib::str(val)), "=", smask_str_vect.back().to_s(), "\n");
     // I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
   }
 }
@@ -825,9 +826,9 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
       } else
         I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
 
-      absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(mmap_lib::str(value)), " = ", key.to_s(), "\n");
+      absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name_std(mmap_lib::str(value)), " = ", key.to_s(), "\n");
     } else {
-      // ref_map.insert(std::pair<mmap_lib::str_view, mmap_lib::str>(key, lnast_to->ref_name(value)));
+      // ref_map.insert(std::pair<mmap_lib::str_view, mmap_lib::str>(key, lnast_to->ref_name_str(value)));
       // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p
       // or reg
       auto ref_map_inst_succ = ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(value)));
@@ -835,7 +836,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
         "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
     }
   } else {
-    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name(mmap_lib::str(value)), " = ", key.to_s(), "\n");
+    absl::StrAppend(&buffer_to_print, indent(), lnast_to->ref_name_std(mmap_lib::str(value)), " = ", key.to_s(), "\n");
   }
 }
 //-------------------------------------------------------------------------------------
@@ -875,7 +876,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
     I(sel_str_vect.size() >= 3, "\n\nunexpected tuple_get type. Please check.\n\n");
 
     auto        key   = sel_str_vect.front();
-    std::string value = sel_str_vect[1].to_s();
+    auto        value = sel_str_vect[1];
 
     auto i = 2u;
     while (i < sel_str_vect.size()) {
@@ -887,18 +888,18 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
       }
 
       if (is_number(ref)) {  // for numbers or temp vars only; we want "[]"
-        absl::StrAppend(&value,
+        value = mmap_lib::str::concat(value,
                         lnast_to->select_init(select_type),
-                        lnast_to->ref_name(ref),
+                        lnast_to->ref_name_str(ref),
                         lnast_to->select_end(select_type));  // test case:tuple_nested1.prp
       } else if ((map_it != ref_map.end() && is_temp_var(map_it->first)) || /*last child is of type ref(not const)*/ lastIsRef) {
         // if ref_map.end is not checked then ERROR: std::bad_alloc (std::exception) is thrown
-        absl::StrAppend(&value,
+        value = mmap_lib::str::concat(value,
                         lnast_to->select_init(select_type),
-                        lnast_to->ref_name(ref),
+                        lnast_to->ref_name_str(ref),
                         lnast_to->select_end(select_type));  // test case:tuple_nested1.prp
       } else {                                               // for alphanumeric, we want"."
-        absl::StrAppend(&value, lnast_to->dot_type_op(), lnast_to->ref_name(ref));
+        value = mmap_lib::str::concat(value, lnast_to->dot_type_op(), lnast_to->ref_name_str(ref));
       }
       i++;
     }
@@ -918,14 +919,14 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
     } else {
       assert(sel_str_vect.size() >= 2);
       if (is_temp_var(key)) {
-        std::string value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1].to_s());
+        auto value = mmap_lib::str::concat(lnast_to->select_init(select_type), sel_str_vect[1]);
 
         auto i = 2u;
         // if (i == sel_str_vect.size()) {
         //  absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
         //}
         while (i < sel_str_vect.size()) {
-          absl::StrAppend(&value, ",");
+          value = mmap_lib::str::concat(value, ",");
           auto ref = sel_str_vect[i];
 
           auto map_it = ref_map.find(ref);
@@ -933,10 +934,10 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
             ref = map_it->second;
           }
 
-          absl::StrAppend(&value, lnast_to->ref_name(ref));
+          value = mmap_lib::str::concat(value, lnast_to->ref_name_str(ref));
           i++;
         }
-        absl::StrAppend(&value, lnast_to->select_end(select_type));
+        value = mmap_lib::str::concat(value, lnast_to->select_end(select_type));
 
         // mmap_lib::str value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
         ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, value));
@@ -957,11 +958,11 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
     }
 
     auto key   = sel_str_vect.front();
-    auto value = sel_str_vect[1].to_s();
+    auto value = sel_str_vect[1];
 
     auto i = 2u;
     if (i == sel_str_vect.size()) {
-      absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
+      value = mmap_lib::str::concat(value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
     }
     while (i < sel_str_vect.size()) {
       auto ref = sel_str_vect[i];
@@ -971,7 +972,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
         ref = map_it->second;
       }
 
-      absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->ref_name(ref), lnast_to->select_end(select_type));
+      value = mmap_lib::str::concat(value, lnast_to->select_init(select_type), lnast_to->ref_name_str(ref), lnast_to->select_end(select_type));
       i++;
     }
 
@@ -988,7 +989,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
 
 //-------------------------------------------------------------------------------------
 // processing tuple
-void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
+/*void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   fmt::print("node:tuple\n");
 
   // Process the first child-node in key and move to the next node:
@@ -999,7 +1000,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
 
   // Process remaining nodes/sub-trees:
   curr_index              = lnast->get_sibling_next(curr_index);
-  std::string tuple_value;
+  mmap_lib::str tuple_value;
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
@@ -1016,42 +1017,42 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
       }
       fmt::print("tuple's next leaf child: {}\n", ref);
       if (lnast->get_type(curr_index).is_const()) {
-        absl::StrAppend(&tuple_value, "\"", lnast_to->ref_name(ref), "\"", lnast_to->tuple_stmt_sep());
+        tuple_value = mmap_lib::str::concat(tuple_value, "\"", lnast_to->ref_name_str(ref), "\"", lnast_to->tuple_stmt_sep());
       } else {
-        absl::StrAppend(&tuple_value, lnast_to->ref_name(ref), lnast_to->tuple_stmt_sep());
+        tuple_value = mmap_lib::str::concat(tuple_value, lnast_to->ref_name_str(ref), lnast_to->tuple_stmt_sep());
       }
     } else {
-      absl::StrAppend(&tuple_value, resolve_tuple_assign(curr_index).to_s());
+      tuple_value = mmap_lib::str::concat(tuple_value, resolve_tuple_assign(curr_index));
     }
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
   // for formatting purposes:
-  if (tuple_value.length() > 2) {
-    if (tuple_value.substr(tuple_value.length() - 2) == lnast_to->tuple_stmt_sep()) {
-      tuple_value = absl::StrCat(lnast_to->tuple_begin(), tuple_value);
+  if (tuple_value.size() > 2) {
+    if (tuple_value.substr(tuple_value.size() - 2) == lnast_to->tuple_stmt_sep()) {
+      tuple_value = mmap_lib::str::concat(lnast_to->tuple_begin(), tuple_value);
       tuple_value.pop_back();
       tuple_value.pop_back();  // to remove the extra (last) tuple stmt sep inserted
-      absl::StrAppend(&tuple_value, lnast_to->tuple_end());
+      tuple_value = tuple_value.append(lnast_to->tuple_end());
     }
   } else if (tuple_value == "") {
-    tuple_value = absl::StrCat(lnast_to->tuple_begin(), lnast_to->tuple_end());
+    tuple_value = mmap_lib::str::concat(lnast_to->tuple_begin(), lnast_to->tuple_end());
   }  // to cater to scenario like: out = () :in ring.prp
 
   // insert to map:
   fmt::print("final tuple value for the above key: {}\n", tuple_value);
   if (is_temp_var(key)) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(tuple_value)));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, tuple_value));
   } else {
     fmt::print("key: {}\n tuple_value:{}\n", key, tuple_value);
-    absl::StrAppend(&buffer_to_print, key.to_s(), " saved as ", tuple_value, "\n");
+    absl::StrAppend(&buffer_to_print, key.to_s(), " saved as ", tuple_value.to_s(), "\n");
     // this should never be possible
   }
 }
-
+*/
 //-------------------------------------------------------------------------------------
 // function called to process the tuple:
-mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
+/*mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
   auto                     curr_index = lnast->get_first_child(tuple_assign_index);
   std::vector<mmap_lib::str> op_str_vect;
 
@@ -1065,12 +1066,12 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
 
   auto        key          = op_str_vect.front();
   bool        is_const     = false;
-  std::string val;
+  mmap_lib::str val;
   const auto& op_node_data = lnast->get_data(tuple_assign_index);  // the operator (assign or as)
 
   if (key == "null") {
     is_const = true;
-    val      = op_str_vect.back().to_s();
+    val      = op_str_vect.back();
   } else {
     bool op_is_unary = false;
     if (is_temp_var(key) && op_str_vect.size() == 2) {
@@ -1080,7 +1081,7 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
     for (unsigned i = 1; i < op_str_vect.size(); i++) {
       auto ref = op_str_vect[i];
       if (ref == "null") {
-        val = "";
+        val = ""_str;
         break;
       }
       auto map_it = ref_map.find(ref);
@@ -1096,17 +1097,17 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
       }
       // check if a number
       if (op_is_unary) {
-        absl::StrAppend(&val, lnast_to->debug_name_lang(op_node_data.type));
+        val = val.append(lnast_to->debug_name_lang(op_node_data.type));
       }
-      absl::StrAppend(&val, lnast_to->ref_name(ref));
+      val = val.append(lnast_to->ref_name_str(ref));
       if ((i + 1) != op_str_vect.size() && !op_is_unary) {
-        absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
+        val = mmap_lib::str::concat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
       }
     }
   }
 
   if (is_temp_var(key)) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, val));
     assert(false);
     return "ERROR"_str; // ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
   } else if (is_const) {
@@ -1117,11 +1118,11 @@ mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_a
     return mmap_lib::str::concat(".", val);
   } else {
     auto ret_tup_str
-        = absl::StrCat(indent(), key.to_s(), " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->tuple_stmt_sep());
+        = absl::StrCat(indent(), key.to_s(), " ", lnast_to->debug_name_lang(op_node_data.type).to_s(), " ", val, lnast_to->tuple_stmt_sep());//absl used as num of args > 6
     return mmap_lib::str(ret_tup_str);
   }
 }
-
+*/
 //-------------------------------------------------------------------------------------
 // check if the node has "___"
 bool Code_gen::is_temp_var(const mmap_lib::str &test_string) {

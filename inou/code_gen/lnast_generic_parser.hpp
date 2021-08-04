@@ -17,12 +17,12 @@ public:
   Prp_parser(){};
   std::string_view stmt_sep() const final;
   std::string_view get_lang_type() const final;
-  std::string_view debug_name_lang(Lnast_ntype node_type) const final;
+  const mmap_lib::str debug_name_lang(Lnast_ntype node_type) const final;
   std::string_view start_else_if() const final;
   std::string_view for_cond_mid() const final;
   std::string_view for_cond_beg() const final;
   std::string_view for_cond_end() const final;
-  std::string      ref_name(const mmap_lib::str &prp_term, bool strct = true) const final;
+  std::string      ref_name_std(const mmap_lib::str &prp_term, bool strct = true) const final;
   mmap_lib::str    ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const final;
   void             dump_maps() const;
   void             call_dump_maps() const final;
@@ -58,12 +58,12 @@ public:
   Cpp_parser(){};
   std::string_view stmt_sep() const final;
   std::string_view get_lang_type() const final;
-  std::string_view debug_name_lang(Lnast_ntype node_type) const final;
+  const mmap_lib::str debug_name_lang(Lnast_ntype node_type) const final;
   std::string_view start_else_if() const final;
   std::string_view for_cond_mid() const final;
   std::string_view for_cond_beg() const final;
   std::string_view for_cond_end() const final;
-  std::string      ref_name(const mmap_lib::str &prp_term, bool strct = true) const final;
+  std::string      ref_name_std(const mmap_lib::str &prp_term, bool strct = true) const final;
   mmap_lib::str    ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const final;
   std::string      starter(std::string_view filename) const final;
   // header related functions:
@@ -98,7 +98,7 @@ public:
   Ver_parser(){};
   std::string_view stmt_sep() const final;
   std::string_view get_lang_type() const final;
-  std::string_view debug_name_lang(Lnast_ntype node_type) const final;
+  const mmap_lib::str debug_name_lang(Lnast_ntype node_type) const final;
   std::string_view start_else_if() const final;
   std::string_view end_else_if() const final;
   std::string_view start_else() const final;
@@ -109,7 +109,7 @@ public:
   std::string_view for_cond_mid() const final;
   std::string_view for_cond_beg() const final;
   std::string_view for_cond_end() const final;
-  std::string      ref_name(const mmap_lib::str &prp_term, bool strct = true) const final;
+  std::string      ref_name_std(const mmap_lib::str &prp_term, bool strct = true) const final;
   mmap_lib::str    ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const final;
   std::string_view assign_node_strt() const final;
   void             dump_maps() const;
