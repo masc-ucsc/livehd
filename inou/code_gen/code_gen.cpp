@@ -248,12 +248,12 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
         if (key == "__range_begin") {
           hier_tup_vec.emplace_back(lnast_to->ref_name(ref));
         } else if (key == "__range_end") {
-          auto vec_replacement = absl::StrCat(hier_tup_vec.back().to_s(), ":", lnast_to->ref_name(ref));
+          auto vec_replacement = mmap_lib::str::concat(hier_tup_vec.back(), ":", lnast_to->ref_name(ref));
           hier_tup_vec.pop_back();
           hier_tup_vec.emplace_back(vec_replacement);
         }
       } else {
-        hier_tup_vec.emplace_back(absl::StrCat(lnast_to->assign_node_strt(),
+        hier_tup_vec.emplace_back(mmap_lib::str::concat(lnast_to->assign_node_strt(),
                                                lnast_to->ref_name(key),
                                                " ",
                                                lnast_to->debug_name_lang(assign_node_data.type),
@@ -564,7 +564,7 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
   }
 
   const auto& op_node_data = lnast->get_data(op_node_index);
-  std::string val;
+  mmap_lib::str val;
   for (unsigned i = 1; i < op_str_vect.size(); i++) {
     auto ref    = op_str_vect[i];
     auto map_it = ref_map.find(ref);
@@ -585,7 +585,8 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
       /*do not append any op type*/
       /*test case: partial.prp. (For set_mask cases)*/
     } else if (op_is_unary) {
-      absl::StrAppend(&val, lnast_to->debug_name_lang(op_node_data.type));
+      val = val.append(lnast_to->debug_name_lang(op_node_data.type));
+      //absl::StrAppend(&val, lnast_to->debug_name_lang(op_node_data.type));
     }
 
     bool ref_is_const = false;
@@ -603,21 +604,21 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
     }
 
     if (op_type == "tup_concat") {
-      absl::StrAppend(&val,
+      val = mmap_lib::str::concat(val,
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const),
                       lnast_to->ref_name(ref),
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const));
     } else {
-      absl::StrAppend(&val, lnast_to->ref_name(ref));
+      val = val.append(lnast_to->ref_name(ref));
     }
     if ((i + 1) != op_str_vect.size()
         && !op_is_unary) {  // check that another entry is left in op_str_vect && it is a binary operation
-      absl::StrAppend(&val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
+      val = mmap_lib::str::concat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
     }
   }
 
   if (is_temp_var(key)) {  //|| !op_is_unary) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(lnast_to->ref_name(mmap_lib::str(val)))));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(lnast_to->ref_name(val))));
   } else {
     // absl::StrAppend (&buffer_to_print, indent(), lnast_to->ref_name(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ",
     // lnast_to->ref_name(val), lnast_to->stmt_sep());
@@ -1135,9 +1136,9 @@ bool Code_gen::has_DblUndrScor(const mmap_lib::str &test_string) {
   return test_string.starts_with("__");
 }
 
-bool Code_gen::has_DblUndrScor(const std::string &test_string) {
-  return test_string.size()>2 && test_string[0] == '_' && test_string[1] == '_';
-}
+//bool Code_gen::has_DblUndrScor(const std::string &test_string) {
+//  return test_string.size()>2 && test_string[0] == '_' && test_string[1] == '_';
+//}
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(const mmap_lib::str &test_string) {
