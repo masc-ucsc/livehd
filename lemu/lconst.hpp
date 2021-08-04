@@ -147,7 +147,8 @@ public:
     return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?';
   }
 
-  bool is_false() const { return num == 0; }
+  bool is_known_false() const { return num == 0; }
+  bool is_known_true() const;
   bool is_string() const { return explicit_str && !has_unknowns(); }
   bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
   bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }

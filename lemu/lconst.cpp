@@ -415,6 +415,25 @@ std::pair<mmap_lib::str, mmap_lib::str> Lconst::match_binary(const Lconst &l, co
   return std::make_pair(l_str, r_str);
 }
 
+bool Lconst::is_known_true() const {
+  if (!explicit_str)
+    return num!=0;
+
+  if (has_unknowns()) {
+    // if there is any one, it is true
+    Number      tmp = num;
+    while (tmp) {
+      auto ch = static_cast<unsigned char>(tmp & 0xFF);
+      if (ch == '1')
+        return true;
+      tmp >>= 8;
+    }
+
+    return false;
+  }
+
+  return true; // plain string
+}
 
 std::pair<int,int> Lconst::get_mask_range() const {
 

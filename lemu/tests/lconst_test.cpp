@@ -130,25 +130,27 @@ TEST_F(Lconst_test, lvar_sizes) {
   fmt::print("l1:{} bits:{}\n", l1.to_pyrope(), l1.get_bits());
   EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0xFF")));
 
-  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_false());
+  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_false());
+  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_true());
 
-  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_false());
+  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_known_false());
+  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_known_true());
 
   EXPECT_EQ(l1.get_bits(), 1);
 
   auto s1 = l1 + Lconst::from_pyrope("1");
   fmt::print("s1:{} bits:{}\n", s1.to_pyrope(), s1.get_bits());
-  EXPECT_EQ(s1.eq_op(Lconst::from_pyrope("0x0")).is_false(), false);
+  EXPECT_EQ(s1.eq_op(Lconst::from_pyrope("0x0")).is_known_false(), false);
   EXPECT_EQ(s1.get_bits(), 1);
 
   auto s2 = l1 + Lconst::from_pyrope("-1");
   fmt::print("s2:{} bits:{}\n", s2.to_pyrope(), s2.get_bits());
-  EXPECT_FALSE(s2.eq_op(Lconst::from_pyrope("-2")).is_false());
+  EXPECT_FALSE(s2.eq_op(Lconst::from_pyrope("-2")).is_known_false());
   EXPECT_EQ(s2.get_bits(), 2);
 
   auto s4 = l1 + Lconst::from_pyrope("0x1F");
   fmt::print("s4:{} bits:{}\n", s4.to_pyrope(), s4.get_bits());
-  EXPECT_FALSE(s4.eq_op(Lconst::from_pyrope("0x1E")).is_false());
+  EXPECT_FALSE(s4.eq_op(Lconst::from_pyrope("0x1E")).is_known_false());
   EXPECT_EQ(s4.get_bits(), 6);
 }
 
@@ -1164,6 +1166,43 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(Lconst::from_pyrope("0").get_raw_num(), 0);
 }
 
+TEST_F(Lconst_test, false_true) {
+
+  EXPECT_TRUE(Lconst::from_pyrope("string").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("true").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("3").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("").is_known_false()); // empty string is false
+
+  EXPECT_FALSE(Lconst::from_pyrope("string").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("true").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("3").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("").is_known_true()); // empty string is false
+
+  EXPECT_FALSE(Lconst::from_pyrope("false").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0x0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0b0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0").is_known_true());
+
+  EXPECT_TRUE(Lconst::from_pyrope("false").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0x0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0sb0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0b0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0").is_known_false());
+
+  // with unknowns
+  EXPECT_FALSE(Lconst::from_pyrope("0b?").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0b?").is_known_true());
+
+  EXPECT_FALSE(Lconst::from_pyrope("0sb??000??").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb?0?0??").is_known_true());
+
+  EXPECT_FALSE(Lconst::from_pyrope("0sb??000??").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb?0?0??").is_known_true());
+}
+
 TEST_F(Lconst_test, binary) {
 
   auto c = Lconst::from_pyrope("0b01__?10__?_1");
@@ -1177,8 +1216,10 @@ TEST_F(Lconst_test, binary) {
   EXPECT_TRUE(a == b2);  // explicit sign (12s vs 12u) does not change this
   EXPECT_EQ(a, b);       // different explicit bits
   EXPECT_EQ(a, b2);      // different explicit bits
-  EXPECT_FALSE(a.eq_op(b).is_false());
-  EXPECT_FALSE(a.eq_op(b2).is_false());
+  EXPECT_FALSE(a.eq_op(b).is_known_false());
+  EXPECT_FALSE(a.eq_op(b2).is_known_false());
+  EXPECT_TRUE(a.eq_op(b).is_known_true());
+  EXPECT_TRUE(a.eq_op(b2).is_known_true());
 
   EXPECT_EQ(c.to_verilog(), "6'b1?10?1");
   EXPECT_EQ(c.to_pyrope(), "0b001?_10?1");
