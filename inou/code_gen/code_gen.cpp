@@ -271,7 +271,7 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
                       " ",
                       lnast_to->ref_name_std(ref),
                       lnast_to->stmt_sep());
-      lnast_to->set_for_vcd_comb(lnast_to->ref_name_std(key, false), lnast_to->ref_name_std(key));
+      lnast_to->set_for_vcd_comb(std::string_view(lnast_to->ref_name_std(key, false)), std::string_view(lnast_to->ref_name_std(key)));
     }
   }
 }
@@ -989,7 +989,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
 
 //-------------------------------------------------------------------------------------
 // processing tuple
-/*void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
+void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   fmt::print("node:tuple\n");
 
   // Process the first child-node in key and move to the next node:
@@ -1031,8 +1031,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
   if (tuple_value.size() > 2) {
     if (tuple_value.substr(tuple_value.size() - 2) == lnast_to->tuple_stmt_sep()) {
       tuple_value = mmap_lib::str::concat(lnast_to->tuple_begin(), tuple_value);
-      tuple_value.pop_back();
-      tuple_value.pop_back();  // to remove the extra (last) tuple stmt sep inserted
+      tuple_value = tuple_value.substr(0,tuple_value.size()-2);// to remove the extra (last) tuple stmt sep inserted
       tuple_value = tuple_value.append(lnast_to->tuple_end());
     }
   } else if (tuple_value == "") {
@@ -1049,10 +1048,10 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
     // this should never be possible
   }
 }
-*/
+
 //-------------------------------------------------------------------------------------
 // function called to process the tuple:
-/*mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
+mmap_lib::str Code_gen::resolve_tuple_assign(const mmap_lib::Tree_index& tuple_assign_index) {
   auto                     curr_index = lnast->get_first_child(tuple_assign_index);
   std::vector<mmap_lib::str> op_str_vect;
 
@@ -1122,7 +1121,7 @@ void Code_gen::do_select(const mmap_lib::Tree_index& select_node_index, const mm
     return mmap_lib::str(ret_tup_str);
   }
 }
-*/
+
 //-------------------------------------------------------------------------------------
 // check if the node has "___"
 bool Code_gen::is_temp_var(const mmap_lib::str &test_string) {

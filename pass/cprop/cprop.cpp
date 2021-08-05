@@ -443,7 +443,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     auto first = inp_edges_ordered[0].driver.get_node().get_type_const();
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = inp_edges_ordered[i].driver.get_node().get_type_const();
-      eq     = eq && !first.eq_op(c).is_false();
+      eq     = eq && !first.eq_op(c).is_known_false();
     }
 
     Lconst result(eq ? 1 : 0);
@@ -981,7 +981,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                   if (!v.is_i()) {
                     Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
                   }
-                  if (v.is_false()) {
+                  if (v.is_known_false()) {
                     read_map.emplace_back(false);
                   } else {
                     read_map.emplace_back(true);
