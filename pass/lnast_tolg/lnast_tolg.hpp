@@ -16,7 +16,7 @@
 class Lnast_tolg {
 public:
   explicit Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str & _path);
-  std::vector<Lgraph *> do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts);
+  std::vector<Lgraph *> do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts);
 
 private:
   inline static std::mutex lgs_mutex;
