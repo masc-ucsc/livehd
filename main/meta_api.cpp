@@ -17,7 +17,7 @@ void Meta_api::open(Eprp_var &var) {
 
   Lgraph *lg = Lgraph::open(path, name);
 
-  if (lg == 0) {
+  if (lg == nullptr) {
     Main_api::warn("lgraph.open could not find {} lgraph in {} path", name, path);
   } else {
     if (lg->is_empty()) {
@@ -37,7 +37,7 @@ void Meta_api::create(Eprp_var &var) {
 
   Lgraph *lg = Lgraph::create(path, name, "lgshell");
 
-  if (lg == 0) {
+  if (lg == nullptr) {
     Main_api::error("lgraph.create could not open {} lgraph in {} path", name, path);
     return;
   }
@@ -71,7 +71,7 @@ void Meta_api::match(Eprp_var &var) {
   auto match = var.get("match");
 
   const auto *library = Graph_library::instance(path);
-  if (library == 0) {
+  if (library == nullptr) {
     Main_api::warn("lgraph.match could not open {} path", path);
     return;
   }
@@ -79,7 +79,7 @@ void Meta_api::match(Eprp_var &var) {
   std::vector<Lgraph *> lgs;
 
   try {
-    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
+    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, const mmap_lib::str &name) {
       (void)lgid;
 
       Lgraph *lg = Lgraph::open(path, name);
@@ -125,7 +125,7 @@ void Meta_api::liberty(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.liberty path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto &f : files.split(',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -136,7 +136,7 @@ void Meta_api::sdc(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.sdc path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto &f : files.split(',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -147,7 +147,7 @@ void Meta_api::spef(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.spef path:{} ", path);
-  for (const auto &f : absl::StrSplit(files, ',')) {
+  for (const auto &f : files.split(',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
