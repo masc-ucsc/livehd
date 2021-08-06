@@ -370,7 +370,6 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
     if (op == Ntype_op::Const) {
       auto         lc = node.get_type_const();
       RTLIL::Wire *new_wire;
-      bool         do_unsign;
 #if 0
       if (lc.is_negative() || lc.get_bits()==1) {
         new_wire = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
@@ -382,7 +381,6 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
       }
 #else
       new_wire  = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
-      do_unsign = false;
 #endif
 
       if (lc.get_bits() < 31 && lc.is_i()) {  // 32bit in yosys const
