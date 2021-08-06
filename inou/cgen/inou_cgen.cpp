@@ -4,6 +4,7 @@
 
 #include "cgen_verilog.hpp"
 #include "eprp_utils.hpp"
+#include "thread_pool.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
@@ -22,9 +23,16 @@ void Inou_cgen::setup() {
 void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
   Inou_cgen pp(var);
 
-  Cgen_verilog p(pp.verbose, mmap_lib::str(pp.get_odir(var)));
+  auto dir     = pp.get_odir(var);
+  auto verbose = pp.verbose;
 
   for (const auto &l : var.lgs) {
-    p.do_from_lgraph(l);
+    thread_pool.add([l, verbose, dir]() {
+      Cgen_verilog p(verbose, dir);
+      p.do_from_lgraph(l);
+    });
   }
+
+  // no need to sync for cgen. It will sync before exit lgshell if needed
 }
+

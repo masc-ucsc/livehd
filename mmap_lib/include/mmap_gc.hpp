@@ -203,8 +203,8 @@ protected:
     return true;
   }
 
-  static void try_collect_mmap() {
-    // std::cerr << "try_collect_mmap\n";
+  static void try_collect_mmap_int() {
+    // std::cerr << "try_collect_mmap_int\n";
     if (n_open_mmaps < n_max_mmaps) {  // readjust max
       n_max_mmaps = 1 + 3 * n_open_mmaps / 4;
     } else {
@@ -343,7 +343,7 @@ public:
 
     auto [base, final_size] = mmap_step(name, fd, size);
     if (base == MAP_FAILED) {
-      try_collect_mmap();
+      try_collect_mmap_int();
       std::tie(base, final_size) = mmap_step(name, fd, size);
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
@@ -425,7 +425,7 @@ public:
 #else
     base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
     if (base == MAP_FAILED) {
-      try_collect_mmap();
+      try_collect_mmap_int();
       base = mremap(mmap_old_base, old_size, new_size, MREMAP_MAYMOVE);
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
@@ -458,6 +458,11 @@ public:
       n_max_fds = n_open_fds / 2;
     }
     recycle_older();
+  }
+
+  static void try_collect_mmap() {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    try_collect_mmap_int();
   }
 };
 

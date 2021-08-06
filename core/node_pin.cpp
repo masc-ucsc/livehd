@@ -396,32 +396,32 @@ std::string Node_pin::debug_name() const {
                       current_g->get_name().to_s());
 }
 
-std::string Node_pin::get_wire_name() const {
+mmap_lib::str Node_pin::get_wire_name() const {
   if (is_sink()) {
     auto dpin = get_driver_pin();
     if (dpin.is_invalid())
-      return "";
+      return ""_str;
     return dpin.get_wire_name();
   }
 
   if (!is_connected())
     return "";
 
-  std::string name;
+  mmap_lib::str name;
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "lg", current_g->get_name().to_s(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    name = mmap_lib::str::concat("lg", current_g->get_name(), "_hidx", hidx.level, "_", hidx.pos);
   }
 
   if (has_name()) {
-    absl::StrAppend(&name, get_name().to_s());
+    name = mmap_lib::str::concat(name, get_name());
     return name;
   }
 
   if (name.empty())
     name = "t";
 
-  absl::StrAppend(&name, "_pin", std::to_string(get_root_idx()), "_", std::to_string(pid));
+  name = mmap_lib::str::concat(name, "_pin", get_root_idx(), "_", pid);
 
   return name;
 }
