@@ -21,7 +21,7 @@ protected:
 private:
   std::unique_ptr<Code_gen_all_lang> lnast_to;
   int                                indendation = 0;
-  std::string                        indent() const;
+  mmap_lib::str                        indent() const;
   std::vector<mmap_lib::str>      const_vect;
 
 public:
