@@ -31,39 +31,39 @@ void Inou_slang::work(Eprp_var &var) {
   Lbench     b("inou.SLANG_verilog");
   Inou_slang p(var);
 
-  std::vector<std::string> default_args = {"--ignore-unknown-modules", "--single-unit"};
   std::vector<char *>      argv;
 
   argv.push_back(strdup("lgshell"));
 
-  for (const auto &arg : default_args) argv.push_back(strdup(arg.c_str()));
+  argv.push_back(strdup("--ignore-unknown-modules"));
+  argv.push_back(strdup("--single-unit"));
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
     for (const auto f : txt.split(',')) {
       argv.push_back(strdup("-I"));
-      argv.push_back(strdup(std::string(f).c_str()));
+      argv.push_back(strdup(f.to_s().c_str()));
     }
   }
 
   if (var.has_label("defines")) {
     auto txt = var.get("defines");
-    for (auto f : absl::StrSplit(txt, ',')) {
+    for (const auto f : txt.split(',')) {
       argv.push_back(strdup("-D"));
-      argv.push_back(strdup(std::string(f).c_str()));
+      argv.push_back(strdup(f.to_s().c_str()));
     }
   }
 
   if (var.has_label("undefines")) {
     auto txt = var.get("undefines");
-    for (auto f : absl::StrSplit(txt, ',')) {
+    for (const auto f : txt.split(',')) {
       argv.push_back(strdup("-U"));
-      argv.push_back(strdup(std::string(f).c_str()));
+      argv.push_back(strdup(f.to_s().c_str()));
     }
   }
 
-  for (auto f : absl::StrSplit(p.files, ',')) {
-    argv.push_back(strdup(std::string(f).c_str()));
+  for (const auto f : p.files.split(',')) {
+    argv.push_back(strdup(f.to_s().c_str()));
   }
 
   // --top if top: provided
