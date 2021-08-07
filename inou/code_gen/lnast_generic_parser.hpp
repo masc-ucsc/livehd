@@ -40,7 +40,7 @@ public:
 class Cpp_parser : public Code_gen_all_lang {
   std::string_view stmt_separator = " ;\n";
   std::string_view lang_type      = "cpp";
-  std::string      supp_ftype     = "hpp";
+  const mmap_lib::str      supp_ftype     = "hpp";
 
   absl::flat_hash_map<std::string, std::string> inp_bw;   // first->input port name, second->UInt<bw>
   absl::flat_hash_map<std::string, std::string> outp_bw;  // first->o/p port name, sec->UInt<bw>
@@ -67,12 +67,12 @@ public:
   mmap_lib::str    ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const final;
   std::string      starter(std::string_view filename) const final;
   // header related functions:
-  std::string_view supporting_ftype() const final;
-  std::string      set_supporting_fstart(const std::string &basename_s) final;
-  std::string      supporting_fend(const std::string &basename_s) const final;
-  std::string      set_supp_buffer_to_print(const std::string &modname) final;
+  const mmap_lib::str supporting_ftype() const final;
+  mmap_lib::str      set_supporting_fstart(const mmap_lib::str basename_s) final;
+  mmap_lib::str      supporting_fend(const mmap_lib::str basename_s) const final;
+  std::string      set_supp_buffer_to_print(const mmap_lib::str modname) final;
 
-  std::string set_main_fstart(const std::string &basename, const std::string &basename_s) final;
+  mmap_lib::str set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) final;
   bool        set_convert_parameters(const mmap_lib::str &key, const std::string &ref) final;
   void        dump_maps() const;
   void        call_dump_maps() const final;

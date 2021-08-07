@@ -107,16 +107,16 @@ public:
   virtual std::string starter(std::string_view) const { return ""; };  // filename goes in here
 
   // for header file:
-  virtual std::string supporting_fend(const std::string &) const { return ""; };  // basename_s goes here
+  virtual mmap_lib::str supporting_fend(const mmap_lib::str) const { return ""_str; };  // basename_s goes here
 
   // Set methods modify the object. Do they really need to return arguments (return a new string is expensive)
-  virtual std::string      set_supporting_fstart(const std::string &) { return ""; };  // basename_s goes in here
-  virtual std::string_view supporting_ftype() const { return ""; };
-  virtual std::string      set_supp_buffer_to_print(const std::string &) { return ""; };  // modname is the argument passed here
+  virtual mmap_lib::str      set_supporting_fstart(const mmap_lib::str) { return ""; };  // basename_s goes in here
+  virtual const mmap_lib::str supporting_ftype() const { return ""_str; };
+  virtual std::string      set_supp_buffer_to_print(const mmap_lib::str) { return ""; };  // modname is the argument passed here
 
   // for main file (cpp file)
-  virtual std::string set_main_fstart(const std::string &basename, const std::string &) {
-    return absl::StrCat("file: ", basename, "\n");
+  virtual mmap_lib::str set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &) {
+    return mmap_lib::str::concat("file: "_str, basename, "\n"_str);
   };  // the other arg is basename_s
 
   // FIXME:renau. Several methods have no variable name. Use it as a way to explain what is the arg

@@ -110,16 +110,16 @@ std::string Cpp_parser::starter(std::string_view filename) const {
 }
 
 // header related functions:
-std::string_view Cpp_parser::supporting_ftype() const { return supp_ftype; }
-std::string      Cpp_parser::set_supporting_fstart(const std::string &basename_s) {
-  auto txt_to_print    = absl::StrCat("file: ", basename_s, "\n");
+const mmap_lib::str Cpp_parser::supporting_ftype() const { return supp_ftype; }
+mmap_lib::str      Cpp_parser::set_supporting_fstart(const mmap_lib::str basename_s) {
+  auto txt_to_print    = mmap_lib::str::concat("file: "_str, basename_s, "\n"_str);
   auto header_includes = "#pragma once\n#include <string>\n#include \"vcd_writer.hpp\"\n";
   absl::StrAppend(&supp_file_final_str, header_includes);
-  return absl::StrCat(txt_to_print, header_includes);
+  return mmap_lib::str::concat(txt_to_print, mmap_lib::str(header_includes));
 }
-std::string Cpp_parser::supporting_fend(const std::string &basename_s) const { return absl::StrCat("<<EOF ", basename_s); }
-std::string Cpp_parser::set_supp_buffer_to_print(const std::string &modname) {
-  std::string header_strt = absl::StrCat("class ", modname, "_sim {\npublic:\n  uint64_t hidx;\n  ");
+mmap_lib::str Cpp_parser::supporting_fend(const mmap_lib::str basename_s) const { return mmap_lib::str::concat("<<EOF "_str, basename_s); }
+std::string Cpp_parser::set_supp_buffer_to_print(const mmap_lib::str modname) {
+  std::string header_strt = absl::StrCat("class ", modname.to_s(), "_sim {\npublic:\n  uint64_t hidx;\n  ");
 
   std::string outps_nline;
   if (!outp_bw.empty()) {
@@ -140,7 +140,7 @@ std::string Cpp_parser::set_supp_buffer_to_print(const std::string &modname) {
     absl::StrAppend(&regs_nline, "} regs;");
   }
 
-  std::string funcs = absl::StrCat("  ", modname, "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(", inps_csv, ");\n");
+  std::string funcs = absl::StrCat("  ", modname.to_s(), "_sim(uint64_t _hidx);\n  void reset_cycle();\n  void cycle(", inps_csv, ");\n");
 
   std::string vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
@@ -213,7 +213,7 @@ std::string Cpp_parser::set_supp_buffer_to_print(const std::string &modname) {
   }
 
   std::string vcd_funcs = absl::StrCat("  ",
-                                       modname,
+                                       modname.to_s(),
                                        "_sim(uint64_t _hidx, const std::string &parent_name, vcd::VCDWriter* writer);\n  void "
                                        "vcd_reset_cycle();\n  void vcd_posedge();\n  void vcd_negedge();\n  void vcd_comb(",
                                        inps_csv,
@@ -235,10 +235,10 @@ std::string Cpp_parser::set_supp_buffer_to_print(const std::string &modname) {
   return answer;
 }
 
-std::string Cpp_parser::set_main_fstart(const std::string &basename, const std::string &basename_s) {
-  auto txt_to_print = absl::StrCat("file: ", basename, "\n");
-  absl::StrAppend(&main_file_final_str, "\n#include \"livesim_types.hpp\"\n#include \"", basename_s, "\"\n");
-  return absl::StrCat(txt_to_print, main_file_final_str);
+mmap_lib::str Cpp_parser::set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) {
+  auto txt_to_print = mmap_lib::str::concat("file: "_str, basename, "\n"_str);
+  absl::StrAppend(&main_file_final_str, "\n#include \"livesim_types.hpp\"\n#include \"", basename_s.to_s(), "\"\n");
+  return mmap_lib::str::concat(txt_to_print, mmap_lib::str(main_file_final_str));
 }
 
 bool Cpp_parser::set_convert_parameters(const mmap_lib::str &key, const std::string &ref) {
@@ -393,7 +393,7 @@ void Prp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str 
 
 void Cpp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &) const {
   // for header file
-  auto supp_f  = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", supp_ftype);
+  auto supp_f  = absl::StrCat(odir.to_s(), "/", fname.to_s(), ".", supp_ftype.to_s());
   int  supp_fd = ::open(supp_f.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (supp_fd < 0) {
     Pass::error("inou.code_gen unable to create header file {}", supp_f);

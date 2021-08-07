@@ -55,7 +55,7 @@ void Code_gen::generate() {
   }
 
   auto lang_type = lnast_to->get_lang_type();     // which lang is it? prp/cpp/verilog
-  auto modname   = lnast->get_top_module_name().to_s();
+  auto modname   = lnast->get_top_module_name();
 
   // for debugging purposes only:
   lnast_to->call_dump_maps();
@@ -66,16 +66,16 @@ void Code_gen::generate() {
   fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
 
   // header file:
-  auto basename_s = absl::StrCat(modname, ".", lnast_to->supporting_ftype());
+  auto basename_s = mmap_lib::str::concat(modname, ".", lnast_to->supporting_ftype());
   fmt::print("{}\n", lnast_to->set_supporting_fstart(basename_s));
   fmt::print("{}\n", lnast_to->set_supp_buffer_to_print(modname));
   fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
 
   // main file:
-  auto basename = absl::StrCat(modname, ".", lang_type);
+  auto basename = mmap_lib::str::concat(modname, "."_str, lang_type);
   // header inclusion:(#includes):
   fmt::print("{}\n", lnast_to->set_main_fstart(basename, basename_s));
-  fmt::print("{}\n", lnast_to->set_final_print(modname, buffer_to_print));
+  fmt::print("{}\n", lnast_to->set_final_print(modname.to_s(), buffer_to_print));
   // main code segment
   // fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
