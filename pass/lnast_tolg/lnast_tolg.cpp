@@ -666,6 +666,8 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 
 void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
   auto pos          = full_inp_hier_name.rfind('.');
+  if (pos == std::string::npos)
+    return;
   auto last_subname = full_inp_hier_name.substr(pos + 1);
 
   // if the last subname is not a number(not a constant), means the tuple is not array-like, it's impossilbe
