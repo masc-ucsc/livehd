@@ -515,12 +515,11 @@ public:
   }
 
   template <std::size_t N>
-  constexpr str(const char (&s)[N]) {
-    if constexpr ((N-1)>=16) {
-      set_non_sso(s, (N-1));
-    }else{
+  inline constexpr str(const char (&s)[N]) : size_ctrl(0), ptr_or_start(0), data_storage(0) {
+    if constexpr ((N-1)<=15)
       set_sso(s,(N-1));
-    }
+    else
+      set_non_sso(s, (N-1));
   }
 
   str(int64_t v) {
@@ -540,7 +539,7 @@ public:
     }
   }
 
-  str(const std::string_view sv) {
+  explicit str(const std::string_view sv) {
     if (sv.size()<=15) {
       set_sso(sv.data(),sv.size());
     }else{

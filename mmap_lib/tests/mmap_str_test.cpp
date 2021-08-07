@@ -44,7 +44,6 @@ class Mmap_str_test : public ::testing::Test {
 public:
   void SetUp() override {
     mmap_lib::str::setup();
-    mmap_lib::str::nuke();
 
     srand(time(0));
     uint8_t t_len = 0u;
