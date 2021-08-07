@@ -1740,7 +1740,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
   } else if (cur_ntype == Ntype_op::AttrSet) {
     if (cur_node.is_sink_connected("field")) {
       // auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_str();
-      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_pyrope(); // low intuitive api
+      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_field(); // low intuitive api
       if (!Lgtuple::is_root_attribute(field_txt)) {
         auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
         hier_name = mmap_lib::str::concat(hier_name, ".", non_attr_field);
@@ -1761,7 +1761,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
       auto field_node = cur_node.get_sink_pin("field").get_driver_node();
       if (field_node.is_type_const()) {
         // auto field_name = field_node.get_type_const().to_str();
-        auto field_name = field_node.get_type_const().to_pyrope(); //low intuitive api
+        auto field_name = field_node.get_type_const().to_field(); //low intuitive api
         new_hier_name   = mmap_lib::str::concat(hier_name, ".", field_name);
       }
     }

@@ -466,7 +466,7 @@ std::pair<Port_ID, mmap_lib::str> Lgtuple::convert_key_to_io(const mmap_lib::str
     ++skip;
 
   if (key[skip] != ':') {
-    return std::pair(Port_invalid, key);
+    return std::pair(Port_invalid, key.substr(skip));
   }
 
   auto key2 = key.substr(skip);
