@@ -539,7 +539,7 @@ public:
     }
   }
 
-  explicit str(const std::string_view sv) {
+  str(const std::string_view sv) {
     if (sv.size()<=15) {
       set_sso(sv.data(),sv.size());
     }else{
