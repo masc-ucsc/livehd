@@ -1812,6 +1812,8 @@ public:
     friend H AbslHashValue(H h, const str s) {
       return H::combine(std::move(h), s.hash());
     };
+
+  __attribute__ ((noinline)) void dump() const;
 };
 
 #if 0

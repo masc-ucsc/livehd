@@ -154,6 +154,8 @@ protected:
 
   bool gc_done(void *base, bool /* force_recycle */) const {
     // std::cerr << "trying GC for " << mmap_name << " mutex:" << in_use_mutex.load() << "\n";
+    if (ref_locked)
+      return false;
     bool lock_was_set = std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed);
     if (lock_was_set)
       return false;  // lock in use, abort!!
@@ -201,6 +203,7 @@ protected:
   }
 
   mutable std::atomic<bool> in_use_mutex{false};
+  mutable std::atomic<int>  ref_locked{0};
 
 public:
   explicit vector(std::string_view _path, std::string_view _map_name)
@@ -240,19 +243,20 @@ public:
 
   // Allocates space, but it does not touch contents
   void reserve(size_t n) const {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     reserve_int(n);
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   void emplace_back() {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     ref_base();
     if (MMAP_LIB_UNLIKELY(capacity() <= *entries_size)) {
@@ -260,14 +264,15 @@ public:
     }
     (*entries_size)++;
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   template <class... Args>
   void emplace_back(Args &&...args) {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (!ref_locked)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     auto *base = ref_base();
     assert(entries_size);
@@ -278,25 +283,31 @@ public:
     base[*entries_size] = T(std::forward<Args>(args)...);
     (*entries_size)++;
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (!ref_locked)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   void ref_lock() const {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (ref_locked==0)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
+
+    ++ref_locked;
   }
 
   void ref_unlock() const {
+    assert(ref_locked);
+    --ref_locked;
     assert(in_use_mutex);
-    in_use_mutex.store(false, std::memory_order_release);
+    if (ref_locked==0)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   template <class... Args>
   void set(const size_t idx, Args &&...args) {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (ref_locked==0)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     auto *base = ref_base();
     assert(base);
@@ -304,11 +315,12 @@ public:
 
     base[idx] = T(std::forward<Args>(args)...);
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (ref_locked==0)
+      in_use_mutex.store(false, std::memory_order_release);
   }
 
   [[nodiscard]] inline const T *ref(size_t const &idx) const {
-    assert(in_use_mutex);
+    assert(ref_locked);
 
     const auto *base = ref_base();
     assert(idx < size());
@@ -316,7 +328,7 @@ public:
   }
 
   [[nodiscard]] inline T *ref(size_t const &idx) {
-    assert(in_use_mutex);
+    assert(ref_locked);
 
     auto *base = ref_base();
     assert(idx < size());
@@ -324,45 +336,47 @@ public:
   }
 
   [[nodiscard]] inline const T operator[](const size_t idx) const {
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (ref_locked==0)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     const auto *base = ref_base();
     assert(idx < size());
     const auto copy = base[idx];
 
-    in_use_mutex.store(false, std::memory_order_release);
+    if (ref_locked==0)
+      in_use_mutex.store(false, std::memory_order_release);
+
     return copy;
   }
 
   T *begin() {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return ref_base();
   }
   const T *cbegin() const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return ref_base();
   }
   const T *begin() const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     return ref_base();
   }
 
   T *end() {
-    assert(in_use_mutex);
+    assert(ref_locked);
     auto *base = ref_base();
     return &base[*entries_size];
   }
 
   const T *cend() const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     const auto *base = ref_base();
     return &base[*entries_size];
   }
 
   const T *end() const {
-    assert(in_use_mutex);
+    assert(ref_locked);
     const auto *base = ref_base();
     return &base[*entries_size];
   }
@@ -414,13 +428,15 @@ public:
       return 0;
     }
 
-    // Single thread check: assert(in_use_mutex == 0);
-    while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
-      ;
+    if (ref_locked==0)
+      while (std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
+        ;
 
     ref_base();  // Force to get entries_size
     auto v = *entries_size;
-    in_use_mutex.store(false, std::memory_order_release);
+
+    if (ref_locked==0)
+      in_use_mutex.store(false, std::memory_order_release);
 
     return v;
   }

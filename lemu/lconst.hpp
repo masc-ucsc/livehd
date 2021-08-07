@@ -76,6 +76,7 @@ public:
 
   Lconst();
 
+  mmap_lib::str to_field() const;  // tuple field (a subset of pyrope allowed)
   mmap_lib::str to_binary() const;
   mmap_lib::str to_verilog() const;
   mmap_lib::str to_pyrope() const;

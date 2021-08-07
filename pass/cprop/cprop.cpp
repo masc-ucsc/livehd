@@ -46,7 +46,7 @@ void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_l
 
   auto pos_dpin = pos_spin.get_driver_pin();
   if (pos_dpin.is_type_const()) {
-    auto v = pos_dpin.get_type_const().to_pyrope();
+    auto v = pos_dpin.get_type_const().to_field();
     if (!Lgtuple::is_root_attribute(v)) {
       tup->set_issue();
       tuple_issues = true;
@@ -598,7 +598,7 @@ std::tuple<mmap_lib::str, mmap_lib::str> Cprop::get_tuple_name_key(const Node &n
   if (node.is_sink_connected("field")) {
     auto node2 = node.get_sink_pin("field").get_driver_node();
     if (node2.is_type_const()) {
-      key_name = node2.get_type_const().to_pyrope();
+      key_name = node2.get_type_const().to_field();
     }
   }
 
@@ -1308,7 +1308,7 @@ void Cprop::tuple_attr_set(const Node &node) {
   auto field_spin = node.get_sink_pin("field");
   I(field_spin.is_connected());
 
-  auto attr_field = field_spin.get_driver_pin().get_type_const().to_pyrope();
+  auto attr_field = field_spin.get_driver_pin().get_type_const().to_field();
   I(Lgtuple::is_root_attribute(attr_field));  // AttrSet is only for root fields
 
   if (attr_field != "__dp_assign")
@@ -1701,7 +1701,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
   if (!pos_spin.is_invalid()) {
     auto pos_dpin = pos_spin.get_driver_pin();
     if (pos_dpin.is_type_const()) {
-      auto field = pos_dpin.get_type_const().to_pyrope();
+      auto field = pos_dpin.get_type_const().to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
           node.set_type(Ntype_op::AttrSet);

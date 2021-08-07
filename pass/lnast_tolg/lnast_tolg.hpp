@@ -27,7 +27,7 @@ private:
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
   absl::flat_hash_map<mmap_lib::str, Node_pin>                name2dpin;  // for scalar variable
-  absl::flat_hash_set<mmap_lib::str>                          inlined_func_names; 
+  absl::flat_hash_set<mmap_lib::str>                          inlined_func_names;
   absl::flat_hash_map<mmap_lib::str, Node_pin>                field2dpin;
   absl::flat_hash_map<mmap_lib::str, std::vector<Node>>       driver_var2wire_nodes;  // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>        inp2leaf_tg_spins;

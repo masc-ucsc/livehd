@@ -1020,6 +1020,26 @@ Lconst Lconst::to_known_rand() const {
   return Lconst::from_binary(str,sign=='0');
 }
 
+mmap_lib::str Lconst::to_field() const {
+  if (explicit_str) {
+    I(!has_unknowns()); // no tuple field should have unknown
+    return to_string();
+  }
+
+  const auto        v = get_num();
+  std::stringstream ss;
+
+  if (v < 0) {
+    ss << -v;
+
+    fmt::print("warning: strange negative {} field\n", ss.str());
+    return mmap_lib::str::concat("-",ss.str());
+  }
+  ss << v;
+
+  return mmap_lib::str(ss.str());
+}
+
 mmap_lib::str Lconst::to_pyrope() const {
   if (explicit_str) {
     auto str_no_underscore = to_string();

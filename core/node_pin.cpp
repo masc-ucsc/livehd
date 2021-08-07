@@ -421,7 +421,7 @@ mmap_lib::str Node_pin::get_wire_name() const {
   if (name.empty())
     name = "t";
 
-  name = mmap_lib::str::concat(name, "_pin", get_root_idx(), "_", pid);
+  name = mmap_lib::str::concat(name, "_pin", get_root_idx().value, "_", pid);
 
   return name;
 }

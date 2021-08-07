@@ -16,7 +16,7 @@ Lnast_tolg::Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str &_
 std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts) {
   Lbench b("pass.lnast_tolg");
 
-  // lnast = ln;
+  lnast = ln;
   auto src = ln->get_source();
   if (src.empty())
     src = "-";

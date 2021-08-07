@@ -169,9 +169,9 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(const mmap_lib::str &a, const 
   bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
   bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
 
-  if (b[b_pos] == '.')
+  if (b.size()>b_pos && b[b_pos] == '.')
     ++b_pos;
-  if (a[a_pos] == '.')
+  if (a.size()>a_pos && a[a_pos] == '.')
     ++a_pos;
 
   return std::make_tuple(a_match, b_match, b_pos);
