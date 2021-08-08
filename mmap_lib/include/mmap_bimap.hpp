@@ -55,14 +55,15 @@ public:
   [[nodiscard]] iterator       find(const Key &key) { return key2val.find(key); }
   [[nodiscard]] const_iterator find(const Key &key) const { return key2val.find(key); }
   [[nodiscard]] const_iterator find_val(const T &val) const {
-    const auto it = val2key.find(val);
-    if (it == val2key.end())
-      return key2val.end();
+    Key key;
+    {
+      const auto it = val2key.find(val);
+      if (it == val2key.end())
+        return key2val.end();
+      key = it->second;
+    }
 
-    const Key  key = val2key.get(it);
-    const auto it2 = key2val.find(key);
-    assert(it2 != key2val.end());
-    return it2;
+    return key2val.find(key);
   }
 
   [[nodiscard]] iterator       begin() { return key2val.begin(); }
@@ -73,14 +74,20 @@ public:
   [[nodiscard]] const_iterator end() const { return key2val.cend(); }
   [[nodiscard]] const_iterator cend() const { return key2val.cend(); }
 
-  iterator erase(const_iterator pos) {
-    val2key.erase(key2val.get(pos));
-    return key2val.erase(pos);
+  bool erase(const_iterator it) { // iterators are always key2val
+    auto it2 = val2key.find(it->second);
+    assert(it2 != val2key.end());
+
+    val2key.erase(it2);
+    return key2val.erase(it);
   }
 
-  iterator erase(iterator pos) {
-    val2key.erase(key2val.get(pos));
-    return key2val.erase(pos);
+  bool erase(iterator &it) {
+    auto it2 = val2key.find(it->second);
+    assert(it2 != val2key.end());
+
+    val2key.erase(it2);
+    return key2val.erase(it);
   }
 
   size_t erase_key(const Key &key) {
@@ -98,20 +105,18 @@ public:
     val2key.reserve(sz);
   }
 
-  [[nodiscard]] size_t size() const { return key2val.size(); }
+  [[nodiscard]] size_t size () const { return key2val.size (); }
   [[nodiscard]] bool   empty() const { return key2val.empty(); }
 
   [[nodiscard]] size_t capacity() const { return key2val.capacity(); }
 
-  [[nodiscard]] Key get_key(const iterator &it) const { return key2val.get_key(it); }
-  [[nodiscard]] Key get_key(const const_iterator &it) const { return key2val.get_key(it); }
+#if 0
+  [[nodiscard]] Key get_key(const iterator       &it) const { return it.first; }
+  [[nodiscard]] Key get_key(const const_iterator &it) const { return it.first; }
 
-  [[nodiscard]] T get_val(const iterator &it) const {
-    return key2val.get(it);
-  }
-  [[nodiscard]] T get_val(const const_iterator &it) const {
-    return key2val.get(it);
-  }
+  [[nodiscard]] T get_val(const iterator       &it) const { return it.second; }
+  [[nodiscard]] T get_val(const const_iterator &it) const { return it.second; }
+#endif
 };
 
 }  // namespace mmap_lib

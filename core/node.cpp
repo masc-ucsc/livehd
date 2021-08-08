@@ -522,7 +522,7 @@ mmap_lib::str Node::create_name() const {
   auto *     ref = Ann_node_name::ref(current_g);
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end())
-    return ref->get_val(it);
+    return it->second;
 
   auto cell_name = Ntype::get_name(get_type_op());
   auto sig       = mmap_lib::str::concat("lg_", cell_name, std::to_string(nid));

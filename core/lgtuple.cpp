@@ -551,7 +551,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const mmap_lib::str &key) const 
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0)
       continue;
-    I(entry[e_pos] != '.');  // . not included
+    GI(e_pos<entry.size(), entry[e_pos] != '.');  // . not included
 
     if (!tup) {
       mmap_lib::str key_with_pos{key};

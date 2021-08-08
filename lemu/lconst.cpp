@@ -1178,6 +1178,9 @@ mmap_lib::str Lconst::to_binary() const {
 }
 
 mmap_lib::str Lconst::to_verilog() const {
+  if (num==0)
+    return "'b0"_str;
+
   if (explicit_str) {
     if (has_unknowns()) {
       auto sign = static_cast<unsigned char>(num & 0xFF);
@@ -1202,3 +1205,4 @@ mmap_lib::str Lconst::to_verilog() const {
 
   return mmap_lib::str::concat(get_bits()-1, "'h", ss.str());
 }
+
