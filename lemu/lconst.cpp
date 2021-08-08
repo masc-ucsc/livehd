@@ -260,7 +260,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
     bool prev_escaped=false;
     for (int i = start_i - 1; i >= end_i; --i) {
       num <<= 8;
-      num += orig_txt[i];
+      num |= orig_txt[i];
 
       if (orig_txt[i] == '\'' && !prev_escaped && i!=0) {
         throw std::runtime_error(fmt::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
@@ -518,12 +518,17 @@ Lconst Lconst::sext_op(Bits_t ebits) const {
 }
 
 Lconst Lconst::get_mask_op() const {
-  if (unlikely(is_string())) {
-    return Lconst(explicit_str, bits, num);
+  if (has_unknowns()) {
+		auto sign = static_cast<unsigned char>(num & 0xFF);
+		if (sign == '0')
+			return Lconst(explicit_str, bits, num);
+	  Number res_num = get_num()<<8;
+		res_num |= '0'; // add ZERO to be 0b0whatever
+		return Lconst(explicit_str, bits+8, res_num);
   }
 
-  if (has_unknowns()) {
-    return Lconst(explicit_str, bits, num);  // 0b0?????? format style (always positive)
+  if (explicit_str) {
+    return Lconst(explicit_str, bits, num);
   }
 
   Number res_num;
@@ -878,10 +883,6 @@ Lconst Lconst::ror_op(const Lconst &o) const {
 }
 
 Lconst Lconst::or_op(const Lconst &o) const {
-  if (unlikely(is_string() || o.is_string())) {
-    return Lconst::from_pyrope("0sb?");
-  }
-
   if (unlikely(has_unknowns() || o.has_unknowns())) {
 
     auto [l_str,r_str] = match_binary(*this, o);
@@ -918,10 +919,6 @@ Lconst Lconst::not_op() const {
 }
 
 Lconst Lconst::and_op(const Lconst &o) const {
-  if (unlikely(is_string() || o.is_string())) {
-    return Lconst::from_pyrope("0bs?");
-  }
-
   if (unlikely(has_unknowns() || o.has_unknowns())) {
 
     auto [l_str,r_str] = match_binary(*this, o);
