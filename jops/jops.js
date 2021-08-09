@@ -48,11 +48,12 @@ class Lconst {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
   
+    // example
+    // 3 => ob11, length = 3
+    // -3 => ob11, length = 3
     static calc_num_bits(number) {
       bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
-      console.log(`binary form is ${binaryForm}`);
-      console.log(`the number of bits is ${binaryForm.length} + 1 [one bit for sign]`);
       return binaryForm.length + 1;
     }
 
