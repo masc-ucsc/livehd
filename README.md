@@ -1,5 +1,4 @@
 
-# Forked by Zili
 ![LiveHD](https://masc.soe.ucsc.edu/logos/livehd5.png)
 
 # LiveHD: Live Hardware Development
