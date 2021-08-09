@@ -4,9 +4,7 @@
 
 #include "mmap_str.hpp"
 
-void call_dump_not_used_but_force_to_preserve_dump() {
-  mmap_lib::str str("hello");
-
+void str_dump(mmap_lib::str str) {
   str.dump();
 }
 
