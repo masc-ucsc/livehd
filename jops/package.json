@@ -1,0 +1,9 @@
+{
+  "name": "Jops For LiveHD",
+  "version": "1.0.0",
+  "description": "Jops in a sub-project under LiveHD",
+  "author": "Zili Wang",
+  "license": "UNLICENSED",
+  "repository": "none",
+  "dependencies": {}
+}
