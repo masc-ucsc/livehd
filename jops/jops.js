@@ -7,13 +7,6 @@
 // 🐅🐅🐅testing workspace🐀🐀🐀
 const truer = 1;
 
-/* static Bits_t calc_num_bits(const Number &num) {
-  if (num == 0 || num == -1)
-    return 1;
-  if (num > 0)
-    return msb(num) + 2;  // +2 because values are signed (msb==0 is 1 bit)
-  return msb(-num - 1) + 2;
-} */
 function calc_num_bits(number) {
   bigI = number > 0 ? BigInt(number) : -1n * BigInt(number); // Question: what if the number is negative?????
   const binaryForm = bigI.toString(2);
@@ -56,11 +49,11 @@ class Lconst {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
   
     static calc_num_bits(number) {
-      bigI = number > 0 ? BigInt(number) : -1n * BigInt(number); // Question: what if the number is negative?????
+      bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
       console.log(`binary form is ${binaryForm}`);
       console.log(`the number of bits is ${binaryForm.length} + 1 [one bit for sign]`);
-      return binaryForm.length + 1; // Question: one more bits for the sign?????
+      return binaryForm.length + 1;
     }
 
   initialized(){
@@ -74,8 +67,9 @@ class Lconst {
       this.bits = Lconst.calc_num_bits(this.num)
     }
   }
-} // end of the class
+} // end of the class ————————————————————————————————————————————
 
-// testing workspace for Lconst
+
+// 🐕testing workspace for Lconst🐇
 /* let testing = new Lconst(3);
-console.log(testing.num, " ", testing.bits); */
+console.log(testing.num, " ", testing.bits, " ", testing.explicit_str); */
