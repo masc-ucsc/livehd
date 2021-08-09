@@ -22,13 +22,6 @@ calc_num_bits(-10);
  * to use bigInt, simply add 'n' behind a number; for example, 2n 
  */
 class Lconst {
-  constructor(number) {
-    this.number = number
-    this.explicit_str = false; 
-    this.bits = 0;
-    this.num = 0;
-    this.initialized()
-  }
 
   static char_to_bits = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0,
@@ -47,15 +40,13 @@ class Lconst {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
-  
-    // example
-    // 3 => ob11, length = 3
-    // -3 => ob11, length = 3
-    static calc_num_bits(number) {
-      bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
-      const binaryForm = bigI.toString(2);
-      return binaryForm.length + 1;
-    }
+  constructor(number) {
+    this.number = number
+    this.explicit_str = false; 
+    this.bits = 0;
+    this.num = 0;
+    this.initialized()
+  }
 
   initialized(){
     if (!this.number) {
@@ -68,6 +59,16 @@ class Lconst {
       this.bits = Lconst.calc_num_bits(this.num)
     }
   }
+    // example
+    // 3 => ob11, length = 3
+    // -3 => ob11, length = 3
+    static calc_num_bits(number) {
+      bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
+      const binaryForm = bigI.toString(2);
+      return binaryForm.length + 1;
+    }
+
+
 } // end of the class ————————————————————————————————————————————
 
 

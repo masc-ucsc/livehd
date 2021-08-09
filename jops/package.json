@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Jops in a sub-project under LiveHD",
   "author": "Zili Wang",
-  "license": "UNLICENSED",
+  "license": "https://github.com/masc-ucsc/livehd/blob/master/LICENSE",
   "repository": "none",
   "dependencies": {}
 }
