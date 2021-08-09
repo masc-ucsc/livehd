@@ -84,9 +84,8 @@ const mmap_lib::str Ver_parser::for_cond_end() const {
 
 const mmap_lib::str Ver_parser::assign_node_strt() const { return "assign "_str; }
 
-std::string Cpp_parser::starter(std::string_view filename) const {
-  std::string _filename = std::string(filename);
-  return absl::StrCat("void ", _filename, "::cycle(");
+mmap_lib::str Cpp_parser::starter(const mmap_lib::str filename) const {
+  return mmap_lib::str::concat("void "_str, filename, "::cycle("_str);
 }
 
 // header related functions:

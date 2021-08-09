@@ -51,7 +51,6 @@ public:
 
   static bool    is_temp_var(const mmap_lib::str &test_string);        // can go to private/protected section!?
   static bool    has_DblUndrScor(const mmap_lib::str &test_string);    // can go to private/protected section!?
-  static bool    has_DblUndrScor(const std::string &test_string);    // can go to private/protected section!?
   static bool    is_number(const mmap_lib::str &test_string);
 
   static mmap_lib::str process_number(const mmap_lib::str &num_string);

@@ -6,7 +6,6 @@
 
 #include "mmap_str.hpp"
 #include "file_output.hpp"
-#include "absl/strings/str_cat.h"
 #include "code_gen.hpp"
 #include "lnast_ntype.hpp"
 
@@ -19,9 +18,9 @@ public:
   virtual const mmap_lib::str stmt_sep() const                             = 0;
   virtual const mmap_lib::str get_lang_type() const                        = 0;
   virtual const mmap_lib::str debug_name_lang(Lnast_ntype node_type) const = 0;
-  std::string_view         dot_type_op() const { return "."; };
-  std::string_view         str_qoute(bool is_str) const { return is_str ? "\"" : ""; /*if string then " is added*/ };
-  std::string_view         gmask_op() const { return "@"; }
+  const mmap_lib::str         dot_type_op() const { return "."; };
+  const mmap_lib::str         str_qoute(bool is_str) const { return is_str ? "\""_str : ""_str; /*if string then " is added*/ };
+  const mmap_lib::str         gmask_op() const { return "@"; }
   virtual const mmap_lib::str start_else_if() const = 0;
 
   virtual const mmap_lib::str end_else_if() const { return ("}"_str); }
@@ -103,7 +102,7 @@ public:
   // in verilog, assign stmt starts with assign keyword. thus this function.
   virtual const mmap_lib::str assign_node_strt() const { return ""_str; }
 
-  virtual std::string starter(std::string_view) const { return ""; };  // filename goes in here
+  virtual mmap_lib::str starter(const mmap_lib::str) const { return ""; };  // filename goes in here
 
   // for header file:
   virtual mmap_lib::str supporting_fend(const mmap_lib::str) const { return ""_str; };  // basename_s goes here

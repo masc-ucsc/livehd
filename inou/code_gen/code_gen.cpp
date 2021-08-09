@@ -686,7 +686,7 @@ void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
   I(smask_str_vect.size() > 2);
 
   auto        key = smask_str_vect.front();
-  std::string val;
+	mmap_lib::str val;
 
   for (unsigned i = 1; i < smask_str_vect.size() - 1; i++) {
     auto ref    = smask_str_vect[i];
@@ -695,15 +695,15 @@ void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
       ref = map_it->second;
     }
 
-    absl::StrAppend(&val, ref.to_s(), lnast_to->gmask_op(), (i == 1 ? "(" : ""));
+    val = mmap_lib::str::concat(val, ref.to_s(), lnast_to->gmask_op(), (i == 1 ? "(" : ""));
   }
-  val.pop_back();
-  absl::StrAppend(&val, ")");
+  val = val.substr(0,val.size()-1);//pop_back()
+  val = val.append(")");
 
   if (is_temp_var(key)) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, val));
   } else {
-    buffer_to_print->append(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(mmap_lib::str(val)), "="_str, smask_str_vect.back(), "\n"_str));
+    buffer_to_print->append(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(val), "="_str, smask_str_vect.back(), "\n"_str));
     // I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
   }
 }
@@ -735,7 +735,7 @@ void Code_gen::do_get_mask(const mmap_lib::Tree_index& gmask_node_index) {
   I(gmask_str_vect.size() > 2);
 
   auto        key = gmask_str_vect.front();
-  std::string val;
+	mmap_lib::str val;
   bool ref_is_ref = false;
   for (unsigned i = 1; i < gmask_str_vect.size(); i++) {
     auto ref    = gmask_str_vect[i];
@@ -748,12 +748,12 @@ void Code_gen::do_get_mask(const mmap_lib::Tree_index& gmask_node_index) {
 		}
 
 		//absl::StrAppend(&val, ref.to_s(), ((i==1)?lnast_to->gmask_op():""), ((i>1)?"":"(") );
-    absl::StrAppend(&val, ((!ref_is_ref&&i>1)?"(":"") , ref.to_s(), ((i==1)?lnast_to->gmask_op():""));
+    val = mmap_lib::str::concat(val, ((!ref_is_ref&&i>1)?"("_str:""_str) , ref, ((i==1)?lnast_to->gmask_op():""_str));
   }
-  absl::StrAppend(&val, (ref_is_ref?"":")") );
+  val = val.append(ref_is_ref?""_str:")"_str );
 
   if (is_temp_var(key)) {
-    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(val)));
+    ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key,val));
   } else {
     I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
   }
@@ -791,7 +791,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
   if (add_to_ref_map) {
     i = 1u;
   }
-  std::string  value;
+	mmap_lib::str  value;
   // const auto& dot_node_data = lnast->get_data(dot_node_index);
   while ((select_type == "tuple_add" && i < (dot_str_vect.size() - 1) && is_temp_var(key))
          || (i < dot_str_vect.size() && is_temp_var(key) && select_type == "selc")
@@ -804,22 +804,22 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
       ref = map_it->second;
     }
     if (ref == "__valid") {
-      value.pop_back();
-      absl::StrAppend(&value, "?");
+      value = value.substr(0,value.size()-1);//value.pop_back();
+      value = value.append("?");
     } else if (ref == "__retry") {
-      value.pop_back();
-      absl::StrAppend(&value, "!");
+      value = value.substr(0,value.size()-1);//value.pop_back();
+      value = value.append("!");
     } else if (is_number(ref)) {
-      absl::StrAppend(&value, process_number(ref).to_s());
+      value = value.append(process_number(ref));
     } else {
-      absl::StrAppend(&value, ref.to_s());
+      value = value.append(ref);
     }
     // now returns "select". So making it more pyrope specific for time being.//  absl::StrAppend(&value,
     // lnast_to->debug_name_lang(dot_node_data.type));  // appends "." after the value in case of pyrope
-    absl::StrAppend(&value, lnast_to->dot_type_op());  // appends "." after the value in case of pyrope
+    value = value.append(lnast_to->dot_type_op());// appends "." after the value in case of pyrope
     i++;
   }
-  value.pop_back();
+  value = value.substr(0,value.size()-1);//value.pop_back();
 
   if (is_temp_var(key)) {
     if (select_type == "tuple_add") {
@@ -829,17 +829,17 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
       } else
         I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
 
-      buffer_to_print->append(indent(), lnast_to->ref_name_str(mmap_lib::str(value)), " = "_str, key, "\n"_str);
+      buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str);
     } else {
       // ref_map.insert(std::pair<mmap_lib::str_view, mmap_lib::str>(key, lnast_to->ref_name_str(value)));
       // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p
       // or reg
-      auto ref_map_inst_succ = ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, mmap_lib::str(value)));
+      auto ref_map_inst_succ = ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, value));
       I(ref_map_inst_succ.second,
         "\n\nThe ref value was already in the ref_map. Thus redundant keypresent. BUG!\nParent_node : dot\n\n");
     }
   } else {
-    buffer_to_print->append(indent(), lnast_to->ref_name_str(mmap_lib::str(value)), " = "_str, key, "\n"_str);
+    buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str);
   }
 }
 //-------------------------------------------------------------------------------------
@@ -1136,10 +1136,6 @@ bool Code_gen::is_temp_var(const mmap_lib::str &test_string) {
 bool Code_gen::has_DblUndrScor(const mmap_lib::str &test_string) {
   return test_string.starts_with("__");
 }
-
-//bool Code_gen::has_DblUndrScor(const std::string &test_string) {
-//  return test_string.size()>2 && test_string[0] == '_' && test_string[1] == '_';
-//}
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(const mmap_lib::str &test_string) {

@@ -65,7 +65,7 @@ public:
   const mmap_lib::str for_cond_beg() const final;
   const mmap_lib::str for_cond_end() const final;
   mmap_lib::str    ref_name_str(const mmap_lib::str &prp_term, bool strct = true) const final;
-  std::string      starter(std::string_view filename) const final;
+  mmap_lib::str      starter(const mmap_lib::str filename) const final;
   // header related functions:
   const mmap_lib::str supporting_ftype() const final;
   mmap_lib::str      set_supporting_fstart(const mmap_lib::str basename_s) final;
