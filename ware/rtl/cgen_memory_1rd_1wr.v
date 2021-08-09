@@ -1,4 +1,3 @@
-
 `define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\
                    (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\
                    (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\
@@ -17,8 +16,8 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_1rd_1wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=2)
-    (input clock
+  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)
+    (input clk
 
       // RD PORT 0
      ,input [`log2(SIZE)-1:0]  rd_addr_0
@@ -31,80 +30,54 @@ module cgen_memory_1rd_1wr
      ,input [BITS-1:0]         wr_din_0
      );
 
-generate
-  if (WENSIZE==1) begin
-    reg [BITS-1:0]        data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
-  end else begin
-    reg [(BITS/WENSIZE)-1:0] data[SIZE-1:0][WENSIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
-  end
-endgenerate
 
-// WRITE
-generate
-  if (WENSIZE==1) begin
-    always @(posedge clock) begin
-      if (wr_enable_0) begin
-        data[wr_addr_0] <= wr_din_0;
-      end
-    end
-  end else begin: DATA_WR_BLOCK
-    genvar i;
+localparam MASKSIZE = BITS/WENSIZE;
 
-    for(i=0;i<WENSIZE;i=i+1) begin
-      always @(posedge clock) begin
-        if (wr_enable_0[i]) begin
-          data[wr_addr_0][i] <= wr_din_0[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)];
+reg [BITS-1:0]        d0_mem;
+
+generate
+  
+    (*ram_style = "block" *) reg [BITS-1:0]        data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
+    
+    integer i;
+    
+    //WRITE
+    always @(posedge clk) begin
+      for(i=0;i<WENSIZE;i=i+1) begin
+        if(wr_enable_0[i]) begin
+            data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
+              wr_din_0[i*MASKSIZE +: MASKSIZE];
         end
       end
     end
-  end
-endgenerate
-
-// READ 0
-  reg [BITS-1:0]        d0_mem;
-generate
-  if (WENSIZE==1) begin
-    always_comb begin
-      if (rd_addr_0 < SIZE && rd_enable_0)
-        d0_mem = data[rd_addr_0];
+    
+    //READ
+    always @(posedge clk) begin
+      if (rd_enable_0)
+        d0_mem <= data[rd_addr_0];
       else
-        d0_mem = 'bx;
+        d0_mem <= {BITS{1'bx}};
     end
-  end else begin
-    genvar i;
-
-    for(i=0;i<WENSIZE;i=i+1) begin
-      always_comb begin
-        if (rd_addr_0 < SIZE && rd_enable_0) begin
-          d0_mem[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] = data[rd_addr_0][i];
-        end else begin
-          d0_mem[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] = 'bx;
-        end
-      end
-    end
-  end
+    
+  
+    
 endgenerate
+
 
   reg [BITS-1:0]        d0_fwd;
 
 generate
   if (FWD) begin:BLOCK_FWD_TRUE
-    integer i;
-    // If WENSIZE==4 and SIZE=64
-    //   {wr_enable_0[3] && wr_hit? din[63:48] : d0_mem[63:48]
-    //   ,wr_enable_0[2] && wr_hit? din[47:32] : d0_mem[47:32]
-    //   ,wr_enable_0[1] && wr_hit? din[31:16] : d0_mem[31:16]
-    //   ,wr_enable_0[0] && wr_hit? din[15:0 ] : d0_mem[15:0 ]
-    //   }
-    reg                   fwd_decision_cmp_0;
-
+    reg [WENSIZE-1:0] fwd_decision_cmp_0;
+    genvar j;
+    for(j=0;j<WENSIZE;j=j+1) begin: FWD_BLOCK_CALC_0
     always_comb begin
-      fwd_decision_cmp_0 = wr_addr_0 == rd_addr_0;
-      for(i=0;i<WENSIZE;i=i+1) begin: FWD_BLOCK_CALC_0
-        d0_fwd[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] =
-          wr_enable_0[i] && fwd_decision_cmp_0?
-          wr_din_0[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)]:
-          d0_mem  [(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)];
+      fwd_decision_cmp_0[j] = wr_addr_0 == rd_addr_0;
+      
+      d0_fwd[j*MASKSIZE +: MASKSIZE] = 
+      wr_enable_0[j] && fwd_decision_cmp_0[j]?
+      wr_din_0[j*MASKSIZE +: MASKSIZE]:
+      d0_mem[j*MASKSIZE +: MASKSIZE];
       end
     end
   end else begin:BLOCK_FWD_FALSE
@@ -115,8 +88,8 @@ generate
 endgenerate
 
 generate
-	if (LATENCY_0==1) begin:BLOCK1
-    always @(posedge clock) begin
+  if (LATENCY_0==1) begin:BLOCK1
+    always @(posedge clk) begin
       rd_dout_0 <= d0_fwd;
     end
   end else begin:BLOCK2
@@ -126,4 +99,3 @@ endgenerate
 
 
 endmodule
-
