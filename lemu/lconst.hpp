@@ -100,6 +100,7 @@ public:
   [[nodiscard]] size_t get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
+  [[nodiscard]] static Lconst get_mask_value(Bits_t h, Bits_t l);
   [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
 

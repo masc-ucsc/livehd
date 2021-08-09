@@ -401,6 +401,8 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
       auto value_dpin = node.get_sink_pin("value").get_driver_pin();
       auto value      = get_expression(value_dpin);
 
+      // fmt::print("a_bits:{} mask:{} minr:{} maxr:{}\n", a_bits, mask_v.to_pyrope(), range_begin, range_end);
+
       if (range_begin>static_cast<int>(a_bits)) {
         final_expr = a;
       }else if (range_begin<0 || range_end<0) { // no continuous range
@@ -420,15 +422,43 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         }
         final_expr = mmap_lib::str::concat("{", sel, "}");
       }else{
-        auto a_replaced = mmap_lib::str::concat(value, "[", range_end - 1, ":", range_begin, "]");
+        mmap_lib::str a_replaced;
+        if ((range_end-1) == range_begin) {
+          a_replaced = mmap_lib::str::concat(value, "[", range_begin, "]");
+        }else{
+          a_replaced = mmap_lib::str::concat(value, "[", range_end - 1, ":", range_begin, "]");
+        }
         mmap_lib::str a_high;
         mmap_lib::str a_low;
 
-        if (range_end< static_cast<int>(a_bits))
-          a_high = mmap_lib::str::concat(a, "[", a_bits-1, ":", range_end, "],");
+        Lconst a_val; // only if const
+        bool a_is_const = a_dpin.is_type_const();
+        if (a_is_const) {
+          a_val = a_dpin.get_type_const();
+        }
 
-        if (range_begin>0)
-          a_low  = mmap_lib::str::concat(",", a, "[", range_begin-1, ":0]");
+        if (range_end< static_cast<int>(a_bits)) {
+          if (a_is_const) {
+            // auto v = a_val.get_mask_op(Lconst::get_mask_value(a_bits, range_end));
+            auto v = a_val.rsh_op(range_end);
+            a_high = mmap_lib::str::concat(v.to_verilog(),",");
+          }else if (static_cast<int>(a_bits)==(range_end+1)) {
+            a_high = mmap_lib::str::concat(a, "[", range_end, "],");
+          }else{
+            a_high = mmap_lib::str::concat(a, "[", a_bits-1, ":", range_end, "],");
+          }
+        }
+
+        if (range_begin>0) {
+          if (a_is_const) {
+            auto v = a_val.get_mask_op(Lconst::get_mask_value(range_begin));
+            a_low = mmap_lib::str::concat(",", v.to_verilog());
+          }else if (range_begin==1) {
+            a_low = mmap_lib::str::concat(",", a, "[0]");
+          }else{
+            a_low = mmap_lib::str::concat(",", a, "[", range_begin-1, ":0]");
+          }
+        }
 
         final_expr = mmap_lib::str::concat("{", a_high, a_replaced, a_low, "}");
       }

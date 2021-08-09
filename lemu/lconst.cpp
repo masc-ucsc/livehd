@@ -436,9 +436,15 @@ bool Lconst::is_known_true() const {
 }
 
 std::pair<int,int> Lconst::get_mask_range() const {
+	if (num==0)
+    return std::make_pair(-1,-1); // No continuous range
+
+	auto range_end = get_bits();
+	if (is_positive())
+		--range_end;
 
   if (is_mask())  // continuous sequence of ones. Nice
-    return std::make_pair(0,get_bits()-1);
+    return std::make_pair(0,range_end);
 
   auto trail = get_trailing_zeroes();
   if (trail==0)
@@ -446,12 +452,26 @@ std::pair<int,int> Lconst::get_mask_range() const {
 
   auto v2 = rsh_op(trail);
   if (v2.is_mask())  // continuous sequence of ones. Nice
-    return std::make_pair(trail, v2.get_bits()-1);
+    return std::make_pair(trail, range_end);
 
   return std::make_pair(-1,-1); // No continuous range
 }
 
-Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
+Lconst Lconst::get_mask_value(Bits_t bits) {
+	return Lconst((Number(1) << bits) - 1);
+}
+
+Lconst Lconst::get_mask_value(Bits_t h, Bits_t l) {
+	if (h==l) {
+		return Lconst(Number(1) << h);
+	}
+	assert(h>l);
+
+	auto res_num = ((Number(1)<<(h-l))-1)<<l;
+
+	return Lconst(false, calc_num_bits(res_num), res_num);
+}
+
 Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bits)); }
 
 Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
