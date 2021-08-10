@@ -4,7 +4,7 @@
 
 #include "mmap_str.hpp"
 
-void str_dump(mmap_lib::str str) {
+void str_dump(const mmap_lib::str &str) {
   str.dump();
 }
 

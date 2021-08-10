@@ -285,6 +285,11 @@ void hook_color(std::string const& context, Replxx::colors_t& colors,
 constexpr unsigned long major_version = 0;
 constexpr unsigned long minor_version = 0;
 
+void dummy_call_to_preserve_methods_useful_for_debugging() {
+  mmap_lib::str str;
+  str.dump();
+}
+
 int main(int argc, char** argv) {
   I_setup();
 
