@@ -805,11 +805,10 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
     } else if (ref == "__retry") {
       value.pop_back();
       absl::StrAppend(&value, "!");
+    } else if (is_number(ref)) {
+      absl::StrAppend(&value, process_number(ref).to_s());
     } else {
       absl::StrAppend(&value, ref.to_s());
-    }
-    if (is_number(ref)) {
-      absl::StrAppend(&value, process_number(ref).to_s());
     }
     // now returns "select". So making it more pyrope specific for time being.//  absl::StrAppend(&value,
     // lnast_to->debug_name_lang(dot_node_data.type));  // appends "." after the value in case of pyrope
