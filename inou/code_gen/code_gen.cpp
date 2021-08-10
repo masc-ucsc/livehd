@@ -43,6 +43,13 @@ void Code_gen::generate() {
 
   const auto& node_data = lnast->get_data(root_index);
   fmt::print("\n\nprocessing LNAST tree\n\n");
+
+
+  auto fname = lnast->get_top_module_name();
+	auto main_filename = get_fname(fname, odir);
+	//auto header_filename = get_fname(fname, odir);
+	buffer_to_print = std::make_shared<File_output>(main_filename);
+
   if (node_data.type.is_top()) {
     fmt::print("\nprocessing LNAST tree root text: {} ", node_data.token.get_text());
     fmt::print("processing root->child");
@@ -66,9 +73,6 @@ void Code_gen::generate() {
 
   fmt::print("lnast_to_{}_parser path:{} \n", lang_type, path);
 
-  //auto fname = lnast->get_top_module_name();
-	//auto main_filename = get_fname(fname, odir);
-	//auto header_filename = get_fname(fname, odir);
 
   // header file:
   auto basename_s = mmap_lib::str::concat(modname, "."_str, lnast_to->supporting_ftype());//header filename w/o the odir
@@ -78,7 +82,6 @@ void Code_gen::generate() {
 
   // main file:
   auto basename = mmap_lib::str::concat(modname, "."_str, lang_type);
-	buffer_to_print = std::make_shared<File_output>(basename);
   // header inclusion:(#includes):
   fmt::print("{}\n", lnast_to->set_main_fstart(basename, basename_s));
   fmt::print("{}\n", lnast_to->set_final_print(modname, buffer_to_print));
@@ -91,9 +94,9 @@ void Code_gen::generate() {
 }
 
 //-------------------------------------------------------------------------------------
-//mmap_lib::str Code_gen::get_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) {
-//return (lnast_to->get_lang_fname(fname, odir));
-//}
+mmap_lib::str Code_gen::get_fname(const mmap_lib::str &fname, const mmap_lib::str &outdir) {
+return (lnast_to->get_lang_fname(fname, outdir));
+}
 
 //-------------------------------------------------------------------------------------
 // the node "stmts" is processed here

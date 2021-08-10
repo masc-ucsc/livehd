@@ -129,7 +129,7 @@ public:
   virtual int indent_final_system() const { return 0; };
 
 //  virtual void result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const = 0;
-  //virtual mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const = 0;
+  virtual mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const = 0;
 
   virtual void set_for_vcd_comb(const mmap_lib::str,const mmap_lib::str ){};
 

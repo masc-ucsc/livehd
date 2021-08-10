@@ -388,10 +388,10 @@ mmap_lib::str Ver_parser::set_final_print(const mmap_lib::str &, std::shared_ptr
   close(fd);
 }
 */
-/*mmap_lib::str Prp_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
+mmap_lib::str Prp_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
   return mmap_lib::str::concat(odir, "/"_str, fname, "."_str, lang_type);
 }
-*/
+
 /*
 void Cpp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &) const {
   // for header file
@@ -423,16 +423,16 @@ void Cpp_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str 
   close(fd);
 }
 */
-/*mmap_lib::str Cpp_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
+mmap_lib::str Cpp_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
   // for header file
-  auto supp_f  = mmap_lib::str::concat(odir, "/"_str, fname, "."_str, supp_ftype);
-  return supp_f;
+//  auto supp_f  = mmap_lib::str::concat(odir, "/"_str, fname, "."_str, supp_ftype);
+//  return supp_f;
 
   // for cpp file
   auto file = mmap_lib::str::concat(odir, "/"_str, fname, "."_str, lang_type);
   return file;
 }
-*/
+
 /*
 void Ver_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const {
   // TODO: currently as per prp. change as required.
@@ -450,11 +450,11 @@ void Ver_parser::result_in_odir(const mmap_lib::str &fname, const mmap_lib::str 
   close(fd);
 }
 */
-/*mmap_lib::str Ver_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
+mmap_lib::str Ver_parser::get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const {
   // TODO: currently as per prp. change as required.
   return mmap_lib::str::concat(odir, "/"_str, fname, "."_str, lang_type);
 }
-*/
+
 void Prp_parser::set_make_unsigned(const mmap_lib::str &sec_child) {
   unsigned_vars.insert(sec_child);
 }

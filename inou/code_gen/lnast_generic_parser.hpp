@@ -30,7 +30,7 @@ public:
   mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output>buffer_to_print) final;
 
 //  void result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
- // mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
+  mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
 
   void        set_make_unsigned(const mmap_lib::str &sec_child) final;
   bool        is_unsigned(const mmap_lib::str &var_name) const final;
@@ -80,7 +80,7 @@ public:
   mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
   int         indent_final_system() const final;
 //  void        result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
-  // mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
+  mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
   void        set_for_vcd_comb(const mmap_lib::str key1, const mmap_lib::str key2) final;
 
   void        set_make_unsigned(const mmap_lib::str &sec_child) final;
@@ -117,7 +117,7 @@ public:
 
   mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
 //  void        result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
- //  mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
+ mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
 
   void        set_make_unsigned(const mmap_lib::str &sec_child) final;
   bool        is_unsigned(const mmap_lib::str &var_name) const final;

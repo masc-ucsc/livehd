@@ -55,6 +55,6 @@ public:
 
   static mmap_lib::str process_number(const mmap_lib::str &num_string);
   
- // mmap_lib::str get_fname(const mmap_lib::str &fname, const mmap_lib::str &odir);
+  mmap_lib::str get_fname(const mmap_lib::str &fname, const mmap_lib::str &outdir);
 
 };
