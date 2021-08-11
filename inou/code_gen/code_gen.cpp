@@ -83,8 +83,8 @@ void Code_gen::generate() {
   // main file:
   auto basename = mmap_lib::str::concat(modname, "."_str, lang_type);
   // header inclusion:(#includes):
-  fmt::print("{}\n", lnast_to->set_main_fstart(basename, basename_s));
-  fmt::print("{}\n", lnast_to->set_final_print(modname, buffer_to_print));
+  lnast_to->set_main_fstart(basename, basename_s);
+  lnast_to->set_final_print(modname, buffer_to_print);
   // main code segment
   // fmt::print("{}\n", buffer_to_print);
   fmt::print("<<EOF\n");
@@ -249,6 +249,14 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
               ,lnast_to->ref_name_str(ref)
               ,lnast_to->stmt_sep())
               );
+          lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent()
+              ,lnast_to->ref_name_str(key_sec)
+              ," "_str
+              ,lnast_to->debug_name_lang(assign_node_data.type)
+              ," "_str
+              ,lnast_to->ref_name_str(ref)
+              ,lnast_to->stmt_sep())
+              );
         }
       }
     }
@@ -282,6 +290,14 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
                       " "_str,
                       lnast_to->ref_name_str(ref),
                       lnast_to->stmt_sep()));
+      lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(),
+                      lnast_to->assign_node_strt(),
+                      lnast_to->ref_name_str(key),
+                      " "_str,
+                      lnast_to->debug_name_lang(assign_node_data.type),
+                      " "_str,
+                      lnast_to->ref_name_str(ref),
+                      lnast_to->stmt_sep()));
       lnast_to->set_for_vcd_comb(lnast_to->ref_name_str(key, false), lnast_to->ref_name_str(key));
     }
   }
@@ -292,6 +308,8 @@ void Code_gen::do_assign(const mmap_lib::Tree_index& assign_node_index, std::vec
 void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
   fmt::print("node:while\n");
   buffer_to_print->append( indent(), "while"_str);
+  lnast_to->add_to_buff_vec_for_cpp(indent());
+  lnast_to->add_to_buff_vec_for_cpp("while"_str);
 
   auto curr_index = lnast->get_first_child(while_node_index);
   auto ref        = lnast->get_name(curr_index);
@@ -305,12 +323,17 @@ void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
                   lnast_to->ref_name_str(ref),
                   lnast_to->while_cond_end(),
                   lnast_to->for_stmt_beg());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lnast_to->while_cond_beg(),
+                  lnast_to->ref_name_str(ref),
+                  lnast_to->while_cond_end(),
+                  lnast_to->for_stmt_beg()));
 
   curr_index = lnast->get_sibling_next(curr_index);
   indendation++;
   do_stmts(curr_index);
   indendation--;
   buffer_to_print->append(indent(), lnast_to->for_stmt_end());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->for_stmt_end()));
 }
 //-------------------------------------------------------------------------------------
 // Process the for node:
@@ -320,6 +343,7 @@ void Code_gen::do_while(const mmap_lib::Tree_index& while_node_index) {
 void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
   fmt::print("node:for\n");
   buffer_to_print->append(indent(), "for"_str);
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), "for"_str));
 
   auto stmt_index = lnast->get_first_child(for_node_index);
 
@@ -327,6 +351,9 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
   buffer_to_print->append(lnast_to->for_cond_beg(),
                   lnast_to->ref_name_str(lnast->get_name(curr_index)),
                   lnast_to->for_cond_mid());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lnast_to->for_cond_beg(),
+                  lnast_to->ref_name_str(lnast->get_name(curr_index)),
+                  lnast_to->for_cond_mid()));
 
   curr_index = lnast->get_sibling_next(curr_index);
   auto ref   = lnast->get_name(curr_index);
@@ -337,12 +364,15 @@ void Code_gen::do_for(const mmap_lib::Tree_index& for_node_index) {
     }
   }
   buffer_to_print->append(lnast_to->ref_name_str(ref), lnast_to->for_cond_end());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lnast_to->ref_name_str(ref), lnast_to->for_cond_end()));
 
   buffer_to_print->append(lnast_to->for_stmt_beg());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lnast_to->for_stmt_beg()));
   indendation++;
   do_stmts(stmt_index);
   indendation--;
   buffer_to_print->append( indent(), lnast_to->for_stmt_end());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat( indent(), lnast_to->for_stmt_end()));
 }
 //-------------------------------------------------------------------------------------
 // Process the "func_def" node:Eg.:
@@ -396,10 +426,19 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
                   lnast_to->param_end(param_exist),
                   lnast_to->print_cond(cond_val),
                   lnast_to->func_stmt_strt()));
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(),
+                  lnast_to->func_begin(),
+                  lnast_to->func_name(func_name),
+                  lnast_to->param_start(param_exist),
+                  parameters,
+                  lnast_to->param_end(param_exist),
+                  lnast_to->print_cond(cond_val),
+                  lnast_to->func_stmt_strt()));
   indendation++;
   do_stmts(stmt_index);
   indendation--;
   buffer_to_print->append( indent(), lnast_to->func_stmt_end(), lnast_to->func_end());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat( indent(), lnast_to->func_stmt_end(), lnast_to->func_end()));
 }
 //-------------------------------------------------------------------------------------
 // Process the func-cond node:
@@ -441,6 +480,7 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
   }
   fmt::print("func_call 1st child: {}\n", lhs);
   buffer_to_print->append(indent());
+  lnast_to->add_to_buff_vec_for_cpp(indent());
 
   curr_index = lnast->get_sibling_next(curr_index);
   auto funcname = lnast->get_name(curr_index);
@@ -462,6 +502,7 @@ void Code_gen::do_func_call(const mmap_lib::Tree_index& func_call_node_index) {
     buffer_to_print->append( lhs, " = "_str);  // lhs and assignment op to further assign the func name and arguments to lhs
     buffer_to_print->append(funcname);  // printitng the func name(the func called)
     buffer_to_print->append(lnast_to->ref_name_str(ref), lnast_to->stmt_sep());  // parameters for the func call
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lhs, " = "_str, funcname, lnast_to->ref_name_str(ref), lnast_to->stmt_sep()));
   }
 }
 //-------------------------------------------------------------------------------------
@@ -486,24 +527,28 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     if (node_num > 2) {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         buffer_to_print->append( indent(), lnast_to->start_else_if());
+        lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat( indent(), lnast_to->start_else_if()));
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
         bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_const()
                              || (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_ref();
         if (!prev_was_cond) {
           buffer_to_print->append( indent(), lnast_to->start_else());
+          lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat( indent(), lnast_to->start_else()));
         }
         indendation++;
         do_stmts(curr_index);
         indendation--;
         if (!prev_was_cond) {
           buffer_to_print->append( indent(), lnast_to->end_if_or_else());
+          lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat( indent(), lnast_to->end_if_or_else()));
           if_closed = true;
         }
       }
     } else {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         buffer_to_print->append(indent(), lnast_to->start_cond());
+        lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->start_cond()));
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
         indendation++;
@@ -517,8 +562,10 @@ void Code_gen::do_if(const mmap_lib::Tree_index& if_node_index) {
     curr_index = lnast->get_sibling_next(curr_index);
   }
 
-  if (node_num <= 2 || !if_closed)
+  if (node_num <= 2 || !if_closed) {
     buffer_to_print->append(indent(), lnast_to->end_if_or_else());
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->end_if_or_else()));
+  }
 }
 
 //-------------------------------------------------------------------------------------
@@ -533,6 +580,7 @@ void Code_gen::do_cond(const mmap_lib::Tree_index& cond_node_index) {
   }
   buffer_to_print->append(lnast_to->ref_name_str(ref));
   buffer_to_print->append(lnast_to->end_cond());
+  lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(lnast_to->ref_name_str(ref), lnast_to->end_cond()));
 }
 
 //-------------------------------------------------------------------------------------
@@ -638,6 +686,13 @@ void Code_gen::do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::
                     " "_str,
                     lnast_to->ref_name_str(mmap_lib::str(val)),
                     lnast_to->stmt_sep()));
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(),
+                    lnast_to->ref_name_str(key),
+                    " "_str,
+                    "="_str,
+                    " "_str,
+                    lnast_to->ref_name_str(mmap_lib::str(val)),
+                    lnast_to->stmt_sep()));
   }
 }
 
@@ -707,6 +762,7 @@ void Code_gen::do_set_mask(const mmap_lib::Tree_index& smask_node_index) {
     ref_map.insert(std::pair<mmap_lib::str, mmap_lib::str>(key, val));
   } else {
     buffer_to_print->append(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(val), "="_str, smask_str_vect.back(), "\n"_str));
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(val), "="_str, smask_str_vect.back(), "\n"_str));
     // I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
   }
 }
@@ -833,6 +889,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
         I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
 
       buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str);
+      lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str));
     } else {
       // ref_map.insert(std::pair<mmap_lib::str_view, mmap_lib::str>(key, lnast_to->ref_name_str(value)));
       // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p
@@ -843,6 +900,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
     }
   } else {
     buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str);
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(indent(), lnast_to->ref_name_str(value), " = "_str, key, "\n"_str));
   }
 }
 //-------------------------------------------------------------------------------------
@@ -1051,6 +1109,7 @@ void Code_gen::do_tuple(const mmap_lib::Tree_index& tuple_node_index) {
   } else {
     fmt::print("key: {}\n tuple_value:{}\n", key, tuple_value);
     buffer_to_print->append(key, " saved as ", tuple_value, "\n");
+    lnast_to->add_to_buff_vec_for_cpp(mmap_lib::str::concat(key, " saved as ", tuple_value, "\n"));
     // this should never be possible
   }
 }

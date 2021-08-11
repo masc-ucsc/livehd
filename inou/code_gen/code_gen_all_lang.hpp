@@ -113,8 +113,9 @@ public:
   virtual mmap_lib::str      set_supp_buffer_to_print(const mmap_lib::str) { return ""; };  // modname is the argument passed here
 
   // for main file (cpp file)
-  virtual mmap_lib::str set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &) {
-    return mmap_lib::str::concat("file: "_str, basename, "\n"_str);
+  virtual void add_to_buff_vec_for_cpp(const mmap_lib::str ) {};
+  virtual void set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &) {
+    //return mmap_lib::str::concat("file: "_str, basename, "\n"_str);
   };  // the other arg is basename_s
 
   // FIXME:renau. Several methods have no variable name. Use it as a way to explain what is the arg
@@ -123,7 +124,7 @@ public:
   };  // 1st param is key and 2nd is ref
 
   // for final printing
-  virtual mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) = 0;  // param is modname
+  virtual void set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) = 0;  // param is modname
   virtual void        call_dump_maps() const                                                          = 0;
 
   virtual int indent_final_system() const { return 0; };

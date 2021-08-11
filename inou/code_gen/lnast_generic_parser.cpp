@@ -229,11 +229,11 @@ mmap_lib::str Cpp_parser::set_supp_buffer_to_print(const mmap_lib::str modname) 
   return answer;
 }
 
-mmap_lib::str Cpp_parser::set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) {
-  auto txt_to_print = mmap_lib::str::concat("file: "_str, basename, "\n"_str);
+void Cpp_parser::set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) {
+  //auto txt_to_print = mmap_lib::str::concat("file: "_str, basename, "\n"_str);
   main_file_final_str = std::make_shared<File_output>(basename);
   main_file_final_str->append( "\n#include \"livesim_types.hpp\"\n#include \"", basename_s, "\"\n");
-  return mmap_lib::str::concat(txt_to_print);//, main_file_final_str);
+  //return mmap_lib::str::concat(txt_to_print);//, main_file_final_str);
 }
 
 bool Cpp_parser::set_convert_parameters(const mmap_lib::str &key, const mmap_lib::str &ref) {
@@ -302,7 +302,11 @@ void Cpp_parser::set_for_vcd_comb(const mmap_lib::str key1, const mmap_lib::str 
   buff_to_print_vcd = mmap_lib::str::concat(buff_to_print_vcd, "vcd_writer->change(vcd_"_str, key1, ", "_str, key2, ".to_string_binary());\n"_str);
 }
 
-mmap_lib::str Cpp_parser::set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output>/* buffer_to_print*/) {
+void Cpp_parser::add_to_buff_vec_for_cpp(const mmap_lib::str s) {
+  buff_vec_for_cpp.emplace_back(s);
+}
+
+void Cpp_parser::set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output>/* buffer_to_print*/) {
   // constructor
   auto constructor_vcd = mmap_lib::str::concat(modname,
                                              "_sim::"_str,
@@ -336,44 +340,61 @@ mmap_lib::str Cpp_parser::set_final_print(const mmap_lib::str &modname, std::sha
   negedge_vcd = mmap_lib::str::concat(negedge_vcd, "}\n"_str);
 
   // main code part function
-  auto main_func_vcd  = mmap_lib::str::concat("void "_str, modname, "_sim::vcd_comb("_str, inps_csv, ") {\n"_str);
- // main_func_vcd =  mmap_lib::str::concat(main_func_vcd, buffer_to_print, "  "_str, buff_to_print_vcd, "\n}"_str);
-  auto main_func = mmap_lib::str::concat("void "_str, modname, "_sim::cycle("_str, inps_csv, ") {\n"_str);
- // main_func = mmap_lib::str::concat(main_func, buffer_to_print, "\n}"_str);
-  auto        answer    = mmap_lib::str::concat("#ifdef SIMLIB_VCD\n",
-                                       constructor_vcd,
-                                       "\n",
-                                       reset_vcd,
-                                       mmap_lib::str::concat(
-                                       "\n",
-                                       posedge_vcd,
-                                       "\n",
-                                       negedge_vcd,
-                                       "\n"),
-                                       mmap_lib::str::concat(
-                                         main_func_vcd,
-                                         "\n#else\n",
-                                         constructor,
-                                         "\n",
-                                         reset_func,
-                                         "\n",
-                                         main_func,
-                                         "\n#endif\n")
-                                       );
-  main_file_final_str->append(answer);
-  return answer;
+//  auto main_func_vcd  = mmap_lib::str::concat("void "_str, modname, "_sim::vcd_comb("_str, inps_csv, ") {\n"_str);
+// // main_func_vcd =  mmap_lib::str::concat(main_func_vcd,buff_vec_for_cpp);// buffer_to_print);
+// main_func_vcd =  mmap_lib::str::concat(main_func_vcd, "  "_str, buff_to_print_vcd, "\n}"_str);
+//  auto main_func = mmap_lib::str::concat("void "_str, modname, "_sim::cycle("_str, inps_csv, ") {\n"_str);
+////  main_func = mmap_lib::str::concat(main_func,buff_vec_for_cpp);// buffer_to_print);
+// main_func = mmap_lib::str::concat(main_func,"\n}"_str);
+//  auto        answer    = mmap_lib::str::concat("#ifdef SIMLIB_VCD\n",
+//                                       constructor_vcd,
+//                                       "\n",
+//                                       reset_vcd,
+//                                       mmap_lib::str::concat(
+//                                       "\n",
+//                                       posedge_vcd,
+//                                       "\n",
+//                                       negedge_vcd,
+//                                       "\n"),
+//                                       mmap_lib::str::concat(
+//                                         main_func_vcd,
+//                                         "\n#else\n",
+//                                         constructor,
+//                                         "\n",
+//                                         reset_func,
+//                                         "\n",
+//                                         main_func,
+//                                         "\n#endif\n")
+//                                       );
+  //main_file_final_str->append(answer);
+
+  main_file_final_str->append("#ifdef SIMLIB_VCD\n"_str, constructor_vcd, "\n"_str);
+  main_file_final_str->append(reset_vcd, "\n"_str);
+  main_file_final_str->append(posedge_vcd, "\n"_str , negedge_vcd, "\n"_str );
+  main_file_final_str->append("void "_str, modname, "_sim::vcd_comb("_str, inps_csv, ") {\n"_str);//main_func_vcd started
+  for (auto i : buff_vec_for_cpp) {
+    main_file_final_str->append(i);
+  }
+  main_file_final_str->append("  "_str, buff_to_print_vcd, "\n}"_str);//main_func_vcd ended
+  main_file_final_str->append("\n#else\n"_str, constructor, "\n"_str);
+  main_file_final_str->append(reset_func, "\n"_str);
+  main_file_final_str->append(mmap_lib::str::concat("void "_str, modname, "_sim::cycle("_str, inps_csv, ") {\n"_str));//main_func started
+  for (auto i : buff_vec_for_cpp) {
+    main_file_final_str->append(i);
+  }
+  main_file_final_str->append("\n}"_str);//main_func ended
+  main_file_final_str->append("\n#endif\n"_str);
+
 }
 
-mmap_lib::str Prp_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
+void Prp_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
   //return mmap_lib::str::concat(buffer_to_print, "\n"_str);
   buffer_to_print->append("\n"_str);
-  return "\n"_str;
 }
 
-mmap_lib::str Ver_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
+void Ver_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
   //return mmap_lib::str::concat(buffer_to_print, "\n"_str);
   buffer_to_print->append("\n"_str);
-  return "\n"_str;
 }
 
 // odir related functions:

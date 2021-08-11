@@ -27,7 +27,7 @@ public:
   void             dump_maps() const;
   void             call_dump_maps() const final;
 
-  mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output>buffer_to_print) final;
+  void set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output>buffer_to_print) final;
 
 //  void result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
   mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
@@ -52,6 +52,7 @@ class Cpp_parser : public Code_gen_all_lang {
   std::shared_ptr<File_output>       supp_file_final_str;
   std::shared_ptr<File_output>       main_file_final_str;
   mmap_lib::str                        buff_to_print_vcd;
+  std::vector<mmap_lib::str> buff_vec_for_cpp;
 
   absl::flat_hash_set<mmap_lib::str> unsigned_vars;
 
@@ -72,12 +73,13 @@ public:
   mmap_lib::str      supporting_fend(const mmap_lib::str basename_s) const final;
   mmap_lib::str      set_supp_buffer_to_print(const mmap_lib::str modname) final;
 
-  mmap_lib::str set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) final;
+  void add_to_buff_vec_for_cpp(const mmap_lib::str s) final;
+  void set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) final;
   bool        set_convert_parameters(const mmap_lib::str &key, const mmap_lib::str &ref) final;
   void        dump_maps() const;
   void        call_dump_maps() const final;
 
-  mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
+  void set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
   int         indent_final_system() const final;
 //  void        result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
   mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
@@ -115,7 +117,7 @@ public:
   void             dump_maps() const;
   void             call_dump_maps() const final;
 
-  mmap_lib::str set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
+  void set_final_print(const mmap_lib::str &modname, std::shared_ptr<File_output> buffer_to_print) final;
 //  void        result_in_odir(const mmap_lib::str &fname, const mmap_lib::str &odir, const std::string &buffer_to_print) const final;
  mmap_lib::str get_lang_fname(const mmap_lib::str &fname, const mmap_lib::str &odir) const final;
 
