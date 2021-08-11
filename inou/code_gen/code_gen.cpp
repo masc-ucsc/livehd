@@ -76,9 +76,9 @@ void Code_gen::generate() {
 
   // header file:
   auto basename_s = mmap_lib::str::concat(modname, "."_str, lnast_to->supporting_ftype());//header filename w/o the odir
-  fmt::print("{}\n", lnast_to->set_supporting_fstart(basename_s));
-  fmt::print("{}\n", lnast_to->set_supp_buffer_to_print(modname));
-  fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
+  lnast_to->set_supporting_fstart(basename_s);
+  lnast_to->set_supp_buffer_to_print(modname);
+//  fmt::print("{}\n", lnast_to->supporting_fend(basename_s));
 
   // main file:
   auto basename = mmap_lib::str::concat(modname, "."_str, lang_type);

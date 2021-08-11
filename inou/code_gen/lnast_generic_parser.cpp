@@ -93,20 +93,20 @@ const mmap_lib::str Cpp_parser::supporting_ftype() const {
   return supp_ftype; 
 }
 
-mmap_lib::str      Cpp_parser::set_supporting_fstart(const mmap_lib::str basename_s) {
+void      Cpp_parser::set_supporting_fstart(const mmap_lib::str basename_s) {
   supp_file_final_str = std::make_shared<File_output>(basename_s);
-  auto txt_to_print    = mmap_lib::str::concat("file: "_str, basename_s, "\n"_str);
   auto header_includes = "#pragma once\n#include <string>\n#include \"vcd_writer.hpp\"\n"_str;
   supp_file_final_str->append( header_includes);
-  return mmap_lib::str::concat(txt_to_print, header_includes);
 }
 
-mmap_lib::str Cpp_parser::supporting_fend(const mmap_lib::str basename_s) const { 
+/*mmap_lib::str Cpp_parser::supporting_fend(const mmap_lib::str basename_s) const { 
   return mmap_lib::str::concat("<<EOF "_str, basename_s); 
 }
-
-mmap_lib::str Cpp_parser::set_supp_buffer_to_print(const mmap_lib::str modname) {
-  auto header_strt = mmap_lib::str::concat("class "_str, modname, "_sim {\npublic:\n  uint64_t hidx;\n  "_str);
+*/
+void Cpp_parser::set_supp_buffer_to_print(const mmap_lib::str modname) {
+  supp_file_final_str->append("class "_str);
+  supp_file_final_str->append(modname);
+  supp_file_final_str->append("_sim {\npublic:\n  uint64_t hidx;\n  "_str);
 
   mmap_lib::str outps_nline;
   if (!outp_bw.empty()) {
@@ -212,21 +212,18 @@ mmap_lib::str Cpp_parser::set_supp_buffer_to_print(const mmap_lib::str modname) 
                                        ");\n"_str);
   // auto answer = absl::StrCat(header_strt, outps_nline, regs_nline, regs_next_nline, funcs, vcd_params, vcd_varptrs, vcd_funcs,
   // "\n};");
-  auto answer = mmap_lib::str::concat(header_strt,
-                             outps_nline,
-                             regs_nline,
-                             regs_next_nline,
-                             "\n#ifndef SIMLIB_VCD\n"_str,
-                             funcs,
-                             mmap_lib::str::concat(
-                             "\n#else\n"_str,
-                             vcd_params,
-                             vcd_varptrs,
-                             vcd_funcs,
-                             "\n#endif\n};"_str)
-      );
-  supp_file_final_str->append( answer);
-  return answer;
+  supp_file_final_str->append(outps_nline);
+  supp_file_final_str->append(regs_nline);
+  supp_file_final_str->append(regs_next_nline);
+  supp_file_final_str->append("\n#ifndef SIMLIB_VCD\n"_str);
+  supp_file_final_str->append(funcs);
+  supp_file_final_str->append("\n#else\n"_str);
+  supp_file_final_str->append(vcd_params);
+  supp_file_final_str->append(vcd_varptrs);
+  supp_file_final_str->append(vcd_funcs);
+  supp_file_final_str->append("\n#endif\n};"_str);
+  //supp_file_final_str->append( answer);
+//  return answer;
 }
 
 void Cpp_parser::set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) {

@@ -69,9 +69,9 @@ public:
   mmap_lib::str      starter(const mmap_lib::str filename) const final;
   // header related functions:
   const mmap_lib::str supporting_ftype() const final;
-  mmap_lib::str      set_supporting_fstart(const mmap_lib::str basename_s) final;
-  mmap_lib::str      supporting_fend(const mmap_lib::str basename_s) const final;
-  mmap_lib::str      set_supp_buffer_to_print(const mmap_lib::str modname) final;
+  void      set_supporting_fstart(const mmap_lib::str basename_s) final;
+//  mmap_lib::str      supporting_fend(const mmap_lib::str basename_s) const final;
+  void     set_supp_buffer_to_print(const mmap_lib::str modname) final;
 
   void add_to_buff_vec_for_cpp(const mmap_lib::str s) final;
   void set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &basename_s) final;

@@ -105,12 +105,12 @@ public:
   virtual mmap_lib::str starter(const mmap_lib::str) const { return ""; };  // filename goes in here
 
   // for header file:
-  virtual mmap_lib::str supporting_fend(const mmap_lib::str) const { return ""_str; };  // basename_s goes here
+//  virtual mmap_lib::str supporting_fend(const mmap_lib::str) const { return ""_str; };  // basename_s goes here
 
   // Set methods modify the object. Do they really need to return arguments (return a new string is expensive)
-  virtual mmap_lib::str      set_supporting_fstart(const mmap_lib::str) { return ""; };  // basename_s goes in here
+  virtual void      set_supporting_fstart(const mmap_lib::str) { };  // basename_s goes in here
   virtual const mmap_lib::str supporting_ftype() const { return ""_str; };
-  virtual mmap_lib::str      set_supp_buffer_to_print(const mmap_lib::str) { return ""; };  // modname is the argument passed here
+  virtual void      set_supp_buffer_to_print(const mmap_lib::str) { };  // modname is the argument passed here
 
   // for main file (cpp file)
   virtual void add_to_buff_vec_for_cpp(const mmap_lib::str ) {};
