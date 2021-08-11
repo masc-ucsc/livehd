@@ -365,11 +365,15 @@ mmap_lib::str Cpp_parser::set_final_print(const mmap_lib::str &modname, std::sha
 }
 
 mmap_lib::str Prp_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
-  return mmap_lib::str::concat(buffer_to_print, "\n"_str);
+  //return mmap_lib::str::concat(buffer_to_print, "\n"_str);
+  buffer_to_print->append("\n"_str);
+  return "\n"_str;
 }
 
 mmap_lib::str Ver_parser::set_final_print(const mmap_lib::str &, std::shared_ptr<File_output> buffer_to_print) {
-  return mmap_lib::str::concat(buffer_to_print, "\n"_str);
+  //return mmap_lib::str::concat(buffer_to_print, "\n"_str);
+  buffer_to_print->append("\n"_str);
+  return "\n"_str;
 }
 
 // odir related functions:
