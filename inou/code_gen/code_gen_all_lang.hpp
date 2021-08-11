@@ -114,7 +114,7 @@ public:
 
   // for main file (cpp file)
   virtual void add_to_buff_vec_for_cpp(const mmap_lib::str ) {};
-  virtual void set_main_fstart(const mmap_lib::str &basename, const mmap_lib::str &) {
+  virtual void set_main_fstart(const mmap_lib::str &, const mmap_lib::str &) {
     //return mmap_lib::str::concat("file: "_str, basename, "\n"_str);
   };  // the other arg is basename_s
 
