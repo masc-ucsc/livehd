@@ -236,8 +236,10 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
       (void)has_through_dpin;
       (void)is_set_graph_inp;
 #endif
-
+      // "0.__ubits"
+      // if (val.is_i()) {
       fb.set_bits_sign(val.to_i(), false);
+      // }
 
     } else {  // Attr::Set_sbits
 #if 0

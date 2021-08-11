@@ -346,7 +346,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
       return g->create_node_const(v.as_int()).setup_driver_pin();
     }
     auto v_str = mmap_lib::str::concat("0b", v.as_string());
-    return g->create_node_const(v_str).setup_driver_pin();
+    return g->create_node_const(Lconst::from_pyrope(v_str)).setup_driver_pin();
   }
   bool is_signed = true;  // signed by default
   if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
@@ -356,7 +356,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
   }
 
   if (!cell->hasPort(name)) {
-    return g->create_node_const("0b?").setup_driver_pin();
+    return g->create_node_const(Lconst::from_pyrope("0b?")).setup_driver_pin();
   }
 
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);

@@ -6,7 +6,6 @@
 #include <iostream>
 #include <queue>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include "absl/strings/match.h"
@@ -41,7 +40,6 @@ void Inou_firrtl::toLNAST(Eprp_var& var) {
       p.tmp_var_cnt         = 0;
       p.seq_cnt             = 0;
       p.dummy_expr_node_cnt = 0;
-      // firrtl_input.PrintDebugString();
       p.IterateCircuits(var, firrtl_input, f);
     }
   } else {
@@ -1019,8 +1017,8 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name, std::vector<mm
   std::size_t pos;
 
   // while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
-  while ((pos = full_name.find(".", prev)) != std::string_view::npos || 
-         (pos = full_name.find("[", prev)) != std::string_view::npos) {
+  while ((pos = full_name.find(".", prev)) != std::string::npos || 
+         (pos = full_name.find("[", prev)) != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1032,7 +1030,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str &full_name, std::vector<mm
   }
 
   if (prev < full_name.size()) {
-    auto subname = full_name.substr(prev, std::string_view::npos);
+    auto subname = full_name.substr(prev, std::string::npos);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
     }
@@ -1046,8 +1044,8 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str& full_name,
   std::size_t pos;
 
   // while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
-  while ((pos = full_name.find(".", prev)) != std::string_view::npos || 
-         (pos = full_name.find("[", prev)) != std::string_view::npos) {
+  while ((pos = full_name.find(".", prev)) != std::string::npos || 
+         (pos = full_name.find("[", prev)) != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1059,7 +1057,7 @@ void Inou_firrtl::split_hier_name(const mmap_lib::str& full_name,
   }
 
   if (prev < full_name.size()) {
-    auto subname = full_name.substr(prev, std::string_view::npos);
+    auto subname = full_name.substr(prev, std::string::npos);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
     }
@@ -1167,7 +1165,7 @@ void Inou_firrtl::create_io_list(const firrtl::FirrtlPB_Type& type, uint8_t dir,
       break;
     }
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
-      const firrtl::FirrtlPB_Type_BundleType btype = type.bundle_type();
+      const auto &btype = type.bundle_type();
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         if (btype.field(i).is_flipped()) {
           uint8_t new_dir = 0;
@@ -1461,10 +1459,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       HandleMuxAssign(lnast, rhs_expr, parent_node, lhs_str);
       break;
     }
-    case firrtl::FirrtlPB_Expression::kSubField: {  // SubField
-      HandleBundVecAcc(lnast, rhs_expr, parent_node, true, Lnast_node::create_ref(lhs_str));
-      break;
-    }
+    case firrtl::FirrtlPB_Expression::kSubField:
     case firrtl::FirrtlPB_Expression::kSubIndex: {  // SubIndex
       HandleBundVecAcc(lnast, rhs_expr, parent_node, true, Lnast_node::create_ref(lhs_str));
       break;
@@ -1721,45 +1716,8 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
       }
       break;
     }
-    case firrtl::FirrtlPB_Statement::kStop: {  // Stop
-      // // Translate to: if (cond) then stop(clk, return val)
-      // std::string stop_cond = ReturnExprString(lnast, stmt.stop().en(), parent_node, true);
-      // std::string stop_clk  = ReturnExprString(lnast, stmt.stop().clk(), parent_node, true);
-
-      // auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
-      // lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(stop_cond)));
-      // auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
-
-      // auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
-      // lnast.add_child(idx_fncall, Lnast_node::create_const("stop"));
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stop_clk)));
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(std::to_string(stmt.stop().return_value()))));
-      break;
-    }
-    case firrtl::FirrtlPB_Statement::kPrintf: {  // Printf
-      // // Translate to: if (cond) then printf(clk, str, vals)
-      // std::string              printf_cond = ReturnExprString(lnast, stmt.printf().en(), parent_node, true);
-      // std::string              printf_clk  = ReturnExprString(lnast, stmt.printf().clk(), parent_node, true);
-      // std::vector<std::string> arg_list;
-      // for (int i = 0; i < stmt.printf().arg_size(); i++) {
-      //   arg_list.emplace_back(ReturnExprString(lnast, stmt.printf().arg(i), parent_node, true));
-      // }
-
-      // auto idx_if = lnast.add_child(parent_node, Lnast_node::create_if());
-      // lnast.add_child(idx_if, Lnast_node::create_ref(lnast.add_string(printf_cond)));
-      // auto idx_stmts = lnast.add_child(idx_if, Lnast_node::create_if());
-
-      // auto idx_fncall = lnast.add_child(idx_stmts, Lnast_node::create_func_call());
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref("null"));
-      // lnast.add_child(idx_fncall, Lnast_node::create_const("printf"));
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(printf_clk)));
-      // lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(stmt.printf().value())));
-      // for (const auto& arg_str : arg_list) {
-      //   lnast.add_child(idx_fncall, Lnast_node::create_ref(lnast.add_string(arg_str)));
-      // }
-      break;
-    }
+    case firrtl::FirrtlPB_Statement::kStop: 
+    case firrtl::FirrtlPB_Statement::kPrintf: 
     case firrtl::FirrtlPB_Statement::kSkip: {  // Skip
       // Nothing to do.
       break;
@@ -2131,7 +2089,7 @@ void Inou_firrtl::GrabExtModuleInfo(const firrtl::FirrtlPB_Module_ExternalModule
   // Figure out all of mods IO and their respective bw + dir.
   std::vector<std::tuple<mmap_lib::str, uint8_t, uint32_t, bool>> port_list;  // Terms are as follows: name, direction, # of bits, sign.
   for (int i = 0; i < emod.port_size(); i++) {
-    auto port = emod.port(i);
+    const auto &port = emod.port(i);
     create_io_list(port.type(), port.direction(), mmap_lib::str(port.id()), port_list);
   }
 

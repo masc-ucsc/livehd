@@ -423,6 +423,7 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
       if (field_name.substr(0, 4) != "null") {
         // pos_const = Lconst::from_pyrope(mmap_lib::str::concat(":", mmap_lib::str(fp), ":", field_name));
         pos_const = Lconst::from_pyrope(mmap_lib::str::concat(":", fp, ":", field_name));
+        fmt::print("DEBUG0\n");
       } else {
         pos_const = Lconst(fp);
       }
@@ -492,6 +493,7 @@ Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, const mmap_lib::str &input_field)
   auto subname  = input_field.substr(1, input_field.size() - 1);
 
   auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(subname)).setup_driver_pin();
+  fmt::print("DEBUG1\n");
   lg->add_edge(pos_dpin, pos_spin);
 
   auto tg_dpin = tup_get_inp.setup_driver_pin();
@@ -553,6 +555,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       } else {
         I(lntype.is_const());
         auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(cn_tg_name)).setup_driver_pin();
+        fmt::print("DEBUG2");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -579,6 +582,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       } else {
         I(lntype.is_const());
         auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(cn_tg_name)).setup_driver_pin();
+        fmt::print("DEBUG3\n");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -679,6 +683,7 @@ void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin,
   auto tup_name  = full_inp_hier_name.substr(0, pos);
   auto name_dpin = setup_tuple_ref(lg, tup_name);
   auto pos_dpin  = lg->create_node_const(Lconst::from_pyrope(last_subname)).setup_driver_pin();
+  fmt::print("DEBUG4\n");
 
   auto ta_node  = lg->create_node(Ntype_op::TupAdd);
   auto pos_spin = ta_node.setup_sink_pin("field");
@@ -718,7 +723,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  // -------- test start ---------
 
   bool        is_all_constant_key_ta = true;
   int         k                      = 0;
@@ -746,6 +750,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       continue;
     }
   }
+  
 
   if (is_all_constant_key_ta) {
     int j = 0;
@@ -758,7 +763,15 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         auto        tup_add     = lg->create_node(Ntype_op::TupAdd);
 
         auto pos_spin = tup_add.setup_sink_pin("field");
-        auto pos_dpin = lg->create_node_const(mmap_lib::str(concatenated_field_str)).setup_driver_pin();
+        // from_pyrope("0.__ubits");
+        // from_string("0.__ubits");
+        // pyrope string cannot differentiate "0.__ubits" and "0bxxx", you need need to make it from_string for Lconst
+        Node_pin pos_dpin;
+        if (concatenated_field_str.find('.') != std::string::npos) {
+          pos_dpin = lg->create_node_const(Lconst::from_string(concatenated_field_str)).setup_driver_pin();
+        } else {
+          pos_dpin = lg->create_node_const(Lconst::from_pyrope(concatenated_field_str)).setup_driver_pin();
+        }
         pos_dpin.connect_sink(pos_spin);
 
         auto val_spin = tup_add.setup_sink_pin("value");
@@ -784,7 +797,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  ////------- test end ------
 
   absl::flat_hash_map<int, Node>          ta_map;
   absl::flat_hash_map<int, mmap_lib::str> ta_name;
@@ -834,6 +846,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       } else {
         I(lntype.is_const());
         auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(field_vname)).setup_driver_pin();
+        fmt::print("DEBUG5\n");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -891,6 +904,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       } else {
         I(lntype.is_const());
         auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(field_vname)).setup_driver_pin();
+        fmt::print("DEBUG6");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -939,7 +953,7 @@ Node_pin Lnast_tolg::setup_field_dpin(Lgraph *lg, const mmap_lib::str &field_nam
     return it2->second;
   }
 
-  auto dpin              = lg->create_node_const(field_name).setup_driver_pin();
+  auto dpin              = lg->create_node_const(Lconst::from_pyrope(field_name)).setup_driver_pin();
   field2dpin[field_name] = dpin;
 
   return dpin;
@@ -1034,6 +1048,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   I(!name.empty());
 
   if (lnast->get_type(lnidx_opd).is_const()) {  // High priority in search to avoid alias
+    fmt::print("DEBUG10 const:{}\n", vname);
     auto node_dpin  = create_const(lg, vname);
     name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
     return node_dpin;
@@ -1131,8 +1146,13 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, const mmap_lib::str &const_str) {
 #if 0
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
-  if (!const_str.contains("bits"))
-    return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
+  if (!const_str.contains("bits")) {
+    fmt::print("DEBUG8, const_str:{}\n", const_str);
+    if (Lconst::from_pyrope(const_str).is_i())
+      return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
+    else 
+      return lg->create_node_const(Lconst::from_string(const_str)).setup_driver_pin();
+  }
 
   // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
   // TODO: It  may be cleaner to create a __fir_const sub in the LNAST gen
@@ -1409,6 +1429,8 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto value_spin = tup_add.setup_sink_pin("value");
 
   auto field_dpin = lg->create_node_const(Lconst::from_pyrope("__fdef")).setup_driver_pin();
+  fmt::print("DEBUG7\n");
+
   field_dpin.connect_sink(pos_spin);
 
   // std::unique_lock<std::mutex> guard(lgs_mutex);
@@ -1515,7 +1537,7 @@ void Lnast_tolg::create_out_ta(Lgraph *lg, const mmap_lib::str &field_name, Node
   if (!field_name.empty())
     tup_name = mmap_lib::str::concat(tup_name, ".", field_name);
 
-  auto pos_dpin = lg->create_node_const(tup_name).setup_driver_pin();
+  auto pos_dpin = lg->create_node_const(Lconst::from_string(tup_name)).setup_driver_pin();
   pos_dpin.connect_sink(pos_spin);
 
   auto val_spin = tup_add.setup_sink_pin("value");
@@ -1549,7 +1571,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       tn_dpin.connect_sink(tn_spin);
 
       auto pos_spin = node.setup_sink_pin("field");
-      auto pos_dpin = lg->create_node_const(dpin.get_name().substr(1, dpin.get_name().size() - 1)).setup_driver_pin();
+      auto dpin_subname = dpin.get_name().substr(1, dpin.get_name().size() - 1);
+      auto pos_dpin = lg->create_node_const(Lconst::from_string(dpin_subname)).setup_driver_pin();
       pos_dpin.connect_sink(pos_spin);
       continue;
     }

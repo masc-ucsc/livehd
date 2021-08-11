@@ -1132,7 +1132,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field() == "__ubits");
+  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field().find("__ubits") != std::string::npos);
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
   auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
