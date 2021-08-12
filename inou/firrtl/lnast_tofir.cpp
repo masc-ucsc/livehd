@@ -42,8 +42,8 @@ void Inou_firrtl::do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB
   const auto     stmts    = ln->get_first_child(top);
   const auto     top_name = ln->get_name(top);
 
-  firrtl::FirrtlPB_Module            *mod  = circuit->add_module();
-  firrtl::FirrtlPB_Module_UserModule *umod = new firrtl::FirrtlPB_Module_UserModule();
+  auto *mod  = circuit->add_module();
+  auto *umod = new firrtl::FirrtlPB_Module_UserModule();
   umod->set_id(top_name.to_s());  // FIXME: Need to make sure top node has module name
   FindCircuitComps(*ln, umod);
 
@@ -202,7 +202,7 @@ bool Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
   }
 
   // Form expression that holds RHS contents.
-  firrtl::FirrtlPB_Expression *rhs_expr = new firrtl::FirrtlPB_Expression();
+  auto *rhs_expr = new firrtl::FirrtlPB_Expression();
   add_refcon_as_expr(ln, c1, rhs_expr);
 
   // Now assign lhs to rhs.
@@ -275,8 +275,8 @@ void Inou_firrtl::process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_not, f
   I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
-  firrtl::FirrtlPB_Expression        *rhs_expr    = new firrtl::FirrtlPB_Expression();
-  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  auto *rhs_expr    = new firrtl::FirrtlPB_Expression();
+  auto *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_NOT);
 
   add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
@@ -295,8 +295,8 @@ void Inou_firrtl::process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_par
   I(ntype_c1.is_const() || ntype_c1.is_ref());
 
   // Form expression that holds RHS contents.
-  firrtl::FirrtlPB_Expression        *rhs_expr    = new firrtl::FirrtlPB_Expression();
-  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
+  auto *rhs_expr    = new firrtl::FirrtlPB_Expression();
+  auto *rhs_prim_op = new firrtl::FirrtlPB_Expression_PrimOp();
   rhs_prim_op->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_XOR_REDUCE);
 
   add_refcon_as_expr(ln, c1, rhs_prim_op->add_arg());
@@ -315,9 +315,9 @@ void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrt
 
   // Grab the LHS for later use. Also create PrimOP for RHS expr.
   Lnast_nid                           lnidx_lhs;
-  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op      = NULL;
-  firrtl::FirrtlPB_Expression        *rhs_expr         = NULL;
-  firrtl::FirrtlPB_Expression        *rhs_highest_expr = NULL;
+  firrtl::FirrtlPB_Expression_PrimOp *rhs_prim_op      = nullptr;
+  firrtl::FirrtlPB_Expression        *rhs_expr         = nullptr;
+  firrtl::FirrtlPB_Expression        *rhs_highest_expr = nullptr;
   for (const auto &lnchild_idx : ln.children(lnidx_op)) {
     if (first) {
       first     = false;
@@ -469,7 +469,7 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
     return true;
   } else if (ln.get_name(field) == "__q_pin") {
     // For FIRRTL, this is just the same lhs = tup
-    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    auto *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(ln.get_name(tup).substr(1).to_s());  // Remove 1st char since it's a '#'
     auto expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_reference(rhs_ref);
@@ -496,8 +496,6 @@ void Inou_firrtl::handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnas
     handle_async_attr(ln, var_name, rhs);
   } else if (attr_name == "__sign") {
     handle_sign_attr(ln, var_name, rhs);
-  } else if (attr_name == "__fwd") {
-    // Can be ignored.
   } else if (attr_name == "__posedge") {
     if (ln.get_name(rhs) == "false") {
       Pass::warn(
@@ -611,11 +609,11 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, const mmap_lib::str &var_name, co
     stmt_ptr->mutable_wire()->set_allocated_type(type);
 
   } else {
-    firrtl::FirrtlPB_Expression_PrimOp *prim = new firrtl::FirrtlPB_Expression_PrimOp();
+    auto *prim = new firrtl::FirrtlPB_Expression_PrimOp();
     prim->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK);
     auto arg = prim->add_arg();
     add_refcon_as_expr(ln, rhs, arg);
-    firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
+    auto *expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_prim_op(prim);
 
     reg->set_allocated_clock(expr);
@@ -682,11 +680,11 @@ void Inou_firrtl::handle_reset_attr(Lnast &ln, const mmap_lib::str &var_name, co
     stmt_ptr->mutable_wire()->set_allocated_type(type);
 
   } else {
-    firrtl::FirrtlPB_Expression_PrimOp *prim = new firrtl::FirrtlPB_Expression_PrimOp();
+    auto *prim = new firrtl::FirrtlPB_Expression_PrimOp();
     prim->set_op(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT);
     auto arg = prim->add_arg();
     add_refcon_as_expr(ln, rhs, arg);
-    firrtl::FirrtlPB_Expression *expr = new firrtl::FirrtlPB_Expression();
+    auto *expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_prim_op(prim);
 
     reg->set_allocated_reset(expr);
@@ -718,8 +716,7 @@ mmap_lib::str Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &ln
   if (ntype.is_ref() || ntype.is_const()) {
     return strip_prefixes(str);
   } else if (ntype.is_const()) {
-    auto lconst_holder = Lconst(ln.get_name(lnidx));
-    return mmap_lib::str(lconst_holder.to_firrtl());
+    return mmap_lib::str(ln.get_name(lnidx));
   }
   fmt::print("{}\n", str);
   I(false);  // When getting names, I would think we should only be checking those two node types.
@@ -746,13 +743,13 @@ mmap_lib::str Inou_firrtl::strip_prefixes(const mmap_lib::str &str) {
  * be treated as a FIRRTL "connect" statement. */
 void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr,
                                       firrtl::FirrtlPB_Statement *fstmt) {
-  firrtl::FirrtlPB_Expression_Reference *lhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+  auto *lhs_ref = new firrtl::FirrtlPB_Expression_Reference();
   lhs_ref->set_id(get_firrtl_name_format(ln, lhs).to_s());
 
-  firrtl::FirrtlPB_Expression *lhs_expr = new firrtl::FirrtlPB_Expression();
+  auto *lhs_expr = new firrtl::FirrtlPB_Expression();
   lhs_expr->set_allocated_reference(lhs_ref);
 
-  firrtl::FirrtlPB_Statement_Connect *conn = new firrtl::FirrtlPB_Statement_Connect();
+  auto *conn = new firrtl::FirrtlPB_Statement_Connect();
   conn->set_allocated_location(lhs_expr);
   conn->set_allocated_expression(rhs_expr);
 
@@ -764,7 +761,7 @@ void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::F
  * needs to be treated as a FIRRTL "node" statement. */
 void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr,
                                    firrtl::FirrtlPB_Statement *fstmt) {
-  firrtl::FirrtlPB_Statement_Node *node = new firrtl::FirrtlPB_Statement_Node();
+  auto *node = new firrtl::FirrtlPB_Statement_Node();
   node->set_id(ln.get_name(lhs).to_s());
   node->set_allocated_expression(rhs_expr);
 
@@ -816,27 +813,27 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
   if (ln.get_data(lnidx).type.is_ref()) {
     // Lnidx is a variable, so I need to make a Reference argument.
     auto                                   str     = get_firrtl_name_format(ln, lnidx);
-    firrtl::FirrtlPB_Expression_Reference *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    auto *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(str.to_s());
     expr->set_allocated_reference(rhs_ref);
 
   } else if (ln.get_data(lnidx).type.is_const()) {
     // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
-    auto lconst_holder = Lconst(ln.get_name(lnidx));
-    auto lconst_str    = lconst_holder.to_firrtl();
+    auto lconst_holder = Lconst::from_string(ln.get_name(lnidx));
+    auto lconst_str    = ln.get_name(lnidx).to_s();
 
-    firrtl::FirrtlPB_Expression_IntegerLiteral *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
+    auto *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
     num->set_value(lconst_str);
-    firrtl::FirrtlPB_Width *width = new firrtl::FirrtlPB_Width();
+    auto *width = new firrtl::FirrtlPB_Width();
     width->set_value(lconst_holder.get_bits());
 
     if (lconst_holder.is_negative()) {
-      firrtl::FirrtlPB_Expression_UIntLiteral *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
+      auto *ulit = new firrtl::FirrtlPB_Expression_UIntLiteral();
       ulit->set_allocated_value(num);
       ulit->set_allocated_width(width - 1);
       expr->set_allocated_uint_literal(ulit);
     } else {
-      firrtl::FirrtlPB_Expression_SIntLiteral *slit = new firrtl::FirrtlPB_Expression_SIntLiteral();
+      auto *slit = new firrtl::FirrtlPB_Expression_SIntLiteral();
       slit->set_allocated_value(num);
       slit->set_allocated_width(width);
       expr->set_allocated_sint_literal(slit);
@@ -852,8 +849,8 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
 void Inou_firrtl::add_const_as_ilit(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_IntegerLiteral *ilit) {
   I(ln.get_data(lnidx).type.is_const());
 
-  auto lconst_holder = Lconst(ln.get_name(lnidx));
-  auto lconst_str    = lconst_holder.to_firrtl();
+  auto lconst_holder = Lconst::from_string(ln.get_name(lnidx));
+  auto lconst_str    = lconst_holder.to_firrtl().to_s();
 
   ilit->set_value(lconst_str);
 }

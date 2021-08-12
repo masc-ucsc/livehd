@@ -283,7 +283,7 @@ void Node_pin::reset_name(const mmap_lib::str &wname) {
 
   auto it = ref->find(get_compact_class_driver());
   if (it != ref->end()) {
-    if (ref->get_val(it) == wname)
+    if (it->second == wname)
       return;
 
     ref->erase(it);
@@ -396,32 +396,32 @@ std::string Node_pin::debug_name() const {
                       current_g->get_name().to_s());
 }
 
-std::string Node_pin::get_wire_name() const {
+mmap_lib::str Node_pin::get_wire_name() const {
   if (is_sink()) {
     auto dpin = get_driver_pin();
     if (dpin.is_invalid())
-      return "";
+      return ""_str;
     return dpin.get_wire_name();
   }
 
   if (!is_connected())
     return "";
 
-  std::string name;
+  mmap_lib::str name;
 
   if (is_hierarchical()) {
-    absl::StrAppend(&name, "lg", current_g->get_name().to_s(), "_hidx", std::to_string(hidx.level), "_", std::to_string(hidx.pos));
+    name = mmap_lib::str::concat("lg", current_g->get_name(), "_hidx", hidx.level, "_", hidx.pos);
   }
 
   if (has_name()) {
-    absl::StrAppend(&name, get_name().to_s());
+    name = mmap_lib::str::concat(name, get_name());
     return name;
   }
 
   if (name.empty())
     name = "t";
 
-  absl::StrAppend(&name, "_pin", std::to_string(get_root_idx()), "_", std::to_string(pid));
+  name = mmap_lib::str::concat(name, "_pin", get_root_idx().value, "_", pid);
 
   return name;
 }
@@ -454,16 +454,18 @@ bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(curren
 
 Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
   auto       ref = Ann_node_pin_name::ref(top);
-  const auto it  = ref->find_val(wname);
-  if (it != ref->end()) {
-    return Node_pin(top, ref->get_key(it));
+  {
+    const auto it  = ref->find_val(wname);
+    if (it != ref->end()) {
+      return Node_pin(top, it->first);
+    }
   }
 
   auto can_wname = Lgtuple::get_canonical_name(wname);
   if (can_wname != wname) {
     const auto it2 = ref->find_val(can_wname);
     if (it2 != ref->end()) {
-      return Node_pin(top, ref->get_key(it2));
+      return Node_pin(top, it2->first);
     }
   }
 
@@ -563,7 +565,7 @@ Node_pin Node_pin::get_down_pin() const {
     I(tree_it != tree_pos->end());
   }
 
-  auto delta_pos = tree_pos->get(tree_it);
+  auto delta_pos = tree_it->second;
 
   const auto &htree = top_g->get_htree();
   I(!htree.is_leaf(hidx));

@@ -110,7 +110,7 @@ Pyrope_step () {
 		exit 4
 	fi
 
-  ${LGCHECK} --top=$top_verilog_name --implementation=tmp_prp_v/all_${top_module}.v --reference=${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
+  ${LGCHECK} --top $top_verilog_name --implementation tmp_prp_v/all_${top_module}.v --reference ${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
   if [ $? -eq 0 ]; then
 		echo "Successfully pass logic equivilence check!"
   else
@@ -130,7 +130,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf lgdb_prp2prp
-	${LGSHELL} "files path:tmp_prp match:\".*\.prp\" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
+	${LGSHELL} "files src_path:tmp_prp match:\".*\.prp\" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp compile with files:${all_files}!"
@@ -142,12 +142,13 @@ Pyrope_step () {
 	if [ $? -eq 0 ] && [ -f "tmp_prp2prp_v/${pt}.v" ]; then
 		echo "Successfully generate Verilog: tmp_prp2prp_v/${pt}.v"
 	else
+		echo "testing Verilog: tmp_prp2prp_v/${pt}.v"
 		echo "ERROR: Pyrope compiler failed: prp2prp verilog generation, testcase: ${all_files}"
 		exit 1
 	fi
 	cat tmp_prp2prp_v/*.v >tmp_prp2prp_v/all_${top_module}.v
 
-  ${LGCHECK} --top=$top_module --implementation=tmp_prp2prp_v/all_${top_module}.v --reference=${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
+  ${LGCHECK} --top $top_module --implementation tmp_prp2prp_v/all_${top_module}.v --reference ${PATTERN_PATH}/verilog_gld/${top_module}.gld.v
   if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
   else

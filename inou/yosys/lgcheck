@@ -5,9 +5,6 @@ if [ ${NO_CHECK}"x" == "1x" ]; then
   exit 0
 fi
 
-TEMP=$(getopt -o r::,i::,l::,d --long reference::,implementation::,cell_library::,top::,yosys:: -n 'lgcheck' -- "$@")
-eval set -- "$TEMP"
-
 if [ -x "bazel-bin/inou/yosys/yosys2" ]; then
   YOSYS="./bazel-bin/inou/yosys/yosys2"
 elif [ -x "inou/yosys/yosys2" ]; then
@@ -18,11 +15,8 @@ else
   YOSYS=$(which yosys)
 fi
 
-
 CELLLIB=""
 OPT_TOP=""
-OPT_DEBUG=""
-LIST_SET=""
 GOLD=""
 GATE=""
 while true ; do
@@ -52,55 +46,33 @@ while true ; do
               "") shift 2 ;;
               *) OPT_TOP=$2 ; shift 2 ;;
           esac ;;
-        -d)
-          shift 1 ;
-          OPT_DEBUG=1 ;;
-        --)
-          LIST_SET="true"
-          shift
-          break
-          ;;
+        "") break ;;
         *)
-          echo "Option $1 not recognized!"
-          exit 1
+          argument=$1
+          if [ ${argument:0:1} == "-" ]; then
+            echo "Option $1 not recognized!"
+            exit 1
+          else
+            if [ "${GOLD}" == "" ]; then
+              GOLD=$1
+              shift 1
+            else
+              GATE=$1
+              shift 1
+            fi
+          fi
           ;;
     esac
 done
 
-if [ "${LIST_SET}" == "true" ]; then
-  for var in "$@"
-  do
-    if [ "${GOLD}" == "" ]; then
-      GOLD=$var
-      echo "setting GOLD:$GOLD"
-    elif [ "${GATE}" == "" ]; then
-      GATE=$var
-      echo "setting GATE:$GATE"
-    else
-      echo "Too many files to check"
-      exit 3
-    fi
-  done
-fi
-
-if [ "${GATE}" == "" ]; then
-  echo "implementation circuit not provided"
+if [ ! -f "${GATE}" ]; then
+  echo "gate circuit ${GATE} not a valid file"
   exit 1
 fi
 
 if [ ! -f ${GOLD} ]; then
-  echo "reference circuit file not found"
+  echo "gold circuit ${GOLD} not a valid file"
   exit 1
-fi
-
-if [ ! -f ${GATE} ]; then
-  if [ -d ${GATE} ] ; then
-    GATE=${GATE}/*
-    echo "using directory ${GATE}"
-  else
-    echo "implementation circuit file not found"
-    exit 1
-  fi
 fi
 
 if [ ! -f "${YOSYS}" ]; then
@@ -192,11 +164,6 @@ yosys_prep="proc; memory -nomap; write_verilog trace0.v ; equiv_make gold gate e
 yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
-
-#try fast script first, if it fails, goes to more complex one
-if [ "$OPT_DEBUG" != "" ]; then
-  echo "${YOSYS} -p \"${yosys_read}; ${yosys_prep}; ${yosys_equiv}; equiv_status -assert\""
-fi
 
 ${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
     2> /dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"

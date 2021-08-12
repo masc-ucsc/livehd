@@ -32,7 +32,7 @@ for input in ${benchmarks[@]}; do
   elif [ "${input}" == "mor1kx" ] ; then
     top="mor1kx"
     dir=${OPT_ANUBIS}/$input/rtl/verilog/
-    include="--incdir= ${dir}"
+    include="--incdir ${dir}"
   elif [ "${input}" == "fpu" ] ; then
     top="fpu"
     dir=${OPT_ANUBIS}/$input/rtl/
@@ -47,7 +47,7 @@ for input in ${benchmarks[@]}; do
   e_lgdb=lgdb_elab_${input}
   s_lgdb=lgdb_synth_${input}
 
-  echo  "${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds=${bounds} --top=${top} --freq=${freq} --testdir=$dir --logdir=${logdir} --e_lgdb=${e_lgdb} --s_lgdb=${s_lgdb} ${include} --lib=fpga"
-  ${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds=${bounds} --top=${top} --freq=${freq} --testdir=$dir --logdir=${logdir} --e_lgdb=${e_lgdb} --s_lgdb=${s_lgdb} ${include} --lib=fpga
+  echo  "${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds ${bounds} --top ${top} --freq ${freq} --testdir $dir --logdir ${logdir} --e_lgdb ${e_lgdb} --s_lgdb ${s_lgdb} ${include} --lib fpga"
+  ${OPT_LGRAPH_DIR}/cops/live/lgsetup --bounds ${bounds} --top ${top} --freq ${freq} --testdir $dir --logdir ${logdir} --e_lgdb ${e_lgdb} --s_lgdb ${s_lgdb} ${include} --lib fpga
 
 done

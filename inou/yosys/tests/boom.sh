@@ -36,7 +36,7 @@ fi
 
 for i in AsyncResetReg; do
   echo "inou.yosys.tolg files:${BENCH_DIR}${i}.v |> inou.yosys.fromlg odir:${TEST_OUT}" | ${LGSHELL}
-  ${LGCHECK} --reference=${BENCH_DIR}/${i}.v --implementation=${TEST_OUT}/${i}.v --top=$i 2> /dev/null > /dev/null
+  ${LGCHECK} --reference ${BENCH_DIR}/${i}.v --implementation ${TEST_OUT}/${i}.v --top $i 2> /dev/null > /dev/null
 
   if [ $? -ne 0 ]; then
     echo "ERROR: Module $i does not match"
@@ -64,7 +64,7 @@ done
 filename="chunk_$(echo ${BOOM_FILE} | tr '/' '.')"
 for i in ${TEST_OUT}/*; do
   name=$(basename ${i%.*})
-  ${LGCHECK} --reference=./lgdb/parse/${filename}:${name} --implementation=${i} --top=$name 2> /dev/null > /dev/null
+  ${LGCHECK} --reference ./lgdb/parse/${filename}:${name} --implementation ${i} --top $name 2> /dev/null > /dev/null
 
   if [ $? -ne 0 ]; then
     echo "ERROR: Module $name does not match"

@@ -67,7 +67,13 @@ protected:
   Lconst l_b128s;
 
 public:
+  void TearDown() override {
+    mmap_lib::str::nuke();
+  }
+
   void SetUp() override {
+    mmap_lib::str::setup();
+
     a16u  = UInt<16>(0xcafe);
     b16u  = UInt<16>(0xbebe);
     a64u  = UInt<64>(0xe2bd5b4ff8b30fc8);
@@ -113,7 +119,7 @@ void print_method(const UInt<N> v) {
 
 TEST_F(Lconst_test, to_from_pyrope) {
 
-  auto v = Lconst::from_pyrope("0sxffffffffffffffffffffffffffffffffffffffffffffffe");
+  auto v = Lconst::from_pyrope("0sb11111111111111111111111111111111111111111111110");
   EXPECT_EQ(v.to_i(), -2);
   EXPECT_EQ(v.to_pyrope(), "-2");
 
@@ -123,30 +129,28 @@ TEST_F(Lconst_test, lvar_sizes) {
   auto l1 = Lconst::from_pyrope("-1");  // 0xFF or -1
   fmt::print("l1:{} bits:{}\n", l1.to_pyrope(), l1.get_bits());
   EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0xFF")));
-  EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0uxFF")));
-  EXPECT_EQ(Lconst::from_pyrope("true") , l1.eq_op(Lconst::from_pyrope("0sxFF")));
 
-  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_false());
+  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_false());
+  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_true());
 
-  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_false());
-  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0uxFFFFFFF")).is_false());
-  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("0sxFFFFFFF")).is_false());
+  EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_known_false());
+  EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("0xFFFFFFF")).is_known_true());
 
   EXPECT_EQ(l1.get_bits(), 1);
 
   auto s1 = l1 + Lconst::from_pyrope("1");
   fmt::print("s1:{} bits:{}\n", s1.to_pyrope(), s1.get_bits());
-  EXPECT_EQ(s1.eq_op(Lconst::from_pyrope("0x0")).is_false(), false);
+  EXPECT_EQ(s1.eq_op(Lconst::from_pyrope("0x0")).is_known_false(), false);
   EXPECT_EQ(s1.get_bits(), 1);
 
   auto s2 = l1 + Lconst::from_pyrope("-1");
   fmt::print("s2:{} bits:{}\n", s2.to_pyrope(), s2.get_bits());
-  EXPECT_FALSE(s2.eq_op(Lconst::from_pyrope("-2")).is_false());
+  EXPECT_FALSE(s2.eq_op(Lconst::from_pyrope("-2")).is_known_false());
   EXPECT_EQ(s2.get_bits(), 2);
 
   auto s4 = l1 + Lconst::from_pyrope("0x1F");
   fmt::print("s4:{} bits:{}\n", s4.to_pyrope(), s4.get_bits());
-  EXPECT_FALSE(s4.eq_op(Lconst::from_pyrope("0x1E")).is_false());
+  EXPECT_FALSE(s4.eq_op(Lconst::from_pyrope("0x1E")).is_known_false());
   EXPECT_EQ(s4.get_bits(), 6);
 }
 
@@ -969,6 +973,32 @@ TEST_F(Lconst_test, trivial_vals) {
 }
 
 TEST_F(Lconst_test, hexa_check) {
+
+  //auto v1 = Lconst::from_pyrope("0xdbd7b0ac8a3a5dcb7ada8e8a30ea6dc54ebe6bc7a37d2d8b2cd2a");
+  auto v1 = Lconst::from_pyrope("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
+
+  mmap_lib::str str("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
+
+  auto s1 = v1.serialize();
+
+  auto v2 = Lconst::unserialize(s1);
+
+#if 0
+  fmt::print("or:");
+  for(auto i=0u;i<s1.size();++i) {
+    fmt::print(":{}", (int)s1[i]);
+  }
+  fmt::print("\n");
+  fmt::print("v1:{}\n", v1.to_pyrope());
+  fmt::print("v2:{}\n", v2.to_pyrope());
+#endif
+
+  EXPECT_EQ(v1,v2);
+  EXPECT_EQ(v1.to_pyrope(),str);
+  EXPECT_EQ(v2.to_pyrope(),str);
+}
+
+TEST_F(Lconst_test, hexa_check_long) {
   Lbench b("lemu.LCONST_const_attr");
 
   unlink("lgdb_attr/c_map");
@@ -997,14 +1027,25 @@ TEST_F(Lconst_test, hexa_check) {
         rnd_list[i] = rnd_list[i].append(hex3_digits.any());
     }
     c_map.set(i, Lconst::from_pyrope(rnd_list[i]).serialize());
+
+    auto v1 = Lconst::from_pyrope(rnd_list[i]);
+    auto v2 = Lconst::unserialize(v1.serialize());
+    //fmt::print("raw:{}\n",rnd_list[i]);
+    //fmt::print("1  :{}\n",v1.to_pyrope());
+    //fmt::print("2  :{}\n",v2.to_pyrope());
+    //v1.dump();
+    //v2.dump();
+    EXPECT_EQ(v1, v2);
   }
 
   for (auto i = 0u; i < n_const; ++i) {
-    // fmt::print("num:{}\n",rnd_list[i]);
 
     { // CHECK that mmap works
       auto v1 = Lconst::unserialize(c_map.get(i));
       auto v2 = Lconst::from_pyrope(rnd_list[i]);
+      //fmt::print("raw:{}\n",rnd_list[i]);
+      //fmt::print("   :{}\n",v1.to_pyrope());
+      //fmt::print("   :{}\n",v2.to_pyrope());
       EXPECT_EQ(v1, v2);
     }
 
@@ -1016,8 +1057,8 @@ TEST_F(Lconst_test, hexa_check) {
       auto v1 = Lconst::from_pyrope(rnd_list[i]);
       auto v2 = Lconst::from_pyrope(v1.to_pyrope());
       EXPECT_EQ(v1,v2);
-      if (c>63) { // no short pyrope syntax
-        EXPECT_EQ(v1.to_pyrope(), rnd_list[i]);
+      if (c>63 && rnd_list[i][2] != '0') { // no short pyrope syntax, no 0x0... which will be shorter
+        EXPECT_EQ(v1.to_pyrope(), rnd_list[i].to_lower());
       }
     }
 
@@ -1062,39 +1103,26 @@ TEST_F(Lconst_test, dec_check) {
     boost::multiprecision::cpp_int c(rnd_list[i]);
 
     mmap_lib::str padded;
+    bool digit_found=false;
     for (const auto ch : rnd_list[i]) {
-      if (flip.any())
+      if (flip.any() && digit_found)
         padded = padded.append('_');
       padded = padded.append(ch);
-    }
-    if (flip.any()) {
-      bool is_sign = true;
-
-      if (flip.any()) {
-        auto nbits = 0;
-        if (c < 0)
-          nbits = msb(-c) + 1;
-        else if (c == 0)
-          nbits = 1;
-        else
-          nbits = msb(c) + 1;
-        if (is_sign)
-          nbits++;
-
-        if (flip.any()) {
-          nbits += num_digits.any();
-        }
-      }
+      if (std::isdigit(ch))
+        digit_found = true;
     }
 
     auto a1 = Lconst::from_pyrope(mmap_lib::str(rnd_list[i]));
     EXPECT_EQ(a1.get_raw_num(), c);
 
     auto a2 = Lconst::from_pyrope(padded);
+#if 0
     if (a2.get_raw_num() != c) {
+      fmt::print("PADDED:{}\n", padded);
       a2.dump();
       a1.dump();
     }
+#endif
     EXPECT_EQ(a2.get_raw_num(), c);
 
     auto fmt_a = a1.to_pyrope();
@@ -1123,12 +1151,12 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(Lconst::from_pyrope("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
   EXPECT_EQ(Lconst::from_string("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
   EXPECT_EQ(Lconst::from_pyrope("\'a longer chain of text").to_pyrope(), mmap_lib::str("'\'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), mmap_lib::str("''"));
+  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), mmap_lib::str("0"));
   EXPECT_EQ(Lconst::from_pyrope("''").to_pyrope(), mmap_lib::str("''"));
   EXPECT_EQ(Lconst::from_string("''").to_pyrope(), mmap_lib::str("''"));
   EXPECT_EQ(Lconst::from_string("''''").to_pyrope(), mmap_lib::str("''''")); // Lconst::from_pyrope("''''") raises an exception
 
-  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), mmap_lib::str("'__longer chain of text"));
+  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), mmap_lib::str("'__longer chain of text'"));
   EXPECT_EQ(Lconst::from_pyrope("_").to_pyrope(), mmap_lib::str("'_'"));
   EXPECT_EQ(Lconst::from_pyrope("a").to_pyrope(), mmap_lib::str("'a'"));
 
@@ -1138,7 +1166,47 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(Lconst::from_pyrope("0").get_raw_num(), 0);
 }
 
+TEST_F(Lconst_test, false_true) {
+
+  EXPECT_TRUE(Lconst::from_pyrope("string").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("true").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("3").is_known_true());
+  EXPECT_TRUE(Lconst::from_pyrope("").is_known_false()); // empty string is false
+
+  EXPECT_FALSE(Lconst::from_pyrope("string").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("true").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("3").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("").is_known_true()); // empty string is false
+
+  EXPECT_FALSE(Lconst::from_pyrope("false").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0x0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0b0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0000").is_known_true());
+  EXPECT_FALSE(Lconst::from_pyrope("0").is_known_true());
+
+  EXPECT_TRUE(Lconst::from_pyrope("false").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0x0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0sb0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0b0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0000").is_known_false());
+  EXPECT_TRUE(Lconst::from_pyrope("0").is_known_false());
+
+  // with unknowns
+  EXPECT_FALSE(Lconst::from_pyrope("0b?").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0b?").is_known_true());
+
+  EXPECT_FALSE(Lconst::from_pyrope("0sb??000??").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb?0?0??").is_known_true());
+
+  EXPECT_FALSE(Lconst::from_pyrope("0sb??000??").is_known_false());
+  EXPECT_FALSE(Lconst::from_pyrope("0sb?0?0??").is_known_true());
+}
+
 TEST_F(Lconst_test, binary) {
+
+  auto c = Lconst::from_pyrope("0b01__?10__?_1");
+
   Lconst a = Lconst::from_pyrope("0b1100");
   Lconst b = Lconst::from_pyrope("12");
   Lconst b2 = Lconst::from_pyrope("12");
@@ -1148,71 +1216,83 @@ TEST_F(Lconst_test, binary) {
   EXPECT_TRUE(a == b2);  // explicit sign (12s vs 12u) does not change this
   EXPECT_EQ(a, b);       // different explicit bits
   EXPECT_EQ(a, b2);      // different explicit bits
-  EXPECT_FALSE(a.eq_op(b).is_false());
-  EXPECT_FALSE(a.eq_op(b2).is_false());
+  EXPECT_FALSE(a.eq_op(b).is_known_false());
+  EXPECT_FALSE(a.eq_op(b2).is_known_false());
+  EXPECT_TRUE(a.eq_op(b).is_known_true());
+  EXPECT_TRUE(a.eq_op(b2).is_known_true());
 
-  auto c = Lconst::from_pyrope("0b01__?10__?_1");
-  EXPECT_EQ(c.to_pyrope(), "0b01?_10?1");
-  EXPECT_EQ(c.to_verilog(), "7'b01?10?1");
+  EXPECT_EQ(c.to_verilog(), "6'b1?10?1");
+  EXPECT_EQ(c.to_pyrope(), "0b001?_10?1");
 
   auto d = Lconst::from_pyrope("0b____1_1x1_");
-  EXPECT_EQ(d.to_pyrope(), "0b0_11?1");
-  EXPECT_EQ(d.to_verilog(), "5'b011?1");
+  EXPECT_EQ(d.to_pyrope(), "0b0000_11?1");
+  EXPECT_EQ(d.to_verilog(), "4'b11?1");
   EXPECT_EQ(d.to_binary(), "011?1");
 
   auto e = Lconst::from_pyrope("_-__0b1_");
   EXPECT_EQ(e.to_pyrope(), "'_-__0b1_'");
   EXPECT_EQ(e.to_verilog(), "\"_-__0b1_\"");
 
+  auto e1 = Lconst::from_pyrope("-0b11_");
+  EXPECT_EQ(e1.to_pyrope(), "-3");
+  EXPECT_EQ(e1.to_verilog(), "3'sh5"); // 3'sb101
+
   auto f = Lconst::from_pyrope("0b1_0100");
   EXPECT_EQ(f.to_pyrope(), "20");
-  EXPECT_EQ(f.to_verilog(), "6'sh14");  // 5'h14 would be fine too
+  EXPECT_EQ(f.to_verilog(), "5'h14");  // 6'sh14 would be fine too
   EXPECT_EQ(f.to_binary(), "010100");
 
   Lconst g = Lconst::from_pyrope("0bxxxx_xxxx_");
-  EXPECT_EQ(g.to_pyrope(), "0b0_????_????");
-  EXPECT_EQ(g.to_verilog(), "'b0????????");
+  EXPECT_EQ(g.to_pyrope(), "0b0000_????_????");
+  EXPECT_EQ(g.to_verilog(), "8'b????????");
   EXPECT_EQ(g.to_binary(), "0????????");
   Lconst h = Lconst::from_pyrope("0b0??___???_??___?");
   EXPECT_EQ(h, g);
 
-  Lconst g2 = Lconst::from_pyrope("0bxxxx_xxxx_");
-  EXPECT_EQ(g2, Lconst::from_pyrope("0b0000000????????"));  // positive, add zeroes at will
-  EXPECT_EQ(g2.to_pyrope(), "0b0_????_????");
-  EXPECT_EQ(g2.to_verilog() , "'b0????????");
-  EXPECT_EQ(g2.to_binary()     , "0????????");  // 0 as MSB because it is a positive number
+  Lconst g1 = Lconst::from_pyrope("0sb1xx_xxxx_");
+  EXPECT_EQ(g1.to_pyrope(), "0sb11??_????");
 
-  Lconst g3 = Lconst::from_pyrope("0sbxxxx_xxxx_");
-  EXPECT_EQ(g3.to_pyrope() , "0b????_????");
-  EXPECT_EQ(g3.to_verilog(), "'sb????????");
-  EXPECT_EQ(g3.to_binary()     , "????????");
+  Lconst g2 = Lconst::from_pyrope("0bxxx_xxxx_");
+
+  EXPECT_EQ(g2, Lconst::from_pyrope("0b0_0_0_0_0_0_0__???__????"));  // positive, add zeroes at will
+  EXPECT_EQ(g2.to_pyrope(), "0b0???_????");
+  EXPECT_EQ(g2.to_verilog() ,"7'b???????");
+  EXPECT_EQ(g2.to_binary()   , "0???????");  // 0 as MSB because it is a positive number
+
+  Lconst g3 = Lconst::from_pyrope("0sb0xxx_xxxx_");
+  EXPECT_EQ(g3.to_pyrope() , "0b0???_????");
+  EXPECT_EQ(g3.to_verilog(),  "7'b???????");
+  EXPECT_EQ(g3.to_binary()     , "0???????");
 
   Lconst g4 = Lconst::from_pyrope("0sb11111xxxx_xxxx_");
-  EXPECT_EQ(g4.to_pyrope(), "0b1_????_????");
-  EXPECT_EQ(g4.to_verilog(), "'sb1????????");
-  EXPECT_EQ(g4.to_binary()     , "1????????");
+  g4.dump();
+  fmt::print("pyrope :{}\n", g4.to_pyrope());
+  fmt::print("verilog:{}\n", g4.to_verilog());
+  EXPECT_EQ(g4.to_pyrope(), "0sb1111_????_????");
+  EXPECT_EQ(g4.to_verilog(), "9'sb1????????");
+  EXPECT_EQ(g4.to_binary()    , "1????????");
 
   Lconst j = Lconst::from_pyrope("-17");
   EXPECT_EQ(j.to_pyrope(), "-17");          // small constant
-  EXPECT_EQ(j.to_verilog(), "6'sb101111");  // neg values use binary (could be patched)
+  EXPECT_EQ(j.to_verilog(), "6'sh2f");  // neg values use binary (could be patched)
   EXPECT_EQ(j.to_binary(), "101111");
 
   {
     Lconst k = Lconst::from_pyrope("17");
     EXPECT_EQ(k.to_pyrope(), "17");
-    EXPECT_EQ(k.to_verilog(), "6'sh11");  // hex positives
+    EXPECT_EQ(k.to_verilog(), "5'h11");
     EXPECT_EQ(k.to_binary(), "010001");
   }
 
   {
     Lconst k = Lconst::from_pyrope("255");
     EXPECT_EQ(k.to_pyrope(), "0xff");
-    EXPECT_EQ(k.to_verilog(), "8'hff");  // hex positives
-    EXPECT_EQ(k.to_binary(), "11111111");
+    EXPECT_EQ(k.to_verilog(), "8'hff");
+    EXPECT_EQ(k.to_binary(), "011111111");
   }
 
   {
-    Lconst k = Lconst::from_pyrope("0sxFF");
+    Lconst k = Lconst::from_pyrope("0sb111111");
     EXPECT_EQ(k.to_pyrope(), "-1");
     EXPECT_EQ(k.to_verilog(), "1'sh1");  // hex positives
     EXPECT_EQ(k.to_binary(), "1");
@@ -1390,7 +1470,7 @@ TEST_F(Lconst_test, lconst_add) {
     auto a = Lconst::from_pyrope("0b0?") + Lconst::from_pyrope("1");
     EXPECT_FALSE(a.is_i());
     EXPECT_EQ(a, Lconst::from_pyrope("0b??"));
-    EXPECT_EQ(a.to_pyrope(), "0b0??");
+    EXPECT_EQ(a.to_pyrope(), "0b00??");
     EXPECT_EQ(a.get_bits(), 3);
   }
 }

@@ -258,7 +258,7 @@ Pyrope_lec_test () {
     echo "Logic Equivalence Check: Hierarchical Design"
     echo "----------------------------------------------------"
 
-    ${LGCHECK} --top=$top_module --implementation=${top_module}_2.v --reference=${top_module}_1.v
+    ${LGCHECK} --top $top_module --implementation ${top_module}_2.v --reference ${top_module}_1.v
 
     if [ $? -eq 0 ]; then
       echo "Successfully pass logic equivilence check!"
@@ -273,7 +273,7 @@ Pyrope_lec_test () {
       echo "--------------------------------------------------------------"
       echo "Logic Equivalence Check"
       echo "--------------------------------------------------------------"
-      ${LGCHECK} --implementation=${pt}_2.v --reference=${pt}_1.v
+      ${LGCHECK} --implementation ${pt}_2.v --reference ${pt}_1.v
 
       if [ $? -eq 0 ]; then
         echo "Successfully passed logic equivalence check!"

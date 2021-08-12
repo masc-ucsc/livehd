@@ -370,7 +370,6 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
     if (op == Ntype_op::Const) {
       auto         lc = node.get_type_const();
       RTLIL::Wire *new_wire;
-      bool         do_unsign;
 #if 0
       if (lc.is_negative() || lc.get_bits()==1) {
         new_wire = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
@@ -382,14 +381,13 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
       }
 #else
       new_wire  = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
-      do_unsign = false;
 #endif
 
       if (lc.get_bits() < 31 && lc.is_i()) {  // 32bit in yosys const
         mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), new_wire->width)));
       } else {
-        // fmt::print("add:{} prp:{}\n",lc.to_yosys(), lc.to_pyrope());
-        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_yosys(do_unsign))));
+        // fmt::print("add:{} prp:{}\n",lc.to_binary(), lc.to_pyrope());
+        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_binary().to_s())));
       }
 
       input_map[node.get_driver_pin().get_compact()] = new_wire;
@@ -611,7 +609,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           mod->connect(out_wire, w2);
         } else {
           Lconst mask = (Lconst(1) << Lconst(out_wire->width)) - 1;
-          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_yosys()), out_wire);
+          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_binary().to_s()), out_wire);
         }
       } break;
       case Ntype_op::Sext: {
@@ -644,7 +642,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
-        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_yosys());
+        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_binary().to_s());
 
         mod->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
       } break;
@@ -789,7 +787,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         } else {  // reset wire
           RTLIL::Const initial_const(0, node.get_bits());
           if (!initial_dpin.is_invalid()) {
-            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_yosys());
+            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_binary().to_s());
           }
 
           if (enable_wire == nullptr) {
@@ -940,14 +938,14 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         if (unsigned_wire.contains(lhs)) {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
             mod->addShr(next_id(g), lhs, amount, dpin, false);
           } else {
             mod->addShr(next_id(g), lhs, rhs, dpin, false);
           }
         } else {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
             mod->addSshr(next_id(g), lhs, amount, dpin, true);
           } else {
             mod->addSshr(next_id(g), lhs, rhs, dpin, true);
@@ -963,7 +961,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         auto *result_wire = cell_output_map[node.get_driver_pin().get_compact()];
         if (b_dpin.get_node().is_type_const()) {  // common optimization
-          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_yosys());
+          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
           if (unsigned_wire.contains(lhs)) {
             mod->addShl(next_id(g), lhs, amount, result_wire, false);
             unsigned_wire.insert(result_wire);

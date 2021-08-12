@@ -8,6 +8,7 @@
 #include "inou_code_gen.hpp"
 #include "lnast.hpp"
 #include "lnast_generic_parser.hpp"
+#include "file_output.hpp"
 
 class Code_gen {
 protected:
@@ -15,13 +16,13 @@ protected:
   std::shared_ptr<Lnast>             lnast;
   mmap_lib::str                      path;
   mmap_lib::str                      odir;
-  std::string                        buffer_to_print;
+  std::shared_ptr<File_output>       buffer_to_print;
   std::map<mmap_lib::str, mmap_lib::str> ref_map;
   // enum class Code_gen_type { Type_verilog, Type_prp, Type_cfg, Type_cpp };
 private:
   std::unique_ptr<Code_gen_all_lang> lnast_to;
   int                                indendation = 0;
-  std::string                        indent() const;
+  mmap_lib::str                        indent() const;
   std::vector<mmap_lib::str>      const_vect;
 
 public:
@@ -30,8 +31,7 @@ public:
   // virtual void generate() = 0;
   void        generate();
   void        do_stmts(const mmap_lib::Tree_index& stmt_node_index);
-  void        do_assign(const mmap_lib::Tree_index& assign_node_index, std::vector<mmap_lib::str>& hier_tup_vec,
-                        bool hier_tup_assign = false);
+  void        do_assign(const mmap_lib::Tree_index& assign_node_index, std::vector<mmap_lib::str>& hier_tup_vec, bool hier_tup_assign = false);
   void        do_for(const mmap_lib::Tree_index& assign_node_index);
   void        do_while(const mmap_lib::Tree_index& assign_node_index);
   void        do_op(const mmap_lib::Tree_index& op_node_index, const mmap_lib::str& op_type);
@@ -51,8 +51,10 @@ public:
 
   static bool    is_temp_var(const mmap_lib::str &test_string);        // can go to private/protected section!?
   static bool    has_DblUndrScor(const mmap_lib::str &test_string);    // can go to private/protected section!?
-  static bool    has_DblUndrScor(const std::string &test_string);    // can go to private/protected section!?
   static bool    is_number(const mmap_lib::str &test_string);
 
   static mmap_lib::str process_number(const mmap_lib::str &num_string);
+  
+  mmap_lib::str get_fname(const mmap_lib::str &fname, const mmap_lib::str &outdir);
+
 };

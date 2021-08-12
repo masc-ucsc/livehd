@@ -964,7 +964,7 @@ void Bitwidth::process_attr_get(Node &node) {
   auto dpin_key = node.get_sink_pin("field").get_driver_pin();
   I(dpin_key.get_node().is_type_const());
 
-  auto key  = dpin_key.get_type_const().to_str();
+  auto key  = dpin_key.get_type_const().to_field();
   auto attr = get_key_attr(key);
   I(attr != Attr::Set_dp_assign);  // Not get attr with __dp_assign
   if (attr == Attr::Set_other) {
@@ -1041,7 +1041,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   I(node_attr.is_sink_connected("field"));
 
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_type_const().to_str();
+  auto key      = dpin_key.get_type_const().to_field();
   auto attr     = get_key_attr(key);
 
   if (attr == Attr::Set_other) {
@@ -1132,7 +1132,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_string(), "__ubits"));
+  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field().find("__ubits") != std::string::npos);
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
   auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
@@ -1163,7 +1163,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
       auto sink_node = e.sink.get_node();
       if (sink_node.get_type_op() == Ntype_op::AttrSet) {
         auto dpin_key = sink_node.get_sink_pin("field").get_driver_pin();
-        auto key      = dpin_key.get_type_const().to_str();
+        auto key      = dpin_key.get_type_const().to_field();
         auto attr     = get_key_attr(key);
         if (attr == Attr::Set_dp_assign) {
           auto range_const = (Lconst(1UL) << Lconst(ubits)) - 1;
@@ -1494,7 +1494,7 @@ void Bitwidth::try_delete_attr_node(Node &node) {
   Attr attr = Attr::Set_other;
   if (node.is_sink_connected("field")) {
     auto key_dpin = node.get_sink_pin("field").get_driver_pin();
-    attr          = get_key_attr(key_dpin.get_type_const().to_str());
+    attr          = get_key_attr(key_dpin.get_type_const().to_field());
     if (attr == Attr::Set_other)
       return;
   }

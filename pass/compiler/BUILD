@@ -12,7 +12,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//inou/graphviz:inou_graphviz",
-        "//inou/yosys:yosys2",
+        # "//inou/yosys:yosys2",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",

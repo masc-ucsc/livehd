@@ -14,6 +14,9 @@ cc_library(
     includes = ["."],
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
+    deps = [
+        "//mmap_lib:headers",
+    ],
 )
 
 cc_test(

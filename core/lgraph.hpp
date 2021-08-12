@@ -217,8 +217,10 @@ public:
   Node create_node(const Ntype_op op);
   Node create_node(const Ntype_op op, Bits_t bits);
 
-  Node create_node_const(const Lconst &value);
-  Node create_node_const(const mmap_lib::str &val) { return create_node_const(Lconst::from_pyrope(val)); }
+	// Lconst may contains a pure number or a pure string or a unkown number like '0bxx101',
+	// the developer has the responsibility to translate to proper Lconst before calling this function
+  Node create_node_const(const Lconst &value); 
+
   Node create_node_const(int64_t val) { return create_node_const(Lconst(val)); }
 
   Node create_node_lut(const Lconst &value);

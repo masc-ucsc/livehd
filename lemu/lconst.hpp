@@ -43,7 +43,9 @@ protected:
 
   mmap_lib::str skip_underscores(const mmap_lib::str txt) const;
 
-  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {}
+  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {
+    assert(d<Bits_max);
+  }
 
   static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)
@@ -74,6 +76,12 @@ public:
 
   Lconst();
 
+  mmap_lib::str to_field() const;  // tuple field (a subset of pyrope allowed)
+  mmap_lib::str to_binary() const;
+  mmap_lib::str to_verilog() const;
+  mmap_lib::str to_pyrope() const;
+  mmap_lib::str to_firrtl() const;
+
   // TODO for from_verilog from_firrtl ...
   static Lconst from_pyrope(const mmap_lib::str txt);
   static Lconst from_binary(const mmap_lib::str txt, bool unsigned_result);
@@ -92,6 +100,7 @@ public:
   [[nodiscard]] size_t get_trailing_zeroes() const;
 
   [[nodiscard]] static Lconst get_mask_value(Bits_t bits);
+  [[nodiscard]] static Lconst get_mask_value(Bits_t h, Bits_t l);
   [[nodiscard]] static Lconst get_neg_mask_value(Bits_t bits);
   [[nodiscard]] Lconst        get_mask_value() const;
 
@@ -145,7 +154,8 @@ public:
     return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?';
   }
 
-  bool is_false() const { return num == 0; }
+  bool is_known_false() const { return num == 0; }
+  bool is_known_true() const;
   bool is_string() const { return explicit_str && !has_unknowns(); }
   bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
   bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
@@ -157,11 +167,6 @@ public:
 
   bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
   int64_t to_i() const;                                         // must fit in int or exception raised
-
-  mmap_lib::str to_binary() const;
-  mmap_lib::str to_verilog() const;
-  mmap_lib::str to_pyrope() const;
-  mmap_lib::str to_firrtl() const;
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }

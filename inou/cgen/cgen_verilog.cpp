@@ -6,15 +6,16 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "absl/strings/str_cat.h"
 #include "cell.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "mmap_gc.hpp"
 #include "pass.hpp"
 
-Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str &_odir) : verbose(_verbose), odir(_odir) {
+Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str _odir) : verbose(_verbose), odir(_odir), nrunning(0) {
   if (reserved_keyword.empty()) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+
     reserved_keyword.insert("reg");
     reserved_keyword.insert("input");
     reserved_keyword.insert("output");
@@ -32,85 +33,83 @@ Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str &_odir) : verbose(
   }
 }
 
-std::string Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
+mmap_lib::str Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
   if (dpin.is_type_const())
     return dpin.get_type_const().to_verilog();
 
   return get_scaped_name(dpin.get_wire_name());
 }
 
-std::string Cgen_verilog::get_scaped_name(const std::string &_name) {
-  std::string name = _name;
+mmap_lib::str Cgen_verilog::get_scaped_name(const mmap_lib::str name) { // follow verilog name and add \ when needed
 
-  if (name[0] == '%') {
+  mmap_lib::str res_name;
+  if (name.front() == '%') {
     if (name[1] == '.') {
-      name = name.substr(2);
+      res_name = name.substr(2);
     } else {
-      name = name.substr(1);
+      res_name = name.substr(1);
     }
+  }else if (reserved_keyword.contains(name)) {
+    return mmap_lib::str::concat("\\", name, " ");
+  }else{
+    res_name = name;
   }
 
-  if (reserved_keyword.contains(name)) {
-    return absl::StrCat("\\", name, " ");
-  }
-
-  for (auto ch : name) {
+  for (auto i=0u; i < res_name.size() ; ++i) {
+    auto ch = res_name[i];
     if (!std::isalnum(ch) && ch != '_')
-      return absl::StrCat("\\", name, " ");
+      return mmap_lib::str::concat("\\", res_name, " ");
   }
 
-  return name;
+  return res_name;
 }
 
-std::string Cgen_verilog::get_append_to_name(const std::string &name, std::string_view ext) const {
-  if (name[0] == '\\') {
-    return absl::StrCat("\\", ext, name.substr(1, name.size() - 1), " ");
+mmap_lib::str Cgen_verilog::get_append_to_name(const mmap_lib::str name, const mmap_lib::str ext) const {
+  if (name.front() == '\\') {
+    return mmap_lib::str::concat("\\", ext, name.substr(1, name.size() - 1), " ");
   }
 
-  return absl::StrCat(ext, name);
+  return mmap_lib::str::concat(ext, name);
 }
 
-std::string Cgen_verilog::get_expression(const Node_pin &dpin) const {
+mmap_lib::str Cgen_verilog::get_expression(const Node_pin &dpin) const {
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it != pin2var.end())
     return var_it->second;
 
   const auto expr_it = pin2expr.find(dpin.get_compact_class());
   I(expr_it != pin2expr.end());
-  for (auto ch : expr_it->second) {
-    if (!std::isalnum(ch) && !std::isspace(ch))
-      return absl::StrCat("(", expr_it->second, ")");
+  if (expr_it->second.needs_parenthesis) {
+    return mmap_lib::str::concat("(", expr_it->second.var, ")");
   }
 
-  return expr_it->second;
+  return expr_it->second.var;
 }
 
-void Cgen_verilog::add_expression(std::string &txt_seq, std::string_view txt_op, Node_pin &dpin) const {
+mmap_lib::str Cgen_verilog::add_expression(const mmap_lib::str txt_seq, const mmap_lib::str txt_op, Node_pin &dpin) const {
   auto expr = get_expression(dpin);
-  ;
 
   if (txt_seq.empty())
-    txt_seq = expr;
-  else
-    absl::StrAppend(&txt_seq, " ", txt_op, " ", expr);
+    return expr;
+
+  return mmap_lib::str::concat(txt_seq, " ", txt_op, " ", expr);
 }
 
-void Cgen_verilog::process_flop(std::string &buffer, Node &node) {
+void Cgen_verilog::process_flop(std::shared_ptr<File_output> fout, Node &node) {
   auto dpin_d = node.get_sink_pin("din").get_driver_pin();
   auto dpin_q = node.get_driver_pin();
 
-  std::string pin_name  = dpin_q.get_wire_name();
-  const auto  name_next = get_scaped_name(absl::StrCat("___next_", std::string(pin_name)));
+  auto pin_name  = dpin_q.get_wire_name();
+  const auto  name_next = get_scaped_name(mmap_lib::str::concat("___next_", pin_name));
 
   if (dpin_d.is_invalid()) {
-    absl::StrAppend(&buffer, "  ", name_next, " = 'hx; // disconnected flop\n");
+    fout->append("  ", name_next, " = 'hx; // disconnected flop\n");
   } else {
-    absl::StrAppend(&buffer, "  ", name_next, " = ", get_expression(dpin_d), ";\n");
+    fout->append("  ", name_next, " = ", get_expression(dpin_d), ";\n");
   }
 }
 
-void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
-  (void)buffer;
+void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node) {
 
   auto iname = get_scaped_name(node.default_instance_name());
 
@@ -129,7 +128,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
   };
   std::vector<Port_field> port_vector;  // first == read, second == port_id
 
-  std::string parameters;
+  mmap_lib::str parameters;
 
   bool first_entry = true;
   for (auto e : node.inp_edges()) {
@@ -146,7 +145,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".BITS(", v, ")");
+      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".BITS(", v, ")");
       first_entry = false;
     } else if (pin_name == "size") {
       if (!e.driver.is_type_const()) {
@@ -154,7 +153,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".SIZE(", v, ")");
+      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".SIZE(", v, ")");
       first_entry = false;
     } else if (pin_name == "latency") {
       if (!e.driver.is_type_const()) {
@@ -162,7 +161,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".LATENCY_", std::to_string(port_id), "(", v, ")");
+      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".LATENCY_", port_id, "(", v, ")");
       first_entry = false;
     } else if (pin_name == "wensize") {
       if (!e.driver.is_type_const()) {
@@ -170,7 +169,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".WENSIZE", "(", v, ")");
+      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".WENSIZE", "(", v, ")");
       first_entry = false;
     } else if (pin_name == "fwd") {
       if (!e.driver.is_type_const()) {
@@ -178,7 +177,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         return;
       }
       auto v = e.driver.get_type_const().to_verilog();
-      absl::StrAppend(&parameters, first_entry ? "" : " ,", ".FWD", "(", v, ")");
+      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".FWD", "(", v, ")");
       first_entry = false;
     } else if (pin_name == "clock") {
       port_vector[port_id].clock = e.driver;
@@ -193,7 +192,7 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
         Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      bool rdport                 = !e.driver.get_type_const().is_false();
+      bool rdport                 = !e.driver.get_type_const().is_known_false();
       port_vector[port_id].rdport = rdport;
 
       if (rdport) {
@@ -222,23 +221,20 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
     return;
   }
 
-  absl::StrAppend(&buffer,
-                  "cgen_memory_",
-                  single_clock ? "" : "multiclock_",
-                  std::to_string(n_rd_ports),
-                  "rd_",
-                  std::to_string(n_wr_ports),
-                  "wr "  // name
-                  ,
-                  " #(",
-                  parameters,
-                  ") ",
-                  iname,
-                  "(\n");  // rest
+  // create name
+  fout->append(mmap_lib::str::concat("cgen_memory_", single_clock ? "" : "multiclock_"));
+  fout->append(mmap_lib::str::concat(n_rd_ports, "rd_"));
+  fout->append(mmap_lib::str::concat(n_wr_ports, "wr "));
+
+  // paremeters
+  fout->append(" #(",parameters,") ");
+
+  // instance name
+  fout->append(iname, "(\n");
 
   first_entry = true;
   if (single_clock) {
-    absl::StrAppend(&buffer, ".clock(", get_wire_or_const(base_clock_dpin), ")\n");
+    fout->append(mmap_lib::str::concat(".clock(", get_wire_or_const(base_clock_dpin), ")\n"));
     first_entry = false;
   }
 
@@ -252,45 +248,38 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
           node.dump();
           Pass::error("memory {} read port is not correctly configured\n", node.debug_name());
         }
-        absl::StrAppend(&buffer,
-                        first_entry ? "" : ",",
-                        ".rd_addr_",
-                        std::to_string(n_rd_pos),
-                        "(",
-                        get_wire_or_const(p.addr),
-                        ")\n");
+        fout->append(mmap_lib::str::concat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_",
+                     n_rd_pos,
+                     "(",
+                     get_wire_or_const(p.addr),
+                     ")\n"));
         first_entry = false;
 
-        auto id = std::to_string(n_rd_pos);
-
-        absl::StrAppend(&buffer, ",.rd_enable_", id, "(", get_wire_or_const(p.enable), ")\n");
+        fout->append("  ,.rd_enable_", n_rd_pos, "(", get_wire_or_const(p.enable), ")\n");
         if (!single_clock) {
-          absl::StrAppend(&buffer, ",.rd_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
+          fout->append("  ,.rd_clock_", n_rd_pos, "(", get_wire_or_const(p.clock), ")\n");
         }
         auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
-        absl::StrAppend(&buffer, ",.rd_dout_", id, "(", get_wire_or_const(dout_dpin), ")\n");
+        fout->append("  ,.rd_dout_", n_rd_pos, "(", get_wire_or_const(dout_dpin), ")\n");
         ++n_rd_pos;
       } else {
         if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
           node.dump();
           Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
         }
-        absl::StrAppend(&buffer,
-                        first_entry ? "" : ",",
-                        ".wr_addr_",
-                        std::to_string(n_wr_pos),
-                        "(",
-                        get_wire_or_const(p.addr),
-                        ")\n");
+        fout->append(mmap_lib::str::concat(first_entry ? "  .wr_addr_" : "  ,.wr_addr_",
+                     n_wr_pos,
+                     "(",
+                     get_wire_or_const(p.addr),
+                     ")\n"));
+
         first_entry = false;
 
-        auto id = std::to_string(n_wr_pos);
-
-        absl::StrAppend(&buffer, ",.wr_enable_", id, "(", get_wire_or_const(p.enable), ")\n");
+        fout->append("  ,.wr_enable_", n_wr_pos, "(", get_wire_or_const(p.enable), ")\n");
         if (!single_clock) {
-          absl::StrAppend(&buffer, ",.wr_clock_", id, "(", get_wire_or_const(p.clock), ")\n");
+          fout->append("  ,.wr_clock_", n_wr_pos, "(", get_wire_or_const(p.clock), ")\n");
         }
-        absl::StrAppend(&buffer, ",.wr_din_", id, "(", get_wire_or_const(p.din), ")\n");
+        fout->append("  ,.wr_din_", n_wr_pos, "(", get_wire_or_const(p.din), ")\n");
         ++n_wr_pos;
       }
       ++n_pos;
@@ -299,10 +288,10 @@ void Cgen_verilog::process_memory(std::string &buffer, Node &node) {
     I(n_wr_pos == n_wr_ports);
   }
 
-  absl::StrAppend(&buffer, ");\n");
+  fout->append(");\n");
 }
 
-void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
+void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node &node) {
   auto ordered_inp = node.inp_edges_ordered();
   I(ordered_inp.size() > 2);  // at least 0 + 1 + 2
 
@@ -314,213 +303,201 @@ void Cgen_verilog::process_mux(std::string &buffer, Node &node) {
   auto mux2vec_it = mux2vector.find(node.get_compact_class());
   if (mux2vec_it == mux2vector.end()) {
     if (ordered_inp.size() == 3) {  // if-else case
-      absl::StrAppend(&buffer, "   if (", sel_expr, ") begin\n");
-      absl::StrAppend(&buffer, "     ", dest_var, " = ", get_expression(ordered_inp[2].driver), ";\n");
-      absl::StrAppend(&buffer, "   end else begin\n");
-      absl::StrAppend(&buffer, "     ", dest_var, " = ", get_expression(ordered_inp[1].driver), ";\n");
-      absl::StrAppend(&buffer, "   end\n");
+      fout->append("   if (", sel_expr, ") begin\n");
+      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[2].driver), ";\n");
+      fout->append("   end else begin\n");
+      fout->append("     ", dest_var, " = ", get_expression(ordered_inp[1].driver), ";\n");
+      fout->append("   end\n");
     } else {
-      absl::StrAppend(&buffer, "   case (", sel_expr, ")\n");
+      fout->append("   case (", sel_expr, ")\n");
       auto sel_bits = ordered_inp[0].driver.get_bits();
       for (auto i = 1u; i < ordered_inp.size(); ++i) {
-        absl::StrAppend(&buffer,
-                        "     ",
-                        sel_bits,
-                        "'d",
-                        std::to_string(i - 1),
-                        " : ",
-                        dest_var,
-                        " = ",
-                        get_expression(ordered_inp[i].driver),
-                        ";\n");
+        fout->append("     ",
+                     sel_bits,
+                     "'d",
+                     mmap_lib::str(i - 1));
+        fout->append(" : ",
+                     dest_var,
+                     " = ",
+                     get_expression(ordered_inp[i].driver),
+                     ";\n");
       }
       size_t num_cases = 1 << (sel_bits);
       if (num_cases > ordered_inp.size() - 1) {
-        absl::StrAppend(&buffer, "       default: ", dest_var, " = 'hx;\n");
+        fout->append("       default: ", dest_var, " = 'hx;\n");
       }
-      absl::StrAppend(&buffer, "   endcase\n");
+      fout->append("   endcase\n");
     }
   }
 }
 
-void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
+void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &node) {
   auto dpin = node.get_driver_pin();
   auto op   = node.get_type_op();
   I(!Ntype::is_multi_driver(op));
 
-  std::string final_expr;
+  mmap_lib::str final_expr;
 
   if (op == Ntype_op::Sum) {
-    std::string add_seq;
-    std::string sub_seq;
+    mmap_lib::str add_seq;
+    mmap_lib::str sub_seq;
     for (auto e : node.inp_edges()) {
       if (e.sink.get_pid() == 0) {
-        add_expression(add_seq, "+", e.driver);
+        add_seq = add_expression(add_seq, "+", e.driver);
       } else {
-        add_expression(sub_seq, "+", e.driver);
+        sub_seq = add_expression(sub_seq, "+", e.driver);
       }
     }
 
     if (sub_seq.empty()) {
       final_expr = add_seq;
     } else if (add_seq.empty()) {
-      final_expr = absl::StrCat(" -(", sub_seq, ")");
+      final_expr = mmap_lib::str::concat(" -(", sub_seq, ")");
     } else {
-      final_expr = absl::StrCat(add_seq, " - (", sub_seq, ")");
+      final_expr = mmap_lib::str::concat(add_seq, " - (", sub_seq, ")");
     }
 
   } else if (op == Ntype_op::Ror) {
     auto inp_edges = node.inp_edges();
     if (inp_edges.size() == 1) {
       auto expr  = get_expression(inp_edges[0].driver);
-      final_expr = absl::StrCat("|", expr);
+      final_expr = mmap_lib::str::concat("|", expr);
     } else {
       auto expr  = get_expression(inp_edges[0].driver);
-      final_expr = absl::StrCat("|{", expr);
+      final_expr = mmap_lib::str::concat("|{", expr);
       for (auto i = 1u; i < inp_edges.size(); ++i) {
-        absl::StrAppend(&final_expr, " | ", get_expression(inp_edges[i].driver));
+        final_expr = mmap_lib::str::concat(final_expr, " | ", get_expression(inp_edges[i].driver));
       }
-      absl::StrAppend(&final_expr, "}");
+      final_expr = mmap_lib::str::concat(final_expr, "}");
     }
   } else if (op == Ntype_op::Div) {
     auto lhs   = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto rhs   = get_expression(node.get_sink_pin("b").get_driver_pin());
-    final_expr = absl::StrCat(lhs, "/", rhs);
+    final_expr = mmap_lib::str::concat(lhs, "/", rhs);
 
   } else if (op == Ntype_op::Not) {
     auto lhs   = get_expression(node.get_sink_pin("a").get_driver_pin());
-    final_expr = absl::StrCat("~", lhs);
+    final_expr = mmap_lib::str::concat("~", lhs);
 
   } else if (op == Ntype_op::Set_mask) {
     auto a_dpin     = node.get_sink_pin("a").get_driver_pin();
-    auto mask_dpin  = node.get_sink_pin("mask").get_driver_pin();
-    auto value_dpin = node.get_sink_pin("value").get_driver_pin();
     auto a          = get_expression(a_dpin);
-    auto value      = get_expression(value_dpin);
 
+    auto mask_dpin  = node.get_sink_pin("mask").get_driver_pin();
     I(mask_dpin.is_type_const());  // Do we want to support this? (not easy)
 
-    auto v = mask_dpin.get_type_const();
+    auto mask_v = mask_dpin.get_type_const();
+    I(!mask_v.has_unknowns());
 
-    bool clean = false;
-    if (v == Lconst(-1)) {  // replace all bits with value
-      final_expr = value;
-      clean      = true;
-    } else if (v == Lconst(0)) {  // nothing to do
+    if (mask_v == Lconst(0)) {  // nothing to do
       final_expr = a;
-      clean      = true;
     } else {
-      auto abits = a_dpin.get_bits();
-      auto mbits = v.get_bits() - 1;  // positive mask (v>0)
-      auto vbits = value_dpin.get_bits();
+      auto [range_begin, range_end] = mask_v.get_mask_range();
+      auto a_bits = a_dpin.get_bits();
 
-      auto trail_zeroes = v.get_trailing_zeroes();
+      if (range_end>static_cast<int>(a_bits))
+        range_end = a_bits;
 
-      std::string expanded_a_txt;
-      if ((abits - trail_zeroes) > mbits) {
-        if (a_dpin.is_type_const()) {
-          auto a_val     = a_dpin.get_type_const();
-          a_val          = a_val.rsh_op(mbits);
-          expanded_a_txt = a_val.to_verilog();
-        } else {
-          expanded_a_txt = absl::StrCat(a, "[", abits - trail_zeroes - 1, ":", mbits, "]");
-        }
-      }
+      auto value_dpin = node.get_sink_pin("value").get_driver_pin();
+      auto value      = get_expression(value_dpin);
 
-      std::string expanded_value_txt;
-      if (vbits == (mbits - trail_zeroes)) {
-        expanded_value_txt = value;
-      } else if (vbits > (mbits - trail_zeroes)) {
-        expanded_value_txt = absl::StrCat(value, "[", mbits - trail_zeroes - 1, ":0]");
-      } else {  // sign-extend value to match mbits
-        expanded_value_txt = absl::StrCat("{",
-                                          mbits - trail_zeroes - vbits,
-                                          "{",
-                                          value,
-                                          "[",
-                                          mbits - trail_zeroes - 1,
-                                          "]}",
-                                          value,
-                                          "[",
-                                          mbits - trail_zeroes - 1,
-                                          ":0]}");
-      }
+      // fmt::print("a_bits:{} mask:{} minr:{} maxr:{}\n", a_bits, mask_v.to_pyrope(), range_begin, range_end);
 
-      if (v.is_mask() && v > 0) {  // {a[a.bits-1:(a.bits-m.bits),value[m.bits-1:0]}
-
-        if (expanded_a_txt.empty())
-          final_expr = expanded_value_txt;
-        else
-          final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, "}");
-
-        clean = true;
-      } else if (v > 0) {
-        if (trail_zeroes > 0) {
-          auto v2 = v.rsh_op(trail_zeroes);
-          if (v2.is_mask()) {
-            clean = true;
-
-            std::string expanded_a_trail_txt;
-            if (a_dpin.is_type_const()) {
-              auto a_val           = a_dpin.get_type_const();
-              a_val                = a_val.sext_op(trail_zeroes);
-              expanded_a_trail_txt = a_val.to_verilog();
-            } else if (trail_zeroes == a_dpin.get_bits()) {
-              expanded_a_trail_txt = a;
-            } else {
-              expanded_a_trail_txt = absl::StrCat(a, "[", trail_zeroes - 1, ":0]");
-            }
-
-            if (expanded_a_txt.empty())
-              final_expr = absl::StrCat("{", expanded_value_txt, ",", expanded_a_trail_txt, "}");
+      if (range_begin>static_cast<int>(a_bits)) {
+        final_expr = a;
+      }else if (range_begin<0 || range_end<0) { // no continuous range
+        mmap_lib::str sel;
+        for(auto i=0u;i<a_bits;++i) {
+          if (mask_v.and_op(Lconst(1)<<i).is_known_false()) { // use a
+            if (sel.empty())
+              sel = mmap_lib::str::concat( a, "[", i ,"]");
             else
-              final_expr = absl::StrCat("{", expanded_a_txt, ",", expanded_value_txt, ",", expanded_a_trail_txt, "}");
+              sel = mmap_lib::str::concat(sel, ",", a, "[", i ,"]");
+          }else{ // use value
+            if (sel.empty())
+              sel = mmap_lib::str::concat( value, "[", i ,"]");
+            else
+              sel = mmap_lib::str::concat(sel, ",", value, "[", i ,"]");
           }
         }
-      }
-      if (!clean) {
-        I(false);  // FIXME. Iterate all the bits, create mask and decide
+        final_expr = mmap_lib::str::concat("{", sel, "}");
+      }else{
+        mmap_lib::str a_replaced;
+        if ((range_end-1) == range_begin) {
+          a_replaced = mmap_lib::str::concat(value, "[", range_begin, "]");
+        }else{
+          a_replaced = mmap_lib::str::concat(value, "[", range_end - 1, ":", range_begin, "]");
+        }
+        mmap_lib::str a_high;
+        mmap_lib::str a_low;
+
+        Lconst a_val; // only if const
+        bool a_is_const = a_dpin.is_type_const();
+        if (a_is_const) {
+          a_val = a_dpin.get_type_const();
+        }
+
+        if (range_end< static_cast<int>(a_bits)) {
+          if (a_is_const) {
+            // auto v = a_val.get_mask_op(Lconst::get_mask_value(a_bits, range_end));
+            auto v = a_val.rsh_op(range_end);
+            a_high = mmap_lib::str::concat(v.to_verilog(),",");
+          }else if (static_cast<int>(a_bits)==(range_end+1)) {
+            a_high = mmap_lib::str::concat(a, "[", range_end, "],");
+          }else{
+            a_high = mmap_lib::str::concat(a, "[", a_bits-1, ":", range_end, "],");
+          }
+        }
+
+        if (range_begin>0) {
+          if (a_is_const) {
+            auto v = a_val.get_mask_op(Lconst::get_mask_value(range_begin));
+            a_low = mmap_lib::str::concat(",", v.to_verilog());
+          }else if (range_begin==1) {
+            a_low = mmap_lib::str::concat(",", a, "[0]");
+          }else{
+            a_low = mmap_lib::str::concat(",", a, "[", range_begin-1, ":0]");
+          }
+        }
+
+        final_expr = mmap_lib::str::concat("{", a_high, a_replaced, a_low, "}");
       }
     }
   } else if (op == Ntype_op::Get_mask) {
     auto mask_dpin = node.get_sink_pin("mask").get_driver_pin();
-    if (mask_dpin.is_type_const()) {
-      auto v      = mask_dpin.get_type_const();
-      auto a_dpin = node.get_sink_pin("a").get_driver_pin();
-      if (a_dpin.is_type_const()) {
-        auto a_v = a_dpin.get_type_const();
+    I(mask_dpin.is_type_const());
 
-        auto result = a_v.get_mask_op(v);
+    auto mask_v = mask_dpin.get_type_const();
+    I(!mask_v.has_unknowns());
 
-        final_expr = result.to_verilog();
-      } else if (v.is_mask()) {
-        auto a     = get_expression(a_dpin);
-        int  ubits = v.get_bits() - 1;  // -1 because it is a positive (mask=0 or mask=-1)
-        if (ubits <= 1)                 // if mask is 0b1 is ubits is 1
-          final_expr = a;
+    auto a_dpin = node  .get_sink_pin("a").get_driver_pin()      ;
+    auto a_bits = a_dpin                  .get_bits()            ;
+    auto a      =                          get_expression(a_dpin);
+
+    auto [range_begin, range_end] = mask_v.get_mask_range();
+
+    if (range_begin<0 || range_end<0) {
+      mmap_lib::str sel;
+      auto max_bits = std::max(mask_v.get_bits(), a_bits);
+      for(auto i=0u;i<max_bits;++i) {
+        if (mask_v.and_op(Lconst(1)<<i).is_known_false())
+          continue;
+
+        if (sel.empty())
+          sel = mmap_lib::str::concat( a, "[", i ,"]");
         else
-          final_expr = absl::StrCat(a, "[", ubits - 1, ":0]");
-      } else {
-        bool clean        = false;
-        auto trail_zeroes = v.get_trailing_zeroes();
-        if (trail_zeroes > 0) {
-          auto v2 = v.rsh_op(trail_zeroes);
-          if (v2.is_mask()) {
-            auto a     = get_expression(a_dpin);
-            clean      = true;
-            auto ubits = v.get_bits() - 1;  // -1 because it is a positive
-            if (ubits <= trail_zeroes)      // if mask is 0b1 is ubits is 1
-              final_expr = a;
-            else
-              final_expr = absl::StrCat(a, "[", ubits - 1, ":", trail_zeroes, "]");
-          }
-        }
-        if (!clean) {
-          I(false);  // FIXME: implement the more complicated cases (check lconst::get_mask_op)
-        }
+          sel = mmap_lib::str::concat(sel, ",", a, "[", i ,"]");
       }
-    } else {
-      I(false);  // FIXME: implement this
+      final_expr = mmap_lib::str::concat("{", sel, "}");
+    }else{
+      if (range_begin>static_cast<int>(a_bits)) {
+        final_expr = mmap_lib::str::concat("{", range_end-range_begin, "{", a , "[", a_bits-1 ,"]}}");
+      }else if (range_end>static_cast<int>(a_bits)) {
+        auto top = mmap_lib::str::concat("{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}");
+        final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
+      }else{
+        final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
+      }
     }
   } else if (op == Ntype_op::Sext) {
     auto lhs      = get_expression(node.get_sink_pin("a").get_driver_pin());
@@ -528,18 +505,18 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     if (pos_node.is_type_const()) {
       auto lpos = pos_node.get_type_const();
       if (lpos.is_i()) {
-        final_expr = absl::StrCat(lhs, "[", lpos.to_i() - 1, ":0]");
+        final_expr = mmap_lib::str::concat(lhs, "[", lpos.to_i() - 1, ":0]");
       }
     }
     if (final_expr.empty()) {
       auto bits     = node.get_sink_pin("b").get_driver_pin().get_bits();
       auto pos_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
 
-      final_expr = absl::StrCat(lhs, "& ((1'sh", std::to_string(bits), " << ", pos_expr, ")-1)");
+      final_expr = mmap_lib::str::concat(lhs, "& ((1'sh", bits, " << ", pos_expr, ")-1)");
     }
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
-    std::vector<std::string> lhs;
-    std::vector<std::string> rhs;
+    std::vector<mmap_lib::str> lhs;
+    std::vector<mmap_lib::str> rhs;
     for (const auto &e : node.inp_edges()) {
       if (e.sink.get_pin_name() == "A") {
         lhs.emplace_back(get_expression(e.driver));
@@ -547,7 +524,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
         rhs.emplace_back(get_expression(e.driver));
       }
     }
-    std::string cmp;
+    mmap_lib::str cmp;
     if (op == Ntype_op::GT) {
       cmp = " > ";
     } else {
@@ -556,19 +533,19 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     for (const auto &l : lhs) {
       for (const auto &r : rhs) {
         if (final_expr.empty()) {
-          final_expr = absl::StrCat(l, cmp, r);
+          final_expr = mmap_lib::str::concat(l, cmp, r);
         } else {
-          absl::StrAppend(&final_expr, " && ", l, cmp, r);
+          final_expr = mmap_lib::str::concat(final_expr, " && ", l, cmp, r);
         }
       }
     }
   } else if (op == Ntype_op::SHL) {
     auto        val_expr = get_expression(node.get_sink_pin("a").get_driver_pin());
-    std::string onehot;
+    mmap_lib::str onehot;
     bool        first = true;
     for (auto &amt_dpin : node.get_sink_pin("B").inp_drivers()) {
       auto amt_expr = get_expression(amt_dpin);
-      absl::StrAppend(&onehot, first ? "(" : " | (", val_expr, " << ", amt_expr, ")");
+      onehot = mmap_lib::str::concat(onehot, first ? "(" : " | (", val_expr, " << ", amt_expr, ")");
       first = false;
     }
     final_expr = onehot;
@@ -577,7 +554,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     auto amt_expr = get_expression(node.get_sink_pin("b").get_driver_pin());
 
     // TODO: If val_expr min>=0, then >> is OK
-    final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
+    final_expr = mmap_lib::str::concat(val_expr, " >>> ", amt_expr);
   } else if (op == Ntype_op::Const) {
     // final_expr = node.get_type_const().to_verilog();
     return;  // Done before at create_locals
@@ -588,7 +565,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
                 Ntype::get_name(op));
     return;
   } else {
-    std::string_view txt_op;
+    mmap_lib::str txt_op;
     if (op == Ntype_op::Mult)
       txt_op = "*";
     else if (op == Ntype_op::And)
@@ -603,7 +580,7 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
     I(!txt_op.empty());
 
     for (auto e : node.inp_edges()) {
-      add_expression(final_expr, txt_op, e.driver);
+      final_expr = add_expression(final_expr, txt_op, e.driver);
     }
   }
 
@@ -615,64 +592,63 @@ void Cgen_verilog::process_simple_node(std::string &buffer, Node &node) {
 
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it == pin2var.end()) {
-    pin2expr.emplace(dpin.get_compact_class(), final_expr);
+    pin2expr.emplace(dpin.get_compact_class(), Expr(final_expr, true));
   } else {
-    absl::StrAppend(&buffer, "  ", var_it->second, " = ", final_expr, ";\n");
+    fout->append("  ", var_it->second, " = ", final_expr, ";\n");
   }
 }
 
-void Cgen_verilog::create_module_io(std::string &buffer, Lgraph *lg) {
-  absl::StrAppend(&buffer, "module ", get_scaped_name(lg->get_name()), "(\n");
+void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, Lgraph *lg) {
 
   bool first_arg = true;
   lg->each_sorted_graph_io([&](const Node_pin &pin, Port_ID pos) {
     (void)pos;
 
     if (!first_arg)
-      absl::StrAppend(&buffer, "  ,");
+      fout->append("  ,");
     else
-      absl::StrAppend(&buffer, "   ");
+      fout->append("   ");
     first_arg = false;
 
     if (pin.is_graph_input()) {
-      absl::StrAppend(&buffer, "input signed ");
+      fout->append("input signed ");
     } else {
-      absl::StrAppend(&buffer, "output reg signed ");
+      fout->append("output reg signed ");
     }
 
     const auto name = get_scaped_name(pin.get_name());
     const auto bits = pin.get_bits();
 
     if (bits > 1) {
-      absl::StrAppend(&buffer, "[", bits - 1, ":0] ", name, "\n");
+      fout->append("[", bits - 1, ":0] ", name, "\n");
     } else {
-      absl::StrAppend(&buffer, name, "\n");
+      fout->append(name, "\n");
     }
 
     pin2var.emplace(pin.get_compact_class(), name);
   });
 
-  absl::StrAppend(&buffer, ");\n");
+  fout->append(");\n");
 }
 
-void Cgen_verilog::create_memories(std::string &buffer, Lgraph *lg) {
+void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, Lgraph *lg) {
   for (auto node : lg->fast()) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Memory)
       continue;
 
-    process_memory(buffer, node);
+    process_memory(fout, node);
   }
 }
 
-void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
-  lg->each_local_sub_fast([&buffer](Node &node, Lg_type_id lgid) {
+void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, Lgraph *lg) {
+  lg->each_local_sub_fast([fout](Node &node, Lg_type_id lgid) {
     (void)lgid;
 
     auto        iname = get_scaped_name(node.default_instance_name());
     const auto &sub   = node.get_type_sub_node();
 
-    absl::StrAppend(&buffer, get_scaped_name(sub.get_name()), " ", iname, "(\n");
+    fout->append(get_scaped_name(sub.get_name()), " ", iname, "(\n");
 
     bool first_entry = true;
     for (auto &io_pin : sub.get_sorted_io_pins()) {
@@ -686,16 +662,19 @@ void Cgen_verilog::create_subs(std::string &buffer, Lgraph *lg) {
           dpin.invalidate();
       }
       if (!dpin.is_invalid()) {
-        absl::StrAppend(&buffer, first_entry ? "" : ",", ".", io_pin.name.to_s(), "(", get_wire_or_const(dpin), ")\n");
+        fout->append(mmap_lib::str::concat(first_entry ? "" : ",", ".", io_pin.name, "(", get_wire_or_const(dpin), ")\n"));
         first_entry = false;
       }
     }
 
-    absl::StrAppend(&buffer, ");\n");
+    fout->append(");\n");
   });
 }
 
-void Cgen_verilog::create_combinational(std::string &buffer, Lgraph *lg) {
+void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgraph *lg) {
+
+  fout->append("always_comb begin\n");
+
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
     if (Ntype::is_multi_driver(op)) {
@@ -707,14 +686,18 @@ void Cgen_verilog::create_combinational(std::string &buffer, Lgraph *lg) {
 
     // flops added to the last always with outputs
     if (op == Ntype_op::Mux) {
-      process_mux(buffer, node);
+      process_mux(fout, node);
     } else {
-      process_simple_node(buffer, node);
+      process_simple_node(fout, node);
     }
   }
+
+  fout->append("end\n");
 }
 
-void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
+void Cgen_verilog::create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg) {
+
+  fout->append("always_comb begin\n");
   lg->each_graph_output([&](const Node_pin &dpin) {
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     if (!spin.is_connected())
@@ -723,47 +706,48 @@ void Cgen_verilog::create_outputs(std::string &buffer, Lgraph *lg) {
     auto name = get_scaped_name(dpin.get_name());
 
     auto out_dpin = spin.get_driver_pin();
-    absl::StrAppend(&buffer, "  ", name, " = ", get_expression(out_dpin), ";\n");
+    fout->append("  ", name, " = ", get_expression(out_dpin), ";\n");
   });
 
   for (auto node : lg->fast()) {
     if (node.is_type_flop())
-      process_flop(buffer, node);
+      process_flop(fout, node);
   }
+  fout->append("end\n");
 }
 
-void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
+void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *lg) {
   for (auto node : lg->fast()) {
     if (!node.is_type_flop())
       continue;
 
     auto dpin = node.get_driver_pin();
 
-    std::string pin_name = dpin.get_wire_name();
+    mmap_lib::str pin_name = dpin.get_wire_name();
 
     // FIXME: HERE if flop is output, do not create flop
     const auto name      = get_scaped_name(pin_name);
-    const auto name_next = get_scaped_name(absl::StrCat("___next_", std::string(pin_name)));
+    const auto name_next = get_scaped_name(mmap_lib::str::concat("___next_", pin_name));
 
-    std::string edge = "posedge";
+    mmap_lib::str edge = "posedge";
     if (node.get_sink_pin("posclk").is_connected()) {
       auto v = node.get_sink_pin("posclk").get_driver_pin().get_type_const().to_i() != 0;
       if (!v) {
         edge = "negedge";
       }
     }
-    std::string clock = get_scaped_name(node.get_sink_pin("clock").get_wire_name());
+    mmap_lib::str clock = get_scaped_name(node.get_sink_pin("clock").get_wire_name());
 
-    std::string reset_async;
-    std::string reset;
+    mmap_lib::str reset_async;
+    mmap_lib::str reset;
     bool        negreset = false;
 
     if (node.get_sink_pin("reset").is_connected()) {
       auto reset_dpin = node.get_sink_pin("reset").get_driver_pin();
       if (reset_dpin.is_type_const()) {
         auto reset_const = reset_dpin.get_node().get_type_const();
-        if (reset_const != Lconst(0) && reset_const != Lconst::string("false")) {
-          Pass::info("flop reset is hardwired to value:{}. (weird)", reset_const.to_pyrope());
+        if (!reset_const.is_known_false() && reset_const != Lconst::from_string("false")) {
+          Pass::info("flop reset pin is hardwired to value:{}. (weird)", reset_const.to_pyrope());
           reset = reset_const.to_verilog();  // hardcoded value???
         }
       } else {
@@ -774,7 +758,7 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
         if (node.get_sink_pin("async").is_connected()) {
           auto v = node.get_sink_pin("async").get_driver_pin().get_type_const().to_i() != 0;
           if (v) {
-            reset_async = absl::StrCat(negreset ? "or negedge " : "or posedge ", reset);
+            reset_async = mmap_lib::str::concat(negreset ? "or negedge " : "or posedge ", reset);
           }
         }
 
@@ -782,34 +766,32 @@ void Cgen_verilog::create_registers(std::string &buffer, Lgraph *lg) {
       }
     }
 
-    std::string reset_initial = "'h0";
+    mmap_lib::str reset_initial = "'h0";
     if (node.get_sink_pin("initial").is_connected()) {
       reset_initial = node.get_sink_pin("initial").get_driver_pin().get_type_const().to_verilog();
     }
 
-    absl::StrAppend(&buffer, "always @(", edge, " ", clock, reset_async, " ) begin\n");
+    fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
 
-    if (!reset.empty()) {
+    if (reset.empty()) {
+      fout->append(name, " <= ", name_next, ";\n");
+    }else{
       if (negreset) {
-        absl::StrAppend(&buffer, "if (!", reset, ") begin\n");
+        fout->append("if (!", reset, ") begin\n");
       } else {
-        absl::StrAppend(&buffer, "if (", reset, ") begin\n");
+        fout->append("if (", reset, ") begin\n");
       }
-      absl::StrAppend(&buffer, name, " <= ", reset_initial, ";\n");
-      absl::StrAppend(&buffer, "end else begin\n");
+      fout->append(name, " <= ", reset_initial, ";\n");
+      fout->append("end else begin\n");
+      fout->append(name, " <= ", name_next, ";\n");
+      fout->append("end\n");
     }
 
-    absl::StrAppend(&buffer, name, " <= ", name_next, ";\n");
-
-    if (!reset.empty()) {
-      absl::StrAppend(&buffer, "end\n");
-    }
-
-    absl::StrAppend(&buffer, "end\n");
+    fout->append("end\n");
   }
 }
 
-void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std::string &name, bool out_unsigned) {
+void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &dpin, const mmap_lib::str name, bool out_unsigned) {
   if (dpin.is_type_const()) {
     return;  // No point for constants
   }
@@ -820,7 +802,7 @@ void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std
 
   int bits = dpin.get_bits();
 
-  std::string reg_str;
+  mmap_lib::str reg_str;
   if (out_unsigned) {
     reg_str = "reg ";
   } else {
@@ -832,23 +814,23 @@ void Cgen_verilog::add_to_pin2var(std::string &buffer, Node_pin &dpin, const std
     --bits;
 
   if (bits <= 0) {
-    absl::StrAppend(&buffer, reg_str, name, ";\n");
+    fout->append(reg_str, name, ";\n");
   } else {
-    absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name, ";\n");
+    fout->append(reg_str, "[", bits, ":0] ", name, ";\n");
   }
 
   if (dpin.is_type_flop()) {
     auto name_next = get_append_to_name(name, "___next_");
 
     if (bits <= 0) {
-      absl::StrAppend(&buffer, reg_str, name_next, ";\n");
+      fout->append(reg_str, name_next, ";\n");
     } else {
-      absl::StrAppend(&buffer, reg_str, "[", bits, ":0] ", name_next, ";\n");
+      fout->append(reg_str, "[", bits, ":0] ", name_next, ";\n");
     }
   }
 }
 
-void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
+void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) {
   // IDEA: This pass can create "sub-blocks in lg". Two blocks can process in
   // parallel, if there is not backward edge crossing blocks. Edges that read
   // pin2var are OK, edges that go to pin2expr (future passes) are not OK.
@@ -860,11 +842,11 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
       if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
         for (auto &e : node.inp_edges()) {
           auto name2 = get_scaped_name(e.driver.get_wire_name());
-          add_to_pin2var(buffer, e.driver, name2, e.driver.is_unsign());
+          add_to_pin2var(fout, e.driver, name2, e.driver.is_unsign());
         }
         for (auto &dpin2 : node.out_connected_pins()) {
           auto name2 = get_scaped_name(dpin2.get_wire_name());
-          add_to_pin2var(buffer, dpin2, name2, dpin2.is_unsign());
+          add_to_pin2var(fout, dpin2, name2, dpin2.is_unsign());
         }
       }
       continue;
@@ -877,7 +859,7 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
 
     auto dpin = node.get_driver_pin();
 
-    std::string name = get_scaped_name(dpin.get_wire_name());
+    mmap_lib::str name = get_scaped_name(dpin.get_wire_name());
 
     bool out_unsigned = dpin.is_unsign();
 
@@ -886,32 +868,32 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
       if (node.get_num_inp_edges() > 3 && false) {
         auto name_sel = get_append_to_name(name, "___sel_");
 
-        absl::StrAppend(&buffer, "reg signed [", node.get_driver_pin().get_bits() - 1, ":0] ", name_sel, ";\n");
+        fout->append("reg signed [", node.get_driver_pin().get_bits() - 1, ":0] ", name_sel, ";\n");
       }
     } else if (op == Ntype_op::Sext) {
       auto b_dpin = node.get_sink_pin("b").get_driver_pin();
       if (!b_dpin.is_invalid() && b_dpin.is_type_const()) {
         auto        dpin2         = node.get_sink_pin("a").get_driver_pin();
-        std::string name2         = get_scaped_name(dpin2.get_wire_name());
+        mmap_lib::str name2         = get_scaped_name(dpin2.get_wire_name());
         bool        out_unsigned2 = dpin2.get_type_op() == Ntype_op::Get_mask;
-        add_to_pin2var(buffer, dpin2, name2, out_unsigned2);
+        add_to_pin2var(fout, dpin2, name2, out_unsigned2);
       }
       if (node.has_name() && node.get_name()[0] != '_')
         continue;
     } else if (op == Ntype_op::Set_mask) {
-      add_to_pin2var(buffer, dpin, name, false);
+      add_to_pin2var(fout, dpin, name, false);
     } else if (op == Ntype_op::Const) {
       auto final_expr = node.get_type_const().to_verilog();
-      pin2expr.emplace(node.get_driver_pin().get_compact_class(), final_expr);
+      pin2expr.emplace(node.get_driver_pin().get_compact_class(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
-      name         = get_scaped_name(absl::StrCat("___unsign_", node.get_sink_pin("a").get_wire_name()));
+      name         = get_scaped_name(mmap_lib::str::concat("___unsign_", node.get_sink_pin("a").get_wire_name()));
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
       {
         // Force the "a" pin in get_mask to be a variable (yosys fails otherwise)
         auto dpin2 = node.get_sink_pin("a").get_driver_pin();
         if (!pin2var.contains(dpin2.get_compact_class())) {
           auto name2 = get_scaped_name(dpin2.get_wire_name());
-          add_to_pin2var(buffer, dpin2, name2, false);
+          add_to_pin2var(fout, dpin2, name2, false);
         }
       }
     } else if (!node.is_type_flop()) {
@@ -922,107 +904,45 @@ void Cgen_verilog::create_locals(std::string &buffer, Lgraph *lg) {
         continue;
     }
 
-    add_to_pin2var(buffer, dpin, name, out_unsigned);
-  }
-}
-
-std::tuple<std::string, int> Cgen_verilog::setup_file(Lgraph *lg) const {
-  std::string filename;
-  if (odir.empty()) {
-    filename = absl::StrCat(lg->get_name().to_s(), ".v");
-  } else {
-    filename = absl::StrCat(odir.to_s(), "/", lg->get_name().to_s(), ".v");
-  }
-
-  int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd < 0) {
-    mmap_lib::mmap_gc::try_collect_fd();  // maybe they are all used by LG?
-    fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  }
-  if (fd < 0) {
-    Pass::error("could not create destination {} verilog file (permissions?)", filename);
-    return std::tuple(filename, -1);
-  }
-
-  return std::tuple(filename, fd);
-}
-
-void Cgen_verilog::append_to_file(const std::string &filename, int fd, const std::string &buffer) const {
-  if (buffer.empty())
-    return;
-
-  int sz = write(fd, buffer.data(), buffer.size());
-  if (sz != static_cast<int>(buffer.size())) {
-    Pass::error("could not write to {} verilog file (file size?)", filename);
-    return;
+    add_to_pin2var(fout, dpin, name, out_unsigned);
   }
 }
 
 void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
+
+  // nrunning!=0 -> incorrect multithread API. Create a Cgen_verilog per thread
+  // instance, and then call one do_from_lgraph at a time per object
+  assert(nrunning == 0);
+  ++nrunning;
+
   (void)verbose;
 
-  pin2var.clear();
-  pin2expr.clear();
+  pin2var   .clear();
+  pin2expr  .clear();
   mux2vector.clear();
 
-  auto [filename, fd] = setup_file(lg);
-  I(fd >= 0);
-
-  {
-    std::string buffer;
-    create_module_io(buffer, lg);  // pin2var adds
-    append_to_file(filename, fd, buffer);
+  mmap_lib::str filename;
+  if (odir.empty()) {
+    filename = mmap_lib::str::concat(           lg->get_name(), ".v");
+  } else {
+    filename = mmap_lib::str::concat(odir, "/", lg->get_name(), ".v");
   }
 
-  // BEGIN PARALLEL BLOCK 1
-  {
-    std::string buffer;
-    create_locals(buffer, lg);  // pin2expr, pin2var & mux2vector adds
-    append_to_file(filename, fd, buffer);
-  }
+  auto fout = std::make_shared<File_output>(filename);
 
-  {
-    std::string buffer;
-    create_memories(buffer, lg);  // no local access
-    append_to_file(filename, fd, buffer);
-  }
+  fout->append("module ", get_scaped_name(lg->get_name()), "(\n");
 
-  {
-    std::string buffer;
-    create_subs(buffer, lg);  // no local access
-    append_to_file(filename, fd, buffer);
-  }
-  // END PARALLEL BLOCK 1
+  create_module_io     (fout, lg);  // pin2var adds
 
-  // BEGIN PARALLEL BLOCK 2
-  {
-    std::string buffer;
-    create_combinational(buffer, lg);  // pin2expr adds, reads pin2var & mux2vector
-    if (!buffer.empty()) {
-      absl::StrAppend(&buffer, "end\n");
+  create_locals        (fout, lg);  // pin2expr, pin2var & mux2vector adds
+  create_memories      (fout, lg);  // no local access
+  create_subs          (fout, lg);  // no local access
 
-      append_to_file(filename, fd, "always_comb begin\n");
-      append_to_file(filename, fd, buffer);
-    }
-  }
+  create_combinational (fout, lg);  // pin2expr adds, reads pin2var & mux2vector
+  create_outputs       (fout, lg);  // reads pin2expr
+  create_registers     (fout, lg);  // reads pin2var
 
-  {
-    std::string buffer;
-    create_outputs(buffer, lg);  // reads pin2expr
-    if (!buffer.empty()) {
-      absl::StrAppend(&buffer, "end\n");
+  fout->append("endmodule\n");
 
-      append_to_file(filename, fd, "always_comb begin\n");
-      append_to_file(filename, fd, buffer);
-    }
-  }
-
-  {
-    std::string buffer;
-    create_registers(buffer, lg);  // reads pin2var
-    append_to_file(filename, fd, buffer);
-  }
-  // BEGIN PARALLEL BLOCK 2
-
-  append_to_file(filename, fd, "endmodule\n");
+  --nrunning;
 }

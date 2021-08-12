@@ -236,6 +236,10 @@ public:
   std::vector<int> vec_cast(const std::vector<int> &vec1, int toBits, bool signExtend = false);
   std::vector<int> vec_pick(const std::vector<int> &vec1, int U32Const, int pickbits);
 
+  std::vector<int> vec_get_mask( std::vector<int> data, std::vector<int> mask );
+// std::vector<int> vec_get_mask(const std::vector<int> &data, uint64_t &mask );
+  std::vector<int> vec_set_mask(std::vector<int> a, std::vector<int> mask, std::vector<int> value);
+
   std::vector<int> vec_pass(const std::vector<int> &vec1);
   std::vector<int> vec_not(const std::vector<int> &vec1);
   std::vector<int> vec_and(const std::vector<int> &vec1, const std::vector<int> &vec2);

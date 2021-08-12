@@ -689,7 +689,7 @@ void Firmap::map_node_fir_mul(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 void Firmap::map_node_fir_const(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
   auto const_str = old_node.get_driver_pin("Y").get_name();
   auto pos       = const_str.find("bits");
-  auto new_node  = new_lg->create_node_const(Lconst(const_str.substr(0, pos - 1)));
+  auto new_node  = new_lg->create_node_const(Lconst::from_pyrope(const_str.substr(0, pos - 1)));
   for (auto old_dpin : old_node.out_connected_pins()) {
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
   }

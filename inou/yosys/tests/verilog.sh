@@ -133,7 +133,7 @@ do
       continue
     fi
   else
-    ${LGCHECK} --implementation=tmp_yosys_mix/all_${base}.v --reference=${full_input} --top=${base}
+    ${LGCHECK} --implementation tmp_yosys_mix/all_${base}.v --reference ${full_input} --top ${base}
     if [ $? -eq 0 ]; then
       echo "Successfully matched generated verilog with original verilog (${full_input})"
     else

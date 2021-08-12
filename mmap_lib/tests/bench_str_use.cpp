@@ -581,7 +581,6 @@ void bench_str_cmp() {
 int main(int argc, char** argv) {
 
   mmap_lib::str::setup();
-  mmap_lib::str::nuke();
 
 #ifdef BENCH
   bench_str_cmp();

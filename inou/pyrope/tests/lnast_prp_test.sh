@@ -198,7 +198,7 @@ Pyrope_compile () {
         echo "Logic Equivalence Check: Hierarchical Design"
         echo "----------------------------------------------------"
 
-        ${LGCHECK} --top=$top_module --implementation=${top_module}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
+        ${LGCHECK} --top $top_module --implementation ${top_module}.v --reference ./inou/pyrope/tests/compiler/verilog_gld/${top_module}.gld.v
 
         if [ $? -eq 0 ]; then
             echo "Successfully pass logic equivilence check!"
@@ -216,7 +216,7 @@ Pyrope_compile () {
             echo "Logic Equivalence Check"
             echo "----------------------------------------------------"
 
-            ${LGCHECK} --implementation=${pt}.v --reference=./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
+            ${LGCHECK} --implementation ${pt}.v --reference ./inou/pyrope/tests/compiler/verilog_gld/${pt}.gld.v
 
             if [ $? -eq 0 ]; then
                 echo "Successfully pass logic equivilence check!"

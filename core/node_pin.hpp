@@ -398,7 +398,7 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
-  std::string get_wire_name() const;
+  mmap_lib::str get_wire_name() const;
 
   void             set_name(const mmap_lib::str &wname);
   void             reset_name(const mmap_lib::str &wname);

@@ -109,7 +109,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
         constant = val_it->second;
       }
     } else {
-      constant = Lconst(data.token.get_text());
+      constant = Lconst::from_pyrope(data.token.get_text());
       I(data.type.is_const());
     }
 
@@ -166,8 +166,7 @@ void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid
 
   auto val_it = level_forward_val.find(rhs);
   if (val_it != level_forward_val.end()) {
-    auto ln_txt = val_it->second.to_str();
-    auto lnode  = Lnast_node::create_const(ln_txt);
+    auto lnode  = Lnast_node::create_const(val_it->second.to_pyrope());
     ln->set_data(rhs_id, lnode);
 
     level_forward_val[lhs] = val_it->second;

@@ -499,7 +499,21 @@ private:
 
     // default constructed iterator can be compared to itself, but WON'T return true when
     // compared to end().
-    Iter() : mKeyVals(nullptr), mInfo(nullptr), map_ptr{nullptr} {}
+    explicit constexpr Iter() : mKeyVals(nullptr), mInfo(nullptr), map_ptr(nullptr) {}
+
+    explicit Iter(const Iter &it) : mKeyVals(it.mKeyVals), mInfo(it.mInfo), map_ptr(it.map_ptr) {
+      if (map_ptr) {
+        map_ptr->ref_lock();
+      }
+    }
+
+    explicit Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
+    }
+
+    explicit Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
+        : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
+      fastForward();
+    }
 
     ~Iter() {
       if (map_ptr) {
@@ -514,20 +528,6 @@ private:
       if (map_ptr) {
         map_ptr->ref_lock();
       }
-    }
-
-    // both const_iterator and iterator can be constructed from a non-const iterator
-    Iter(Iter<false> const& other) : mKeyVals(other.mKeyVals), mInfo(other.mInfo), map_ptr(other.map_ptr) {
-      if (map_ptr)
-        map_ptr->ref_lock();
-    }
-
-    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr) : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
-    }
-
-    Iter(const map* _map_ptr, NodePtr valPtr, uint8_t const* infoPtr, fast_forward_tag mmap_map_UNUSED(tag) /*unused*/)
-        : mKeyVals(valPtr), mInfo(infoPtr), map_ptr(_map_ptr) {
-      fastForward();
     }
 
     // prefix increment. Undefined behavior if we are at end()!
@@ -1061,6 +1061,7 @@ public:
     return ret;
   }
 
+#if 0
   [[nodiscard]] const T  get(const const_iterator& it) const {
     assert(ref_locked);
     return it->second;
@@ -1074,6 +1075,7 @@ public:
     assert(ref_locked);
     return it.first;
   }
+#endif
 
   [[nodiscard]] T* ref(key_type const& key) {
     assert(ref_locked);
@@ -1186,8 +1188,9 @@ public:
     return erase(iterator{this, const_cast<Node*>(pos.mKeyVals), const_cast<uint8_t*>(pos.mInfo)});
   }
 
+#if 0
   // Erases element at pos, returns iterator to the next element.
-  iterator erase(iterator pos) {
+  iterator erase(iterator &pos) {
     assert(ref_locked);
 
     // we assume that pos always points to a valid entry, and not end().
@@ -1202,8 +1205,26 @@ public:
     }
 
     // no backward shift, return next element
-    return ++pos;
+    auto it = pos; // copy iterator and move it
+    return ++it;
   }
+#else
+  bool erase(const iterator &pos) {
+    assert(ref_locked);
+
+    // we assume that pos always points to a valid entry, and not end().
+    auto const idx = static_cast<size_t>(pos.mKeyVals - mKeyVals);
+
+    shiftDown(idx);
+    --(*mNumElements);
+
+    if (*pos.mInfo) {
+      return false;
+    }
+
+    return true;
+  }
+#endif
 
   size_t erase(const key_type& key) {
     if (!ref_locked)

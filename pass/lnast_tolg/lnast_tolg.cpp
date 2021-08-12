@@ -13,11 +13,11 @@ Lnast_tolg::Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str &_
   tuple_assign_str = "tuple_assign";
 }
 
-std::vector<Lgraph *> Lnast_tolg::do_tolg(std::shared_ptr<Lnast> ln, const Lnast_nid &top_stmts) {
+std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts) {
   Lbench b("pass.lnast_tolg");
 
   lnast = ln;
-  auto src = lnast->get_source();
+  auto src = ln->get_source();
   if (src.empty())
     src = "-";
 
@@ -324,14 +324,13 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
   auto opd1_ntype = opd1_node.get_type_op();
 
   Node_pin opr_spin;
-  if (is_tup_asg || opd1_ntype == Ntype_op::TupAdd) {
+  auto cond1 = is_tup_asg;
+  auto cond2 = opd1_ntype == Ntype_op::TupAdd;
+  auto cond3 = opd1.has_name() && is_input(opd1.get_name());
+
+  if (cond1 || cond2 || cond3) {
     opr_spin = setup_tuple_assignment(lg, lnidx_assign);
-  } else if (opd1_ntype == Ntype_op::AttrSet) {
-    opr_spin = setup_node_assign_and_lhs(lg, lnidx_assign);
-  } else if (opd1.has_name() && is_input(opd1.get_name())) {
-    opr_spin = setup_tuple_assignment(lg, lnidx_assign);
-  } else {
-    // opr_spin = setup_tuple_assignment(lg, lnidx_assign);
+  } else { // including condition of "opd1_ntype == Ntype_op::AttrSet"
     opr_spin = setup_node_assign_and_lhs(lg, lnidx_assign);
   }
 
@@ -422,7 +421,9 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
       }
       Lconst pos_const;
       if (field_name.substr(0, 4) != "null") {
-        pos_const = Lconst(absl::StrCat(":", std::to_string(fp), ":", field_name.to_s()));
+        // pos_const = Lconst::from_pyrope(mmap_lib::str::concat(":", mmap_lib::str(fp), ":", field_name));
+        pos_const = Lconst::from_pyrope(mmap_lib::str::concat(":", fp, ":", field_name));
+        fmt::print("DEBUG0\n");
       } else {
         pos_const = Lconst(fp);
       }
@@ -491,7 +492,8 @@ Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, const mmap_lib::str &input_field)
   auto pos_spin = tup_get_inp.setup_sink_pin("field");
   auto subname  = input_field.substr(1, input_field.size() - 1);
 
-  auto pos_dpin = lg->create_node_const(Lconst(subname)).setup_driver_pin();
+  auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(subname)).setup_driver_pin();
+  fmt::print("DEBUG1\n");
   lg->add_edge(pos_dpin, pos_spin);
 
   auto tg_dpin = tup_get_inp.setup_driver_pin();
@@ -502,11 +504,11 @@ Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, const mmap_lib::str &input_field)
 }
 
 void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg) {
-  int                            i = 0;
   absl::flat_hash_map<int, Node> tg_map;
-  mmap_lib::str                  c0_tg_name;
-  mmap_lib::str                  c0_tg_vname;
-  int8_t                         c0_tg_subs = 0;
+  int            i = 0;
+  mmap_lib::str  c0_tg_name;
+  mmap_lib::str  c0_tg_vname;
+  auto           c0_tg_subs = 0;
 
   for (const auto &child : lnast->children(lnidx_tg)) {
     if (i == 0) {
@@ -552,7 +554,8 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
         lg->add_edge(pos_dpin, pos_spin);
       } else {
         I(lntype.is_const());
-        auto pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
+        auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(cn_tg_name)).setup_driver_pin();
+        fmt::print("DEBUG2");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -578,7 +581,8 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
         lg->add_edge(pos_dpin, pos_spin);
       } else {
         I(lntype.is_const());
-        auto pos_dpin = lg->create_node_const(Lconst(cn_tg_name)).setup_driver_pin();
+        auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(cn_tg_name)).setup_driver_pin();
+        fmt::print("DEBUG3\n");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -666,6 +670,8 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 
 void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
   auto pos          = full_inp_hier_name.rfind('.');
+  if (pos == std::string::npos)
+    return;
   auto last_subname = full_inp_hier_name.substr(pos + 1);
 
   // if the last subname is not a number(not a constant), means the tuple is not array-like, it's impossilbe
@@ -676,7 +682,8 @@ void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin,
 
   auto tup_name  = full_inp_hier_name.substr(0, pos);
   auto name_dpin = setup_tuple_ref(lg, tup_name);
-  auto pos_dpin  = lg->create_node_const(Lconst(last_subname)).setup_driver_pin();
+  auto pos_dpin  = lg->create_node_const(Lconst::from_pyrope(last_subname)).setup_driver_pin();
+  fmt::print("DEBUG4\n");
 
   auto ta_node  = lg->create_node(Ntype_op::TupAdd);
   auto pos_spin = ta_node.setup_sink_pin("field");
@@ -716,7 +723,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  // -------- test start ---------
 
   bool        is_all_constant_key_ta = true;
   int         k                      = 0;
@@ -744,6 +750,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       continue;
     }
   }
+  
 
   if (is_all_constant_key_ta) {
     int j = 0;
@@ -756,7 +763,15 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         auto        tup_add     = lg->create_node(Ntype_op::TupAdd);
 
         auto pos_spin = tup_add.setup_sink_pin("field");
-        auto pos_dpin = lg->create_node_const(mmap_lib::str(concatenated_field_str)).setup_driver_pin();
+        // from_pyrope("0.__ubits");
+        // from_string("0.__ubits");
+        // pyrope string cannot differentiate "0.__ubits" and "0bxxx", you need need to make it from_string for Lconst
+        Node_pin pos_dpin;
+        if (concatenated_field_str.find('.') != std::string::npos) {
+          pos_dpin = lg->create_node_const(Lconst::from_string(concatenated_field_str)).setup_driver_pin();
+        } else {
+          pos_dpin = lg->create_node_const(Lconst::from_pyrope(concatenated_field_str)).setup_driver_pin();
+        }
         pos_dpin.connect_sink(pos_spin);
 
         auto val_spin = tup_add.setup_sink_pin("value");
@@ -782,7 +797,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
     return;
   }
 
-  ////------- test end ------
 
   absl::flat_hash_map<int, Node>          ta_map;
   absl::flat_hash_map<int, mmap_lib::str> ta_name;
@@ -831,7 +845,8 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         lg->add_edge(pos_dpin, pos_spin);
       } else {
         I(lntype.is_const());
-        auto pos_dpin = lg->create_node_const(Lconst(field_vname)).setup_driver_pin();
+        auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(field_vname)).setup_driver_pin();
+        fmt::print("DEBUG5\n");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -888,7 +903,8 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         lg->add_edge(pos_dpin, pos_spin);
       } else {
         I(lntype.is_const());
-        auto pos_dpin = lg->create_node_const(Lconst(field_vname)).setup_driver_pin();
+        auto pos_dpin = lg->create_node_const(Lconst::from_pyrope(field_vname)).setup_driver_pin();
+        fmt::print("DEBUG6");
         lg->add_edge(pos_dpin, pos_spin);
       }
 
@@ -937,7 +953,7 @@ Node_pin Lnast_tolg::setup_field_dpin(Lgraph *lg, const mmap_lib::str &field_nam
     return it2->second;
   }
 
-  auto dpin              = lg->create_node_const(field_name).setup_driver_pin();
+  auto dpin              = lg->create_node_const(Lconst::from_pyrope(field_name)).setup_driver_pin();
   field2dpin[field_name] = dpin;
 
   return dpin;
@@ -1032,6 +1048,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   I(!name.empty());
 
   if (lnast->get_type(lnidx_opd).is_const()) {  // High priority in search to avoid alias
+    fmt::print("DEBUG10 const:{}\n", vname);
     auto node_dpin  = create_const(lg, vname);
     name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
     return node_dpin;
@@ -1129,8 +1146,13 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, const mmap_lib::str &const_str) {
 #if 0
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
-  if (!const_str.contains("bits"))
-    return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
+  if (!const_str.contains("bits")) {
+    fmt::print("DEBUG8, const_str:{}\n", const_str);
+    if (Lconst::from_pyrope(const_str).is_i())
+      return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
+    else 
+      return lg->create_node_const(Lconst::from_string(const_str)).setup_driver_pin();
+  }
 
   // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
   // TODO: It  may be cleaner to create a __fir_const sub in the LNAST gen
@@ -1343,11 +1365,10 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   }
 
   mmap_lib::str func_name;
-  if (module_name.substr(0, 9) == "__firrtl_") {
-    func_name = func_name_ori;
-  } else if (func_name_ori.substr(0, 2) == "__") {  //__flop, __mem ... etc
-    func_name = func_name_ori;
-  } else if (!inlined_func_names.contains(func_name_ori)) {
+  auto cond1 =  module_name.substr(0, 9) == "__firrtl_";
+  auto cond2 =  func_name_ori.substr(0, 2) == "__";
+  auto cond3 =  !inlined_func_names.contains(func_name_ori) ;
+  if (cond1 || cond2 || cond3) {
     func_name = func_name_ori;
   } else {
     func_name = mmap_lib::str::concat(module_name, ".", func_name_ori);
@@ -1407,7 +1428,9 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto pos_spin   = tup_add.setup_sink_pin("field");  // field name
   auto value_spin = tup_add.setup_sink_pin("value");
 
-  auto field_dpin = lg->create_node_const(Lconst::string("__fdef")).setup_driver_pin();
+  auto field_dpin = lg->create_node_const(Lconst::from_pyrope("__fdef")).setup_driver_pin();
+  fmt::print("DEBUG7\n");
+
   field_dpin.connect_sink(pos_spin);
 
   // std::unique_lock<std::mutex> guard(lgs_mutex);
@@ -1514,7 +1537,7 @@ void Lnast_tolg::create_out_ta(Lgraph *lg, const mmap_lib::str &field_name, Node
   if (!field_name.empty())
     tup_name = mmap_lib::str::concat(tup_name, ".", field_name);
 
-  auto pos_dpin = lg->create_node_const(Lconst(tup_name)).setup_driver_pin();
+  auto pos_dpin = lg->create_node_const(Lconst::from_string(tup_name)).setup_driver_pin();
   pos_dpin.connect_sink(pos_spin);
 
   auto val_spin = tup_add.setup_sink_pin("value");
@@ -1548,7 +1571,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       tn_dpin.connect_sink(tn_spin);
 
       auto pos_spin = node.setup_sink_pin("field");
-      auto pos_dpin = lg->create_node_const(Lconst(dpin.get_name().substr(1, dpin.get_name().size() - 1))).setup_driver_pin();
+      auto dpin_subname = dpin.get_name().substr(1, dpin.get_name().size() - 1);
+      auto pos_dpin = lg->create_node_const(Lconst::from_string(dpin_subname)).setup_driver_pin();
       pos_dpin.connect_sink(pos_spin);
       continue;
     }
@@ -1559,11 +1583,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       auto subs  = dpin.get_ssa();
 
       auto it = vname2ssa_dpin.find(vname);
-      if (it == vname2ssa_dpin.end()) {
+      if (it == vname2ssa_dpin.end() || subs >= it->second.get_ssa()) 
         vname2ssa_dpin.insert_or_assign(vname, dpin);
-      } else if (subs >= it->second.get_ssa()) {
-        vname2ssa_dpin.insert_or_assign(vname, dpin);
-      }
     }
   }
 
@@ -1743,7 +1764,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
     }
   } else if (cur_ntype == Ntype_op::AttrSet) {
     if (cur_node.is_sink_connected("field")) {
-      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_str();
+      // auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_str();
+      auto field_txt = cur_node.get_sink_pin("field").get_driver_pin().get_type_const().to_field(); // low intuitive api
       if (!Lgtuple::is_root_attribute(field_txt)) {
         auto non_attr_field = Lgtuple::get_all_but_last_level(field_txt);
         hier_name = mmap_lib::str::concat(hier_name, ".", non_attr_field);
@@ -1763,7 +1785,8 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
     if (cur_node.is_sink_connected("field")) {
       auto field_node = cur_node.get_sink_pin("field").get_driver_node();
       if (field_node.is_type_const()) {
-        auto field_name = field_node.get_type_const().to_str();
+        // auto field_name = field_node.get_type_const().to_str();
+        auto field_name = field_node.get_type_const().to_field(); //low intuitive api
         new_hier_name   = mmap_lib::str::concat(hier_name, ".", field_name);
       }
     }

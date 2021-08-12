@@ -54,10 +54,9 @@ TEST_F(Setup_mmap_map_test, string_data) {
 
     map.ref_lock();
     for (const auto &it : map) {
-      (void)it;
       if (it.getFirst() == 0)
         zero_found = true;
-      const auto &key = map.get_key(it);
+      const auto &key = it.first;
       EXPECT_TRUE(map.has(key));
 
       const auto val = it.second;
@@ -127,7 +126,7 @@ TEST_F(Setup_mmap_map_test, string_data_persistance) {
       auto txt2 = map.get(it.first);
       auto it2  = map.find(it.first);
       EXPECT_NE(it2, map.end());
-      auto txt4 = map.get(it2);
+      auto txt4 = it2->second;
       EXPECT_EQ(txt1, txt2);
       EXPECT_EQ(txt1, txt4);
 
@@ -244,7 +243,7 @@ TEST_F(Setup_mmap_map_test, string_key_persistance) {
     map.ref_lock();
     for (const auto &it : map) {
       (void)it;
-      EXPECT_EQ(map.get_key(it), mmap_lib::str(std::to_string(it.second) + "foo"));
+      EXPECT_EQ(it.first, mmap_lib::str::concat(it.second, "foo"));
       EXPECT_EQ(map2.count(it.first.to_s()), 1);
       conta--;
     }

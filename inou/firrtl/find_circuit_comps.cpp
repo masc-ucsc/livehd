@@ -145,8 +145,12 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
         }
       }
     }
-    auto     size_str = Lconst(ln.get_name(size_rhs)).to_firrtl();
-    uint32_t size_val = std::stoul(size_str);  // FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
+    //auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl();
+    //uint32_t size_val = std::stoul(size_str);  // FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
+    //auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl();
+    //uint32_t size_val = size_str.to_i();
+
+    auto     size_val = Lconst::from_pyrope(ln.get_name(size_rhs)).to_i();
 
     // Actually create Memory statement + subexpressions
     auto type = CreateTypeObject(0);  // leave bw as implicit for now

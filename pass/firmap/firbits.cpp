@@ -185,7 +185,7 @@ void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
 void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_type_const().to_str();
+  auto key      = dpin_key.get_type_const().to_firrtl();
   auto attr     = get_key_attr(key);
   if (attr == Attr::Set_other) {
     return;  // don't care
@@ -236,8 +236,10 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
       (void)has_through_dpin;
       (void)is_set_graph_inp;
 #endif
-
+      // "0.__ubits"
+      // if (val.is_i()) {
       fb.set_bits_sign(val.to_i(), false);
+      // }
 
     } else {  // Attr::Set_sbits
 #if 0

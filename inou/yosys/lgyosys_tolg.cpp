@@ -93,9 +93,7 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
 
   if (v.is_fully_def() && data.size() < 30) {
     auto x = v.as_int(is_signed);
-    if (x > 0)
-      return g->create_node_const(Lconst(x)).setup_driver_pin();
-    // NOTE: negatives must be explicit in bits
+    return g->create_node_const(Lconst(x)).setup_driver_pin();
   }
 
   // this is a vector of RTLIL::State
@@ -105,21 +103,24 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
   // Sz => high z
   // Sa => don't care (not sure what is the diff between Sa and Sx
   // Sm => used internally by Yosys
-  mmap_lib::str val("0b");
-  if (!is_signed && data[data.size() - 1] == RTLIL::S1) {
-    val = val.prepend('0');
+  mmap_lib::str val;
+  if (is_signed) {
+    val = "0sb";
+  }else{
+    val = "0b";
   }
+
   for (size_t i = data.size(); i > 0; i--) {
     switch (data[i - 1]) {
       case RTLIL::S0: val = val.prepend('0'); break;
       case RTLIL::S1: val = val.prepend('1'); break;
+      case RTLIL::Sz: val = val.prepend('z'); break;
       default: val = val.prepend('?'); break;
     }
   }
 
-  Lconst lc(val);
   // fmt::print("val:{} prp:{} bits:{}\n", val, lc.to_pyrope(), lc.get_bits());
-  return g->create_node_const(lc).setup_driver_pin();
+  return g->create_node_const(Lconst::from_pyrope(val)).setup_driver_pin();
 }
 
 class Pick_ID {
@@ -345,7 +346,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
       return g->create_node_const(v.as_int()).setup_driver_pin();
     }
     auto v_str = mmap_lib::str::concat("0b", v.as_string());
-    return g->create_node_const(v_str).setup_driver_pin();
+    return g->create_node_const(Lconst::from_pyrope(v_str)).setup_driver_pin();
   }
   bool is_signed = true;  // signed by default
   if (name == ID::A && cell->hasParam(ID::A_SIGNED)) {
@@ -355,7 +356,7 @@ static Node_pin get_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLIL::IdStri
   }
 
   if (!cell->hasPort(name)) {
-    return g->create_node_const("0b?").setup_driver_pin();
+    return g->create_node_const(Lconst::from_pyrope("0b?")).setup_driver_pin();
   }
 
   return create_pick_concat_dpin(g, cell->getPort(name), is_signed);
@@ -569,7 +570,7 @@ static bool is_black_box_output(const RTLIL::Module *mod, const RTLIL::Cell *cel
   if (wire->port_input)
     return false;
 
-  mmap_lib::str cell_port(absl::StrCat(cell->type.str(), "_:_", port_name.str()));
+  auto cell_port = mmap_lib::str::concat(cell->type.str(), "_:_", port_name.str());
 
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
     fprintf(stderr, "WARNING: lgyosys_tolg guessing that cell %s pin %s is an output\n", cell->name.c_str(), port_name.c_str());
@@ -605,7 +606,7 @@ static bool is_black_box_input(const RTLIL::Module *mod, const RTLIL::Cell *cell
   if (wire->port_input)
     return true;
 
-  mmap_lib::str cell_port(absl::StrCat(cell->type.str(), "_:_", port_name.str()));
+  auto cell_port = mmap_lib::str::concat(cell->type.str(), "_:_", port_name.str());
 
   // Opposite of is_black_box_output
   if (cell_port_outputs.find(cell_port) != cell_port_outputs.end()) {
@@ -1048,9 +1049,11 @@ static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, u
     auto n_z = current_dpin.get_bits();
 
     auto local_or_node = g->create_node(Ntype_op::Or, nbits);
-    auto mask          = absl::StrCat("0b", std::string(n_x, 'x'), std::string(n_z, '0'), "u", (int)nbits, "bits");
+    mmap_lib::str mask("0b");
+    mask = mask.append(n_x, '?');
+    mask = mask.append(n_z, '0');
 
-    local_or_node.connect_sink(g->create_node_const(Lconst(mask)));
+    local_or_node.connect_sink(g->create_node_const(Lconst::from_pyrope(mask)));
     local_or_node.connect_sink(current_dpin);
 
     append_to_or_node(g, or_node, local_or_node.setup_driver_pin(), or_offset);
@@ -2241,17 +2244,19 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     for (auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
-      auto          *g      = library->try_find_lgraph(&mod->name.c_str()[1]);
+      mmap_lib::str mod_name(&mod->name.c_str()[1]);
+
+      auto *g= library->try_find_lgraph(mod_name);
       if (g == nullptr) {
-        g = ::Lgraph::create(path, &mod->name.c_str()[1], "-");
+        g = ::Lgraph::create(path, mod_name, "-");
       }
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {
         RTLIL::Wire *wire = mod->wire(port);
-        std::string  wire_name(&wire->name.c_str()[1]);
+        mmap_lib::str  wire_name(&wire->name.c_str()[1]);
 
-        mmap_lib::str cell_port(absl::StrCat(mod->name.str(), "_:_", wire->name.str()));
+        auto cell_port = mmap_lib::str::concat(mod->name.str(), "_:_", wire->name.str());
         if (wire->port_input && !wire->port_output) {
           // fmt::print("mod:{} inp:{}\n", mod->name.str(), wire->name.str());
           cell_port_inputs.insert(cell_port);
@@ -2277,16 +2282,16 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     for (auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
       if (design->selected_module(it.first)) {
-        const std::string mod_name(&(mod->name.c_str()[1]));
+        mmap_lib::str mod_name(&(mod->name.c_str()[1]));
 #ifndef NDEBUG
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
-        Lbench b("inou.YOSYS_tolg_" + mod_name);
+        Lbench b("inou.YOSYS_tolg_" + mod_name.to_s());
 
         for (const auto &port : mod->ports) {
           RTLIL::Wire *wire = mod->wire(port);
-          std::string  wire_name(&wire->name.c_str()[1]);
+          mmap_lib::str  wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {
             pending_outputs.emplace_back(wire);
           }

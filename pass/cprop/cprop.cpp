@@ -46,7 +46,7 @@ void Cprop::add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_l
 
   auto pos_dpin = pos_spin.get_driver_pin();
   if (pos_dpin.is_type_const()) {
-    auto v = pos_dpin.get_type_const().to_str();
+    auto v = pos_dpin.get_type_const().to_field();
     if (!Lgtuple::is_root_attribute(v)) {
       tup->set_issue();
       tuple_issues = true;
@@ -443,7 +443,7 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
     auto first = inp_edges_ordered[0].driver.get_node().get_type_const();
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
       auto c = inp_edges_ordered[i].driver.get_node().get_type_const();
-      eq     = eq && first.eq_op(c);
+      eq     = eq && !first.eq_op(c).is_known_false();
     }
 
     Lconst result(eq ? 1 : 0);
@@ -598,7 +598,7 @@ std::tuple<mmap_lib::str, mmap_lib::str> Cprop::get_tuple_name_key(const Node &n
   if (node.is_sink_connected("field")) {
     auto node2 = node.get_sink_pin("field").get_driver_node();
     if (node2.is_type_const()) {
-      key_name = node2.get_type_const().to_str();
+      key_name = node2.get_type_const().to_field();
     }
   }
 
@@ -896,7 +896,7 @@ void Cprop::tuple_get_mask_mut(Node &node) {
           lt_node.setup_sink_pin("B").connect_driver(zero_dpin);
 
           auto bits_node = node.create(Ntype_op::AttrGet);
-          bits_node.setup_sink_pin("field").connect_driver(node.create_const(Lconst::string("__sbits")));
+          bits_node.setup_sink_pin("field").connect_driver(node.create_const(Lconst::from_string("__sbits")));
           bits_node.setup_sink_pin("parent").connect_driver(a_spin.get_driver_pin());
 
           auto tmp_node = node.create(Ntype_op::Sum);
@@ -981,7 +981,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                   if (!v.is_i()) {
                     Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
                   }
-                  if (v.is_false()) {
+                  if (v.is_known_false()) {
                     read_map.emplace_back(false);
                   } else {
                     read_map.emplace_back(true);
@@ -1308,7 +1308,7 @@ void Cprop::tuple_attr_set(const Node &node) {
   auto field_spin = node.get_sink_pin("field");
   I(field_spin.is_connected());
 
-  auto attr_field = field_spin.get_driver_pin().get_type_const().to_str();
+  auto attr_field = field_spin.get_driver_pin().get_type_const().to_field();
   I(Lgtuple::is_root_attribute(attr_field));  // AttrSet is only for root fields
 
   if (attr_field != "__dp_assign")
@@ -1701,7 +1701,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
   if (!pos_spin.is_invalid()) {
     auto pos_dpin = pos_spin.get_driver_pin();
     if (pos_dpin.is_type_const()) {
-      auto field = pos_dpin.get_type_const().to_str();
+      auto field = pos_dpin.get_type_const().to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
           node.set_type(Ntype_op::AttrSet);
@@ -1818,7 +1818,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, const mmap_lib::str &key_
     auto av_spin   = attr_node.setup_sink_pin("value");
 
     // auto attr_key_node = node.create_const(Lconst::string(attr));
-    auto attr_key_node = node.create_const(Lconst(mmap_lib::str(attr)));
+    auto attr_key_node = node.create_const(Lconst::from_string(attr));
     auto attr_key_dpin = attr_key_node.setup_driver_pin();
     attr_key_dpin.connect_sink(af_spin);
 
