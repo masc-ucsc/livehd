@@ -15,7 +15,6 @@ function calc_num_bits(number) {
   return binaryForm.length + 1; // Question: one more bits for the sign?????
 } */
 
-calc_num_bits(-10);
 
 
 /**
@@ -49,7 +48,8 @@ class Lconst {
   }
 
   initialized(){
-    if (!this.number) {
+    console.log(this.number, typeof(this.number));
+    if (typeof this.number === "string") {
       this.explicit_str = false;
       this.bits = 0;
       this.num = 0;
@@ -63,7 +63,7 @@ class Lconst {
     // 3 => ob11, length = 3
     // -3 => ob11, length = 3
     static calc_num_bits(number) {
-      bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
+      const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
       return binaryForm.length + 1;
     }
