@@ -5,7 +5,7 @@
 
 
 // 🐅🐅🐅testing workspace🐀🐀🐀
-const truer = 1;
+/* const truer = 1;
 
 function calc_num_bits(number) {
   bigI = number > 0 ? BigInt(number) : -1n * BigInt(number); // Question: what if the number is negative?????
@@ -13,7 +13,7 @@ function calc_num_bits(number) {
   console.log(`binary form is ${binaryForm}`);
   console.log(`the number of bits is ${binaryForm.length} + 1 [one bit for sign]`);
   return binaryForm.length + 1; // Question: one more bits for the sign?????
-}
+} */
 
 calc_num_bits(-10);
 
@@ -75,3 +75,5 @@ class Lconst {
 // 🐕testing workspace for Lconst🐇
 /* let testing = new Lconst(3);
 console.log(testing.num, " ", testing.bits, " ", testing.explicit_str); */
+
+module.exports = Lconst;
