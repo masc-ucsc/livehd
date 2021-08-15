@@ -48,7 +48,6 @@ class Lconst {
   }
 
   initialized(){
-    console.log(this.number, typeof(this.number));
     if (typeof this.number === "string") {
       this.explicit_str = false;
       this.bits = 0;
@@ -65,6 +64,7 @@ class Lconst {
     static calc_num_bits(number) {
       const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
+      console.log(number, " ", bigI, " ", binaryForm);
       return binaryForm.length + 1;
     }
 
@@ -73,7 +73,9 @@ class Lconst {
 
 
 // 🐕testing workspace for Lconst🐇
-/* let testing = new Lconst(3);
-console.log(testing.num, " ", testing.bits, " ", testing.explicit_str); */
+/* let testing = new Lconst(-123456789101112131415n);
+console.log(testing.num, " ", testing.bits, " ", testing.explicit_str);
+console.log((123).toString(2));
+console.log((-123).toString(2)); */
 
 module.exports = Lconst;
