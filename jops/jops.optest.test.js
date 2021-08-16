@@ -14,8 +14,6 @@ test('TEST from_pyrope & to_pyrope, a trival test', () => {
   expect(testing3.to_pyrope()).toBe('0x3'); 
 });
 
-
-
 test('TEST from_pyrope & to_pyrope, a average test', () => {
   let testing = Lconst.from_pyrope('0x12352353464564234526246__345723564756345');
   let testing2 = Lconst.from_pyrope('0x2435234655463_457_6543__2545324564136161346');
