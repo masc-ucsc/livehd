@@ -6,6 +6,8 @@
 
 // 🐅🐅🐅testing workspace🐀🐀🐀
 
+
+// helper function
 function BigIntnumberConversion(target = '0', from_base = 10, to_base = 10) {
   const numberString = parseInt(target, from_base).toString(to_base);
   /* console.log(target, "numberString", numberString) */
@@ -44,7 +46,6 @@ class Lconst {
     static calc_num_bits(number) {
       const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
-      console.log(binaryForm);
       return binaryForm.length + 1;
     }
 
@@ -85,6 +86,7 @@ class Lconst {
 
       let num = BigInt(0);
       let to_power = -1n;
+      // time&space complexity should be o(n) and o(1)
       for (let i = txt.length-1; i>= skip_chars; --i){
         if (txt[i] === '_') {
           continue;
@@ -100,7 +102,7 @@ class Lconst {
     // restriction: only from decimal to pyrope
     to_pyrope() {
       let output = '0x';
-      return output + String(BigIntnumberConversion(this.num, 10, 16));
+      return output + this.num.toString(16);
     }
 
     // ========= operation =============
@@ -110,22 +112,15 @@ class Lconst {
       return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
     }
     sayHello() {
-      console.log("hello")
+      console.log("I am a Lconst object :)");
     }
 } // end of the class ————————————————————————————————————————————
 
 
 // 🐕testing workspace for Lconst🐇
 
-/* let testing = Lconst.from_pyrope('0x__ab_c_');
-console.log('explicit_str: ', testing.explicit_str, 'bits: ', testing.bits, 'num: ', testing.num);
- */
-
-/* let testing = Lconst.from_pyrope('0x12352353464564234526246345723564756345');
-let testing2 = Lconst.from_pyrope('0x243523465546345765432545324564136161346'); */
-
-let testing = Lconst.from_pyrope('0x1');
-let testing2 = Lconst.from_pyrope('0x2');
-let testing3 = testing.xor_op(testing2); 
+let testing = Lconst.from_pyrope('0x12352353464564234526246__345723564756345');
+let testing2 = Lconst.from_pyrope('0x2435234655463_457_6543__2545324564136161346');
+let testing3 = testing.xor_op(testing2);
 console.log(testing3.to_pyrope());
 module.exports = Lconst;
