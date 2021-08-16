@@ -44,7 +44,7 @@ class Lconst {
     static calc_num_bits(number) {
       const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
-      console.log(number, " ", bigI, " ", binaryForm);
+      console.log(binaryForm);
       return binaryForm.length + 1;
     }
 
@@ -85,20 +85,30 @@ class Lconst {
 
       let num = BigInt(0);
       let to_power = -1n;
-      console.log(txt, txt.length)
       for (let i = txt.length-1; i>= skip_chars; --i){
         if (txt[i] === '_') {
           continue;
         }
         to_power += 1n;
-        console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
+        // console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
         num += BigIntnumberConversion(txt[i], shift_mode) * (BigInt(shift_mode)**to_power);
       }
-
-      console.log(num);
+      
       return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
     } // end of from_pyrope
 
+    // restriction: only from decimal to pyrope
+    to_pyrope() {
+      let output = '0x';
+      return output + String(BigIntnumberConversion(this.num, 10, 16));
+    }
+
+    // ========= operation =============
+    // restriction: the num of these two objects do not have underscore and '?'
+    xor_op (com_lconst) {
+      const num = this.num ^ com_lconst.num;
+      return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
+    }
     sayHello() {
       console.log("hello")
     }
@@ -106,11 +116,16 @@ class Lconst {
 
 
 // 🐕testing workspace for Lconst🐇
-/* let testing = new Lconst(-123456789101112131415n);
-console.log(testing.num, " ", testing.bits, " ", testing.explicit_str);
-console.log((123).toString(2));
-console.log((-123).toString(2)); */
-let testing = Lconst.from_pyrope('0x__ab_c_');
-console.log('explicit_str: ', testing.explicit_str, 'bits: ', testing.bits, 'num: ', testing.num);
 
+/* let testing = Lconst.from_pyrope('0x__ab_c_');
+console.log('explicit_str: ', testing.explicit_str, 'bits: ', testing.bits, 'num: ', testing.num);
+ */
+
+/* let testing = Lconst.from_pyrope('0x12352353464564234526246345723564756345');
+let testing2 = Lconst.from_pyrope('0x243523465546345765432545324564136161346'); */
+
+let testing = Lconst.from_pyrope('0x1');
+let testing2 = Lconst.from_pyrope('0x2');
+let testing3 = testing.xor_op(testing2); 
+console.log(testing3.to_pyrope());
 module.exports = Lconst;
