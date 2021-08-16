@@ -1,22 +1,45 @@
-# Developer documentation
 
-This document provides links and points to the main information available to potential LGraph developers.
+# Creating a Pass
 
-As a developer, you should become familiar with the following documents:
+This document provides some minimal suggestion on how to build a new LiveHD pass.
 
-1. [Usage](./Usage.md), which describes how to build and run the LGraph shell.
-2. [Concepts](./Concepts.md), which contains information about LGraph and how to traverse it.
-3. [Bazel](./Bazel.md), which explains in detail how to use the [Bazel](https://bazel.build) build system.
-4. [GitHub](./GitHub-use.md), which explains how to use Git/GitHub with LGraph, how to
-   handle branches, merges and the lack of submodules.
 
-If you are going to create a new pass and/or inou, the
-[CreateInouPass](./CreateInouPass.md) provides an introduction on how to create
-an example pass and integrate it with lgshell.
+Most LiveHD passes reside inside `inou` or `pass`. The only difference is that
+`inou` focuses on translation from some external tool to/from LiveHD while
+`pass` works on transformations from LiveHD to LiveHD.
 
-Outlined below are various ways to build, test, and debug LGraph.
+## Create a pass
 
-## Using clang when building
+Check the `pass/sample` directory for how to create a trivial pass.
+
+* Create pass/XXX directory
+
+The typical is to have these files:
+
+* pass/XXX/pass_XXX.[cpp|hpp]: C++ and Header file to interface with lgshell
+* pass/XXX/XXX.[cpp|hpp]: C++ file to perform the pass over a Lgraph or LNAST API
+* pass/XXX/BUILD: the [Bazel](bazel.md) build configuration file
+* pass/XXX/tests/XXX_test.cpp: A google test checking the pass
+
+
+Finally, add the new pass to `main/BUILD`
+
+
+## Pass Parameters and Common variables
+
+ One of the main goals is to have a uniform set of passes in lgshell. lgshell should use this common
+variable names when possible
+
+```bash
+    name:foo        lgraph name
+    path:lgdb       lgraph database path (lgdb)
+    files:foo,var   comma separated list of files used for INPUT
+    odir:.          output directory to generate files like verilog/pyrope...
+```
+
+## Some hints/comments useful for developers
+
+### Using clang when building
 
 The regression system builds for both gcc and clang. To force a clang build, set the following environment variables before building:
 
@@ -24,7 +47,7 @@ The regression system builds for both gcc and clang. To force a clang build, set
 CXX=clang++ CC=clang bazel build -c dbg //...
 ```
 
-## Perf in lgbench
+### Perf in lgbench
 
 Use lgbench to gather statistics in your code block. It also allows to run perf record
 for the code section (from lgbench construction to destruction). To enable perf record
@@ -34,7 +57,7 @@ set LGBENCH_PERF environment variable
 export LGBENCH_PERF=1
 ```
 
-## GDB/LLDB usage
+### GDB/LLDB usage
 
 For most tests, you can debug with
 
@@ -50,7 +73,7 @@ lldb ./bazel-bin/main/lgshell
 
 Note that breakpoint locations may not resolve until lgshell is started and the relevant LGraph libraries are loaded.
 
-## Address Sanitizer
+### Address Sanitizer
 
 LiveHD has the option to run it with address sanitizer to detect memory leaks.
 
@@ -58,7 +81,7 @@ LiveHD has the option to run it with address sanitizer to detect memory leaks.
 bazel build -c dbg --config asan //...
 ```
 
-## Thread Sanitizer
+### Thread Sanitizer
 
 To debug with concurrent data race.
 
@@ -66,7 +89,7 @@ To debug with concurrent data race.
 bazel build -c dbg --config tsan //...
 ```
 
-## Debugging a broken Docker image
+### Debugging a broken Docker image
 
 The travis/azure regressions run several docker images. To debug the issue, run the same as the failing
 docker image. c++ OPT with archlinux-masc image

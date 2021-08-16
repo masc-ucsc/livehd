@@ -1,4 +1,4 @@
-# Usage
+# Getting started
 
 This is a high level description of how to use LiveHD.
 
@@ -107,16 +107,3 @@ $ less trivial.json
   $./bazel-bin/inou/yosys/yosys2
   ```
 
-## Documentation
-
-LiveHD uses Markdown for documentation. You can view the documentation in GitHub or in any viewer that supports Markdown. If you would like to generate a pdf of the documentation, we recommend using pandoc (see the Installation section for installation details)
-
-To generate PDFs, run
-
-```
-$ pandoc -S -N -V geometry:margin=1in ./docs/Usage.md -o ./docs/Usage.pdf
-```
-
-## Developing LiveHD
-
-If you're interested in working on LiveHD, refer to [Develop](./Develop.md).

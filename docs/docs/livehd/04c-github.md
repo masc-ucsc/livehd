@@ -1,4 +1,4 @@
-# LiveHD and GitHub
+# GitHub Guide
 
 LiveHD is the synthesis/emulation flow primarily maintained and developed by
 the [MASC lab][masc] at UC Santa Cruz. Since LiveHD is used for computer

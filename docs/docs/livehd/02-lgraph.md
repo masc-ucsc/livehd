@@ -1,4 +1,7 @@
-# LGraph Internals
+# LGraph 
+
+!!!WARNING
+   This document is not updated to the latest changes
 
 LGraph is the graph-based data structure used inside LiveHD. Together with
 LNAST, it is one of the key data structures.

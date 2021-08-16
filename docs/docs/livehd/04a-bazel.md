@@ -1,5 +1,5 @@
 
-# Bazel
+# Bazel build
 
 Bazel is a relatively new build system open sourced by google. The main difference
 with traditional Makefiles is that it checks to make sure that dependences are not

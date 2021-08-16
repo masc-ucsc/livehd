@@ -1,7 +1,7 @@
 
-# General coding style for LGraph
+# Coding Style
 
-These are the coding style rules for LGraph. Each rule can be broken, but it
+These are the coding style rules for LiveHD C++. Each rule can be broken, but it
 should be VERY rare, and a small comment should be placed explaining why.
 
 ## Overall
@@ -18,6 +18,7 @@ the WHY not the HOW. The code is the HOW.
 
 Labels used in comments:
 
+```
 // FIXME: Known bug/issue but no time to fix it at the moment
 
 // TODO: Code improvement that will improve perf/quality/??? but no time at the moment
@@ -28,13 +29,13 @@ Labels used in comments:
 // NOTE: Any comment that you want to remember something about (not critical)
 
 // STYLE: why you broke a style rule (pointers, iterator...)
+```
 
-## c++17
+## strings
 
-Use std::string_view instead of "const char &ast" or "const std::string &" in the APIs. DO NOT use string_view in maps/sets/storage.
+Avoid std::string and std::string_view. Use them only when interfacing external project. Use mmap_lib::str
 
 Avoid pointers, use std::unique_ptr with RAII
-
 
 ## Variable naming rules
 
@@ -73,6 +74,7 @@ You can configure your text editor to do this automatically
 First do C includes (try to avoid when possible), then an empty line with C++
 includes, then an empty line followed with lgraph related includes. E.g:
 
+```
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -81,6 +83,7 @@ includes, then an empty line followed with lgraph related includes. E.g:
 
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
+```
 
 ## Keep column widths short
 
@@ -108,7 +111,6 @@ for(const auto &[name, id]:name2id) {
   // ...
 ```
 
-
 ## Use "auto", or "const auto", when possible.
 
 ```cpp
@@ -122,27 +124,7 @@ It may be too verbose to write const all the time. The coding style request to u
 const (when possible) in iterators and pointers. The others are up to the programmer.
 
 
-## Strings must be passed as std::string_view
-
-```cpp
-void print(std::string_view message)
-```
-
-## Use abseil library for String operations like StrCat, StrSplit, EndsWith
-
-```cpp
-#include "absl/strings/substitute.h"
-
-auto file = absl::StrCat("file","/",extension);
-
-if (absl::EndsWidth(file,".prp")) {
-  // Your code here
-}
-```
-The reason is to have a more efficient. Using + for string concats have mallocs
-and traversal overheads.
-
-## Do not use std::unordered_set, use flat_hash_map or flat_hash_set from abseil
+## Do not use std::unordered_set, std::map, use flat_hash_map or flat_hash_set from abseil
 
 ```cpp
 #include "absl/container/flat_hash_map.h"
@@ -152,7 +134,6 @@ absl::flat_hash_map<Index_ID, RTLIL::Wire *>   my_example;
 ```
 
 ## Some common idioms to handle map/sets
-
 
 Traverse the map/set, and as it traverses decide to erase some of the entries:
 ```cpp
@@ -311,10 +292,39 @@ Many times it is important to have information per node, but that it is not pers
 when building a LGraph from Yosys, there is a need to remember pointers from yosys to LGraph. This by definition can not be persistent because pointers change across runs. For this case, there are several options.
 
 
-### The Non-Persistent Annotations use Node, Node_pin, or Edge as data
+### The Non-Persistent Annotations
 
-In this case, there is some index value like a pointer or a string or an integer. The index for the map
-is not a LGraph structure. E.g:
+
+If the data structure needs to keep most of the node/pins in the Lgraph, use the compact_class notation:
+```cpp
+absl::flat_hash_map<SomeData, Node_pin::Compact_class> s2pin;
+absl::flat_hash_map<SomeData, Node::Compact_class>     s2node;
+
+SomeData d1;
+Lgraph *lg; // LGraph owning the node
+s2pin[d1]  = node.get_driver_pin().get_compact_class(); // Example of use getting a pint
+s2node[d1] = node.get_compact_class();
+auto name = s2pin[d1].get_node(lg).get_name();   // Pick previously set driver name
+```
+
+Another example:
+
+```cpp
+absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>  input_map;
+
+input_map[pin.get_compact()] = wire;
+
+auto *wire = input_map[pin.get_compact()];
+
+for(const auto &[key, value]:input_map) {
+  Node_pin pin(lg, key); // Key is a ::Compact, not a Node_pin
+  auto name  = pin.get_name();
+  // ... Some use here
+}
+```
+
+If the data structure just holds a small subset of the graph, you can keep the
+metadata, and use Node/Node_pin directly. E.g:
 
 ```cpp
 absl::flat_hash_map<SomeData, Node_pin> s2pin;
@@ -326,30 +336,9 @@ s2node[d1] = node;
 auto name = s2pin[d1].get_name();   // Pick previously set driver name
 ```
 
-In this case, it is fine to use the full Node, Node_pin, or Edge. This has some pointers inside, but it is OK because it is not persistent.
+In this case, it is fine to use the full Node, Node_pin, or Edge. This has some
+pointers inside, but it is OK because it is not persistent.
 
-### The Non-Persistent Annotations use Node, Node_pin, or Edge as Index
-
-When using the Node, Node_pin, Edge as index for a map-like structure, it is NOT ok to use the Node, Node_pin, Edge directly. The reason is that the internal pointer is going to confuse the hash function. The value to use
-is the Node::Compact, Node_pin::Compact, Edge::Compact. The ::Compact already comes with the hash functions for abseil map structures that are the recommended by default for performance reasons.
-
-
-```cpp
-absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>  input_map;
-
-input_map[pin.get_compact()] = wire;
-
-auto *wire = input_map[pin.get_compact()];
-
-for(const auto &[key, value]:input_map) {
-  Node_pin pin(lg, 0, key); // Key is a ::Compact, not a Node_pin. Must provide LGraph pointer back. 0 is for no hierarchy
-  auto name  = pin.get_name();
-  auto *wire = value;
-  // ... Some use here
-}
-```
-
-The persistent attribute class does something similar internally, but it is hidden from the external usage.
 
 ## Avoid code duplication
 
@@ -359,26 +348,5 @@ Tool to detect duplication
 ```
     find . -name '*.?pp' | grep -v test >list.txt
     duplo -ml 12 -pt 90 list.txt report.txt
-```
-
-## Check if a string starts with a substring
-
-Use the STL rfind to handle the common case of finding a sub-string. Even for when checking if a string starts with a given substring.
-
-```cpp
-  // If string starts with a given substring
-  std::string str1 = "start333";
-  std::string str2 = "xstart333";
-  I(str1.rfind("start") == 0);
-  I(str2.rfind("start") != 0);
-
-  // For single character checks
-  I(str1[0] == 's');
-  I(str2[1] == 's');
-
-  // If the substring exists
-  I(str1.rfind("start") != std::string::npos);
-  I(str2.rfind("start") != std::string::npos);
-  I(str2.rfind("potato") == std::string::npos);
 ```
 
