@@ -57,7 +57,9 @@
 //  }
 //
 // ------------------------------------------------------
-// ALTERNATIVE ORDER: (children_first traversal)
+// ALTERNATIVE ORDER: (children_first traversal) -- Better (more spatial locality, less search)
+// Visit tree node once children and niblings are visited
+// (post-order does visit tree node once the children are visited)
 // visit:
 //   visit children(...)
 //   print children()
@@ -104,8 +106,8 @@
 //  }
 //
 //  API: find_last_child()
-//    bin-search between fc[pos] and pos-1 last child
-//    (have a small cache to repeated inserts at the end?. std::map<> last_child_of
+//    check older sibling that has children (fc[pos+1] if exist)
+//    sibling_fc-1 should be the last child
 //
 // API: insert_child_next_to
 //    insert after, keep same parent
