@@ -755,6 +755,36 @@ reduce xor is a chain of XORs.
 
 ### Latch_op
 
+### Get_mask_op
+
+Inputs - a, mask
+Get_mask (a, mask)
+Functionality - Output contains only those bits a[i], for which mask[i] = 1, other bits a[i] for which mask[i] = 0, are dropped.
+mask is interpreted as a signed number and sign extended to the size of a, if required.
+// Check - if a is signed, actually a should never be extended so, sign should not matter, mask is signed and sign extended
+eg - Get_mask (0sb11000011, 0sb10101010) = osb1001
+     Get_mask (0sb11110000, 0sb00001111) = 0sb0000
+
+### Set_mask_op
+
+Inputs - a, value, mask
+Set_mask(a, mask, value)
+Functionality - Replaces all bits a[i] for which mask[i] = 1, with value[i] 
+Retains all bits a[i] for which mask[i] = 0.
+// Check - if a, value are signed, actually none of them should be extended and their signs should not matter, mask is signed and sign extended
+eg - Set_mask (0sb10101010, 0sb00011000, 0sb00110011) = 0sb 101 10 010
+
+### Sext_op  (Sign extend)
+
+Inputs - a, b
+Sext (a, b)
+Selects only bits a[b:0] dropping all remaining MSBs.
+The selected a[b:0] is interpretded as a signed value
+eg Sext (0sb10101010, 4) = 0sb01010 = 0xA = +10
+Sext (0sb10101010, 5) = 0sb101010 = 0x2A = -22
+
+
+
 ### Memory_op
 
 Memory is the basic block to represent SRAM-like structures. Any large storage will benefit from using memory arrays instead of flops, which are slower to simulate. These memories are highly configurable.
