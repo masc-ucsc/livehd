@@ -6,8 +6,8 @@
 
 // 🐅🐅🐅testing workspace🐀🐀🐀
 
-function BigIntnumberConversion(target = '0', from_base = 10) {
-  const numberString = parseInt(target, from_base).toString(10);
+function BigIntnumberConversion(target = '0', from_base = 10, to_base = 10) {
+  const numberString = parseInt(target, from_base).toString(to_base);
   /* console.log(target, "numberString", numberString) */
   return BigInt(numberString);
 }
