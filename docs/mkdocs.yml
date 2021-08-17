@@ -1,7 +1,7 @@
 site_name: LiveHD and Pyrope
 
 repo_url: https://github.com/masc-ucsc/livehd
-edit_uri: ""
+  # edit_uri: ""
 
 theme:
   name: material
