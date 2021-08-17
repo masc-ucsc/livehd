@@ -397,6 +397,7 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
   auto func_name  = lnast->get_name(curr_index);
 
   curr_index    = lnast->get_sibling_next(curr_index);
+  auto cond_val = resolve_func_cond(curr_index);
 
   auto stmt_index = lnast->get_sibling_next(curr_index);
 
@@ -415,8 +416,6 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
   } else {
     param_exist = false;
   }
-
-  auto cond_val = resolve_func_cond(curr_index);
 
   buffer_to_print->append(mmap_lib::str::concat(indent(),
                   lnast_to->func_begin(),
