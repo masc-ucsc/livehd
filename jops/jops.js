@@ -26,6 +26,7 @@ class Lconst {
     this.explicit_str = explicit_str; 
     this.bits = bits;
     this.num = num;
+    this.unknown = undefined;
     this.initialized()
   }
 
@@ -44,6 +45,7 @@ class Lconst {
   }
     // ======== support functions ======================
     static calc_num_bits(number) {
+      // count implicit sign bits
       const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
       const binaryForm = bigI.toString(2);
       return binaryForm.length + 1;
@@ -69,6 +71,13 @@ class Lconst {
       let skip_chars = 0;
       let shift_mode = -1;
       let negative = false;
+
+      if (txt[0] === '-') {
+        negative = true;
+        skip_chars = 1;
+      } else if (txt[0] === '+') {
+        skip_chars = 1;
+      }
       
 
       if ((txt.length >= skip_chars + 1) && isDigit(txt[skip_chars])) {
@@ -80,21 +89,41 @@ class Lconst {
           if (sel_ch === 'x') {
             shift_mode = 16;
             skip_chars += 1;
-          }          
+          } else if (sel_ch === 'b') {
+            shift_mode = 2;
+            skip_chars += 1;
+          } else if (sel_ch === 'd') {
+            shift_mode = 10;
+            skip_chars += 1;
+          }
         }
       }
 
       let num = BigInt(0);
       let to_power = -1n;
-      // time&space complexity should be o(n) and o(1)
-      for (let i = txt.length-1; i>= skip_chars; --i){
-        if (txt[i] === '_') {
-          continue;
+       
+      if (shift_mode === 10) {
+        for (let i = skip_chars; i < txt.length; i++) {
+          if (txt[i] >= 0) {
+            num = 10n*num + BigInt(txt[i])
+          } else {
+            if (txt[i] === '_') {
+              continue;
+            }
+            throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
+          }
         }
-        to_power += 1n;
-        // console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
-        num += BigIntnumberConversion(txt[i], shift_mode) * (BigInt(shift_mode)**to_power);
+      } else {
+        for (let i = txt.length-1; i>= skip_chars; --i){
+          if (txt[i] === '_') {
+            continue;
+          }
+          to_power += 1n;
+          // console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
+          num += BigIntnumberConversion(txt[i], shift_mode) * (BigInt(shift_mode)**to_power);
+        }
       }
+      
       
       return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
     } // end of from_pyrope
@@ -119,8 +148,10 @@ class Lconst {
 
 // 🐕testing workspace for Lconst🐇
 
-let testing = Lconst.from_pyrope('0x12352353464564234526246__345723564756345');
-let testing2 = Lconst.from_pyrope('0x2435234655463_457_6543__2545324564136161346');
-let testing3 = testing.xor_op(testing2);
+let testing = Lconst.from_pyrope('0d1234512452353464_53_2654375634745542353264345654');
+console.log(testing.num);
+
+/* let testing3 = testing.xor_op(testing2);
 console.log(testing3.to_pyrope());
+console.log(~5) */
 module.exports = Lconst;
