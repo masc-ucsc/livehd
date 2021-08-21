@@ -1,3 +1,5 @@
+const assert = require('assert');
+assert(50<70, 'this is not true')
 // CITATION
 // https://tc39.es/proposal-bigint/#sec-exp-operator
 // https://stackoverflow.com/questions/54758130/how-to-obtain-the-amount-of-bits-of-a-bigint
@@ -26,6 +28,7 @@ class Lconst {
     this.explicit_str = explicit_str; 
     this.bits = bits;
     this.num = num;
+    this.binary = undefined;
     this.unknown = undefined;
     this.initialized()
   }
@@ -70,7 +73,8 @@ class Lconst {
       
       let skip_chars = 0;
       let shift_mode = -1;
-      let negative = false;
+      let negative = false; // does it have negative sign?
+      let unsigned_result = false; // true if start with 0sb
 
       if (txt[0] === '-') {
         negative = true;
@@ -85,6 +89,16 @@ class Lconst {
         if (txt.length >= (2+skip_chars) && txt[skip_chars] === '0') {
           skip_chars += 1;
           const sel_ch = txt[skip_chars];
+          if (sel_ch === 's') {
+            skip_chars += 1;
+            sel_ch = txt[skip_chars];
+            if (sel_ch != 'b') {
+              throw `ERROR: ${number_str} unknown pyrope encoding only binary can be signed 0sb...`
+            }
+            assert(!unsigned_result, `ERROR: ${number_str} have unsigned_result = FALSE...`)
+          } else {
+            unsigned_result = true;
+          }
 
           if (sel_ch === 'x') {
             shift_mode = 16;
@@ -95,6 +109,13 @@ class Lconst {
           } else if (sel_ch === 'd') {
             shift_mode = 10;
             skip_chars += 1;
+          } else if (isDigit(sel_ch)) {
+            shift_mode = 8;
+          } else if (sel_ch === 'o') {
+            shift_mode = 8;
+            skip_chars += 1;
+          } else {
+            throw `ERROR: ${number_str} unknown pyrope encoding (leading ${sel_ch})...`
           }
         }
       }
@@ -114,6 +135,7 @@ class Lconst {
           }
         }
       } else {
+        assert(shift_mode === 16 || shift_mode === 8, `ERROR: ${number_str} should be either hexa or octal...`)
         for (let i = txt.length-1; i>= skip_chars; --i){
           if (txt[i] === '_') {
             continue;
@@ -127,6 +149,11 @@ class Lconst {
       
       return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
     } // end of from_pyrope
+
+    static from_binary(txt, unsigned_result) {
+      let bin;
+
+    }
 
     // restriction: only from decimal to pyrope
     to_pyrope() {
@@ -148,7 +175,7 @@ class Lconst {
 
 // 🐕testing workspace for Lconst🐇
 
-let testing = Lconst.from_pyrope('0d1234512452353464_53_2654375634745542353264345654');
+let testing = Lconst.from_pyrope('0o1_3');
 console.log(testing.num);
 
 /* let testing3 = testing.xor_op(testing2);
