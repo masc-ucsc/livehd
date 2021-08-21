@@ -499,7 +499,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
       if (range_begin>static_cast<int>(a_bits)) {
         final_expr = mmap_lib::str::concat("{", range_end-range_begin, "{", a , "[", a_bits-1 ,"]}}");
       }else if (range_end>static_cast<int>(a_bits)) {
-        auto top = mmap_lib::str::concat("{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}");
+        auto top = mmap_lib::str::concat("{{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}}");
         final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
       }else{
         final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
