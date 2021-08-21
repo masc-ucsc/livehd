@@ -46,11 +46,11 @@ void Eprp_var::add(const mmap_lib::str &name, const mmap_lib::str &value) {
   if (name == "files") {
     for (const auto &v : value.split(',')) {
       if (access(v.to_s().c_str(), R_OK) == -1) {
-        fmt::print("ERROR: file {} is not accessible (skipping)\n", v);
+        fmt::print("ERROR: file '{}' is not accessible (skipping)\n", v);
         throw std::runtime_error("not valid file");
       }
     }
-  } else if (name == "path") {
+  } else if (name == "path" || name == "src_path") {
     auto path = value.to_s();
     if (access(path.c_str(), R_OK) == -1) {
       mkdir(path.c_str(), 0755);

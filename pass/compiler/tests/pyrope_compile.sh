@@ -130,7 +130,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf lgdb_prp2prp
-	${LGSHELL} "files src_path:tmp_prp match:\".*\.prp\" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
+	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp compile with files:${all_files}!"
