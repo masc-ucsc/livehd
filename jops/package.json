@@ -10,6 +10,7 @@
     "test": "jest --coverage"
   },
   "devDependencies": {
-    "jest": "^27.0.6"
+    "jest": "^27.0.6",
+    "prettier": "2.3.2"
   }
 }
