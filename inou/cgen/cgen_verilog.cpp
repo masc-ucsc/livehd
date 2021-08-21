@@ -393,10 +393,10 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
       final_expr = a;
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
-      auto a_bits = a_dpin.get_bits();
+      if (range_end>static_cast<int>(dpin.get_bits()))
+        range_end = dpin.get_bits() + range_begin;
 
-      if (range_end>static_cast<int>(a_bits))
-        range_end = a_bits;
+      auto a_bits = a_dpin.get_bits();
 
       auto value_dpin = node.get_sink_pin("value").get_driver_pin();
       auto value      = get_expression(value_dpin);
@@ -423,10 +423,13 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         final_expr = mmap_lib::str::concat("{", sel, "}");
       }else{
         mmap_lib::str a_replaced;
-        if ((range_end-1) == range_begin) {
-          a_replaced = mmap_lib::str::concat(value, "[", range_begin, "]");
+        Bits_t value_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+        if (value_bits_to_use >= value_dpin.get_bits()) {
+          a_replaced = value;
+        }else if (value_bits_to_use == 1) {
+          a_replaced = mmap_lib::str::concat(value, "[0]");
         }else{
-          a_replaced = mmap_lib::str::concat(value, "[", range_end - 1, ":", range_begin, "]");
+          a_replaced = mmap_lib::str::concat(value, "[", value_bits_to_use-1, ":0]");
         }
         mmap_lib::str a_high;
         mmap_lib::str a_low;
@@ -475,6 +478,9 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     auto a      =                          get_expression(a_dpin);
 
     auto [range_begin, range_end] = mask_v.get_mask_range();
+    Bits_t a_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+    if (a_bits_to_use > dpin.get_bits())
+      range_end = dpin.get_bits() + range_begin;
 
     if (range_begin<0 || range_end<0) {
       mmap_lib::str sel;

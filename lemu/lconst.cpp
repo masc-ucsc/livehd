@@ -439,9 +439,12 @@ std::pair<int,int> Lconst::get_mask_range() const {
 	if (num==0)
     return std::make_pair(-1,-1); // No continuous range
 
-	auto range_end = get_bits();
-	if (is_positive())
-		--range_end;
+  int range_end;
+  if (is_positive()) {
+    range_end = get_bits() - 1;
+  }else{
+    range_end = Bits_max;
+  }
 
   if (is_mask())  // continuous sequence of ones. Nice
     return std::make_pair(0,range_end);
