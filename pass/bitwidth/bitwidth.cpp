@@ -18,6 +18,20 @@ void Bitwidth::do_trans(Lgraph *lg) {
   bw_pass(lg);
 }
 
+void Bitwidth::set_bw_1bit(Node_pin &dpin) {
+  Bitwidth_range bw;
+  bw.set_sbits_range(1);
+  dpin.set_bits(1);
+  bwmap.insert_or_assign(dpin.get_compact_class(), bw);
+}
+
+void Bitwidth::set_bw_1bit(Node_pin &&dpin) {
+  Bitwidth_range bw;
+  bw.set_sbits_range(1);
+  dpin.set_bits(1);
+  bwmap.insert_or_assign(dpin.get_compact_class(), bw);
+}
+
 void Bitwidth::adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw) {
   auto [it, inserted] = bwmap.insert({dpin.get_compact_class(), bw});  // not use insert_or_assign because it could a bw update
   if (inserted) {
@@ -126,9 +140,7 @@ void Bitwidth::process_flop(Node &node) {
 void Bitwidth::process_ror(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size());
 
-  Bitwidth_range bw;
-  bw.set_sbits_range(1);  // no need adjust_bw. Always 1
-  bwmap.insert_or_assign(node.get_driver_pin().get_compact_class(), bw);
+  set_bw_1bit(node.get_driver_pin());
 }
 
 void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
@@ -311,14 +323,12 @@ void Bitwidth::process_memory(Node &node) {
   std::vector<Node_pin> din_drivers;
   std::vector<Node_pin> addr_drivers;
   {
-    for (const auto &e : node.inp_edges_ordered()) {
+    for (auto &e : node.inp_edges_ordered()) {
       auto n = e.sink.get_pin_name();
       if (n == "clock") {
         auto it = bwmap.find(e.driver.get_compact_class());
         if (it == bwmap.end()) {
-          Bitwidth_range clock_bw;
-          clock_bw.set_sbits_range(1);
-          bwmap.insert_or_assign(e.driver.get_compact_class(), clock_bw);
+          set_bw_1bit(e.driver);
 
           discovered_some_backward_nodes_try_again = true;
         }
@@ -754,9 +764,7 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
 }
 
 void Bitwidth::process_comparator(Node &node) {
-  Bitwidth_range bw;
-  bw.set_sbits_range(1);
-  bwmap.insert_or_assign(node.get_driver_pin().get_compact_class(), bw);
+  set_bw_1bit(node.get_driver_pin());
 }
 
 void Bitwidth::process_assignment_or(Node &node, XEdge_iterator &inp_edges) {

@@ -24,6 +24,8 @@ protected:
   // absl::flat_hash_map<Node_pin::Compact_flat , Bitwidth_range> bwmap_flat;  // bwmap indexing with dpin_compact_flat, (lgid, nid)
   // absl::flat_hash_map<Node_pin::Compact      , Bitwidth_range> bwmap_hier;  // bwmap indexing with dpin_compact,      (hidx, nid)
 
+  void set_bw_1bit(Node_pin &&dpin);
+  void set_bw_1bit(Node_pin &dpin);
   void adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw);
   void adjust_bw(Node_pin &dpin, const Bitwidth_range &bw);
 

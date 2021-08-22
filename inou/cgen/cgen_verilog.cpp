@@ -690,6 +690,11 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
     if (!node.has_outputs() || node.is_type_flop())
       continue;
 
+    if (node.get_driver_pin().get_bits()==0) {
+      node.dump();
+      Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
+    }
+
     // flops added to the last always with outputs
     if (op == Ntype_op::Mux) {
       process_mux(fout, node);
