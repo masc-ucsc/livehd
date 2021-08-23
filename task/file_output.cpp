@@ -50,9 +50,9 @@ File_output::~File_output() {
 
   //---------------------------------- CLOSE
   ::munmap(base, map_size);
-  if (sz != map_size) {
+  if (map_size != sz) {
     auto ok2 = ftruncate(fd, sz);
-    I(ok2);
+    (void)ok2;
   }
   ::close(fd);
 }

@@ -322,11 +322,7 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
       num = (num << shift_mode) | v;
     }
 
-    if (!unsigned_result) { // check if MSB is 1 for 2s complement
-      if (first_digit>>(shift_mode-1)) {
-        num = num - (Number(1)<<(calc_num_bits(num)-1));
-      }
-    }
+    I(unsigned_result);
   }
 
   if (negative) {
