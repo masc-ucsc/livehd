@@ -111,7 +111,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 
   // todo: when move to the new compressed bottom-up tree paralellism, you don't need to specify top
   if (top == "") {  // top will be specified only if it is a hierarchical design
-    I(lgs.size() == 1);
+    //I(lgs.size() == 1);
     for (auto &lg : lgs) {
       bw.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
