@@ -707,6 +707,21 @@ std::vector<int> vec_set_mask(std::vector<int> a, std::vector<int> mask, std::ve
   }
   return a;
 }
+// Check sign and size for b
+std::vector<int> vec_Sext(std::vector<int> a, uint32_t b)
+{ 
+  std::vector<int> result = {a.begin()+b, a.begin()};
+  return result;
+ /* for (size_t i = 1; i <= mask.size(); i++)
+  {
+    if (mask[mask.size() - i])
+    {
+      if ((i < a.size()) && (i < value.size()))
+        a[a.size() - i] = value[value.size() - i];
+    }
+  }
+  return a;*/
+}
 
 std::vector<int> lezSAT::vec_pass(const std::vector<int> &vec1) {
   std::vector<int> vec;
