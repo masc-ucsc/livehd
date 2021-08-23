@@ -3,5 +3,5 @@ Script written for use with MASC LiveHD/Pyrope
 Given a number of read ports and write ports, automatically generates
 Verilog memory module with forwarding/latency/masking parameters.
 
-Use: ./cgen_memory_generate write 4 read 2
-creates a verilog file with 4 write ports/2 read ports
+Use: ./cgen_memory_generate read 4 write 2
+creates a verilog file with 4 read ports/2 write ports
