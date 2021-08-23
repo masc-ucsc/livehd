@@ -20,13 +20,20 @@ function isDigit(str) {
 // console.log('answer', BigIntnumberConversion('1', -1));
 
 class Lconst {
-  constructor(number, explicit_str = false, bits = 0, num = 0) {
+  constructor(
+    number,
+    explicit_str = false,
+    bits = 0,
+    num = 0,
+    has_unknown = false
+  ) {
     this.number = number;
     this.explicit_str = explicit_str;
     this.bits = bits;
     this.num = num;
     this.binary = undefined;
     this.unknown = undefined;
+    this.has_unknown = has_unknown;
     this.initialized();
   }
 
@@ -52,11 +59,12 @@ class Lconst {
     return binaryForm.length + 1;
   }
 
-  static new_lconst(explicit_str, bits, num) {
+  static new_lconst(explicit_str, bits, num, has_unknown = false) {
     const new_l = new Lconst();
     new_l.explicit_str = explicit_str;
     new_l.bits = bits;
     new_l.num = num;
+    new_l.has_unknown = has_unknown;
     return new_l;
   }
 
@@ -78,7 +86,7 @@ class Lconst {
 
     let skip_chars = 0;
     let shift_mode = -1;
-    let negative = false; // does it have negative sign?
+    var negative = false; // does it have negative sign?
     let unsigned_result = false; // true if start with 0sb
 
     if (txt[0] === '-') {
@@ -93,6 +101,7 @@ class Lconst {
       if (txt.length >= 2 + skip_chars && txt[skip_chars] === '0') {
         skip_chars += 1;
         const sel_ch = txt[skip_chars];
+
         if (sel_ch === 's') {
           skip_chars += 1;
           sel_ch = txt[skip_chars];
@@ -141,6 +150,12 @@ class Lconst {
           throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
         }
       }
+    } else if (shift_mode === 2) {
+      let v = Lconst.from_binary(txt.substring(skip_chars), unsigned_result);
+      if (!negative) return v;
+      // Prob:
+      num = -v.num;
+      return Lconst.new_lconst(false, this.calc_num_bits(num), num);
     } else {
       assert(
         shift_mode === 16 || shift_mode === 8,
@@ -158,11 +173,77 @@ class Lconst {
       }
     }
 
+    if (negative) {
+      num = -num;
+      if (unsigned_result && num < 0n) {
+        throw `ERROR, ${number_str} negative value but it must be unsigned`;
+      }
+    }
+
     return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
   } // end of from_pyrope
 
   static from_binary(txt, unsigned_result) {
-    let bin;
+    assert(
+      typeof unsigned_result === 'boolean',
+      `ERROR: unsigned_result ${unsigned_result} is not Boolean type`
+    );
+    const ori_txt = txt.replace(/_/g, '');
+    let binary = '';
+    let unknown = '';
+    let unknown_found = false;
+    let num = 0n;
+
+    if (unsigned_result) {
+      binary = unknown = '0';
+    } else {
+      binary += ori_txt[0];
+      unknown += '0';
+    }
+
+    for (const char of ori_txt) {
+      console.log('-----current char----', char);
+      console.log('check the value of binary: ', binary);
+      if (char === '?' || char === 'x' || char === 'z') {
+        binary += '0';
+        unknown += '1';
+        unknown_found = true;
+      } else if (char === '0') {
+        if (binary !== '0') {
+          console.log('get inside of the loop: ', binary);
+          binary += '0';
+          unknown += '0';
+          num = num << 1n;
+          console.log('what1', num);
+        }
+      } else if (char === '1') {
+        if (binary !== '1') {
+          console.log('get inside of the loop: ', binary);
+          binary += '1';
+          unknown += '0';
+          num = (num << 1n) | 1n;
+          console.log('what2', num);
+        }
+      } else {
+        throw `ERROR: ${txt} binary encoding could not use ${char}`;
+      }
+    }
+
+    if (!unsigned_result && binary[0] === '1') {
+      console.log(num);
+      num = num - (1n << (BigInt(binary.length) - 1n));
+    }
+
+    let return_Lconst = Lconst.new_lconst(
+      false,
+      Lconst.calc_num_bits(num),
+      num,
+      unknown_found
+    );
+
+    return_Lconst.binary = binary;
+    return_Lconst.unknown = unknown;
+    return return_Lconst;
   }
 
   // restriction: only from decimal to pyrope
@@ -177,17 +258,14 @@ class Lconst {
     const num = this.num ^ com_lconst.num;
     return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
   }
+
   sayHello() {
     console.log('I am a Lconst object :)');
   }
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
+let testing = Lconst.from_binary('__111110', false);
+console.log(testing.binary, testing.unknown, testing.num, testing.has_unknown);
 
-let testing = Lconst.from_pyrope('0o1_3');
-console.log(testing.num);
-
-/* let testing3 = testing.xor_op(testing2);
-console.log(testing3.to_pyrope());
-console.log(~5) */
 module.exports = Lconst;
