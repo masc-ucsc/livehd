@@ -1295,7 +1295,8 @@ void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
 
 void Bitwidth::bw_pass(Lgraph *lg) {
   discovered_some_backward_nodes_try_again = true;
-  not_finished                             = true;
+  // not_finished                             = true;
+  not_finished                             = false;
 
   int n_iterations = 0;
 

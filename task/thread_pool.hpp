@@ -115,14 +115,11 @@ class Thread_pool {
   }
 
 public:
-  Thread_pool(int _thread_count = 0)
-      :
+  Thread_pool(int _thread_count = 0):
 #ifdef MPMC
-      queue(256)
-      ,
+      queue(256),
 #endif
-      jobs_left(0)
-      , finishing(false) {
+      jobs_left(0), finishing(false) {
 
     started_lock = false;
 

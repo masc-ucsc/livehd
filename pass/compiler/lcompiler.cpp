@@ -2,6 +2,9 @@
 
 #include "lcompiler.hpp"
 
+// FIXME: todo: the top should always specified so that the bottom-up mechanism works
+
+
 Lcompiler::Lcompiler(mmap_lib::str _path, mmap_lib::str _odir, mmap_lib::str _top, bool _gviz)
     : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {}
 
@@ -56,7 +59,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
       {
         std::unique_lock<std::mutex> guard(lg_visited_mutex);
         if (lg_visited.find(lg_sub) != lg_visited.end())
-          return;
+          return; //return false
         lg_visited.insert(lg_sub);
       }
 
@@ -81,6 +84,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
           Pass::error("graph {} could not converge bw/cprop in {} iterations", lg_sub->get_name(), n_iters);
         }
       }
+      // return true
     });
 
     Bitwidth bw(false, 10);  // hier = false, max_iters = 10
@@ -204,14 +208,6 @@ void Lcompiler::do_fir_cprop() {
     Pass::error("Top module not specified for firrtl codes!\n");
 }
 
-void Lcompiler::fir_thread_cprop(Lgraph *lg) {
-  Cprop cp(false);
-
-  fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg->get_name());
-  cp.do_trans(lg);
-  gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-  
-}
 
 void Lcompiler::setup_maps() {  // single-thread
 
@@ -281,8 +277,24 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
       
+      // FIXME->sh: bw.is_finished() malfunction
+      // int n_iters = 0;
+      // while (true) {
+      //   fmt::print("-------- {:<28} ({:<30}) -------- (B-{})\n", "Local Bitwidth-Inference", new_lg_sub->get_name(), n_iters);
+      //   bw.do_trans(new_lg_sub);
+      //   gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
+
+      //   if (bw.is_finished()) {
+      //     break;
+      //   }
+      //   n_iters++;
+      //   if (n_iters > 4) {
+      //     Pass::error("graph {} could not converge bw in {} iterations", new_lg_sub->get_name(), n_iters);
+      //   }
+      // }
 
       fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg_sub->get_name());
+      bw.do_trans(new_lg_sub);
       bw.do_trans(new_lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
       
@@ -302,7 +314,26 @@ void Lcompiler::do_fir_firmap_bitwidth() {
     gviz == true ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
     
 
+    // FIXME->sh: bw.is_finished() malfunction
+    // int n_iters = 0;
+    // while (true) {
+    //   fmt::print("-------- {:<28} ({:<30}) -------- (B-{})\n", "Local Bitwidth-Inference", new_lg->get_name(), n_iters);
+    //   bw.do_trans(new_lg);
+    //   gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
+
+    //   if (bw.is_finished()) {
+    //     break;
+    //   }
+    //   n_iters++;
+    //   if (n_iters > 4) {
+    //     Pass::error("graph {} could not converge bw in {} iterations", new_lg->get_name(), n_iters);
+    //   }
+    // }
+
+
+
     fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg->get_name());
+    bw.do_trans(new_lg);
     bw.do_trans(new_lg);
     gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
 
@@ -324,6 +355,7 @@ void Lcompiler::do_fir_firbits() {
   auto top_name_before_mapping = mmap_lib::str::concat("__firrtl_", top);
 
   // hierarchical traversal
+  // create a lamda function for every firrtl/pyrope passes. if top provided, use it, if not, use the visited table
   for (auto &lg : lgs) {
     ++lgcnt;
     // bottom up approach to parallelly analyze the firbits
