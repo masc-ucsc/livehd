@@ -87,6 +87,7 @@ public:
       return;
     end();
     perf_stop();
+    linux.close();
   }
 
   void start();

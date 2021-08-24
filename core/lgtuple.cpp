@@ -469,7 +469,7 @@ std::pair<Port_ID, mmap_lib::str> Lgtuple::convert_key_to_io(const mmap_lib::str
     return std::pair(Port_invalid, key.substr(skip));
   }
 
-  auto key2 = key.substr(skip);
+  auto key2 = key.substr(skip+1);
 
   if (!std::isdigit(key2.front())) {
     Lgraph::error("name should have digit after position specified :digits: not {}\n", key2);

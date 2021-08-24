@@ -423,7 +423,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         final_expr = mmap_lib::str::concat("{", sel, "}");
       }else{
         mmap_lib::str a_replaced;
-        Bits_t value_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+        Bits_t value_bits_to_use = static_cast<Bits_t>(range_end-range_begin-1);
         if (value_bits_to_use >= value_dpin.get_bits()) {
           a_replaced = value;
         }else if (value_bits_to_use == 1) {
@@ -478,9 +478,13 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     auto a      =                          get_expression(a_dpin);
 
     auto [range_begin, range_end] = mask_v.get_mask_range();
-    Bits_t a_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+    Bits_t a_bits_to_use = static_cast<Bits_t>(range_end-range_begin-1);
     if (a_bits_to_use > dpin.get_bits())
       range_end = dpin.get_bits() + range_begin;
+
+    int out_bits = dpin.get_bits();
+    if (dpin.is_unsign())
+      --out_bits;
 
     if (range_begin<0 || range_end<0) {
       mmap_lib::str sel;
@@ -495,16 +499,17 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
           sel = mmap_lib::str::concat(sel, ",", a, "[", i ,"]");
       }
       final_expr = mmap_lib::str::concat("{", sel, "}");
+    }else if (range_begin>static_cast<int>(a_bits)) {
+      final_expr = mmap_lib::str::concat("{", range_end-range_begin-1, "{", a , "[", a_bits-1 ,"]}}");
+    }else if (range_end>static_cast<int>(a_bits)) {
+      auto top = mmap_lib::str::concat("{{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}}");
+      final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
+    }else if (range_begin == 0 && range_end>=out_bits) {
+      final_expr = a;
     }else{
-      if (range_begin>static_cast<int>(a_bits)) {
-        final_expr = mmap_lib::str::concat("{", range_end-range_begin, "{", a , "[", a_bits-1 ,"]}}");
-      }else if (range_end>static_cast<int>(a_bits)) {
-        auto top = mmap_lib::str::concat("{{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}}");
-        final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
-      }else{
-        final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
-      }
+      final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
     }
+
   } else if (op == Ntype_op::Sext) {
     auto lhs      = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto pos_node = node.get_sink_pin("b").get_driver_node();
