@@ -659,7 +659,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     return value;  // all ones mask, just copy value
   }
 
-  I(!mask.has_unknowns() && !has_unknowns());  // FIXME: this should work (just someone else could do it?)
+  I(!mask.has_unknowns());  // FIXME: this should work (just someone else could do it?)
 
   auto mask_min = mask.get_trailing_zeroes();
   auto mask_max = mask.get_bits();
@@ -675,6 +675,33 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   if (mask.is_negative()) {
     mask_num = mask.not_op().get_num();
   }
+
+  if (has_unknowns()) {
+
+    Bits_t end_bits = mask.get_bits();
+    if (mask.is_negative()) {
+      end_bits += std::max(value.get_bits(), get_bits());
+    }
+
+    auto a_bin     = to_binary();
+    auto value_bin = value.to_binary();
+
+    mmap_lib::str bin_txt;
+    for (std::size_t i = 0u; i < end_bits; ++i) {
+      if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero) {
+        auto a_pos = std::min(i, a_bin.size()-1);
+        bin_txt = bin_txt.append(a_bin[a_pos]);
+      }else{
+        bin_txt = bin_txt.append(value_bin[value_pos]);
+
+        if (value_bin.size()>(value_pos+1))
+          ++value_pos;
+      }
+    }
+
+    return Lconst::from_binary(bin_txt, false);
+  }
+
   for (auto i = mask_min; i < mask_max; ++i) {
     if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero)
       continue;
@@ -885,6 +912,20 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
   if (bits == 0)
     return *this;
 
+  if (has_unknowns()) {
+    // rsh_op(0b??00??,3) -> 0b??0
+    if (amount >= get_bits()) {
+      if (has_unknown_sign())
+        return Lconst::from_pyrope("0sb?");
+      if (is_positive())
+        return Lconst::from_pyrope("0b?");
+      I(is_negative());
+      return Lconst::from_pyrope("0sb1?");
+    }
+    auto qmarks = to_pyrope();
+    return Lconst::from_pyrope(qmarks.substr(0,qmarks.size()-amount));
+  }
+
   if (is_string()) {
     auto qmarks = to_pyrope();
     return Lconst::from_pyrope(qmarks.substr(amount));
@@ -909,12 +950,16 @@ Lconst Lconst::or_op(const Lconst &o) const {
     mmap_lib::str result;
 
     for (auto i = 0u; i < l_str.size(); ++i) {
-      if (l_str[i] == '1' || r_str[i] == '1')
-        result = result.append('0');
-      else if (l_str[i] == '?' || r_str[i] == '?')
-        result = result.append('?');
-      else
-        result = result.append('0');
+      if (l_str[i] == '1' || r_str[i] == '1') {
+        if (result.size() != 1 || result.front() != '0')
+          result = result.append('0');
+      }else if (l_str[i] == '?' || r_str[i] == '?'){
+        if (result.size() != 1 || result.front() != '?')
+          result = result.append('?');
+      }else{
+        if (result.size() != 1 || result.front() != '0')
+          result = result.append('0');
+      }
     }
 
     return Lconst::from_binary(result, true);
@@ -945,12 +990,16 @@ Lconst Lconst::and_op(const Lconst &o) const {
     mmap_lib::str result;
 
     for (auto i = 0u; i < l_str.size(); ++i) {
-      if (l_str[i] == '0' || r_str[i] == '0')
-        result = result.append('0');
-      else if (l_str[i] == '?' || r_str[i] == '?')
-        result = result.append('?');
-      else
-        result = result.append('1');
+      if (l_str[i] == '0' || r_str[i] == '0') {
+        if (result.size() != 1 || result.front() != '0')
+          result = result.append('0');
+      }else if (l_str[i] == '?' || r_str[i] == '?') {
+        if (result.size() != 1 || result.front() != '?')
+          result = result.append('?');
+      }else{
+        if (result.size() != 1 || result.front() != '1')
+          result = result.append('1');
+      }
     }
 
     return Lconst::from_binary(result, true);
@@ -1179,6 +1228,8 @@ mmap_lib::str Lconst::to_binary() const {
   }
 
   auto v = get_num();
+  if (v == 0)
+    return "0";
 
   mmap_lib::str txt;
   for (auto i = 0u; i < get_bits(); ++i) {

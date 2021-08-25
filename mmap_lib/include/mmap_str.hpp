@@ -822,12 +822,23 @@ public:
     return 0;
   }
 
+  [[nodiscard]] bool is_string() const {
+    if (size() == 0)
+      return false;
+
+    auto ch = front();
+    if (std::isdigit(ch) || ch == '-')
+      return false;
+
+    return true;
+  }
+
   [[nodiscard]] bool is_i() const {
     if (!is_sso())
       return false;
     int         result;
     const auto *base = ref_base_sso();
-    if (size() == 0 || !std::isdigit(base[0]))
+    if (size() == 0 || !(std::isdigit(base[0]) || base[0] == '-'))
       return false;
     auto [p, ec] = std::from_chars(base, base + size(), result);
     (void)p;

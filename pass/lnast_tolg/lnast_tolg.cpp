@@ -1139,10 +1139,10 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, const mmap_lib::str &const_str) {
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
   if (!const_str.contains("bits")) {
-    if (Lconst::from_pyrope(const_str).is_i())
-      return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
-    else 
+    if (Lconst::from_pyrope(const_str).is_string())
       return lg->create_node_const(Lconst::from_string(const_str)).setup_driver_pin();
+    else
+      return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
   }
 
   // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
