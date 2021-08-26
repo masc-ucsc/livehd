@@ -36,6 +36,22 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;
 
+#if 0
+  // Iterate over inputs to look for tup_add to fill firbits for inputs
+  lg->each_graph_input([this,&fbmap](Node_pin &dpin) {
+
+    for(auto spin:dpin.out_sinks()) {
+      auto node = spin.get_node();
+      fmt::print("1.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
+      node.dump();
+      if (node.get_type_op() == Ntype_op::AttrSet) {
+      fmt::print("2.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
+        analysis_lg_attr_set(node, fbmap);
+      }
+    }
+  });
+#endif
+
   int firbits_iters = 0;
   do {
     if (firbits_iters > 10)
@@ -47,6 +63,8 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
 
     lg->regenerate_htree();  // called bottom up, and the hierarchy may have been unfinished before
     firbits_wait_flop = false;
+
+
     for (auto node : lg->forward()) {
 #ifndef NDEBUG
       fmt::print("{}\n", node.debug_name());
@@ -403,7 +421,7 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   auto h_dpin = driver_list[0];
 
   I(!h_dpin.is_invalid());  // connected
-  I(h_dpin != e.driver);
+  //I(h_dpin != e.driver);
   auto *hier_lg = h_dpin.get_node().get_class_lgraph();
   I(fbmaps.find(hier_lg) != fbmaps.end());
   auto &hier_fbmap = fbmaps[hier_lg];

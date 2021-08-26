@@ -32,11 +32,11 @@ protected:
 
   enum class Net_attr { Input, Output, Register, Local };
 
-  absl::flat_hash_map<mmap_lib::str, Net_attr> net2attr;
+  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> vname2lname;
 
   mmap_lib::str create_lnast_tmp();
-  mmap_lib::str create_lnast_var(mmap_lib::str val);
-  mmap_lib::str create_lnast_lhs_var(mmap_lib::str val);
+  mmap_lib::str get_lnast_name(mmap_lib::str val);
+  mmap_lib::str get_lnast_lhs_name(mmap_lib::str val);
 
   void new_lnast(mmap_lib::str name);
 

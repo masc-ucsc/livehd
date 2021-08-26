@@ -466,7 +466,9 @@ Lconst Lconst::get_mask_value(Bits_t h, Bits_t l) {
 	}
 	assert(h>l);
 
-	auto res_num = ((Number(1)<<(h-l))-1)<<l;
+	Number res_num = Number(1)<<(h-l+1);
+	res_num -= Number(1);
+  res_num <<= l;
 
 	return Lconst(false, calc_num_bits(res_num), res_num);
 }

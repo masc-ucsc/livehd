@@ -25,45 +25,30 @@ mmap_lib::str Slang_tree::create_lnast_tmp() {
   return mmap_lib::str::concat("___", ++tmp_var_cnt);
 }
 
-mmap_lib::str Slang_tree::create_lnast_var(mmap_lib::str val) {
+mmap_lib::str Slang_tree::get_lnast_name(mmap_lib::str vname) {
 
-  const auto &it = net2attr.find(val);
-  if (it == net2attr.end()) {  // OOPS, use before assignment
+  const auto &it = vname2lname.find(vname);
+  if (it == vname2lname.end()) {  // OOPS, use before assignment (can not be IOs mapped before)
     auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
     auto tmp_var = create_lnast_tmp();
     lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
-    lnast->add_child(idx_dot, Lnast_node::create_ref(val));
+    lnast->add_child(idx_dot, Lnast_node::create_ref(vname));
     lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
 
     return tmp_var;
   }
 
-  if (it->second == Net_attr::Input) {
-    return val.prepend('$');
-  } else if (it->second == Net_attr::Output) {
-    return val.prepend('%');
-  } else if (it->second == Net_attr::Register) {
-    return val.prepend('#');
-  }
-
-  return val;
+  return it->second;
 }
 
-mmap_lib::str Slang_tree::create_lnast_lhs_var(mmap_lib::str val) {
-  const auto &it = net2attr.find(val);
-  if (it == net2attr.end()) {
-    return val;
+mmap_lib::str Slang_tree::get_lnast_lhs_name(mmap_lib::str vname) {
+  const auto &it = vname2lname.find(vname);
+  if (it == vname2lname.end()) {
+    vname2lname.emplace(vname,vname);
+    return vname;
   }
 
-  if (it->second == Net_attr::Input) {
-    return val.prepend('$');
-  } else if (it->second == Net_attr::Output) {
-    return val.prepend('%');
-  } else if (it->second == Net_attr::Register) {
-    return val.prepend('#');
-  }
-
-  return val;
+  return it->second;
 }
 
 void Slang_tree::new_lnast(mmap_lib::str name) {
@@ -73,7 +58,7 @@ void Slang_tree::new_lnast(mmap_lib::str name) {
   auto node_stmts = Lnast_node::create_stmts();
   idx_stmts       = lnast->add_child(mmap_lib::Tree_index::root(), node_stmts);
 
-  net2attr.clear();
+  vname2lname.clear();
 
   tmp_var_cnt = 0;
 }
@@ -134,13 +119,20 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       mmap_lib::str var_name;
       if (port.direction == slang::ArgumentDirection::In) {
         var_name = mmap_lib::str::concat("$.:", decl_pos, ":", port.name);
-        net2attr.emplace(port.name, Net_attr::Input);
+        vname2lname.emplace(port.name, var_name);
       } else {
         var_name = mmap_lib::str::concat("%.:", decl_pos, ":", port.name);
-        net2attr.emplace(port.name, Net_attr::Output);
+        vname2lname.emplace(port.name, var_name);
       }
 
-      create_declare_bits_stmts(var_name, port.getType().isSigned(), port.getType().getBitWidth());
+      const auto &type = port.getType();
+      if (type.hasFixedRange()) {
+        auto range = type.getFixedRange();
+        if (!range.isLittleEndian()) {
+          fmt::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
+        }
+      }
+      create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
       ++decl_pos;
 
     } else if (p->kind == slang::SymbolKind::InterfacePort) {
@@ -160,19 +152,8 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       const auto &ns   = member.as<slang::NetSymbol>();
       auto       *expr = ns.getInitializer();
       if (expr) {
-        mmap_lib::str lhs_var = create_lnast_var(member.name);
-
-#if 0
-        // ALso correct, more checks but is it needed? Not if all the bit ops are correctly tracked
-				auto it = net2attr.find(member.name);
-				if (it == net2attr.end()) {
-					net2attr.emplace(member.name, Net_attr::Local);
-					create_declare_bits_stmts(lhs_var, ns.getType().isSigned(), ns.getType().getBitWidth());
-				}
-				create_assign_stmts(lhs_var, process_expression(*expr));
-#else
-        create_assign_stmts(lhs_var, process_expression(*expr));
-#endif
+        //mmap_lib::str lhs_var = get_lnast_name(member.name);
+        create_assign_stmts(member.name, process_expression(*expr));
       }
     } else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
@@ -241,7 +222,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
 
   if (lhs.kind == slang::ExpressionKind::NamedValue) {
     const auto &var = lhs.as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -250,7 +231,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     I(es.value().kind == slang::ExpressionKind::NamedValue);
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
 
     dest_max_bit = process_expression(es.selector());
     dest_min_bit = dest_max_bit;
@@ -263,7 +244,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     I(rs.value().kind == slang::ExpressionKind::NamedValue);
 
     const auto &var = rs.value().as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -272,9 +253,9 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     dest_min_bit = process_expression(rs.right());
   }
 
-  auto it = net2attr.find(var_name);
-  if (it == net2attr.end()) {
-    net2attr.emplace(var_name, Net_attr::Local);
+  auto it = vname2lname.find(var_name);
+  if (it == vname2lname.end()) {
+    vname2lname.emplace(var_name, var_name);
     create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
     if (dest_var_sign)
       create_assign_stmts(var_name, "0sb?");
@@ -316,7 +297,15 @@ mmap_lib::str Slang_tree::create_mask_stmts(mmap_lib::str dest_max_bit) {
 mmap_lib::str Slang_tree::create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib::str min_bit) {
 
   if (max_bit.is_i() && min_bit.is_i()) {
-    auto mask = Lconst::get_mask_value(max_bit.to_i(), min_bit.to_i());
+    auto a = max_bit.to_i();
+    auto b = min_bit.to_i();
+    if (a<b) {
+      auto tmp = a;
+      a = b;
+      b = tmp;
+    }
+
+    auto mask = Lconst::get_mask_value(a, b);
     return mask.to_pyrope();
   }
 
@@ -714,7 +703,7 @@ void Slang_tree::create_set_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitm
 mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
   if (expr.kind == slang::ExpressionKind::NamedValue) {
     const auto &nv = expr.as<slang::NamedValueExpression>();
-    return create_lnast_var(nv.symbol.name);
+    return get_lnast_name(nv.symbol.name);
   }
 
   if (expr.kind == slang::ExpressionKind::IntegerLiteral) {
@@ -859,12 +848,27 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
 
-    auto sel_var  = create_lnast_var(var.symbol.name);
+    auto sel_var  = get_lnast_name(var.symbol.name);
     auto sel_bit  = process_expression(es.selector());
     auto sel_mask = create_shl_stmts("1", sel_bit);
 
     return create_get_mask_stmts(sel_var, sel_mask);
   }
+
+  if (expr.kind == slang::ExpressionKind::RangeSelect) {
+    const auto &es = expr.as<slang::RangeSelectExpression>();
+    I(es.value().kind == slang::ExpressionKind::NamedValue);
+
+    const auto &var = es.value().as<slang::NamedValueExpression>();
+
+    auto sel_var  = get_lnast_name(var.symbol.name);
+    auto max_bit  = process_expression(es.left());
+    auto min_bit  = process_expression(es.right());
+
+    auto sel_mask = create_bitmask_stmts(max_bit, min_bit);
+    return create_get_mask_stmts(sel_var, sel_mask);
+  }
+
 
   fmt::print("FIXME still unimplemented Expression kind\n");
 
