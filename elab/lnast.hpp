@@ -234,4 +234,20 @@ public:
   void     set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth);
 
   void dump() const;
+
+  template <typename S, typename... Args>
+  static void info(const S &format, Args &&...args) {
+    auto txt = fmt::format(format, args...);
+    fmt::print("info:{}\n", txt);
+  }
+
+  class error : public std::runtime_error {
+  public:
+    template <typename S, typename... Args>
+    error(const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+      fmt::print("error:lnast {}\n", what());
+      throw std::runtime_error(std::string(what()));
+    };
+  };
+
 };
