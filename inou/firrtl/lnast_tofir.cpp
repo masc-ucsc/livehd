@@ -807,7 +807,7 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
   } else if (ntype.is_shl()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT;
-  } else if (ntype.is_shr()) {
+  } else if (ntype.is_sra()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT;
   } else {
     I(false);  // some nary op not yet supported

@@ -62,8 +62,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_uif)
   CREATE_LNAST_NODE(_for)
   CREATE_LNAST_NODE(_while)
-  CREATE_LNAST_NODE(_phi)
-  CREATE_LNAST_NODE(_hot_phi)
   CREATE_LNAST_NODE(_func_call)
   CREATE_LNAST_NODE(_func_def)
 
@@ -89,7 +87,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_div)
   CREATE_LNAST_NODE(_mod)
 
-  CREATE_LNAST_NODE(_shr)
   CREATE_LNAST_NODE(_shl)
   CREATE_LNAST_NODE(_sra)
 
@@ -105,18 +102,19 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_gt)
   CREATE_LNAST_NODE(_ge)
 
-  CREATE_LNAST_NODE(_tuple_concat)
-
   CREATE_LNAST_NODE(_ref)
   CREATE_LNAST_NODE(_const)
 
-  CREATE_LNAST_NODE(_assert)
-  CREATE_LNAST_NODE(_err_flag)
-
+  CREATE_LNAST_NODE(_tuple_concat)
   CREATE_LNAST_NODE(_tuple_add)
   CREATE_LNAST_NODE(_tuple_get)
+
   CREATE_LNAST_NODE(_attr_set)
   CREATE_LNAST_NODE(_attr_get)
+
+  CREATE_LNAST_NODE(_err_flag)
+  CREATE_LNAST_NODE(_phi)
+  CREATE_LNAST_NODE(_hot_phi)
 };
 
 class Lnast : public mmap_lib::tree<Lnast_node> {

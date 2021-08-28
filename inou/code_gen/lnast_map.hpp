@@ -10,8 +10,8 @@ class Lnast_map {
 protected:
   constexpr static std::array namemap_pyrope{"invalid",
 
-                                             "top",       "sts",        "if",       "uif",     "for", "while", "phi",
-                                             "hotphi",    "func_call",  "func_def",
+                                             "top",       "sts",        "if",       "uif",     "for", "while",
+                                             "func_call",  "func_def",
 
                                              "=",         ":=",         "mut",
 
@@ -23,19 +23,22 @@ protected:
 
                                              "+",         "-",          "*",        "/",       "mod",
 
-                                             "<<",        ">>",         ">>>",
+                                             "<<",        ">>",
 
                                              "sext",      "set_mask",   "get_mask",
 
                                              "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 
-                                             "++",      //"tuple_concat", // ++
 
                                              "ref",       "const",
 
-                                             "assert",    "error_flag",
 
-                                             "tuple_add", "tuple_get",  "attr_set", "attr_get"};
+                                             "++",        "tuple_add", "tuple_get",
+
+                                             "attr_set", "attr_get",
+
+                                             "error_flag", "phi", "hot_phi"
+  };
 
   constexpr static std::array namemap_verilog{
       "invalid",
@@ -45,8 +48,6 @@ protected:
       "uif",
       "for",
       "while",
-      "phi",
-      "hotphi",
       "func_call",
       "func_def",
 
@@ -73,7 +74,6 @@ protected:
       "%",
 
       "<<",
-      ">>",
       ">>>",
 
       "sext",
@@ -88,18 +88,19 @@ protected:
       ">",
       ">=",
 
-      "tuple_concat",
-
       "ref",
       "const",
 
-      "assert",
-      "error_flag",
-
+      "tuple_concat",
       "tuple_add",
       "tuple_get",
+
       "attr_set",
       "attr_get",
+
+      "error_flag",
+      "phi",
+      "hotphi",
   };
 
   constexpr static std::array namemap_cpp{
@@ -111,8 +112,6 @@ protected:
       "uif",
       "for",
       "while",
-      "phi",
-      "hotphi",
       "func_call",
       "func_def",
 
@@ -139,7 +138,6 @@ protected:
       "%",
 
       "<<",
-      ">>",
       ">>>",
 
       "sext",
@@ -154,18 +152,19 @@ protected:
       ">",
       ">=",
 
-      "tuple_concat",  // ++
-
       "ref",
       "const",
 
-      "assert",
-      "error_flag",
-
+      "tuple_concat",  // ++
       "tuple_add",
       "tuple_get",
+
       "attr_set",
       "attr_get",
+
+      "error_flag",
+      "phi",
+      "hotphi",
   };
 
 public:

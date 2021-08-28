@@ -1846,12 +1846,8 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
         else {
           if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
             idx = ast->get_sibling_next(idx);
-            if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
-              *skip_sibs = 2;
-              return Lnast_node::create_sra();
-            }
             *skip_sibs = 1;
-            return Lnast_node::create_shr();
+            return Lnast_node::create_sra();
           }
           return Lnast_node::create_gt();
         }
@@ -1907,7 +1903,6 @@ void Prp_lnast::generate_priority_map() {
   priority_map[Lnast_ntype::Lnast_ntype_ne]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_tuple_concat] = 1;
   priority_map[Lnast_ntype::Lnast_ntype_shl]          = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_shr]          = 1;
   priority_map[Lnast_ntype::Lnast_ntype_sra]          = 1;
   priority_map[Lnast_ntype::Lnast_ntype_minus]        = 1;
   priority_map[Lnast_ntype::Lnast_ntype_plus]         = 1;
