@@ -66,7 +66,7 @@ std::tuple<bool, size_t, size_t> Bundle::match_int_advance(const mmap_lib::str &
 
     ++b_pos;
     ++a_pos;
-    I(b[b_pos] != ':');  // should not call this method for this
+    GI(b.size() < b_pos, b[b_pos] != ':');  // should not call this method for this
 
     if (b_pos == b.size() || b[b_pos] == '.') {
       bool m = (a_pos == a.size() || a[a_pos] == '.' || a[a_pos] == ':');
@@ -992,15 +992,34 @@ bool Bundle::is_scalar() const {
   return true;
 }
 
-bool Bundle::is_ordered() const {
+bool Bundle::is_ordered(const mmap_lib::str key) const {
   for (const auto &e : key_map) {
-    if (is_root_attribute(e.first))
-      continue;
+    auto e_pos = 0u;
+    mmap_lib::str field;
+    if (key.empty()) {
+      if (is_root_attribute(e.first))
+        continue;  // attributes do not affect order
 
-    auto pos = get_first_level_pos(e.first);
+      field = e.first;
+    }else{
+      e_pos = match_first_partial(key, e.first);
+      if (e_pos == 0)
+        continue;
+
+      if (e_pos >= e.first.size())
+        continue; // there was no match, so still ordered
+
+      if (is_attribute(e.first))
+        continue;  // attributes do not affect order
+
+      field = e.first.substr(e_pos);
+    }
+
+    auto pos = get_first_level_pos(field);
     if (pos < 0)
-      return false;
+      return false; // OOPS, not ordered entry. This is not OK
   }
+
   return true;
 }
 

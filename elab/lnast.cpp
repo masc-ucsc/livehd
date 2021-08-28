@@ -72,8 +72,10 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       selc2attr_set_get(psts_nid, selc_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
+#if 0
     } else if (type.is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
+#endif
     }
   }
 }
@@ -92,8 +94,10 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         } else if (is_scalar_attribute_related(opr_nid)) {
           auto selc_nid = opr_nid;
           selc2attr_set_get(itr_nid, selc_nid);
+#if 0
         } else if (type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
+#endif
         } else if (type.is_tuple()) {
           rename_to_real_tuple_name(itr_nid, opr_nid);
         }
@@ -116,6 +120,8 @@ bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, cons
 }
 
 bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
+  (void)opr_nid;
+#if 0
   if (!get_type(opr_nid).is_select())
     return false;
 
@@ -129,6 +135,7 @@ bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
         return true;
     }
   }
+#endif
   return false;
 }
 
@@ -191,6 +198,8 @@ void Lnast::selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
 }
 
 void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
+  (void)selc_nid;
+#if 0
   I(get_type(selc_nid).is_select());
   auto sibling_asg_nid = get_sibling_next(selc_nid);
   I(get_type(sibling_asg_nid).is_assign());
@@ -232,12 +241,14 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
     }
     stk_tuple_fields.pop();
   }
+#endif
 }
 
 void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_selc_nid, std::stack<Lnast_nid> &stk_tuple_fields) {
   auto type = get_type(prev_selc_nid);
   // note: the sel might be transform to tuple_get, but it's fine in this case, handle it as normal sel
-  if (!type.is_select() && !type.is_tuple_get()) {
+  // if (!type.is_select() && !type.is_tuple_get()) 
+  if (!type.is_tuple_get()) {
     get_data(prev_selc_nid).dump();
     return;
   }
@@ -329,9 +340,13 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
 }
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  (void)psts_nid;
+  (void)opr_nid;
+#if 0
   I(get_type(opr_nid).is_select());
   auto selc_nid = opr_nid;
   sel2local_tuple_chain(psts_nid, selc_nid);
+#endif
 }
 
 void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
@@ -727,7 +742,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   if (type.is_invalid())
     return;
 
-  I(!type.is_select());  // Select is deprecated
+  // I(!type.is_select());  // Select is deprecated
 
   bool the_ta_is_tuple_struct = false;
   if (type.is_tuple_add()) {
@@ -1072,6 +1087,9 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const {
+  (void)psts_nid;
+  (void)opr_nid;
+#if 0
   I(get_type(opr_nid).is_select());
 
   const auto it = selc_lrhs_tables.find(psts_nid);
@@ -1083,6 +1101,7 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const {
     return it2->second.first;
 
   I(false);
+#endif
   return false;
 }
 

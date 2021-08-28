@@ -19,6 +19,52 @@ bool Symbol_table::var(mmap_lib::str key) {
   return true;
 }
 
+bool Symbol_table::set(mmap_lib::str key, std::shared_ptr<Bundle> bundle) {
+  auto [var, field] = get_var_field(key);
+
+  const auto it = varmap.find(std::pair(stack.back().scope, var));
+
+  std::shared_ptr<Bundle> var_bundle;
+  if (unlikely(it == varmap.end())) {
+    stack.back().declared.emplace_back(var);
+    if (var == key) {
+      varmap.insert({std::pair(stack.back().scope,var), bundle});
+      return true;
+    }
+    var_bundle = std::make_shared<Bundle>(var);
+    varmap.insert({std::pair(stack.back().scope,var), var_bundle});
+  }else{
+    if (var == key) {
+      it->second = bundle;
+      return true;
+    }
+    var_bundle = it->second;
+  }
+
+  var_bundle->set(field, bundle);
+
+  return true;
+}
+
+bool Symbol_table::set(mmap_lib::str key, const Lconst &trivial) {
+  auto [var, field] = get_var_field(key);
+
+  const auto it = varmap.find(std::pair(stack.back().scope, var));
+
+  std::shared_ptr<Bundle> bundle;
+  if (unlikely(it == varmap.end())) {
+    stack.back().declared.emplace_back(var);
+    bundle = std::make_shared<Bundle>(var);
+    varmap.insert({std::pair(stack.back().scope,var), bundle});
+  }else{
+    bundle = it->second;
+  }
+
+  bundle->set(field, trivial);
+
+  return true;
+}
+
 bool Symbol_table::mut(mmap_lib::str key, const Lconst &trivial) {
   auto [var, field] = get_var_field(key);
 
@@ -91,6 +137,10 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
     }
   }
 
+  auto scope = stack.back().scope;
+
+  dump();
+
   if (stack.size()==1) { // Just clear everything and be done
     I(stack.back().type == Scope_type::Function);
 
@@ -99,7 +149,6 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
     return outputs;
   }
 
-  auto scope = stack.back().scope;
 
   for(auto var:stack.back().declared) {
     varmap.erase(std::pair(scope, var));
@@ -130,6 +179,19 @@ Lconst Symbol_table::get_trivial(mmap_lib::str key) const {
   return it->second->get_trivial(field);
 }
 
+std::shared_ptr<Bundle> Symbol_table::get_bundle(mmap_lib::str key) const {
+  auto [var, field] = get_var_field(key);
+
+  const auto it = varmap.find(std::pair(stack.back().scope, var));
+  if (it == varmap.end())
+    return nullptr;
+
+  if (var == key)
+    return it->second;
+
+  return it->second->get_bundle(field);
+}
+
 bool Symbol_table::has_bundle(mmap_lib::str key) const {
   auto [var, field] = get_var_field(key);
 
@@ -137,6 +199,16 @@ bool Symbol_table::has_bundle(mmap_lib::str key) const {
   if (it == varmap.end())
     return false;
 
-  return field.empty() || it->second->has_bundle(field);
+  return var == key || it->second->has_bundle(field);
+}
+
+void Symbol_table::dump() const {
+  fmt::print("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
+  for(auto var:stack.back().declared) {
+    fmt::print("var:{}\n", var);
+    auto it = varmap.find(std::pair(stack.back().scope, var));
+    if (it != varmap.end())
+      it->second->dump();
+  }
 }
 

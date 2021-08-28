@@ -84,8 +84,10 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == mmap_lib::str("err_var_undefined"));
       continue;
+#if 0
     } else if (ntype.is_select()) {
       I(false);  // have been converted to tuple chain
+#endif
     } else if (ntype.is_err_flag()) {
       I(lnast->get_name(lnidx) == mmap_lib::str("err_var_undefined"));
       continue;

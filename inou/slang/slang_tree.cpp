@@ -654,6 +654,7 @@ mmap_lib::str Slang_tree::create_mod_stmts(mmap_lib::str a_var, mmap_lib::str b_
   return res_var;
 }
 
+#if 0
 mmap_lib::str Slang_tree::create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field) {
   I(sel_var.size() && sel_field.size());
 
@@ -668,6 +669,7 @@ mmap_lib::str Slang_tree::create_select_stmts(mmap_lib::str sel_var, mmap_lib::s
 
   return res_var;
 }
+#endif
 
 mmap_lib::str Slang_tree::create_get_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask) {
   I(sel_var.size() && bitmask.size());

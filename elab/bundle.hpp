@@ -113,9 +113,10 @@ public:
 
   bool is_empty           () const { return key_map.empty(); }
   bool is_scalar          () const;
-  bool is_ordered         () const;
   bool is_trivial_scalar  () const;
   bool has_just_attributes() const;
+
+  bool is_ordered         (const mmap_lib::str key) const;
 
   void dump() const;
 

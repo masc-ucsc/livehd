@@ -31,8 +31,6 @@ protected:
 
                                              "()",
                                              "++",      //"tuple_concat", // ++
-                                             "--",      //"tuple_delete", // --
-                                             "select",  // []
 
                                              "ref",       "const",
 
@@ -93,8 +91,6 @@ protected:
 
       "()",
       "tuple_concat",
-      "tuple_delete",
-      "select",  // []
 
       "ref",
       "const",
@@ -162,8 +158,6 @@ protected:
 
       "()",
       "tuple_concat",  // ++
-      "tuple_delete",  // --
-      "selc",          // []
 
       "ref",
       "const",

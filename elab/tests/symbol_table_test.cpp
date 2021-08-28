@@ -113,5 +113,47 @@ TEST_F(Symbol_table_test, recursion) {
 
   st.leave_scope();
   EXPECT_EQ(st.get_trivial("foo"),Lconst(1));
+}
 
+TEST_F(Symbol_table_test, ordered_check) {
+
+  Symbol_table st;
+
+  st.funcion_scope("my function with spaces and very log name");
+
+  st.set("foo.:0:bar", Lconst(1));
+  st.set("foo.:1:xxx", Lconst(2));
+  st.set("foo.2"     , Lconst(3));
+  st.set("foo.99"    , Lconst(4));
+
+  auto bundle = st.get_bundle("foo");
+  bundle->dump();
+
+  EXPECT_EQ(bundle->get_trivial("0"     ), Lconst(1));
+  EXPECT_EQ(bundle->get_trivial("bar"   ), Lconst(1));
+  EXPECT_EQ(bundle->get_trivial(":1:xxx"), Lconst(2));
+
+  EXPECT_TRUE(bundle->is_ordered("foo"));
+  st.set("foo.bar"   , Lconst(4));  // replace ":0:bar"
+  EXPECT_EQ(bundle->get_trivial("bar"), Lconst(4));
+  EXPECT_TRUE(bundle->is_ordered(""));
+
+  st.set("foo.nothere"   , Lconst(4));
+  EXPECT_FALSE(bundle->is_ordered(""));
+
+  EXPECT_TRUE(bundle->is_ordered("nothere"));
+  st.set("foo.nothere.2"   , Lconst(4));
+  EXPECT_TRUE(bundle->is_ordered("nothere"));
+  st.set("foo.nothere.x"   , Lconst(4));
+  EXPECT_FALSE(bundle->is_ordered("nothere"));
+
+  st.set("foo.bar.0.xx"   , Lconst(10));
+  st.set("foo.bar.1.yy"   , Lconst(11));
+  st.set("foo.bar.2.xx"   , Lconst(12));
+  st.set("foo.bar.8.zz"   , Lconst(13));
+  EXPECT_TRUE(bundle->is_ordered("bar"));
+  st.set("foo.bar.NOT.zz"   , Lconst(13));
+  EXPECT_FALSE(bundle->is_ordered("bar"));
+
+  st.leave_scope();
 }

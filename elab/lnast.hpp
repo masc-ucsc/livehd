@@ -107,8 +107,6 @@ struct Lnast_node {
 
   CREATE_LNAST_NODE(_tuple)
   CREATE_LNAST_NODE(_tuple_concat)
-  CREATE_LNAST_NODE(_tuple_delete)
-  CREATE_LNAST_NODE(_select)
 
   CREATE_LNAST_NODE(_ref)
   // CREATE_LNAST_NODE_sv(_ref)

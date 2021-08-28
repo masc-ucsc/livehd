@@ -71,8 +71,6 @@ public:
     // Tuple ops
     Lnast_ntype_tuple,         // ()
     Lnast_ntype_tuple_concat,  // ++
-    Lnast_ntype_tuple_delete,  // --
-    Lnast_ntype_select,
 
     // group: language variable
     Lnast_ntype_ref,
@@ -148,8 +146,6 @@ protected:
 
       "tuple",
       "tuple_concat",
-      "tuple_delete",
-      "select",
 
       // group: language variable
       "ref",
@@ -230,8 +226,6 @@ public:
 
   static constexpr Lnast_ntype create_tuple() { return Lnast_ntype(Lnast_ntype_tuple); }
   static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
-  static constexpr Lnast_ntype create_tuple_delete() { return Lnast_ntype(Lnast_ntype_tuple_delete); }
-  static constexpr Lnast_ntype create_select() { return Lnast_ntype(Lnast_ntype_select); }
 
   static constexpr Lnast_ntype create_ref() { return Lnast_ntype(Lnast_ntype_ref); }
   static constexpr Lnast_ntype create_const() { return Lnast_ntype(Lnast_ntype_const); }
@@ -297,8 +291,6 @@ public:
 
   bool constexpr is_tuple() const { return val == Lnast_ntype_tuple; }
   bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
-  bool constexpr is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
-  bool constexpr is_select() const { return val == Lnast_ntype_select; }
 
   bool constexpr is_ref() const { return val == Lnast_ntype_ref; }
   bool constexpr is_const() const { return val == Lnast_ntype_const; }

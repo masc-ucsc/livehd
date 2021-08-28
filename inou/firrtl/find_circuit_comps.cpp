@@ -29,8 +29,10 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
     CheckTuple(ln, parent_node, umod);
   } else if (ntype.is_func_call()) {
     CreateSubmodInst(ln, parent_node, umod);
+#if 0
   } else if (ntype.is_select()) {
     return;
+#endif
   } else {
     // If "regular" node
     for (const auto &lnidx : ln.children(parent_node)) {

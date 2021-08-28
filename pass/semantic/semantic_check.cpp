@@ -503,6 +503,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_str());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
       }
+#if 0
     } else if (node_type.is_select()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -523,6 +524,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_str());
         Pass::error("Select Operation Error: Missing Reference Node(s)\n");
       }
+#endif
     } else if (node_type.is_nary_op()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;

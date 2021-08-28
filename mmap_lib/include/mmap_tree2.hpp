@@ -105,6 +105,12 @@
 //    add_to_children list
 //  }
 //
+//  API is_first_child()
+//    Check prev parent (if parent_id is diff, is first child)
+//
+//  API is_last_child()
+//    Check next parent (if parent_id is diff, is last child)
+//
 //  API: find_last_child()
 //    check older sibling that has children (fc[pos+1] if exist)
 //    sibling_fc-1 should be the last child

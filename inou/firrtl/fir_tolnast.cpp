@@ -1469,7 +1469,7 @@ void Inou_firrtl::InitialExprAdd(Lnast& lnast, const firrtl::FirrtlPB_Expression
       auto index_name    = ReturnExprString(lnast, rhs_expr.sub_access().index(), parent_node, true);
       auto temp_var_name = create_tmp_var();
 
-      auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select());
+      auto idx_select = lnast.add_child(parent_node, Lnast_node::create_tuple_get());
       lnast.add_child(idx_select, Lnast_node::create_ref(temp_var_name));
       AttachExprStrToNode(lnast, expr_name, idx_select);
       AttachExprStrToNode(lnast, index_name, idx_select);

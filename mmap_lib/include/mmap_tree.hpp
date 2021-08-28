@@ -273,6 +273,14 @@ public:
     return child_index;
   }
 
+  bool is_last_child(const Tree_index &self_index) const {
+    return get_sibling_next(self_index) == invalid_index();
+  }
+
+  bool is_first_child(const Tree_index &self_index) const {
+    return get_first_child(get_parent(self_index)) == self_index;
+  }
+
   Tree_index get_first_child(const Tree_index &parent_index) const {
     Tree_index child_index(parent_index.level + 1, get_first_child_pos(parent_index));
 

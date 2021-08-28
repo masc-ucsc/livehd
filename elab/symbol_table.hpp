@@ -53,7 +53,7 @@ public:
 
   // Lconst can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
   Lconst                  get_trivial(mmap_lib::str key) const;
-  std::shared_ptr<Bundle> get_bundle(mmap_lib::str key) const;
+  std::shared_ptr<Bundle> get_bundle (mmap_lib::str key) const;
 
   void dump() const;
 
