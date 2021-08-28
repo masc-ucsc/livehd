@@ -128,6 +128,8 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_select(curr_index, "attr_get"_str);
     } else if (curr_node_type.is_tuple_add()) {
       do_select(curr_index, "tuple_add"_str);
+    } else if (curr_node_type.is_tuple_set()) {
+      do_select(curr_index, "tuple_add"_str); // FIXME: we may want different syntax
     } else if (curr_node_type.is_attr_set()) {
       Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
     } else if (curr_node_type.is_tuple_get()) {

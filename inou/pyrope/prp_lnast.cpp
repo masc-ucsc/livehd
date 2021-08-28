@@ -1603,7 +1603,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
 
   if (in_lhs) {
     if (in_lhs_sel_root.is_invalid()) {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
+      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_set());
     }
   } else if (is_attr) {  // rhs
 

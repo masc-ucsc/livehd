@@ -110,7 +110,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid) {
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
-  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_get());
+  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_set() || get_type(get_parent(target_nid)).is_tuple_get());
 
   auto target_name = get_name(target_nid);
   // only record the first tuple_var that appears at this scope
@@ -753,7 +753,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   // I(!type.is_select());  // Select is deprecated
 
   bool the_ta_is_tuple_struct = false;
-  if (type.is_tuple_add()) {
+  if (type.is_tuple_add() || type.is_tuple_set()) {
     auto first_child  = get_first_child(opr_nid);
     auto second_child = get_sibling_next(first_child);
     if (!second_child.is_invalid() && get_type(second_child).is_assign())

@@ -108,6 +108,7 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_tuple_concat)
   CREATE_LNAST_NODE(_tuple_add)
   CREATE_LNAST_NODE(_tuple_get)
+  CREATE_LNAST_NODE(_tuple_set)
 
   CREATE_LNAST_NODE(_attr_set)
   CREATE_LNAST_NODE(_attr_get)

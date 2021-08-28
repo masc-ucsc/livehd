@@ -74,6 +74,7 @@ public:
     Lnast_ntype_tuple_concat,  // ++
     Lnast_ntype_tuple_add,
     Lnast_ntype_tuple_get,
+    Lnast_ntype_tuple_set,
 
     // group: compiler internal type
     // DO NOT GENERATE THIS from IO passes
@@ -143,6 +144,7 @@ protected:
       "tuple_concat",
       "tuple_add",
       "tuple_get",
+      "tuple_set",
 
       "attr_set",
       "attr_get",
@@ -216,6 +218,7 @@ public:
   static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
   static constexpr Lnast_ntype create_tuple_add() { return Lnast_ntype(Lnast_ntype_tuple_add); }
   static constexpr Lnast_ntype create_tuple_get() { return Lnast_ntype(Lnast_ntype_tuple_get); }
+  static constexpr Lnast_ntype create_tuple_set() { return Lnast_ntype(Lnast_ntype_tuple_set); }
 
   static constexpr Lnast_ntype create_attr_set() { return Lnast_ntype(Lnast_ntype_attr_set); }
   static constexpr Lnast_ntype create_attr_get() { return Lnast_ntype(Lnast_ntype_attr_get); }
@@ -232,8 +235,6 @@ public:
   bool constexpr is_uif() const { return val == Lnast_ntype_uif; }
   bool constexpr is_for() const { return val == Lnast_ntype_for; }
   bool constexpr is_while() const { return val == Lnast_ntype_while; }
-  bool constexpr is_phi() const { return val == Lnast_ntype_phi; }
-  bool constexpr is_hot_phi() const { return val == Lnast_ntype_hot_phi; }
   bool constexpr is_func_call() const { return val == Lnast_ntype_func_call; }
   bool constexpr is_func_def() const { return val == Lnast_ntype_func_def; }
 
@@ -274,22 +275,26 @@ public:
   bool constexpr is_gt() const { return val == Lnast_ntype_gt; }
   bool constexpr is_ge() const { return val == Lnast_ntype_ge; }
 
-  bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
 
   bool constexpr is_ref() const { return val == Lnast_ntype_ref; }
   bool constexpr is_const() const { return val == Lnast_ntype_const; }
 
-  bool constexpr is_err_flag() const { return val == Lnast_ntype_err_flag; }
-
+  bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
   bool constexpr is_tuple_add() const { return val == Lnast_ntype_tuple_add; }
   bool constexpr is_tuple_get() const { return val == Lnast_ntype_tuple_get; }
+  bool constexpr is_tuple_set() const { return val == Lnast_ntype_tuple_set; }
+
+  bool constexpr is_tuple_attr() const {
+    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_tuple_set || val == Lnast_ntype_attr_set
+           || val == Lnast_ntype_attr_get || val == Lnast_ntype_tuple_set;
+  }
+
   bool constexpr is_attr_set() const { return val == Lnast_ntype_attr_set; }
   bool constexpr is_attr_get() const { return val == Lnast_ntype_attr_get; }
 
-  bool constexpr is_tuple_attr() const {
-    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_attr_set
-           || val == Lnast_ntype_attr_get;
-  }
+  bool constexpr is_err_flag() const { return val == Lnast_ntype_err_flag; }
+  bool constexpr is_phi() const { return val == Lnast_ntype_phi; }
+  bool constexpr is_hot_phi() const { return val == Lnast_ntype_hot_phi; }
 
   // Super types
   bool constexpr is_primitive_op() const { return (val >= Lnast_ntype_assign && val <= Lnast_ntype_attr_get); }

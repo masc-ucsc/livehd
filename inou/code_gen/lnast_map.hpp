@@ -33,7 +33,7 @@ protected:
                                              "ref",       "const",
 
 
-                                             "++",        "tuple_add", "tuple_get",
+                                             "++",        "tuple_add", "tuple_get", "tuple_set",
 
                                              "attr_set", "attr_get",
 
@@ -94,6 +94,7 @@ protected:
       "tuple_concat",
       "tuple_add",
       "tuple_get",
+      "tuple_set",
 
       "attr_set",
       "attr_get",
@@ -158,6 +159,7 @@ protected:
       "tuple_concat",  // ++
       "tuple_add",
       "tuple_get",
+      "tuple_set",
 
       "attr_set",
       "attr_get",

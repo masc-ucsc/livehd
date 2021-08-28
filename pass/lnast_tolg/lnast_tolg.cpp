@@ -59,7 +59,7 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
       process_ast_attr_set_op(lg, lnidx);
     } else if (ntype.is_attr_get()) {
       process_ast_attr_get_op(lg, lnidx);
-    } else if (ntype.is_tuple_add()) {
+    } else if (ntype.is_tuple_add() || ntype.is_tuple_set()) {
       process_ast_tuple_add_op(lg, lnidx);
     } else if (ntype.is_tuple_get()) {
       process_ast_tuple_get_op(lg, lnidx);
@@ -107,7 +107,7 @@ void Lnast_tolg::process_ast_if_op(Lgraph *lg, const Lnast_nid &lnidx_if) {
       continue;
     } else if (ntype.is_phi()) {
       process_ast_phi_op(lg, if_child);
-    } else if (ntype.is_tuple_add()) {
+    } else if (ntype.is_tuple_add() || ntype.is_tuple_set()) {
       process_ast_tuple_add_op(lg, if_child);
     } else if (ntype.is_tuple_get()) {
       process_ast_tuple_get_op(lg, if_child);
