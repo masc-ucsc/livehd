@@ -69,8 +69,6 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
       process_ast_func_call_op(lg, lnidx);
     } else if (ntype.is_func_def()) {
       process_ast_func_def_op(lg, lnidx);
-    } else if (ntype.is_tuple()) {
-      process_ast_tuple_struct(lg, lnidx);
     } else if (ntype.is_tuple_concat()) {
       process_ast_concat_op(lg, lnidx);
     } else if (ntype.is_for()) {

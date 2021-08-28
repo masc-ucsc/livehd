@@ -25,8 +25,10 @@ void Inou_firrtl::SearchNode(Lnast &ln, const Lnast_nid &parent_node, firrtl::Fi
     return;
   } else if (ntype.is_ref()) {
     CheckRefForComp(ln, parent_node, umod);
+#if 0
   } else if (ntype.is_tuple()) {
     CheckTuple(ln, parent_node, umod);
+#endif
   } else if (ntype.is_func_call()) {
     CreateSubmodInst(ln, parent_node, umod);
 #if 0

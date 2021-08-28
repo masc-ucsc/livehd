@@ -124,13 +124,6 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_assign(curr_index, vec1, false);
     } else if (curr_node_type.is_if()) {
       do_if(curr_index);
-    } else if (curr_node_type.is_tuple()) {
-      Pass::error("\nUnexpected node \"tuple\" encountered in LN during code_gen.\n");
-      //do_tuple(curr_index);
-#if 0
-    } else if (curr_node_type.is_select() || curr_node_type.is_attr_get()) {
-      do_select(curr_index, "attr_get"_str);
-#endif
     } else if (curr_node_type.is_attr_get()) {
       do_select(curr_index, "attr_get"_str);
     } else if (curr_node_type.is_tuple_add()) {

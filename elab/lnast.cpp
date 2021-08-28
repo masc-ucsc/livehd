@@ -65,8 +65,10 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       continue;
     } else if (type.is_if()) {
       trans_tuple_opr_if_subtree(opr_nid);
+#if 0
     } else if (type.is_tuple()) {
       rename_to_real_tuple_name(psts_nid, opr_nid);
+#endif
     } else if (is_scalar_attribute_related(opr_nid)) {
       auto selc_nid = opr_nid;
       selc2attr_set_get(psts_nid, selc_nid);
@@ -97,9 +99,9 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 #if 0
         } else if (type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
-#endif
         } else if (type.is_tuple()) {
           rename_to_real_tuple_name(itr_nid, opr_nid);
+#endif
         }
       }
     }
@@ -280,6 +282,7 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 }
 
+#if 0
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &old_tup_nid) {
   auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  paired_assign_nid = selc_lrhs_table[old_tup_nid].second;
@@ -338,6 +341,7 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   //   add_child(tup_asg_nid, get_data(c0_paired_assign));
   // }
 }
+#endif
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
   (void)psts_nid;
@@ -556,6 +560,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // }
 }
 
+#if 0
 bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, const mmap_lib::str &ref_name,
                                                               const Lnast_nid &src_if_nid) {
   if (get_parent(psts_nid).is_root()) {
@@ -564,7 +569,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     if (it == tuple_var_1st_scope_ssa_table.end()) {
       if (is_output(ref_name)) {
         auto prev_sib_if     = get_sibling_prev(src_if_nid);
-        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
+        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
         add_child(tup_pre_declare, Lnast_node::create_ref(ref_name));
         add_child(tup_pre_declare, get_data(undefined_var_nid));
         return true;
@@ -583,6 +588,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     }
   }
 }
+#endif
 
 void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
   Selc_lrhs_table top_selc_lrhs_table;
@@ -593,7 +599,7 @@ void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
       do_ssa_trans(opr_nid);
     } else if (type.is_if()) {
       analyze_selc_lrhs_if_subtree(opr_nid);
-    } else if (type.is_tuple_concat() || type.is_tuple()) {
+    } else if (type.is_tuple_concat() /*|| type.is_tuple() */) {
       analyze_selc_lrhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
@@ -601,7 +607,7 @@ void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
 
 void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &selc_nid) {
   auto type = get_type(selc_nid);
-  I(type.is_tuple_concat() || type.is_tuple());
+  I(type.is_tuple_concat());
   auto &selc_lrhs_table = selc_lrhs_tables[psts_nid];
   auto  c0_sel          = get_first_child(selc_nid);  // c0 = intermediate target
   auto  c0_sel_name     = get_name(c0_sel);
@@ -613,6 +619,7 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
 
     sib_nid = get_sibling_next(sib_nid);
 
+#if 0
     // hier-tuple case
     if (get_type(sib_nid).is_tuple()) {
       for (auto sib_child : children(sib_nid)) {
@@ -635,6 +642,7 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
       if (hit)
         continue;
     }
+#endif
 
     // normal case
     for (auto sib_child : children(sib_nid)) {
@@ -670,7 +678,7 @@ void Lnast::analyze_selc_lrhs_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           analyze_selc_lrhs_if_subtree(opr_nid);
-        } else if (type.is_tuple_concat() || type.is_tuple()) {
+        } else if (type.is_tuple_concat()) {
           analyze_selc_lrhs_handle_a_statement(itr_nid, opr_nid);
         }
       }
@@ -752,7 +760,7 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
       the_ta_is_tuple_struct = true;
   }
 
-  if (type.is_tuple() || the_ta_is_tuple_struct) {
+  if (the_ta_is_tuple_struct) {
     for (auto itr_opd : children(opr_nid)) {
       if (itr_opd == get_first_child(opr_nid))
         continue;
@@ -829,8 +837,6 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   auto opr_nid  = get_sibling_prev(assign_nid);
   auto opr_type = get_type(opr_nid);
-  if (opr_type.is_tuple())
-    return;
 #if 1
   // This whole function should go once select is gone
   if (opr_type.is_tuple_attr())

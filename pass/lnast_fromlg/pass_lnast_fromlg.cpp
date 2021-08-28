@@ -1070,7 +1070,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
   for (uint64_t i = 0; i < port_count; i++) {
     /* FIXME: This tuple having the name "memory[1/2/3]" is important to the LN->FIR interface,
      * specifically to help with identifying things related to memory. This is hacky... */
-    auto idx_tuple     = lnast.add_child(parent_node, Lnast_node::create_tuple());
+    auto idx_tuple     = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto temp_var_name = create_temp_var();
     port_temp_name_list.insert({"FIXME:GET_DPIN_NAME", temp_var_name});
     lnast.add_child(idx_tuple, Lnast_node::create_ref(temp_var_name));  // FIXME: how to get port name?
@@ -1123,7 +1123,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
   }
 
   // Create a single tuple with each memory port instantiated in.
-  auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple());
+  auto idx_port_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   auto temp_var_name  = create_temp_var();
   lnast.add_child(idx_port_tuple, Lnast_node::create_ref(temp_var_name));
   for (const auto& it : port_temp_name_list) {
@@ -1134,7 +1134,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
   }
 
   // Specify all the attributes of this memory (.__port, .__size, ...)
-  auto idx_mem_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple());
+  auto idx_mem_tuple = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   lnast.add_child(idx_mem_tuple, Lnast_node::create_ref("#FIXME:MEM_NAME"));
 
   auto idx_asg_port = lnast.add_child(idx_mem_tuple, Lnast_node::create_assign());

@@ -29,7 +29,6 @@ protected:
 
                                              "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 
-                                             "()",
                                              "++",      //"tuple_concat", // ++
 
                                              "ref",       "const",
@@ -89,7 +88,6 @@ protected:
       ">",
       ">=",
 
-      "()",
       "tuple_concat",
 
       "ref",
@@ -156,7 +154,6 @@ protected:
       ">",
       ">=",
 
-      "()",
       "tuple_concat",  // ++
 
       "ref",

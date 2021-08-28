@@ -96,6 +96,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
 #endif
   } else if (ntype.is_func_call()) {
     return;  // Nothing to do, submod_inst already made in FindCircuitComps
+#if 0
   } else if (ntype.is_tuple()) {
     mmap_lib::str tup_name;
     bool             first = true;
@@ -108,6 +109,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
+#endif
   } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {
@@ -161,6 +163,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
 #endif
   } else if (ntype.is_func_call()) {
     return;  // Nothing to do, submod_inst already made in FindCircuitComps
+#if 0
   } else if (ntype.is_tuple()) {
     mmap_lib::str tup_name;
     bool             first = true;
@@ -173,6 +176,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
+#endif
   } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {

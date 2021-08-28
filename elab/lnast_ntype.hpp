@@ -69,7 +69,6 @@ public:
     Lnast_ntype_ge,
 
     // Tuple ops
-    Lnast_ntype_tuple,         // ()
     Lnast_ntype_tuple_concat,  // ++
 
     // group: language variable
@@ -144,7 +143,6 @@ protected:
       "gt",
       "ge",
 
-      "tuple",
       "tuple_concat",
 
       // group: language variable
@@ -224,7 +222,6 @@ public:
   static constexpr Lnast_ntype create_gt() { return Lnast_ntype(Lnast_ntype_gt); }
   static constexpr Lnast_ntype create_ge() { return Lnast_ntype(Lnast_ntype_ge); }
 
-  static constexpr Lnast_ntype create_tuple() { return Lnast_ntype(Lnast_ntype_tuple); }
   static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
 
   static constexpr Lnast_ntype create_ref() { return Lnast_ntype(Lnast_ntype_ref); }
@@ -289,7 +286,6 @@ public:
   bool constexpr is_gt() const { return val == Lnast_ntype_gt; }
   bool constexpr is_ge() const { return val == Lnast_ntype_ge; }
 
-  bool constexpr is_tuple() const { return val == Lnast_ntype_tuple; }
   bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
 
   bool constexpr is_ref() const { return val == Lnast_ntype_ref; }

@@ -297,8 +297,6 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_gt();
   } else if (orig_node_type.is_ge()) {
     new_node = Lnast_node::create_ge();
-  } else if (orig_node_type.is_tuple()) {
-    new_node = Lnast_node::create_tuple();
   } else if (orig_node_type.is_tuple_concat()) {
     new_node = Lnast_node::create_tuple_concat();
   } else if (orig_node_type.is_ref()) {
