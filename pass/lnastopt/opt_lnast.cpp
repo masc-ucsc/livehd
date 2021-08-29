@@ -177,6 +177,73 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   }
 }
 
+void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  //-------------------------------
+  auto idx                     = ln->get_first_child(lnid);
+  const auto &first_child_data = ln->get_data(idx);
+  I(first_child_data.type.is_ref());
+
+  auto var_root = first_child_data.token.get_text();
+
+  //-------------------------------
+  idx = ln->get_sibling_next(idx);
+
+  if (idx.is_invalid()) {
+    st.set(var_root,Lconst::invalid()); // just declare the variable as an empty tuple
+    return;
+  }
+
+  auto bundle = std::make_shared<Bundle>(var_root);
+  fmt::print("1.------------------------\n");
+  st.dump();
+  fmt::print("1.------------------\n");
+
+  int pos = 0;
+  while(!idx.is_invalid()) {
+    auto pos_txt = mmap_lib::str(pos);
+
+    const auto &data = ln->get_data(idx);
+    if (data.type.is_const()) { // CASE 1: (..., 123, ...)
+      bundle->set(pos_txt, Lconst::from_pyrope(data.token.get_text()));
+    }else if (data.type.is_ref()) { // CASE 2: (..., $run, ...)
+      bundle->set(pos_txt, st.get_bundle(data.token.get_text()));
+    }else{ // CASE 3: (...,a=..., ...)
+      I(data.type.is_assign());
+      auto lhs_id = ln->get_first_child(idx);
+      auto rhs_id = ln->get_sibling_next(lhs_id);
+
+      const auto &data_lhs = ln->get_data(lhs_id);
+      const auto &data_rhs = ln->get_data(rhs_id);
+      I(data_lhs.type.is_ref());
+      if (data_lhs.token.get_text().is_i()) {
+        throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs.token.get_text());
+      }
+      auto field_lhs = mmap_lib::str::concat(":", pos_txt, ":", data_lhs.token.get_text());
+
+  fmt::print("a.------------------------\n");
+  st.dump();
+  fmt::print("a.----------------------\n");
+      if (data_rhs.type.is_const()) { // CASE 1: (..., a=123, ...)
+        bundle->set(field_lhs, Lconst::from_pyrope(data_rhs.token.get_text()));
+      }else {
+        I(data_rhs.type.is_ref()); // CASE 2: (..., a=$run, ...)
+        bundle->set(field_lhs, st.get_bundle(data_rhs.token.get_text()));
+      }
+  fmt::print("b.------------------------\n");
+  st.dump();
+  fmt::print("b.----------------------\n");
+    }
+
+    idx = ln->get_sibling_next(idx);
+    ++pos;
+  }
+
+  bundle->dump();
+  fmt::print("2.------------------\n");
+
+  st.set(var_root, bundle);
+}
+
 void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   auto lhs_id = ln->get_first_child(lnid);
   auto rhs_id = ln->get_sibling_next(lhs_id);
@@ -225,6 +292,7 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus     : process_plus     (ln, lnid); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign   : process_assign   (ln, lnid); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, lnid); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, lnid); break;
       default                                                 : process_todo     (ln, lnid);
     }
   }

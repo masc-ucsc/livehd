@@ -598,7 +598,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const mmap_lib::str &key) const {
 
   std::shared_ptr<Bundle> tup;
 
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     auto             e_pos = match_first_partial(key, e.first);
     if (e_pos == 0)
       continue;
@@ -659,6 +659,11 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
 
 void Bundle::set(const mmap_lib::str &key, const std::shared_ptr<Bundle const>& tup) {
   I(!key.empty());
+
+  if (tup == nullptr) {
+    set(key, Lconst::invalid());
+    return;
+  }
 
   correct = correct && tup->correct;
 
