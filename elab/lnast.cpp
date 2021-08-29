@@ -1180,8 +1180,8 @@ void Lnast::set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth) {
   from_lgraph_bw_table[name] = bitwidth;
 }
 
-void Lnast::dump() const {
-  for (const auto &it : depth_preorder()) {
+void Lnast::dump(const Lnast_nid &root_nid) const {
+  for (const auto &it : depth_preorder(root_nid)) {
     const auto &node = get_data(it);
     mmap_lib::str indent;
     indent = indent.append(it.level*4+4,' ');
@@ -1205,6 +1205,7 @@ void Lnast::dump() const {
     }
   }
 }
+
 
 /*
 Note I: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the

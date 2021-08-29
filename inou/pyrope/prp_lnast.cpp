@@ -1196,7 +1196,7 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
 #if 1
   mmap_lib::Tree_index idx_sel_root;
   if (in_lhs) {
-    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_add());
+    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_set());
   } else {
     idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_get());
     lnast->add_child(idx_sel_root, retnode);

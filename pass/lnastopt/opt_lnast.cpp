@@ -70,6 +70,25 @@ COMMENTS:
 Opt_lnast::Opt_lnast(const Eprp_var &var) {
   (void)var;
   // could check for options
+
+  if (var.has_label("top"))
+    top = var.get("top");
+
+  needs_hierarchy = false;
+  hier_mode       = false;
+}
+
+void Opt_lnast::set_needs_hierarchy() {
+  needs_hierarchy = true;
+}
+
+void Opt_lnast::hierarchy_info_int(const std::string &msg) {
+  needs_hierarchy = true;
+  if (hier_mode) {
+    throw Lnast::error(msg);
+  }else{
+    Lnast::info(msg);
+  }
 }
 
 void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
@@ -99,58 +118,63 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  (void)ln;
-  (void)lnid;
-  // child can be const/ref/assign
-
-#if 0
+void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   //-------------------------------
   auto idx                     = ln->get_first_child(lnid);
   const auto &first_child_data = ln->get_data(idx);
   I(first_child_data.type.is_ref());
 
-  auto var = first_child_data.token.get_text();
+  auto var_root = first_child_data.token.get_text();
+  mmap_lib::str var_field;
 
   //-------------------------------
-  auto last_idx = ln->get_last_child(lnid);
+  auto rhs_id = ln->get_last_child(lnid);
   idx = ln->get_sibling_next(idx);
 
-  int assign_pos = 0;
-  while(idx!=last_idx) {
+  while(idx!=rhs_id) {
     const auto &data = ln->get_data(idx);
-    if (data.type.is_const()) {
-    }else if (data.type.is_const()) {
+    if (data.type.is_const()) { // CASE 1: foo.bar
+      var_field = mmap_lib::str::concat(var_field, ".", data.token.get_text());
     }else{
-      I(data.type.is_assign());
+      I(data.type.is_ref());
+      auto ref = data.token.get_text();
 
-      ++assign_pos;
+      auto v = st.get_trivial(ref);
+      if (!v.is_invalid()) { // CASE 2: foo['bar'] or foo[123]
+        var_field = mmap_lib::str::concat(var_field, ".", v.to_field());
+      }else{
+        auto var_bundle = st.get_bundle(var_root);
+        if (var_bundle == nullptr ) { // CASE 3: foo[$runtime] foo is unknown and $runtime may not be constant
+          hierarchy_info("bundle '{}{}' does not exist when indexed with non-constant '{}'", var_root, var_field, ref);
+          return;
+        }
+        if (var_bundle->is_ordered(var_field)) { // CASE 3: foo[$runtime] OK (foo is ordered/array)
+          ln->dump(lnid);
+          fmt::print("FIXME: handle non-const (array)\n"); // could become const with hier
+        }else{
+          // CASE 4: foo[(1,'bar')] -- Not allowed in tuple_set/get (for the moment)
+          ln->dump(lnid);
+          fmt::print("FIXME: handle non-array (it will be error unless hier solves it)\n");
+          return;
+        }
+      }
     }
+
+    idx = ln->get_sibling_next(idx);
   }
 
+  const auto &rhs_data = ln->get_data(rhs_id);
+  auto rhs_txt = rhs_data.token.get_text();
 
-  bool first_child = true;
-  for (auto child : ln->children(lnid)) {
-    if (first_child) {  // first child
-      first_child = false;
+  auto lhs_txt = mmap_lib::str::concat(var_root, var_field);
 
-      I(data.type.is_ref());
-      var = data.token.get_text();
-      continue;
-    }
-HERE    if LAST CHILD, just add the value
-
-    if (data.type.is_const()) {
-      var = mmap_lib::str::concat(var, ".", data.token.get_text());
-    } else {
-      I(data.type.is_ref());
-      var idx = st.get_trivial(data.token.get_text());
-      HERE!!! If invalid, it should be an array or compile error
-    }
-
+  if (rhs_data.type.is_ref()) {
+    auto bundle = st.get_bundle(rhs_txt);
+    st.set(lhs_txt, bundle);
+  }else{
+    auto v = Lconst::from_pyrope(rhs_txt);
+    st.set(lhs_txt, v);
   }
-#endif
-
 }
 
 void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
@@ -184,6 +208,11 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
 
   st.funcion_scope(ln->get_top_module_name());
 
+  if (ln->get_top_module_name() == top || top.empty())
+    hier_mode = true;
+  else
+    hier_mode = false;
+
   for (auto &lnid : ln->depth_postorder()) {
     // fmt::print("lnast:{}\n", data.type.debug_name());
     if (ln->is_leaf(lnid))
@@ -195,7 +224,7 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus     : process_plus     (ln, lnid); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign   : process_assign   (ln, lnid); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, lnid); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, lnid); break;
       default                                                 : process_todo     (ln, lnid);
     }
   }

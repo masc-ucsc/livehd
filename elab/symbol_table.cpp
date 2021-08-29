@@ -174,7 +174,7 @@ Lconst Symbol_table::get_trivial(mmap_lib::str key) const {
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())
-    return false;
+    return Lconst::invalid();
 
   return it->second->get_trivial(field);
 }

@@ -7,12 +7,25 @@
 
 class Opt_lnast {
 protected:
-  Symbol_table st;
+  Symbol_table  st;
+  bool          needs_hierarchy;
+  bool          hier_mode;
+  mmap_lib::str top;
 
   void process_plus     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
-  void process_tuple_add(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_tuple_set(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_assign   (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_todo     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+
+  void set_needs_hierarchy();
+
+  void hierarchy_info_int(const std::string &msg);
+
+  template <typename S, typename... Args>
+  void hierarchy_info(const S &format, Args &&...args) {
+    std::string txt(fmt::format(format, args...));
+    hierarchy_info_int(txt);
+  }
 
 public:
   Opt_lnast(const Eprp_var& var);

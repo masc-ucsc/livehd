@@ -227,7 +227,10 @@ public:
   uint32_t get_bitwidth(const mmap_lib::str &name) const;
   void     set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth);
 
-  void dump() const;
+  void dump(const Lnast_nid &root) const;
+  void dump() const {
+    dump(Lnast_nid::root());
+  }
 
   template <typename S, typename... Args>
   static void info(const S &format, Args &&...args) {
