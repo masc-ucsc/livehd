@@ -1,5 +1,7 @@
 const Lconst = require('./jops');
 
+// https://www.rapidtables.com/convert/number/hex-to-decimal.html: I USED THIS WEBISTE FOR TESTING: https://www.rapidtables.com/convert/number/hex-to-decimal.html
+
 // test, when the input is in hex
 test('TEST from_pyrope, underscore', () => {
   let testing = Lconst.from_pyrope('0x__ab_c_');
@@ -153,4 +155,14 @@ test('TEST throw due to un-stringed input', () => {
   expect(() => {
     Lconst.from_pyrope(1);
   }).toThrow('the input must be a string');
+});
+
+// AND_OP
+test('simple test for AND operation', () => {
+  const testing1 = Lconst.from_pyrope('0xFFFF');
+  const testing2 = Lconst.from_pyrope('0xA1CD');
+  const res = testing1.and_op(testing2);
+  expect(res.num).toBe(41421n);
+  expect(res.explicit_str).toBe(false);
+  expect(res.bits).toBe(17); // NOTICE: one extra bit for inexplicit sign bit "0"
 });

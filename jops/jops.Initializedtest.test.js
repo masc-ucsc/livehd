@@ -1,5 +1,12 @@
 const Lconst = require('./jops');
 
+test('simple check, initiate without anything', () => {
+  const testing = new Lconst();
+  expect(testing.explicit_str).toBe(false);
+  expect(testing.bits).toBe(0);
+  expect(testing.num).toBe(0);
+});
+
 test('simple check, if it is a number', () => {
   const testing = new Lconst(3);
   expect(testing.num).toBe(3);
