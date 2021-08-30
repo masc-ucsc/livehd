@@ -31,7 +31,6 @@ class Lconst {
     this.explicit_str = explicit_str;
     this.bits = bits;
     this.num = num;
-    this.binary = undefined;
     this.unknown = undefined;
     this.has_unknown = has_unknown;
     this.initialized();
@@ -75,13 +74,14 @@ class Lconst {
       throw 'the input must be a string';
     }
 
-    const txt = number_str.toLowerCase();
+    let txt = number_str.toLowerCase();
+    txt = txt.replace(/_/g, '');
 
     // special cases
     if (txt === 'true') {
-      return Lconst(false, 1, -1);
+      return Lconst.new_lconst(false, 1, -1);
     } else if (txt == 'false') {
-      return Lconst(false, 1, 0);
+      return Lconst.new_lconst(false, 1, 0);
     }
 
     let skip_chars = 0;
@@ -100,7 +100,7 @@ class Lconst {
       shift_mode = 10;
       if (txt.length >= 2 + skip_chars && txt[skip_chars] === '0') {
         skip_chars += 1;
-        const sel_ch = txt[skip_chars];
+        let sel_ch = txt[skip_chars];
 
         if (sel_ch === 's') {
           skip_chars += 1;
@@ -144,26 +144,27 @@ class Lconst {
         if (txt[i] >= 0) {
           num = 10n * num + BigInt(txt[i]);
         } else {
-          if (txt[i] === '_') {
-            continue;
-          }
           throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
         }
       }
     } else if (shift_mode === 2) {
+      //待测试
       let v = Lconst.from_binary(txt.substring(skip_chars), unsigned_result);
       if (!negative) return v;
       // Prob:
-      num = -v.num;
-      return Lconst.new_lconst(false, this.calc_num_bits(num), num);
+      v.num *= -1n;
+      return v;
     } else {
       assert(
         shift_mode === 16 || shift_mode === 8,
         `ERROR: ${number_str} should be either hexa or octal...`
       );
       for (let i = txt.length - 1; i >= skip_chars; --i) {
-        if (txt[i] === '_') {
-          continue;
+        if (
+          (shift_mode === 16 && !/^(\d|[abcdef])$/.test(txt[i])) |
+          (shift_mode === 8 && !/^[0-7]$/.test(txt[i]))
+        ) {
+          throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
         }
         to_power += 1n;
         // console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
@@ -189,39 +190,41 @@ class Lconst {
       `ERROR: unsigned_result ${unsigned_result} is not Boolean type`
     );
     const ori_txt = txt.replace(/_/g, '');
-    let binary = '';
-    let unknown = '';
-    let unknown_found = false;
     let num = 0n;
+    let unknown = 0n;
+    let unknown_found = false;
+    let len_num = 0n;
+    let negative = 0;
 
-    if (unsigned_result) {
-      binary = unknown = '0';
-    } else {
-      binary += ori_txt[0];
-      unknown += '0';
+    // find the sign
+    if (!unsigned_result) {
+      if (ori_txt[0] === '1') {
+        negative = 1;
+      }
     }
 
     for (const char of ori_txt) {
       console.log('-----current char----', char);
-      console.log('check the value of binary: ', binary);
+      console.log('check the value of binary: ', num);
       if (char === '?' || char === 'x' || char === 'z') {
-        binary += '0';
-        unknown += '1';
+        num <<= 1n;
+        len_num += 1n;
+        unknown = (unknown << 1n) | 1n;
         unknown_found = true;
       } else if (char === '0') {
-        if (binary !== '0') {
-          console.log('get inside of the loop: ', binary);
-          binary += '0';
-          unknown += '0';
-          num = num << 1n;
+        if (num !== 0n) {
+          console.log('get inside of the loop: ', num);
+          unknown <<= 1n;
+          num <<= 1n;
+          len_num += 1n;
           console.log('what1', num);
         }
       } else if (char === '1') {
-        if (binary !== '1') {
-          console.log('get inside of the loop: ', binary);
-          binary += '1';
-          unknown += '0';
+        if (num !== 1n || !negative) {
+          console.log('get inside of the loop: ', num);
           num = (num << 1n) | 1n;
+          len_num += 1n;
+          unknown <<= 1n;
           console.log('what2', num);
         }
       } else {
@@ -229,9 +232,11 @@ class Lconst {
       }
     }
 
-    if (!unsigned_result && binary[0] === '1') {
-      console.log(num);
-      num = num - (1n << (BigInt(binary.length) - 1n));
+    if (!unsigned_result && negative) {
+      // =====================================
+      console.log('signed_result and num[0] is 1', num);
+      console.log('len_num:', len_num);
+      num = num - (1n << len_num);
     }
 
     let return_Lconst = Lconst.new_lconst(
@@ -240,8 +245,6 @@ class Lconst {
       num,
       unknown_found
     );
-
-    return_Lconst.binary = binary;
     return_Lconst.unknown = unknown;
     return return_Lconst;
   }
@@ -258,14 +261,10 @@ class Lconst {
     const num = this.num ^ com_lconst.num;
     return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
   }
-
-  sayHello() {
-    console.log('I am a Lconst object :)');
-  }
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-let testing = Lconst.from_binary('__111110', false);
-console.log(testing.binary, testing.unknown, testing.num, testing.has_unknown);
+/* let testing = Lconst.from_binary('1110??1', true);
+console.log(testing.num, testing.unknown, testing.has_unknown); */
 
 module.exports = Lconst;
