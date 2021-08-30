@@ -158,11 +158,58 @@ test('TEST throw due to un-stringed input', () => {
 });
 
 // AND_OP
-test('simple test for AND operation', () => {
+test('simple tests for AND operation', () => {
   const testing1 = Lconst.from_pyrope('0xFFFF');
   const testing2 = Lconst.from_pyrope('0xA1CD');
   const res = testing1.and_op(testing2);
   expect(res.num).toBe(41421n);
   expect(res.explicit_str).toBe(false);
   expect(res.bits).toBe(17); // NOTICE: one extra bit for inexplicit sign bit "0"
+});
+
+test('TEST AND_OP compare with unknown', () => {
+  // test 1: 0b010??1 and 0b000?01
+  const a1 = Lconst.from_pyrope('0b010??1');
+  const a2 = Lconst.from_pyrope('0b000?01');
+  const resa = a1.and_op(a2);
+  expect(resa.num).toBe(1n); // 0b000001
+  expect(resa.unknown).toBe(4n); // 0b000100
+
+  // test 2: 0b1?1001 and 0b111?01
+  const b1 = Lconst.from_pyrope('0b1?1001');
+  const b2 = Lconst.from_pyrope('0b111?01');
+  const resb = b1.and_op(b2);
+  expect(resb.num).toBe(41n); // 0b101001
+  expect(resb.unknown).toBe(16n); //0?0000
+
+  // test 3: 0b010??1 and 0b000?11
+  const c1 = Lconst.from_pyrope('0b010??1');
+  const c2 = Lconst.from_pyrope('0b000?11');
+  const resc = c1.and_op(c2);
+  expect(resc.num).toBe(1n); // 0b000001
+  expect(resc.unknown).toBe(6n); //0000110
+});
+
+// OR_OP
+test('simple tests for OR operation', () => {
+  const testing1 = Lconst.from_pyrope('0xFFD_F');
+  const testing2 = Lconst.from_pyrope('0x0_000');
+  const res = testing1.or_op(testing2);
+  expect(res.num).toBe(65503n);
+  expect(res.explicit_str).toBe(false);
+  expect(res.bits).toBe(17);
+});
+
+test('TEST OR_OP compare with unknown', () => {
+  const a1 = Lconst.from_pyrope('0b010??1');
+  const a2 = Lconst.from_pyrope('0b000?11');
+  const resa = a1.or_op(a2);
+  expect(resa.num).toBe(19n); //0b010011
+  expect(resa.unknown).toBe(4n); //0b100
+
+  const b1 = Lconst.from_pyrope('0b010??1');
+  const b2 = Lconst.from_pyrope('0b000?01');
+  const resb = b1.or_op(b2);
+  expect(resb.num).toBe(17n); //0b010001
+  expect(resb.unknown).toBe(6n); // 0b000110
 });

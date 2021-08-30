@@ -204,9 +204,9 @@ class Lconst {
     }
 
     for (const char of ori_txt) {
-      console.log('-----current char----', char);
+      /* console.log('-----current char----', char);
       console.log('check the value of binary: ', num);
-      console.log('check the value of unknown: ', unknown);
+      console.log('check the value of unknown: ', unknown); */
       if (char === '?' || char === 'x' || char === 'z') {
         num <<= 1n;
         len_num += 1n;
@@ -214,19 +214,19 @@ class Lconst {
         unknown_found = true;
       } else if (char === '0') {
         if (num !== 0n || unknown != 0n) {
-          console.log('get inside of the loop: ', num);
+          /* console.log('get inside of the loop: ', num); */
           unknown <<= 1n;
           num <<= 1n;
           len_num += 1n;
-          console.log('what1', num);
+          /* console.log('what1', num); */
         }
       } else if (char === '1') {
         if (num !== 1n || !negative) {
-          console.log('get inside of the loop: ', num);
+          /*  console.log('get inside of the loop: ', num); */
           num = (num << 1n) | 1n;
           len_num += 1n;
           unknown <<= 1n;
-          console.log('what2', num);
+          /*  console.log('what2', num); */
         }
       } else {
         throw `ERROR: ${txt} binary encoding could not use ${char}`;
@@ -235,8 +235,8 @@ class Lconst {
 
     if (!unsigned_result && negative) {
       // =====================================
-      console.log('signed_result and num[0] is 1', num);
-      console.log('len_num:', len_num);
+      /* console.log('signed_result and num[0] is 1', num);
+      console.log('len_num:', len_num); */
       num = num - (1n << len_num);
     }
 
@@ -273,22 +273,39 @@ class Lconst {
     }
 
     let res = new Lconst();
-
+    res.num = this.num & com_lconst.num;
     if (com_lconst.has_unknown || this.has_unknown) {
       // notice that has_unknown toggles into True from false only in function from_binary
       // PRIORITY OF three logic: 0 > ? > 1
-
       //first step: get an expression, where '1' represents 1 or ?, and '0' represents 0
-      res.num = this.num & com_lconst.num;
+
       const zeroTo0 =
         (this.num | this.unknown) & (com_lconst.num | com_lconst.unknown);
-      console.log(this.num, this.unknown, com_lconst.num, com_lconst.unknown);
+      /* console.log(this.num, this.unknown, com_lconst.num, com_lconst.unknown); */
       res.unknown = (this.unknown | com_lconst.unknown) & zeroTo0;
+      res.has_unknown = true;
       return res;
     }
     // case: neither of them has unknown
-    console.log(this.num, com_lconst.num);
-    res.num = this.num & com_lconst.num;
+    res.adjust(com_lconst);
+    return res;
+  }
+
+  or_op(com_lconst) {
+    if (!(com_lconst instanceof Lconst)) {
+      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+    }
+
+    let res = new Lconst();
+    res.num = this.num | com_lconst.num;
+    if (com_lconst.has_unknown || this.has_unknown) {
+      // notice that has_unknown toggles into True from false only in function from_binary
+      // PRIORITY OF three logic: 1 > ? > 0
+      res.unknown = (this.unknown | com_lconst.unknown) & ~res.num;
+      res.has_unknown = true;
+      return res;
+    }
+    // case: neither of them has unknown
     res.adjust(com_lconst);
     return res;
   }
@@ -301,7 +318,7 @@ class Lconst {
 
 // 🐕testing workspace for Lconst🐇
 const a = Lconst.from_pyrope('0b010??1');
-const b = Lconst.from_pyrope('0b000?01');
-const res = a.and_op(b);
+const b = Lconst.from_pyrope('0b000?11');
+const res = a.or_op(b);
 console.log(res);
 module.exports = Lconst;
