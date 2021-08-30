@@ -1,6 +1,6 @@
 // based on https://github.com/WojciechMula/toys/blob/master/000helpers/linux-perf-events.h
 #pragma once
-#ifdef __linux__
+#if 0
 
 #include <sys/mman.h>
 #include <asm/unistd.h>        // for __NR_perf_event_open

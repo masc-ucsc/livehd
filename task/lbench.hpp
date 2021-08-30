@@ -70,7 +70,7 @@ public:
     perf_start(name);
 
     const std::vector<int> evts{
-#ifdef __linux__
+#if 0
         PERF_COUNT_HW_CPU_CYCLES,
         PERF_COUNT_HW_INSTRUCTIONS,
         PERF_COUNT_HW_BRANCH_MISSES,
