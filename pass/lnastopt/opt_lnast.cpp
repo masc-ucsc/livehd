@@ -194,9 +194,6 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
   }
 
   auto bundle = std::make_shared<Bundle>(var_root);
-  fmt::print("1.------------------------\n");
-  st.dump();
-  fmt::print("1.------------------\n");
 
   int pos = 0;
   while(!idx.is_invalid()) {
@@ -220,26 +217,17 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
       }
       auto field_lhs = mmap_lib::str::concat(":", pos_txt, ":", data_lhs.token.get_text());
 
-  fmt::print("a.------------------------\n");
-  st.dump();
-  fmt::print("a.----------------------\n");
       if (data_rhs.type.is_const()) { // CASE 1: (..., a=123, ...)
         bundle->set(field_lhs, Lconst::from_pyrope(data_rhs.token.get_text()));
       }else {
         I(data_rhs.type.is_ref()); // CASE 2: (..., a=$run, ...)
         bundle->set(field_lhs, st.get_bundle(data_rhs.token.get_text()));
       }
-  fmt::print("b.------------------------\n");
-  st.dump();
-  fmt::print("b.----------------------\n");
     }
 
     idx = ln->get_sibling_next(idx);
     ++pos;
   }
-
-  bundle->dump();
-  fmt::print("2.------------------\n");
 
   st.set(var_root, bundle);
 }
@@ -271,6 +259,27 @@ void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   fmt::print("not handling lnast type:{} (TODO)\n", data.type.debug_name());
 }
 
+void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  I(ln->get_data(lnid).type.is_stmts());
+
+  auto idx = ln->get_first_child(lnid);
+
+  while(!idx.is_invalid()) {
+    const auto &data = ln->get_data(idx);
+
+    switch (data.type.get_raw_ntype()) {
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus     : process_plus     (ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign   : process_assign   (ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts    : process_stmts    (ln, idx); break;
+      default                                                 : process_todo     (ln, idx);
+    }
+
+    idx = ln->get_sibling_next(idx);
+  }
+}
+
 void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
 
   st.funcion_scope(ln->get_top_module_name());
@@ -280,22 +289,13 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
   else
     hier_mode = false;
 
-  for (auto &lnid : ln->depth_postorder()) {
-    // fmt::print("lnast:{}\n", data.type.debug_name());
-    if (ln->is_leaf(lnid))
-      continue;  // TODO: Maybe a faster postorder traversal
-
-    auto &data = ln->get_data(lnid);
-    // fmt::print("lnast:{}\n", data.type.debug_name());
-
-    switch (data.type.get_raw_ntype()) {
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus     : process_plus     (ln, lnid); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign   : process_assign   (ln, lnid); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, lnid); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, lnid); break;
-      default                                                 : process_todo     (ln, lnid);
-    }
+  const auto &data = ln->get_data(Lnast_nid::root());
+  if (!data.type.is_top()) {
+    throw Lnast::error("invalid lnast. It should be top");
   }
+
+  auto idx = ln->get_first_child(Lnast_nid::root());
+  process_stmts(ln, idx);
 
   auto outputs = st.leave_scope();
   if (outputs)

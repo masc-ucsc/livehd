@@ -12,10 +12,12 @@ protected:
   bool          hier_mode;
   mmap_lib::str top;
 
+  void process_assign   (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_plus     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_stmts    (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_set(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_add(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
-  void process_assign   (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+
   void process_todo     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
 
   void set_needs_hierarchy();
