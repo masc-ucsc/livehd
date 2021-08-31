@@ -1,10 +1,6 @@
 
 #pragma once
 
-#ifndef NDEBUG
-#define DEBUG 1
-#endif
-
 // clang-format off
 #include "slang/symbols/ASTVisitor.h"
 
@@ -42,8 +38,8 @@ protected:
 
   static bool has_lnast(mmap_lib::str name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
-  bool             process_top_instance(const slang::InstanceSymbol& symbol);
-  bool             process(const slang::AssignmentExpression& expr);
+  bool          process_top_instance(const slang::InstanceSymbol& symbol);
+  bool          process(const slang::AssignmentExpression& expr);
   mmap_lib::str process_expression(const slang::Expression& expr);
   mmap_lib::str process_reduce_and(const slang::UnaryExpression& uexpr);
 
@@ -69,7 +65,7 @@ protected:
   mmap_lib::str create_mult_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   mmap_lib::str create_div_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   mmap_lib::str create_mod_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  //mmap_lib::str create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field);
+  // mmap_lib::str create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field);
   mmap_lib::str create_get_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask);
   void          create_set_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask, mmap_lib::str value);
 };

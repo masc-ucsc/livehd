@@ -5,11 +5,6 @@
 // File is under the MIT license; see LICENSE for details
 //------------------------------------------------------------------------------
 
-#ifndef NDEBUG
-// Slang includes need this or seg-fault at run-time
-#define DEBUG 1
-#endif
-
 #include <fstream>
 #include <iostream>
 

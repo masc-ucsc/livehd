@@ -50,10 +50,10 @@ new_git_repository(
 http_archive(
     name = "slang",
     build_file = "BUILD.slang",
-    sha256 = "5b5c8eb2a7bcc7763023ea2f696bedb81fafd21e1ba725bf439e3fe81b20e742",
-    strip_prefix = "slang-2120e15e45aa63070f322fa61a8c43ec97e632b5",
+    sha256 = "1c25af46484a03fc7ddb4ccf35888e8e43476e4fcfda49b91734379712f74733",
+    strip_prefix = "slang-a421a5f53b2d8e694c993cc6b106900a3d462cce",
     urls = [
-        "https://github.com/masc-ucsc/slang/archive/2120e15e45aa63070f322fa61a8c43ec97e632b5.zip",
+        "https://github.com/masc-ucsc/slang/archive/a421a5f53b2d8e694c993cc6b106900a3d462cce.zip",
     ],
 )
 
