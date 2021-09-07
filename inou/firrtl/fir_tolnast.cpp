@@ -892,10 +892,10 @@ void Inou_firrtl::HandleBundVecAcc(Lnast& lnast, const firrtl::FirrtlPB_Expressi
 }
 
 void Inou_firrtl::HandleRdMportUsage(Lnast& lnast, Lnast_nid& parent_node, const mmap_lib::str& mport_name) {
-  fmt::print("DEBUG2 rd_mport:{}\n", mport_name);
+  // fmt::print("DEBUG2 rd_mport:{}\n", mport_name);
   auto mem_name     = mport2mem[mport_name];
   auto mem_port_str = mem2port_cnt[mem_name];
-  fmt::print("DEBUG4 rd port cnt:{}\n", mem_port_str);
+  // fmt::print("DEBUG4 rd port cnt:{}\n", mem_port_str);
 
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
@@ -943,7 +943,7 @@ void Inou_firrtl::HandleRdMportUsage(Lnast& lnast, Lnast_nid& parent_node, const
 }
 
 void Inou_firrtl::HandleWrMportUsage(Lnast& lnast, Lnast_nid& parent_node, const mmap_lib::str& mport_name) {
-  fmt::print("DEBUG2 wr_mport:{}\n", mport_name);
+  // fmt::print("DEBUG2 wr_mport:{}\n", mport_name);
   auto mem_name     = mport2mem[mport_name];
   auto port_cnt     = mem2port_cnt[mem_name];
   auto port_cnt_str = port_cnt;
@@ -1681,7 +1681,7 @@ void Inou_firrtl::ListStatementInfo(Lnast& lnast, const firrtl::FirrtlPB_Stateme
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {
       memory_names.insert(mmap_lib::str(stmt.cmemory().id()));
-      fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
+      // fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
       InitCMemory(lnast, parent_node, stmt.cmemory());
       break;
     }
@@ -1852,7 +1852,7 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
 
     std::vector<mmap_lib::str> tmp_flattened_fields_per_port;
     for (int pcnt = 0; pcnt <= mem2port_cnt[mem_name]; pcnt++) {
-      fmt::print("DEBUG3 @port_cnt:{}\n", pcnt);
+      // fmt::print("DEBUG3 @port_cnt:{}\n", pcnt);
       auto gmask_tmp_var_str = create_tmp_var();
       auto tg_tmp_var_str    = create_tmp_var();
       auto ta_tmp_var_str    = create_tmp_var();
