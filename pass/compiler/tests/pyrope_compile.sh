@@ -186,13 +186,13 @@ Pyrope_compile() {
 
 for pt in $pts_hier
 do
-	rm -rf ./lgdb
+	rm -rf ./lgdb*
 	Pyrope_compile "$pt"
 done
 
 for pt in $pts
 do
-	rm -rf ./lgdb
+	rm -rf ./lgdb*
 	Pyrope_compile "$pt"
 done
 

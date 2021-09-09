@@ -113,13 +113,14 @@ firrtl_test() {
         echo "FAIL: ${pt}.v !== ${pt}.gld.v"
         exit $ret_val
     fi
+    # rm -rf lgdb_${pt}
   done
 
   # rm -f *.v
   # rm -f *.dot
   # rm -f *.tcl
   # rm -f lgcheck*
-  # rm -rf lgdb
+  # rm -rf lgdb*
 }
 
 firrtl_test "$pts"
