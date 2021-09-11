@@ -310,6 +310,94 @@ class Lconst {
     return res;
   }
 
+  add_op(com_lconst) {
+    if (!(com_lconst instanceof Lconst)) {
+      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+    }
+
+    let set_checker = 1n;
+
+    if (this.has_unknown || com_lconst.has_unknown) {
+      let num = 0n;
+      let unknown = 0n;
+      let carry = 0;
+
+      while (true) {
+        let n_ones = 0;
+        let n_unknowns = 0;
+
+        if (set_checker <= this.num && set_checker & this.num) {
+          n_ones += 1;
+        }
+
+        if (set_checker <= com_lconst.num && set_checker & com_lconst.num) {
+          n_ones += 1;
+        }
+
+        if (set_checker <= this.unknown && set_checker & this.unknown) {
+          n_unknowns += 1;
+        }
+
+        if (
+          set_checker <= com_lconst.unknown &&
+          set_checker & com_lconst.unknown
+        ) {
+          n_unknowns += 1;
+        }
+
+        if (carry === 1) {
+          n_ones += 1;
+        } else if (carry === -1) {
+          n_unknowns += 1;
+        }
+
+        if (n_unknowns === 0 && n_ones === 0) {
+          carry = 0;
+        } else if (n_unknowns === 0 && n_ones === 1) {
+          num ^= set_checker;
+          carry = 0;
+        } else if (n_unknowns === 0 && n_ones === 2) {
+          carry = 1;
+        } else if (n_unknowns === 0 && n_ones === 3) {
+          num ^= set_checker;
+          carry = 1;
+        } else if (n_unknowns === 1 && n_ones === 0) {
+          unknown ^= set_checker;
+          carry = 0;
+        } else if (n_unknowns === 1 && n_ones === 2) {
+          unknown ^= set_checker;
+          carry = 1;
+        } else {
+          unknown ^= set_checker;
+          carry = -1;
+        }
+        console.log(set_checker, num, unknown);
+
+        set_checker <<= 1n;
+
+        if (
+          set_checker > this.num &&
+          set_checker > this.unknown &&
+          set_checker > com_lconst.num &&
+          set_checker > com_lconst.unknown
+        ) {
+          break;
+        }
+      }
+
+      return {
+        myNum: num,
+        myUnknown: unknown,
+        set_checker: set_checker,
+      };
+    }
+
+    let res = new Lconst();
+    res.num = this.num + com_lconst.num;
+    res.adjust(com_lconst);
+    return res;
+  }
+
   xor_op(com_lconst) {
     const num = this.num ^ com_lconst.num;
     return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
@@ -317,8 +405,8 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-const a = Lconst.from_pyrope('0b010??1');
-const b = Lconst.from_pyrope('0b000?11');
-const res = a.or_op(b);
-console.log(res);
+const a = Lconst.from_pyrope('0b010?01');
+const b = Lconst.from_pyrope('0b000101');
+console.log(a.add_op(b));
+
 module.exports = Lconst;
