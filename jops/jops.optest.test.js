@@ -214,6 +214,8 @@ test('TEST OR_OP compare with unknown', () => {
   expect(resb.unknown).toBe(6n); // 0b000110
 });
 
+// test plus and minus
+
 // test mul and div
 test('complicated check, a divide by b', () => {
   const testing1a = Lconst.from_pyrope('50052096');
@@ -235,8 +237,34 @@ test('complicated check, a multiply b', () => {
 
   const testing2a = Lconst.from_pyrope('0b?');
   const testing2b = Lconst.from_pyrope('0b1');
-  console.log(testing2a, testing2b);
   // Because we count one additional bit for unsigned value, so both  0b? and 0b1 has two bits.
   // thus, the answer should be '???0'
   expect(testing2a.mult_op(testing2b).num).toBe(1061109552n);
+});
+
+// tests from string
+test('complated check, from_string', () => {
+  // I used the following online big number calculator to solve the answer before testing
+  // https://www.calculator.net/big-number-calculator.html?cx=1%2C111%2C835%2C904&cy=70&cp=20&co=plus
+  const test1 = Lconst.from_string('BEEF');
+  const test2 = Lconst.from_string('?!');
+  expect(test1.num).toBe(1111835974n);
+  expect(test2.num).toBe(16161n);
+  expect(test2.explicit_str && test1.explicit_str).toBe(true);
+});
+
+// tests ADD_OP
+test('complicated check, and_op', () => {
+  const testing1a = Lconst.from_pyrope('0b1?10');
+  const testing1b = Lconst.from_pyrope('0b10');
+  // if a is 1?10, and b is 0b10, then a+b = ???00
+  const res1 = testing1b.add_op(testing1a);
+  expect(res1.num).toBe(0n);
+  expect(res1.unknown).toBe(28n);
+
+  const testing2a = Lconst.from_pyrope('0b1110');
+  const testing2b = Lconst.from_pyrope('0b10');
+  const res2 = testing2a.add_op(testing2b);
+  expect(res2.num).toBe(16n);
+  expect(res2.has_unknown).toBe(false); //Potential BUG, unknown should be undefined even though has_unknown == false
 });

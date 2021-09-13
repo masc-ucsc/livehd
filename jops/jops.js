@@ -59,12 +59,13 @@ class Lconst {
     return BigInt(binaryForm.length + 1);
   }
 
-  static new_lconst(explicit_str, bits, num, has_unknown = false) {
+  static new_lconst(explicit_str, bits, num, has_unknown = false, unknown) {
     const new_l = new Lconst();
     new_l.explicit_str = explicit_str;
     new_l.bits = BigInt(bits);
     new_l.num = BigInt(num);
     new_l.has_unknown = has_unknown;
+    if (new_l.has_unknown) new_l.unknown = unknown;
     return new_l;
   }
 
@@ -253,6 +254,16 @@ class Lconst {
     return return_Lconst;
   }
 
+  static from_string(orig_txt) {
+    let num = 0n;
+    for (const char of orig_txt) {
+      num <<= 8n;
+      num += BigInt(char.charCodeAt(0));
+    }
+
+    return Lconst.new_lconst(true, BigInt(8 * orig_txt.length), num);
+  }
+
   // restriction: only from decimal to pyrope
   to_pyrope() {
     let output = '0x';
@@ -266,6 +277,32 @@ class Lconst {
     this.explicit_str =
       com_lconst.explicit_str && (this.bits === 0 || this.explicit_str);
     this.bits = Lconst.calc_num_bits(this.num);
+  }
+  is_negative() {
+    // return true if its num is less than 0
+    if (!this.explicit_str) return this.num < 0;
+
+    // if it is a string and has unknown
+    if (!this.has_unknown) return false;
+
+    // if is a string and does not have unknown
+    // ...
+  }
+
+  is_positive() {
+    if (!this.explicit_str) return this.num >= 0;
+    if (!this.has_unknown) return false;
+  }
+
+  to_string() {
+    let str = '';
+    let tmp = this.num;
+    while (tmp) {
+      let ch = tmp & 0xffn;
+      str += ch;
+      tmp >>= 8n;
+    }
+    return str;
   }
 
   // ========= operation =============
@@ -328,7 +365,6 @@ class Lconst {
       while (true) {
         let n_ones = 0;
         let n_unknowns = 0;
-
         if (set_checker <= this.num && set_checker & this.num) {
           n_ones += 1;
         }
@@ -382,17 +418,19 @@ class Lconst {
           set_checker > this.num &&
           set_checker > this.unknown &&
           set_checker > com_lconst.num &&
-          set_checker > com_lconst.unknown
-        ) {
+          set_checker > com_lconst.unknown &&
+          carry === 0
+        )
           break;
-        }
       }
 
-      return {
-        myNum: num,
-        myUnknown: unknown,
-        set_checker: set_checker,
-      };
+      return Lconst.new_lconst(
+        false,
+        Lconst.calc_num_bits(num),
+        num,
+        true,
+        unknown
+      );
     }
 
     let res = new Lconst();
@@ -403,33 +441,6 @@ class Lconst {
 
   is_string() {
     return this.explicit_str && !this.has_unknown;
-  }
-
-  is_negative() {
-    // return true if its num is less than 0
-    if (!this.explicit_str) return this.num < 0;
-
-    // if it is a string and has unknown
-    if (!this.has_unknown) return false;
-
-    // if is a string and does not have unknown
-    // ...
-  }
-
-  is_positive() {
-    if (!this.explicit_str) return this.num >= 0;
-    if (!this.has_unknown) return false;
-  }
-
-  to_string() {
-    let str = '';
-    let tmp = this.num;
-    while (tmp) {
-      let ch = tmp & 0xffn;
-      str += ch;
-      tmp >>= 8n;
-    }
-    return str;
   }
 
   sub_op(com_lconst) {
@@ -557,4 +568,7 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
+const testing1 = Lconst.from_pyrope('0b1?10');
+const testing2 = Lconst.from_pyrope('0b10');
+console.log(testing2.add_op(testing1));
 module.exports = Lconst;
