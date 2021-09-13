@@ -239,6 +239,36 @@ test('complicated check, a multiply b', () => {
   const testing2b = Lconst.from_pyrope('0b1');
   // Because we count one additional bit for unsigned value, so both  0b? and 0b1 has two bits.
   // thus, the answer should be '???0'
+  //
+  // Simple rule if only one side has unknowns:
+  //
+  // n:0b0 x 23 
+  // U:0b1 x 23
+  // 0b? x 2 = 0b?0
+  // 0b? x 3 = 0b??
+  // 0b? x 4 = 0b?00
+  //
+  // 0b?0? x 1 =   0b?0?
+  // 0b?0? x 2 =  0b?0?0
+  // 0b?0? x 3 =  0b????
+  //
+  // 0b?0? x 4 = 0b?0?00
+  //  n:0   x 4 = 0b00000
+  //  u:101 x 4 = 0b10100
+  // 0b?0? x 5 = 0b??00?
+  //  n:0
+  //  u:101 x 5 =  11001
+  //
+  // NOT CLEAR if both sides have unknowns (just max bits all ??)
+  // 0b?0 x 0b?1 (2x3 or 2x1 or 0x3 or 0x1)
+  //             0b100
+  //             0b010
+  //             0b011
+  //             0b001
+  //             0b???
+  // n:00, u:10
+  // n:01, u:10
+  //         10
   expect(testing2a.mult_op(testing2b).num).toBe(1061109552n);
 });
 
