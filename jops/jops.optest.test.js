@@ -50,22 +50,22 @@ test('TEST when the input is a signed binary', () => {
 
   expect(testing1.num).toBe(-15n);
   expect(testing1.unknown).toBe(6n);
-  expect(testing1.bits).toBe(5); // notice that the extra '1' is not needed
+  expect(testing1.bits).toBe(5n); // notice that the extra '1' is not needed
 
   expect(testing2.num).toBe(49n);
   expect(testing2.unknown).toBe(6n);
-  expect(testing2.bits).toBe(7);
+  expect(testing2.bits).toBe(7n);
 
   // !!!! not sure; wheter this result is correct or not
   expect(testing3.num).toBe(-113n);
   expect(testing3.unknown).toBe(6n);
-  expect(testing3.bits).toBe(8);
+  expect(testing3.bits).toBe(8n);
 });
 
 test('TEST when the input is an unsigned binary', () => {
   const testing1 = Lconst.from_pyrope('0b110001');
   expect(testing1.num).toBe(49n);
-  expect(testing1.bits).toBe(7); // extra non-explict bit '0' is required for unsigned string
+  expect(testing1.bits).toBe(7n); // extra non-explict bit '0' is required for unsigned string
 });
 
 test('TESt only binary number could be signed', () => {
@@ -118,12 +118,12 @@ test('TEST when the input is true or no', () => {
   let testing2 = Lconst.from_pyrope('false');
 
   expect(testing1.explicit_str).not.toBeTruthy();
-  expect(testing1.num).toBe(-1);
-  expect(testing1.bits).toBe(1);
+  expect(testing1.num).toBe(-1n);
+  expect(testing1.bits).toBe(1n);
 
   expect(testing2.explicit_str).not.toBeTruthy();
-  expect(testing2.num).toBe(0);
-  expect(testing2.bits).toBe(1);
+  expect(testing2.num).toBe(0n);
+  expect(testing2.bits).toBe(1n);
 });
 
 test('TEST when the encoding is not correct', () => {
@@ -164,7 +164,7 @@ test('simple tests for AND operation', () => {
   const res = testing1.and_op(testing2);
   expect(res.num).toBe(41421n);
   expect(res.explicit_str).toBe(false);
-  expect(res.bits).toBe(17); // NOTICE: one extra bit for inexplicit sign bit "0"
+  expect(res.bits).toBe(17n); // NOTICE: one extra bit for inexplicit sign bit "0"
 });
 
 test('TEST AND_OP compare with unknown', () => {
@@ -197,7 +197,7 @@ test('simple tests for OR operation', () => {
   const res = testing1.or_op(testing2);
   expect(res.num).toBe(65503n);
   expect(res.explicit_str).toBe(false);
-  expect(res.bits).toBe(17);
+  expect(res.bits).toBe(17n);
 });
 
 test('TEST OR_OP compare with unknown', () => {
@@ -212,4 +212,31 @@ test('TEST OR_OP compare with unknown', () => {
   const resb = b1.or_op(b2);
   expect(resb.num).toBe(17n); //0b010001
   expect(resb.unknown).toBe(6n); // 0b000110
+});
+
+// test mul and div
+test('complicated check, a divide by b', () => {
+  const testing1a = Lconst.from_pyrope('50052096');
+  const testing1b = Lconst.from_pyrope('0xBE_EF');
+  expect(testing1a.div_op(testing1b).num).toBe(1024n);
+
+  const testing2a = Lconst.from_pyrope('0');
+  const testing2b = Lconst.from_pyrope('0xBEEF');
+  const testing2c = Lconst.from_pyrope('-0b101');
+  expect(testing2a.div_op(testing2b).num).toBe(0n);
+  expect(testing2b.div_op(testing2a).num).toBe(16176n); // num is ?0, which is 16 bits
+  expect(testing2c.div_op(testing2a).num).toBe(16177n); // num is ?1, which is 16 bits
+});
+
+test('complicated check, a multiply b', () => {
+  const testing1a = Lconst.from_pyrope('1231532342345');
+  const testing1b = Lconst.from_pyrope('0xBEEF');
+  expect(testing1a.mult_op(testing1b).num).toBe(60196069361481255n);
+
+  const testing2a = Lconst.from_pyrope('0b?');
+  const testing2b = Lconst.from_pyrope('0b1');
+  console.log(testing2a, testing2b);
+  // Because we count one additional bit for unsigned value, so both  0b? and 0b1 has two bits.
+  // thus, the answer should be '???0'
+  expect(testing2a.mult_op(testing2b).num).toBe(1061109552n);
 });

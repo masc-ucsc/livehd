@@ -1,4 +1,5 @@
 const assert = require('assert');
+const { lchmod } = require('fs');
 assert(50 < 70, 'this is not true');
 // CITATION
 // https://tc39.es/proposal-bigint/#sec-exp-operator
@@ -23,8 +24,8 @@ class Lconst {
   constructor(
     number,
     explicit_str = false,
-    bits = 0,
-    num = 0,
+    bits = 0n,
+    num = 0n,
     has_unknown = false
   ) {
     this.number = number;
@@ -40,12 +41,12 @@ class Lconst {
     if (this.number) {
       if (typeof this.number === 'string') {
         this.explicit_str = false;
-        this.bits = 0;
-        this.num = 0;
+        this.bits = 0n;
+        this.num = 0n;
       } else {
         //question: how to deal with the size of number is int64_t or Number(bigInt)
         this.explicit_str = false;
-        this.num = this.number;
+        this.num = BigInt(this.number);
         this.bits = Lconst.calc_num_bits(this.num);
       }
     }
@@ -55,14 +56,14 @@ class Lconst {
     // count implicit sign bits
     const bigI = number > 0 ? BigInt(number) : -1n * BigInt(number);
     const binaryForm = bigI.toString(2);
-    return binaryForm.length + 1;
+    return BigInt(binaryForm.length + 1);
   }
 
   static new_lconst(explicit_str, bits, num, has_unknown = false) {
     const new_l = new Lconst();
     new_l.explicit_str = explicit_str;
-    new_l.bits = bits;
-    new_l.num = num;
+    new_l.bits = BigInt(bits);
+    new_l.num = BigInt(num);
     new_l.has_unknown = has_unknown;
     return new_l;
   }
@@ -74,14 +75,16 @@ class Lconst {
       throw 'the input must be a string';
     }
 
+    if (number_str.length === 0) return new Lconst();
+
     let txt = number_str.toLowerCase();
     txt = txt.replace(/_/g, '');
 
-    // special cases
+    // special cases !!!
     if (txt === 'true') {
-      return Lconst.new_lconst(false, 1, -1);
+      return Lconst.new_lconst(false, 1n, -1n);
     } else if (txt == 'false') {
-      return Lconst.new_lconst(false, 1, 0);
+      return Lconst.new_lconst(false, 1n, 0n);
     }
 
     let skip_chars = 0;
@@ -241,7 +244,7 @@ class Lconst {
     }
 
     let return_Lconst = Lconst.new_lconst(
-      false,
+      unknown_found, //if there is unknown in the string, then it is an explicit string
       Lconst.calc_num_bits(num),
       num,
       unknown_found
@@ -398,6 +401,155 @@ class Lconst {
     return res;
   }
 
+  is_string() {
+    return this.explicit_str && !this.has_unknown;
+  }
+
+  is_negative() {
+    // return true if its num is less than 0
+    if (!this.explicit_str) return this.num < 0;
+
+    // if it is a string and has unknown
+    if (!this.has_unknown) return false;
+
+    // if is a string and does not have unknown
+    // ...
+  }
+
+  is_positive() {
+    if (!this.explicit_str) return this.num >= 0;
+    if (!this.has_unknown) return false;
+  }
+
+  to_string() {
+    let str = '';
+    let tmp = this.num;
+    while (tmp) {
+      let ch = tmp & 0xffn;
+      str += ch;
+      tmp >>= 8n;
+    }
+    return str;
+  }
+
+  sub_op(com_lconst) {
+    // in sub operation, we cannot have unknown values
+    if (this.is_string() || com_lconst.is_string()) {
+      throw `ERROR: not allowed because one is string.`;
+    }
+
+    if (typeof com_lconst !== Lconst) {
+      throw `ERROR: not allowed because the take in value is not Lconst`;
+    }
+
+    let res = new Lconst();
+    res.num = this.num - com_lconst.num;
+    res.adjust(com_lconst);
+    return res;
+  }
+
+  mult_op(com_lconst) {
+    if (this.is_string() || com_lconst.is_string())
+      throw `ERROR: not allowed because one is string.`;
+
+    if (!com_lconst instanceof Lconst)
+      throw `ERROR: not allowed because the take in value is not Lconst`;
+
+    if (this.has_unknown || com_lconst.has_unknown) {
+      let n1 = this.is_negative() ? -1 : 1;
+      let n2 = com_lconst.is_negative() ? -1 : 1;
+      if (n1 * n2 < 0)
+        return Lconst.unknown_negative(this.bits + com_lconst.bits);
+      console.log('it is positive');
+      return Lconst.unknown_positive(this.bits + com_lconst.bits);
+    }
+
+    let res = new Lconst();
+    res.num = this.num * com_lconst.num;
+    res.adjust(com_lconst);
+    return res;
+  }
+
+  div_op(com_lconst) {
+    if (this.is_string() || com_lconst.is_string())
+      throw `ERROR: not allowed because one is string.`;
+
+    if (!com_lconst instanceof Lconst)
+      throw `ERROR: not allowed because the take in value is not Lconst`;
+
+    if (com_lconst.num === 0n) {
+      if (this.is_negative()) return Lconst.unknown_negative(2n);
+      return Lconst.unknown_positive(2n);
+    }
+    if (this.has_unknown || com_lconst.has_unknown) {
+      let n1 = this.is_negative() ? -1 : 1;
+      let n2 = com_lconst.is_negative() ? -1 : 1;
+
+      let b = this.bits;
+      if (!com_lconst.has_unknown) {
+        b -= com_lconst.bits;
+        if (b <= 0) return new Lconst(0);
+      }
+
+      if (n1 * n2 < 0) return Lconst.unknown_negative(b);
+      return Lconst.unknown_positive(b);
+    }
+
+    let res = new Lconst();
+    res.num = this.num / com_lconst.num;
+    res.adjust(com_lconst);
+    return res;
+  }
+
+  static unknown(nbits) {
+    let res = new Lconst();
+    for (let i = 0; i < nbits; i++) {
+      res.num <<= 8;
+      res.num |= '?'.charCodeAt(0);
+    }
+    res.bits = nbits;
+    if (nbits > 0) res.explicit_str = true;
+    return res;
+  }
+
+  static unknown_positive(nbits) {
+    let res = new Lconst();
+    let questionMark = BigInt('?'.charCodeAt(0));
+    let zero = BigInt('0'.charCodeAt(0));
+    for (let i = 0n; i < nbits - 1n; i++) {
+      res.num <<= 8n;
+      res.num |= questionMark;
+      console.log(res.num);
+    }
+    res.bits = nbits;
+    if (nbits > 1n) {
+      res.num <<= 8n;
+      console.log(res.num);
+      res.num |= zero;
+      res.explicit_str = true;
+      console.log(res.num);
+    }
+    return res;
+  }
+
+  static unknown_negative(nbits) {
+    let res = new Lconst();
+    let questionMark = BigInt('?'.charCodeAt(0));
+    let one = BigInt('1'.charCodeAt(0));
+    for (let i = 0n; i < nbits - 1n; i++) {
+      res.num <<= 8n;
+      res.num |= questionMark;
+    }
+    res.bits = nbits;
+    if (nbits > 1n) {
+      res.num <<= 8n;
+      res.num |= one;
+      res.explicit_str = true;
+    }
+
+    return res;
+  }
+
   xor_op(com_lconst) {
     const num = this.num ^ com_lconst.num;
     return Lconst.new_lconst(false, Lconst.calc_num_bits(num), num);
@@ -405,8 +557,4 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-const a = Lconst.from_pyrope('0b010?01');
-const b = Lconst.from_pyrope('0b000101');
-console.log(a.add_op(b));
-
 module.exports = Lconst;
