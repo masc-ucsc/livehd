@@ -33,3 +33,4 @@ docs/graph-images
 node_modules
 coverage
 .vscode
+package-lock.json
