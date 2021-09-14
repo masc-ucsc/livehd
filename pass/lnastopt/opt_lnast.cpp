@@ -244,7 +244,69 @@ void Opt_lnast::process_assign(const std::shared_ptr<Lnast> &ln, const Lnast_nid
   auto lhs_txt = lhs_data.token.get_text();
   auto rhs_txt = rhs_data.token.get_text();
 
-  if (rhs_data.type.is_ref()) {
+#if 0
+  // CODE FOR DP_ASSIGN??
+  //
+  // CASE 1:
+zz = (x=0,y=0)
+zz = (1,a=3)
+
+
+  // CASE 2:
+zz = (x=0,y=0)
+yy = (1,a=3)
+
+
+  // CASE 3:
+(x=0,y=0) = (1,a=3)
+
+  // CASE 4:
+(x,y) = (1,a=3)
+
+  if (st.has_bundle(lhs_txt)) {
+    auto lhs_bundle = st.get_bundle(lhs_txt);
+
+    std::vector<mmap_lib::str> lhs_ids;
+    for(const auto &e:lhs_bundle->get_sort_map()) {
+      if (e.first.contains('.')) {
+        lhs_bundle->dump();
+        hierarchy_info_int("the lhs of the assigned must be a trivial bundle when assigning a constant");
+        return;
+      }
+      if (e.first.is_i()) {
+        lhs_bundle->dump();
+        hierarchy_info_int("the lhs bundle must be named");
+        return;
+      }
+      lhs_ids.emplace_back(e.first);
+    }
+
+    if (rhs_data.type.is_ref()) {
+      auto bundle = st.get_bundle(rhs_txt);
+      if (!bundle->is_ordered(""_str)) {
+        bundle->dump();
+        hierarchy_info_int("bundle assigned must be between ordered bundles");
+        return;
+      }
+
+      for(auto i=0u;i<lhs_ids.size();++i) {
+        auto b = bundle->get_bundle(mmap_lib::str(i));
+        st.set(lhs_ids[i], b);
+      }
+    }else{
+      auto v = Lconst::from_pyrope(rhs_txt);
+      if (lhs_ids.size()!=1) {
+        ln->dump(lnid);
+        hierarchy_info_int("the lhs of the assigned must be a trivial bundle when assigning a constant");
+        return;
+      }
+      st.set(lhs_ids[0], v);
+    }
+
+  }else 
+#endif
+    
+    if (rhs_data.type.is_ref()) {
     auto bundle = st.get_bundle(rhs_txt);
     st.set(lhs_txt, bundle);
   }else{
