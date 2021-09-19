@@ -211,7 +211,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
 
       const auto &data_lhs = ln->get_data(lhs_id);
       const auto &data_rhs = ln->get_data(rhs_id);
-      I(data_lhs.type.is_ref());
+      I(data_lhs.type.is_const());
       if (data_lhs.token.get_text().is_i()) {
         throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs.token.get_text());
       }
