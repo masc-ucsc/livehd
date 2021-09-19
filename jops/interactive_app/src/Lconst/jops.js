@@ -1,5 +1,4 @@
 const assert = require('assert');
-const { lchmod } = require('fs');
 assert(50 < 70, 'this is not true');
 // CITATION
 // https://tc39.es/proposal-bigint/#sec-exp-operator
