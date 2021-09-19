@@ -716,7 +716,7 @@ private:
     mInfoHashShift         = reinterpret_cast<InfoType*>(&mmap_base[4]);
 
     mInfo = reinterpret_cast<uint8_t*>(&mmap_base[5]);
-    if (*mMask == n_entries - 1 || n_entries == 0) {
+    if (*mNumElements != 0) { //if (*mMask == n_entries - 1 || n_entries == 0)
       assert(*mMaxNumElementsAllowed <= *mMask);
       assert(calc_mmap_size(*mMask + 1) <= mmap_size);
       // assert(mInfo[*mMask+1] == 1); // Sentinel
