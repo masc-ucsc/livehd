@@ -22,7 +22,7 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   ln->ssa_trans();
 
   gviz == true ? gv.do_from_lnast(ln) : void();
-  
+
 
   fmt::print("---------------- LNAST -> Lgraph ({})----------------------- \n", ln->get_top_module_name());
 
@@ -31,9 +31,9 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto       local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
-  if (gviz) 
+  if (gviz)
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
- 
+
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs) lgs.emplace_back(lg);
@@ -52,17 +52,17 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-        
+
 
         fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
         bw.do_trans(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
-        
+
 
         // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
         cp.do_trans(lg_sub);
-        gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void(); 
+        gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
 
         // FIXME->sh: bw.is_finished() never raise high!
@@ -71,12 +71,12 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
         //   fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
         //   cp.do_trans(lg_sub);
         //   gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-          
+
 
         //   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
         //   bw.do_trans(lg_sub);
         //   gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
-          
+
         //   if (bw.is_finished()) {
         //     break;
         //   }
@@ -93,17 +93,17 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
       cp.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-      
+
 
       fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
       bw.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
-      
+
 
       // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
       fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
       cp.do_trans(lg);
-      gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void(); 
+      gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
     }
   }
   if (lgcnt > 1 && hit == false)
@@ -122,7 +122,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
     for (auto &lg : lgs) {
       bw.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
-      
+
     }
   } else {
     for (auto &lg : lgs) {
@@ -133,7 +133,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
         bw.do_trans(lg);
       }
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
-      
+
     }
 
     if (lgcnt > 1 && hit == false)
@@ -154,12 +154,12 @@ void Lcompiler::do_fir_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &l
 
 void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
-  
+
 
   fmt::print("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", mmap_lib::str::concat("__firrtl_", ln->get_top_module_name()));
   ln->ssa_trans();
   gviz == true ? gv.do_from_lnast(ln) : void();
-  
+
 
   // since the first generated lgraphs are firrtl_op_lgs, they will be removed
   // in the end, we should keep the original mod_name for the firrtl_op
@@ -173,12 +173,12 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
-  if (gviz) 
+  if (gviz)
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
 
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
-  for (auto *lg : local_lgs) 
+  for (auto *lg : local_lgs)
     lgs.emplace_back(lg);
 }
 
@@ -198,7 +198,7 @@ void Lcompiler::do_fir_cprop() {
         fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg_sub->get_name());
         cp.do_trans(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-        
+
       });
 
       // for top lgraph
@@ -206,7 +206,7 @@ void Lcompiler::do_fir_cprop() {
       fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg->get_name());
       cp.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-      
+
     }
   }
   if (lgcnt > 1 && hit == false)
@@ -281,7 +281,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
-      
+
       // FIXME->sh: bw.is_finished() malfunction
       // int n_iters = 0;
       // while (true) {
@@ -302,7 +302,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       bw.do_trans(new_lg_sub);
       bw.do_trans(new_lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
-      
+
 
       {
         std::unique_lock<std::mutex> guard(lgs_mutex);
@@ -317,7 +317,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
     fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg->get_name());
     auto new_lg = fm.do_firrtl_mapping(lg);
     gviz == true ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
-    
+
 
     // FIXME->sh: bw.is_finished() malfunction
     // int n_iters = 0;
@@ -366,14 +366,19 @@ void Lcompiler::do_fir_firbits() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
+#if 1
+      // FIXME: paralell breaks (hier)
       lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
+#else
+      lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
+#endif
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
         fmt::print("-------- {:<28} ({:<30}) -------- (F-0)\n", "Firrtl Bits Analysis", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         fmt::print("-------- {:<28} ({:<30}) -------- (F-1)\n", "Firrtl Bits Analysis", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "firbits-ed") : void();
-        
+
       });
 
       // for top lgraph
@@ -383,7 +388,7 @@ void Lcompiler::do_fir_firbits() {
       fmt::print("-------- {:<28} ({:<30}) -------- (F-1)\n", "Firrtl Bits Analysis", lg->get_name());
       fm.do_firbits_analysis(lg);
       gviz == true ? gv.do_from_lgraph(lg, "firbits-ed") : void();
-      
+
     }
   }
   if (lgcnt > 1 && hit == false)

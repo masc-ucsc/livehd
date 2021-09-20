@@ -170,9 +170,8 @@ public:
 
   bool is_empty() const { return fast_first() == 0; }
 
-  void regenerate_htree() {
-    htree.clear();
-    htree.regenerate();
+  void force_regenerate_htree() {
+    htree.force_regenerate();
   }
 
   Hierarchy_tree *ref_htree() {

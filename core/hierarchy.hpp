@@ -11,13 +11,17 @@ class Lgraph;
 class Hierarchy_tree : public mmap_lib::tree<Hierarchy_data> {
 protected:
   Lgraph *top;
+  static inline std::mutex  top_mutex; // NASTY lock. There is some tree sharing. Threads can update each other?
 
   void regenerate_step(Lgraph *lg, const Hierarchy_index &parent);
+
+  void regenerate_int();  // lock free regenerate
 
 public:
   Hierarchy_tree(Lgraph *top);
 
-  void regenerate();  // Triggered when the hierarchy may have changed
+  void force_regenerate();  // clear and regenerate (new LG may be added)
+  void regenerate();        // Compute the hierarchy (if not computed already)
 
   // Lg_type_id get_lgid(const Hierarchy_index &hidx) const { return get_data(hidx).lgid; }
   Node get_instance_up_node(const Hierarchy_index &hidx) const;

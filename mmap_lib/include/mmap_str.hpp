@@ -218,11 +218,17 @@ protected:
     std::string name;
     Table       key2sv_vector;
     Table       map_vector;
+    std::mutex  pool_mutex;
 
     absl::flat_hash_map<std::string, uint32_t> map;
 
     uint32_t add_new_sv(std::string_view sv) {
-      assert(map.find(sv) == map.end());
+      std::lock_guard<std::mutex> guard(pool_mutex);
+
+      auto it = map.find(sv);
+      if (MMAP_LIB_UNLIKELY(it != map.end())) { // re-check inside the lock
+        return it->second;
+      }
 
       auto key = key2sv_vector.insert_entry(sv.data(), sv.size());
 
