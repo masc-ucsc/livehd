@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import Calculator from './calculator';
 const Lconst = require('./Lconst/jops');
 
 function getLconst(functionx, valuex) {
@@ -16,7 +15,11 @@ function calculator(function_A, value_A, function_B, value_B, operation) {
   const itemB = getLconst(function_B, value_B);
   if (itemA === null || itemB === null) {
     throw 'some error';
-  } else if (operation === 'and') {
+  } else if (operation === 'and_op') {
+    return itemA.and_op(itemB);
+  } else if (operation === 'or_op') {
+    return itemA.or_op(itemB);
+  } else if (operation === 'add_op') {
     return itemA.add_op(itemB);
   }
 }
@@ -24,40 +27,121 @@ function calculator(function_A, value_A, function_B, value_B, operation) {
 function App() {
   const testing = Lconst.from_pyrope('0xFFFFFFFFFFFFFFF');
   const b = testing.num;
-  const build_functions = ['from_pyrope', 'from_binary'];
-  const build_opeartion = ['and', 'or', 'add', 'div', 'mul'];
+  const build_functions = ['from_pyrope', 'from_binary', 'to_pyrope'];
+  const build_opeartions = [
+    'and_op',
+    'or_op',
+    'add_op',
+    'div_op',
+    'mul_op',
+    'xor_op',
+  ];
 
   const [selected_function_A, set_function_A] = useState('from_pyrope');
   const [value_A, set_value_A] = useState('0x0');
   const [selected_function_B, set_function_B] = useState('from_pyrope');
   const [value_B, set_value_B] = useState('0x0');
-  const [selected_operation, set_operation] = useState('and');
+  const [selected_operation, set_operation] = useState('and_op');
   const [current_result, set_result] = useState();
+  const [cal_engine, set_engine] = useState(true);
 
   useEffect(() => {
     update_result();
-  }, [selected_function_A, selected_function_B]);
+  }, [cal_engine]);
+
+  function run_engine() {
+    const new_value = cal_engine ? false : true;
+    set_engine(new_value);
+  }
 
   function update_valueA(new_value) {
     set_value_A(new_value);
+  }
+
+  function update_function_A(new_value) {
+    set_function_A(new_value);
   }
 
   function update_valueB(new_value) {
     set_value_B(new_value);
   }
 
+  function update_function_B(new_value) {
+    set_function_B(new_value);
+  }
+
   function update_result() {
-    const ans = calculator('from_pyrope', '0x0', 'from_pyrope', '0x0', 'and');
+    console.log(
+      selected_function_A,
+      value_A,
+      selected_function_B,
+      value_B,
+      selected_operation
+    );
+    const ans = calculator(
+      selected_function_A,
+      value_A,
+      selected_function_B,
+      value_B,
+      selected_operation
+    );
     set_result(ans.num);
   }
 
+  // Note!!! It seems like we cannot use map function directly in render (in the case of react function)
+  const listFunctions = build_functions.map((each) => {
+    return <option value={each}> {each} </option>;
+  });
+
+  const listOperations = build_opeartions.map((each) => {
+    return <option value={each}> {each} </option>;
+  });
+
   return (
     <div className="App">
-      <div> Input A {`${selected_function_A}, value: ${value_A}`} </div>
-      <div> Input B {`${selected_function_B}, value: ${value_B}`} </div>
-      <div> Operation {`${selected_operation}`} </div>
-      <div> Result {`${current_result}`}</div>
-      <Calculator />
+      <div id="handle_A">
+        Input A{'  '}
+        <input
+          type="text"
+          placeholder="0x0"
+          onChange={(e) => update_valueA(e.target.value)}
+        />
+        <select onChange={(e) => update_function_A(e.target.value)}>
+          {listFunctions}
+        </select>
+      </div>
+
+      <div id="handle_B">
+        Input B{' '}
+        <input
+          type="text"
+          placeholder="0x0"
+          onChange={(e) => update_valueB(e.target.value)}
+        />
+        <select onChange={(e) => update_function_B(e.target.value)}>
+          {listFunctions}
+        </select>
+      </div>
+
+      <div id="handle_op">
+        Operation{' '}
+        <select onChange={(e) => set_operation(e.target.value)}>
+          {listOperations}
+        </select>
+      </div>
+
+      <div id="calculate">
+        {' '}
+        <button onClick={(e) => run_engine()}> calculate! </button>{' '}
+      </div>
+      <div id="testing area">
+        <div> --------testing area------- </div>
+        <div> Input A {`${selected_function_A}, value: ${value_A}`} </div>
+        <div> Input B {`${selected_function_B}, value: ${value_B}`} </div>
+        <div> Operation {`${selected_operation}`} </div>
+        <div> Result {`${current_result}`}</div>
+        <div> engine {`${cal_engine}`}</div>
+      </div>
     </div>
   );
 }
