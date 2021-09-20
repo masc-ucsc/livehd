@@ -567,7 +567,7 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-const testing1 = Lconst.from_pyrope('0b1?10');
-const testing2 = Lconst.from_pyrope('0b10');
+const testing1 = Lconst.from_pyrope('0x0');
+const testing2 = Lconst.from_pyrope('0x0');
 console.log(testing2.add_op(testing1));
 module.exports = Lconst;
