@@ -211,11 +211,12 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
 
       const auto &data_lhs = ln->get_data(lhs_id);
       const auto &data_rhs = ln->get_data(rhs_id);
-      I(data_lhs.type.is_const());
-      if (data_lhs.token.get_text().is_i()) {
-        throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs.token.get_text());
+      I(data_lhs.type.is_ref());
+      auto data_lhs_txt = data_lhs.token.get_text();
+      if (data_lhs_txt.is_i()) {
+        throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs_txt);
       }
-      auto field_lhs = mmap_lib::str::concat(":", pos_txt, ":", data_lhs.token.get_text());
+      auto field_lhs = mmap_lib::str::concat(":", pos_txt, ":", data_lhs_txt);
 
       if (data_rhs.type.is_const()) { // CASE 1: (..., a=123, ...)
         bundle->set(field_lhs, Lconst::from_pyrope(data_rhs.token.get_text()));
