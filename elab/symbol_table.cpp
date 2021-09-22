@@ -204,6 +204,9 @@ bool Symbol_table::has_bundle(mmap_lib::str key) const {
 
 void Symbol_table::dump() const {
   fmt::print("Symbol_table::leave_scope func_id:{} scope:{}\n", stack.back().func_id, stack.back().scope);
+  if (stack.empty())
+    return;
+
   for(auto var:stack.back().declared) {
     fmt::print("var:{}\n", var);
     auto it = varmap.find(std::pair(stack.back().scope, var));
