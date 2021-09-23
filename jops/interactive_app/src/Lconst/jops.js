@@ -1,5 +1,4 @@
 const assert = require('assert');
-const { type } = require('os');
 assert(50 < 70, 'this is not true');
 // CITATION
 // https://tc39.es/proposal-bigint/#sec-exp-operator

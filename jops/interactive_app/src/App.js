@@ -44,7 +44,7 @@ function App() {
   const [cal_engine, set_engine] = useState(true);
 
   useEffect(() => {
-    function update_result() {
+    const update_result = () => {
       let ans;
       try {
         ans = calculator(
@@ -58,7 +58,7 @@ function App() {
         /* some code dealing with the error */
       }
       set_result(ans.num);
-    }
+    };
     update_result();
   }, [cal_engine]);
 
