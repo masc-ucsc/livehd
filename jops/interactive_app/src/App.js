@@ -14,7 +14,7 @@ function calculator(function_A, value_A, function_B, value_B, operation) {
   const itemA = getLconst(function_A, value_A);
   const itemB = getLconst(function_B, value_B);
   if (itemA === null || itemB === null) {
-    throw 'some error';
+    throw new Error('some error');
   } else if (operation === 'and_op') {
     return itemA.and_op(itemB);
   } else if (operation === 'or_op') {
@@ -25,8 +25,6 @@ function calculator(function_A, value_A, function_B, value_B, operation) {
 }
 
 function App() {
-  const testing = Lconst.from_pyrope('0xFFFFFFFFFFFFFFF');
-  const b = testing.num;
   const build_functions = ['from_pyrope', 'from_binary', 'to_pyrope'];
   const build_opeartions = [
     'and_op',
@@ -46,6 +44,21 @@ function App() {
   const [cal_engine, set_engine] = useState(true);
 
   useEffect(() => {
+    function update_result() {
+      let ans;
+      try {
+        ans = calculator(
+          selected_function_A,
+          value_A,
+          selected_function_B,
+          value_B,
+          selected_operation
+        );
+      } catch (err) {
+        /* some code dealing with the error */
+      }
+      set_result(ans.num);
+    }
     update_result();
   }, [cal_engine]);
 
@@ -68,24 +81,6 @@ function App() {
 
   function update_function_B(new_value) {
     set_function_B(new_value);
-  }
-
-  function update_result() {
-    console.log(
-      selected_function_A,
-      value_A,
-      selected_function_B,
-      value_B,
-      selected_operation
-    );
-    const ans = calculator(
-      selected_function_A,
-      value_A,
-      selected_function_B,
-      value_B,
-      selected_operation
-    );
-    set_result(ans.num);
   }
 
   // Note!!! It seems like we cannot use map function directly in render (in the case of react function)

@@ -1,4 +1,4 @@
-'use strict';
+// delete 'use strict' here
 
 const fs = require('fs');
 const errorOverlayMiddleware = require('react-dev-utils/errorOverlayMiddleware');

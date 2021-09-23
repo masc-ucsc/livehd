@@ -1,4 +1,4 @@
-'use strict';
+// delete 'use strict' here
 
 const babelJest = require('babel-jest');
 
