@@ -1,0 +1,28 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#include "tree_sitter/api.h"
+
+#include "lnast.hpp"
+#include "lnast_ntype.hpp"
+
+class Prp2lnast {
+protected:
+  std::unique_ptr<Lnast> lnast;
+
+  std::string prp_file;
+  TSParser   *parser;
+  TSNode      ts_root_node;
+
+  void process_stmt_seq(const TSNode &node);
+  void process_root(const TSNode &node);
+
+public:
+  Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_name);
+
+  ~Prp2lnast();
+
+  std::unique_ptr<Lnast> get_lnast() {
+    return std::move(lnast);
+  }
+};
+

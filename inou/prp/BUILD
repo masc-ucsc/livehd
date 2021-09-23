@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
+        "@tree-sitter-pyrope//:tree-sitter-pyrope",
     ],
     alwayslink = True,
 )
@@ -25,7 +26,6 @@ cc_binary(
     copts = COPTS,
     deps = [
         ":inou_prp",
-        "@tree-sitter-pyrope//:tree-sitter-pyrope",
         # "@com_google_googletest//:gtest_main",
     ],
 )
