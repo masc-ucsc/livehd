@@ -58,6 +58,20 @@ http_archive(
 )
 
 new_git_repository(
+    name = "tree-sitter-pyrope",
+    build_file = "BUILD.tree-sitter-pyrope",
+    commit = "b543bf668055454c3e5bcd03fde64bfd8b3da984",   # Sep 22, 2021
+    remote = "https://github.com/masc-ucsc/tree-sitter-pyrope.git",
+)
+
+new_git_repository(
+    name = "tree-sitter",
+    build_file = "BUILD.tree-sitter",
+    commit = "2bee7c9b75e3e0163b321502f1f73e2e38943a7e",   # Sep 22, 2021
+    remote = "https://github.com/tree-sitter/tree-sitter.git",
+)
+
+new_git_repository(
     name = "jsonxxxx",
     build_file = "BUILD.json",
     commit = "68c36963826671d3f3ba157222430109ef932bac",
