@@ -60,6 +60,8 @@ function App() {
       set_result(ans.num);
     };
     update_result();
+    // next line may disable the warning
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cal_engine]);
 
   function run_engine() {
