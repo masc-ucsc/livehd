@@ -55,7 +55,7 @@ function App() {
           selected_operation
         );
       } catch (err) {
-        /* some code dealing with the error */
+        /* some code dealing with the errorc */
       }
       set_result(ans.num);
     };
