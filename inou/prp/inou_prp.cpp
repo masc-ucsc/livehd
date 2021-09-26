@@ -8,7 +8,7 @@
 #include "lgraph.hpp"
 #include "prp2lnast.hpp"
 
-void setup_inou_prp() { Inou_prp::setup(); }
+static Pass_plugin sample("inou_prp", Inou_prp::setup);
 
 void Inou_prp::setup() {
   Eprp_method m1("inou.prp", mmap_lib::str("Parse the input file and convert to an LNAST"), &Inou_prp::parse_to_lnast);

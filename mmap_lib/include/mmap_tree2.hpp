@@ -68,7 +68,7 @@
 // 02: 00, 05 │           -── 1.2.1.3.2
 // 03: 00, 06 │       -── 1.2.1.1
 // 04: 00, 06 │       ├── 1.2.1.2
-// 05: 02, 06 │       |── 1.2.1.3
+// 05: 01, 06 │       |── 1.2.1.3
 // 06: 03, 12 │   -── 1.2.1
 // 07: 00, 09 │       -── 1.3.1.1
 // 08: 00, 09 │       |── 1.3.1.2
@@ -110,6 +110,74 @@
 //
 //  API is_last_child()
 //    Check next parent (if parent_id is diff, is last child)
+//
+//  API: find_last_child()
+//    check older sibling that has children (fc[pos+1] if exist)
+//    sibling_fc-1 should be the last child
+//
+// API: insert_child_next_to
+//    insert after, keep same parent
+//
+// API: insert_first_child
+//    insert before fc[pos], update fc[pos]--
+//
+// API: insert_last_child
+//    find last_child, insert after
+//
+// API: add_child (first child or insert_last_child)
+//
+// ------------------------------------------------------
+// BEST Possible order for LNAST "typical" traversal is post-order (first-case)
+//   Get children & get parent calls
+//
+// Index: level (2bytes)
+//
+// 01: 01 | 1
+// 02: 02 -── 1.1
+// 03: 02 ├── 1.2
+// 04: 03 │   -── 1.2.1
+// 05: 04 │       -── 1.2.1.1
+// 06: 04 │       ├── 1.2.1.2
+// 07: 02 ├── 1.3
+// 08: 03 │   -── 1.3.1
+// 09: 03 │   ├── 1.3.2
+// 10: 03 │   ├── 1.3.3
+// 11: 04 │       -── 1.3.1.1
+// 12: 04 │       |── 1.3.1.2
+// 13: 04 │       |── 1.2.1.3
+// 14: 05 │           -── 1.2.1.3.1
+// 15: 05 │           -── 1.2.1.3.2
+// 16: 02 ├── 1.4
+// 17: 03 │   -── 1.4.1
+// 18: 03 │   ├── 1.4.2
+// 19: 04 │   │   -── 1.4.2.1
+// 20: 03 │   ├── 1.4.3
+// 21: 04 │   │   -── 1.4.3.1
+//
+// API: find_next_siblings
+//  ++pos;
+//  while(level[pos]<=level[self]) {
+//    if(level[pos]==level[self]) {
+//      return pos
+//    }
+//    ++pos;
+//  }
+//
+// API: find_prev_siblings
+//   Same traverse --pos
+//
+// API: find_parent
+//  Build to ID when traversing, but could be recomputed
+//  go back until level+1 is found
+//
+// API: find_children
+//  Similar find_next_siblings but continue adding
+//
+//  API is_first_child()
+//   return level[self-1] == level[self]-1
+//
+//  API is_last_child()
+//   return level[self+1] >= level[self]-1
 //
 //  API: find_last_child()
 //    check older sibling that has children (fc[pos+1] if exist)

@@ -5,9 +5,19 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_binary(
     name = "lgshell",
+    srcs = ["main.cpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":main",
+    ],
+)
+
+cc_library(
+    name = "main",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = ["*test*.cpp", "main.cpp"],
     ) + glob([
         "*_api.hpp",
     ]),
@@ -28,6 +38,7 @@ cc_binary(
         "//inou/json:inou_json",
         "//inou/liveparse:inou_liveparse",
         "//inou/pyrope:inou_pyrope",
+        "//inou/prp:inou_prp",
         "//inou/slang:inou_slang",
         "//inou/yosys:lgyosys",
         "//lgcpp/common:lgcpp",

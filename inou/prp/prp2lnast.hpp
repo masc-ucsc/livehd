@@ -13,8 +13,9 @@ protected:
   TSParser   *parser;
   TSNode      ts_root_node;
 
-  void process_stmt_seq(const TSNode &node);
-  void process_root(const TSNode &node);
+  void process_multiple_stmt(TSTreeCursor *tc);
+  void process_stmt_seq(TSTreeCursor *tc);
+  void process_root();
 
 public:
   Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_name);
@@ -24,5 +25,8 @@ public:
   std::unique_ptr<Lnast> get_lnast() {
     return std::move(lnast);
   }
+  void dump_tree_sitter() const;
+  void dump_tree_sitter(TSTreeCursor *tc, int level) const;
+  void dump() const;
 };
 
