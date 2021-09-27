@@ -4,6 +4,10 @@ const Lconst = require('./Lconst/jops');
 function getLconst(functionx, valuex) {
   if (functionx === 'from_pyrope') {
     return Lconst.from_pyrope(valuex);
+  } else if (functionx === 'from_binary') {
+    return Lconst.from_binary(valuex);
+  } else if (functionx === 'from_string') {
+    return Lconst.from_string(valuex);
   } else {
     return null;
   }
@@ -21,11 +25,23 @@ function calculator(function_A, value_A, function_B, value_B, operation) {
     return itemA.or_op(itemB);
   } else if (operation === 'add_op') {
     return itemA.add_op(itemB);
+  } else if (operation === 'div_op') {
+    return itemA.div_op(itemB);
+  } else if (operation === 'mul_op') {
+    return itemA.mult_op(itemB);
+  } else if (operation === 'xor_op') {
+    return itemA.div_op(itemB);
   }
 }
 
 function App() {
-  const build_functions = ['from_pyrope', 'from_binary', 'to_pyrope'];
+  const default_Lconst = new Lconst();
+  const build_functions = [
+    'from_pyrope',
+    'from_binary',
+    'from_string',
+    'to_pyrope',
+  ];
   const build_opeartions = [
     'and_op',
     'or_op',
@@ -40,7 +56,7 @@ function App() {
   const [selected_function_B, set_function_B] = useState('from_pyrope');
   const [value_B, set_value_B] = useState('0x0');
   const [selected_operation, set_operation] = useState('and_op');
-  const [current_result, set_result] = useState();
+  const [current_result, set_result] = useState(default_Lconst);
   const [cal_engine, set_engine] = useState(true);
 
   useEffect(() => {
@@ -57,10 +73,11 @@ function App() {
       } catch (err) {
         /* some code dealing with the errorc */
       }
-      set_result(ans.num);
+      set_result(ans);
     };
     update_result();
     // next line may disable the warning
+    // reason: calculate the ans.num only after the user click a button which would trigger 'cal_engine'
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cal_engine]);
 
@@ -136,8 +153,13 @@ function App() {
         <div> Input A {`${selected_function_A}, value: ${value_A}`} </div>
         <div> Input B {`${selected_function_B}, value: ${value_B}`} </div>
         <div> Operation {`${selected_operation}`} </div>
-        <div> Result {`${current_result}`}</div>
         <div> engine {`${cal_engine}`}</div>
+        <div> ---data of result--- </div>
+        <div> num: {`${current_result.num}`}</div>
+        <div> unknown: {`${current_result.unknown}`}</div>
+        <div> bits: {`${current_result.bits}`} </div>
+        <div> explicit_str: {`${current_result.explicit_str}`}</div>
+        <div> has_unknown: {`${current_result.has_unknown}`}</div>
       </div>
     </div>
   );

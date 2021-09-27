@@ -253,6 +253,11 @@ test('20. complated check, from_string', () => {
   expect(test2.explicit_str && test1.explicit_str).toBe(true);
 });
 
+test('addition. complicated check. from_string', () => {
+  const test1 = Lconst.from_string('BEEF');
+  const test2 = Lconst.from_string('FFFF');
+  expect(test1.and_op(test2).num).toBe(1111770182n);
+});
 // tests ADD_OP
 test('21. complicated check, and_op', () => {
   const testing1a = Lconst.from_pyrope('0b1?10');
