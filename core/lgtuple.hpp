@@ -141,6 +141,11 @@ public:
     return add("0"_str, dpin);
   }
 
+  // TODO: cleaner interface for LNAST and c++ API
+  // add_const(mmap_lib::str key, Lconst v);
+  // add_const(Lconst v);
+  // get_const(mmap_lib::str key) const;
+
   bool                     concat(const std::shared_ptr<Lgtuple const>& tup2);
   bool                     concat(const Node_pin &dpin);
   Node_pin                 flatten() const;

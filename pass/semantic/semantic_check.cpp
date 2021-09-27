@@ -441,40 +441,6 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       lhs_list.push_back(lhs);
       rhs_list.push_back(rhs_args);
 
-    } else if (node_type.is_tuple()) {
-      int num_of_ref = 0;
-      for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
-        const auto node_type_child = lnast->get_data(lnidx_opr_child).type;
-
-        if (lnast->get_first_child(lnidx_opr) == lnidx_opr_child) {
-          num_of_ref += 1;
-          // Store type 'ref' variables
-          add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
-          lhs_list.push_back(lnidx_opr_child);
-          continue;
-        }
-        if (node_type_child.is_ref()) {
-          num_of_ref += 1;
-          // Store type 'ref' variables
-          add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
-          rhs_args.push_back(lnidx_opr_child);
-        } else if (node_type_child.is_const()) {
-          add_to_read_list(lnast->get_name(lnidx_opr_child), stmt_name);
-          // rhs_args.push_back(lnidx_opr_child);
-        } else if (node_type_child.is_assign()) {
-          check_primitive_ops(lnast, lnidx_opr_child, node_type_child, stmt_name);
-        } else {
-          // Invalid Node Type
-          error_print_lnast_by_name(lnast, lnast->get_name(lnidx_opr));
-          Pass::error("Tuple Operation Error: Child Node(s) must be Node type 'ref' or 'assign'\n");
-        }
-      }
-      rhs_list.push_back(rhs_args);
-      // Missing Nodes
-      if (num_of_ref == 0) {
-        error_print_lnast_by_type(lnast, node_type.to_str());
-        Pass::error("Tuple Operation Error: Missing Reference Node\n");
-      }
     } else if (node_type.is_tuple_concat()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -503,6 +469,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_str());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
       }
+#if 0
     } else if (node_type.is_select()) {
       int num_of_ref = 0;
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
@@ -523,6 +490,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
         error_print_lnast_by_type(lnast, node_type.to_str());
         Pass::error("Select Operation Error: Missing Reference Node(s)\n");
       }
+#endif
     } else if (node_type.is_nary_op()) {
       for (const auto &lnidx_opr_child : lnast->children(lnidx_opr)) {
         const auto node_type_child = lnast->get_data(lnidx_opr_child).type;

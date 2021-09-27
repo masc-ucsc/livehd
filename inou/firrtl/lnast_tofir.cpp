@@ -80,6 +80,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     fstmt->set_allocated_when(nested_when_stmt);
+#if 0
   } else if (ntype.is_select()) {
     auto fstmt       = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     auto stmt_needed = process_ln_select(ln, lnidx, fstmt);
@@ -92,8 +93,10 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         when->mutable_otherwise()->RemoveLast();
       }
     }
+#endif
   } else if (ntype.is_func_call()) {
     return;  // Nothing to do, submod_inst already made in FindCircuitComps
+#if 0
   } else if (ntype.is_tuple()) {
     mmap_lib::str tup_name;
     bool             first = true;
@@ -106,6 +109,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
+#endif
   } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {
@@ -147,6 +151,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();
     fstmt->set_allocated_when(when_stmt);
+#if 0
   } else if (ntype.is_select()) {
     auto fstmt       = umod->add_statement();
     auto stmt_needed = process_ln_select(ln, lnidx, fstmt);
@@ -155,8 +160,10 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
        * didn't need that assign so erase that statement made.*/
       umod->mutable_statement()->RemoveLast();
     }
+#endif
   } else if (ntype.is_func_call()) {
     return;  // Nothing to do, submod_inst already made in FindCircuitComps
+#if 0
   } else if (ntype.is_tuple()) {
     mmap_lib::str tup_name;
     bool             first = true;
@@ -169,6 +176,7 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
         process_tup_asg(ln, child, tup_name, fstmt);
       }
     }
+#endif
   } else if (ntype.is_invalid()) {
     return;
   } else if (ntype.is_const()) {
@@ -799,7 +807,7 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_BIT_XOR;
   } else if (ntype.is_shl()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_LEFT;
-  } else if (ntype.is_shr()) {
+  } else if (ntype.is_sra()) {
     return firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DYNAMIC_SHIFT_RIGHT;
   } else {
     I(false);  // some nary op not yet supported

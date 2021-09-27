@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
+        "//elab",
     ],
     alwayslink = True,  # Needed to have constructor called
 )

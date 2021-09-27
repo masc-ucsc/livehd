@@ -16,6 +16,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//task",
+        "//lemu",
         "//mmap_lib:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -37,6 +38,15 @@ filegroup(
 cc_test(
     name = "ast_test",
     srcs = ["tests/ast_test.cpp"],
+    deps = [
+        ":elab",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "symbol_table_test",
+    srcs = ["tests/symbol_table_test.cpp"],
     deps = [
         ":elab",
         "@com_google_googletest//:gtest_main",

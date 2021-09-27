@@ -201,31 +201,6 @@ o_num++;
 #endif
     }*/
 
-    /*else if (node.get_type_op() == Ntype_op::Get_mask) {
-      auto a_input = node.get_sink_pin("a").inp_edges();
-      auto mask_input = node.get_sink_pin("mask").inp_edges();
-
-      std::cout << "a and mask inputs  gotten \n";
-      auto get_mask_result = sat.vec_get_mask(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[mask_input[0].driver.get_compact()]);
-      std::cout << "get_mask_result gotten \n";
-      dpin2sat_var[node.setup_driver_pin().get_compact()] = get_mask_result;
-
-      fmt::print("--Debug Get_Mask: {}\n", node.setup_driver_pin().debug_name());
-    }
-
-	else if (node.get_type_op() == Ntype_op::Set_mask) {
-      auto a_input = node.get_sink_pin("a").inp_edges();
-      auto mask_input = node.get_sink_pin("mask").inp_edges();
-	    auto value_input = node.get_sink_pin("value").inp_edges();
-
-      std::cout << "a, mask and value inputs  gotten \n";
-      auto set_mask_result
-          = sat.vec_set_mask(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[mask_input[0].driver.get_compact()], dpin2sat_var[value_input[0].driver.get_compact()]);
-      std::cout << "set_mask_result gotten \n";
-      dpin2sat_var[node.setup_driver_pin().get_compact()] = set_mask_result;
-
-      fmt::print("--Debug MUX: {}\n", node.setup_driver_pin().debug_name());
-    }*/
 
     else if (node.get_type_op() == Ntype_op::Sum) {
       auto a_input = node.get_sink_pin("A").inp_edges();
@@ -286,7 +261,42 @@ o_num++;
       fmt::print("--Debug SHRL: {}\n", node.setup_driver_pin().debug_name());
     }
 
-    /*else if (node.get_type_op() == Ntype_op::Mux) {
+    else if (node.get_type_op() == Ntype_op::Get_mask) {
+      auto a_input = node.get_sink_pin("a").inp_edges();
+      auto mask_input = node.get_sink_pin("mask").inp_edges();
+
+      std::cout << "a and mask inputs  gotten \n";
+      //auto get_mask_result = sat.vec_get_mask(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[mask_input[0].driver.get_compact()]);
+      std::cout << "get_mask_result gotten \n";
+      //dpin2sat_var[node.setup_driver_pin().get_compact()] = get_mask_result;
+
+      //fmt::print("--Debug Get_Mask: {}\n", node.setup_driver_pin().debug_name());
+    }
+
+	else if (node.get_type_op() == Ntype_op::Set_mask) {
+      auto a_input = node.get_sink_pin("a").inp_edges();
+      auto mask_input = node.get_sink_pin("mask").inp_edges();
+	    auto value_input = node.get_sink_pin("value").inp_edges();
+
+      std::cout << "a, mask and value inputs  gotten \n";
+     // auto set_mask_result  = sat.vec_set_mask(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[mask_input[0].driver.get_compact()], dpin2sat_var[value_input[0].driver.get_compact()]);
+      std::cout << "set_mask_result gotten \n";
+      //dpin2sat_var[node.setup_driver_pin().get_compact()] = set_mask_result;
+
+      //fmt::print("--Debug Set_mask: {}\n", node.setup_driver_pin().debug_name());
+    }
+    else if (node.get_type_op() == Ntype_op::Sext) {
+      auto a_input = node.get_sink_pin("a").inp_edges();
+      auto b_input = node.get_sink_pin("b").inp_edges();
+
+      std::cout << "a and b inputs  gotten \n";
+      // auto Sext_result = sat.vec_shrl_LiveHD(dpin2sat_var[a_input[0].driver.get_compact()], dpin2sat_var[b_input[0].driver.get_compact()]);
+      std::cout << "Sext_result gotten \n";
+      // dpin2sat_var[node.setup_driver_pin().get_compact()] = Sext_result;
+
+      // fmt::print("--Debug Sext: {}\n", node.setup_driver_pin().debug_name());
+    }
+  /*else if (node.get_type_op() == Ntype_op::Mux) {
       auto a_input = node.get_sink_pin_raw("pid1").inp_edges();
       auto b_input = node.get_sink_pin_raw("pid2").inp_edges();
       auto sel_input = node.get_sink_pin_raw("pid0").inp_edges();

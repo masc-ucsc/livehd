@@ -273,8 +273,6 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_mod();
   } else if (orig_node_type.is_shl()) {
     new_node = Lnast_node::create_shl();
-  } else if (orig_node_type.is_shr()) {
-    new_node = Lnast_node::create_shr();
   } else if (orig_node_type.is_sra()) {
     new_node = Lnast_node::create_sra();
   } else if (orig_node_type.is_sext()) {
@@ -297,20 +295,12 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_gt();
   } else if (orig_node_type.is_ge()) {
     new_node = Lnast_node::create_ge();
-  } else if (orig_node_type.is_tuple()) {
-    new_node = Lnast_node::create_tuple();
   } else if (orig_node_type.is_tuple_concat()) {
     new_node = Lnast_node::create_tuple_concat();
-  } else if (orig_node_type.is_tuple_delete()) {
-    new_node = Lnast_node::create_tuple_delete();
-  } else if (orig_node_type.is_select()) {
-    new_node = Lnast_node::create_select();
   } else if (orig_node_type.is_ref()) {
     new_node = Lnast_node::create_ref(orig_node_name);
   } else if (orig_node_type.is_const()) {
     new_node = Lnast_node::create_const(orig_node_name);
-  } else if (orig_node_type.is_assert()) {
-    new_node = Lnast_node::create_assert();
   } else if (orig_node_type.is_err_flag()) {
     new_node = Lnast_node::create_err_flag();
   } else if (orig_node_type.is_tuple_add()) {

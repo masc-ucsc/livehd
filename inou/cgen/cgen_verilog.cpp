@@ -393,10 +393,10 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
       final_expr = a;
     } else {
       auto [range_begin, range_end] = mask_v.get_mask_range();
-      auto a_bits = a_dpin.get_bits();
+      if (range_end>static_cast<int>(dpin.get_bits()))
+        range_end = dpin.get_bits() + range_begin;
 
-      if (range_end>static_cast<int>(a_bits))
-        range_end = a_bits;
+      auto a_bits = a_dpin.get_bits();
 
       auto value_dpin = node.get_sink_pin("value").get_driver_pin();
       auto value      = get_expression(value_dpin);
@@ -423,11 +423,33 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         final_expr = mmap_lib::str::concat("{", sel, "}");
       }else{
         mmap_lib::str a_replaced;
-        if ((range_end-1) == range_begin) {
-          a_replaced = mmap_lib::str::concat(value, "[", range_begin, "]");
+        Bits_t value_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+        if (value_bits_to_use >= value_dpin.get_bits()) {
+          a_replaced = value;
+        }else if (value_bits_to_use == 1) {
+          a_replaced = mmap_lib::str::concat(value, "[0]");
         }else{
-          a_replaced = mmap_lib::str::concat(value, "[", range_end - 1, ":", range_begin, "]");
+          a_replaced = mmap_lib::str::concat(value, "[", value_bits_to_use-1, ":0]");
         }
+
+        auto var_it = pin2var.find(dpin.get_compact_class());
+        assert(var_it != pin2var.end());
+        if (value_bits_to_use < dpin.get_bits()) {
+          if (var_it->second != a) {
+            fout->append("  ", var_it->second, " = ", a, ";\n");
+          }
+        }
+        mmap_lib::str replace;
+
+        if (value_bits_to_use == 1) {
+          replace = mmap_lib::str::concat("[", range_begin, "] = ");
+        }else{
+          replace = mmap_lib::str::concat("[", range_end-1,":",range_begin, "] = ");
+        }
+        fout->append("  ", var_it->second, replace, value , ";\n");
+        return; // special case, multiple statements
+
+#if 0
         mmap_lib::str a_high;
         mmap_lib::str a_low;
 
@@ -461,6 +483,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         }
 
         final_expr = mmap_lib::str::concat("{", a_high, a_replaced, a_low, "}");
+#endif
       }
     }
   } else if (op == Ntype_op::Get_mask) {
@@ -475,6 +498,13 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     auto a      =                          get_expression(a_dpin);
 
     auto [range_begin, range_end] = mask_v.get_mask_range();
+    Bits_t a_bits_to_use = static_cast<Bits_t>(range_end-range_begin);
+    if (a_bits_to_use > dpin.get_bits())
+      range_end = dpin.get_bits() + range_begin;
+
+    int out_bits = dpin.get_bits();
+    if (dpin.is_unsign())
+      --out_bits;
 
     if (range_begin<0 || range_end<0) {
       mmap_lib::str sel;
@@ -489,16 +519,19 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
           sel = mmap_lib::str::concat(sel, ",", a, "[", i ,"]");
       }
       final_expr = mmap_lib::str::concat("{", sel, "}");
+    }else if (range_begin>=static_cast<int>(a_bits)) {
+      final_expr = mmap_lib::str::concat("{", range_end-range_begin, "{", a , "[", a_bits-1 ,"]}}");
+    }else if (range_end>static_cast<int>(a_bits)) {
+      auto top = mmap_lib::str::concat("{{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}}");
+      final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
+    }else if (range_begin == 0 && range_end>=out_bits) {
+      final_expr = a;
+    }else if (a_bits_to_use==1) {
+      final_expr = mmap_lib::str::concat(a, "[", range_begin, "]");
     }else{
-      if (range_begin>static_cast<int>(a_bits)) {
-        final_expr = mmap_lib::str::concat("{", range_end-range_begin, "{", a , "[", a_bits-1 ,"]}}");
-      }else if (range_end>static_cast<int>(a_bits)) {
-        auto top = mmap_lib::str::concat("{", range_end-a_bits, "{", a , "[", a_bits-1 ,"]}");
-        final_expr = mmap_lib::str::concat(top, ",", a, "[", a_bits-1, ":", range_begin, "]}");
-      }else{
-        final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
-      }
+      final_expr = mmap_lib::str::concat(a, "[", range_end-1, ":", range_begin, "]");
     }
+
   } else if (op == Ntype_op::Sext) {
     auto lhs      = get_expression(node.get_sink_pin("a").get_driver_pin());
     auto pos_node = node.get_sink_pin("b").get_driver_node();
@@ -684,6 +717,11 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
     if (!node.has_outputs() || node.is_type_flop())
       continue;
 
+    if (node.get_driver_pin().get_bits()==0) {
+      node.dump();
+      Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
+    }
+
     // flops added to the last always with outputs
     if (op == Ntype_op::Mux) {
       process_mux(fout, node);
@@ -809,23 +847,22 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
     reg_str = "reg signed ";
   }
 
-  --bits;  //[0:0] is 1 bit already
   if (out_unsigned)
     --bits;
 
-  if (bits <= 0) {
+  if (bits <= 1) {
     fout->append(reg_str, name, ";\n");
   } else {
-    fout->append(reg_str, "[", bits, ":0] ", name, ";\n");
+    fout->append(reg_str, "[", bits-1, ":0] ", name, ";\n");
   }
 
   if (dpin.is_type_flop()) {
     auto name_next = get_append_to_name(name, "___next_");
 
-    if (bits <= 0) {
+    if (bits <= 1) {
       fout->append(reg_str, name_next, ";\n");
     } else {
-      fout->append(reg_str, "[", bits, ":0] ", name_next, ";\n");
+      fout->append(reg_str, "[", bits-1, ":0] ", name_next, ";\n");
     }
   }
 }
@@ -886,14 +923,16 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
       auto final_expr = node.get_type_const().to_verilog();
       pin2expr.emplace(node.get_driver_pin().get_compact_class(), Expr(final_expr, false));
     } else if (op == Ntype_op::Get_mask) {
-      name         = get_scaped_name(mmap_lib::str::concat("___unsign_", node.get_sink_pin("a").get_wire_name()));
+      auto a_spin = node.get_sink_pin("a");
+
+      name         = get_scaped_name(mmap_lib::str::concat("___unsign_", a_spin.get_wire_name(), dpin.get_wire_name()));
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
       {
         // Force the "a" pin in get_mask to be a variable (yosys fails otherwise)
-        auto dpin2 = node.get_sink_pin("a").get_driver_pin();
-        if (!pin2var.contains(dpin2.get_compact_class())) {
-          auto name2 = get_scaped_name(dpin2.get_wire_name());
-          add_to_pin2var(fout, dpin2, name2, false);
+        auto a_dpin = a_spin.get_driver_pin();
+        if (!pin2var.contains(a_dpin.get_compact_class())) {
+          auto name2 = get_scaped_name(a_dpin.get_wire_name());
+          add_to_pin2var(fout, a_dpin, name2, false);
         }
       }
     } else if (!node.is_type_flop()) {

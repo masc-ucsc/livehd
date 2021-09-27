@@ -25,45 +25,30 @@ mmap_lib::str Slang_tree::create_lnast_tmp() {
   return mmap_lib::str::concat("___", ++tmp_var_cnt);
 }
 
-mmap_lib::str Slang_tree::create_lnast_var(mmap_lib::str val) {
+mmap_lib::str Slang_tree::get_lnast_name(mmap_lib::str vname) {
 
-  const auto &it = net2attr.find(val);
-  if (it == net2attr.end()) {  // OOPS, use before assignment
+  const auto &it = vname2lname.find(vname);
+  if (it == vname2lname.end()) {  // OOPS, use before assignment (can not be IOs mapped before)
     auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
     auto tmp_var = create_lnast_tmp();
     lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
-    lnast->add_child(idx_dot, Lnast_node::create_ref(val));
+    lnast->add_child(idx_dot, Lnast_node::create_ref(vname));
     lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
 
     return tmp_var;
   }
 
-  if (it->second == Net_attr::Input) {
-    return val.prepend('$');
-  } else if (it->second == Net_attr::Output) {
-    return val.prepend('%');
-  } else if (it->second == Net_attr::Register) {
-    return val.prepend('#');
-  }
-
-  return val;
+  return it->second;
 }
 
-mmap_lib::str Slang_tree::create_lnast_lhs_var(mmap_lib::str val) {
-  const auto &it = net2attr.find(val);
-  if (it == net2attr.end()) {
-    return val;
+mmap_lib::str Slang_tree::get_lnast_lhs_name(mmap_lib::str vname) {
+  const auto &it = vname2lname.find(vname);
+  if (it == vname2lname.end()) {
+    vname2lname.emplace(vname,vname);
+    return vname;
   }
 
-  if (it->second == Net_attr::Input) {
-    return val.prepend('$');
-  } else if (it->second == Net_attr::Output) {
-    return val.prepend('%');
-  } else if (it->second == Net_attr::Register) {
-    return val.prepend('#');
-  }
-
-  return val;
+  return it->second;
 }
 
 void Slang_tree::new_lnast(mmap_lib::str name) {
@@ -73,7 +58,7 @@ void Slang_tree::new_lnast(mmap_lib::str name) {
   auto node_stmts = Lnast_node::create_stmts();
   idx_stmts       = lnast->add_child(mmap_lib::Tree_index::root(), node_stmts);
 
-  net2attr.clear();
+  vname2lname.clear();
 
   tmp_var_cnt = 0;
 }
@@ -134,13 +119,20 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       mmap_lib::str var_name;
       if (port.direction == slang::ArgumentDirection::In) {
         var_name = mmap_lib::str::concat("$.:", decl_pos, ":", port.name);
-        net2attr.emplace(port.name, Net_attr::Input);
+        vname2lname.emplace(port.name, var_name);
       } else {
         var_name = mmap_lib::str::concat("%.:", decl_pos, ":", port.name);
-        net2attr.emplace(port.name, Net_attr::Output);
+        vname2lname.emplace(port.name, var_name);
       }
 
-      create_declare_bits_stmts(var_name, port.getType().isSigned(), port.getType().getBitWidth());
+      const auto &type = port.getType();
+      if (type.hasFixedRange()) {
+        auto range = type.getFixedRange();
+        if (!range.isLittleEndian()) {
+          fmt::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
+        }
+      }
+      create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
       ++decl_pos;
 
     } else if (p->kind == slang::SymbolKind::InterfacePort) {
@@ -160,19 +152,8 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       const auto &ns   = member.as<slang::NetSymbol>();
       auto       *expr = ns.getInitializer();
       if (expr) {
-        mmap_lib::str lhs_var = create_lnast_var(member.name);
-
-#if 0
-        // ALso correct, more checks but is it needed? Not if all the bit ops are correctly tracked
-				auto it = net2attr.find(member.name);
-				if (it == net2attr.end()) {
-					net2attr.emplace(member.name, Net_attr::Local);
-					create_declare_bits_stmts(lhs_var, ns.getType().isSigned(), ns.getType().getBitWidth());
-				}
-				create_assign_stmts(lhs_var, process_expression(*expr));
-#else
-        create_assign_stmts(lhs_var, process_expression(*expr));
-#endif
+        //mmap_lib::str lhs_var = get_lnast_name(member.name);
+        create_assign_stmts(member.name, process_expression(*expr));
       }
     } else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
@@ -241,7 +222,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
 
   if (lhs.kind == slang::ExpressionKind::NamedValue) {
     const auto &var = lhs.as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -250,7 +231,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     I(es.value().kind == slang::ExpressionKind::NamedValue);
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
 
     dest_max_bit = process_expression(es.selector());
     dest_min_bit = dest_max_bit;
@@ -263,7 +244,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     I(rs.value().kind == slang::ExpressionKind::NamedValue);
 
     const auto &var = rs.value().as<slang::NamedValueExpression>();
-    var_name        = create_lnast_lhs_var(var.symbol.name);
+    var_name        = get_lnast_lhs_name(var.symbol.name);
     dest_var_sign   = var.type->isSigned();
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
@@ -272,31 +253,23 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     dest_min_bit = process_expression(rs.right());
   }
 
-  auto it = net2attr.find(var_name);
-  if (it == net2attr.end()) {
-    net2attr.emplace(var_name, Net_attr::Local);
+  auto it = vname2lname.find(var_name);
+  if (it == vname2lname.end()) {
+    vname2lname.emplace(var_name, var_name);
     create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
+    if (dest_var_sign)
+      create_assign_stmts(var_name, "0sb?");
+    else
+      create_assign_stmts(var_name, "0b?"); // mark with x so that potential use is poison if needed
   }
 
-  mmap_lib::str rhs_var;
+  auto rhs_var = process_expression(expr.right());
   if (dest_min_bit.empty() && dest_max_bit.empty()) {
-    rhs_var = process_expression(expr.right());
+    create_assign_stmts(var_name, rhs_var);
   } else {
-    auto expr_var = process_expression(expr.right());
-
-    auto mask_h_var   = create_mask_stmts(dest_max_bit);                        // (1<<H)-1
-    auto mask_l_var   = create_bit_not_stmts(create_mask_stmts(dest_min_bit));  // ~((1<<L)-1)
-    auto mask_var     = create_bit_and_stmts(mask_h_var, mask_l_var);           // ((1<<H)-1) & (~((1<<L)-1))
-    auto mask_not_var = create_bit_not_stmts(mask_var);
-
-    auto adj_rhs_var = create_shl_stmts(expr_var, dest_min_bit);
-    auto updated_rhs = create_bit_and_stmts(adj_rhs_var, mask_var);
-    auto rest_rhs    = create_bit_and_stmts(var_name, mask_not_var);
-
-    rhs_var = create_bit_or_stmts({updated_rhs, rest_rhs});
+    auto bitmask = create_bitmask_stmts(dest_max_bit, dest_min_bit);
+    create_set_mask_stmts(var_name, bitmask, rhs_var);
   }
-
-  create_assign_stmts(var_name, rhs_var);
 
   return true;
 }
@@ -321,6 +294,34 @@ mmap_lib::str Slang_tree::create_mask_stmts(mmap_lib::str dest_max_bit) {
   return mask_h_var;
 }
 
+mmap_lib::str Slang_tree::create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib::str min_bit) {
+
+  if (max_bit.is_i() && min_bit.is_i()) {
+    auto a = max_bit.to_i();
+    auto b = min_bit.to_i();
+    if (a<b) {
+      auto tmp = a;
+      a = b;
+      b = tmp;
+    }
+
+    auto mask = Lconst::get_mask_value(a, b);
+    return mask.to_pyrope();
+  }
+
+  if (max_bit == min_bit) {
+    return create_shl_stmts("1", max_bit);
+  }
+
+	// ((1<<(max_bit-min_bit))-1)<<min_bit
+
+  auto max_minus_min = create_minus_stmts(max_bit, min_bit);
+  auto tmp           = create_shl_stmts("1", max_minus_min);
+  auto upper_mask    = create_minus_stmts(tmp, "1");
+
+  return create_shl_stmts(upper_mask, min_bit);
+}
+
 mmap_lib::str Slang_tree::create_bit_not_stmts(mmap_lib::str var_name) {
   if (var_name.empty())
     return var_name;
@@ -328,10 +329,10 @@ mmap_lib::str Slang_tree::create_bit_not_stmts(mmap_lib::str var_name) {
   auto res_var = create_lnast_tmp();
   auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_not());
   lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(var_name[0]))
-    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
-  else
+  if (var_name.is_string())
     lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
+  else
+    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
 
   return res_var;
 }
@@ -343,10 +344,10 @@ mmap_lib::str Slang_tree::create_logical_not_stmts(mmap_lib::str var_name) {
   auto res_var = create_lnast_tmp();
   auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_logical_not());
   lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(var_name[0]))
-    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
-  else
+  if (var_name.is_string())
     lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
+  else
+    lnast->add_child(not_idx, Lnast_node::create_const(var_name));
 
   return res_var;
 }
@@ -357,10 +358,10 @@ mmap_lib::str Slang_tree::create_reduce_or_stmts(mmap_lib::str var_name) {
   auto res_var = create_lnast_tmp();
   auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_reduce_or());
   lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(var_name[0]))
-    lnast->add_child(or_idx, Lnast_node::create_const(var_name));
-  else
+  if (var_name.is_string())
     lnast->add_child(or_idx, Lnast_node::create_ref(var_name));
+  else
+    lnast->add_child(or_idx, Lnast_node::create_const(var_name));
 
   return res_var;
 }
@@ -371,10 +372,10 @@ mmap_lib::str Slang_tree::create_reduce_xor_stmts(mmap_lib::str var_name) {
   auto res_var = create_lnast_tmp();
   auto xor_idx = lnast->add_child(idx_stmts, Lnast_node::create_reduce_xor());
   lnast->add_child(xor_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(var_name[0]))
-    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
-  else
+  if (var_name.is_string())
     lnast->add_child(xor_idx, Lnast_node::create_ref(var_name));
+  else
+    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
 
   return res_var;
 }
@@ -386,14 +387,15 @@ mmap_lib::str Slang_tree::create_sra_stmts(mmap_lib::str a_var, mmap_lib::str b_
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_sra());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(idx, Lnast_node::create_const(a_var));
+
+  if (b_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -411,14 +413,14 @@ mmap_lib::str Slang_tree::create_sext_stmts(mmap_lib::str a_var, mmap_lib::str b
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_sext());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -432,14 +434,14 @@ mmap_lib::str Slang_tree::create_bit_and_stmts(mmap_lib::str a_var, mmap_lib::st
   auto res_var = create_lnast_tmp();
   auto and_idx = lnast->add_child(idx_stmts, Lnast_node::create_bit_and());
   lnast->add_child(and_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(and_idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(and_idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(and_idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(and_idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(and_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(and_idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -458,10 +460,10 @@ mmap_lib::str Slang_tree::create_bit_or_stmts(const std::vector<mmap_lib::str> &
       lnast->add_child(lid, Lnast_node::create_ref(res_var));
     }
 
-    if (std::isdigit(v[0]))
-      lnast->add_child(lid, Lnast_node::create_const(v));
-    else
+    if (v.is_string())
       lnast->add_child(lid, Lnast_node::create_ref(v));
+    else
+      lnast->add_child(lid, Lnast_node::create_const(v));
   }
 
   return res_var;
@@ -476,14 +478,14 @@ mmap_lib::str Slang_tree::create_bit_xor_stmts(mmap_lib::str a_var, mmap_lib::st
   auto res_var = create_lnast_tmp();
   auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_bit_xor());
   lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(or_idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(or_idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(or_idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(or_idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(or_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(or_idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -497,14 +499,14 @@ mmap_lib::str Slang_tree::create_shl_stmts(mmap_lib::str a_var, mmap_lib::str b_
   auto res_var = create_lnast_tmp();
   auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shl());
   lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(shl_idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(shl_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(shl_idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -515,10 +517,10 @@ void Slang_tree::create_dp_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs
 
   auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_dp_assign());
   lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
-  if (std::isdigit(rhs_var[0]))
-    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
-  else
+  if (rhs_var.is_string())
     lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_var));
+  else
+    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
 }
 
 void Slang_tree::create_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs_var) {
@@ -527,10 +529,10 @@ void Slang_tree::create_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs_va
 
   auto idx_assign = lnast->add_child(idx_stmts, Lnast_node::create_assign());
   lnast->add_child(idx_assign, Lnast_node::create_ref(lhs_var));
-  if (std::isdigit(rhs_var[0]))
-    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
-  else
+  if (rhs_var.is_string())
     lnast->add_child(idx_assign, Lnast_node::create_ref(rhs_var));
+  else
+    lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
 }
 
 void Slang_tree::create_declare_bits_stmts(mmap_lib::str a_var, bool is_signed, int bits) {
@@ -554,15 +556,15 @@ mmap_lib::str Slang_tree::create_minus_stmts(mmap_lib::str a_var, mmap_lib::str 
   if (a_var.empty()) {
     lnast->add_child(sub_idx, Lnast_node::create_const("0"));
   } else {
-    if (std::isdigit(a_var[0]))
-      lnast->add_child(sub_idx, Lnast_node::create_const(a_var));
-    else
+    if (a_var.is_string())
       lnast->add_child(sub_idx, Lnast_node::create_ref(a_var));
+    else
+      lnast->add_child(sub_idx, Lnast_node::create_const(a_var));
   }
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(sub_idx, Lnast_node::create_const(b_var));
-  else
+  if (b_var.is_string())
     lnast->add_child(sub_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(sub_idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -576,14 +578,14 @@ mmap_lib::str Slang_tree::create_plus_stmts(mmap_lib::str a_var, mmap_lib::str b
   auto res_var = create_lnast_tmp();
   auto add_idx = lnast->add_child(idx_stmts, Lnast_node::create_plus());
   lnast->add_child(add_idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(add_idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(add_idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(add_idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(add_idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(add_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(add_idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -597,14 +599,14 @@ mmap_lib::str Slang_tree::create_mult_stmts(mmap_lib::str a_var, mmap_lib::str b
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_mult());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -620,16 +622,16 @@ mmap_lib::str Slang_tree::create_div_stmts(mmap_lib::str a_var, mmap_lib::str b_
   if (a_var.empty()) {
     lnast->add_child(idx, Lnast_node::create_const("1"));
   } else {
-    if (std::isdigit(a_var[0]))
-      lnast->add_child(idx, Lnast_node::create_const(a_var));
-    else
+    if (a_var.is_string())
       lnast->add_child(idx, Lnast_node::create_ref(a_var));
+    else
+      lnast->add_child(idx, Lnast_node::create_const(a_var));
   }
 
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
-  else
+  if (b_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(b_var));
 
   return res_var;
 }
@@ -640,22 +642,70 @@ mmap_lib::str Slang_tree::create_mod_stmts(mmap_lib::str a_var, mmap_lib::str b_
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_mod());
   lnast->add_child(idx, Lnast_node::create_ref(res_var));
-  if (std::isdigit(a_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(a_var));
-  else
+  if (a_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(a_var));
-  if (std::isdigit(b_var[0]))
-    lnast->add_child(idx, Lnast_node::create_const(b_var));
   else
+    lnast->add_child(idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
     lnast->add_child(idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(b_var));
 
   return res_var;
+}
+
+#if 0
+mmap_lib::str Slang_tree::create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field) {
+  I(sel_var.size() && sel_field.size());
+
+  auto res_var = create_lnast_tmp();
+  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_select());
+  lnast->add_child(idx, Lnast_node::create_ref(res_var));
+  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
+  if (sel_field.is_string())
+    lnast->add_child(idx, Lnast_node::create_ref(sel_field));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(sel_field));
+
+  return res_var;
+}
+#endif
+
+mmap_lib::str Slang_tree::create_get_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask) {
+  I(sel_var.size() && bitmask.size());
+
+  auto res_var = create_lnast_tmp();
+  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_get_mask());
+  lnast->add_child(idx, Lnast_node::create_ref(res_var));
+  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
+  if (bitmask.is_string())
+    lnast->add_child(idx, Lnast_node::create_ref(bitmask));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(bitmask));
+
+  return res_var;
+}
+
+void Slang_tree::create_set_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask, mmap_lib::str value) {
+  I(sel_var.size() && bitmask.size() && value.size());
+
+  auto idx     = lnast->add_child(idx_stmts, Lnast_node::create_set_mask());
+  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
+  lnast->add_child(idx, Lnast_node::create_ref(sel_var));
+  if (bitmask.is_string())
+    lnast->add_child(idx, Lnast_node::create_ref(bitmask));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(bitmask));
+  if (value.is_string())
+    lnast->add_child(idx, Lnast_node::create_ref(value));
+  else
+    lnast->add_child(idx, Lnast_node::create_const(value));
 }
 
 mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
   if (expr.kind == slang::ExpressionKind::NamedValue) {
     const auto &nv = expr.as<slang::NamedValueExpression>();
-    return create_lnast_var(nv.symbol.name);
+    return get_lnast_name(nv.symbol.name);
   }
 
   if (expr.kind == slang::ExpressionKind::IntegerLiteral) {
@@ -793,6 +843,34 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
 
     return create_bit_or_stmts(adjusted_fields);
   }
+
+  if (expr.kind == slang::ExpressionKind::ElementSelect) {
+    const auto &es = expr.as<slang::ElementSelectExpression>();
+    I(es.value().kind == slang::ExpressionKind::NamedValue);
+
+    const auto &var = es.value().as<slang::NamedValueExpression>();
+
+    auto sel_var  = get_lnast_name(var.symbol.name);
+    auto sel_bit  = process_expression(es.selector());
+    auto sel_mask = create_shl_stmts("1", sel_bit);
+
+    return create_get_mask_stmts(sel_var, sel_mask);
+  }
+
+  if (expr.kind == slang::ExpressionKind::RangeSelect) {
+    const auto &es = expr.as<slang::RangeSelectExpression>();
+    I(es.value().kind == slang::ExpressionKind::NamedValue);
+
+    const auto &var = es.value().as<slang::NamedValueExpression>();
+
+    auto sel_var  = get_lnast_name(var.symbol.name);
+    auto max_bit  = process_expression(es.left());
+    auto min_bit  = process_expression(es.right());
+
+    auto sel_mask = create_bitmask_stmts(max_bit, min_bit);
+    return create_get_mask_stmts(sel_var, sel_mask);
+  }
+
 
   fmt::print("FIXME still unimplemented Expression kind\n");
 

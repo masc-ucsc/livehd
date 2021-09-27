@@ -62,8 +62,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_uif)
   CREATE_LNAST_NODE(_for)
   CREATE_LNAST_NODE(_while)
-  CREATE_LNAST_NODE(_phi)
-  CREATE_LNAST_NODE(_hot_phi)
   CREATE_LNAST_NODE(_func_call)
   CREATE_LNAST_NODE(_func_def)
 
@@ -89,7 +87,6 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_div)
   CREATE_LNAST_NODE(_mod)
 
-  CREATE_LNAST_NODE(_shr)
   CREATE_LNAST_NODE(_shl)
   CREATE_LNAST_NODE(_sra)
 
@@ -105,23 +102,20 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_gt)
   CREATE_LNAST_NODE(_ge)
 
-  CREATE_LNAST_NODE(_tuple)
-  CREATE_LNAST_NODE(_tuple_concat)
-  CREATE_LNAST_NODE(_tuple_delete)
-  CREATE_LNAST_NODE(_select)
-
   CREATE_LNAST_NODE(_ref)
-  // CREATE_LNAST_NODE_sv(_ref)
   CREATE_LNAST_NODE(_const)
-  // CREATE_LNAST_NODE_sv(_const)
 
-  CREATE_LNAST_NODE(_assert)
-  CREATE_LNAST_NODE(_err_flag)
-
+  CREATE_LNAST_NODE(_tuple_concat)
   CREATE_LNAST_NODE(_tuple_add)
   CREATE_LNAST_NODE(_tuple_get)
+  CREATE_LNAST_NODE(_tuple_set)
+
   CREATE_LNAST_NODE(_attr_set)
   CREATE_LNAST_NODE(_attr_get)
+
+  CREATE_LNAST_NODE(_err_flag)
+  CREATE_LNAST_NODE(_phi)
+  CREATE_LNAST_NODE(_hot_phi)
 };
 
 class Lnast : public mmap_lib::tree<Lnast_node> {
@@ -233,5 +227,24 @@ public:
   uint32_t get_bitwidth(const mmap_lib::str &name) const;
   void     set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth);
 
-  void dump() const;
+  void dump(const Lnast_nid &root) const;
+  void dump() const {
+    dump(Lnast_nid::root());
+  }
+
+  template <typename S, typename... Args>
+  static void info(const S &format, Args &&...args) {
+    auto txt = fmt::format(format, args...);
+    fmt::print("info:{}\n", txt);
+  }
+
+  class error : public std::runtime_error {
+  public:
+    template <typename S, typename... Args>
+    error(const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+      fmt::print("error:lnast {}\n", what());
+      throw std::runtime_error(std::string(what()));
+    };
+  };
+
 };

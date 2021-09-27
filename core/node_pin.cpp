@@ -560,7 +560,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(tree_pos);
   auto tree_it = tree_pos->find(node.get_compact_class());
   if (tree_it == tree_pos->end()) {
-    top_g->regenerate_htree();  // force regenerate
+    top_g->force_regenerate_htree();  // force regenerate
     tree_it = tree_pos->find(node.get_compact_class());
     I(tree_it != tree_pos->end());
   }

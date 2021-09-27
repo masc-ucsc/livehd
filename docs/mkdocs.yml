@@ -1,0 +1,46 @@
+site_name: LiveHD and Pyrope
+
+repo_url: https://github.com/masc-ucsc/livehd
+  # edit_uri: ""
+
+theme:
+  name: material
+  font:
+    code: Fira Code
+  logo: assets/pyrope5.png
+  features:
+    - navigation.sections
+    - navigation.instant
+    - navigation.indexes
+      # - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+
+markdown_extensions:
+  - pymdownx.arithmatex:
+      generic: true
+  - def_list
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid
+
+extra_javascript:
+  - javascripts/config.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - https://unpkg.com/mermaid/dist/mermaid.min.js
+

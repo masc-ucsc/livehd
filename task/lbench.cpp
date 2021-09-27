@@ -151,7 +151,6 @@ void Lbench::end() {
   }
   std::vector<uint64_t> stats(4);
   linux.stop(stats);
-  linux.close();
 
   std::chrono::duration<double> t = tp - start_time;
   std::stringstream             sstr;

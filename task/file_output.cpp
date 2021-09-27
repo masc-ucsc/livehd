@@ -3,6 +3,7 @@
 #include <cerrno>
 
 #include "file_output.hpp"
+#include "iassert.hpp"
 
 File_output::File_output(mmap_lib::str fname) :filename(fname), sz(0), aborted(false) {
 
@@ -26,7 +27,8 @@ File_output::~File_output() {
   map_size>>=12;
   ++map_size;
   map_size<<=12;
-  ftruncate(fd, map_size);
+  auto ok = ftruncate(fd, map_size);
+  I(ok==0);
 
   void *base = ::mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
   if (base==MAP_FAILED) {
@@ -48,7 +50,9 @@ File_output::~File_output() {
 
   //---------------------------------- CLOSE
   ::munmap(base, map_size);
-  if (sz != map_size)
-    ftruncate(fd, sz);
+  if (map_size != sz) {
+    auto ok2 = ftruncate(fd, sz);
+    (void)ok2;
+  }
   ::close(fd);
 }

@@ -703,6 +703,7 @@ private:
     }
 
     {
+      assert(in_use_mutex);
       auto  gc_func = std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_done, this, std::placeholders::_1, std::placeholders::_2);
       void* base    = nullptr;
       std::tie(base, mmap_size) = mmap_gc::mmap(mmap_name, mmap_fd, new_mmap_size, gc_func);
@@ -716,7 +717,7 @@ private:
     mInfoHashShift         = reinterpret_cast<InfoType*>(&mmap_base[4]);
 
     mInfo = reinterpret_cast<uint8_t*>(&mmap_base[5]);
-    if (*mMask == n_entries - 1 || n_entries == 0) {
+    if (*mNumElements != 0) { //if (*mMask == n_entries - 1 || n_entries == 0)
       assert(*mMaxNumElementsAllowed <= *mMask);
       assert(calc_mmap_size(*mMask + 1) <= mmap_size);
       // assert(mInfo[*mMask+1] == 1); // Sentinel
@@ -735,6 +736,7 @@ private:
   }
 
   void reload() const {
+    assert(in_use_mutex);
     if (MMAP_LIB_UNLIKELY(mmap_base == nullptr)) {
       assert(mmap_base == nullptr);
       assert(mmap_fd < 0);
@@ -1007,8 +1009,9 @@ public:
 
     auto ret = findIdx(key) >= 0;
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
 
     return ret;
   }
@@ -1020,8 +1023,9 @@ public:
 
     auto ret = findIdx(key);
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
 
     return ret;
   }
@@ -1042,21 +1046,24 @@ public:
     assert(ref_locked);
     --ref_locked;
     assert(in_use_mutex);
-    if (ref_locked==0)
+    if (ref_locked==0) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
   }
 
   [[nodiscard]] const T get(key_type const& key) const {
     if (!ref_locked)
       while(std::atomic_exchange_explicit(&in_use_mutex, true, std::memory_order_relaxed))
         ;
+
     const auto idx = findIdx(key);
     assert(idx >= 0);
 
     const auto ret = mKeyVals[idx].getSecond();
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
 
     return ret;
   }
@@ -1241,8 +1248,9 @@ public:
         shiftDown(idx);
         --(*mNumElements);
 
-        if (!ref_locked)
+        if (!ref_locked) {
           in_use_mutex.store(false, std::memory_order_release);
+        }
 
         return 1;
       }
@@ -1250,8 +1258,9 @@ public:
       info = next_info(info);
     } while (info <= mInfo[idx]);
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
 
     return 0;
   }
@@ -1269,8 +1278,9 @@ public:
 
     rehash(newSize);
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
   }
 
   [[nodiscard]] size_type size() const { return *mNumElements; }
@@ -1287,14 +1297,16 @@ public:
 
     if (mmap_base) {
       auto ret =  *mMaxNumElementsAllowed;
-      if (!ref_locked)
+      if (!ref_locked) {
         in_use_mutex.store(false, std::memory_order_release);
+      }
       return ret;
     }
     auto ret = calcMaxNumElementsAllowed(InitialNumElements);
 
-    if (!ref_locked)
+    if (!ref_locked) {
       in_use_mutex.store(false, std::memory_order_release);
+    }
 
     return ret;
   }
@@ -1312,6 +1324,7 @@ public:
 
 private:
   void rehash(size_t numBuckets) {
+    assert(in_use_mutex);
     assert(MMAP_LIB_UNLIKELY((numBuckets & (numBuckets - 1)) == 0));  // rehash only allowed for power of two
 
     reload();
@@ -1426,8 +1439,9 @@ private:
         ++(*mNumElements);
       }
 
-      if (!ref_locked)
+      if (!ref_locked) {
         in_use_mutex.store(false, std::memory_order_release);
+      }
 
       return insertion_idx;
     }

@@ -75,11 +75,27 @@ void Hierarchy_tree::regenerate_step(Lgraph *lg, const Hierarchy_index &parent) 
   }
 }
 
-void Hierarchy_tree::regenerate() {
+void Hierarchy_tree::regenerate_int() {
+
   Hierarchy_data data(top->get_lgid(), 0);
   set_root(data);
 
   regenerate_step(top, Hierarchy_tree::root_index());
+}
+
+void Hierarchy_tree::force_regenerate() {
+  std::lock_guard<std::mutex> guard(top_mutex);
+  clear();
+  regenerate_int();
+}
+
+void Hierarchy_tree::regenerate() {
+  std::lock_guard<std::mutex> guard(top_mutex);
+
+  if (!empty()) // re-check because it was outside lock
+    return;
+
+  regenerate_int();
 }
 
 Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {

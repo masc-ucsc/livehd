@@ -86,6 +86,7 @@ public:
   static Lconst from_pyrope(const mmap_lib::str txt);
   static Lconst from_binary(const mmap_lib::str txt, bool unsigned_result);
   static Lconst from_string(const mmap_lib::str txt);
+  static Lconst invalid() { return Lconst(true, 0, 0); }
 
   static Lconst unknown(Bits_t nbits);
   static Lconst unknown_positive(Bits_t nbits);
@@ -93,6 +94,8 @@ public:
 
   static Lconst unserialize(const mmap_lib::str &v);
   mmap_lib::str serialize() const;
+
+  bool is_invalid() const { return explicit_str && bits == 0; }
 
   uint64_t  hash() const;
 
@@ -201,4 +204,15 @@ public:
   bool operator>=(const Lconst &other) const { return num >= other.num; }
 
   const Number get_raw_num() const { return num; }  // FOR DEBUG ONLY
+};
+
+#include "fmt/format.h"
+
+template <>
+struct fmt::formatter<Lconst> : formatter<string_view> {
+  // parse is inherited from formatter<string_view>.
+  template <typename FormatContext>
+  auto format(Lconst c, FormatContext &ctx) {
+    return formatter<string_view>::format(c.to_pyrope().to_s(), ctx);
+  }
 };

@@ -1,4 +1,3 @@
-
 `define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\
                    (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\
                    (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\
@@ -17,104 +16,82 @@
                    (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : 32)
 
 module cgen_memory_2rd_1wr
-  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, LATENCY_1=1, WENSIZE=2)
+  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)
     (input clock
 
-      // RD PORT 0
      ,input [`log2(SIZE)-1:0]  rd_addr_0
      ,input                    rd_enable_0
      ,output reg [BITS-1:0]    rd_dout_0
 
-      // RD PORT 1
      ,input [`log2(SIZE)-1:0]  rd_addr_1
      ,input                    rd_enable_1
      ,output reg [BITS-1:0]    rd_dout_1
 
-     // WR PORT 0
      ,input [`log2(SIZE)-1:0]  wr_addr_0
      ,input [WENSIZE-1:0]      wr_enable_0
      ,input [BITS-1:0]         wr_din_0
-     );
+
+);
+
+localparam MASKSIZE = BITS/WENSIZE;
+
+reg [BITS-1:0]        d0_mem;
+
+reg [BITS-1:0]        d1_mem;
 
 generate
-  if (WENSIZE==1) begin
-    reg [BITS-1:0]        data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
-  end else begin
-    reg [(BITS/WENSIZE)-1:0] data[SIZE-1:0][WENSIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
-  end
-endgenerate
-
-// WRITE
-generate
-  if (WENSIZE==1) begin
+    reg [BITS-1:0]        data[SIZE-1:0];
+    integer i;
     always @(posedge clock) begin
-      if (wr_enable_0) begin
-        data[wr_addr_0] <= wr_din_0;
-      end
-    end
-  end else begin: DATA_WR_BLOCK
-    genvar i;
-
-    for(i=0;i<WENSIZE;i=i+1) begin
-      always @(posedge clock) begin
-        if (wr_enable_0[i]) begin
-          data[wr_addr_0][i] <= wr_din_0[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)];
+      for(i=0;i<WENSIZE;i=i+1) begin
+        if(wr_enable_0[i]) begin
+            data[wr_addr_0][i*MASKSIZE +: MASKSIZE] <=
+              wr_din_0[i*MASKSIZE +: MASKSIZE];
         end
       end
     end
-  end
-endgenerate
 
-// READ 0
-  reg [BITS-1:0]        d0_mem;
-generate
-  if (WENSIZE==1) begin
-    always_comb begin
-      if (rd_addr_0 < SIZE && rd_enable_0)
-        d0_mem = data[rd_addr_0];
+    always @(posedge clock) begin
+      if (rd_enable_0)
+        d0_mem <= data[rd_addr_0];
       else
-        d0_mem = 'bx;
+        d0_mem <= {BITS{1'bx}};
+      if (rd_enable_1)
+        d1_mem <= data[rd_addr_1];
+      else
+        d1_mem <= {BITS{1'bx}};
     end
-  end else begin
-    genvar i;
-
-    for(i=0;i<WENSIZE;i=i+1) begin
-      always_comb begin
-        if (rd_addr_0 < SIZE && rd_enable_0) begin
-          d0_mem[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] = data[rd_addr_0][i];
-        end else begin
-          d0_mem[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] = 'bx;
-        end
-      end
-    end
-  end
 endgenerate
 
-  reg [BITS-1:0]        d0_fwd;
+reg [BITS-1:0]        d0_fwd;
+
+reg [BITS-1:0]        d1_fwd;
 
 generate
   if (FWD) begin:BLOCK_FWD_TRUE
-    integer i;
-    // If WENSIZE==4 and SIZE=64
-    //   {wr_enable_0[3] && wr_hit? din[63:48] : d0_mem[63:48]
-    //   ,wr_enable_0[2] && wr_hit? din[47:32] : d0_mem[47:32]
-    //   ,wr_enable_0[1] && wr_hit? din[31:16] : d0_mem[31:16]
-    //   ,wr_enable_0[0] && wr_hit? din[15:0 ] : d0_mem[15:0 ]
-    //   }
-    reg                   fwd_decision_cmp_0;
-
+    reg [WENSIZE-1:0] fwd_decision_cmp_0rd_0wr;
+    reg [WENSIZE-1:0] fwd_decision_cmp_1rd_0wr;
+    genvar j;
+    for(j=0;j<WENSIZE;j=j+1) begin:FWD_BLOCK_CALC_0
     always_comb begin
-      fwd_decision_cmp_0 = wr_addr_0 == rd_addr_0;
-      for(i=0;i<WENSIZE;i=i+1) begin: FWD_BLOCK_CALC_0
-        d0_fwd[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)] =
-          wr_enable_0[i] && fwd_decision_cmp_0?
-          wr_din_0[(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)]:
-          d0_mem  [(BITS-i*BITS/WENSIZE-1):(BITS-(i+1)*BITS/WENSIZE)];
+      fwd_decision_cmp_0rd_0wr[j] = rd_addr_0 == wr_addr_0;
+      fwd_decision_cmp_1rd_0wr[j] = rd_addr_1 == wr_addr_0;
+      d0_fwd[j*MASKSIZE +: MASKSIZE] = 
+      wr_enable_0[j] && fwd_decision_cmp_0rd_0wr[j]?
+      wr_din_0[j*MASKSIZE +: MASKSIZE]:
+      d0_mem[j*MASKSIZE +: MASKSIZE];
+
+      d1_fwd[j*MASKSIZE +: MASKSIZE] = 
+      wr_enable_0[j] && fwd_decision_cmp_1rd_0wr[j]?
+      wr_din_0[j*MASKSIZE +: MASKSIZE]:
+      d1_mem[j*MASKSIZE +: MASKSIZE];
+
       end
     end
   end else begin:BLOCK_FWD_FALSE
     always_comb begin
       d0_fwd = d0_mem;
+      d1_fwd = d1_mem;
     end
   end
 endgenerate
@@ -123,12 +100,11 @@ generate
 	if (LATENCY_0==1) begin:BLOCK1
     always @(posedge clock) begin
       rd_dout_0 <= d0_fwd;
+      rd_dout_1 <= d1_fwd;
     end
   end else begin:BLOCK2
     assign rd_dout_0 = d0_fwd;
+    assign rd_dout_1 = d1_fwd;
   end
 endgenerate
-
-
 endmodule
-

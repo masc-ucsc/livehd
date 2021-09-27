@@ -65,15 +65,19 @@ void Lnast::trans_tuple_opr(const Lnast_nid &psts_nid) {
       continue;
     } else if (type.is_if()) {
       trans_tuple_opr_if_subtree(opr_nid);
+#if 0
     } else if (type.is_tuple()) {
       rename_to_real_tuple_name(psts_nid, opr_nid);
+#endif
     } else if (is_scalar_attribute_related(opr_nid)) {
       auto selc_nid = opr_nid;
       selc2attr_set_get(psts_nid, selc_nid);
     } else if (type.is_tuple_concat()) {
       merge_tconcat_paired_assign(psts_nid, opr_nid);
+#if 0
     } else if (type.is_select()) {
       trans_tuple_opr_handle_a_statement(psts_nid, opr_nid);
+#endif
     }
   }
 }
@@ -92,10 +96,12 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
         } else if (is_scalar_attribute_related(opr_nid)) {
           auto selc_nid = opr_nid;
           selc2attr_set_get(itr_nid, selc_nid);
+#if 0
         } else if (type.is_select()) {
           trans_tuple_opr_handle_a_statement(itr_nid, opr_nid);
         } else if (type.is_tuple()) {
           rename_to_real_tuple_name(itr_nid, opr_nid);
+#endif
         }
       }
     }
@@ -104,7 +110,7 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid) {
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
-  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_get());
+  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_set() || get_type(get_parent(target_nid)).is_tuple_get());
 
   auto target_name = get_name(target_nid);
   // only record the first tuple_var that appears at this scope
@@ -116,6 +122,8 @@ bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, cons
 }
 
 bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
+  (void)opr_nid;
+#if 0
   if (!get_type(opr_nid).is_select())
     return false;
 
@@ -129,6 +137,7 @@ bool Lnast::is_scalar_attribute_related(const Lnast_nid &opr_nid) {
         return true;
     }
   }
+#endif
   return false;
 }
 
@@ -191,6 +200,8 @@ void Lnast::selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
 }
 
 void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
+  (void)selc_nid;
+#if 0
   I(get_type(selc_nid).is_select());
   auto sibling_asg_nid = get_sibling_next(selc_nid);
   I(get_type(sibling_asg_nid).is_assign());
@@ -232,12 +243,14 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
     }
     stk_tuple_fields.pop();
   }
+#endif
 }
 
 void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_selc_nid, std::stack<Lnast_nid> &stk_tuple_fields) {
   auto type = get_type(prev_selc_nid);
   // note: the sel might be transform to tuple_get, but it's fine in this case, handle it as normal sel
-  if (!type.is_select() && !type.is_tuple_get()) {
+  // if (!type.is_select() && !type.is_tuple_get()) 
+  if (!type.is_tuple_get()) {
     get_data(prev_selc_nid).dump();
     return;
   }
@@ -269,6 +282,7 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
 }
 
+#if 0
 void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &old_tup_nid) {
   auto &selc_lrhs_table   = selc_lrhs_tables[psts_nid];
   auto  paired_assign_nid = selc_lrhs_table[old_tup_nid].second;
@@ -327,11 +341,16 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   //   add_child(tup_asg_nid, get_data(c0_paired_assign));
   // }
 }
+#endif
 
 void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) {
+  (void)psts_nid;
+  (void)opr_nid;
+#if 0
   I(get_type(opr_nid).is_select());
   auto selc_nid = opr_nid;
   sel2local_tuple_chain(psts_nid, selc_nid);
+#endif
 }
 
 void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
@@ -541,6 +560,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // }
 }
 
+#if 0
 bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, const mmap_lib::str &ref_name,
                                                               const Lnast_nid &src_if_nid) {
   if (get_parent(psts_nid).is_root()) {
@@ -549,7 +569,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     if (it == tuple_var_1st_scope_ssa_table.end()) {
       if (is_output(ref_name)) {
         auto prev_sib_if     = get_sibling_prev(src_if_nid);
-        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple(), Etoken()));
+        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
         add_child(tup_pre_declare, Lnast_node::create_ref(ref_name));
         add_child(tup_pre_declare, get_data(undefined_var_nid));
         return true;
@@ -568,6 +588,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     }
   }
 }
+#endif
 
 void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
   Selc_lrhs_table top_selc_lrhs_table;
@@ -578,7 +599,7 @@ void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
       do_ssa_trans(opr_nid);
     } else if (type.is_if()) {
       analyze_selc_lrhs_if_subtree(opr_nid);
-    } else if (type.is_tuple_concat() || type.is_tuple()) {
+    } else if (type.is_tuple_concat() /*|| type.is_tuple() */) {
       analyze_selc_lrhs_handle_a_statement(psts_nid, opr_nid);
     }
   }
@@ -586,7 +607,7 @@ void Lnast::analyze_selc_lrhs(const Lnast_nid &psts_nid) {
 
 void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &selc_nid) {
   auto type = get_type(selc_nid);
-  I(type.is_tuple_concat() || type.is_tuple());
+  I(type.is_tuple_concat());
   auto &selc_lrhs_table = selc_lrhs_tables[psts_nid];
   auto  c0_sel          = get_first_child(selc_nid);  // c0 = intermediate target
   auto  c0_sel_name     = get_name(c0_sel);
@@ -598,6 +619,7 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
 
     sib_nid = get_sibling_next(sib_nid);
 
+#if 0
     // hier-tuple case
     if (get_type(sib_nid).is_tuple()) {
       for (auto sib_child : children(sib_nid)) {
@@ -620,6 +642,7 @@ void Lnast::analyze_selc_lrhs_handle_a_statement(const Lnast_nid &psts_nid, cons
       if (hit)
         continue;
     }
+#endif
 
     // normal case
     for (auto sib_child : children(sib_nid)) {
@@ -655,7 +678,7 @@ void Lnast::analyze_selc_lrhs_if_subtree(const Lnast_nid &if_nid) {
         I(!type.is_func_def());
         if (type.is_if()) {
           analyze_selc_lrhs_if_subtree(opr_nid);
-        } else if (type.is_tuple_concat() || type.is_tuple()) {
+        } else if (type.is_tuple_concat()) {
           analyze_selc_lrhs_handle_a_statement(itr_nid, opr_nid);
         }
       }
@@ -727,17 +750,17 @@ void Lnast::ssa_rhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
   if (type.is_invalid())
     return;
 
-  I(!type.is_select());  // Select is deprecated
+  // I(!type.is_select());  // Select is deprecated
 
   bool the_ta_is_tuple_struct = false;
-  if (type.is_tuple_add()) {
+  if (type.is_tuple_add() || type.is_tuple_set()) {
     auto first_child  = get_first_child(opr_nid);
     auto second_child = get_sibling_next(first_child);
     if (!second_child.is_invalid() && get_type(second_child).is_assign())
       the_ta_is_tuple_struct = true;
   }
 
-  if (type.is_tuple() || the_ta_is_tuple_struct) {
+  if (the_ta_is_tuple_struct) {
     for (auto itr_opd : children(opr_nid)) {
       if (itr_opd == get_first_child(opr_nid))
         continue;
@@ -814,8 +837,6 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   auto opr_nid  = get_sibling_prev(assign_nid);
   auto opr_type = get_type(opr_nid);
-  if (opr_type.is_tuple())
-    return;
 #if 1
   // This whole function should go once select is gone
   if (opr_type.is_tuple_attr())
@@ -1072,6 +1093,9 @@ void Lnast::ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_ni
 }
 
 bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const {
+  (void)psts_nid;
+  (void)opr_nid;
+#if 0
   I(get_type(opr_nid).is_select());
 
   const auto it = selc_lrhs_tables.find(psts_nid);
@@ -1083,6 +1107,7 @@ bool Lnast::is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const {
     return it2->second.first;
 
   I(false);
+#endif
   return false;
 }
 
@@ -1155,8 +1180,8 @@ void Lnast::set_bitwidth(const mmap_lib::str &name, const uint32_t bitwidth) {
   from_lgraph_bw_table[name] = bitwidth;
 }
 
-void Lnast::dump() const {
-  for (const auto &it : depth_preorder()) {
+void Lnast::dump(const Lnast_nid &root_nid) const {
+  for (const auto &it : depth_preorder(root_nid)) {
     const auto &node = get_data(it);
     mmap_lib::str indent;
     indent = indent.append(it.level*4+4,' ');
@@ -1180,6 +1205,7 @@ void Lnast::dump() const {
     }
   }
 }
+
 
 /*
 Note I: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the

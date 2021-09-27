@@ -29,17 +29,18 @@ void Top_api::files(Eprp_var &var) {
     while ((dp = readdir(dirp)) != NULL) {
       if (dp->d_type == DT_DIR)
         continue;
+      std::string filename(dp->d_name); // string looks for 0 sequence
       if (match.empty()) {
         if (filter.empty()) {
-          sort_files.push_back(dp->d_name);
-        } else if (!std::regex_search(dp->d_name, filter_regex)) {
-          sort_files.push_back(dp->d_name);
+          sort_files.push_back(mmap_lib::str(filename));
+        } else if (!std::regex_search(filename, filter_regex)) {
+          sort_files.push_back(mmap_lib::str(filename));
         }
-      } else if (std::regex_search(dp->d_name, txt_regex)) {
+      } else if (std::regex_search(filename, txt_regex)) {
         if (filter.empty()) {
-          sort_files.push_back(dp->d_name);
-        } else if (!std::regex_search(dp->d_name, filter_regex)) {
-          sort_files.push_back(dp->d_name);
+          sort_files.push_back(mmap_lib::str(filename));
+        } else if (!std::regex_search(filename, filter_regex)) {
+          sort_files.push_back(mmap_lib::str(filename));
         }
       }
     }
@@ -49,9 +50,9 @@ void Top_api::files(Eprp_var &var) {
     mmap_lib::str files;
     for (const auto &s : sort_files) {
       if (!files.empty())
-        files = mmap_lib::str::concat(",", src_path, "/", s);
+        files = mmap_lib::str::concat(files, ",", src_path, "/", s);
       else
-        files = mmap_lib::str::concat(     src_path, "/", s);
+        files = mmap_lib::str::concat(            src_path, "/", s);
     }
 
     var.add("files", files);
@@ -68,7 +69,7 @@ void Top_api::setup(Eprp &eprp) {
   Eprp_method m1("files", "match file names in alphabetical order. Like `ls {src_path} | grep -E {match} | sort`", &Top_api::files);
   m1.add_label_optional("src_path", "source path to match the file search. by default", ".");
   m1.add_label_optional("match", "quoted string of regex to match. E.g: match:\"\\.v$\" for verilog files.");
-  m1.add_label_optional("filter", "quoted string of regex to filter.");
+  m1.add_label_optional("filter", "quoted string of regex to filter out or remove from match.");
 
   eprp.register_method(m1);
 }

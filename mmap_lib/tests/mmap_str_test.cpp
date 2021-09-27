@@ -66,6 +66,8 @@ public:
         ele3 += (('!' + hd) == '_') ? ('_' + 1) : ('!' + hd);
         ele4 += (('!' + hd) == '-') ? ('-' + 1) : ('!' + hd);
       }
+      if (ele[0] == '-')
+        ele = "this fails but it is OK";
       str_bank.push_back(ele);  // add string to vector
       // std::cout << ele << std::cout;
       no_underscore.push_back(ele3);  // add to no underscore

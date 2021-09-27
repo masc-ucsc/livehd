@@ -1621,11 +1621,15 @@ TEST_F(Lconst_test, lconst_sign) {
   }
 
   {
+    EXPECT_EQ(Lconst::from_pyrope(-123), Lconst::from_pyrope("0sb1111110000101"));
+    //"0sb1111110000101"
+    //"0sb00000000??0??"
     auto pos1 = Lconst(-123).and_op(Lconst::from_pyrope("0b??0??"));
 
     EXPECT_TRUE(!pos1.is_negative());
     auto zero = pos1.rsh_op(2).and_op(1);
-    EXPECT_EQ(zero, Lconst(0));
+    fmt::print("zero:{}\n",zero.to_pyrope());
+    EXPECT_EQ(zero, Lconst::from_pyrope("0b?"));
   }
 
   {

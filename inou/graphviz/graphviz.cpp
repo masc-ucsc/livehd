@@ -316,8 +316,10 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
                           node_data.type.debug_name(),
                           name,
                           subs);
+#if 0
     } else if (node_data.type.is_select()) {
       data += fmt::format(" {} [label=<{}, {}>];\n", id, "selc", name);
+#endif
     } else {
       data += fmt::format(" {} [label=<{}, {}>];\n", id, node_data.type.debug_name(), name);
     }

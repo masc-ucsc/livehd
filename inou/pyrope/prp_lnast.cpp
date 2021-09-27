@@ -1196,7 +1196,7 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(mmap_lib::Tree_index idx_start_a
 #if 1
   mmap_lib::Tree_index idx_sel_root;
   if (in_lhs) {
-    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_add());
+    idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_set());
   } else {
     idx_sel_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_tuple_get());
     lnast->add_child(idx_sel_root, retnode);
@@ -1603,7 +1603,7 @@ Lnast_node Prp_lnast::eval_tuple_dot_notation(mmap_lib::Tree_index idx_start_ast
 
   if (in_lhs) {
     if (in_lhs_sel_root.is_invalid()) {
-      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_add());
+      idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_tuple_set());
     }
   } else if (is_attr) {  // rhs
 
@@ -1765,10 +1765,12 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(mmap_lib::Tree_index idx_start
 }
 
 Lnast_node Prp_lnast::eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_lib::Tree_index idx_start_ln) {
+  (void)idx_start_ast;
   (void)idx_start_ln;
 
   fmt::print("WARNING. The select syntax for fluid does not seem right beyond trivial cases like foo?\n");
 
+#if 0
   auto idx_dot_root = lnast->add_child(cur_stmts, Lnast_node::create_select());
 
   // create the temporary variable for the LHS
@@ -1793,6 +1795,10 @@ Lnast_node Prp_lnast::eval_fluid_ref(mmap_lib::Tree_index idx_start_ast, mmap_li
       lnast->add_child(idx_dot_root, Lnast_node::create_const("__fluid_reset"));
     }
   }
+#else
+  auto retnode = get_lnast_temp_ref();
+#endif
+
   return retnode;
 }
 
@@ -1840,12 +1846,8 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
         else {
           if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
             idx = ast->get_sibling_next(idx);
-            if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
-              *skip_sibs = 2;
-              return Lnast_node::create_sra();
-            }
             *skip_sibs = 1;
-            return Lnast_node::create_shr();
+            return Lnast_node::create_sra();
           }
           return Lnast_node::create_gt();
         }
@@ -1875,10 +1877,6 @@ Lnast_node Prp_lnast::gen_operator(mmap_lib::Tree_index idx, uint8_t *skip_sibs)
         }
         return Lnast_node::create_plus();
       case '-':
-        if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == "-") {
-          *skip_sibs = 1;
-          return Lnast_node::create_tuple_delete();
-        }
         return Lnast_node::create_minus();
       default:  // unimplemented operator
         Pass::error("Operator {} is not yet supported.", tid);
@@ -1904,9 +1902,7 @@ void Prp_lnast::generate_priority_map() {
   priority_map[Lnast_ntype::Lnast_ntype_eq]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_ne]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_tuple_concat] = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_tuple_delete] = 1;
   priority_map[Lnast_ntype::Lnast_ntype_shl]          = 1;
-  priority_map[Lnast_ntype::Lnast_ntype_shr]          = 1;
   priority_map[Lnast_ntype::Lnast_ntype_sra]          = 1;
   priority_map[Lnast_ntype::Lnast_ntype_minus]        = 1;
   priority_map[Lnast_ntype::Lnast_ntype_plus]         = 1;

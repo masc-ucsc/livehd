@@ -124,13 +124,12 @@ void Code_gen::do_stmts(const mmap_lib::Tree_index& stmt_node_index) {
       do_assign(curr_index, vec1, false);
     } else if (curr_node_type.is_if()) {
       do_if(curr_index);
-    } else if (curr_node_type.is_tuple()) {
-      Pass::error("\nUnexpected node \"tuple\" encountered in LN during code_gen.\n");
-      //do_tuple(curr_index);
-    } else if (curr_node_type.is_select() || curr_node_type.is_attr_get()) {
-      do_select(curr_index, "selc"_str);
+    } else if (curr_node_type.is_attr_get()) {
+      do_select(curr_index, "attr_get"_str);
     } else if (curr_node_type.is_tuple_add()) {
       do_select(curr_index, "tuple_add"_str);
+    } else if (curr_node_type.is_tuple_set()) {
+      do_select(curr_index, "tuple_add"_str); // FIXME: we may want different syntax
     } else if (curr_node_type.is_attr_set()) {
       Pass::error("Error in BitWidth Pass in LGraph optimization.\n");
     } else if (curr_node_type.is_tuple_get()) {
@@ -397,6 +396,7 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
   auto func_name  = lnast->get_name(curr_index);
 
   curr_index    = lnast->get_sibling_next(curr_index);
+  auto cond_val = resolve_func_cond(curr_index);
 
   auto stmt_index = lnast->get_sibling_next(curr_index);
 
@@ -415,8 +415,6 @@ void Code_gen::do_func_def(const mmap_lib::Tree_index& func_def_node_index) {
   } else {
     param_exist = false;
   }
-
-  auto cond_val = resolve_func_cond(curr_index);
 
   buffer_to_print->append(mmap_lib::str::concat(indent(),
                   lnast_to->func_begin(),
@@ -853,7 +851,7 @@ void Code_gen::do_dot(const mmap_lib::Tree_index& dot_node_index, const mmap_lib
 	mmap_lib::str  value;
   // const auto& dot_node_data = lnast->get_data(dot_node_index);
   while ((select_type == "tuple_add" && i < (dot_str_vect.size() - 1) && is_temp_var(key))
-         || (i < dot_str_vect.size() && is_temp_var(key) && select_type == "selc")
+         || (i < dot_str_vect.size() && is_temp_var(key) && select_type == "attr_get")
          || (i < (dot_str_vect.size() - 1)
              && !is_temp_var(
                  key))) {  // condition set as per if.prp and adder_stage.prp test cases. To accomodate attr_get and tuple_add.

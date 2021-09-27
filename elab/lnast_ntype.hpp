@@ -13,11 +13,9 @@ public:
     Lnast_ntype_top,
     Lnast_ntype_stmts,  // stmts
     Lnast_ntype_if,
-    Lnast_ntype_uif,
+    Lnast_ntype_uif,    // unique IF
     Lnast_ntype_for,
     Lnast_ntype_while,
-    Lnast_ntype_phi,
-    Lnast_ntype_hot_phi,
     Lnast_ntype_func_call,  // .()
     Lnast_ntype_func_def,   // ::{   func_def = sub-graph in lgraph
 
@@ -38,7 +36,7 @@ public:
     Lnast_ntype_logical_not,  // !
 
     // reduce ops
-    // NO reduce AND because the operation is bitwidth sensitive
+    // NO reduce AND because the operation is bitwidth sensitive (a == -1 is like reduce AND)
     Lnast_ntype_reduce_or,
     Lnast_ntype_reduce_xor,
 
@@ -51,10 +49,10 @@ public:
 
     // shifts
     Lnast_ntype_shl,  // << or <<<
-    Lnast_ntype_shr,  // >>
+    // NO SHR because it is bitwidth sensitive
     Lnast_ntype_sra,  // >>>
 
-    // zero/sign extend (becomes Cell:And, Cell:sext, Cell:tposs)
+    // bit manipulation (zero/sign extend)
     Lnast_ntype_sext,  // sext(wire, bit) == chop wire/tuple to have sbits == bit, and bit pos is the sign
     Lnast_ntype_set_mask,
     Lnast_ntype_get_mask,
@@ -68,27 +66,24 @@ public:
     Lnast_ntype_gt,
     Lnast_ntype_ge,
 
-    // Tuple ops
-    Lnast_ntype_tuple,         // ()
-    Lnast_ntype_tuple_concat,  // ++
-    Lnast_ntype_tuple_delete,  // --
-    Lnast_ntype_select,
-
     // group: language variable
     Lnast_ntype_ref,
     Lnast_ntype_const,
 
-    // group: others
-    Lnast_ntype_assert,    // I
-    Lnast_ntype_err_flag,  // compile error flag
-
-    // group: compiler internal type
-    // TODO: If the parsers generate this directly (possible) instead of
-    // select, we can avoid 2 LNAST traversals (faster compilation)
+    // Tuple ops
+    Lnast_ntype_tuple_concat,  // ++
     Lnast_ntype_tuple_add,
     Lnast_ntype_tuple_get,
+    Lnast_ntype_tuple_set,
+
+    // group: compiler internal type
+    // DO NOT GENERATE THIS from IO passes
     Lnast_ntype_attr_set,
     Lnast_ntype_attr_get,
+
+    Lnast_ntype_err_flag,  // compile error flag
+    Lnast_ntype_phi,
+    Lnast_ntype_hot_phi,
 
     Lnast_ntype_last_invalid
   };
@@ -103,8 +98,6 @@ protected:
       "uif",
       "for",
       "while",
-      "phi",
-      "hot_phi",
       "fcall",
       "fdef",
 
@@ -131,7 +124,6 @@ protected:
       "mod",
 
       "shl",
-      "shr",
       "sra",
 
       "sext",
@@ -146,25 +138,20 @@ protected:
       "gt",
       "ge",
 
-      "tuple",
-      "tuple_concat",
-      "tuple_delete",
-      "select",
-
-      // group: language variable
       "ref",
       "const",
 
-      // group: others
-      "assert",
-      "error_flag",
-
-      // group: compiler internal type (generated out of select)
+      "tuple_concat",
       "tuple_add",
       "tuple_get",
-      "attr_set",  // tuple_add with __foo
-      "attr_get"   // tuple_get with __foo
+      "tuple_set",
 
+      "attr_set",
+      "attr_get",
+
+      "error_flag",
+      "phi",
+      "hot_phi"
   };
 
   Lnast_ntype_int val;
@@ -185,8 +172,6 @@ public:
   static constexpr Lnast_ntype create_uif() { return Lnast_ntype(Lnast_ntype_uif); }
   static constexpr Lnast_ntype create_for() { return Lnast_ntype(Lnast_ntype_for); }
   static constexpr Lnast_ntype create_while() { return Lnast_ntype(Lnast_ntype_while); }
-  static constexpr Lnast_ntype create_phi() { return Lnast_ntype(Lnast_ntype_phi); }
-  static constexpr Lnast_ntype create_hot_phi() { return Lnast_ntype(Lnast_ntype_hot_phi); }
   static constexpr Lnast_ntype create_func_call() { return Lnast_ntype(Lnast_ntype_func_call); }
   static constexpr Lnast_ntype create_func_def() { return Lnast_ntype(Lnast_ntype_func_def); }
 
@@ -213,7 +198,6 @@ public:
   static constexpr Lnast_ntype create_mod() { return Lnast_ntype(Lnast_ntype_mod); }
 
   static constexpr Lnast_ntype create_shl() { return Lnast_ntype(Lnast_ntype_shl); }
-  static constexpr Lnast_ntype create_shr() { return Lnast_ntype(Lnast_ntype_shr); }
   static constexpr Lnast_ntype create_sra() { return Lnast_ntype(Lnast_ntype_sra); }
 
   static constexpr Lnast_ntype create_sext() { return Lnast_ntype(Lnast_ntype_sext); }
@@ -228,21 +212,20 @@ public:
   static constexpr Lnast_ntype create_gt() { return Lnast_ntype(Lnast_ntype_gt); }
   static constexpr Lnast_ntype create_ge() { return Lnast_ntype(Lnast_ntype_ge); }
 
-  static constexpr Lnast_ntype create_tuple() { return Lnast_ntype(Lnast_ntype_tuple); }
-  static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
-  static constexpr Lnast_ntype create_tuple_delete() { return Lnast_ntype(Lnast_ntype_tuple_delete); }
-  static constexpr Lnast_ntype create_select() { return Lnast_ntype(Lnast_ntype_select); }
-
   static constexpr Lnast_ntype create_ref() { return Lnast_ntype(Lnast_ntype_ref); }
   static constexpr Lnast_ntype create_const() { return Lnast_ntype(Lnast_ntype_const); }
 
-  static constexpr Lnast_ntype create_assert() { return Lnast_ntype(Lnast_ntype_assert); }
-  static constexpr Lnast_ntype create_err_flag() { return Lnast_ntype(Lnast_ntype_err_flag); }
-
+  static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
   static constexpr Lnast_ntype create_tuple_add() { return Lnast_ntype(Lnast_ntype_tuple_add); }
   static constexpr Lnast_ntype create_tuple_get() { return Lnast_ntype(Lnast_ntype_tuple_get); }
+  static constexpr Lnast_ntype create_tuple_set() { return Lnast_ntype(Lnast_ntype_tuple_set); }
+
   static constexpr Lnast_ntype create_attr_set() { return Lnast_ntype(Lnast_ntype_attr_set); }
   static constexpr Lnast_ntype create_attr_get() { return Lnast_ntype(Lnast_ntype_attr_get); }
+
+  static constexpr Lnast_ntype create_err_flag() { return Lnast_ntype(Lnast_ntype_err_flag); }
+  static constexpr Lnast_ntype create_phi() { return Lnast_ntype(Lnast_ntype_phi); }
+  static constexpr Lnast_ntype create_hot_phi() { return Lnast_ntype(Lnast_ntype_hot_phi); }
 
   bool constexpr is_invalid() const { return val == Lnast_ntype_invalid; }
 
@@ -252,8 +235,6 @@ public:
   bool constexpr is_uif() const { return val == Lnast_ntype_uif; }
   bool constexpr is_for() const { return val == Lnast_ntype_for; }
   bool constexpr is_while() const { return val == Lnast_ntype_while; }
-  bool constexpr is_phi() const { return val == Lnast_ntype_phi; }
-  bool constexpr is_hot_phi() const { return val == Lnast_ntype_hot_phi; }
   bool constexpr is_func_call() const { return val == Lnast_ntype_func_call; }
   bool constexpr is_func_def() const { return val == Lnast_ntype_func_def; }
 
@@ -280,7 +261,6 @@ public:
   bool constexpr is_mod() const { return val == Lnast_ntype_mod; }
 
   bool constexpr is_shl() const { return val == Lnast_ntype_shl; }
-  bool constexpr is_shr() const { return val == Lnast_ntype_shr; }
   bool constexpr is_sra() const { return val == Lnast_ntype_sra; }
 
   bool constexpr is_sext() const { return val == Lnast_ntype_sext; }
@@ -295,26 +275,26 @@ public:
   bool constexpr is_gt() const { return val == Lnast_ntype_gt; }
   bool constexpr is_ge() const { return val == Lnast_ntype_ge; }
 
-  bool constexpr is_tuple() const { return val == Lnast_ntype_tuple; }
-  bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
-  bool constexpr is_tuple_delete() const { return val == Lnast_ntype_tuple_delete; }
-  bool constexpr is_select() const { return val == Lnast_ntype_select; }
 
   bool constexpr is_ref() const { return val == Lnast_ntype_ref; }
   bool constexpr is_const() const { return val == Lnast_ntype_const; }
 
-  bool constexpr is_assert() const { return val == Lnast_ntype_assert; }
-  bool constexpr is_err_flag() const { return val == Lnast_ntype_err_flag; }
-
+  bool constexpr is_tuple_concat() const { return val == Lnast_ntype_tuple_concat; }
   bool constexpr is_tuple_add() const { return val == Lnast_ntype_tuple_add; }
   bool constexpr is_tuple_get() const { return val == Lnast_ntype_tuple_get; }
+  bool constexpr is_tuple_set() const { return val == Lnast_ntype_tuple_set; }
+
+  bool constexpr is_tuple_attr() const {
+    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_tuple_set || val == Lnast_ntype_attr_set
+           || val == Lnast_ntype_attr_get || val == Lnast_ntype_tuple_set;
+  }
+
   bool constexpr is_attr_set() const { return val == Lnast_ntype_attr_set; }
   bool constexpr is_attr_get() const { return val == Lnast_ntype_attr_get; }
 
-  bool constexpr is_tuple_attr() const {
-    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_attr_set
-           || val == Lnast_ntype_attr_get;
-  }
+  bool constexpr is_err_flag() const { return val == Lnast_ntype_err_flag; }
+  bool constexpr is_phi() const { return val == Lnast_ntype_phi; }
+  bool constexpr is_hot_phi() const { return val == Lnast_ntype_hot_phi; }
 
   // Super types
   bool constexpr is_primitive_op() const { return (val >= Lnast_ntype_assign && val <= Lnast_ntype_attr_get); }
@@ -330,7 +310,7 @@ public:
   }
 
   bool constexpr is_binary_op() const {
-    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_shr) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext)
+    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext)
            || (val == Lnast_ntype_get_mask) || (val == Lnast_ntype_set_mask);
   }
 
@@ -346,7 +326,6 @@ public:
   bool constexpr is_direct_lgraph_op() const {
     return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_reduce_xor
            && val != Lnast_ntype_mod
-           // && val != Lnast_ntype_shr
            && val != Lnast_ntype_is && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }
 

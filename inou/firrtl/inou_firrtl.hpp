@@ -72,17 +72,14 @@ protected:
   void HandleTailOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void HandleConcatOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void HandlePadOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
-  void HandleTwoExprPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                           const mmap_lib::str &lhs);
-  void HandleStaticShiftOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                           const mmap_lib::str &lhs);
+  void HandleTwoExprPrimOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
+  void HandleStaticShiftOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void HandleTypeConvOp(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void AttachExprStrToNode(Lnast &lnast, const mmap_lib::str &access_str, Lnast_nid &parent_node);
 
   mmap_lib::str FlattenExpression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
-  void HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
-                        const Lnast_node &value_node);
+  void HandleBundVecAcc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs, const Lnast_node &value_node);
   void CreateTupAddFromStr(Lnast &ln, Lnast_nid &parent_node, const mmap_lib::str &flattened_str, const Lnast_node &value_node);
   void CreateTupGetFromStr(Lnast &ln, Lnast_nid &parent_node, const mmap_lib::str &flattened_str, const Lnast_node &dest_node);
 

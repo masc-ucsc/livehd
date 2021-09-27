@@ -53,6 +53,10 @@ han_carl:
 	verilator -sv +incdir+rtl --Wall --cc --trace --top-module han_carl ./rtl/han_carl.v ./rtl/pref_op.v ./rtl/diamond.v ./rtl/square_op.v --exe tests/han_carl_tb.cpp -CFLAGS "-DTRACE=1 -std=c++11"
 	make -C obj_dir/ -f Vhan_carl.mk Vhan_carl
 
+cgen_mem:
+	verilator -sv +incdir+rtl --Wall --cc --trace --top-module cgen_driver ./tests/cgen_driver.v ./rtl/cgen_memory_1rd_1wr.v --exe tests/cgen_memory_1rd_1wr.cpp -CFLAGS "-DTRACE=1 -std=c++11"
+	make -C obj_dir/ -f Vcgen_driver.mk Vcgen_driver
+
 run1: add_rca
 	./obj_dir/Vadd_rca
 
@@ -92,7 +96,10 @@ run12: kogg_stone_8
 run13: han_carl
 	./obj_dir/Vhan_carl
 
-run: run1 run2 run3 run4 run5 run6 run7 run9 run10 run11 run12 run13
+run14: cgen_mem
+	./obj_dir/Vcgen_driver
+
+run: run1 run2 run3 run4 run5 run6 run7 run9 run10 run11 run12 run13 run14
 
 clean:
 	rm -rf obj_dir output.vcd a.out

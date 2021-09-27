@@ -30,10 +30,19 @@ cc_binary(
 )
 
 cc_binary(
-    name = "driver",
-    srcs = ["tests/driver.cpp"],
+    name = "slang",
+    srcs = ["tests/slang.cpp"],
     copts = COPTS,
     deps = [
         ":inou_slang",
+    ],
+)
+
+sh_test(
+    name = "slang_test.sh",
+    srcs = ["tests/slang_test.sh"],
+    data = [
+        "//inou/yosys/tests:verilog_tests",
+        "slang"
     ],
 )
