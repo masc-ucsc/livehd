@@ -47,22 +47,23 @@ done
 pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
+pts='Snxn100k Snxn200k Snxn300k Snxn400k Snxn500k Snxn600k Snxn700k Snxn800k Snxn900k Snxn1000k'
 pts='Snxn100k'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
 fucntion() {
-  echo "-------------------- LiveHD  (${FIRRTL_LEVEL}.pb -> Verilog(Cgen)) -----" > stat.livehd
 
   for pt in $1
   do
+    echo "-------------------- LiveHD  $pt Compilation with $2 Threads -----" >> stat.livehd
     rm -rf $LGDB
-    echo ""
-    echo ""
-    echo ""
-    echo "======================================================================"
-    echo "                     LiveHD Full Compilation: ${pt}.${FIRRTL_LEVEL}.pb"
-    echo "======================================================================"
+    # echo ""
+    # echo ""
+    # echo ""
+    # echo "======================================================================"
+    # echo "                     LiveHD Full Compilation: ${pt}.${FIRRTL_LEVEL}.pb"
+    # echo "======================================================================"
     # livehd compilation
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
@@ -78,16 +79,29 @@ fucntion() {
       exit $ret_val
     fi
 
-    grep elapsed pp       >> stat.livehd
+    grep elapsed pp >> stat.livehd
   done #end of for
 
 
-  cat stat.livehd
+  # cat stat.livehd
 
   # rm -f *.dot
   # rm -f *.v
   rm -f ./*.tcl
-  rm -f pp*
+  rm -f pp
 }
 
-fucntion "$pts"
+
+
+  echo "-------------------- Benchmark Start -----" > stat.livehd
+  # for thds in 2 3 4 8 16 32
+  # note: for single thread, you have to disable thread pool directly
+  # for thds in 1 
+  for thds in 1 2
+  do
+    export LIVEHD_THREADS=$thds
+    fucntion "$pts" "$thds"
+  done
+
+
+

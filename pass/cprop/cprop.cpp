@@ -1681,7 +1681,10 @@ void Cprop::reconnect_tuple_sub(Node &node) {
 
     // only punch inputs (clock, resetxxx, foo, but not outputs)
     auto *lg = node.get_class_lgraph();
+
+#ifndef NDEBUG
     Pass::info("instance {} has unconnected {}. Punching through lgraph {}", node.debug_name(), io_pins[pid].name, lg->get_name());
+#endif
 
     I(io_pins[pid].is_input());
     Node_pin dpin;

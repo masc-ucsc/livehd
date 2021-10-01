@@ -23,7 +23,7 @@
 
 #include "lbench.hpp"
 
-//#define DISABLE_THREAD_POOL
+// #define DISABLE_THREAD_POOL
 
 template <class Func, class... Args>
 inline auto forward_as_lambda(Func &&func, Args &&...args) {
@@ -64,6 +64,8 @@ class Thread_pool {
   std::condition_variable job_available_var;
   std::mutex              queue_mutex;
 
+  int env_threads;
+
   void task() {
     task_id = ++task_id_count;
 
@@ -100,18 +102,31 @@ class Thread_pool {
   }
 
   void add_(const std::function<void(void)> &job) {
-#ifdef DISABLE_THREAD_POOL
-    job();
-    return;
-#else
-    if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
+    if(env_threads == 1) {
       job();
       return;
+    } else { // not specify $LIVEHD_THREADS at all -> run with full threads resources
+      if (jobs_left > 48) {  
+        job();
+        return;
+      }
+      jobs_left.fetch_add(1, std::memory_order_relaxed);
+      queue.enqueue(job);
+      job_available_var.notify_one();
     }
-    jobs_left.fetch_add(1, std::memory_order_relaxed);
-    queue.enqueue(job);
-    job_available_var.notify_one();
-#endif
+// To be deprecated
+// #ifdef DISABLE_THREAD_POOL
+//     job();
+//     return;
+// #else
+//     if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
+//       job();
+//       return;
+//     }
+//     jobs_left.fetch_add(1, std::memory_order_relaxed);
+//     queue.enqueue(job);
+//     job_available_var.notify_one();
+// #endif
   }
 
 public:
@@ -125,12 +140,20 @@ public:
 
     thread_count = _thread_count;
     size_t lim   = (std::thread::hardware_concurrency() - 1);  // -1 for calling thread
+    // char  *foo = getenv("LIVEHD_THREADS");
+    if (getenv("LIVEHD_THREADS") != nullptr) {
+      // clangd complains "not thread safe", but it's ok as only construct thread_pool once
+      env_threads = atoi(getenv("LIVEHD_THREADS")); 
+    } else {
+      // use max threads resources
+      env_threads = -1; 
+    }
 
     if (thread_count > lim || thread_count == 0) {
-      auto *var = getenv("LIVEHD_THREADS");
-      if (var) {
-        lim = atoi(var);
-        printf("LIVEHD_THREADS set to %ld\n", lim);
+      if (env_threads != -1) {
+        // LiveHD default has one top thread, so env variable LiveHD_THREADS has to -1 for semantic matching
+        lim = env_threads - 1;  
+        printf("LIVEHD_THREADS set to %ld\n", lim + 1);
       }
       thread_count = lim;
     }

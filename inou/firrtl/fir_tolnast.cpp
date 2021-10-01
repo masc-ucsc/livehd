@@ -1932,7 +1932,10 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
 //--------------Modules/Circuits--------------------
 // Create basis of LNAST tree. Set root to "top" and have "stmts" be top's child.
 void Inou_firrtl::ListUserModuleInfo(Eprp_var& var, const firrtl::FirrtlPB_Module& fmodule, const mmap_lib::str& file_name) {
+
+#ifndef NDEBUG
   fmt::print("Module (user): {}\n", fmodule.user_module().id());
+#endif
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(mmap_lib::str(fmodule.user_module().id()), file_name);
 
   const firrtl::FirrtlPB_Module_UserModule& user_module = fmodule.user_module();
