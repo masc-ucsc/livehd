@@ -68,6 +68,16 @@ class Lconst {
     return new_l;
   }
 
+  // not sure why bits is less than 62
+  is_i() {
+    return !this.explicit_str && this.bits <= 62;
+  }
+
+  to_i() {
+    // return static_cast<long int>(num);
+    return this.num;
+  }
+
   // ======= new Lconst returned =======================
   static from_pyrope(number_str) {
     // check, the input must be a string
@@ -140,6 +150,37 @@ class Lconst {
             `ERROR: ${number_str} unknown pyrope encoding (leading ${sel_ch})...`
           );
         }
+      }
+    } else {
+      let start_i = number_str.length;
+      let end_i = 0;
+
+      if (
+        number_str.length > 1 &&
+        number_str.charAt(0) === "'" &&
+        number_str.charAt(start_i) === "'"
+      ) {
+        --start_i;
+        ++end_i;
+      }
+
+      let bigNumber = BigInt(0);
+      let prev_escaped = false;
+      for (let i = start_i - 1; i >= end_i; --i) {
+        bigNumber <<= 8n;
+        bigNumber |= BigInt(number_str.charCodeAt(i));
+
+        if (number_str[i] === "'" && !prev_escaped && i !== 0) {
+          throw new Error(
+            `ERROR: ${number_str} malformed pyrope string. ' must be escaped`
+          );
+        }
+
+        if (number_str[i] === '\\') {
+          if (prev_escaped) prev_escaped = false;
+          else prev_escaped = true;
+        }
+        return Lconst.new_lconst(true, (start_i - end_i) * 8, bigNumber);
       }
     }
 
@@ -279,6 +320,39 @@ class Lconst {
     return output + this.num.toString(16);
   }
 
+  to_string() {
+    let str = '';
+    let tmp = this.num;
+    while (tmp) {
+      let ch = tmp & 0xffn;
+      str += ch;
+      tmp >>= 8n;
+    }
+    return str;
+  }
+
+  // TESTING
+  to_binary() {
+    if (this.has_unknown) {
+      return this.to_string();
+    }
+
+    let v = this.num;
+    if (v === 0n) return '0';
+
+    let txt = '';
+    /* console.log(this.bits, this.num); */
+    for (let i = 0n; i < this.bits; ++i) {
+      if (v & 1n) {
+        txt = '1' + txt;
+      } else {
+        txt = '0' + txt;
+      }
+      v = v >> 1n;
+    }
+    return txt;
+  }
+
   adjust(com_lconst) {
     if (!(com_lconst instanceof Lconst)) {
       throw new Error(
@@ -303,17 +377,6 @@ class Lconst {
   is_positive() {
     if (!this.explicit_str) return this.num >= 0;
     if (!this.has_unknown) return false;
-  }
-
-  to_string() {
-    let str = '';
-    let tmp = this.num;
-    while (tmp) {
-      let ch = tmp & 0xffn;
-      str += ch;
-      tmp >>= 8n;
-    }
-    return str;
   }
 
   // ========= operation =============
@@ -535,6 +598,28 @@ class Lconst {
     return res;
   }
 
+  /*   concat_op(com_lconst) {
+    if (this.is_string() || com_lconst.is_string()) {
+      let str = '';
+      let com_str = '';
+
+      if (this.is_string()) str = this.to_string();
+      else if (this.is_i()) str = String(this.to_i());
+      else str = this.to_binary();
+
+      if (com_lconst.is_string()) com_str = com_lconst.to_string();
+      else if (com_lconst.is_i()) com_lconst = String(com_lconst.to_i);
+      else com_lconst = this.to_binary();
+
+      // question
+      return Lconst.from_string();
+    }
+
+    let res_num = (this.num << com_lconst.bits) | com_lconst.num;
+
+    return Lconst.new_lconst(false, Lconst.calc_num_bits(res_num), res_num);
+  } */
+
   static unknown(nbits) {
     let res = new Lconst();
     for (let i = 0; i < nbits; i++) {
@@ -591,7 +676,6 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-const testing1 = Lconst.from_pyrope('0x0');
-const testing2 = Lconst.from_pyrope('0x0');
-console.log(testing2.add_op(testing1));
+const testing1 = Lconst.from_pyrope('?');
+console.log(testing1);
 module.exports = Lconst;
