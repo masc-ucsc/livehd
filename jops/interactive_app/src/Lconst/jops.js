@@ -170,7 +170,7 @@ class Lconst {
         bigNumber <<= 8n;
         bigNumber |= BigInt(number_str.charCodeAt(i));
 
-        if (number_str[i] === "'" && !prev_escaped && i != 0) {
+        if (number_str[i] === "'" && !prev_escaped && i !== 0) {
           throw new Error(
             `ERROR: ${number_str} malformed pyrope string. ' must be escaped`
           );
@@ -598,7 +598,7 @@ class Lconst {
     return res;
   }
 
-  concat_op(com_lconst) {
+  /*   concat_op(com_lconst) {
     if (this.is_string() || com_lconst.is_string()) {
       let str = '';
       let com_str = '';
@@ -618,7 +618,7 @@ class Lconst {
     let res_num = (this.num << com_lconst.bits) | com_lconst.num;
 
     return Lconst.new_lconst(false, Lconst.calc_num_bits(res_num), res_num);
-  }
+  } */
 
   static unknown(nbits) {
     let res = new Lconst();
