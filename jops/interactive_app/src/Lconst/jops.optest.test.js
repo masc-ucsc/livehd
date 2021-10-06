@@ -3,12 +3,12 @@ const Lconst = require('./jops');
 // https://www.rapidtables.com/convert/number/hex-to-decimal.html: I USED THIS WEBISTE FOR TESTING: https://www.rapidtables.com/convert/number/hex-to-decimal.html
 
 // test, when the input is in hex
-test('TEST from_pyrope, underscore', () => {
+test('1. TEST from_pyrope, underscore', () => {
   let testing = Lconst.from_pyrope('0x__ab_c_');
   expect(String(testing.num)).toBe('2748');
 });
 
-test('TEST from_pyrope, + and - sign', () => {
+test('2. TEST from_pyrope, + and - sign', () => {
   let hex_postiveWithOutSign = Lconst.from_pyrope('0xFE_E_B');
   let hex_postiveWithSign = Lconst.from_pyrope('+0x_FEEB_');
 
@@ -21,14 +21,14 @@ test('TEST from_pyrope, + and - sign', () => {
   }).toThrow();
 });
 
-test('TEST from_pyrope & to_pyrope, a trival test', () => {
+test('3. TEST from_pyrope & to_pyrope, a trival test', () => {
   let testing = Lconst.from_pyrope('0x1');
   let testing2 = Lconst.from_pyrope('0x2');
   let testing3 = testing.xor_op(testing2);
   expect(testing3.to_pyrope()).toBe('0x3');
 });
 
-test('TEST from_pyrope & to_pyrope, a average test', () => {
+test('4. TEST from_pyrope & to_pyrope, a average test', () => {
   let testing = Lconst.from_pyrope(
     '0x12352353464564234526246__345723564756345'
   );
@@ -43,7 +43,7 @@ test('TEST from_pyrope & to_pyrope, a average test', () => {
 
 // test, when the input is in signed binary
 // !!!!! here, notice that we have two values: the unknown and binary !!!!!
-test('TEST when the input is a signed binary', () => {
+test('5. TEST when the input is a signed binary', () => {
   const testing1 = Lconst.from_pyrope('0sb1110??1');
   const testing2 = Lconst.from_pyrope('0sb0110??1');
   const testing3 = Lconst.from_pyrope('-0b1110??1');
@@ -62,13 +62,13 @@ test('TEST when the input is a signed binary', () => {
   expect(testing3.bits).toBe(8n);
 });
 
-test('TEST when the input is an unsigned binary', () => {
+test('6. TEST when the input is an unsigned binary', () => {
   const testing1 = Lconst.from_pyrope('0b110001');
   expect(testing1.num).toBe(49n);
   expect(testing1.bits).toBe(7n); // extra non-explict bit '0' is required for unsigned string
 });
 
-test('TESt only binary number could be signed', () => {
+test('7. TESt only binary number could be signed', () => {
   expect(() => {
     Lconst.from_pyrope('0sd12345');
   }).toThrow();
@@ -79,7 +79,7 @@ test('TESt only binary number could be signed', () => {
 });
 
 // test, when the input is in decimal
-test('TEST when the input is decimal', () => {
+test('8. TEST when the input is decimal', () => {
   const testing = Lconst.from_pyrope(
     '0d12344325431_32312432435436546345_1234235'
   );
@@ -105,7 +105,7 @@ test('TEST when the input is decimal', () => {
 });
 
 // test, then the input is oct
-test('TEST when the input is signed oct', () => {
+test('9. TEST when the input is signed oct', () => {
   const testing1 = Lconst.from_pyrope('0777_777_777777777');
   const testing2 = Lconst.from_pyrope('0o777_777_777777777');
   expect(testing1.num).toBe(35184372088831n);
@@ -113,7 +113,7 @@ test('TEST when the input is signed oct', () => {
 });
 
 // test, when the input is 'true' or 'no'
-test('TEST when the input is true or no', () => {
+test('10. TEST when the input is true or no', () => {
   let testing1 = Lconst.from_pyrope('true');
   let testing2 = Lconst.from_pyrope('false');
 
@@ -126,14 +126,14 @@ test('TEST when the input is true or no', () => {
   expect(testing2.bits).toBe(1n);
 });
 
-test('TEST when the encoding is not correct', () => {
+test('11. TEST when the encoding is not correct', () => {
   expect(() => {
     Lconst.from_pyrope('0g23');
   }).toThrow('ERROR: 0g23 unknown pyrope encoding (leading g)...');
 });
 
 // test, invalid characters
-test('TEST invalid characters', () => {
+test('12. TEST invalid characters', () => {
   expect(() => {
     Lconst.from_pyrope('0b12345');
   }).toThrow('ERROR: 12345 binary encoding could not use 2');
@@ -151,14 +151,14 @@ test('TEST invalid characters', () => {
   }).toThrow('ERROR: 017778 encoding could not use 8');
 });
 
-test('TEST throw due to un-stringed input', () => {
+test('13. TEST throw due to un-stringed input', () => {
   expect(() => {
     Lconst.from_pyrope(1);
   }).toThrow('the input must be a string');
 });
 
 // AND_OP
-test('simple tests for AND operation', () => {
+test('14. simple tests for AND operation', () => {
   const testing1 = Lconst.from_pyrope('0xFFFF');
   const testing2 = Lconst.from_pyrope('0xA1CD');
   const res = testing1.and_op(testing2);
@@ -167,7 +167,7 @@ test('simple tests for AND operation', () => {
   expect(res.bits).toBe(17n); // NOTICE: one extra bit for inexplicit sign bit "0"
 });
 
-test('TEST AND_OP compare with unknown', () => {
+test('15. TEST AND_OP compare with unknown', () => {
   // test 1: 0b010??1 and 0b000?01
   const a1 = Lconst.from_pyrope('0b010??1');
   const a2 = Lconst.from_pyrope('0b000?01');
@@ -191,7 +191,7 @@ test('TEST AND_OP compare with unknown', () => {
 });
 
 // OR_OP
-test('simple tests for OR operation', () => {
+test('16. simple tests for OR operation', () => {
   const testing1 = Lconst.from_pyrope('0xFFD_F');
   const testing2 = Lconst.from_pyrope('0x0_000');
   const res = testing1.or_op(testing2);
@@ -200,7 +200,7 @@ test('simple tests for OR operation', () => {
   expect(res.bits).toBe(17n);
 });
 
-test('TEST OR_OP compare with unknown', () => {
+test('17. TEST OR_OP compare with unknown', () => {
   const a1 = Lconst.from_pyrope('0b010??1');
   const a2 = Lconst.from_pyrope('0b000?11');
   const resa = a1.or_op(a2);
@@ -217,7 +217,7 @@ test('TEST OR_OP compare with unknown', () => {
 // test plus and minus
 
 // test mul and div
-test('complicated check, a divide by b', () => {
+test('18. complicated check, a divide by b', () => {
   const testing1a = Lconst.from_pyrope('50052096');
   const testing1b = Lconst.from_pyrope('0xBE_EF');
   expect(testing1a.div_op(testing1b).num).toBe(1024n);
@@ -230,7 +230,7 @@ test('complicated check, a divide by b', () => {
   expect(testing2c.div_op(testing2a).num).toBe(16177n); // num is ?1, which is 16 bits
 });
 
-test('complicated check, a multiply b', () => {
+test('19. complicated check, a multiply b', () => {
   const testing1a = Lconst.from_pyrope('1231532342345');
   const testing1b = Lconst.from_pyrope('0xBEEF');
   expect(testing1a.mult_op(testing1b).num).toBe(60196069361481255n);
@@ -273,7 +273,7 @@ test('complicated check, a multiply b', () => {
 });
 
 // tests from string
-test('complated check, from_string', () => {
+test('20. complated check, from_string', () => {
   // I used the following online big number calculator to solve the answer before testing
   // https://www.calculator.net/big-number-calculator.html?cx=1%2C111%2C835%2C904&cy=70&cp=20&co=plus
   const test1 = Lconst.from_string('BEEF');
@@ -283,8 +283,13 @@ test('complated check, from_string', () => {
   expect(test2.explicit_str && test1.explicit_str).toBe(true);
 });
 
+test('addition. complicated check. from_string', () => {
+  const test1 = Lconst.from_string('BEEF');
+  const test2 = Lconst.from_string('FFFF');
+  expect(test1.and_op(test2).num).toBe(1111770182n);
+});
 // tests ADD_OP
-test('complicated check, and_op', () => {
+test('21. complicated check, and_op', () => {
   const testing1a = Lconst.from_pyrope('0b1?10');
   const testing1b = Lconst.from_pyrope('0b10');
   // if a is 1?10, and b is 0b10, then a+b = ???00

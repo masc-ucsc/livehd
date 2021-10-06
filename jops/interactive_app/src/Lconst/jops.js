@@ -1,5 +1,4 @@
 const assert = require('assert');
-const { lchmod } = require('fs');
 assert(50 < 70, 'this is not true');
 // CITATION
 // https://tc39.es/proposal-bigint/#sec-exp-operator
@@ -69,11 +68,21 @@ class Lconst {
     return new_l;
   }
 
+  // not sure why bits is less than 62
+  is_i() {
+    return !this.explicit_str && this.bits <= 62;
+  }
+
+  to_i() {
+    // return static_cast<long int>(num);
+    return this.num;
+  }
+
   // ======= new Lconst returned =======================
   static from_pyrope(number_str) {
     // check, the input must be a string
     if (typeof number_str != 'string') {
-      throw 'the input must be a string';
+      throw new TypeError('the input must be a string');
     }
 
     if (number_str.length === 0) return new Lconst();
@@ -84,7 +93,7 @@ class Lconst {
     // special cases !!!
     if (txt === 'true') {
       return Lconst.new_lconst(false, 1n, -1n);
-    } else if (txt == 'false') {
+    } else if (txt === 'false') {
       return Lconst.new_lconst(false, 1n, 0n);
     }
 
@@ -109,8 +118,10 @@ class Lconst {
         if (sel_ch === 's') {
           skip_chars += 1;
           sel_ch = txt[skip_chars];
-          if (sel_ch != 'b') {
-            throw `ERROR: ${number_str} unknown pyrope encoding only binary can be signed 0sb...`;
+          if (sel_ch !== 'b') {
+            throw new Error(
+              `ERROR: ${number_str} unknown pyrope encoding only binary can be signed 0sb...`
+            );
           }
           assert(
             !unsigned_result,
@@ -135,8 +146,41 @@ class Lconst {
           shift_mode = 8;
           skip_chars += 1;
         } else {
-          throw `ERROR: ${number_str} unknown pyrope encoding (leading ${sel_ch})...`;
+          throw new Error(
+            `ERROR: ${number_str} unknown pyrope encoding (leading ${sel_ch})...`
+          );
         }
+      }
+    } else {
+      let start_i = number_str.length;
+      let end_i = 0;
+
+      if (
+        number_str.length > 1 &&
+        number_str.charAt(0) === "'" &&
+        number_str.charAt(start_i) === "'"
+      ) {
+        --start_i;
+        ++end_i;
+      }
+
+      let bigNumber = BigInt(0);
+      let prev_escaped = false;
+      for (let i = start_i - 1; i >= end_i; --i) {
+        bigNumber <<= 8n;
+        bigNumber |= BigInt(number_str.charCodeAt(i));
+
+        if (number_str[i] === "'" && !prev_escaped && i !== 0) {
+          throw new Error(
+            `ERROR: ${number_str} malformed pyrope string. ' must be escaped`
+          );
+        }
+
+        if (number_str[i] === '\\') {
+          if (prev_escaped) prev_escaped = false;
+          else prev_escaped = true;
+        }
+        return Lconst.new_lconst(true, (start_i - end_i) * 8, bigNumber);
       }
     }
 
@@ -148,7 +192,9 @@ class Lconst {
         if (txt[i] >= 0) {
           num = 10n * num + BigInt(txt[i]);
         } else {
-          throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
+          throw new Error(
+            `ERROR: ${number_str} encoding could not use ${txt[i]}`
+          );
         }
       }
     } else if (shift_mode === 2) {
@@ -168,7 +214,9 @@ class Lconst {
           (shift_mode === 16 && !/^(\d|[abcdef])$/.test(txt[i])) |
           (shift_mode === 8 && !/^[0-7]$/.test(txt[i]))
         ) {
-          throw `ERROR: ${number_str} encoding could not use ${txt[i]}`;
+          throw new Error(
+            `ERROR: ${number_str} encoding could not use ${txt[i]}`
+          );
         }
         to_power += 1n;
         // console.log(i + ' current letter is ' + txt[i] + ' shift mode ' + shift_mode + ' to power ' + to_power);
@@ -181,7 +229,9 @@ class Lconst {
     if (negative) {
       num = -num;
       if (unsigned_result && num < 0n) {
-        throw `ERROR, ${number_str} negative value but it must be unsigned`;
+        throw new Error(
+          `ERROR, ${number_str} negative value but it must be unsigned`
+        );
       }
     }
 
@@ -217,7 +267,7 @@ class Lconst {
         unknown = (unknown << 1n) | 1n;
         unknown_found = true;
       } else if (char === '0') {
-        if (num !== 0n || unknown != 0n) {
+        if (num !== 0n || unknown !== 0n) {
           /* console.log('get inside of the loop: ', num); */
           unknown <<= 1n;
           num <<= 1n;
@@ -233,7 +283,7 @@ class Lconst {
           /*  console.log('what2', num); */
         }
       } else {
-        throw `ERROR: ${txt} binary encoding could not use ${char}`;
+        throw new Error(`ERROR: ${txt} binary encoding could not use ${char}`);
       }
     }
 
@@ -270,9 +320,44 @@ class Lconst {
     return output + this.num.toString(16);
   }
 
+  to_string() {
+    let str = '';
+    let tmp = this.num;
+    while (tmp) {
+      let ch = tmp & 0xffn;
+      str += ch;
+      tmp >>= 8n;
+    }
+    return str;
+  }
+
+  // TESTING
+  to_binary() {
+    if (this.has_unknown) {
+      return this.to_string();
+    }
+
+    let v = this.num;
+    if (v === 0n) return '0';
+
+    let txt = '';
+    /* console.log(this.bits, this.num); */
+    for (let i = 0n; i < this.bits; ++i) {
+      if (v & 1n) {
+        txt = '1' + txt;
+      } else {
+        txt = '0' + txt;
+      }
+      v = v >> 1n;
+    }
+    return txt;
+  }
+
   adjust(com_lconst) {
     if (!(com_lconst instanceof Lconst)) {
-      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+      throw new Error(
+        `ERROR the input ${com_lconst} must be an instance of Lconst`
+      );
     }
     this.explicit_str =
       com_lconst.explicit_str && (this.bits === 0 || this.explicit_str);
@@ -294,22 +379,13 @@ class Lconst {
     if (!this.has_unknown) return false;
   }
 
-  to_string() {
-    let str = '';
-    let tmp = this.num;
-    while (tmp) {
-      let ch = tmp & 0xffn;
-      str += ch;
-      tmp >>= 8n;
-    }
-    return str;
-  }
-
   // ========= operation =============
   // restriction: the num of these two objects do not have underscore and '?'
   and_op(com_lconst) {
     if (!(com_lconst instanceof Lconst)) {
-      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+      throw TypeError(
+        `ERROR the input ${com_lconst} must be an instance of Lconst`
+      );
     }
 
     let res = new Lconst();
@@ -333,7 +409,9 @@ class Lconst {
 
   or_op(com_lconst) {
     if (!(com_lconst instanceof Lconst)) {
-      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+      throw TypeError(
+        `ERROR the input ${com_lconst} must be an instance of Lconst`
+      );
     }
 
     let res = new Lconst();
@@ -352,7 +430,9 @@ class Lconst {
 
   add_op(com_lconst) {
     if (!(com_lconst instanceof Lconst)) {
-      throw `ERROR the input ${com_lconst} must be an instance of Lconst`;
+      throw TypeError(
+        `ERROR the input ${com_lconst} must be an instance of Lconst`
+      );
     }
 
     let set_checker = 1n;
@@ -446,11 +526,13 @@ class Lconst {
   sub_op(com_lconst) {
     // in sub operation, we cannot have unknown values
     if (this.is_string() || com_lconst.is_string()) {
-      throw `ERROR: not allowed because one is string.`;
+      throw TypeError(`ERROR: not allowed because one is string.`);
     }
 
     if (typeof com_lconst !== Lconst) {
-      throw `ERROR: not allowed because the take in value is not Lconst`;
+      throw TypeError(
+        `ERROR: not allowed because the take in value is not Lconst`
+      );
     }
 
     let res = new Lconst();
@@ -461,10 +543,12 @@ class Lconst {
 
   mult_op(com_lconst) {
     if (this.is_string() || com_lconst.is_string())
-      throw `ERROR: not allowed because one is string.`;
+      throw TypeError(`ERROR: not allowed because one is string.`);
 
     if (!com_lconst instanceof Lconst)
-      throw `ERROR: not allowed because the take in value is not Lconst`;
+      throw TypeError(
+        `ERROR: not allowed because the take in value is not Lconst`
+      );
 
     if (this.has_unknown || com_lconst.has_unknown) {
       let n1 = this.is_negative() ? -1 : 1;
@@ -483,10 +567,12 @@ class Lconst {
 
   div_op(com_lconst) {
     if (this.is_string() || com_lconst.is_string())
-      throw `ERROR: not allowed because one is string.`;
+      throw TypeError(`ERROR: not allowed because one is string.`);
 
     if (!com_lconst instanceof Lconst)
-      throw `ERROR: not allowed because the take in value is not Lconst`;
+      throw TypeError(
+        `ERROR: not allowed because the take in value is not Lconst`
+      );
 
     if (com_lconst.num === 0n) {
       if (this.is_negative()) return Lconst.unknown_negative(2n);
@@ -511,6 +597,28 @@ class Lconst {
     res.adjust(com_lconst);
     return res;
   }
+
+  /*   concat_op(com_lconst) {
+    if (this.is_string() || com_lconst.is_string()) {
+      let str = '';
+      let com_str = '';
+
+      if (this.is_string()) str = this.to_string();
+      else if (this.is_i()) str = String(this.to_i());
+      else str = this.to_binary();
+
+      if (com_lconst.is_string()) com_str = com_lconst.to_string();
+      else if (com_lconst.is_i()) com_lconst = String(com_lconst.to_i);
+      else com_lconst = this.to_binary();
+
+      // question
+      return Lconst.from_string();
+    }
+
+    let res_num = (this.num << com_lconst.bits) | com_lconst.num;
+
+    return Lconst.new_lconst(false, Lconst.calc_num_bits(res_num), res_num);
+  } */
 
   static unknown(nbits) {
     let res = new Lconst();
@@ -568,7 +676,6 @@ class Lconst {
 } // end of the class ————————————————————————————————————————————
 
 // 🐕testing workspace for Lconst🐇
-const testing1 = Lconst.from_pyrope('0b1?10');
-const testing2 = Lconst.from_pyrope('0b10');
-console.log(testing2.add_op(testing1));
+const testing1 = Lconst.from_pyrope('?');
+console.log(testing1);
 module.exports = Lconst;
