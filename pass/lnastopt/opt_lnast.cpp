@@ -118,6 +118,72 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   st.set(var, result_trivial);
 }
 
+void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial + st.get_trivial(data.token.get_text());
+      }
+      else {
+        result_trivial = result_trivial + Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+    else {
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial - st.get_trivial(data.token.get_text());
+      }
+      else {
+        result_trivial = result_trivial - Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (data.type.is_ref()) {
+      result_trivial = result_trivial | st.get_trivial(data.token.get_text());
+    } else {
+      result_trivial = result_trivial | Lconst::from_pyrope(data.token.get_text());
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
 void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   //-------------------------------
   auto idx                     = ln->get_first_child(lnid);
@@ -304,9 +370,9 @@ yy = (1,a=3)
       st.set(lhs_ids[0], v);
     }
 
-  }else 
+  }else
 #endif
-    
+
     if (rhs_data.type.is_ref()) {
     auto bundle = st.get_bundle(rhs_txt);
     st.set(lhs_txt, bundle);
@@ -332,6 +398,8 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus     : process_plus     (ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus     : process_minus     (ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or     : process_bit_or     (ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign   : process_assign   (ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, idx); break;
