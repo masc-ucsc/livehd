@@ -210,8 +210,12 @@ void Symbol_table::dump() const {
   for(auto var:stack.back().declared) {
     fmt::print("var:{}\n", var);
     auto it = varmap.find(std::pair(stack.back().scope, var));
-    if (it != varmap.end())
-      it->second->dump();
+    if (it != varmap.end()) {
+      if (it->second)
+        it->second->dump();
+      else
+        fmt::print("nullptr bundle\n");
+    }
   }
 }
 
