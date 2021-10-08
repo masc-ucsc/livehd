@@ -1,4 +1,4 @@
-module pp2(
+module array(
    input signed [3:0] data
   ,input signed [1:0] in
   ,output reg signed [3:0] out

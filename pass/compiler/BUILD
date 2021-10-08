@@ -39,6 +39,7 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
+    "array",
     "scalar_tuple",
     "flatten_bundle",
     "partial",
