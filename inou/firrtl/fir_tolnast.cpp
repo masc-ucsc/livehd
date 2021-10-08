@@ -322,13 +322,6 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
     fwd = true;
   }
 
-  uint8_t rd_latency;
-  if (cmem.sync_read()) {  // FIXME: Make sure this is correct (0 and 1 in right spot)
-    rd_latency = 1;
-  } else {
-    rd_latency = 0;
-  }
-
   // create foo_mem_res = __memory(foo_mem_aruments.__last_value)
   auto idx_attr_get = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   auto temp_var_str = create_tmp_var();
@@ -355,7 +348,8 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
   lnast.add_child(idx_asg_mfwd, Lnast_node::create_const(fwd));  // note: initialized
 
   auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-  lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_latency")));
+  lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_type")));
+  lnast.add_child(idx_ta_mlat, Lnast_node::create_const(cmem.sync_read()?1:0));
 
   auto idx_asg_mwensize = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg_mwensize, Lnast_node::create_ref(mmap_lib::str::concat(cmem.id(), "_wensize")));
@@ -375,7 +369,6 @@ void Inou_firrtl::InitCMemory(Lnast& lnast, Lnast_nid& parent_node, const firrtl
   mem2initial_idx.insert_or_assign(mmap_lib::str(cmem.id()), idx_stmts);
 
   mem2port_cnt.insert_or_assign(mmap_lib::str(cmem.id()), -1);
-  mem2rd_latency.insert_or_assign(mmap_lib::str(cmem.id()), rd_latency);
 }
 
 void Inou_firrtl::HandleMportDeclaration(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement_MemoryPort& mport) {
@@ -422,7 +415,7 @@ void Inou_firrtl::HandleMportDeclaration(Lnast& lnast, Lnast_nid& parent_node, c
   lnast.add_child(idx_ta_men_ini, Lnast_node::create_const(default_val_str));
 
   auto idx_ta_mlat_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
-  lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_latency")));
+  lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_type")));
   lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_const(port_cnt_str));
   lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_const(default_val_str));
 
@@ -901,11 +894,6 @@ void Inou_firrtl::HandleRdMportUsage(Lnast& lnast, Lnast_nid& parent_node, const
   if (it == mport_usage_visited.end()) {
     mport_usage_visited.insert(mport_name);
 
-    auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_latency")));
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_const(mem_port_str));
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_const((mem2rd_latency[mem_name])));
-
     auto idx_ta_mrdport = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_rdport")));
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_const(mem_port_str));
@@ -953,10 +941,6 @@ void Inou_firrtl::HandleWrMportUsage(Lnast& lnast, Lnast_nid& parent_node, const
     mem2one_wr_mport.insert_or_assign(mem_name, port_cnt);
 
     mport_usage_visited.insert(mport_name);
-    auto idx_ta_mlat = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_latency")));
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_const(port_cnt_str));
-    lnast.add_child(idx_ta_mlat, Lnast_node::create_const(1));  // wr latency must be 1
 
     auto idx_ta_mrdport = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_rdport")));
@@ -1908,8 +1892,8 @@ void Inou_firrtl::FinalMemInterfaceAssign(Lnast& lnast, Lnast_nid& parent_node) 
     lnast.add_child(idx_asg_fwd, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_fwd")));
 
     auto idx_asg_lat = lnast.add_child(idx_ta_margs, Lnast_node::create_assign());
-    lnast.add_child(idx_asg_lat, Lnast_node::create_const("latency"));
-    lnast.add_child(idx_asg_lat, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_latency")));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_const("type"));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_ref(mmap_lib::str::concat(mem_name, "_type")));
 
     auto idx_asg_wensize = lnast.add_child(idx_ta_margs, Lnast_node::create_assign());
     lnast.add_child(idx_asg_wensize, Lnast_node::create_const("wensize"));
@@ -2172,7 +2156,6 @@ void Inou_firrtl::IterateModules(Eprp_var& var, const firrtl::FirrtlPB_Circuit& 
     reg_name2rst_init_expr.clear();
     mem2port_cnt.clear();
     mem2wensize.clear();
-    mem2rd_latency.clear();
     mem2initial_idx.clear();
     mport2mem.clear();
     mem2din_fields.clear();

@@ -171,7 +171,7 @@ constexpr mmap_lib::str Ntype::get_sink_name_slow(Ntype_op op, int pid) {
         case 4: return "enable"_str;   // runtime  x n_ports
         case 5: return "fwd"_str;      // comptime x 1
         case 6: return "posclk"_str;   // comptime x 1
-        case 7: return "latency"_str;  // comptime x n_ports
+        case 7: return "type"_str;     // comptime x 1 (0:async, 1:sync: 2:array)
         case 8: return "wensize"_str;  // comptime x 1  -- number of Write Enable bits
         case 9: return "size"_str;     // comptime x 1
         case 10: return "rdport"_str;  // comptime x n_ports (1 rd, 0 wr)

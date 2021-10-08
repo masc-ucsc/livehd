@@ -7,12 +7,23 @@
 
 class Prp2lnast {
 protected:
+
   std::unique_ptr<Lnast> lnast;
 
   std::string prp_file;
   TSParser   *parser;
   TSNode      ts_root_node;
+  bool        in_lhs;
 
+  mmap_lib::str get_text(const TSNode &node) const;
+  mmap_lib::str get_trivial_identifier(const TSNode &node) const {
+    return get_text(node);
+  }
+  mmap_lib::str get_complex_identifier(const TSNode &node) const;
+
+  bool is_lhs_fcall_or_variable(TSTreeCursor *tc) const;
+
+  void process_fcall_or_variable(TSTreeCursor *tc);
   void process_multiple_stmt(TSTreeCursor *tc);
   void process_stmt_seq(TSTreeCursor *tc);
   void process_root();

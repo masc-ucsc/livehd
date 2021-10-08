@@ -20,7 +20,6 @@ mem_addr    = ()
 mem_din     = ()
 mem_enable  = ()
 mem_fwd     = 0
-mem_latency = ()
 mem_wensize = 4
 mem_size    = 0b0000010000000000 //1024
 mem_rdport  = ()
@@ -29,13 +28,11 @@ if (true) {
   mem_clock     = $clock
   mem_addr.0    = 0
   mem_enable.0  = 0
-  mem_latency.0 = 0
   mem_rdport.0  = true  
   mem_din.0.0   = 0
   mem_din.0.1   = 0
   mem_din.0.2   = 0
   mem_din.0.3   = 0
-  mem_latency.0 = 1
   mem_rdport.0  = false
   F4            = MPORT.__last_value
   mem_din.0     = F4
@@ -43,7 +40,6 @@ if (true) {
   mem_clock           = $clock 
   mem_addr.1          = 0
   mem_enable.1        = 0
-  mem_latency.1       = 0
   mem_rdport.1        = true
   //mem_res.1.0.__ubits = 8
   //mem_res.1.1.__ubits = 8
@@ -63,7 +59,6 @@ if (true) {
 F1            = $io.addr
 mem_addr.0    = F1
 mem_enable.0  = 1
-// mem_latency.0 = 1
 // mem_rdport.0  = false 
 
 F2 = $io.mask.0
@@ -106,7 +101,7 @@ if (F11) {
     mem_enable.1 = 1
 }
 
-mem_latency.1 = 1
+mem_type = 1 // sync
 mem_rdport.1  = true 
 F12 = dataOut_MPORT.0 
 F13 = dataOut_MPORT.1 
@@ -124,6 +119,6 @@ F18 = F19@()
 F22 = F21@()
 F24 = (F18, F22) 
 
-F25 = (addr = mem_addr, clock = mem_clock, din = F24, enable = mem_enable, fwd = mem_fwd, latency = mem_latency, wensize = mem_wensize, size = mem_size, rdport = mem_rdport)
+F25 = (addr = mem_addr, clock = mem_clock, din = F24, enable = mem_enable, fwd = mem_fwd, type = mem_type, wensize = mem_wensize, size = mem_size, rdport = mem_rdport)
 mem_interface_args = F25
 

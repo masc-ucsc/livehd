@@ -128,9 +128,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
   };
   std::vector<Port_field> port_vector;  // first == read, second == port_id
 
-  mmap_lib::str parameters;
+  int mem_size    = 0;
+  int mem_bits    = 0;
+  int mem_fwd     = 0;
+  int mem_type    = 2; // array by default
+  int mem_wensize = 0;
 
-  bool first_entry = true;
   for (auto e : node.inp_edges()) {
     auto pin_name = e.sink.get_pin_name();
 
@@ -144,41 +147,31 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
         Pass::error("memory {} should have a constant for bits not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      auto v = e.driver.get_type_const().to_verilog();
-      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".BITS(", v, ")");
-      first_entry = false;
+      mem_bits = e.driver.get_type_const().to_i();
     } else if (pin_name == "size") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for size not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      auto v = e.driver.get_type_const().to_verilog();
-      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".SIZE(", v, ")");
-      first_entry = false;
-    } else if (pin_name == "latency") {
+      mem_size = e.driver.get_type_const().to_i();
+    } else if (pin_name == "type") {
       if (!e.driver.is_type_const()) {
-        Pass::error("memory {} should have a constant for latency not {}", node.debug_name(), e.driver.get_node().debug_name());
+        Pass::error("memory {} should have a constant type not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      auto v = e.driver.get_type_const().to_verilog();
-      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".LATENCY_", port_id, "(", v, ")");
-      first_entry = false;
+      mem_type = e.driver.get_type_const().to_i();
     } else if (pin_name == "wensize") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for wensize not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      auto v = e.driver.get_type_const().to_verilog();
-      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".WENSIZE", "(", v, ")");
-      first_entry = false;
+      mem_wensize = e.driver.get_type_const().to_i();
     } else if (pin_name == "fwd") {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant for fwd not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
       }
-      auto v = e.driver.get_type_const().to_verilog();
-      parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".FWD", "(", v, ")");
-      first_entry = false;
+      mem_fwd = e.driver.get_type_const().to_i();
     } else if (pin_name == "clock") {
       port_vector[port_id].clock = e.driver;
     } else if (pin_name == "addr") {
@@ -203,92 +196,171 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
     }
   }
 
-  bool     single_clock    = true;
-  Node_pin base_clock_dpin = port_vector[0].clock;
-  {
-    for (auto &p : port_vector) {
-      auto &dpin = p.clock;
-      if (dpin.is_invalid()) {
-        dpin = base_clock_dpin;
-        continue;
+  if (mem_type==0 || mem_type==1) { // sync or async memory
+    bool     single_clock    = true;
+    Node_pin base_clock_dpin = port_vector[0].clock;
+    {
+      for (auto &p : port_vector) {
+        auto &dpin = p.clock;
+        if (dpin.is_invalid()) {
+          dpin = base_clock_dpin;
+          continue;
+        }
+        if (dpin != base_clock_dpin)
+          single_clock = false;
       }
-      if (dpin != base_clock_dpin)
-        single_clock = false;
     }
-  }
-  if (base_clock_dpin.is_invalid()) {
-    Pass::error("memory {} should have a clock pin", node.debug_name());
-    return;
-  }
 
-  // create name
-  fout->append(mmap_lib::str::concat("cgen_memory_", single_clock ? "" : "multiclock_"));
-  fout->append(mmap_lib::str::concat(n_rd_ports, "rd_"));
-  fout->append(mmap_lib::str::concat(n_wr_ports, "wr "));
+    if (base_clock_dpin.is_invalid()) {
+      Pass::error("memory {} should have a clock pin", node.debug_name());
+      return;
+    }
+    // create name
+    fout->append(mmap_lib::str::concat("cgen_memory_", single_clock ? "" : "multiclock_"));
+    fout->append(mmap_lib::str::concat(n_rd_ports, "rd_"));
+    fout->append(mmap_lib::str::concat(n_wr_ports, "wr "));
 
-  // paremeters
-  fout->append(" #(",parameters,") ");
+    // parameters
+    mmap_lib::str parameters;
+    bool first_entry = true;
 
-  // instance name
-  fout->append(iname, "(\n");
-
-  first_entry = true;
-  if (single_clock) {
-    fout->append(mmap_lib::str::concat(".clock(", get_wire_or_const(base_clock_dpin), ")\n"));
+    parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".LATENCY_0(", mem_type, ")");
     first_entry = false;
-  }
+    parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".BITS(", mem_bits, ")");
+    first_entry = false;
+    parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".SIZE(", mem_size, ")");
+    first_entry = false;
+    parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".WENSIZE", "(", mem_wensize, ")");
+    first_entry = false;
+    parameters = mmap_lib::str::concat(parameters, first_entry ? "" : " ,", ".FWD", "(", mem_fwd, ")");
+    first_entry = false;
+    fout->append(" #(",parameters,") ");
 
-  {
-    auto n_rd_pos = 0;
-    auto n_wr_pos = 0;
-    auto n_pos    = 0;
-    for (auto &p : port_vector) {
-      if (p.rdport) {
-        if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
-          node.dump();
-          Pass::error("memory {} read port is not correctly configured\n", node.debug_name());
-        }
-        fout->append(mmap_lib::str::concat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_",
-                     n_rd_pos,
-                     "(",
-                     get_wire_or_const(p.addr),
-                     ")\n"));
-        first_entry = false;
+    // instance name
+    fout->append(iname, "(\n");
 
-        fout->append("  ,.rd_enable_", n_rd_pos, "(", get_wire_or_const(p.enable), ")\n");
-        if (!single_clock) {
-          fout->append("  ,.rd_clock_", n_rd_pos, "(", get_wire_or_const(p.clock), ")\n");
+    first_entry = true;
+    if (single_clock) {
+      fout->append(mmap_lib::str::concat(".clock(", get_wire_or_const(base_clock_dpin), ")\n"));
+      first_entry = false;
+    }
+
+    {
+      auto n_rd_pos = 0;
+      auto n_wr_pos = 0;
+      auto n_pos    = 0;
+      for (auto &p : port_vector) {
+        if (p.rdport) {
+          if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
+            node.dump();
+            Pass::error("memory {} read port is not correctly configured\n", node.debug_name());
+          }
+          fout->append(mmap_lib::str::concat(first_entry ? "  .rd_addr_" : "  ,.rd_addr_",
+                n_rd_pos,
+                "(",
+                get_wire_or_const(p.addr),
+                ")\n"));
+          first_entry = false;
+
+          fout->append("  ,.rd_enable_", n_rd_pos, "(", get_wire_or_const(p.enable), ")\n");
+          if (!single_clock) {
+            fout->append("  ,.rd_clock_", n_rd_pos, "(", get_wire_or_const(p.clock), ")\n");
+          }
+          auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
+          fout->append("  ,.rd_dout_", n_rd_pos, "(", get_wire_or_const(dout_dpin), ")\n");
+          ++n_rd_pos;
+        } else {
+          if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
+            node.dump();
+            Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
+          }
+          fout->append(mmap_lib::str::concat(first_entry ? "  .wr_addr_" : "  ,.wr_addr_",
+                n_wr_pos,
+                "(",
+                get_wire_or_const(p.addr),
+                ")\n"));
+
+          first_entry = false;
+
+          fout->append("  ,.wr_enable_", n_wr_pos, "(", get_wire_or_const(p.enable), ")\n");
+          if (!single_clock) {
+            fout->append("  ,.wr_clock_", n_wr_pos, "(", get_wire_or_const(p.clock), ")\n");
+          }
+          fout->append("  ,.wr_din_", n_wr_pos, "(", get_wire_or_const(p.din), ")\n");
+          ++n_wr_pos;
         }
-        auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
-        fout->append("  ,.rd_dout_", n_rd_pos, "(", get_wire_or_const(dout_dpin), ")\n");
-        ++n_rd_pos;
-      } else {
-        if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
+        ++n_pos;
+      }
+      I(n_rd_pos == n_rd_ports);
+      I(n_wr_pos == n_wr_ports);
+    }
+
+    fout->append(");\n");
+  }else{ // array
+    fout->append(mmap_lib::str::concat("reg [", mem_bits-1, ":0] ", iname, "[", mem_size-1, ":0];\n"));
+
+    if (first_array_block) {
+      fout->append("integer mem_loop_i;\n");
+      first_array_block = false;
+    }
+
+    fout->append("always_comb begin\n");
+
+    fout->append("for (mem_loop_i=0;mem_loop_i < ", mem_size, ";mem_loop_i = mem_loop_i + 1) begin\n");
+    fout->append(iname, "[mem_loop_i] = 'b0;\n");
+    fout->append("end\n");
+
+    {
+      // ARRAY has forwarding, so writes first
+      for (auto &p : port_vector) {
+        if (p.rdport)
+          continue;
+
+        if (p.addr.is_invalid() || p.din.is_invalid()) {
           node.dump();
           Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
         }
-        fout->append(mmap_lib::str::concat(first_entry ? "  .wr_addr_" : "  ,.wr_addr_",
-                     n_wr_pos,
-                     "(",
-                     get_wire_or_const(p.addr),
-                     ")\n"));
 
-        first_entry = false;
+        auto din_name = get_wire_or_const(p.din);
 
-        fout->append("  ,.wr_enable_", n_wr_pos, "(", get_wire_or_const(p.enable), ")\n");
-        if (!single_clock) {
-          fout->append("  ,.wr_clock_", n_wr_pos, "(", get_wire_or_const(p.clock), ")\n");
+        auto write_stmt = mmap_lib::str::concat(iname, "[", get_wire_or_const(p.addr), "] = ", din_name,";\n");
+        if (p.enable.is_invalid()) {
+          fout->append("  ", write_stmt);
+        }else{
+          fout->append("  if (", get_wire_or_const(p.enable), ") begin \n");
+          fout->append("    ", write_stmt);
+          fout->append("end\n");
         }
-        fout->append("  ,.wr_din_", n_wr_pos, "(", get_wire_or_const(p.din), ")\n");
-        ++n_wr_pos;
       }
-      ++n_pos;
-    }
-    I(n_rd_pos == n_rd_ports);
-    I(n_wr_pos == n_wr_ports);
-  }
 
-  fout->append(");\n");
+      auto n_pos    = 0;
+      for (auto &p : port_vector) {
+        if (!p.rdport) {
+          ++n_pos;
+          continue;
+        }
+
+        if (p.addr.is_invalid()) {
+          node.dump();
+          Pass::error("array {} read port is not correctly configured\n", node.debug_name());
+        }
+        auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
+        auto dest_name = get_wire_or_const(dout_dpin);
+
+        auto read_stmt = mmap_lib::str::concat(dest_name ," = ", iname, "[", get_wire_or_const(p.addr), "];\n");
+        if (p.enable.is_invalid()) {
+          fout->append("  ", read_stmt);
+        }else{
+          fout->append("  if (", get_wire_or_const(p.enable), ") begin \n");
+          fout->append("    ", read_stmt);
+          fout->append("end\n");
+        }
+        ++n_pos;
+      }
+    }
+
+    fout->append("end\n");
+  }
 }
 
 void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node &node) {
@@ -959,6 +1031,7 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
   pin2var   .clear();
   pin2expr  .clear();
   mux2vector.clear();
+  first_array_block = true;
 
   mmap_lib::str filename;
   if (odir.empty()) {

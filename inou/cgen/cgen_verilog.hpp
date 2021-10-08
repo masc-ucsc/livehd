@@ -26,6 +26,8 @@ private:
   absl::flat_hash_map<Node_pin::Compact_class, mmap_lib::str>  pin2var;
   absl::flat_hash_map<Node    ::Compact_class, mmap_lib::str>  mux2vector;
 
+  bool first_array_block;
+
   std::atomic<int> nrunning;
   inline static std::mutex lgs_mutex; // just needed for the once at a time setup of static reserved_keyword
   inline static absl::flat_hash_set<mmap_lib::str> reserved_keyword;

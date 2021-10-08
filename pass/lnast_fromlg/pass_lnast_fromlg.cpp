@@ -1025,10 +1025,10 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       case 5:  // fwd
         fwd_q.push(inp.driver);
         break;
-      case 7:  // latency
+      case 7:  // type
         lat_q.push(inp.driver);
         break;
-      case 8:  // wmask
+      case 8:  // wensize
         wmask_q.push(inp.driver);
         break;
       case 6:  // posedge
@@ -1037,7 +1037,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       case 9:  // size
         size_dpin = inp.driver;
         break;
-      case 10:  // wmode
+      case 10:  // rdport
         wmode_q.push(inp.driver);
         break;
       default: Pass::error("bad input edge into memory node {} with sink pid {}", pin.get_node().debug_name(), inp.sink.get_pid());
@@ -1102,7 +1102,7 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       fwd_q.pop();
 
     auto idx_asg_lat = lnast.add_child(idx_tuple, Lnast_node::create_assign());
-    lnast.add_child(idx_asg_lat, Lnast_node::create_const("__latency"));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_const("__type"));
     attach_child(lnast, idx_asg_lat, lat_q.front());
     if (!is_one_lat)
       lat_q.pop();

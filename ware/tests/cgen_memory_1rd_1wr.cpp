@@ -74,9 +74,6 @@ int main(int argc, char **argv, char **env) {
   uint16_t val_wr_addr[NUM_TESTS] = {0,0,0,0};
   uint16_t val_wr_enable[NUM_TESTS] = {1,1,1,1};
   uint16_t val_wr_din[NUM_TESTS+2] = {0xaaaa, 0xaaab, 0xaaaf, 0x5555, 0x0000, 0x0000};  //extra two values for longer latency param settings
-  
-
-
 
 #ifdef TRACE
   // init trace dump
@@ -121,7 +118,7 @@ int main(int argc, char **argv, char **env) {
     printf("With values:\n");
     printf("rd_addr = 0x%X, wr_addr = 0x%X, wr_din = 0x%X, rd_dout = 0x%X\n", top_rd_addr, top_wr_addr, top_wr_din, top_rd_dout);
   }
-  
+
 
   // FWD = 0 LATENCY = 1 WRENSIZE = 1
   printf("\nNow testing FWD=0 LATENCY=1 WRENSIZE=1\n");
@@ -157,7 +154,6 @@ int main(int argc, char **argv, char **env) {
     printf("With values:\n");
     printf("rd_addr = 0x%X, wr_addr = 0x%X, wr_din = 0x%X, rd_dout = 0x%X\n", top_rd_addr, top_wr_addr, top_wr_din, top_rd_dout);
   }
-  
 
   // FWD = 1 LATENCY = 0 WRENSIZE = 1
   printf("\nNow testing FWD=1 LATENCY=0 WRENSIZE=1\n");
@@ -182,7 +178,6 @@ int main(int argc, char **argv, char **env) {
     printf("With values:\n");
     printf("rd_addr = 0x%X, wr_addr = 0x%X, wr_din = 0x%X, rd_dout = 0x%X\n", top_rd_addr, top_wr_addr, top_wr_din, top_rd_dout);
   }
-  
 
   // FWD = 1 LATENCY = 1 WRENSIZE = 1
   printf("\nNow testing FWD=1 LATENCY=1 WRENSIZE=1\n");

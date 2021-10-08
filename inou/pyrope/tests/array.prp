@@ -1,0 +1,9 @@
+
+//foo[$in] = $data
+//%out = foo[$in]
+
+$data.__ubits = 3
+$in.__sbits = 2
+
+tmp = __memory(type=2, addr=($in,$in),rdport=(true,false), din=(0,$data))
+%out = tmp

@@ -191,7 +191,8 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
   auto do_fwd = node.get_sink_pin("fwd").get_driver_node().get_type_const().to_i();
   assert(do_fwd == 0 || do_fwd == 1);
 
-  auto latency_value = node.get_sink_pin("latency").get_driver_node().get_type_const().to_i();
+  auto latency_value = node.get_sink_pin("type").get_driver_node().get_type_const().to_i();
+  I(latency_value < 2); // TODO: 2 is array (no flop)
 
   memory->setParam("\\SIZE", mem_size);
   memory->setParam("\\MEMID", RTLIL::Const::from_string(node.get_name().to_s()));

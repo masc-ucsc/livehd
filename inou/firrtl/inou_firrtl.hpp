@@ -203,7 +203,6 @@ private:
 
   absl::flat_hash_map<mmap_lib::str, uint8_t>     mem2port_cnt;
   absl::flat_hash_map<mmap_lib::str, uint8_t>     mem2wensize;
-  absl::flat_hash_map<mmap_lib::str, uint8_t>     mem2rd_latency;
   absl::flat_hash_map<mmap_lib::str, Lnast_nid>   mem2initial_idx;
   absl::flat_hash_map<mmap_lib::str, mmap_lib::str> mport2mem;
   // control how many bits should be shifted at the bit-vector for masked mem_wr_enable

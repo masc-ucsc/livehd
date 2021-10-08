@@ -19,7 +19,7 @@ mem.din     = (0, 0, $din0)
 mem.enable  = (1, 1, $we0)
 
 mem.fwd     = true
-mem.latency = (1, 1, 1)
+mem.type    = 1
 mem.wensize = 2 // 1 we bit (no write mask)
 mem.rdport  = (-1,1,0) // 0 WR, !=0 -> RD
 // mem.rdport  = (1, 1, 0) // 0 WR, !=0 -> RD

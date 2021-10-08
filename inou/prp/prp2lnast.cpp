@@ -37,13 +37,73 @@ Prp2lnast::~Prp2lnast() {
   ts_parser_delete(parser);
 }
 
+bool Prp2lnast::is_lhs_fcall_or_variable(TSTreeCursor *tc) const {
+  auto tc2 = ts_tree_cursor_copy(tc);
+
+  while(ts_tree_cursor_goto_next_sibling(&tc2)) {
+    const TSNode node = ts_tree_cursor_current_node(&tc2);
+    mmap_lib::str node_type(ts_node_type(node));
+    if (node_type == "assignment_cont2")
+      return true;
+  }
+
+  return false;
+}
+
+mmap_lib::str Prp2lnast::get_text(const TSNode &node) const {
+  auto start = ts_node_start_byte(node);
+  auto end = ts_node_end_byte(node);
+  auto length = end - start;
+
+  I(end<=prp_file.size());
+  return mmap_lib::str(prp_file.substr(start, length));
+}
+
+mmap_lib::str Prp2lnast::get_complex_identifier(const TSNode &node) const {
+  auto start = ts_node_start_byte(node);
+  auto end = ts_node_end_byte(node);
+  auto length = end - start;
+
+  if (length>2) {
+    // create a canonical name: $foo -> $.foo
+    auto ch1 = prp_file[start];
+    auto ch2 = prp_file[start+1];
+    if ((ch1=='$' || ch1=='#' || ch1 == '%') && ch2 != '.')
+      return mmap_lib::str::concat(mmap_lib::str(1,ch1), ".", prp_file.substr(start+1, length-1));
+  }
+
+  I(end<=prp_file.size());
+  return mmap_lib::str(prp_file.substr(start, length));
+}
+
+void Prp2lnast::process_fcall_or_variable(TSTreeCursor *tc) {
+
+  const TSNode node = ts_tree_cursor_current_node(tc);
+
+  mmap_lib::str node_type(ts_node_type(node));
+  if (node_type == "trivial_identifier") {
+    auto var = get_trivial_identifier(node);
+
+    fmt::print("trivial_identifier[{}]\n", var);
+  }else if (node_type == "complex_identifier") {
+    auto var = get_complex_identifier(node);
+
+    fmt::print("complex_identifier[{}]\n", var);
+  }else{
+    fmt::print("FIXME: add {} fcall_or_variable\n", node_type);
+  }
+}
+
 void Prp2lnast::process_multiple_stmt(TSTreeCursor *tc) {
 
   const TSNode node = ts_tree_cursor_current_node(tc);
 
   mmap_lib::str node_type(ts_node_type(node));
   if (node_type == "fcall_or_variable") {
-    // TODO: HERE
+    in_lhs = is_lhs_fcall_or_variable(tc);
+    ts_tree_cursor_goto_first_child(tc);
+    process_fcall_or_variable(tc);
+    ts_tree_cursor_goto_parent(tc);
   }else{
     fmt::print("FIXME: add start {} to process_multiple_stmt\n", node_type);
   }
@@ -53,6 +113,7 @@ void Prp2lnast::process_multiple_stmt(TSTreeCursor *tc) {
     const TSNode cont_node = ts_tree_cursor_current_node(tc);
     mmap_lib::str cont_type(ts_node_type(cont_node));
     if (cont_type == "assignment_cont2") {
+      in_lhs = false;
       // TODO: HERE
     }else{
       fmt::print("FIXME: add cont {} to process_multiple_stmt\n", cont_type);

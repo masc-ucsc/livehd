@@ -1680,8 +1680,8 @@ bool Lgtuple::has_just_attributes() const {
 }
 
 void Lgtuple::dump() const {
-  fmt::print("tuple_name: {}{}\n", name, correct ? "" : " ISSUES");
+  fmt::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
   for (const auto &it : key_map) {
-    fmt::print("  key: {} dpin: {}\n", it.first, it.second.debug_name());
+    fmt::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());
   }
 }

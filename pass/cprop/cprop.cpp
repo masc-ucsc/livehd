@@ -1231,9 +1231,9 @@ bool Cprop::tuple_tuple_get(const Node &node) {
       }
     }
     if (!tuple_issues) {
-      Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
       node_tup->set_issue();  // It is not right
       tuple_issues = true;
+      Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
     }
     return false;
   }
@@ -1514,7 +1514,15 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 
   I(cell_ntype != Ntype_op::Sub);  // structural is not allowed with subs
   if (cell_ntype == Ntype_op::Memory) {
-    connect_clock_pin_if_needed(node);
+    auto type_dpin = tup->get_dpin("type");
+
+    if (type_dpin.is_invalid()) {
+      connect_clock_pin_if_needed(node);
+    }else{
+      auto v = type_dpin.get_node().get_type_const().to_i();
+      if (v != 2)
+        connect_clock_pin_if_needed(node);
+    }
     // memories should have the outputs already connected
   } else {
     auto sink_list = node.out_sinks();

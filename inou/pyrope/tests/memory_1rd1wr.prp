@@ -23,7 +23,7 @@ rd_a := $rd_addr + 32
 // mem.enable  = (1, wr_data_q & 1)  // rd_enable always, wr_enable on odd data
 
 // // mem.fwd     = false default value is false
-// mem.latency  = (0, 1)
+// mem.type  = 1
 
 // mem.wensize = 1 // no wmask, all bits always written
 // mem.rdport = (true,false) // port 0 rd, port 1 wr
@@ -49,7 +49,7 @@ mem.din     = (wr_data_q, 0)
 mem.enable  = (wr_data_q & 1, 1)  // rd_enable always, wr_enable on odd data
 
 // mem.fwd     = false default value is false
-mem.latency  = (1, 0)
+mem.type  = 1  // 1:sync memory (0:async)
 
 mem.wensize = 1 // no wmask, all bits always written
 mem.rdport = (false, true) // port 0 rd, port 1 wr

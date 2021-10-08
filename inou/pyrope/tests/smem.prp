@@ -13,7 +13,7 @@ mem_addr    = ()
 mem_din     = ()
 mem_enable  = ()
 mem_fwd     = 0
-mem_latency = ()
+mem_type    = 1
 mem_wensize = 1
 mem_size    = 0b0000010000000000 //1024
 mem_rdport  = ()
@@ -22,14 +22,12 @@ if (true) {
   mem_clock     = $clock
   mem_addr.0    = 0
   mem_enable.0  = 0
-  mem_latency.0 = 0
   mem_rdport.0  = true  
   mem_din.0     = 0
 
   mem_clock         = $clock 
   mem_addr.1        = 0
   mem_enable.1      = 0
-  mem_latency.1     = 0
   mem_rdport.1      = true
   // bug? where is mem_din.1 = 0? should you also provide it?
   mem_res.1.__ubits = 32
@@ -40,7 +38,6 @@ if (true) {
 F8            = $io.addr
 mem_addr.0    = F8
 mem_enable.0  = 1
-mem_latency.0 = 1
 mem_rdport.0  = false 
 
 F9            = MPORT.__last_value
@@ -58,10 +55,9 @@ if (F11) {
   mem_enable.1 = 1
 }
 
-mem_latency.1 = 1
 mem_rdport.1  = true
 %dataOut = dataOut_MPORT
 
-F15 = (addr = mem_addr, clock = mem_clock, din = mem_din, enable = mem_enable, fwd = mem_fwd, latency = mem_latency, wensize = mem_wensize, size = mem_size, rdport = mem_rdport)
+F15 = (addr = mem_addr, clock = mem_clock, din = mem_din, enable = mem_enable, fwd = mem_fwd, type = mem_type, wensize = mem_wensize, size = mem_size, rdport = mem_rdport)
 mem_interface_args = F15
 
