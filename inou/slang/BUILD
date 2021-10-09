@@ -14,8 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "@slang",   # Must be before pass because both have FMT and pass has priority (or slang fails)
         "//pass/common:pass",
-        "@slang",
     ],
     alwayslink = True,  # Needed to have constructor called
 )

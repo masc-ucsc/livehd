@@ -10,8 +10,8 @@ cc_library(
         "-O2",
     ],
     # WARNING: Yosys dynamic library was giving problems without FMT_HEADER_ONLY
-    defines = ["FMT_HEADER_ONLY"],
-    #srcs = glob(["src/*.cc"]),
+    #defines = ["FMT_HEADER_ONLY"],
+    srcs = glob(["src/*.cc"]),
     includes = ["include"],
     visibility = ["//visibility:public"],
 )
