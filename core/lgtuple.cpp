@@ -492,6 +492,9 @@ mmap_lib::str Lgtuple::get_all_but_first_level(const mmap_lib::str &key) {
     return key.substr(n + 1);
   }
 
+	if (key.front() == '$' || key.front() == '%' || key.front() == '#')
+		return key.substr(1);
+
   return mmap_lib::str("");  // empty if no dot left
 }
 

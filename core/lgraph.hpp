@@ -206,8 +206,8 @@ public:
   void clear() override;
   void sync() override;
 
-  Node_pin add_graph_input(const mmap_lib::str &str, Port_ID pos, uint32_t bits);
-  Node_pin add_graph_output(const mmap_lib::str &str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t bits);
 
   Node create_node();
 

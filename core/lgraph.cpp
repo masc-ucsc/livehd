@@ -169,7 +169,7 @@ bool Lgraph::has_graph_output(const mmap_lib::str &io_name) const {
   return (idx != 0);
 }
 
-Node_pin Lgraph::add_graph_input(const mmap_lib::str &str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t bits) {
   I(str != "$");
   I(!has_graph_output(str));
 
@@ -194,7 +194,7 @@ Node_pin Lgraph::add_graph_input(const mmap_lib::str &str, Port_ID pos, uint32_t
   return pin;
 }
 
-Node_pin Lgraph::add_graph_output(const mmap_lib::str &str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t bits) {
   I(str != "%");
   I(!has_graph_input(str));
 

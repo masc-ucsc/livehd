@@ -2182,14 +2182,9 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
       continue;
     }
 
-    Port_ID x   = Port_invalid;
-    auto    pos = Lgtuple::get_first_level_pos(out_name);
-    if (pos >= 0) {
-      x = pos;
-    }
-    auto flattened_gout = lg->add_graph_output(out_name, x, 0);
+		auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
+    auto flattened_gout = lg->add_graph_output(no_pos_name, io_pos, 0);
     it.second.connect_sink(flattened_gout);
-    I(!lg->get_graph_output(out_name).is_invalid());
   }
 
   if (!local_error) {
