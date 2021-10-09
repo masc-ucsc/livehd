@@ -693,14 +693,14 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges[0].sink.get_pin_name() == "a");
   I(inp_edges[1].sink.get_pin_name() == "b");
 
-  auto wire_it = bwmap.find(wire_dpin.get_compact_class());
+  bool no_wire = !bwmap.contains(wire_dpin.get_compact_class());
 
   auto sign_max = Bits_max;
   if (pos_dpin.is_type_const()) {
     sign_max = pos_dpin.get_type_const().to_i();
   }
 
-  if (sign_max == Bits_max && wire_it == bwmap.end()) {
+  if (sign_max == Bits_max && no_wire) {
     debug_unconstrained_msg(node, pos_dpin);
     not_finished = true;
     return;
@@ -710,9 +710,10 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
   bw.set_sbits_range(sign_max);
   adjust_bw(node.get_driver_pin(), bw);
 
-  if (hier || not_finished || wire_it == bwmap.end())
+  if (hier || not_finished || no_wire)
     return;
 
+  auto wire_it = bwmap.find(wire_dpin.get_compact_class());
   {
     auto b = wire_it->second.get_sbits();
     if (b <= sign_max) {  // sext is useless

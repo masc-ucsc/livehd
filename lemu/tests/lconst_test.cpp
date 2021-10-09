@@ -1221,12 +1221,12 @@ TEST_F(Lconst_test, binary) {
   EXPECT_TRUE(a.eq_op(b).is_known_true());
   EXPECT_TRUE(a.eq_op(b2).is_known_true());
 
-  EXPECT_EQ(c.to_verilog(), "6'b1?10?1");
+  EXPECT_EQ(c.to_verilog(), "7'sb01?10?1");
   EXPECT_EQ(c.to_pyrope(), "0b001?_10?1");
 
   auto d = Lconst::from_pyrope("0b____1_1x1_");
   EXPECT_EQ(d.to_pyrope(), "0b0000_11?1");
-  EXPECT_EQ(d.to_verilog(), "4'b11?1");
+  EXPECT_EQ(d.to_verilog(), "5'sb011?1");
   EXPECT_EQ(d.to_binary(), "011?1");
 
   auto e = Lconst::from_pyrope("_-__0b1_");
@@ -1239,12 +1239,12 @@ TEST_F(Lconst_test, binary) {
 
   auto f = Lconst::from_pyrope("0b1_0100");
   EXPECT_EQ(f.to_pyrope(), "20");
-  EXPECT_EQ(f.to_verilog(), "5'h14");  // 6'sh14 would be fine too
+  EXPECT_EQ(f.to_verilog(), "6'sh14");
   EXPECT_EQ(f.to_binary(), "010100");
 
   Lconst g = Lconst::from_pyrope("0bxxxx_xxxx_");
   EXPECT_EQ(g.to_pyrope(), "0b0000_????_????");
-  EXPECT_EQ(g.to_verilog(), "8'b????????");
+  EXPECT_EQ(g.to_verilog(), "9'sb0????????");
   EXPECT_EQ(g.to_binary(), "0????????");
   Lconst h = Lconst::from_pyrope("0b0??___???_??___?");
   EXPECT_EQ(h, g);
@@ -1256,12 +1256,12 @@ TEST_F(Lconst_test, binary) {
 
   EXPECT_EQ(g2, Lconst::from_pyrope("0b0_0_0_0_0_0_0__???__????"));  // positive, add zeroes at will
   EXPECT_EQ(g2.to_pyrope(), "0b0???_????");
-  EXPECT_EQ(g2.to_verilog() ,"7'b???????");
+  EXPECT_EQ(g2.to_verilog() ,"8'sb0???????");
   EXPECT_EQ(g2.to_binary()   , "0???????");  // 0 as MSB because it is a positive number
 
   Lconst g3 = Lconst::from_pyrope("0sb0xxx_xxxx_");
   EXPECT_EQ(g3.to_pyrope() , "0b0???_????");
-  EXPECT_EQ(g3.to_verilog(),  "7'b???????");
+  EXPECT_EQ(g3.to_verilog(),  "8'sb0???????");
   EXPECT_EQ(g3.to_binary()     , "0???????");
 
   Lconst g4 = Lconst::from_pyrope("0sb11111xxxx_xxxx_");
@@ -1280,14 +1280,14 @@ TEST_F(Lconst_test, binary) {
   {
     Lconst k = Lconst::from_pyrope("17");
     EXPECT_EQ(k.to_pyrope(), "17");
-    EXPECT_EQ(k.to_verilog(), "5'h11");
+    EXPECT_EQ(k.to_verilog(), "6'sh11");
     EXPECT_EQ(k.to_binary(), "010001");
   }
 
   {
     Lconst k = Lconst::from_pyrope("255");
     EXPECT_EQ(k.to_pyrope(), "0xff");
-    EXPECT_EQ(k.to_verilog(), "8'hff");
+    EXPECT_EQ(k.to_verilog(), "9'shff");
     EXPECT_EQ(k.to_binary(), "011111111");
   }
 

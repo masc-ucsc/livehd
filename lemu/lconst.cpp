@@ -1252,10 +1252,10 @@ mmap_lib::str Lconst::to_verilog() const {
 
   if (explicit_str) {
     if (has_unknowns()) {
-      auto sign = static_cast<unsigned char>(num & 0xFF);
+      //auto sign = static_cast<unsigned char>(num & 0xFF);
 
-      if (sign=='0')
-        return mmap_lib::str::concat(get_bits()-1, "'b", to_string().substr(1));
+      //if (sign=='0')
+        //return mmap_lib::str::concat(get_bits()-1, "'b", to_string().substr(1));
 
       return mmap_lib::str::concat(get_bits(), "'sb", to_string());
     }
@@ -1272,6 +1272,6 @@ mmap_lib::str Lconst::to_verilog() const {
   }
   ss << num;
 
-  return mmap_lib::str::concat(get_bits()-1, "'h", ss.str());
+  return mmap_lib::str::concat(get_bits(), "'sh", ss.str());
 }
 
