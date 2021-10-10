@@ -74,12 +74,11 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_bit_not)
   CREATE_LNAST_NODE(_bit_xor)
 
+  CREATE_LNAST_NODE(_reduce_or)
+
   CREATE_LNAST_NODE(_logical_and)
   CREATE_LNAST_NODE(_logical_or)
   CREATE_LNAST_NODE(_logical_not)
-
-  CREATE_LNAST_NODE(_reduce_or)
-  CREATE_LNAST_NODE(_reduce_xor)
 
   CREATE_LNAST_NODE(_plus)
   CREATE_LNAST_NODE(_minus)
@@ -92,7 +91,11 @@ struct Lnast_node {
 
   CREATE_LNAST_NODE(_sext)
   CREATE_LNAST_NODE(_set_mask)
+
   CREATE_LNAST_NODE(_get_mask)
+  CREATE_LNAST_NODE(_mask_and)
+  CREATE_LNAST_NODE(_mask_popcount)
+  CREATE_LNAST_NODE(_mask_xor)
 
   CREATE_LNAST_NODE(_is)
   CREATE_LNAST_NODE(_ne)

@@ -73,9 +73,16 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_bit_not()) {
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_bit_not_op(ln, lnidx, fstmt);
-  } else if (ntype.is_reduce_xor()) {
+  } else if (ntype.is_mask_and()) {
+    I(false); // FIXME: this is similar to a reduce and, but not the same because it has a mask
+  } else if (ntype.is_mask_popcount()) {
+    I(false); // FIXME: this is similar to a popcount op with a mask
+  } else if (ntype.is_mask_xor()) {
+    I(false); // FIXME: this is similar to a reduce xor, but not the same because it has a mask
+#if 0
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_reduce_xor_op(ln, lnidx, fstmt);
+#endif
   } else if (ntype.is_if()) {
     auto nested_when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt            = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
@@ -144,9 +151,16 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
   } else if (ntype.is_bit_not()) {
     auto fstmt = umod->add_statement();
     process_ln_bit_not_op(ln, lnidx, fstmt);
-  } else if (ntype.is_reduce_xor()) {
+  } else if (ntype.is_mask_and()) {
+    I(false); // FIXME: similar to reduce and with mask
+  } else if (ntype.is_mask_popcount()) {
+    I(false); // FIXME: similar to reduce popcount with mask
+  } else if (ntype.is_mask_xor()) {
+    I(false); // FIXME: similar to reduce xor with mask
+#if 0
     auto fstmt = umod->add_statement();
     process_ln_reduce_xor_op(ln, lnidx, fstmt);
+#endif
   } else if (ntype.is_if()) {
     auto when_stmt = process_ln_if_op(ln, lnidx);
     auto fstmt     = umod->add_statement();

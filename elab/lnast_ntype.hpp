@@ -30,15 +30,13 @@ public:
     Lnast_ntype_bit_not,  // ~
     Lnast_ntype_bit_xor,  // ^
 
+    // Only bitwidth insensitive reduce
+    Lnast_ntype_reduce_or,  // ror
+
     // Logical ops
     Lnast_ntype_logical_and,  // and
     Lnast_ntype_logical_or,   // or
     Lnast_ntype_logical_not,  // !
-
-    // reduce ops
-    // NO reduce AND because the operation is bitwidth sensitive (a == -1 is like reduce AND)
-    Lnast_ntype_reduce_or,
-    Lnast_ntype_reduce_xor,
 
     // arithmetic ops
     Lnast_ntype_plus,
@@ -55,7 +53,13 @@ public:
     // bit manipulation (zero/sign extend)
     Lnast_ntype_sext,  // sext(wire, bit) == chop wire/tuple to have sbits == bit, and bit pos is the sign
     Lnast_ntype_set_mask,
-    Lnast_ntype_get_mask,
+
+    // reduce ops with mask (ror does not need mask)
+    // These reduce OPS use a bit and a mask (different from LGraph or reduce which has no mask)
+    Lnast_ntype_get_mask,  // zext
+    Lnast_ntype_mask_and,
+    Lnast_ntype_mask_popcount,
+    Lnast_ntype_mask_xor,
 
     // Comparators
     Lnast_ntype_is,
@@ -110,12 +114,11 @@ protected:
       "not",
       "xor",
 
+      "ror",
+
       "land",
       "lor",
       "lnot",
-
-      "ror",
-      "rxor",
 
       "plus",
       "minus",
@@ -128,7 +131,11 @@ protected:
 
       "sext",
       "set_mask",
+
       "get_mask",
+      "mask_and",
+      "mask_popcount",
+      "mask_xor",
 
       "is",
       "ne",
@@ -184,12 +191,11 @@ public:
   static constexpr Lnast_ntype create_bit_not() { return Lnast_ntype(Lnast_ntype_bit_not); }
   static constexpr Lnast_ntype create_bit_xor() { return Lnast_ntype(Lnast_ntype_bit_xor); }
 
+  static constexpr Lnast_ntype create_reduce_or() { return Lnast_ntype(Lnast_ntype_reduce_or); }
+
   static constexpr Lnast_ntype create_logical_and() { return Lnast_ntype(Lnast_ntype_logical_and); }
   static constexpr Lnast_ntype create_logical_or() { return Lnast_ntype(Lnast_ntype_logical_or); }
   static constexpr Lnast_ntype create_logical_not() { return Lnast_ntype(Lnast_ntype_logical_not); }
-
-  static constexpr Lnast_ntype create_reduce_or() { return Lnast_ntype(Lnast_ntype_reduce_or); }
-  static constexpr Lnast_ntype create_reduce_xor() { return Lnast_ntype(Lnast_ntype_reduce_xor); }
 
   static constexpr Lnast_ntype create_plus() { return Lnast_ntype(Lnast_ntype_plus); }
   static constexpr Lnast_ntype create_minus() { return Lnast_ntype(Lnast_ntype_minus); }
@@ -202,7 +208,11 @@ public:
 
   static constexpr Lnast_ntype create_sext() { return Lnast_ntype(Lnast_ntype_sext); }
   static constexpr Lnast_ntype create_set_mask() { return Lnast_ntype(Lnast_ntype_set_mask); }
+
   static constexpr Lnast_ntype create_get_mask() { return Lnast_ntype(Lnast_ntype_get_mask); }
+  static constexpr Lnast_ntype create_mask_and() { return Lnast_ntype(Lnast_ntype_mask_and); }
+  static constexpr Lnast_ntype create_mask_popcount() { return Lnast_ntype(Lnast_ntype_mask_popcount); }
+  static constexpr Lnast_ntype create_mask_xor() { return Lnast_ntype(Lnast_ntype_mask_xor); }
 
   static constexpr Lnast_ntype create_is() { return Lnast_ntype(Lnast_ntype_is); }
   static constexpr Lnast_ntype create_ne() { return Lnast_ntype(Lnast_ntype_ne); }
@@ -247,12 +257,11 @@ public:
   bool constexpr is_bit_not() const { return val == Lnast_ntype_bit_not; }
   bool constexpr is_bit_xor() const { return val == Lnast_ntype_bit_xor; }
 
+  bool constexpr is_reduce_or() const { return val == Lnast_ntype_reduce_or; }
+
   bool constexpr is_logical_and() const { return val == Lnast_ntype_logical_and; }
   bool constexpr is_logical_or() const { return val == Lnast_ntype_logical_or; }
   bool constexpr is_logical_not() const { return val == Lnast_ntype_logical_not; }
-
-  bool constexpr is_reduce_or() const { return val == Lnast_ntype_reduce_or; }
-  bool constexpr is_reduce_xor() const { return val == Lnast_ntype_reduce_xor; }
 
   bool constexpr is_plus() const { return val == Lnast_ntype_plus; }
   bool constexpr is_minus() const { return val == Lnast_ntype_minus; }
@@ -265,7 +274,11 @@ public:
 
   bool constexpr is_sext() const { return val == Lnast_ntype_sext; }
   bool constexpr is_set_mask() const { return val == Lnast_ntype_set_mask; }
+
   bool constexpr is_get_mask() const { return val == Lnast_ntype_get_mask; }
+  bool constexpr is_mask_and() const { return val == Lnast_ntype_mask_and; }
+  bool constexpr is_mask_popcount() const { return val == Lnast_ntype_mask_popcount; }
+  bool constexpr is_mask_xor() const { return val == Lnast_ntype_mask_xor; }
 
   bool constexpr is_is() const { return val == Lnast_ntype_is; }
   bool constexpr is_ne() const { return val == Lnast_ntype_ne; }
@@ -302,7 +315,7 @@ public:
     return (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_logical_not);
   }
 
-  bool constexpr is_reduce_op() const { return (val == Lnast_ntype_reduce_or) || (val == Lnast_ntype_reduce_xor); }
+  bool constexpr is_mask_op() const { return val >= Lnast_ntype_mask_and && val <= Lnast_ntype_mask_xor; }
 
   bool constexpr is_unary_op() const {
     return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_logical_not) || (val == Lnast_ntype_assign)
@@ -310,21 +323,20 @@ public:
   }
 
   bool constexpr is_binary_op() const {
-    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext)
-           || (val == Lnast_ntype_get_mask) || (val == Lnast_ntype_set_mask);
+    return (val == Lnast_ntype_shl) || (val == Lnast_ntype_sra) || (val == Lnast_ntype_sext) || is_mask_op();
   }
 
   bool constexpr is_nary_op() const {
     return (val == Lnast_ntype_bit_and) || (val == Lnast_ntype_bit_or) || (val == Lnast_ntype_bit_xor)
-           || (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_reduce_or)
-           || (val == Lnast_ntype_reduce_xor) || (val == Lnast_ntype_plus) || (val == Lnast_ntype_minus)
+           || (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_plus)
+           || (val == Lnast_ntype_minus)
            || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq) || (val == Lnast_ntype_ne)
            || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt) || (val == Lnast_ntype_ge);
   }
 
   // basic_op have 1 to 1 translation between LNAST and Lgraph
   bool constexpr is_direct_lgraph_op() const {
-    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && val != Lnast_ntype_reduce_xor
+    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && !is_mask_op()
            && val != Lnast_ntype_mod
            && val != Lnast_ntype_is && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }

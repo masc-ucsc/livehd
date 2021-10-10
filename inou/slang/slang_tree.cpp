@@ -367,20 +367,6 @@ mmap_lib::str Slang_tree::create_reduce_or_stmts(mmap_lib::str var_name) {
   return res_var;
 }
 
-mmap_lib::str Slang_tree::create_reduce_xor_stmts(mmap_lib::str var_name) {
-  if (var_name.empty())
-    return var_name;
-  auto res_var = create_lnast_tmp();
-  auto xor_idx = lnast->add_child(idx_stmts, Lnast_node::create_reduce_xor());
-  lnast->add_child(xor_idx, Lnast_node::create_ref(res_var));
-  if (var_name.is_string())
-    lnast->add_child(xor_idx, Lnast_node::create_ref(var_name));
-  else
-    lnast->add_child(xor_idx, Lnast_node::create_const(var_name));
-
-  return res_var;
-}
-
 mmap_lib::str Slang_tree::create_sra_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
@@ -499,6 +485,25 @@ mmap_lib::str Slang_tree::create_shl_stmts(mmap_lib::str a_var, mmap_lib::str b_
 
   auto res_var = create_lnast_tmp();
   auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_shl());
+  lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
+  if (a_var.is_string())
+    lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));
+  else
+    lnast->add_child(shl_idx, Lnast_node::create_const(a_var));
+  if (b_var.is_string())
+    lnast->add_child(shl_idx, Lnast_node::create_ref(b_var));
+  else
+    lnast->add_child(shl_idx, Lnast_node::create_const(b_var));
+
+  return res_var;
+}
+
+mmap_lib::str Slang_tree::create_mask_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+  I(!a_var.empty()); // mask
+  I(!b_var.empty()); // data
+
+  auto res_var = create_lnast_tmp();
+  auto shl_idx = lnast->add_child(idx_stmts, Lnast_node::create_mask_xor());
   lnast->add_child(shl_idx, Lnast_node::create_ref(res_var));
   if (a_var.is_string())
     lnast->add_child(shl_idx, Lnast_node::create_ref(a_var));
@@ -754,10 +759,15 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
 
   if (expr.kind == slang::ExpressionKind::UnaryOp) {
     const auto &op = expr.as<slang::UnaryExpression>();
+
     if (op.op == slang::UnaryOperator::BitwiseAnd)
-      return process_reduce_and(op);
+      return process_mask_and(op);
     if (op.op == slang::UnaryOperator::BitwiseNand)
-      return create_bit_not_stmts(process_reduce_and(op));
+      return create_bit_not_stmts(process_mask_and(op));
+    if (op.op== slang::UnaryOperator::BitwiseXor)
+      return process_mask_xor(op);
+    if (op.op== slang::UnaryOperator::BitwiseXnor)
+      return create_bit_not_stmts(process_mask_xor(op));
 
     auto lhs = process_expression(op.operand());
     switch (op.op) {
@@ -766,12 +776,9 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
       case slang::UnaryOperator::Plus: return lhs;
       case slang::UnaryOperator::Minus: return create_minus_stmts(0, lhs);
       case slang::UnaryOperator::BitwiseOr: return create_reduce_or_stmts(lhs);
-      case slang::UnaryOperator::BitwiseXor: return create_reduce_xor_stmts(lhs);
       // do I use bit not or logical not?
       // Also is it ok for it to be two connected references if we have no lnast node?
       case slang::UnaryOperator::BitwiseNor: return create_bit_not_stmts(create_reduce_or_stmts(lhs));
-      case slang::UnaryOperator::BitwiseXnor:
-        return create_bit_not_stmts(create_reduce_xor_stmts(lhs));
         // case UnaryOperator::Preincrement:
         // case UnaryOperator::Predecrement:
         // case UnaryOperator::Postincrement:
@@ -878,7 +885,7 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
   return "FIXME_op";
 }
 
-mmap_lib::str Slang_tree::process_reduce_and(const slang::UnaryExpression &uexpr) {
+mmap_lib::str Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
   // reduce and does not have a direct mapping in Lgraph
   // And(Not(Ror(Not(inp))), inp.MSB)
 
@@ -890,3 +897,13 @@ mmap_lib::str Slang_tree::process_reduce_and(const slang::UnaryExpression &uexpr
   auto tmp = create_bit_not_stmts(create_reduce_or_stmts(create_bit_not_stmts(inp)));
   return create_bit_and_stmts(tmp, create_sra_stmts(inp, msb_pos));  // No need pick (reduce is 1 bit)
 }
+
+mmap_lib::str Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
+  const auto &op      = uexpr.operand();
+
+  auto inp = process_expression(op);
+
+  auto mask = create_mask_stmts(op.type->getBitWidth());
+  return create_mask_xor_stmts(mask, inp);
+}
+

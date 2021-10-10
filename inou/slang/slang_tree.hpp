@@ -41,14 +41,15 @@ protected:
   bool          process_top_instance(const slang::InstanceSymbol& symbol);
   bool          process(const slang::AssignmentExpression& expr);
   mmap_lib::str process_expression(const slang::Expression& expr);
-  mmap_lib::str process_reduce_and(const slang::UnaryExpression& uexpr);
+  mmap_lib::str process_mask_and(const slang::UnaryExpression& uexpr);
+  mmap_lib::str process_mask_popcount(const slang::UnaryExpression& uexpr);
+  mmap_lib::str process_mask_xor(const slang::UnaryExpression& uexpr);
 
   mmap_lib::str create_mask_stmts(mmap_lib::str dest_max_bit);
   mmap_lib::str create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib::str min_bit);
   mmap_lib::str create_bit_not_stmts(mmap_lib::str var_name);
   mmap_lib::str create_logical_not_stmts(mmap_lib::str var_name);
   mmap_lib::str create_reduce_or_stmts(mmap_lib::str var_name);
-  mmap_lib::str create_reduce_xor_stmts(mmap_lib::str var_name);
 
   mmap_lib::str create_sra_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   mmap_lib::str create_pick_bit_stmts(mmap_lib::str a_var, mmap_lib::str pos);
@@ -57,6 +58,7 @@ protected:
   mmap_lib::str create_bit_or_stmts(const std::vector<mmap_lib::str>& var);
   mmap_lib::str create_bit_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   mmap_lib::str create_shl_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
+  mmap_lib::str create_mask_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   void          create_dp_assign_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   void          create_assign_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
   void          create_declare_bits_stmts(mmap_lib::str a_var, bool is_signed, int bits);

@@ -21,7 +21,7 @@ enum class Ntype_op : uint8_t {
   And,
   Or,
   Xor,
-  Ror,  // Reduce OR
+  Ror,  // Reduce OR (This is a bit different from the LNAST reduce_or (lnast uses mask)
 
   Not,       // bitwise not
   Get_mask,  // To positive signed

@@ -17,15 +17,15 @@ protected:
 
                                              "&",         "|",          "~",        "^",
 
-                                             "and",       "or",         "!",
+                                             "ror",
 
-                                             "ror",       "rxor",
+                                             "and",       "or",         "!",
 
                                              "+",         "-",          "*",        "/",       "mod",
 
                                              "<<",        ">>",
 
-                                             "sext",      "set_mask",   "get_mask",
+                                             "sext",      "set_mask",   "get_mask", "mask_and", "mask_popcount", "mask_xor",
 
                                              "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
 
@@ -60,12 +60,11 @@ protected:
       "~",
       "^",
 
+      "ror",
+
       "and",
       "or",
       "not",
-
-      "ror",
-      "rxor",
 
       "+",
       "-",
@@ -79,6 +78,9 @@ protected:
       "sext",
       "set_mask",
       "get_mask",
+      "mask_and",
+      "mask_popcount",
+      "mask_xor",
 
       "is",
       "!=",
@@ -125,12 +127,11 @@ protected:
       "~",  // not
       "^",  // not
 
+      "ror",
+
       "&&",  // logical_and
       "||",  // logical_or
       "!",   // logical_not
-
-      "ror",
-      "rxor",
 
       "+",
       "-",
@@ -144,6 +145,9 @@ protected:
       "sext",
       "set_mask",
       "get_mask",
+      "mask_and",
+      "mask_popcount",
+      "mask_xor",
 
       "is",
       "!=",

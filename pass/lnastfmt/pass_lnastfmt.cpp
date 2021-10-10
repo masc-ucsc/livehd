@@ -259,8 +259,6 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_logical_not();
   } else if (orig_node_type.is_reduce_or()) {
     new_node = Lnast_node::create_reduce_or();
-  } else if (orig_node_type.is_reduce_xor()) {
-    new_node = Lnast_node::create_reduce_xor();
   } else if (orig_node_type.is_plus()) {
     new_node = Lnast_node::create_plus();
   } else if (orig_node_type.is_minus()) {
@@ -279,6 +277,12 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_sext();
   } else if (orig_node_type.is_get_mask()) {
     new_node = Lnast_node::create_get_mask();
+  } else if (orig_node_type.is_mask_and()) {
+    new_node = Lnast_node::create_mask_and();
+  } else if (orig_node_type.is_mask_popcount()) {
+    new_node = Lnast_node::create_mask_popcount();
+  } else if (orig_node_type.is_mask_xor()) {
+    new_node = Lnast_node::create_mask_xor();
   } else if (orig_node_type.is_set_mask()) {
     new_node = Lnast_node::create_set_mask();
   } else if (orig_node_type.is_is()) {
