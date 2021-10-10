@@ -1523,6 +1523,11 @@ TEST_F(Lconst_test, lconst_get_bits) {
   auto v3 = Lconst::from_pyrope("41");
   EXPECT_EQ(v1, v2);
   EXPECT_EQ(v2, v3);
+  auto v4 = Lconst::from_pyrope("-23").get_mask_op(Lconst::from_pyrope("0xFFF"));
+  EXPECT_EQ(v4, Lconst::from_pyrope("0xfe9"));
+  EXPECT_EQ(Lconst(-2).get_mask_op(Lconst(0xF)), Lconst::from_pyrope("0xe"));
+  EXPECT_EQ(Lconst(-2).get_mask_op(Lconst(0xFF)), Lconst::from_pyrope("0xFe"));
+  EXPECT_EQ(Lconst(-2).get_mask_op(Lconst(0xF0F)), Lconst::from_pyrope("0xFe"));
 
   EXPECT_EQ(Lconst::from_pyrope("0b0?0").get_mask_op(Lconst::from_pyrope("1")), Lconst::from_pyrope("0"));
 
@@ -1746,3 +1751,5 @@ TEST_F(Lconst_test, get_set_mask_equivalence) {
 #endif
 }
 
+TEST_F(Lconst_test, debug_console) {
+}
