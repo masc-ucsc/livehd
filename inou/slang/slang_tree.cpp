@@ -35,6 +35,7 @@ mmap_lib::str Slang_tree::get_lnast_name(mmap_lib::str vname) {
     lnast->add_child(idx_dot, Lnast_node::create_ref(vname));
     lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
 
+    //vname2lname.emplace(vname, tmp_var);
     return tmp_var;
   }
 
@@ -44,7 +45,7 @@ mmap_lib::str Slang_tree::get_lnast_name(mmap_lib::str vname) {
 mmap_lib::str Slang_tree::get_lnast_lhs_name(mmap_lib::str vname) {
   const auto &it = vname2lname.find(vname);
   if (it == vname2lname.end()) {
-    vname2lname.emplace(vname,vname);
+    //vname2lname.emplace(vname,vname);
     return vname;
   }
 
@@ -230,11 +231,11 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
     const auto &es = lhs.as<slang::ElementSelectExpression>();
     I(es.value().kind == slang::ExpressionKind::NamedValue);
 
-    const auto &var = es.value().as<slang::NamedValueExpression>();
-    var_name        = get_lnast_lhs_name(var.symbol.name);
-
     dest_max_bit = process_expression(es.selector());
     dest_min_bit = dest_max_bit;
+
+    const auto &var = es.value().as<slang::NamedValueExpression>();
+    var_name        = get_lnast_lhs_name(var.symbol.name);
 
     dest_var_sign = false;
     dest_var_bits = 1;
