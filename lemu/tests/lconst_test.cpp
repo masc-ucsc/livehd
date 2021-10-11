@@ -1752,4 +1752,10 @@ TEST_F(Lconst_test, get_set_mask_equivalence) {
 }
 
 TEST_F(Lconst_test, debug_console) {
+  auto a = UInt<130>("0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"); // 129 ones
+  auto b = UInt<130>("0x100000000000000000000000000000001"); // 1, 127 zeroes, 1 one
+
+  auto res = a+b;
+  
+  std::cout << res << "\n";
 }

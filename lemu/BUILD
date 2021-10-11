@@ -34,6 +34,15 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "blop_test",
+    srcs = ["tests/blop_test.cpp"],
+    deps = [
+        ":lemu",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 cc_binary(
     name = "lconst_dump",
     srcs = ["tests/lconst_dump.cpp"],
