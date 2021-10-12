@@ -662,6 +662,8 @@ void Bitwidth::process_get_mask(Node &node) {
 
   const Lconst val     = it->second.get_max().get_mask_op(mask_min);
   Lconst       min_val = val;
+  if (it->second.get_max()>0 && it->second.get_min()<0)
+    min_val = 0;
   Lconst       max_val = val;
 
   Lconst val2 = it->second.get_max().get_mask_op(mask_max);
