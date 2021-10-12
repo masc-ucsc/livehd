@@ -11,6 +11,7 @@
 #include "gtest/gtest.h"
 
 #include "blop.hpp"
+#include "dlop.hpp"
 #include "lbench.hpp"
 #include "lconst.hpp"
 #include "lrand.hpp"
@@ -57,11 +58,19 @@ TEST_F(Blop_test, shift) {
     int64_t dst2[3];
     Blop::shrn(dst2, 3, dst1, i);
 
-    fmt::print(">>{} dst1:{},{},{}\n", i, dst1[0], dst1[1], dst1[2]);
-    fmt::print("<<{} dst2:{},{},{}\n", i, dst2[0], dst2[1], dst2[2]);
+    fmt::print("<<{} dst1:{},{},{}\n", i, dst1[0], dst1[1], dst1[2]);
+    fmt::print(">>{} dst2:{},{},{}\n", i, dst2[0], dst2[1], dst2[2]);
 
     EXPECT_EQ(dst2[0], src1[0]);
     EXPECT_EQ(dst2[1], src1[1]);
     EXPECT_EQ(dst2[2], src1[2]);
   }
+}
+
+TEST_F(Blop_test, dlop_from_pyrope) {
+
+  auto dlop = Dlop::from_pyrope("0xdeadbeef");
+  dlop->dump();
+
+  Dlop::from_pyrope("0b1011")->dump();
 }

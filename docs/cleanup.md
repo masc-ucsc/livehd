@@ -234,6 +234,9 @@ int cgen_do_str_ptr(const mmap_lib::str &s) { // MORE CODE
  1920   16: c3                    retq
 
 
+### mmap_str
+
+Use unsigned char not char (sign extension issues)
 
 ### lnast
 

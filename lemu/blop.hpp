@@ -13,6 +13,16 @@ class Blop {
 protected:
 public:
   //---------------------------------------------------------------------------
+  // extend
+  //---------------------------------------------------------------------------
+  static void extend(int64_t *dest, size_t dest_sz, const int64_t src) {
+    dest[0] = src;
+    int64_t v = src<0?-1:0;
+    for(auto i=1u;i<dest_sz;++i)
+      dest[i] = v;
+  }
+
+  //--------------------------------------------------------------------------
   // ADD
   //---------------------------------------------------------------------------
   static void add8(int8_t &dest, const int8_t src1, const int8_t src2) {
@@ -21,11 +31,11 @@ public:
   static void add64(int64_t &dest, const int64_t src1, const int64_t src2) {
     dest = src1 + src2;
   }
-  static void addn(int64_t *dest, int dest_sz, const int64_t *src1, const int64_t *src2) {
-    assert(dest_sz>1);
+  static void addn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
+    assert(dest_sz>=1);
 
     uint64_t carry = __builtin_uaddll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long*>(dest));
-    for(auto i=1;i<dest_sz-1;++i) {
+    for(auto i=1u;i<dest_sz-1;++i) {
       unsigned long long tmp;
       carry =  __builtin_uaddll_overflow(src1[i], carry, &tmp);
       carry |= __builtin_uaddll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long*>(dest + i));
@@ -44,11 +54,11 @@ public:
     dest = src1 - src2;
   }
 
-  static void subn(int64_t *dest, int dest_sz, const int64_t *src1, const int64_t *src2) {
-    assert(dest_sz>1);
+  static void subn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
+    assert(dest_sz>=1);
 
     uint64_t carry = __builtin_usubll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long*>(dest));
-    for(auto i=1;i<dest_sz-1;++i) {
+    for(auto i=1u;i<dest_sz-1;++i) {
       unsigned long long tmp;
       carry =  __builtin_usubll_overflow(src1[i], carry, &tmp);
       carry |= __builtin_usubll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long*>(dest + i));
@@ -71,8 +81,8 @@ public:
     assert((dest>>src2) == src1); // no precision lost of allocate larger dest
   }
 
-  static void shln(int64_t *dest, int dest_sz, const int64_t *src1, const int64_t src2) {
-    assert(dest_sz>1);
+  static void shln(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
+    assert(dest_sz>=1);
     assert(src2>=0);
 
     uint64_t word_up = src2 / 64;
@@ -80,18 +90,18 @@ public:
     uint64_t bits_up = src2 & 63;
 
     if (bits_up==0) {
-      for (uint64_t i=0; i < dest_sz; i++) {
+      for (int i=dest_sz-word_up-1; i >= 0; --i) {
         dest[i + word_up] = src1[i];
       }
     }else{
-      for (uint64_t i=0; i <= word_up ; i++) {
-        dest[i] = 0;
+      for (int i=dest_sz-word_up-1; i>0 ; --i) {
+        dest[i + word_up ]  = static_cast<uint64_t>(src1[i-1]) >> static_cast<uint64_t>(64 - bits_up);
+        dest[i + word_up ] |= src1[i] << bits_up;
       }
-      for (uint64_t i=0; i < dest_sz-1; i++) {
-        dest[i + word_up    ] |= src1[i] << bits_up;
-        dest[i + word_up + 1]  = static_cast<uint64_t>(src1[i]) >> static_cast<uint64_t>(64 - bits_up);
-      }
-      dest[dest_sz - 1 + word_up] |= src1[dest_sz-1] << bits_up;
+      dest[word_up]  = src1[0] << bits_up;
+    }
+    for (auto i=0u; i < word_up; ++i) {
+      dest[i] = 0;
     }
   }
 
@@ -107,24 +117,76 @@ public:
     dest = src1 >> src2;
   }
 
-  static void shrn(int64_t *dest, int dest_sz, const int64_t *src1, const int64_t src2) {
-    assert(dest_sz>1);
+  static void shrn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
+    assert(dest_sz>=1);
     assert(src2>=0);
 
     uint64_t word_down = src2 / 64;
     uint64_t bits_down = src2 & 63;
 
     if (bits_down==0) {
-      for (uint64_t i = word_down; i < dest_sz; i++) {
+      for (auto i = word_down; i < dest_sz; i++) {
         dest[i - word_down] = src1[i];
       }
     }else{
-      for (uint64_t i = word_down; i < dest_sz-1; i++) {
+      for (auto i = word_down; i < dest_sz-1; i++) {
         auto tmp = static_cast<uint64_t>(src1[i]) >> bits_down;
         tmp |= src1[i + 1] << static_cast<uint64_t>(64 - bits_down);
         dest[i - word_down] = tmp;
       }
       dest[dest_sz - 1 - word_down] = src1[dest_sz-1] >> bits_down;
     }
+  }
+
+  //---------------------------------------------------------------------------
+  // OR
+  //---------------------------------------------------------------------------
+  static void or8(int8_t &dest, const int8_t src1, const int8_t src2) {
+    dest = src1 | src2;
+  }
+  static void or64(int64_t &dest, const int64_t src1, const int64_t src2) {
+    dest = src1 | src2;
+  }
+
+  static void orn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
+    assert(dest_sz>=1);
+    for (auto i = 0u; i < dest_sz; i++) {
+      dest[i] = src1[i] | src2[i];
+    }
+  }
+
+  static void orn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
+    assert(dest_sz>=1);
+    dest[0] = src1[0] | src2;
+    uint64_t v = src2<0?-1:0;
+    for (auto i = 1u; i < dest_sz; i++) {
+      dest[i] = v;
+    }
+  }
+
+  //---------------------------------------------------------------------------
+  // MULT
+  //---------------------------------------------------------------------------
+  static void mult8(int8_t &dest, const int8_t src1, const int8_t src2) {
+    dest = src1 * src2;
+  }
+  static void mult64(int64_t &dest, const int64_t src1, const int64_t src2) {
+    dest = src1 * src2;
+  }
+
+  static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
+    (void)dest;
+    (void)dest_sz;
+    (void)src1;
+    (void)src2;
+    assert(false);
+  }
+
+  static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
+    (void)dest;
+    (void)dest_sz;
+    (void)src1;
+    (void)src2;
+    assert(false);
   }
 };
