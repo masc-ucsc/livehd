@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <queue>
+
 #include "pass_submatch.hpp"
 
 #include "annotate.hpp"
@@ -35,72 +37,65 @@ void pass_submatch::work(Eprp_var &var) {
 void pass_submatch::find_subs(Lgraph *g) {
   fmt::print("TODO: implement pass\n");
 
-  struct Hash_attr {
-    int depth;  // connection depth - how deep the connection is
-    int n;
-  };
-
-  absl::flat_hash_map<uint64_t, Hash_attr>                hash2attr;
-  absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2hash;
-  absl::flat_hash_map<Node_pin::Compact_driver, uint64_t> dpin2depth;
-
-  for (const auto &node : g->forward()) {
-    std::vector<uint64_t> i_hash;
-
-    uint64_t input_depth = 0;
-    for (auto e : node.inp_edges()) {
-      auto it = dpin2hash.find(e.driver.get_compact_driver());
-      if (it == dpin2hash.end()) {
-        uint64_t n = e.driver.get_pid();
-        n <<= 8;
-        n |= static_cast<uint64_t>(e.driver.get_node().get_type_op());
-        n <<= 16;
-        n |= e.sink.get_pid();
-        i_hash.emplace_back(n);
-      } else {
-        i_hash.emplace_back(it->second ^ e.sink.get_pid());
-
-        const auto it2 = dpin2depth.find(e.driver.get_compact_driver());
-        if (it2->second > input_depth)
-          input_depth = it2->second;
+  const int SUBGRAPH_DEPTH = 10;
+  
+  // Topological Sort
+  std::vector<Node::Compact> sorted_compact_nodes;
+  absl::flat_hash_set<Node::Compact> visited;
+  std::queue<Node::Compact> node_queue;
+  g->each_graph_output([&](const Node_pin &pin) {
+    sorted_compact_nodes.emplace_back(pin.get_node().get_compact());
+    node_queue.push(pin.get_node().get_compact());
+    while (!node_queue.empty()) {
+      auto node = Node(g, node_queue.front());
+      node_queue.pop();
+      sorted_compact_nodes.emplace_back(node.get_compact());
+      for (auto e : node.inp_edges()) {
+        auto node_drv = e.driver.get_node();
+        if (visited.count(node_drv.get_compact())) continue;
+        node_queue.push(node_drv.get_compact());
       }
     }
-    std::sort(i_hash.begin(), i_hash.begin() + i_hash.size());
+  });
+  // FIXME: Backward iterator is not working
+  // for (const auto &node : g->backward()) {
+  //   fmt::print("node = {}\n", node.debug_name());
+  //   sorted_compact_nodes.emplace_back(node.get_compact());
+  // }
+  std::reverse(sorted_compact_nodes.begin(), sorted_compact_nodes.end());
 
-    uint64_t input_key = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 8);
-    if (node.is_type_loop_last())
-      input_depth = 0;
-
-    for (auto dpin : node.out_connected_pins()) {
-      uint64_t n = dpin.get_pid();
-      n <<= 8;
-      n |= static_cast<uint64_t>(node.get_type_op());
-
-      // want to use port information in hash
-      uint32_t c_key = mmap_lib::waterhash(&n, 4, input_key & 0xFFFF);
-
-      uint64_t key = (input_key << 2) ^ c_key;
-
-      // fmt::print("dpin:{} input_key:{} c_key:{} key:{} d:{}\n", dpin.debug_name(), input_key, c_key, key, input_depth + 1);
-
-      dpin2hash[dpin.get_compact_driver()]  = key;
-      dpin2depth[dpin.get_compact_driver()] = input_depth + 1;
-      hash2attr[key].depth                  = input_depth + 1;
-      hash2attr[key].n++;
-    }
-  }
-
-  /*
-  for (const auto it : hash2attr) {
-    const auto &attr = it.second;
-    fmt::print("hash:{} depth:{} n:{} s:{}\n", it.first, attr.depth, attr.n, attr.depth * attr.n);
-  }
-  */
-
-  for (const auto node : g->fast()) {
-    for (auto dp : node.out_connected_pins()) {
-      Hash_attr a = hash2attr[dpin2hash[dp.get_compact_driver()]];
-      fmt::print("dpin: {}, n: {}, depth: {}\n", dp.debug_name(), a.n, a.depth);
+  // Construct Node <-> (Depth,Hash) Map
+  // Complexity = O(V x DEPTH)
+  absl::flat_hash_map<Node::Compact, std::vector<uint64_t>> node2depth_hash;
+  for (const auto &compact_node : sorted_compact_nodes) {
+    auto node = Node(g, compact_node);
+    for (uint64_t depth = 0; depth < SUBGRAPH_DEPTH; ++depth) {
+      uint64_t max_depth = 0;
+      std::vector<uint64_t> i_hash;
+      for (auto e : node.inp_edges()) {
+        auto it = node2depth_hash.find(e.driver.get_node().get_compact());
+        if (it == node2depth_hash.end() || depth == 0) {
+          i_hash.emplace_back(e.sink.get_pid());
+        } else {
+          auto subtree_depth = std::min(it->second.size(), depth);
+          i_hash.emplace_back(it->second[subtree_depth-1] ^ e.sink.get_pid());
+          max_depth = std::max(subtree_depth, max_depth);
+        }
+      }
+      if (depth != max_depth) {
+        break;
+      }
+      uint64_t h1;
+      std::sort(i_hash.begin(), i_hash.end());
+      h1 = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 8);
+      uint64_t n = static_cast<uint64_t>(node.get_type_op());
+      uint64_t h2 = mmap_lib::waterhash(&n, 4, h1 & 0xFFFF);
+      if (depth == 0) {
+        node2depth_hash[node.get_compact()] = {h2};
+      } else {
+        node2depth_hash[node.get_compact()].emplace_back(h2);
+      }
+      fmt::print("Node = {}\tDepth = {}\tHash = {}\n", node.debug_name(), depth, h2);
     }
   }
 }
