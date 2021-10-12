@@ -131,6 +131,7 @@ public:
       base  = &data[0];
       extra = &data[1];
     }
+    clear();
   }
 
   Dlop() : type(Type::Invalid), size(0), base(nullptr), extra(nullptr) {

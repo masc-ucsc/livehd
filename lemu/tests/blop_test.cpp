@@ -73,4 +73,8 @@ TEST_F(Blop_test, dlop_from_pyrope) {
   dlop->dump();
 
   Dlop::from_pyrope("0b1011")->dump();
+
+  Dlop::from_pyrope("0b01?01")->dump();
+
+  Dlop::from_pyrope("0xbee1_dea2_bee3_dea4_bee5_dea6_bee7_dea8_bee9_deaa_beeb_deec_beed_deaf")->dump();
 }

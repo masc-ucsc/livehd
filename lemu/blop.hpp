@@ -95,8 +95,9 @@ public:
       }
     }else{
       for (int i=dest_sz-word_up-1; i>0 ; --i) {
+        auto tmp = src1[i]; // need to do copy because self update
         dest[i + word_up ]  = static_cast<uint64_t>(src1[i-1]) >> static_cast<uint64_t>(64 - bits_up);
-        dest[i + word_up ] |= src1[i] << bits_up;
+        dest[i + word_up ] |= tmp << bits_up;
       }
       dest[word_up]  = src1[0] << bits_up;
     }
@@ -160,7 +161,7 @@ public:
     dest[0] = src1[0] | src2;
     uint64_t v = src2<0?-1:0;
     for (auto i = 1u; i < dest_sz; i++) {
-      dest[i] = v;
+      dest[i] = src1[i] | v;
     }
   }
 

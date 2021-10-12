@@ -21,7 +21,7 @@ void Dlop::free(size_t sz, int64_t *ptr) {
 int64_t *Dlop::alloc(size_t sz) {
   assert(sz>=1); // less than 1 is not valid in dlop
 
-  if (sz<free_pool.size()) {
+  if (sz>=free_pool.size()) {
     free_pool.resize(sz+1,nullptr);
   }
 
@@ -63,7 +63,6 @@ std::shared_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
 std::shared_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_result) {
 
   auto dlop = std::make_shared<Dlop>(Type::Integer, 1+txt.size()/64);
-  dlop->clear();
   if (!unsigned_result) {
     // Look for the first not underscore character (this is the sign)
     for (auto i = 0u; i < txt.size(); ++i) {
@@ -79,7 +78,7 @@ std::shared_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_r
     }
   }
 
-  for (int i = txt.size()-1; i >=0 ; --i) {
+  for (auto i = 0u; i < txt.size(); ++i) {
     const auto ch2 = txt[i];
     if (ch2 == '_')
       continue;
@@ -236,11 +235,11 @@ std::shared_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
 }
 
 void Dlop::dump() const {
-  fmt::print("size:{}\n  base", size);
-  for(auto i=0;i<size;++i)
-    fmt::print(":{}", base[i]);
-  fmt::print("\n extra", size);
-  for(auto i=0;i<size;++i)
-    fmt::print(":{}", extra[i]);
+  fmt::print("size:{}\n  base:0x", size);
+  for(int i=size-1; i>=0;--i)
+    fmt::print("_{:016x}", (uint64_t)base[i]);
+  fmt::print("\n extra:0x", size);
+  for(int i=size-1; i>=0;--i)
+    fmt::print("_{:016x}", (uint64_t)extra[i]);
   fmt::print("\n");
 }
