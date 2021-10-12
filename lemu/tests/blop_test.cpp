@@ -72,9 +72,14 @@ TEST_F(Blop_test, dlop_from_pyrope) {
   auto dlop = Dlop::from_pyrope("0xdeadbeef");
   dlop->dump();
 
-  Dlop::from_pyrope("0b1011")->dump();
-
-  Dlop::from_pyrope("0b01?01")->dump();
-
   Dlop::from_pyrope("0xbee1_dea2_bee3_dea4_bee5_dea6_bee7_dea8_bee9_deaa_beeb_deec_beed_deaf")->dump();
+
+  auto a = Dlop::from_pyrope("0b01110011");
+  auto b = Dlop::from_pyrope("0b011100?1");
+  a->dump();
+  b->dump();
+
+  auto c = a->add_op(b);
+
+  c->dump();
 }

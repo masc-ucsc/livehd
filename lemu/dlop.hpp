@@ -142,5 +142,7 @@ public:
   static std::shared_ptr<Dlop> from_binary(const mmap_lib::str txt, bool unsigned_result);
   static std::shared_ptr<Dlop> from_pyrope(const mmap_lib::str orig_txt);
 
+  std::shared_ptr<Dlop> add_op(std::shared_ptr<Dlop> other);
+
   void dump() const;
 };
