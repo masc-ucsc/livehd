@@ -18,6 +18,7 @@ protected:
   void process_bit_or     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_stmts    (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_set(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_tuple_get(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_add(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
 
   void process_todo     (const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
