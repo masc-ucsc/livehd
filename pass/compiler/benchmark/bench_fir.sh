@@ -1,5 +1,7 @@
 #!/bin/bash
-mv -f lbench.trace lbench.trace.old
+if [ -f "./lbench.trace" ]; then
+  mv -f lbench.trace lbench.trace.old
+fi
 
 # if [ ! -d ./livehd_regression ]; then
 #   git clone git@github.com:masc-ucsc/livehd_regression.git
@@ -71,7 +73,8 @@ fucntion() {
     fi 
     # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
 
-    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
+    # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
+    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -80,10 +83,22 @@ fucntion() {
     fi
 
     grep elapsed pp >> stat.livehd
+
+  # # Verilog code generation
+    # perf stat -o pp ${LGSHELL} "lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
+    # grep elapsed pp >> stat.livehd
+
+    # ret_val=$?
+    # if [ $ret_val -eq 0 ] && [ -f "tmp_firrtl/${pt}.v" ]; then
+    #     echo "Successfully generate Verilog: tmp_firrtl/top_${pt}.v"
+    #     rm -f  yosys_script.*
+    # else
+    #     echo "ERROR: Firrtl compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
+    #     exit $ret_val
+    # fi
+
   done #end of for
 
-
-  # cat stat.livehd
 
   # rm -f *.dot
   # rm -f *.v
@@ -93,15 +108,16 @@ fucntion() {
 
 
 
-  echo "-------------------- Benchmark Start -----" > stat.livehd
-  # for thds in 2 3 4 8 16 32
-  # note: for single thread, you have to disable thread pool directly
-  # for thds in 1 
-  for thds in 1 2
-  do
-    export LIVEHD_THREADS=$thds
-    fucntion "$pts" "$thds"
-  done
+echo "-------------------- Benchmark Start -----" > stat.livehd
+# for thds in 2 3 4 8 16 32
+# note: for single thread, you have to disable thread pool directly
+# for thds in 1 
+# set up $1 from the command line, ex: ./bench_fir.sh '1 2 3 4 8 16'
+for thds in $1
+do
+  export LIVEHD_THREADS=$thds
+  fucntion "$pts" "$thds"
+done
 
 
 

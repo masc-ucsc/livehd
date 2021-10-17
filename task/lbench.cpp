@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <fmt/format.h>
 #include "lbench.hpp"
 #include "thread_pool.hpp"
 
@@ -119,9 +120,10 @@ void Lbench::end() {
 
   Time_Point tp = std::chrono::system_clock::now();
 
-  Time_Point prev     = start_time;
   //int        prev_mem = start_mem;
 
+#if 1
+  Time_Point prev     = start_time;
   for (const auto &s : record) {
     std::chrono::duration<double> t = s.tp - prev;
 
@@ -149,15 +151,18 @@ void Lbench::end() {
 
     prev     = s.tp;
   }
+#endif
+
   std::vector<uint64_t> stats(4);
   linux.stop(stats);
 
   std::chrono::duration<double> t = tp - start_time;
-  std::stringstream             sstr;
 
   std::chrono::duration<double> from_sec = start_time - global_start_time;
   std::chrono::duration<double> to_sec   = tp         - global_start_time;
 
+#if 1
+  std::stringstream  sstr;
   sstr << std::setw(20) << std::left << sample_name
     << " tid=" << std::setw(4) << Thread_pool::get_task_id()
     << " secs=" << std::setw(15) << t.count() << " IPC=" << std::setw(10)
@@ -166,12 +171,23 @@ void Lbench::end() {
     << " from=" << from_sec.count() << " to=" << to_sec.count()
     << "\n";
   // std::cerr << sstr.str();
+#endif
+	// auto buf = fmt::memory_buffer();
+	// fmt::format_to(std::back_inserter(buf),
+	// 			"{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count()
+	// 		);
+
+  // auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count());
+  // auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, 0, 0, 0, 0, 0, 0, 0);
 
   int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
 
   if (tfd >= 0) {
     auto sz = write(tfd, sstr.str().data(), sstr.str().size());
+    // auto sz = write(tfd, res.data(), res.size());
     (void)sz;
     close(tfd);
   }
+  Time_Point tp2 = std::chrono::system_clock::now();
+	std::cout<< "Yo3:" << (tp2-tp).count() << std::endl;
 }

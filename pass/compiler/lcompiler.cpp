@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "lcompiler.hpp"
+#include "lbench.hpp"
 
 // FIXME: todo: the top should always specified so that the bottom-up mechanism works
 
@@ -29,6 +30,7 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   Lnast_tolg ln2lg(mod_name, path);
   const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto       local_lgs = ln2lg.do_tolg(ln, top_stmts);
+  // Lbench foo("pass.wierd");
 
   if (gviz)
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
@@ -36,6 +38,10 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs) lgs.emplace_back(lg);
+  // auto tp = std::chrono::system_clock::now();
+  // auto tp2 = std::chrono::system_clock::now();
+  // fmt::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
+
 }
 
 void Lcompiler::do_prp_local_cprop_bitwidth() {
@@ -174,6 +180,11 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
 
+  // auto tp = std::chrono::system_clock::now();
+
+  // Lbench foo("pass.wierd");
+
+
   if (gviz)
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
 
@@ -181,6 +192,9 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs)
     lgs.emplace_back(lg);
+
+  // auto tp2 = std::chrono::system_clock::now();
+  // fmt::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
 }
 
 void Lcompiler::do_fir_cprop() {

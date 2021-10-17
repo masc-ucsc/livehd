@@ -76,7 +76,7 @@ void Hierarchy_tree::regenerate_step(Lgraph *lg, const Hierarchy_index &parent) 
 }
 
 void Hierarchy_tree::regenerate_int() {
-
+  Lbench bar("core.hierarchy");
   Hierarchy_data data(top->get_lgid(), 0);
   set_root(data);
 
