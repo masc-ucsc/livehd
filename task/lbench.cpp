@@ -79,8 +79,7 @@ void Lbench::perf_stop() {
 
 
 void Lbench::start() {
-  start_time = std::chrono::system_clock::now();
-  start_mem  = getValue();
+  start_time = get_cycles();
   linux.start();
 
   static bool first = true;
@@ -95,60 +94,29 @@ void Lbench::sample(const std::string &name) {
   linux.sample(stats);
 
   Time_Sample s;
-  s.tp          = std::chrono::system_clock::now();
-  s.mem         = getValue();
+  s.tp          = get_cycles();
   s.ncycles     = stats[0];
   s.ninst       = stats[1];
   s.nbr_misses  = stats[2];
-  s.nmem_misses = stats[3];
   s.name        = name;
 
   record.push_back(s);
 }
 
-double Lbench::get_secs() const {
-  Time_Point tp = std::chrono::system_clock::now();
-
-  std::chrono::duration<double> t    = tp - start_time;
-  return t.count();
-}
-
 void Lbench::end() {
-  // return;
   if (end_called)
     return;
   end_called = true;
 
-  Time_Point tp = std::chrono::system_clock::now();
+  Time_Point tp = get_cycles();
 
-  //int        prev_mem = start_mem;
-
-#if 1
+#if 0
   Time_Point prev     = start_time;
   for (const auto &s : record) {
     std::chrono::duration<double> t = s.tp - prev;
 
     if (s.name == "end" && t.count() < 0.01)
       continue;
-
-#if 0
-    int m;
-    if (prev_mem > s.mem)
-      m = prev_mem - s.mem;
-    else
-      m = s.mem - prev_mem;
-
-    std::cerr << s.name << " secs=" << t.count();
-    if (s.ncycles) {
-      std::cerr
-        << ":IPC=" << ((double)s.ninst) / (s.ncycles+1)
-        << ":BR MPKI=" << ((double)s.nbr_misses*1000 ) / (s.ninst+1)
-        << ":L2 MPKI=" << ((double)s.nmem_misses*1000) / (s.ninst+1);
-    }
-    std::cerr << m << ":KB delta " << s.mem << "KB abs\n";
-
-    prev_mem = s.mem;
-#endif
 
     prev     = s.tp;
   }
@@ -157,41 +125,39 @@ void Lbench::end() {
   std::vector<uint64_t> stats(4);
   linux.stop(stats);
 
-  std::chrono::duration<double> t = tp - start_time;
-
-  std::chrono::duration<double> from_sec = start_time - global_start_time;
-  std::chrono::duration<double> to_sec   = tp         - global_start_time;
-
-#if 0
-  std::stringstream  sstr;
-  sstr << std::setw(20) << std::left << sample_name
-    << " tid=" << std::setw(4) << Thread_pool::get_task_id()
-    << " secs=" << std::setw(15) << t.count() << " IPC=" << std::setw(10)
-    << ((double)stats[1]) / (stats[0] + 1) << " BR_MPKI=" << std::setw(10) << ((double)stats[2] * 1000) / (stats[1] + 1)
-    << " L2_MPKI=" << std::setw(10) << ((double)stats[3] * 1000) / (stats[1] + 1)
-    << " from=" << from_sec.count() << " to=" << to_sec.count()
-    << "\n";
-  // std::cerr << sstr.str();
+#ifdef __x86_64__
+  auto t = (tp - start_time);
+  auto from_sec = (start_time - global_start_time);
+  auto to_sec   = (tp         - global_start_time);
+#else
+  auto t = (tp - start_time).count();
+  auto from_sec = (start_time - global_start_time).count();
+  auto to_sec   = (tp         - global_start_time).count();
 #endif
-	// auto buf = fmt::memory_buffer();
-	// fmt::format_to(std::back_inserter(buf),
-	// 			"{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count()
-	// 		);
 
-  auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count());
-  // auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, 0, 0, 0, 0, 0, 0, 0);
+  auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n"
+      ,sample_name
+      ,Thread_pool::get_task_id()
+      ,t
+      ,((double)stats[1]) / (stats[0] + 1)
+      ,((double)stats[2] * 1000) / (stats[1] + 1)
+      ,((double)stats[3] * 1000) / (stats[1] + 1)
+      ,from_sec
+      ,to_sec
+      );
 
   // int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
 
-  if (tfd >= 0) {
-    // auto sz = write(tfd, sstr.str().data(), sstr.str().size());
-    auto sz = write(tfd, res.data(), res.size());
-    (void)sz;
-    // close(tfd);
-  } else {
+  if (tfd < 0) {
     tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
+    if (tfd<0) {
+      fmt::print("ERROR: could not create lbench.trace\n");
+      exit(-3);
+    }
   }
-
-  Time_Point tp2 = std::chrono::system_clock::now();
-	std::cout<< "Yo3:" << (tp2-tp).count() << std::endl;
+  // auto sz = write(tfd, sstr.str().data(), sstr.str().size());
+  auto sz = ::write(tfd, res.data(), res.size());
+  (void)sz;
+  assert(sz == res.size());
+  // close(tfd);
 }

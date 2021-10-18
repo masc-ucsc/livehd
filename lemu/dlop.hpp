@@ -110,8 +110,10 @@ private:
   }
 
   void clear() {
-    bzero(base , size*sizeof(int64_t));
-    bzero(extra, size*sizeof(int64_t));
+    for(auto i=0;i<size;++i) {
+      base[i] = 0;
+      extra[i] = 0;
+    }
   }
 
 public:

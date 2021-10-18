@@ -21,7 +21,6 @@ void Pass_compiler::setup() {
 
 Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
 
-int Lbench::tfd = -1;
 void Pass_compiler::compile(Eprp_var &var) {
   // Lbench b("pass.compile.front");
   Pass_compiler pc(var);

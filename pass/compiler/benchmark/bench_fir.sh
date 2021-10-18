@@ -7,8 +7,8 @@ fi
 #   git clone git@github.com:masc-ucsc/livehd_regression.git
 
 #   cd livehd_regression/synthetic
-#   # run the full chisel compilation flow 
-#   ./setup.sh 
+#   # run the full chisel compilation flow
+#   ./setup.sh
 #   cd ../../
 # fi
 
@@ -22,7 +22,7 @@ FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 if [ "${PWD##/home/}" != "${PWD}" ]; then
   LGDB=./lgdb
 else
-  LGDB=/local/scrap/masc/swang203/lgdb   # NSF
+  LGDB=${MADA_SCRAP}/lgdb   # NSF
 fi
 
 GVIZ='false'
@@ -41,7 +41,7 @@ fi
 unsorted=''
 for filename in ./livehd_regression/synthetic/generated/*.${FIRRTL_LEVEL}.pb
 do
-  pt=$(basename "$filename" .${FIRRTL_LEVEL}.pb) # ./foo/bar.scala -> bar 
+  pt=$(basename "$filename" .${FIRRTL_LEVEL}.pb) # ./foo/bar.scala -> bar
   unsorted+="$pt "
 done
 
@@ -70,11 +70,11 @@ fucntion() {
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
         exit 1
-    fi 
-    # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog" 
+    fi
+    # perf record --call-graph fp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> inou.cgen.verilog"
 
     # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
-    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
+    perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:${LGDB}/gen_verilog"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
@@ -83,6 +83,7 @@ fucntion() {
     fi
 
     grep elapsed pp >> stat.livehd
+    cp pp perf.livehd
 
   # # Verilog code generation
     # perf stat -o pp ${LGSHELL} "lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
@@ -111,7 +112,7 @@ fucntion() {
 echo "-------------------- Benchmark Start -----" > stat.livehd
 # for thds in 2 3 4 8 16 32
 # note: for single thread, you have to disable thread pool directly
-# for thds in 1 
+# for thds in 1
 # set up $1 from the command line, ex: ./bench_fir.sh '1 2 3 4 8 16'
 for thds in $1
 do
