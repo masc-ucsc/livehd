@@ -114,6 +114,7 @@ double Lbench::get_secs() const {
 }
 
 void Lbench::end() {
+  // return;
   if (end_called)
     return;
   end_called = true;
@@ -161,7 +162,7 @@ void Lbench::end() {
   std::chrono::duration<double> from_sec = start_time - global_start_time;
   std::chrono::duration<double> to_sec   = tp         - global_start_time;
 
-#if 1
+#if 0
   std::stringstream  sstr;
   sstr << std::setw(20) << std::left << sample_name
     << " tid=" << std::setw(4) << Thread_pool::get_task_id()
@@ -177,17 +178,20 @@ void Lbench::end() {
 	// 			"{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count()
 	// 		);
 
-  // auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count());
+  auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, Thread_pool::get_task_id(), t.count(), ((double)stats[1]) / (stats[0] + 1), ((double)stats[2] * 1000) / (stats[1] + 1), ((double)stats[3] * 1000) / (stats[1] + 1), from_sec.count(), to_sec.count());
   // auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n", sample_name, 0, 0, 0, 0, 0, 0, 0);
 
-  int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
+  // int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
 
   if (tfd >= 0) {
-    auto sz = write(tfd, sstr.str().data(), sstr.str().size());
-    // auto sz = write(tfd, res.data(), res.size());
+    // auto sz = write(tfd, sstr.str().data(), sstr.str().size());
+    auto sz = write(tfd, res.data(), res.size());
     (void)sz;
-    close(tfd);
+    // close(tfd);
+  } else {
+    tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
   }
+
   Time_Point tp2 = std::chrono::system_clock::now();
 	std::cout<< "Yo3:" << (tp2-tp).count() << std::endl;
 }

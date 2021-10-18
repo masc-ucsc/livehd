@@ -26,6 +26,7 @@
 class Lbench {
 private:
   LinuxEvents<PERF_TYPE_HARDWARE> linux;
+  
 
   int parseLine(char *line) const {
     // This assumes that a digit will be found and the line ends in " Kb".
@@ -95,5 +96,6 @@ public:
   double get_secs() const;
 
   void end();
+  static int tfd;
 };
 
