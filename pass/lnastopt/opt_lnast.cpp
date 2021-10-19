@@ -239,7 +239,10 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
 }
 
 void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  auto        lhs_id            = ln->get_first_child(lnid);
+  auto        lhs_id   = ln->get_first_child(lnid);
+  const auto &lhs_data = ln->get_data(lhs_id);
+  auto        lhs_txt  = lhs_data.token.get_text();
+
   auto        idx               = ln->get_sibling_next(lhs_id);
   const auto &second_child_data = ln->get_data(idx);
   I(second_child_data.type.is_ref());
@@ -249,28 +252,40 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
 
   //-------------------------------
   auto rhs_id = ln->get_last_child(lnid);
-  idx         = ln->get_sibling_next(idx);
 
   while (idx != rhs_id) {
     const auto &data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: foo.bar
       var_field = mmap_lib::str::concat(var_field, ".", data.token.get_text());
+    } else {
+      I(data.type.is_ref());
+      auto ref        = data.token.get_text();
+      auto ref_bundle = st.get_bundle(ref);
+      if (ref_bundle == nullptr) {  // Stores reference if reference value is unknown
+        st.set(lhs_txt, ref_bundle);
+        return;
+      }
     }
 
     idx = ln->get_sibling_next(idx);
   }
   // Repeat one last time for last child
-  const auto &data = ln->get_data(idx);
-  if (data.type.is_const()) {  // CASE 1: foo.bar
-    var_field = mmap_lib::str::concat(var_field, ".", data.token.get_text());
+  const auto &rhs_data = ln->get_data(rhs_id);
+  if (rhs_data.type.is_const()) {  // CASE 1: foo.bar
+    var_field = mmap_lib::str::concat(var_field, ".", rhs_data.token.get_text());
+  } else {
+    I(rhs_data.type.is_ref());
+    auto ref        = rhs_data.token.get_text();
+    auto ref_bundle = st.get_bundle(ref);
+    if (ref_bundle == nullptr) {  // Stores reference if reference value is unknown
+      st.set(lhs_txt, ref_bundle);
+      return;
+    }
   }
 
-  const auto &lhs_data = ln->get_data(lhs_id);
-  auto        lhs_txt  = lhs_data.token.get_text();
-
+  // Stores value if reference value is known
   auto rhs_txt = mmap_lib::str::concat(var_root, var_field);
   auto bundle  = st.get_bundle(rhs_txt);
-
   st.set(lhs_txt, bundle);
 
   // TEMP CODE
