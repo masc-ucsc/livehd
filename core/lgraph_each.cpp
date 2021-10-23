@@ -214,7 +214,6 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)>& fn) {
-  Lbench b("down_map");
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
 }
@@ -236,14 +235,10 @@ void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn
     int n_pending = atomic_fetch_sub_explicit((std::atomic<int> *)(&it2->second), 1, std::memory_order_relaxed);
     if (n_pending==1) {
       I(it2->second==0);
-#if 1
 #ifdef NO_BOTTOM_UP_PARALLEL
       parent_lg->bottom_up_visit_wrap(fn, pending_map, parent_map);
 #else
       thread_pool.add(&Lgraph::bottom_up_visit_wrap, parent_lg, fn, pending_map, parent_map);
-#endif
-#else
-      parent_lg->bottom_up_visit_wrap(fn, pending_map, parent_map);
 #endif
     }
   }

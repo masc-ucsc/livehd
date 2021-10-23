@@ -2137,7 +2137,7 @@ void Cprop::clean_io(Lgraph *lg) {
 }
 
 void Cprop::do_trans(Lgraph *lg) {
-  Lbench b("pass.cprop");
+  Lbench b("pass.cprop." + lg->get_name().to_s());
 
   scalar_pass(lg);
   tuple_pass(lg);

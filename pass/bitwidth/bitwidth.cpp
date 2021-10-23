@@ -14,7 +14,7 @@
 Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterations), hier(_hier) {}
 
 void Bitwidth::do_trans(Lgraph *lg) {
-  Lbench b("pass.bitwidth");
+  Lbench b("pass.bitwidth." + lg->get_name().to_s());
   bw_pass(lg);
 }
 

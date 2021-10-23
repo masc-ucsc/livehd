@@ -10,7 +10,6 @@
 #include "main_api.hpp"
 
 void Meta_api::open(Eprp_var &var) {
-  Lbench b("lgraph.open");
   auto path = var.get("path");
   auto name = var.get("name");
   auto hier = var.get("hier");

@@ -229,10 +229,10 @@ public:
       if (has_work) {
         res();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
-      } else {
-        Lbench b("waiting");
-        while (jobs_left > 0)
-          ;
+      /* } else { */
+      /*   Lbench b("waiting"); */
+      /*   while (jobs_left > 0) */
+      /*     ; */
       }
     }
   }

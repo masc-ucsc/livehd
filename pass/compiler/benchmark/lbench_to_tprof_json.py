@@ -4,7 +4,7 @@ import re
 def main():
 
     # for website color mapping
-    tfprof_map = {'inou.fir_tolnast': 'static', 
+    tfprof_map = {'inou.fir_tolnast': 'static',
                   'pass.lnast_ssa' :  'static',
                   'core.hierarchy' :  'static',
                   'pass.lnast_tolg' : 'static',
@@ -25,7 +25,7 @@ def main():
     fw.write("  {\n")
     fw.write("    \"executor\": \"8-threads\",\n")
     fw.write("    \"data\": [\n")
-    
+
     # first parsing to know the last line of tid=k happened
     tid_to_last_line = {}
     loc = 1
@@ -63,12 +63,18 @@ def main():
         thread_str[tid] += ("          {\n")
         thread_str[tid] += ("            \"span\": [%s, %s],\n" %(beg, end))
         thread_str[tid] += ("            \"name\": \"%s\",\n"   %(pname))
-        thread_str[tid] += ("            \"type\": \"%s\"\n"    %(tfprof_map[pname]))
+        if (pname == "idle"):
+            thread_str[tid] += ("            \"type\": \"subflow\"\n")
+        elif (pname == "waiting"):
+            thread_str[tid] += ("            \"type\": \"cudaflow\"\n")
+        else:
+            thread_str[tid] += ("            \"type\": \"static\"\n")
+        # thread_str[tid] += ("            \"type\": \"%s\"\n"    %(tfprof_map[pname]))
         if (loc == tid_to_last_line[tid]):
            thread_str[tid] += ("          }\n")
         else:
            thread_str[tid] += ("          },\n")
-            
+
         loc +=1
 
 
@@ -87,7 +93,7 @@ def main():
             thread_str[key] += ("      },\n")
         else:
             thread_str[key] += ("      }\n")
-            
+
 
     for i in range(thread_number):
         key = 'tid=' + str(i)

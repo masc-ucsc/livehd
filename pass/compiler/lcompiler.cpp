@@ -216,14 +216,15 @@ void Lcompiler::do_fir_cprop() {
         gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
       });
-
+      break;
+#if 0
       // for top lgraph
       Cprop cp(false);
 
       fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg->get_name());
       cp.do_trans(lg);
       gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-
+#endif
     }
   }
   if (lgcnt > 1 && hit == false)
@@ -383,12 +384,7 @@ void Lcompiler::do_fir_firbits() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-#if 1
-      // FIXME: paralell breaks (hier)
       lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
-#else
-      lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
-#endif
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
 
         fmt::print("-------- {:<28} ({:<30}) -------- (F-0)\n", "Firrtl Bits Analysis", lg_sub->get_name());
@@ -399,7 +395,9 @@ void Lcompiler::do_fir_firbits() {
         gviz == true ? gv.do_from_lgraph(lg_sub, "firbits-ed") : void();
 
       });
+      break;
 
+#if 0
       // for top lgraph
       Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
 
@@ -409,6 +407,7 @@ void Lcompiler::do_fir_firbits() {
       fmt::print("-------- {:<28} ({:<30}) -------- (F-1)\n", "Firrtl Bits Analysis", lg->get_name());
       fm.do_firbits_analysis(lg);
       gviz == true ? gv.do_from_lgraph(lg, "firbits-ed") : void();
+#endif
 
     }
   }

@@ -14,7 +14,7 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
     : fbmaps(_fbmaps), pinmaps(_pinmaps), spinmaps_xorr(_spinmaps_xorr) {}
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
-  Lbench b("pass.firmap");
+  Lbench b("pass.firmap." + lg->get_name().to_s());
 
   auto    lg_name   = lg->get_name();
   auto    lg_source = lg->get_library().get_source(lg->get_lgid());
