@@ -309,13 +309,32 @@ protected:
     size_ctrl    = (sz << 1) | 1;
     ptr_or_start = 0;
     data_storage = 0;
-    for (auto i = 0u; i < sz; ++i) {
-      uint64_t val = static_cast<unsigned char>(s[i]);
-      if (i < 3) {
+
+    if (sz < 3) {
+      for (auto i = 0u; i < sz; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
         size_ctrl |= val << (8 * (i + 1));
-      } else if (i < 7) {
+      }
+    } else if (sz < 7) {
+      for (auto i = 0u; i < 3; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
+        size_ctrl |= val << (8 * (i + 1));
+      }
+      for (auto i = 3u; i < sz; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
         ptr_or_start |= val << (8 * (i - 3));
-      } else {
+      }
+    } else {
+      for (auto i = 0u; i < 3; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
+        size_ctrl |= val << (8 * (i + 1));
+      }
+      for (auto i = 3u; i < 7; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
+        ptr_or_start |= val << (8 * (i - 3));
+      }
+      for (auto i = 7u; i < sz; ++i) {
+        uint64_t val = static_cast<unsigned char>(s[i]);
         data_storage |= val << (8 * (i - 7));
       }
     }

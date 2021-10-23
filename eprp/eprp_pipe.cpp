@@ -2,6 +2,7 @@
 
 #include "eprp.hpp"
 #include "eprp_pipe.hpp"
+#include "lbench.hpp"
 
 void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) {
   steps.emplace_back(method, var);

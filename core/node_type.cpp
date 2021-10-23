@@ -12,14 +12,15 @@ Lgraph_Node_Type::Lgraph_Node_Type(const mmap_lib::str &_path, const mmap_lib::s
     : Lgraph_Base(_path, _name, _lgid, _lib)
     , const_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_const"))
     , subid_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_subid"))
+    , down_class_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_downc"))
     , lut_map(_path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_lut")) {
-
 
 }
 
 void Lgraph_Node_Type::clear() {
   const_map.clear();
   subid_map.clear();
+  down_class_map.clear();
   lut_map.clear();
 }
 
@@ -29,9 +30,17 @@ void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
   I(node_internal.ref(nid)->is_master_root());
 
   auto type = node_internal.ref(nid)->get_type();
-  if (type == Ntype_op::Sub)
-    subid_map.erase(Node::Compact_class(nid));
-  else if (type == Ntype_op::LUT)
+  if (type == Ntype_op::Sub) {
+    auto it = subid_map.find(Node::Compact_class(nid));
+    I(it != subid_map.end());
+    auto it2 = down_class_map.find(it->second);
+    I(it2 != down_class_map.end());
+    it2->second--;
+    if (it2->second==0) {
+      down_class_map.erase(it2);
+    }
+    subid_map.erase(it);
+  }else if (type == Ntype_op::LUT)
     lut_map.erase(Node::Compact_class(nid));
 
   node_internal.ref(nid)->set_type(op);
@@ -49,6 +58,12 @@ bool Lgraph_Node_Type::is_type_const(Index_id nid) const {
 void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
 
   subid_map.set(Node::Compact_class(nid), subgraphid.value);
+  if (down_class_map.has(subgraphid) ) {
+    auto i = down_class_map.get(subgraphid);
+    down_class_map.set(subgraphid, i+1);
+  }else{
+    down_class_map.set(subgraphid, 1);
+  }
 
   // Ann_node_tree_pos::ref(static_cast<const Lgraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
 

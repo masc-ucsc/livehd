@@ -89,6 +89,13 @@ void Lbench::start() {
   }
 }
 
+double Lbench::get_secs() const {
+
+  auto end_time = get_cycles();
+
+  return (end_time-start_time);
+}
+
 void Lbench::sample(const std::string &name) {
   std::vector<uint64_t> stats(4);
   linux.sample(stats);
@@ -158,6 +165,6 @@ void Lbench::end() {
   // auto sz = write(tfd, sstr.str().data(), sstr.str().size());
   auto sz = ::write(tfd, res.data(), res.size());
   (void)sz;
-  // assert(sz == res.size()); COMMENTED OUT BY ABDULLAH - comparing expressions of different signedness causes build to fail
+  assert(static_cast<size_t>(sz) == res.size());
   // close(tfd);
 }

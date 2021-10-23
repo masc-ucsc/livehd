@@ -55,8 +55,8 @@ protected:
   static inline int n_open_mmaps = 0;
   static inline int n_open_fds   = 0;
 
-  static inline int n_max_mmaps = 500;
-  static inline int n_max_fds   = 500;
+  static inline int n_max_mmaps = 4000;
+  static inline int n_max_fds   = 900;
 
   static void recycle_older() {
     // Recycle around 1/2 of the newer open fds with mmap
@@ -236,7 +236,7 @@ protected:
       exit(-3);
     }
     /* LCOV_EXCL_STOP */
-    if (s.st_size <= static_cast<int>(size)) {
+    if (s.st_size < static_cast<int>(size)) {
       int ret = ::ftruncate(fd, size);
       /* LCOV_EXCL_START */
       if (ret < 0) {

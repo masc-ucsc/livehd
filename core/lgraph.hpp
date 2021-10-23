@@ -2,6 +2,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
 #include "cell.hpp"
 #include "edge.hpp"
 #include "graph_library.hpp"
@@ -162,6 +163,17 @@ protected:
 
   void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)>& fn);
 
+  using Parent_map_type = absl::node_hash_map<Lgraph *, std::vector<Lgraph *>>;
+  using Pending_map     = absl::flat_hash_map<Lgraph *, int>;
+
+  void bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn
+                           ,      Pending_map                         *pending_map
+                           ,const Parent_map_type                     *parent_map);
+
+  void bottom_up_visit_step(Pending_map                   &pending_map
+                           ,Parent_map_type               &parent_map
+                           ,absl::flat_hash_set<Lgraph *> &leafs_set
+                           ,std::vector<Lgraph *>         &leafs);
 public:
   Lgraph()               = delete;
   Lgraph(const Lgraph &) = delete;
@@ -255,6 +267,8 @@ public:
 
   void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)>& fn);
   void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)>& fn);
+
+  void each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph *lg_sub)>& fn);
   void each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)>& fn);
 
   template <typename FN>

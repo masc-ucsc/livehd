@@ -20,6 +20,7 @@ cc_library(
         "//task",
         "@boost//:multiprecision",
         "@com_google_absl//absl/container:btree",
+        "@com_google_absl//absl/container:node_hash_map",
         "@iassert",
         "@rapidjson//:headers",
     ],

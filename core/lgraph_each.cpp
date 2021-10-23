@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <atomic>
+
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "mmap_map.hpp"
@@ -175,6 +178,7 @@ void Lgraph::each_hier_fast(const std::function<bool(Node &)>& f) {
 }
 
 void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)>& fn) {
+
   std::set<Lg_type_id> visited;
   for (auto e : get_down_nodes_map()) {
     Index_id cid = e.first.nid;
@@ -195,28 +199,100 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)>& fn) {
-  for (auto e : get_down_nodes_map()) {
-    Index_id cid = e.first.nid;
-    I(cid);
 
-    if (visited.find(e.second) != visited.end())
+  for(const auto &ent:get_down_class_map()) {
+    if (visited.find(ent.first) != visited.end())
       continue;
+    visited.insert(ent.first);
 
-    Lgraph *lg = Lgraph::open(get_path(), e.second);
-    if (lg == nullptr)
+    auto *down_lg = Lgraph::open(get_path(), Lg_type_id(ent.first));
+    if (down_lg == nullptr)
       continue;
-
-    lg->each_hier_unique_sub_bottom_up_int(visited, fn);
-    if (visited.find(e.second) == visited.end()) {
-      visited.insert(e.second);
-      fn(lg);
-    }
+    down_lg->each_hier_unique_sub_bottom_up_int(visited, fn);
+    fn(down_lg);
   }
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)>& fn) {
+  Lbench b("down_map");
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
+}
+
+void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn
+                                 ,      Pending_map                         *pending_map
+                                 ,const Parent_map_type                     *parent_map) {
+
+  (*fn)(this);
+
+  const auto it = parent_map->find(this);
+  if (it == parent_map->end())
+    return;
+
+  for(auto *parent_lg:it->second) {
+    auto it2 = pending_map->find(parent_lg);
+    I(it2 != pending_map->end());
+    // WARNING: NASTY cast to atomic because map does not allow to have an atomic as 2nd entry
+    int n_pending = atomic_fetch_sub_explicit((std::atomic<int> *)(&it2->second), 1, std::memory_order_relaxed);
+    if (n_pending==1) {
+      I(it2->second==0);
+#if 1
+#ifdef NO_BOTTOM_UP_PARALLEL
+      parent_lg->bottom_up_visit_wrap(fn, pending_map, parent_map);
+#else
+      thread_pool.add(&Lgraph::bottom_up_visit_wrap, parent_lg, fn, pending_map, parent_map);
+#endif
+#else
+      parent_lg->bottom_up_visit_wrap(fn, pending_map, parent_map);
+#endif
+    }
+  }
+}
+
+void Lgraph::bottom_up_visit_step(Pending_map                    &pending_map
+                                 ,Parent_map_type                &parent_map
+                                 ,absl::flat_hash_set<Lgraph *>  &leafs_set
+                                 ,std::vector<Lgraph *>          &leafs) {
+
+  bool leaf = true;
+  for(const auto &ent:get_down_class_map()) {
+    auto *down_lg = Lgraph::open(get_path(), Lg_type_id(ent.first));
+    if (down_lg != nullptr && !down_lg->is_empty()) {
+      leaf = false;
+      parent_map[down_lg].emplace_back(this);
+      pending_map[this]++;
+      down_lg->bottom_up_visit_step(pending_map, parent_map, leafs_set, leafs);
+    }
+  }
+
+  if (leaf) {
+    auto it = leafs_set.insert(this);
+    if (it.second) {
+      leafs.emplace_back(this);
+    }
+  }
+}
+
+void Lgraph::each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph *lg_sub)>& fn) {
+
+  Pending_map     pending_map;
+  Parent_map_type parent_map;
+
+  absl::flat_hash_set<Lgraph *>  leafs_set;
+  std::vector<Lgraph *>          leafs;
+
+  bottom_up_visit_step(pending_map, parent_map, leafs_set, leafs); // single-thread
+
+  if (!leafs.empty()) {
+    for(auto *lg:leafs) {
+#ifdef NO_BOTTOM_UP_PARALLEL
+      lg->bottom_up_visit_wrap(&fn, &pending_map, &parent_map);
+#else
+      thread_pool.add(&Lgraph::bottom_up_visit_wrap, lg, &fn, &pending_map, &parent_map);
+#endif
+    }
+    thread_pool.wait_all();
+  }
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_parallel(const std::function<void(Lgraph *lg_sub)>& fn) {

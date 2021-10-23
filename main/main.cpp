@@ -487,7 +487,7 @@ int main(int argc, char** argv) {
           auto        pos2 = cmd2.find(' ');
           if (pos2 != std::string::npos)
             cmd2 = cmd2.substr(0, pos2);
-          
+
           help(mmap_lib::str(cmd2), Main_api::get_command_help(mmap_lib::str(cmd2)));
           Main_api::get_labels(mmap_lib::str(cmd2), help_labels);
         }

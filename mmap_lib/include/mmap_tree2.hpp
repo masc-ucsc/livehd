@@ -127,6 +127,54 @@
 // API: add_child (first child or insert_last_child)
 //
 // ------------------------------------------------------
+// BEST potential locality on typical LNAST traversal
+//
+//   Get children & get parent calls
+// 02: 02 -── 1.1
+// 05: 04 │       -── 1.2.1.1
+// 06: 04 │       ├── 1.2.1.2
+// 14: 05 │           -── 1.2.1.3.1
+// 15: 05 │           -── 1.2.1.3.2
+// 13: 04 │       |── 1.2.1.3
+// 04: 03 │   -── 1.2.1
+// 03: 02 ├── 1.2
+// 11: 04 │       -── 1.3.1.1
+// 12: 04 │       |── 1.3.1.2
+// 08: 03 │   -── 1.3.1
+// 09: 03 │   ├── 1.3.2
+// 10: 03 │   ├── 1.3.3
+// 07: 02 ├── 1.3
+// 17: 03 │   -── 1.4.1
+// 19: 04 │   │   -── 1.4.2.1
+// 18: 03 │   ├── 1.4.2
+// 21: 04 │   │   -── 1.4.3.1
+// 20: 03 │   ├── 1.4.3
+// 16: 02 ├── 1.4
+// 01: 01 | 1
+//
+// API: find_next_siblings
+//  ++pos;
+//  while(level[pos]<=level[self]) {
+//    if(level[pos]==level[self]) {
+//      return pos
+//    }
+//    ++pos;
+//  }
+//
+// API: find_prev_siblings
+//   Same traverse --pos
+//
+// API: find_parent
+//   ++pos until level[pos] == level[self]+1
+//
+//  API is_first_child()
+//   go --pos while (level[pos]>level[self])
+//   true when level[pos] == level[self] || level[pos] == level[self-1]
+//
+//  API is_last_child()
+//   true when level[pos+1] == level[self] + 1
+//
+// ------------------------------------------------------
 // BEST Possible order for LNAST "typical" traversal is post-order (first-case)
 //   Get children & get parent calls
 //

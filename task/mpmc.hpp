@@ -51,7 +51,7 @@ public:
       _mask(size - 1)
       , _head_seq(0)
       , _tail_seq(0) {
-    // bzero(_buffer,sizeof(node_t)*(_size + 1));
+    bzero(_buffer,sizeof(node_t)*(_size));
 
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));

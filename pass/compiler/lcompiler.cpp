@@ -51,7 +51,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     ++lgcnt;
     if (lg->get_name() == top) {
       hit = true;
-      lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
+      lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
         Bitwidth bw(false, 10);
         Cprop    cp(false);
         fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
@@ -208,7 +208,7 @@ void Lcompiler::do_fir_cprop() {
     // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
+      lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
         Cprop cp(false);
 
         fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg_sub->get_name());
@@ -282,7 +282,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 
     hit = true;
     // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
-    lg->each_hier_unique_sub_bottom_up_parallel([this, &lg_visited, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
+    lg->each_hier_unique_sub_bottom_up_parallel2([this, &lg_visited, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
       {
         std::unique_lock<std::mutex> guard(lg_visited_mutex);
         if (lg_visited.find(lg_sub) != lg_visited.end())
@@ -385,7 +385,7 @@ void Lcompiler::do_fir_firbits() {
       hit = true;
 #if 1
       // FIXME: paralell breaks (hier)
-      lg->each_hier_unique_sub_bottom_up_parallel([this](Lgraph *lg_sub) {
+      lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
 #else
       lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
 #endif

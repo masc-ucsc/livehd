@@ -21,6 +21,8 @@ struct Explicit_type {
   bool is_invalid() const { return value == inv_val; }
   void invalidate() { value = inv_val; }
 
+  [[nodiscard]] constexpr size_t hash() const { return value; }
+
   // bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
 };
 

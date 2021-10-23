@@ -26,10 +26,10 @@ void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
   auto dir     = pp.get_odir(var);
   auto verbose = pp.verbose;
 
-  for (const auto &l : var.lgs) {
-    thread_pool.add([l, verbose, dir]() {
+  for (auto *lg : var.lgs) {
+    thread_pool.add([lg, verbose, dir]() -> void {
       Cgen_verilog p(verbose, dir);
-      p.do_from_lgraph(l);
+      p.do_from_lgraph(lg);
     });
   }
 

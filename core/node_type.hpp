@@ -10,7 +10,8 @@
 #include "node.hpp"
 #include "sub_node.hpp"
 
-using Node_down_map = mmap_lib::map<Node::Compact_class, Lg_type_id>;
+using Node_down_map  = mmap_lib::map<Node::Compact_class, Lg_type_id>;
+using Down_class_map = mmap_lib::map<Lg_id_t, int>;
 
 class Lgraph_Node_Type : virtual public Lgraph_Base {
 protected:
@@ -19,8 +20,9 @@ protected:
 
   Node_value_map const_map;  // bimap to avoid unnecessary constant replication
 
-  Node_down_map subid_map;
-  Node_lut_map  lut_map;
+  Node_down_map  subid_map;
+  Down_class_map down_class_map;
+  Node_lut_map   lut_map;
 
   void clear();
 
@@ -53,5 +55,6 @@ public:
   Lgraph_Node_Type() = delete;
   explicit Lgraph_Node_Type(const mmap_lib::str &path, const mmap_lib::str &name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
 
-  const Node_down_map &get_down_nodes_map() const { return subid_map; };
+  const Node_down_map  &get_down_nodes_map() const { return subid_map; };
+  const Down_class_map &get_down_class_map() const { return down_class_map; };
 };
