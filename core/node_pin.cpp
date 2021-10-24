@@ -581,7 +581,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(down_pid != Port_invalid);
 
   // 3rd: get down_current_g
-  auto *down_current_g = htree.ref_lgraph(down_hidx);
+  auto *down_current_g = node.ref_type_sub_lgraph();
 
   // 4th: get down_idx
   Index_id down_idx = down_current_g->find_idx_from_pid(is_driver() ? Hardcoded_output_nid : Hardcoded_input_nid, down_pid);

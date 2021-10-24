@@ -66,9 +66,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
 
 
     for (auto node : lg->forward()) {
-#ifndef NDEBUG
-      fmt::print("{}\n", node.debug_name());
-#endif
+      // fmt::print("{}\n", node.debug_name());
       auto op = node.get_type_op();
 
       I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And && op != Ntype_op::Sum && op != Ntype_op::Mult
