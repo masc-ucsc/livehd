@@ -339,11 +339,14 @@ public:
   // std::bind(&map<MaxLoadFactor100, Key, T, Hash>::gc_function, this, std::placeholders::_1));
   static std::tuple<void *, size_t> mmap(std::string_view name, int fd, size_t size,
                                          std::function<bool(void *, bool)> gc_function) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
 
+    //std::cerr << "mmap_lib::mmap " << size / 1024 << "KBs for " << name << std::endl;
     auto [base, final_size] = mmap_step(name, fd, size);
     if (base == MAP_FAILED) {
-      try_collect_mmap_int();
+      {
+        std::lock_guard<std::mutex> guard(lgs_mutex);
+        try_collect_mmap_int();
+      }
       std::tie(base, final_size) = mmap_step(name, fd, size);
       /* LCOV_EXCL_START */
       if (base == MAP_FAILED) {
@@ -352,6 +355,7 @@ public:
       }
       /* LCOV_EXCL_STOP */
     }
+    std::lock_guard<std::mutex> guard(lgs_mutex);
     n_open_mmaps++;
 
     mmap_gc_entry entry;

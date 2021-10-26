@@ -66,9 +66,13 @@ public:
 
   template <typename... Args>
   static void info(std::string_view format, const Args &...args) {
+#ifndef NDEBUG
     auto tmp = fmt::format(format, args...);
     err_tracker::err_logger(tmp.data());
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
+#else
+    (void)format;
+#endif
   }
 
   virtual bool is_done() const { return true; }
