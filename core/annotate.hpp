@@ -24,7 +24,6 @@ struct Ann_name {
   static constexpr char instname[]  = "instname";
   static constexpr char nodeplace[] = "nodeplace";
   static constexpr char file_loc[]  = "file_loc";
-  static constexpr char tree_pos[]  = "tree_pos";
   static constexpr char color[]     = "color";
 };
 
@@ -50,8 +49,6 @@ using Ann_node_place = Attribute<Ann_name::nodeplace, Node, mmap_lib::map<Node::
 
 using Ann_node_file_loc = Attribute<Ann_name::file_loc, Node, mmap_lib::map<Node::Compact_class, Ann_file_loc> >;
 
-using Ann_node_tree_pos = Attribute<Ann_name::tree_pos, Node, mmap_lib::map<Node::Compact_class, uint32_t> >;
-
 using Ann_node_color = Attribute<Ann_name::color, Node, mmap_lib::bimap<Node::Compact_class, int32_t> >;
 
 struct Ann_support {
@@ -68,7 +65,6 @@ struct Ann_support {
     Ann_inst_name::clear(lg);
     Ann_node_place::clear(lg);
     Ann_node_file_loc::clear(lg);
-    Ann_node_tree_pos::clear(lg);
     Ann_node_color::clear(lg);
   };
 
@@ -84,7 +80,6 @@ struct Ann_support {
     Ann_inst_name::sync(lg);
     Ann_node_place::sync(lg);
     Ann_node_file_loc::sync(lg);
-    Ann_node_tree_pos::sync(lg);
     Ann_node_color::sync(lg);
   };
 };

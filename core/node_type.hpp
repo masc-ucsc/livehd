@@ -51,6 +51,8 @@ protected:
   // No const because Lconst created
   Lconst get_type_const(Index_id nid) const;
 
+  std::tuple<Lg_type_id, Index_id> go_next_down(Index_id nid) const;
+
 public:
   Lgraph_Node_Type() = delete;
   explicit Lgraph_Node_Type(const mmap_lib::str &path, const mmap_lib::str &name, Lg_type_id _lgid, Graph_library *_lib) noexcept;

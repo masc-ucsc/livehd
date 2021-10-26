@@ -6,10 +6,10 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-static_assert(sizeof(XEdge::Compact) == 24);
-static_assert(sizeof(Node_pin::Compact) == 12);
+static_assert(sizeof(XEdge::Compact) == 40);
+static_assert(sizeof(Node_pin::Compact) == 20); // 16 hier + 4 compact
 static_assert(sizeof(Node_pin::Compact_class) == 4);
-static_assert(sizeof(Node::Compact) == 12);
+static_assert(sizeof(Node::Compact) == 20);
 static_assert(sizeof(Node::Compact_class) == 4);
 
 XEdge::XEdge(Lgraph *g, const Compact &c)

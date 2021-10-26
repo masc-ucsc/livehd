@@ -18,40 +18,31 @@ void Fast_edge_iterator::Fast_iter::go_next() {
   I(nid != 0);
 
   nid = current_g->fast_next(nid);
-  if (visit_sub) {
-    while (!nid.is_invalid()) {  // Skip SubGraph present
-      Node node(current_g, current_g, Hierarchy_tree::root_index(), nid);
-      if (!node.is_type_sub_present())
-        break;
+  if (!visit_sub)
+    return;
 
-      nid = current_g->fast_next(nid);
-    }
+  while (!nid.is_invalid()) {  // Skip SubGraph present
+    Node node(current_g, current_g, Hierarchy::hierarchical_root(), nid);
+    if (!node.is_type_sub_present())
+      break;
+
+    nid = current_g->fast_next(nid);
   }
 
-  if (nid.is_invalid()) {
-    if (visit_sub) {
-      auto next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
-      while (!next_hidx.is_invalid()) {
-        hidx      = next_hidx;
-        current_g = top_g->ref_htree()->ref_lgraph(hidx);
-        nid       = current_g->fast_first();
-        if (!nid.is_invalid()) {
-          Node node(current_g, current_g, Hierarchy_tree::root_index(), nid);
-          if (node.is_type_sub_present())
-            go_next();
-        }
-        if (!nid.is_invalid())
-          return;
-        next_hidx = top_g->ref_htree()->get_depth_preorder_next(hidx);
-      }
-      current_g = top_g;
-      I(nid == 0);
-      hidx.invalidate();
-    } else {
-      I(nid == 0);
-      I(hidx.is_invalid());  // no hierarhical, it should be already invalid
+  if (!nid.is_invalid())
+    return;
+
+  std::tie(hidx, current_g) =  top_g->get_htree().get_next(hidx);
+  while (current_g != top_g) {
+    nid = current_g->fast_first();
+    if (!nid.is_invalid()) {
+      return;
     }
+    std::tie(hidx, current_g) =  top_g->get_htree().get_next(hidx);
   }
+  I(current_g == top_g);
+  nid = 0;
+  hidx = Hierarchy::non_hierarchical(); // invalidate hidx
 }
 
 Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {
@@ -64,9 +55,9 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
   if (nid) {
-    Fast_iter it(top_g, top_g, visit_sub ? Hierarchy_tree::root_index() : Hierarchy_tree::invalid_index(), nid, visit_sub);
+    Fast_iter it(top_g, top_g, visit_sub ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical(), nid, visit_sub);
     if (visit_sub) {  // && top_g->is_type_sub(nid)) {
-      Node node(top_g, top_g, Hierarchy_tree::root_index(), nid);
+      Node node(top_g, top_g, Hierarchy::hierarchical_root(), nid);
       if (node.is_type_sub_present())
         ++it;
     }

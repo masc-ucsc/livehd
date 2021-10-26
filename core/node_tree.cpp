@@ -10,6 +10,9 @@ Node_tree::Node_tree(Lgraph* root_arg)
     : mmap_lib::tree<Node>(root_arg->get_path().to_s(), absl::StrCat(root_arg->get_name().to_s(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
+#if 1
+  assert(false); // TO DEPRECATE SOON
+#else
   absl::flat_hash_set<Hierarchy_index>                      hidx_used;
   std::function<void(Lgraph*, Hierarchy_index, Tree_index)> add_lg_nodes = [&](Lgraph* lg, Hierarchy_index hidx, Tree_index tidx) {
     auto ht = root->ref_htree();
@@ -31,10 +34,9 @@ Node_tree::Node_tree(Lgraph* root_arg)
       last_sib = tree_cidx;
 
       if (debug_verbose) {
-        fmt::print("node {}: hl:{}, hp:{}, tl:{}, tp:{}\n",
+        fmt::print("node {}: hidx:{}, tl:{}, tp:{}\n",
                    cn.debug_name(),
-                   (int)hidx.level,
-                   (int)hidx.pos,
+                   hidx,
                    (int)tree_cidx.level,
                    (int)tree_cidx.pos);
       }
@@ -82,6 +84,7 @@ Node_tree::Node_tree(Lgraph* root_arg)
   };
 
   add_lg_nodes(root, Hierarchy_index(0, 0), Tree_index(0, 0));
+#endif
 }
 
 void Node_tree::dump() const {
@@ -100,12 +103,11 @@ void Node_tree::dump() const {
       }
     }
 
-    fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({}, {})\n",
+    fmt::print("{} name: {} loc: ({}, {}) livehd loc: ({})\n",
                indent,
                name,
                index.level,
                index.pos,
-               id.get_hidx().level,
-               id.get_hidx().pos);
+               id.get_hidx());
   }
 }

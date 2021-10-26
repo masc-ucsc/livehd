@@ -31,7 +31,7 @@ protected:
   friend class Flow_base_iterator;
   friend class Fwd_edge_iterator;
   friend class Bwd_edge_iterator;
-  friend class Hierarchy_tree;
+  friend class Hierarchy;
 
   constexpr Node(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _nid)
       : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
@@ -69,7 +69,7 @@ public:
     constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
     constexpr Hierarchy_index get_hidx() const {
-      I(!hidx.is_invalid());
+      I(!Hierarchy::is_invalid(hidx));
       return hidx;
     }
 
@@ -79,13 +79,13 @@ public:
     constexpr bool is_invalid() const { return nid == 0; }
 
     constexpr bool operator==(const Compact &other) const {
-      return nid == other.nid && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+      return nid == other.nid && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
-      return H::combine(std::move(h), s.hidx.get_hash(), s.nid);
+      return H::combine(std::move(h), s.hidx.hash(), s.nid);
     };
   };
 
@@ -139,7 +139,7 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class Hierarchy_tree;
+    friend class Hierarchy;
     friend class mmap_lib::hash<Compact_class>;
 
   public:
@@ -166,7 +166,7 @@ public:
 
   template <typename H>
   friend H AbslHashValue(H h, const Node &s) {
-    return H::combine(std::move(h), (int)s.hidx.get_hash(), (int)s.nid);  // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hidx.hash(), (int)s.nid);  // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
@@ -181,7 +181,7 @@ public:
   Node(Lgraph *_g, const Compact_flat &comp);
   Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
   constexpr Node(Lgraph *_g, const Compact_class &comp)
-      : top_g(_g), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+      : top_g(_g), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
@@ -284,15 +284,15 @@ public:
 
   constexpr bool is_invalid() const { return nid == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
-  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
   Node           get_non_hierarchical() const;
 
   constexpr bool operator==(const Node &other) const {
-    GI(nid == 0, hidx.is_invalid());
-    GI(other.nid == 0, other.hidx.is_invalid());
+    GI(nid == 0, Hierarchy::is_invalid(hidx));
+    GI(other.nid == 0, Hierarchy::is_invalid(other.hidx));
     GI(nid && other.nid, top_g == other.top_g);
 
-    return nid == other.nid && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+    return nid == other.nid && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
   }
   constexpr bool operator!=(const Node &other) const { return !(*this == other); }
 
@@ -399,7 +399,7 @@ template <>
 struct hash<Node::Compact> {
   constexpr size_t operator()(Node::Compact const &o) const {
     uint64_t h = o.nid;
-    h          = (h << 12) ^ o.hidx.get_hash() ^ o.nid;
+    h          = (h << 12) ^ o.hidx.hash() ^ o.nid;
     return hash<uint64_t>{}(h);
   }
 };

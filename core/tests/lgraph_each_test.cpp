@@ -301,6 +301,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   std::vector<Lgraph *> all_lgs;
 
+  to_pos[top->get_lgid()] = 0;
   top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph *lg) -> bool {
     // fmt::print("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
 
@@ -313,10 +314,20 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   });
 
   // Slow but simple way to compute the levels
-  top->get_htree().each_bottom_up_fast([&to_level](const Hierarchy_index &hidx, const Hierarchy_data &data) {
-    // fmt::print("bottom up lgid:{}\n", data.lgid);
-    to_level[data.lgid] = hidx.level;
-  });
+  {
+    auto hidx = Hierarchy::hierarchical_root();
+
+    Lgraph *current_g;
+    std::tie(hidx, current_g) =  top->get_htree().get_next(hidx);
+    while (current_g != top) {
+      auto levels = hidx.split(':');
+      to_level[current_g->get_lgid()] = levels.size();
+      fmt::print("hier:{} lg:{}\n", hidx, current_g->get_name());
+
+      std::tie(hidx, current_g) =  top->get_htree().get_next(hidx);
+    }
+    to_level[top->get_lgid()] = 0;
+  }
 
   std::vector<int> all_visited;  // Only monotonic st and ld operator, so it is atomic
   all_visited.resize(all_lgs.size());
@@ -324,13 +335,10 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   // top->get_htree().dump();
 
   top->each_hier_unique_sub_bottom_up([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool {
-    bool sure_leaf = false;
+    bool sure_leaf = lg->get_down_class_map().empty();
     if (to_level.find(lg->get_lgid()) != to_level.end()) {
-      // auto level = to_level[lg->get_lgid()];
-      // fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
-    } else {
-      sure_leaf = true;
-      // fmt::print("visiting name:{} lgid:{} LEAF sub\n", lg->get_name(), lg->get_lgid());
+      auto level = to_level[lg->get_lgid()];
+      fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
     }
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
@@ -357,14 +365,11 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   all_visited.clear();
   all_visited.resize(all_lgs.size());
-  top->each_hier_unique_sub_bottom_up_parallel([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool {
-    bool sure_leaf = false;
+  top->each_hier_unique_sub_bottom_up_parallel2([&to_pos, &to_level, &all_visited](Lgraph *lg) -> bool {
+    bool sure_leaf = lg->get_down_class_map().empty();
     if (to_level.find(lg->get_lgid()) != to_level.end()) {
-      // auto level = to_level[lg->get_lgid()];
-      // fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
-    } else {
-      sure_leaf = true;
-      // fmt::print("visiting name:{} lgid:{} LEAF sub\n", lg->get_name(), lg->get_lgid());
+      auto level = to_level[lg->get_lgid()];
+      fmt::print("visiting name:{} lgid:{} level:{}\n", lg->get_name(), lg->get_lgid(), level);
     }
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());

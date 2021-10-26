@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "checkfp.hpp"
+#include "lgedgeiter.hpp"
 
 #include <vector>
 
@@ -28,26 +29,24 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
   std::vector<Node> nodes;
 
-  var.lgs[0]->each_hier_fast([&](const Node& n) -> bool {
+  for(const auto n:var.lgs[0]->fast(true)) {
     if (!n.is_type_synth()) {
-      return true;
+      continue;
     }
 
     if (!n.has_place()) {
       fmt::print("ERROR: node {} has no place information!\n", n.debug_name());
       issue_counter++;
-      return true;
+      continue;
     }
 
     nodes.emplace_back(n);
-
-    return true;
-  });
+  }
 
   for (auto n : nodes) {
-    var.lgs[0]->each_hier_fast([&](const Node& nt) -> bool {
+    for(const auto nt:var.lgs[0]->fast(true)) {
       if (!nt.is_type_synth()) {
-        return true;
+        continue;
       }
 
       I(nt.has_place());
@@ -56,7 +55,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
       Ann_place np = n.get_place();
 
       if (np == tp) {
-        return true;
+        continue;
       }
 
       // fmt::print("\n{} vs {}\n", n.debug_name(), nt.debug_name());
@@ -99,9 +98,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
         issue_counter++;
       }
-
-      return true;
-    });
+    }
   }
 
   fmt::print("done. {} problems found.\n\n", issue_counter);

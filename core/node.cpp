@@ -11,13 +11,13 @@
 void Node::invalidate(Lgraph *_g) {
   top_g     = _g;
   current_g = _g;
-  hidx.invalidate();
+  hidx = "";
   nid = 0;
 }
 
 void Node::invalidate() {
   current_g = top_g;
-  hidx.invalidate();
+  hidx = "";
   nid = 0;
 }
 
@@ -62,17 +62,13 @@ void Node::update(Lgraph *_g, const Node::Compact &comp) {
 
   top_g = _g;
   hidx  = comp.hidx;
-  if (hidx.is_root() || hidx.is_invalid()) {  // invalid->no hierarchy
-    current_g = top_g;
-    return;
-  }
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
 }
 
 void Node::update(const Node::Compact &comp) {
-  I(!comp.hidx.is_invalid());
+  I(!Hierarchy::is_invalid(comp.hidx));
   I(comp.nid);
   I(top_g);
 
@@ -89,17 +85,14 @@ Node::Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
-  if (hidx.is_root() || hidx.is_invalid())
-    current_g = top_g;
-  else
-    current_g = top_g->ref_htree()->ref_lgraph(hidx);
+	current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
 Node::Node(Lgraph *_g, const Compact_flat &comp)
-    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = _g->ref_library();
   top_g     = lib->try_find_lgraph(Lg_type_id(comp.lgid));
@@ -111,7 +104,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
 }
 
 Node::Node(const mmap_lib::str &path, const Compact_flat &comp)
-    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy_tree::invalid_index()), nid(comp.nid) {
+    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   top_g = Graph_library::try_find_lgraph(path, Lg_type_id(comp.lgid));
   I(top_g);
@@ -317,7 +310,7 @@ int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this)
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
-Node Node::get_non_hierarchical() const { return Node(current_g, current_g, Hierarchy_tree::invalid_index(), nid); }
+Node Node::get_non_hierarchical() const { return Node(current_g, current_g, Hierarchy::non_hierarchical(), nid); }
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 #ifndef NDEBUG
@@ -415,7 +408,7 @@ bool Node::is_root() const {
 
 Node Node::get_up_node() const {
   I(!is_root());
-  I(!hidx.is_invalid());
+  I(!Hierarchy::is_invalid(hidx));
   auto up_node = top_g->ref_htree()->get_instance_up_node(hidx);
 
   return up_node;
@@ -505,7 +498,7 @@ mmap_lib::str Node::default_instance_name() const {
   mmap_lib::str name{"i"};
 
   if (is_hierarchical()) {
-    name = mmap_lib::str::concat("i_lg", current_g->get_name(), std::string("_hidx") + std::to_string(hidx.level) + std::string("_") + std::to_string(hidx.pos));
+    name = mmap_lib::str::concat("i_lg", current_g->get_name(), "_hidx", hidx);
   }
 
   if (has_name()) {
@@ -515,7 +508,7 @@ mmap_lib::str Node::default_instance_name() const {
     return mmap_lib::str::concat(name, get_name());
   }
 
-  return mmap_lib::str::concat(name, std::string("_nid") + std::to_string(nid));
+  return mmap_lib::str::concat(name, "_nid" , mmap_lib::str(nid.value));
 }
 
 mmap_lib::str Node::create_name() const {

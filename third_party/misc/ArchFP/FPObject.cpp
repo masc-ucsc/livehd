@@ -123,10 +123,9 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     found = true;
     if (verbose) {
-      fmt::print("assigning child node {} to parent hier ({}, {})\n",
+      fmt::print("assigning child node {} to parent hier ({})\n",
                  child->debug_name(),
-                 child->get_hidx().level,
-                 child->get_hidx().pos);
+                 child->get_hidx());
     }
 
     Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());

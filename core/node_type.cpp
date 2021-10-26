@@ -65,8 +65,6 @@ void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
     down_class_map.set(subgraphid, 1);
   }
 
-  // Ann_node_tree_pos::ref(static_cast<const Lgraph *>(this))->set(Node::Compact_class(nid), subid_map.size());
-
   node_internal.ref_lock();
   node_internal.ref(nid)->set_type(Ntype_op::Sub);
   node_internal.ref_unlock();
@@ -76,6 +74,26 @@ Lg_type_id Lgraph_Node_Type::get_type_sub(Index_id nid) const {
   I(node_internal[nid].get_type() == Ntype_op::Sub);
 
   return subid_map.get(Node::Compact_class(nid));
+}
+
+std::tuple<Lg_type_id, Index_id> Lgraph_Node_Type::go_next_down(Index_id nid) const {
+
+  Index_id   n_nid=0;
+  Lg_type_id n_lgid=0;
+
+  subid_map.ref_lock();
+  auto it = subid_map.find(nid);
+  if (it != subid_map.end()) {
+    ++it;
+    if (it != subid_map.end()) {
+      n_nid  = it->first.nid;
+      n_lgid = it->second;
+    }
+  }
+
+  subid_map.ref_unlock();
+
+  return std::make_tuple(n_lgid, n_nid);
 }
 
 const Sub_node &Lgraph_Node_Type::get_type_sub_node(Index_id nid) const {

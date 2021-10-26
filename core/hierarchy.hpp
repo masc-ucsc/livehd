@@ -8,32 +8,40 @@
 class Node;
 class Lgraph;
 
-class Hierarchy_tree : public mmap_lib::tree<Hierarchy_data> {
+// hidx:
+//
+// ":" root is_hierarchical
+// "" is_invalid (root, not hierarhical) -> is_root
+// ":lgid.nid"  top(nid)->lgid
+// ":lgid1.nid1:lgid2.nid2"  top(nid1)->lgid1(nid2)->lgid2
+//
+class Hierarchy {
 protected:
   Lgraph *top;
-  static inline std::mutex  top_mutex; // NASTY lock. There is some tree sharing. Threads can update each other?
 
-  void regenerate_step(Lgraph *lg, const Hierarchy_index &parent);
-
-  void regenerate_int();  // lock free regenerate
+  static Hierarchy_index go_down(Hierarchy_index, Lg_type_id lgid, Index_id nid);
+  static std::tuple<Hierarchy_index, Lgraph *> go_next_down(Hierarchy_index hidx, Lgraph *lg);
+  std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
 
 public:
-  Hierarchy_tree(Lgraph *top);
+  Hierarchy(Lgraph *top);
 
-  void force_regenerate();  // clear and regenerate (new LG may be added)
-  void regenerate();        // Compute the hierarchy (if not computed already)
+  Lgraph *ref_lgraph(const Hierarchy_index hidx) const;
 
-  // Lg_type_id get_lgid(const Hierarchy_index &hidx) const { return get_data(hidx).lgid; }
-  Node get_instance_up_node(const Hierarchy_index &hidx) const;
+  Node get_instance_up_node(const Hierarchy_index hidx) const;
 
-  Lgraph *ref_lgraph(const Hierarchy_index &hidx) const;
+  static Hierarchy_index go_up(const Hierarchy_index hidx);
+  static Hierarchy_index go_down(const Node &node);
+  static Hierarchy_index go_up(const Node &node);
 
-  Hierarchy_index go_down(const Node &node) const;
+  std::tuple<Hierarchy_index, Lgraph *> get_next(const Hierarchy_index hidx) const;
 
-  Hierarchy_index go_up(const Node &node) const;
+  static constexpr Hierarchy_index hierarchical_root() { return ":"; }
+  static constexpr Hierarchy_index non_hierarchical() { return ""; }
 
-  static constexpr mmap_lib::Tree_index root_index() { return mmap_lib::Tree_index::root(); }
-  bool                                  is_root(const Node &node) const;
+  static bool  is_root(const Node &node);
+  static constexpr bool  is_root(const Hierarchy_index hidx) { return hidx.empty() || hidx == ":"; }
+  static constexpr bool  is_invalid(const Hierarchy_index hidx) { return hidx.empty(); }
 
   void dump() const;
 };

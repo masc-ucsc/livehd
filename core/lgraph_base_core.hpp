@@ -30,7 +30,7 @@ public:
   bool is_invalid() const { return lgid == 0; }
 };
 
-using Hierarchy_index = mmap_lib::Tree_index;
+using Hierarchy_index = mmap_lib::str;
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }

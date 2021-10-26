@@ -13,8 +13,7 @@
 #include "node_pin.hpp"
 #include "tech_library.hpp"
 
-static_assert(sizeof(Hierarchy_data) == 8);
-static_assert(sizeof(Hierarchy_index) == 8);
+static_assert(sizeof(Hierarchy_index) == 16);
 
 mmap_lib::str Lgraph_base_core::Setup_path::last_path("");
 

@@ -7,117 +7,145 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-Hierarchy_tree::Hierarchy_tree(Lgraph *_top)
-    : mmap_lib::tree<Hierarchy_data>(_top->get_path().to_s(), absl::StrCat(_top->get_name().to_s(), "_htree")), top(_top) {}
+Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {}
 
-Lgraph *Hierarchy_tree::ref_lgraph(const Hierarchy_index &hidx) const {
-  I(!hidx.is_invalid());  // no hierarchical should not call this
+Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
 
-  // NOTE: if this becomes a bottleneck, we can memorize the Lgraph *
-  const auto &data = get_data(hidx);
+  if (Hierarchy::is_root(hidx))
+    return top;
 
-  I(data.lgid);
+  auto parent = hidx.get_str_after_last_if_exists(':');
 
-  auto *lg = Lgraph::open(mmap_lib::str(get_path()), data.lgid);
+  auto lgid = parent.to_u64_from_hex();
+  I(lgid);
+
+  auto *lg = Lgraph::open(top->get_path(), Lg_type_id(lgid));
   I(lg);
   return lg;
 }
 
-Node Hierarchy_tree::get_instance_up_node(const Hierarchy_index &hidx) const {
-  const auto &data = get_data(hidx);
-
-  auto up_hidx = get_parent(hidx);
-
-  I(data.lgid);
-
+std::tuple<Hierarchy_index, Lgraph *, Index_id> Hierarchy::get_instance_up(const Hierarchy_index hidx) const {
   Lgraph *lg;
-  if (up_hidx.is_root()) {
-    lg = top;
-  } else {
-    const auto &up_data = get_data(up_hidx);
-    lg                  = Lgraph::open(mmap_lib::str(get_path()), up_data.lgid);
-    I(top != lg);
-  }
-  I(lg);
+  Hierarchy_index up_hidx;
 
-  return Node(top, lg, up_hidx, data.up_nid);
+  {
+    auto parent_lgid_pos  = hidx.rfind(':');
+
+    if (parent_lgid_pos == std::string::npos) { // prev to top
+      lg      = top;
+      up_hidx = Hierarchy::hierarchical_root();
+    }else{
+      up_hidx = hidx.substr(0, parent_lgid_pos);
+      I(!up_hidx.empty()); // up_hidx = Hierarchy::hierarchical_root();
+
+      Lg_type_id  lgid(hidx.substr(parent_lgid_pos+1).to_u64_from_hex());
+      lg = Lgraph::open(top->get_path(), lgid);
+    }
+  }
+
+  Index_id nid;
+  {
+    auto parent_nid_pos   = hidx.rfind('.');
+    I(parent_nid_pos != std::string::npos);
+    nid = hidx.substr(parent_nid_pos+1).to_u64_from_hex();
+  }
+
+  return std::make_tuple(up_hidx, lg, nid);
 }
 
-void Hierarchy_tree::regenerate_step(Lgraph *lg, const Hierarchy_index &parent) {
-  auto *tree_pos = Ann_node_tree_pos::ref(lg);
+Node Hierarchy::get_instance_up_node(const Hierarchy_index hidx) const {
 
-  int conta = 0;
-  for (auto it : lg->get_down_nodes_map()) {
-    auto child_lgid = lg->get_type_sub(it.first.get_nid());
+  I(!Hierarchy::is_root(hidx));
 
-    auto node = it.first.get_node(lg);
-#ifndef NDEBUG
-    I(node.is_type_sub());
-    I(child_lgid == node.get_type_sub());
-#endif
+  auto [up_hidx, up_lg, up_nid] = get_instance_up(hidx);
 
-    auto *child_lg = lg->get_library().try_find_lgraph(child_lgid);  // faster
-    if (child_lg == nullptr) {
-      child_lg = node.ref_type_sub_lgraph();
-      if (child_lg == nullptr)
-        continue;
+  return Node(top, up_lg, up_hidx, up_nid);
+}
+
+Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) {
+
+  auto parent_lgid_pos = hidx.rfind(':');
+  if (parent_lgid_pos == std::string::npos) {
+    return ""_str;
+  }
+
+  return hidx.substr(0, parent_lgid_pos);
+}
+
+Hierarchy_index Hierarchy::go_up(const Node &node) {
+  return go_up(node.get_hidx());
+}
+
+std::tuple<Hierarchy_index, Lgraph *> Hierarchy::go_next_down(Hierarchy_index hidx, Lgraph *lg) {
+
+  for (const auto &ent:lg->get_down_nodes_map()) {
+    auto *sub_lg = Lgraph::open(lg->get_path(), ent.second);
+    if (sub_lg == nullptr)
+      continue;
+
+    if (sub_lg->is_empty())
+      continue;
+
+    auto n_hidx = go_down(hidx, ent.second, ent.first.nid);
+
+    return go_next_down(n_hidx, sub_lg);
+  }
+
+  return std::make_tuple(hidx, lg);
+}
+
+std::tuple<Hierarchy_index, Lgraph *> Hierarchy::get_next(const Hierarchy_index hidx) const {
+
+  if (Hierarchy::is_root(hidx)) { // go to find depth first post order
+    return go_next_down(hidx, top);
+  }
+
+  auto it_hidx = hidx;
+  while(true) {
+    auto [up_hidx, up_lg, up_nid] = get_instance_up(it_hidx);
+
+    auto [n_lgid, n_nid] = up_lg->go_next_down(up_nid);
+    if (n_lgid) {
+      auto  down_hidx = go_down(up_hidx, n_lgid, n_nid);
+      auto *down_lg   = Lgraph::open(up_lg->get_path(), n_lgid);
+
+      return go_next_down(down_hidx, down_lg);
     }
 
-    // Hierarchy_data data(child_lgid, node.get_nid());
-    auto child = add_child(parent, {child_lgid, node.get_nid()});
+    if (up_hidx == Hierarchy::hierarchical_root()) // nothing pending
+      return std::make_tuple(Hierarchy::hierarchical_root(), top);
 
-    I(child.pos == conta + get_first_child(parent).pos);
-    tree_pos->set(it.first, conta);
-
-    regenerate_step(child_lg, child);
-
-    conta++;
+    it_hidx = up_hidx;
   }
 }
 
-void Hierarchy_tree::regenerate_int() {
-  Lbench bar("core.hierarchy");
-  Hierarchy_data data(top->get_lgid(), 0);
-  set_root(data);
+Hierarchy_index Hierarchy::go_down(Hierarchy_index hidx, Lg_type_id lgid, Index_id nid) {
+  if (Hierarchy::is_root(hidx))
+    return mmap_lib::str::concat(mmap_lib::str::from_u64_to_hex(lgid), ".", mmap_lib::str::from_u64_to_hex(nid));
 
-  regenerate_step(top, Hierarchy_tree::root_index());
+  return mmap_lib::str::concat(hidx, ":", mmap_lib::str::from_u64_to_hex(lgid), ".", mmap_lib::str::from_u64_to_hex(nid));
 }
 
-void Hierarchy_tree::force_regenerate() {
-  std::lock_guard<std::mutex> guard(top_mutex);
-  clear();
-  regenerate_int();
+Hierarchy_index Hierarchy::go_down(const Node &node) {
+  I(node.is_type_sub_present());
+
+  return go_down(node.get_hidx(), node.get_type_sub(), node.get_nid());
 }
 
-void Hierarchy_tree::regenerate() {
-  std::lock_guard<std::mutex> guard(top_mutex);
-
-  if (!empty()) // re-check because it was outside lock
-    return;
-
-  regenerate_int();
+bool  Hierarchy::is_root(const Node &node) {
+  return is_root(node.get_hidx());
 }
 
-Hierarchy_index Hierarchy_tree::go_down(const Node &node) const {
-  auto *tree_pos = Ann_node_tree_pos::ref(node.get_class_lgraph());
-  I(tree_pos);
-  I(tree_pos->has(node.get_compact_class()));
-  auto pos = tree_pos->get(node.get_compact_class());
+void Hierarchy::dump() const {
 
-  I(!is_leaf(node.get_hidx()));
-  Hierarchy_index child(node.get_hidx().level + 1, pos);
-  return child;
-}
+  auto hidx = Hierarchy::hierarchical_root();
 
-Hierarchy_index Hierarchy_tree::go_up(const Node &node) const { return get_parent(node.get_hidx()); }
-bool            Hierarchy_tree::is_root(const Node &node) const { return node.get_hidx().is_root(); }
-
-/* LCOV_EXCL_START */
-void Hierarchy_tree::dump() const {
-  for (const auto &index : depth_preorder()) {
-    std::string indent(index.level, ' ');
-    const auto &index_data = get_data(index);
-    fmt::print("{} level:{} pos:{} lgid:{} nid:{}\n", indent, index.level, index.pos, index_data.lgid, index_data.up_nid);
+  Lgraph *current_g;
+  std::tie(hidx, current_g) =  get_next(hidx);
+  while (current_g != top) {
+    fmt::print("hier:{} lg:{}\n", hidx, current_g->get_name());
+    std::tie(hidx, current_g) =  get_next(hidx);
   }
+
+  fmt::print("hier:{} lg:{}\n", hidx, top->get_name());
 }
-/* LCOV_EXCL_STOP */

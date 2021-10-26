@@ -71,7 +71,7 @@ public:
 
     Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
     Compact(const Hierarchy_index _hidx, Index_id _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
-      I(!hidx.is_invalid());
+      I(!Hierarchy::is_invalid(hidx));
     };
     Compact() : idx(0), sink(0){};
     Compact &operator=(const Compact &obj) {
@@ -86,13 +86,13 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact &other) const {
-      return idx == other.idx && sink == other.sink && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+      return idx == other.idx && sink == other.sink && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
     constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
-      return H::combine(std::move(h), s.hidx.get_hash(), s.idx, s.sink);
+      return H::combine(std::move(h), s.hidx, s.idx, s.sink);
     };
   };
   class __attribute__((packed)) Compact_flat {
@@ -161,7 +161,7 @@ public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
     Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
-    Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!hidx.is_invalid()); };
+    Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!Hierarchy::is_invalid(hidx)); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
       I(this != &obj);
@@ -174,13 +174,13 @@ public:
     constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact_driver &other) const {
-      return idx == other.idx && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+      return idx == other.idx && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
     constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_driver &s) {
-      return H::combine(std::move(h), s.hidx.get_hash(), s.idx);
+      return H::combine(std::move(h), s.hidx, s.idx);
     };
   };
 
@@ -266,7 +266,7 @@ public:
 
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin &s) {
-    return H::combine(std::move(h), s.hidx.get_hash(), (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), s.hidx, (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
   }
 
   constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
@@ -281,8 +281,8 @@ public:
   // No constexpr (get_root_idx)
 
   Compact get_compact() const {
-    if (hidx.is_invalid())
-      return Compact(mmap_lib::Tree_index::root(), get_root_idx(), sink);
+    if (Hierarchy::is_invalid(hidx))
+      return Compact(Hierarchy::hierarchical_root(), get_root_idx(), sink);
     return Compact(hidx, get_root_idx(), sink);
   }
   Compact_flat   get_compact_flat() const;
@@ -381,16 +381,16 @@ public:
   void           invalidate() { idx = 0; }
   constexpr bool is_invalid() const { return idx == 0; }
   constexpr bool is_down_node() const { return top_g != current_g; }
-  constexpr bool is_hierarchical() const { return !hidx.is_invalid(); }
+  constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
   Node_pin       get_non_hierarchical() const;
   Node_pin       get_hierarchical() const;
 
   bool operator==(const Node_pin &other) const {
-    GI(idx == 0, hidx.is_invalid());
-    GI(other.idx == 0, other.hidx.is_invalid());
+    GI(idx == 0, Hierarchy::is_invalid(hidx));
+    GI(other.idx == 0, Hierarchy::is_invalid(other.hidx));
     // GI(idx && other.idx, top_g == other.top_g);
     return get_root_idx() == other.get_root_idx() && sink == other.sink
-           && (hidx == other.hidx || hidx.is_invalid() || other.hidx.is_invalid());
+           && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
   }
   bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
@@ -452,7 +452,7 @@ template <>
 struct hash<Node_pin::Compact> {
   size_t operator()(Node_pin::Compact const &o) const {
     uint64_t h = o.idx;
-    h          = (h << 12) ^ o.hidx.get_hash() ^ o.idx;
+    h          = (h << 12) ^ o.hidx.hash() ^ o.idx;
     return hash<uint64_t>{}((h << 1) + o.sink);
   }
 };
@@ -470,7 +470,7 @@ template <>
 struct hash<Node_pin::Compact_driver> {
   size_t operator()(Node_pin::Compact_driver const &o) const {
     uint64_t h = o.idx;
-    h          = (h << 12) ^ o.hidx.get_hash() ^ o.idx;
+    h          = (h << 12) ^ o.hidx.hash() ^ o.idx;
     return hash<uint64_t>{}(h);
   }
 };

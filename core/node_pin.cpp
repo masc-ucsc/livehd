@@ -8,7 +8,7 @@
 #include "node.hpp"
 
 Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
-  I(!comp.hidx.is_invalid());  // Why to Compact. Use Compact_class
+  I(!Hierarchy::is_invalid(comp.hidx));  // Why to Compact. Use Compact_class
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
@@ -18,7 +18,7 @@ Node_pin::Node_pin(const mmap_lib::str &path, const Compact_flat &comp) {
   current_g = Lgraph::open(path, Lg_type_id(comp.lgid));
   top_g     = current_g;
 
-  hidx = Hierarchy_tree::invalid_index();
+  hidx = Hierarchy::non_hierarchical();
   idx  = comp.idx;
   pid  = top_g->get_dst_pid(comp.idx);
   sink = comp.sink;
@@ -27,7 +27,7 @@ Node_pin::Node_pin(const mmap_lib::str &path, const Compact_flat &comp) {
 }
 
 Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
-  I(!hidx.is_invalid());
+  I(!Hierarchy::is_invalid(hidx));
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
@@ -35,20 +35,20 @@ Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(com
 
 Node_pin::Node_pin(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
     : top_g(_g), hidx(_hidx), idx(comp.idx), sink(comp.sink) {
-  I(!hidx.is_invalid());
+  I(!Hierarchy::is_invalid(hidx));
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(Lgraph *_g, const Compact_class &comp)
-    : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
+    : top_g(_g), hidx(Hierarchy::non_hierarchical()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(comp.sink) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(idx));
 }
 
 Node_pin::Node_pin(Lgraph *_g, const Compact_class_driver &comp)
-    : top_g(_g), hidx(Hierarchy_tree::invalid_index()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
+    : top_g(_g), hidx(Hierarchy::non_hierarchical()), idx(comp.idx), pid(_g->get_dst_pid(comp.idx)), sink(false) {
   current_g = top_g;  // top_g->ref_htree()->ref_lgraph(hid);
   I(current_g->is_valid_node_pin(get_root_idx()));
 }
@@ -66,8 +66,8 @@ Node_pin::Compact_flat Node_pin::get_compact_flat() const {
 
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {
   I(!sink);
-  if (hidx.is_invalid())
-    return Compact_driver(Hierarchy_tree::root_index(), get_root_idx());
+  if (Hierarchy::is_invalid(hidx))
+    return Compact_driver(Hierarchy::hierarchical_root(), get_root_idx());
   return Compact_driver(hidx, get_root_idx());
 }
 
@@ -117,12 +117,12 @@ Lconst Node_pin::get_type_const() const {
 
 Node_pin Node_pin::get_non_hierarchical() const {
   I(is_hierarchical());
-  return Node_pin(current_g, current_g, Hierarchy_tree::invalid_index(), idx, pid, sink);
+  return Node_pin(current_g, current_g, Hierarchy::non_hierarchical(), idx, pid, sink);
 }
 
 Node_pin Node_pin::get_hierarchical() const {
   I(!is_hierarchical());
-  return Node_pin(current_g, current_g, Hierarchy_tree::root_index(), idx, pid, sink);
+  return Node_pin(current_g, current_g, Hierarchy::hierarchical_root(), idx, pid, sink);
 }
 
 Node_pin Node_pin::switch_to_sink() const {
@@ -410,7 +410,7 @@ mmap_lib::str Node_pin::get_wire_name() const {
   mmap_lib::str name;
 
   if (is_hierarchical()) {
-    name = mmap_lib::str::concat("lg", current_g->get_name(), "_hidx", hidx.level, "_", hidx.pos);
+    name = mmap_lib::str::concat("lg", current_g->get_name(), "_hidx", hidx);
   }
 
   if (has_name()) {
@@ -556,23 +556,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(node.is_type_sub_present());
 
   // 1st: Get down_hidx
-  const auto *tree_pos = Ann_node_tree_pos::ref(current_g);
-  I(tree_pos);
-  auto tree_it = tree_pos->find(node.get_compact_class());
-  if (tree_it == tree_pos->end()) {
-    top_g->force_regenerate_htree();  // force regenerate
-    tree_it = tree_pos->find(node.get_compact_class());
-    I(tree_it != tree_pos->end());
-  }
-
-  auto delta_pos = tree_it->second;
-
-  const auto &htree = top_g->get_htree();
-  I(!htree.is_leaf(hidx));
-  auto first_child = htree.get_first_child(hidx);
-
-  Hierarchy_index down_hidx(first_child.level, first_child.pos + delta_pos);
-  I(htree.get_parent(down_hidx) == hidx);
+	auto down_hidx = top_g->get_htree().go_down(node);
 
   // 2nd: get down_pid
   I(pid != Port_invalid);

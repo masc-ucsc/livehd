@@ -116,8 +116,6 @@ void Lgraph::clear() {
   set_type(nid1, Ntype_op::IO);
   set_type(nid2, Ntype_op::IO);
 
-  htree.clear();
-
   std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
 }
 
@@ -133,21 +131,21 @@ Node_pin Lgraph::get_graph_input(const mmap_lib::str &str) {
   I(get_self_sub_node().is_input(str));  // The input does not exist, do not call get_input
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
+  return Node(this, Hierarchy::hierarchical_root(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
 }
 
 Node_pin Lgraph::get_graph_output(const mmap_lib::str &str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
+  return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
 }
 
 Node_pin Lgraph::get_graph_output_driver_pin(const mmap_lib::str &str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
-  return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
+  return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
 }
 
 bool Lgraph::has_graph_input(const mmap_lib::str &io_name) const {
@@ -186,7 +184,7 @@ Node_pin Lgraph::add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t 
   if (idx == 0)
     idx = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
 
-  Node_pin pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
+  Node_pin pin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, false);
 
   pin.set_name(str);
   pin.set_bits(bits);
@@ -211,11 +209,11 @@ Node_pin Lgraph::add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t
   if (idx == 0)
     idx = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
 
-  Node_pin dpin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, false);
+  Node_pin dpin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, false);
   dpin.set_name(str);
   dpin.set_bits(bits);
 
-  return Node_pin(this, this, Hierarchy_tree::root_index(), idx, inst_pid, true);
+  return Node_pin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, true);
 }
 
 Node_pin_iterator Lgraph::out_connected_pins(const Node &node) const {
@@ -943,7 +941,7 @@ void Lgraph::del_node(const Node &node) {
       auto            n = node_int_ptr->get_num_local_inputs();
       int             i;
       const Edge_raw *redge = nullptr;
-      Node_pin        spin(this, this, Hierarchy_tree::invalid_index(), idx2, node_internal.ref(idx2)->get_dst_pid(), true);
+      Node_pin        spin(this, this, Hierarchy::non_hierarchical(), idx2, node_internal.ref(idx2)->get_dst_pid(), true);
 
       std::vector<Node_pin> pin_list;  // NOTE: insert in pin_list because the mmap can dissapaear if touching other nodes
       for (i = 0, redge = node_int_ptr->get_input_begin(); i < n; i++, redge += redge->next_node_inc()) {
@@ -951,7 +949,7 @@ void Lgraph::del_node(const Node &node) {
         I(redge->is_input());
         auto     dpin_idx = redge->get_idx();
         auto     dpin_pid = redge->get_inp_pid();
-        Node_pin dpin(this, this, Hierarchy_tree::invalid_index(), dpin_idx, dpin_pid, false);
+        Node_pin dpin(this, this, Hierarchy::non_hierarchical(), dpin_idx, dpin_pid, false);
         pin_list.emplace_back(dpin);
       }
 
@@ -973,7 +971,7 @@ void Lgraph::del_node(const Node &node) {
         I(!redge->is_input());
 
         auto other_nid = node_internal.ref(redge->get_idx())->get_nid();
-        Node other_sink(this, this, Hierarchy_tree::invalid_index(), other_nid);
+        Node other_sink(this, this, Hierarchy::non_hierarchical(), other_nid);
         node_list.emplace_back(other_sink);
       }
 
@@ -1205,7 +1203,7 @@ void Lgraph::del_edge(const Node_pin &dpin, const Node_pin &spin) {
 
 Node Lgraph::create_node() {
   Index_id nid = create_node_int();
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 Node Lgraph::create_node(const Node &old_node) {
@@ -1245,7 +1243,7 @@ Node Lgraph::create_node(const Ntype_op op) {
   I(op != Ntype_op::IO);   // Special case, must use add input/output API
   I(op != Ntype_op::Sub);  // Do not build by steps. call create_node_sub
 
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 Node Lgraph::create_node(const Ntype_op op, Bits_t bits) {
@@ -1270,14 +1268,14 @@ Node Lgraph::create_node_const(const Lconst &value) {
 
   I(node_internal[nid].get_dst_pid() == 0);
 
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 Node Lgraph::create_node_lut(const Lconst &lut) {
   auto nid = create_node().get_nid();
   set_type_lut(nid, lut);
 
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 Node Lgraph::create_node_sub(Lg_type_id sub_id) {
@@ -1286,7 +1284,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
 
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 Node Lgraph::create_node_sub(const mmap_lib::str &sub_name) {
@@ -1295,7 +1293,7 @@ Node Lgraph::create_node_sub(const mmap_lib::str &sub_name) {
   auto &sub = library->setup_sub(sub_name);
   set_type_sub(nid, sub.get_lgid());
 
-  return Node(this, Hierarchy_tree::root_index(), nid);
+  return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
 const Sub_node &Lgraph::get_self_sub_node() const { return library->get_sub(get_lgid()); }
@@ -1416,14 +1414,14 @@ void Lgraph::dump_down_nodes() {
 
 Node Lgraph::get_graph_input_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy_tree::root_index(), Hardcoded_input_nid);
+    return Node(this, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
   else
-    return Node(this, Hierarchy_tree::invalid_index(), Hardcoded_input_nid);
+    return Node(this, Hierarchy::non_hierarchical(), Hardcoded_input_nid);
 }
 
 Node Lgraph::get_graph_output_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy_tree::root_index(), Hardcoded_output_nid);
+    return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
   else
-    return Node(this, Hierarchy_tree::invalid_index(), Hardcoded_output_nid);
+    return Node(this, Hierarchy::non_hierarchical(), Hardcoded_output_nid);
 }

@@ -536,9 +536,10 @@ public:
   }
 
   str(int64_t v) {
-    auto val_str = std::to_string(v);
-    assert(val_str.size() <= 15);
-    set_sso(val_str.data(), val_str.size());
+    std::array<char, 15> str2;
+    auto [ptr, ec] = std::to_chars(str2.data(), str2.data() + str2.size(), v, 10);
+    (void)ec;
+    set_sso(str2.data(), ptr - str2.data());
   }
 
   // Explicit creators
@@ -838,9 +839,29 @@ public:
     if (is_sso()) {
       int         result = 0;
       const auto *base   = ref_base_sso();
-      if (size() == 0 || !std::isdigit(base[0]))
+      if (empty() || !std::isdigit(base[0]))
         return 0;
       std::from_chars(base, base + size_sso(), result);
+      return result;
+    }
+    assert(false);  // overflow non SSO is a TOO long integer
+    return 0;
+  }
+
+  [[nodiscard]] static str from_u64_to_hex(uint64_t v) {
+    std::array<char, 15> str2;
+    auto [ptr, ec] = std::to_chars(str2.data(), str2.data() + str2.size(), v, 16);
+    (void)ec;
+    return str(str2.data(), ptr - str2.data());
+  }
+
+  [[nodiscard]] constexpr int to_u64_from_hex() const {  // convert to integer from hexa
+    if (is_sso()) {
+      int         result = 0;
+      const auto *base   = ref_base_sso();
+      if (empty())
+        return 0;
+      std::from_chars(base, base + size_sso(), result, 16);
       return result;
     }
     assert(false);  // overflow non SSO is a TOO long integer

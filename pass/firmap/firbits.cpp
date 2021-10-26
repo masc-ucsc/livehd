@@ -61,9 +61,7 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
     fmt::print("\nFIRBITS Iteration:{}\n", firbits_iters);
 #endif
 
-    // lg->regenerate_htree();  // called bottom up, and the hierarchy may have been unfinished before
     firbits_wait_flop = false;
-
 
     for (auto node : lg->forward()) {
       // fmt::print("{}\n", node.debug_name());

@@ -102,70 +102,56 @@ std::string Graphviz::graphviz_legalize_name(std::string_view name) {
   return legal;
 }
 
-void Graphviz::do_hierarchy(Lgraph *g) {
+void Graphviz::do_hierarchy(Lgraph *lg) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
-  const auto &root_tree = g->get_htree();
-
   absl::flat_hash_set<std::pair<Hierarchy_index, Hierarchy_index>> added;
 
-  for (auto hidx : root_tree.depth_preorder()) {
-    auto *lg = root_tree.ref_lgraph(hidx);
-    fmt::print("visiting node:{} level:{} pos:{}\n", lg->get_name(), (int)hidx.level, (int)hidx.pos);
+  lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
 
-    Node h_inp(g, hidx, Hardcoded_input_nid);
+    fmt::print("visiting node:{}\n", g->get_name());
+
+    Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
-      fmt::print("edge from:{} to:{} level:{} pos:{}\n",
-                 e.driver.get_class_lgraph()->get_name(),
-                 e.sink.get_class_lgraph()->get_name(),
-                 (int)hidx.level,
-                 (int)hidx.pos);
+      fmt::print("edge from:{} to:{}\n"
+                 ,e.driver.get_class_lgraph()->get_name()
+                 ,e.sink.get_class_lgraph()->get_name());
 
-      auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
+      auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second)
         continue;  // no itself edges
       if (added.contains(p))
         continue;
       added.insert(p);
 
-      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
+      data += fmt::format(" {}->{};\n",
                           graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
-                          (int)e.driver.get_hidx().level,
-                          (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
-                          (int)e.sink.get_hidx().level,
-                          (int)e.sink.get_hidx().pos);
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
     }
 
-    Node h_out(g, hidx, Hardcoded_output_nid);
+    Node h_out(g, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
-      fmt::print("edge from:{} to:{} level:{} pos:{}\n",
+      fmt::print("edge from:{} to:{}\n",
                  e.driver.get_class_lgraph()->get_name(),
-                 e.sink.get_class_lgraph()->get_name(),
-                 (int)hidx.level,
-                 (int)hidx.pos);
+                 e.sink.get_class_lgraph()->get_name());
 
-      auto p = std::pair(e.driver.get_hidx(), e.sink.get_hidx());
+      auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second)
         continue;  // no itself edges
       if (added.contains(p))
         continue;
       added.insert(p);
 
-      data += fmt::format(" {}_l{}p{}->{}_l{}p{};\n",
+      data += fmt::format(" {}->{};\n",
                           graphviz_legalize_name(e.driver.get_class_lgraph()->get_name()),
-                          (int)e.driver.get_hidx().level,
-                          (int)e.driver.get_hidx().pos,
-                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()),
-                          (int)e.sink.get_hidx().level,
-                          (int)e.sink.get_hidx().pos);
+                          graphviz_legalize_name(e.sink.get_class_lgraph()->get_name()));
     }
-  }
+  });
 
   data += "\n}\n";
 
-  save_graph(g->get_name(), ".hier", data);
+  save_graph(lg->get_name(), ".hier", data);
 }
 
 void Graphviz::create_color_map(Lgraph *lg) {

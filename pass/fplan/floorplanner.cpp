@@ -111,9 +111,9 @@ void Lhd_floorplanner::write_lhd_node() {
   unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, mmap_lib::Tree_index::root());
 
   unsigned int node_count = 0;
-  root_lg->each_hier_fast([&node_count](const Node& n) {
+  for(const auto n:root_lg->fast(true)) {
     if (!n.is_type_synth()) {
-      return true;
+      continue;
     }
 
     node_count++;
@@ -125,7 +125,7 @@ void Lhd_floorplanner::write_lhd_node() {
     // basic sanity checking for returned floorplans
     I(n.is_hierarchical());
     if (debug_print) {
-      fmt::print("level {} pos {} ", n.get_hidx().level, n.get_hidx().pos);
+      fmt::print("hidx {} ", n.get_hidx());
     }
 
     I(n.has_instance_name());
@@ -137,9 +137,7 @@ void Lhd_floorplanner::write_lhd_node() {
       const Ann_place& p = n.get_place();
       fmt::print("x: {:.3f}, y: {:.3f}, width: {:.3f}, height: {:.3f}\n", p.get_x(), p.get_y(), p.get_width(), p.get_height());
     }
-
-    return true;
-  });
+  }
 
   // check that the correct number of nodes are in the floorplan
   I(node_count == placed_nodes);
