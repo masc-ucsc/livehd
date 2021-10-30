@@ -40,6 +40,14 @@ rules_proto_dependencies()
 
 rules_proto_toolchains()
 
+
+http_archive(
+  name = "com_google_benchmark",
+  sha256 = "ef0fab8058be682e382e155eeda1b22e1747fd6606e22e0c1b19f6da91e8b52d",
+  urls = ["https://github.com/google/benchmark/archive/69054ae50e07e9de7cb27f9e2d1d355f74605524.zip"],
+  strip_prefix = "benchmark-69054ae50e07e9de7cb27f9e2d1d355f74605524",
+)
+
 http_archive(
     name = "fmt",
     build_file = "BUILD.fmt",

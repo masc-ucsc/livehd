@@ -85,6 +85,15 @@ cc_test(
 )
 
 cc_test(
+    name = "lnast_bench",
+    srcs = ["tests/lnast_bench.cpp"],
+    deps = [
+        ":elab",
+        "@com_google_benchmark//:benchmark",
+    ],
+)
+
+cc_test(
     name = "elab_verilog_test",
     srcs = ["tests/elab_verilog_test.cpp"],
     args = ["$(location :verilog_test)"],

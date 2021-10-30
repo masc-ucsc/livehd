@@ -249,7 +249,7 @@ protected:
       size = s.st_size;
     }
 
-    void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);  // no superpages
+    void *base = ::mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NONBLOCK, fd, 0);  // no superpages
     // allowed to fail: step called again if needed
 
     return {base, size};
