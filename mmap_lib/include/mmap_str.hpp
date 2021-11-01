@@ -972,15 +972,15 @@ public:
 protected:
   template <typename T>
   static inline typename std::enable_if<true == std::is_integral_v<T>, std::string>::type _concat_to_s(T const &val) {
-    return std::to_string(val);
+    std::string str2(16,0);
+    auto [ptr, ec] = std::to_chars(str2.data(), str2.data() + str2.size(), val, 10);
+    str2.resize(ptr - str2.data());
+    return str2; // std::to_string(val);
   }
 
-  static inline std::string _concat_to_s(const str &s) { return s.to_s(); }
-
+  static inline std::string      _concat_to_s(const str &s) { return s.to_s(); }
   static inline std::string_view _concat_to_s(const std::string &s) { return s; }
-
   static inline std::string_view _concat_to_s(const std::string_view &s) { return s; }
-
   static inline std::string_view _concat_to_s(const char *s) { return {s}; }
 
 public:

@@ -998,7 +998,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
     } else if (op == Ntype_op::Get_mask) {
       auto a_spin = node.get_sink_pin("a");
 
-      name         = get_scaped_name(mmap_lib::str::concat("___unsign_", a_spin.get_wire_name(), dpin.get_wire_name()));
+      name         = get_scaped_name(mmap_lib::str::concat(dpin.get_wire_name(), "_u"));
       out_unsigned = true;  // Get_mask uses a variable to converts/removes sign in a cleaner way
       {
         // Force the "a" pin in get_mask to be a variable (yosys fails otherwise)

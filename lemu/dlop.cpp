@@ -6,40 +6,27 @@
 #include "lbench.hpp"
 
 void Dlop::free(size_t sz, int64_t *ptr) {
-  assert(free_pool.size() > sz);
+  assert(free_pool.size() > (sz>>3));
 
-  if (free_pool[sz]) {
-    auto tmp = (int64_t)free_pool[sz];
-    *ptr = tmp;
-  }else{
-    *ptr = 0;
-  }
-
-  free_pool[sz] = ptr;
+  free_pool[sz>>3]->release_ptr(ptr);
 }
 
-int64_t *Dlop::alloc(size_t sz) {
+int64_t *Dlop::alloc(size_t sz) { // sz is in int64 chunks (8bytes)
   assert(sz>=1); // less than 1 is not valid in dlop
 
-  if (sz>=free_pool.size()) {
-    free_pool.resize(sz+1,nullptr);
+  if (likely(free_pool.size()>(sz>>3)))
+    return static_cast<int64_t *>(free_pool[sz>>3]->get_ptr());
+
+  while ((sz>>3)>=free_pool.size()) {
+    auto *ptr = new raw_ptr_pool((free_pool.size()+1)<<6); // 64bytes chunk multiples
+    free_pool.emplace_back(ptr);
   }
 
-  if (free_pool[sz] == nullptr) { // TODO: Maybe malloc many and put in free_pool to avoid many mallocs
-    return static_cast<int64_t *>(malloc(8*sz));
-  }
-
-  int64_t *ptr = free_pool[sz];
-  if (*ptr) {
-    int64_t *tmp = (int64_t *)(*ptr);
-    free_pool[sz] = tmp;
-  }
-
-  return ptr;
+  return static_cast<int64_t *>(free_pool[sz>>3]->get_ptr());
 }
 
-std::shared_ptr<Dlop> Dlop::create(bool val) {
-  auto dlop = std::make_shared<Dlop>(Type::Boolean, 1);
+spool_ptr<Dlop> Dlop::create_bool(bool val) {
+  auto dlop = spool_ptr<Dlop>::make(Type::Boolean, 1);
 
   dlop->base[0]  = val?-1:0;
   dlop->extra[0] = 0;
@@ -47,9 +34,18 @@ std::shared_ptr<Dlop> Dlop::create(bool val) {
   return dlop;
 }
 
-std::shared_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
+spool_ptr<Dlop> Dlop::create_integer(int64_t val) {
+  auto dlop = spool_ptr<Dlop>::make(Type::Integer, 1);
 
-  auto dlop = std::make_shared<Dlop>(Type::String, txt.size());
+  dlop->base[0]  = val;
+  dlop->extra[0] = 0;
+
+  return dlop;
+}
+
+spool_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
+
+  auto dlop = spool_ptr<Dlop>::make(Type::String, txt.size());
 
   // alnum string
   for (int i = txt.size() - 1; i >= 0; --i) {
@@ -60,9 +56,9 @@ std::shared_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
   return dlop;
 }
 
-std::shared_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_result) {
+spool_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_result) {
 
-  auto dlop = std::make_shared<Dlop>(Type::Integer, 1+txt.size()/64);
+  auto dlop = spool_ptr<Dlop>::make(Type::Integer, 1+txt.size()/64);
   if (!unsigned_result) {
     // Look for the first not underscore character (this is the sign)
     for (auto i = 0u; i < txt.size(); ++i) {
@@ -100,18 +96,18 @@ std::shared_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_r
   return dlop;
 }
 
-std::shared_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
+spool_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
 
   if (orig_txt.empty())
-    return std::make_shared<Dlop>(Type::Invalid, 0);
+    return spool_ptr<Dlop>::make(Type::Invalid, 0);
 
   mmap_lib::str txt = orig_txt.to_lower();
 
   // Special cases
   if (txt == "true"_str) {
-    return Dlop::create(true);
+    return Dlop::create_bool(true);
   } else if (txt == "false"_str) {
-    return Dlop::create(false);
+    return Dlop::create_bool(false);
   }
 
   bool negative   = false;
@@ -174,7 +170,7 @@ std::shared_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
     return Dlop::create_string(orig_txt.substr(end_i, start_i-end_i));
   }
 
-  auto dlop = std::make_shared<Dlop>(Type::Integer, 1+txt.size()/16); // conservative size for hex 
+  auto dlop = spool_ptr<Dlop>::make(Type::Integer, 1+txt.size()/16); // conservative size for hex 
 
   if (shift_mode == 10) { // decimal
     for (auto i = skip_chars; i < txt.size(); ++i) {
@@ -233,6 +229,52 @@ std::shared_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
 
   return dlop;
 }
+
+spool_ptr<Dlop> Dlop::add_op(spool_ptr<Dlop> other) {
+
+  // TODO: deal with extra
+  auto dlop = spool_ptr<Dlop>::make(Type::Integer, size); // TODO: it can be size+1 (get_bits)
+
+  assert(size == other->size); // TODO:
+
+  Blop::addn(dlop->base, dlop->size, base, other->base);
+
+  return dlop;
+}
+
+void Dlop::mut_add(spool_ptr<Dlop> other) {
+
+  assert(size == other->size); // TODO:
+
+  Blop::addn(base, size, base, other->base); // FIXME: have an carry addn?
+}
+
+void Dlop::mut_add(int64_t other) {
+  if (size>1) {
+    int64_t extended[size] = {0};
+    extended[0] = other;
+    Blop::addn(base, size, base, extended);
+  }else{
+    Blop::addn(base, 1, base, &other);
+  }
+}
+
+spool_ptr<Dlop> Dlop::add_op(int64_t other) {
+
+  // TODO: deal with extra
+  auto dlop = spool_ptr<Dlop>::make(Type::Integer, size); // TODO: it can be size+1 (get_bits)
+
+  if (dlop->size>1) {
+    int64_t extended[dlop->size];
+    Blop::extend(extended, dlop->size, other);
+    Blop::addn(dlop->base, dlop->size, base, extended);
+  }else{
+    Blop::addn(dlop->base, 1, base, &other);
+  }
+
+  return dlop;
+}
+
 
 void Dlop::dump() const {
   fmt::print("size:{}\n  base:0x", size);

@@ -179,10 +179,6 @@ bool Cprop::try_constant_prop(Node &node, XEdge_iterator &inp_edges_ordered) {
     auto drv_node = e.driver.get_node();
     if (!drv_node.is_type_const())
       continue;
-    const auto &lc = drv_node.get_type_const();
-    (void)lc;
-    //    if (lc.is_string())
-    //      continue;
     n_inputs_constant++;
   }
 

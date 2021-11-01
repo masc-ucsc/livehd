@@ -404,26 +404,13 @@ mmap_lib::str Node_pin::get_wire_name() const {
     return dpin.get_wire_name();
   }
 
-  if (!is_connected())
-    return "";
-
-  mmap_lib::str name;
-
-  if (is_hierarchical()) {
-    name = mmap_lib::str::concat("lg", current_g->get_name(), "_hidx", hidx);
-  }
-
   if (has_name()) {
-    name = mmap_lib::str::concat(name, get_name());
-    return name;
+    if (is_hierarchical())
+      return mmap_lib::str::concat(hidx, "_", get_name());
+    return get_name();
   }
 
-  if (name.empty())
-    name = "t";
-
-  name = mmap_lib::str::concat(name, "_pin", get_root_idx().value, "_", pid);
-
-  return name;
+  return mmap_lib::str::concat("p", get_root_idx().value, "_", pid);
 }
 
 mmap_lib::str Node_pin::get_name() const {

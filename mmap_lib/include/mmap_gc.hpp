@@ -33,6 +33,9 @@ struct mmap_gc_entry {
     size = 0;
     fd   = -1;
   }
+  virtual ~mmap_gc_entry() {
+    // std::cout << "done\n";
+  }
   void touch_age() {
     if ((age + 1) == global_age || (global_age >> 14))
       return;

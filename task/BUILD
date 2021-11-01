@@ -47,3 +47,14 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "pool_bench",
+    srcs = ["tests/pool_bench.cpp",
+        "tests/concurrentqueue.hpp",
+    ],
+    deps = [
+        ":task",
+        "@com_google_benchmark//:benchmark",
+    ],
+)

@@ -100,4 +100,58 @@ private:
   void operator=(const spsc &) {}
 };
 
+template <typename T>
+class spsc256 {
+
+public:
+  spsc256()
+      : _buffer(reinterpret_cast<T *>(aligned_alloc(128, sizeof(T) * (256 + 1))))
+      ,  // need one extra element for a guard
+      _head(0)
+      , _tail(0) {
+  }
+
+  ~spsc256() { free(_buffer); }
+
+  bool empty() const { return _head == _tail; }
+
+  bool enqueue(T &input) {
+    const size_t head = _head.load(std::memory_order_relaxed);
+
+    if (((_tail.load(std::memory_order_acquire) - (head + 1)) & 255) >= 1) {
+      _buffer[head & 255] = input;
+      _head.store(head + 1, std::memory_order_release);
+      return true;
+    }
+    return false;
+  }
+
+  bool dequeue(T &output) {
+    const size_t tail = _tail.load(std::memory_order_relaxed);
+
+    if (((_head.load(std::memory_order_acquire) - tail) & 255) >= 1) {
+      output = _buffer[_tail & 255];
+      _tail.store(tail + 1, std::memory_order_release);
+      return true;
+    }
+    return false;
+  }
+
+private:
+  typedef char cache_line_pad_t[64];
+
+  cache_line_pad_t _pad0;
+  T *const         _buffer;
+
+  cache_line_pad_t    _pad1;
+  std::atomic<size_t> _head;
+
+  cache_line_pad_t    _pad2;
+  std::atomic<size_t> _tail;
+
+  spsc256(const spsc256 &) {}
+  void operator=(const spsc256 &) {}
+};
+
+
 #endif

@@ -35,6 +35,15 @@ cc_test(
 )
 
 cc_test(
+    name = "lconst_bench",
+    srcs = ["tests/lconst_bench.cpp"],
+    deps = [
+        ":lemu",
+        "@com_google_benchmark//:benchmark",
+    ],
+)
+
+cc_test(
     name = "blop_test",
     srcs = ["tests/blop_test.cpp"],
     deps = [

@@ -1153,6 +1153,30 @@ mmap_lib::str Lconst::to_pyrope() const {
   }
 
   const auto        v = get_num();
+  if (is_i()) { // Most common case
+    if (v>=0 && v<=63) { // Integer
+      return mmap_lib::str(to_i());
+    }
+    char str2[12];
+
+    auto val = to_i();
+    size_t delta;
+    if (val<0) {
+      val = -val;
+      str2[0] = '-';
+      str2[1] = '0';
+      str2[2] = 'x';
+      delta=3;
+    }else{
+      str2[0] = '0';
+      str2[1] = 'x';
+      delta=2;
+    }
+
+    auto [ptr, ec] = std::to_chars(str2+delta, str2 + 12, val, 16);
+    return mmap_lib::str(str2, ptr-str2);
+  }
+
   std::stringstream ss;
 
   bool print_hexa = v > 63;
@@ -1163,7 +1187,7 @@ mmap_lib::str Lconst::to_pyrope() const {
   if (v < 0) {
     ss << -v;
     if (print_hexa)
-      return mmap_lib::str::concat("0sx", ss.str());
+      return mmap_lib::str::concat("-0x", ss.str());
 
     return mmap_lib::str::concat("-",ss.str());
   }

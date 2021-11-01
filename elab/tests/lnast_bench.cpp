@@ -5,7 +5,6 @@
 
 static void BM_assign_const(benchmark::State& state) {
 
-  std::set<int> data;
   for (auto _ : state) {
     Lnast_create ln;
     ln.new_lnast(mmap_lib::str::concat("t", state.range(0)));
@@ -27,7 +26,6 @@ static void BM_assign_const(benchmark::State& state) {
 
 static void BM_assign_pyrope_const(benchmark::State& state) {
 
-  std::set<int> data;
   for (auto _ : state) {
     Lnast_create ln;
     ln.new_lnast(mmap_lib::str::concat("t", state.range(0)));
