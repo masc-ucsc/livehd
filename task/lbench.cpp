@@ -90,10 +90,13 @@ void Lbench::start() {
 }
 
 double Lbench::get_secs() const {
-
   auto end_time = get_cycles();
 
-  return (end_time-start_time);
+#ifdef __x86_64__
+  return (end_time - start_time);
+#else
+  return std::chrono::duration<double>(end_time - start_time).count();
+#endif
 }
 
 void Lbench::sample(const std::string &name) {
