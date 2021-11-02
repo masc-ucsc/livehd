@@ -1,24 +1,22 @@
-load("@rules_foreign_cc//tools/build_defs:cmake.bzl", "cmake_external")
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 
 filegroup(
     name = "all",
     srcs = glob(["**"]),
 )
 
-cmake_external(
+cmake(
     name = "slang",
-    cmake_options = [
-        "-GNinja",  # remember to install ninja in OS X
-        "-DSLANG_INCLUDE_TESTS=OFF",
-        "-DSLANG_INCLUDE_TOOLS=OFF",
-        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+    cache_entries = {
+        "SLANG_INCLUDE_TESTS": "OFF",
+        "SLANG_INCLUDE_TOOLS": "OFF",
+        "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+    },
+    generate_args = [
+        "-GNinja",
     ],
     lib_source = ":all",
-    make_commands = [
-        "ninja",
-        "ninja install",
-    ],
-    static_libraries = [
+    out_static_libs = [
         "libslangruntime.a",
         "libslangparser.a",
         "libslangcompiler.a",
