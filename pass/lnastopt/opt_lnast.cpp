@@ -470,6 +470,53 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
   }
 }
 
+void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid, Lnast_create &ln2) {
+  I(ln->get_data(lnid).type.is_stmts());
+
+  auto idx = ln->get_first_child(lnid);
+
+  while (!idx.is_invalid()) {
+    const auto &data = ln->get_data(idx);
+
+    auto  lhs_id   = ln->get_first_child(idx);
+    auto &lhs_data = ln->get_data(lhs_id);
+    auto  lhs_text = lhs_data.token.get_text();
+
+    switch (data.type.get_raw_ntype()) {
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: {
+        ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
+        process_minus(ln, idx);
+        break;
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
+        process_bit_or(ln, idx);
+        break;
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: {
+        ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts: reconstruct_stmts(ln, idx, ln2); break;
+      // default: process_todo(ln, idx);
+      default: break;
+    }
+
+    idx = ln->get_sibling_next(idx);
+  }
+}
+
 void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
   st.funcion_scope(ln->get_top_module_name());
 
@@ -485,6 +532,25 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
 
   auto idx = ln->get_first_child(Lnast_nid::root());
   process_stmts(ln, idx);
+
+  // auto outputs = st.leave_scope();
+  // if (outputs)
+  //   outputs->dump();
+}
+
+void Opt_lnast::reconstruct(const std::shared_ptr<Lnast> &ln, Lnast_create &ln2) {
+  if (ln->get_top_module_name() == top || top.empty())
+    hier_mode = true;
+  else
+    hier_mode = false;
+
+  const auto &data = ln->get_data(Lnast_nid::root());
+  if (!data.type.is_top()) {
+    throw Lnast::error("invalid lnast. It should be top");
+  }
+
+  auto idx = ln->get_first_child(Lnast_nid::root());
+  reconstruct_stmts(ln, idx, ln2);
 
   auto outputs = st.leave_scope();
   if (outputs)

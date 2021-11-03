@@ -21,5 +21,9 @@ void Pass_lnastopt::work(Eprp_var &var) {
 
   for (const auto &ln : var.lnasts) {
     p.opt(ln);
+    Lnast_create ln2;
+    ln2.new_lnast("ln2");
+    p.reconstruct(ln, ln2);
+    ln2.lnast->dump();
   }
 }
