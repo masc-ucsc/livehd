@@ -1,6 +1,7 @@
 
 #include "tree_sitter/api.h"
 #include <iostream>
+#include <sstream>
 #include <stdio.h>
 #include <string.h>
 #include <string>
