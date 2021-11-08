@@ -6,6 +6,9 @@
 
 #include <cstdint>
 #include <cassert>
+#include <iostream>
+#include <cmath>
+
 
 // Base-inline lop use by dlop and slop
 
@@ -16,92 +19,83 @@ public:
   // extend
   //---------------------------------------------------------------------------
   static void extend(int64_t *dest, size_t dest_sz, const int64_t src) {
-    dest[0] = src;
-    int64_t v = src<0?-1:0;
-    for(auto i=1u;i<dest_sz;++i)
-      dest[i] = v;
+    dest[0]   = src;
+    int64_t v = src < 0 ? -1 : 0;
+    for (auto i = 1u; i < dest_sz; ++i) dest[i] = v;
   }
 
   //--------------------------------------------------------------------------
   // ADD
   //---------------------------------------------------------------------------
-  static void add8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    dest = src1 + src2;
-  }
-  static void add64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    dest = src1 + src2;
-  }
+  static void add8(int8_t &dest, const int8_t src1, const int8_t src2) { dest = src1 + src2; }
+  static void add64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 + src2; }
   static void addn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
-    assert(dest_sz>=1);
+    assert(dest_sz >= 1);
 
-    uint64_t carry = __builtin_uaddll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long*>(dest));
-    for(auto i=1u;i<dest_sz-1;++i) {
+    uint64_t carry = __builtin_uaddll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long *>(dest));
+    for (auto i = 1u; i < dest_sz - 1; ++i) {
       unsigned long long tmp;
-      carry =  __builtin_uaddll_overflow(src1[i], carry, &tmp);
-      carry |= __builtin_uaddll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long*>(dest + i));
+      carry = __builtin_uaddll_overflow(src1[i], carry, &tmp);
+      carry |= __builtin_uaddll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long *>(dest + i));
     }
     assert(carry == 0 || carry == 1);
-    dest[dest_sz-1] = src1[dest_sz-1] + src2[dest_sz-1] + carry;
+    dest[dest_sz - 1] = src1[dest_sz - 1] + src2[dest_sz - 1] + carry;
   }
 
   //---------------------------------------------------------------------------
   // SUB
   //---------------------------------------------------------------------------
-  static void sub8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    dest = src1 - src2;
-  }
-  static void sub64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    dest = src1 - src2;
-  }
+  static void sub8(int8_t &dest, const int8_t src1, const int8_t src2) { dest = src1 - src2; }
+  static void sub64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 - src2; }
 
   static void subn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
-    assert(dest_sz>=1);
+    assert(dest_sz >= 1);
 
-    uint64_t carry = __builtin_usubll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long*>(dest));
-    for(auto i=1u;i<dest_sz-1;++i) {
+    uint64_t carry = __builtin_usubll_overflow(src1[0], src2[0], reinterpret_cast<unsigned long long *>(dest));
+    for (auto i = 1u; i < dest_sz - 1; ++i) {
       unsigned long long tmp;
-      carry =  __builtin_usubll_overflow(src1[i], carry, &tmp);
-      carry |= __builtin_usubll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long*>(dest + i));
+      carry = __builtin_usubll_overflow(src1[i], carry, &tmp);
+      carry |= __builtin_usubll_overflow(tmp, src2[i], reinterpret_cast<unsigned long long *>(dest + i));
     }
     assert(carry == 0 || carry == 1);
-    dest[dest_sz-1] = src1[dest_sz-1] - src2[dest_sz-1] - carry;
+    dest[dest_sz - 1] = src1[dest_sz - 1] - src2[dest_sz - 1] - carry;
   }
 
   //---------------------------------------------------------------------------
   // SHL
   //---------------------------------------------------------------------------
   static void shl8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    assert(src2>=0);
+    assert(src2 >= 0);
     dest = src1 << src2;
-    assert((dest>>src2) == src1); // no precision lost of allocate larger dest
+    assert((dest >> src2) == src1);  // no precision lost of allocate larger dest
   }
   static void shl64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    assert(src2>=0);
+    assert(src2 >= 0);
     dest = src1 << src2;
-    assert((dest>>src2) == src1); // no precision lost of allocate larger dest
+    assert((dest >> src2) == src1);  // no precision lost of allocate larger dest
   }
 
   static void shln(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
-    assert(dest_sz>=1);
-    assert(src2>=0);
+    assert(dest_sz >= 1);
+    assert(src2 >= 0);
 
     uint64_t word_up = src2 / 64;
-    assert(word_up<dest_sz);
+    assert(word_up < dest_sz);
     uint64_t bits_up = src2 & 63;
 
-    if (bits_up==0) {
-      for (int i=dest_sz-word_up-1; i >= 0; --i) {
+    if (bits_up == 0) {
+      for (int i = dest_sz - word_up - 1; i >= 0; --i) {
         dest[i + word_up] = src1[i];
       }
-    }else{
-      for (int i=dest_sz-word_up-1; i>0 ; --i) {
-        auto tmp = src1[i]; // need to do copy because self update
-        dest[i + word_up ]  = static_cast<uint64_t>(src1[i-1]) >> static_cast<uint64_t>(64 - bits_up);
-        dest[i + word_up ] |= tmp << bits_up;
+    } else {
+      for (int i = dest_sz - word_up - 1; i > 0; --i) {
+        auto tmp          = src1[i];  // need to do copy because self update
+        dest[i + word_up] = static_cast<uint64_t>(src1[i - 1]) >> static_cast<uint64_t>(64 - bits_up);
+        dest[i + word_up] |= tmp << bits_up;
       }
-      dest[word_up]  = src1[0] << bits_up;
+      dest[word_up] = src1[0] << bits_up;
     }
-    for (auto i=0u; i < word_up; ++i) {
+    for (auto i = 0u; i < word_up; ++i) {
       dest[i] = 0;
     }
   }
@@ -110,56 +104,52 @@ public:
   // SHR
   //---------------------------------------------------------------------------
   static void shr8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    assert(src2>=0);
+    assert(src2 >= 0);
     dest = src1 >> src2;
   }
   static void shr64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    assert(src2>=0);
+    assert(src2 >= 0);
     dest = src1 >> src2;
   }
 
   static void shrn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
-    assert(dest_sz>=1);
-    assert(src2>=0);
+    assert(dest_sz >= 1);
+    assert(src2 >= 0);
 
     uint64_t word_down = src2 / 64;
     uint64_t bits_down = src2 & 63;
 
-    if (bits_down==0) {
+    if (bits_down == 0) {
       for (auto i = word_down; i < dest_sz; i++) {
         dest[i - word_down] = src1[i];
       }
-    }else{
-      for (auto i = word_down; i < dest_sz-1; i++) {
+    } else {
+      for (auto i = word_down; i < dest_sz - 1; i++) {
         auto tmp = static_cast<uint64_t>(src1[i]) >> bits_down;
         tmp |= src1[i + 1] << static_cast<uint64_t>(64 - bits_down);
         dest[i - word_down] = tmp;
       }
-      dest[dest_sz - 1 - word_down] = src1[dest_sz-1] >> bits_down;
+      dest[dest_sz - 1 - word_down] = src1[dest_sz - 1] >> bits_down;
     }
   }
 
   //---------------------------------------------------------------------------
   // OR
   //---------------------------------------------------------------------------
-  static void or8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    dest = src1 | src2;
-  }
-  static void or64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    dest = src1 | src2;
-  }
+  static void or8(int8_t &dest, const int8_t src1, const int8_t src2) { dest = src1 | src2; }
+  static void or64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 | src2; }
 
   static void orn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
-    assert(dest_sz>=1);
+    assert(dest_sz >= 1);
     for (auto i = 0u; i < dest_sz; i++) {
       dest[i] = src1[i] | src2[i];
     }
   }
 
   static void orn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
-    assert(dest_sz>=1);
-    dest[0] = src1[0] | src2;
-    uint64_t v = src2<0?-1:0;
+    assert(dest_sz >= 1);
+    dest[0]    = src1[0] | src2;
+    uint64_t v = src2 < 0 ? -1 : 0;
     for (auto i = 1u; i < dest_sz; i++) {
       dest[i] = src1[i] | v;
     }
@@ -168,12 +158,8 @@ public:
   //---------------------------------------------------------------------------
   // MULT
   //---------------------------------------------------------------------------
-  static void mult8(int8_t &dest, const int8_t src1, const int8_t src2) {
-    dest = src1 * src2;
-  }
-  static void mult64(int64_t &dest, const int64_t src1, const int64_t src2) {
-    dest = src1 * src2;
-  }
+  static void mult8(int8_t &dest, const int8_t src1, const int8_t src2) { dest = src1 * src2; }
+  static void mult64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 * src2; }
 
   static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
     (void)dest;
@@ -184,10 +170,70 @@ public:
   }
 
   static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
-    (void)dest;
-    (void)dest_sz;
-    (void)src1;
-    (void)src2;
-    assert(false);
+    for (int i = 0; i < dest_sz; i++) {
+      dest[i] = 0;
+    }
+    int64_t *temp_src1 = const_cast<int64_t *>(src1);
+    int64_t  temp_src2 = src2;
+    int64_t  flip_carry[dest_sz];
+    for (int i = 0; i < dest_sz; i++) {
+      if (i == 0) {
+        flip_carry[i] = 1;
+      } else {
+        flip_carry[i] = 0;
+      }
+    }
+    assert(dest_sz >= 1 && sizeof(src1) > 1);
+    bool s1Negative, s2Negative = false;
+    if (src2 < 0) {
+      s2Negative = true;
+      temp_src2  = ~(src2 - 1);
+    }
+    if (src1[dest_sz - 2] < 0) {
+      s1Negative = true;
+      subn(temp_src1, dest_sz - 1, temp_src1, flip_carry);
+      for (int i = 0; i < dest_sz - 1; i++) {
+        temp_src1[i] = ~temp_src1[i];
+      }
+    }
+    // split src2
+    int     index    = 0;
+    int64_t exponent = 63;
+    while (temp_src2 > 0) {
+      uint64_t exp = std::pow(2, exponent);
+      if (temp_src2 >= exp) {
+        int64_t temp[dest_sz];
+        temp_src2 -= exp;
+        // shift left base on exponent
+        shln(temp, dest_sz, temp_src1, exponent);
+
+        //-------------add shifted bits to lastindex of temp-----------
+        temp[dest_sz - 1] = 0;
+        uint64_t src1_msb = temp_src1[dest_sz - 2];
+        for (auto i = 0; i < 64; i++) {
+          if (src1_msb != 0) {
+            uint temp_bit = src1_msb % 2;
+            src1_msb      = src1_msb / 2;
+            if (i >= (64 - exponent)) {
+              temp[dest_sz - 1] += temp_bit * (std::pow(2, i));
+            }
+          } else {
+            break;
+          }
+        }
+        addn(dest, dest_sz, temp, dest);
+      }
+      exponent--;
+    }
+    // check sign
+    if (src2 != 0) {
+      if (s1Negative + s2Negative == 1) {
+        // positive to two's complement negative
+        for (auto i = 0; i < dest_sz; i++) {
+          dest[i] = ~dest[i];
+        }
+        addn(dest, dest_sz, dest, flip_carry);
+      }
+    }
   }
 };
