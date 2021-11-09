@@ -181,7 +181,6 @@ public:
       subn(temp_src1, src1_sz, temp_src1, flip_carry);
       for (int i = 0; i < src1_sz; i++) {
         temp_src1[i] = ~temp_src1[i];
-        // cout << i << ": " << temp_src1[i] << endl;
       }
     }
     if (src2[src2_sz - 1] < 0) {
@@ -202,7 +201,6 @@ public:
           for (int k = 0; k < dest_sz; k++) {
             temp[k] = 0;
           }
-          // cout << temp[2] << endl;
           temp_src2 -= exp;
           // shift left base on exponent
           shln(temp, dest_sz, temp_src1, exponent);
