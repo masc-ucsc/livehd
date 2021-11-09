@@ -4,11 +4,10 @@
 
 #pragma once
 
-#include <cstdint>
 #include <cassert>
-#include <iostream>
 #include <cmath>
-
+#include <cstdint>
+#include <iostream>
 
 // Base-inline lop use by dlop and slop
 
@@ -161,12 +160,83 @@ public:
   static void mult8(int8_t &dest, const int8_t src1, const int8_t src2) { dest = src1 * src2; }
   static void mult64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 * src2; }
 
-  static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t *src2) {
-    (void)dest;
-    (void)dest_sz;
-    (void)src1;
-    (void)src2;
-    assert(false);
+  static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, size_t src1_sz, const int64_t *src2, size_t src2_sz) {
+    for (int i = 0; i < dest_sz; i++) {
+      dest[i] = 0;
+    }
+    int64_t *temp_src1 = const_cast<int64_t *>(src1);
+    int64_t *temp_src2 = const_cast<int64_t *>(src2);
+    int64_t  flip_carry[dest_sz];
+    for (int i = 0; i < dest_sz; i++) {
+      if (i == 0) {
+        flip_carry[i] = 1;
+      } else {
+        flip_carry[i] = 0;
+      }
+    }
+    assert(dest_sz >= 1 && sizeof(src1) > 1 && sizeof(src2) > 1);
+    bool s1Negative, s2Negative = false;
+    if (src1[src1_sz - 1] < 0) {
+      s1Negative = true;
+      subn(temp_src1, src1_sz, temp_src1, flip_carry);
+      for (int i = 0; i < src1_sz; i++) {
+        temp_src1[i] = ~temp_src1[i];
+        // cout << i << ": " << temp_src1[i] << endl;
+      }
+    }
+    if (src2[src2_sz - 1] < 0) {
+      s2Negative = true;
+      subn(temp_src2, src2_sz, temp_src2, flip_carry);
+      for (int i = 0; i < src2_sz; i++) {
+        temp_src2[i] = ~temp_src2[i];
+      }
+    }
+    int     index    = 0;
+    int64_t exponent = 63;
+    for (int j = 0; j < src2_sz; j++) {
+      uint64_t temp_src2 = (uint64_t)src2[j];
+      while (temp_src2 > 0) {
+        uint64_t exp = std::pow(2, exponent);
+        if (temp_src2 >= exp) {
+          int64_t temp[dest_sz];
+          for (int k = 0; k < dest_sz; k++) {
+            temp[k] = 0;
+          }
+          // cout << temp[2] << endl;
+          temp_src2 -= exp;
+          // shift left base on exponent
+          shln(temp, dest_sz, temp_src1, exponent);
+          //-------------add shifted bits to lastindex of temp-----------
+          uint64_t src1_msb = temp_src1[src1_sz - 1];
+          for (auto i = 0; i < 64; i++) {
+            if (src1_msb != 0) {
+              uint temp_bit = src1_msb % 2;
+              src1_msb      = src1_msb / 2;
+              if (i >= (64 - exponent)) {
+                // -----------------------------------------------not finished-----------------------------------------------
+
+                temp[src1_sz + j + 1] += temp_bit * (std::pow(2, i));
+                // -----------------------------------------------not finished-----------------------------------------------
+              }
+            } else {
+              break;
+            }
+          }
+          addn(dest, dest_sz, temp, dest);
+        }
+        exponent--;
+      }
+    }
+    // check sign
+    if (src2 != 0) {
+      if (s1Negative + s2Negative == 1) {
+        // positive to two's complement negative
+        for (auto i = 0; i < dest_sz; i++) {
+          dest[i] = ~dest[i];
+        }
+        addn(dest, dest_sz, dest, flip_carry);
+      }
+    }
   }
 
   static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
