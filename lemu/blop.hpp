@@ -161,13 +161,18 @@ public:
   static void mult64(int64_t &dest, const int64_t src1, const int64_t src2) { dest = src1 * src2; }
 
   static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, size_t src1_sz, const int64_t *src2, size_t src2_sz) {
-    for (int i = 0; i < dest_sz; i++) {
+    for (size_t i = 0; i < dest_sz; i++) {
       dest[i] = 0;
     }
+
+    int64_t flip_carry[dest_sz];
+
     int64_t *temp_src1 = const_cast<int64_t *>(src1);
-    int64_t *temp_src2 = const_cast<int64_t *>(src2);
-    int64_t  flip_carry[dest_sz];
-    for (int i = 0; i < dest_sz; i++) {
+
+    bool s1Negative = false;
+    bool s2Negative = false;
+
+    for (size_t i = 0; i < dest_sz; i++) {
       if (i == 0) {
         flip_carry[i] = 1;
       } else {
@@ -175,30 +180,34 @@ public:
       }
     }
     assert(dest_sz >= 1 && sizeof(src1) > 1 && sizeof(src2) > 1);
-    bool s1Negative, s2Negative = false;
+
     if (src1[src1_sz - 1] < 0) {
       s1Negative = true;
       subn(temp_src1, src1_sz, temp_src1, flip_carry);
-      for (int i = 0; i < src1_sz; i++) {
+      for (size_t i = 0; i < src1_sz; i++) {
         temp_src1[i] = ~temp_src1[i];
       }
     }
-    if (src2[src2_sz - 1] < 0) {
-      s2Negative = true;
-      subn(temp_src2, src2_sz, temp_src2, flip_carry);
-      for (int i = 0; i < src2_sz; i++) {
-        temp_src2[i] = ~temp_src2[i];
+
+    {
+      int64_t *temp_src2 = const_cast<int64_t *>(src2);
+      if (src2[src2_sz - 1] < 0) {
+        s2Negative = true;
+        subn(temp_src2, src2_sz, temp_src2, flip_carry);
+        for (size_t i = 0; i < src2_sz; i++) {
+          temp_src2[i] = ~temp_src2[i];
+        }
       }
     }
-    int     index    = 0;
+
     int64_t exponent = 63;
-    for (int j = 0; j < src2_sz; j++) {
+    for (size_t j = 0; j < src2_sz; j++) {
       uint64_t temp_src2 = (uint64_t)src2[j];
       while (temp_src2 > 0) {
         uint64_t exp = std::pow(2, exponent);
         if (temp_src2 >= exp) {
           int64_t temp[dest_sz];
-          for (int k = 0; k < dest_sz; k++) {
+          for (size_t k = 0; k < dest_sz; k++) {
             temp[k] = 0;
           }
           temp_src2 -= exp;
@@ -225,11 +234,12 @@ public:
         exponent--;
       }
     }
+
     // check sign
     if (src2 != 0) {
       if (s1Negative + s2Negative == 1) {
         // positive to two's complement negative
-        for (auto i = 0; i < dest_sz; i++) {
+        for (size_t i = 0; i < dest_sz; i++) {
           dest[i] = ~dest[i];
         }
         addn(dest, dest_sz, dest, flip_carry);
@@ -238,13 +248,14 @@ public:
   }
 
   static void multn(int64_t *dest, size_t dest_sz, const int64_t *src1, const int64_t src2) {
-    for (int i = 0; i < dest_sz; i++) {
+    for (size_t i = 0; i < dest_sz; i++) {
       dest[i] = 0;
     }
+
     int64_t *temp_src1 = const_cast<int64_t *>(src1);
     int64_t  temp_src2 = src2;
     int64_t  flip_carry[dest_sz];
-    for (int i = 0; i < dest_sz; i++) {
+    for (size_t i = 0; i < dest_sz; i++) {
       if (i == 0) {
         flip_carry[i] = 1;
       } else {
@@ -260,15 +271,15 @@ public:
     if (src1[dest_sz - 2] < 0) {
       s1Negative = true;
       subn(temp_src1, dest_sz - 1, temp_src1, flip_carry);
-      for (int i = 0; i < dest_sz - 1; i++) {
+      for (size_t i = 0; i < dest_sz - 1; i++) {
         temp_src1[i] = ~temp_src1[i];
       }
     }
+
     // split src2
-    int     index    = 0;
     int64_t exponent = 63;
     while (temp_src2 > 0) {
-      uint64_t exp = std::pow(2, exponent);
+      auto exp = std::pow(2, exponent);
       if (temp_src2 >= exp) {
         int64_t temp[dest_sz];
         temp_src2 -= exp;
@@ -293,11 +304,12 @@ public:
       }
       exponent--;
     }
+
     // check sign
     if (src2 != 0) {
       if (s1Negative + s2Negative == 1) {
         // positive to two's complement negative
-        for (auto i = 0; i < dest_sz; i++) {
+        for (size_t i = 0; i < dest_sz; i++) {
           dest[i] = ~dest[i];
         }
         addn(dest, dest_sz, dest, flip_carry);
