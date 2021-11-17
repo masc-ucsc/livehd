@@ -153,6 +153,156 @@ void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
   st.set(var, result_trivial);
 }
 
+void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial + st.get_trivial(data.token.get_text());
+      } else {
+        result_trivial = result_trivial + Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial.mult_op(st.get_trivial(data.token.get_text()));
+      } else {
+        result_trivial = result_trivial.mult_op(Lconst::from_pyrope(data.token.get_text()));
+      }
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial + st.get_trivial(data.token.get_text());
+      } else {
+        result_trivial = result_trivial + Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial.div_op(st.get_trivial(data.token.get_text()));
+      } else {
+        result_trivial = result_trivial.div_op(Lconst::from_pyrope(data.token.get_text()));
+      }
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
+// MODULO IS NOT CONSIDERED FOR NOW
+//
+// void Opt_lnast::process_mod(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+//   mmap_lib::str var;
+//   Lconst        result_trivial;
+//
+//   bool first_child   = true;
+//   bool first_operand = true;
+//   for (auto child : ln->children(lnid)) {
+//     const auto &data = ln->get_data(child);
+//
+//     if (first_child) {  // first child
+//       first_child = false;
+//
+//       I(data.type.is_ref());
+//       var = data.token.get_text();
+//       continue;
+//     }
+//
+//     if (first_operand) {
+//       first_operand = false;
+//
+//       if (data.type.is_ref()) {
+//         result_trivial = result_trivial + st.get_trivial(data.token.get_text());
+//       } else {
+//         result_trivial = result_trivial + Lconst::from_pyrope(data.token.get_text());
+//       }
+//     } else {
+//       if (data.type.is_ref()) {
+//         result_trivial = Lconst::from_pyrope((result_trivial).to_pyrope().to_i() % (st.get_trivial(data.token.get_text())).to_pyrope().to_i());
+//       } else {
+//         result_trivial = Lconst::from_pyrope((result_trivial).to_pyrope().to_i() % data.token.get_text().to_i());
+//       }
+//     }
+//   }
+//
+//   st.set(var, result_trivial);
+// }
+
+void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial + st.get_trivial(data.token.get_text());
+      } else {
+        result_trivial = result_trivial + Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        result_trivial = result_trivial.and_op(st.get_trivial(data.token.get_text()));
+      } else {
+        result_trivial = result_trivial.and_op(Lconst::from_pyrope(data.token.get_text()));
+      }
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
 void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   mmap_lib::str var;
   Lconst        result_trivial;
@@ -173,6 +323,32 @@ void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
       result_trivial = result_trivial | st.get_trivial(data.token.get_text());
     } else {
       result_trivial = result_trivial | Lconst::from_pyrope(data.token.get_text());
+    }
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+
+  bool first_child = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (data.type.is_ref()) {
+      result_trivial = st.get_trivial(data.token.get_text()).not_op();
+    } else {
+      result_trivial = Lconst::from_pyrope(data.token.get_text()).not_op();
     }
   }
 
@@ -438,6 +614,10 @@ yy = (1,a=3)
     auto v = Lconst::from_pyrope(rhs_txt);
     st.set(lhs_txt, v);
   }
+
+  if (lhs_txt == "%out") {
+      std::cout << "OUT: " << st.get_trivial(lhs_txt).to_pyrope() << std::endl;
+  }
 }
 
 void Opt_lnast::process_todo(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
@@ -457,7 +637,11 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: process_plus(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus: process_minus(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult: process_mult(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div: process_div(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and: process_bit_and(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or: process_bit_or(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: process_bit_not(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: process_assign(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: process_tuple_get(ln, idx); break;
@@ -488,20 +672,37 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
         break;
       }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
-        process_minus(ln, idx);
-        break;
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult:
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div:
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and:
         {
           ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
-        process_bit_or(ln, idx);
-        break;
+        {
+          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          break;
+        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not:
         {
           ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: {
+        std::cout << lhs_text << " : " << st.get_trivial(lhs_text).to_pyrope() << std::endl;
         ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
         break;
       }
