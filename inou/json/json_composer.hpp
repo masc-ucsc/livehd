@@ -13,7 +13,7 @@ using namespace std;
 
 namespace jsn
 {
-    
+
 class JsonComposer;
 class Object{
     public:
@@ -45,7 +45,7 @@ struct JsonElement
     ulong u;
     float f;
     bool  b;
-    const char*   str; 
+    const char*   str;
     const Object* obj;
     const ObjVec* ovec;
     const vector<int>*  ivec;
@@ -84,17 +84,17 @@ class JsonComposer
   public:
     JsonComposer(ostream& target_medium) : target(target_medium) { }
 
-    void Write(const JsonElement* el_list) const;  
-  
+    void Write(const JsonElement* el_list) const;
+
     template<typename T> void WriteVector(const vector<T>* vec) {
         target << "[" ;
         WriteEach(vec, [](T const* ent, JsonElement* key_val) { *key_val=*ent; });
         target << "]" ;
     }
-    
+
     void WriteVectorAsObj(const ObjVec* ovec) const;
 };
- 
+
 } // namespace jsn
 
 
