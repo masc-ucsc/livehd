@@ -61,10 +61,10 @@ http_archive(
 http_archive(
     name = "slang",
     build_file = "BUILD.slang",
-    sha256 = "982fae57bb994486979df7585205eaf566c5aa1266a469fce68286fc06113208",
-    strip_prefix = "slang-livehd-1",
+    sha256 = "e506656a98a5a0d2b5e7dc4f937f86d2b273b3a27681292ed88017f3ed2955b2",
+    strip_prefix = "slang-344f4b415d03ef4dc5b9cfcd3a9fcffdf44d5e8a",
     urls = [
-        "https://github.com/masc-ucsc/slang/archive/livehd-1.zip",
+        "https://github.com/masc-ucsc/slang/archive/344f4b415d03ef4dc5b9cfcd3a9fcffdf44d5e8a.zip",
     ],
 )
 
