@@ -256,7 +256,8 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 //       }
 //     } else {
 //       if (data.type.is_ref()) {
-//         result_trivial = Lconst::from_pyrope((result_trivial).to_pyrope().to_i() % (st.get_trivial(data.token.get_text())).to_pyrope().to_i());
+//         result_trivial = Lconst::from_pyrope((result_trivial).to_pyrope().to_i() %
+//         (st.get_trivial(data.token.get_text())).to_pyrope().to_i());
 //       } else {
 //         result_trivial = Lconst::from_pyrope((result_trivial).to_pyrope().to_i() % data.token.get_text().to_i());
 //       }
@@ -658,49 +659,43 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 
     auto  lhs_id   = ln->get_first_child(idx);
     auto &lhs_data = ln->get_data(lhs_id);
-    auto  lhs_txt = lhs_data.token.get_text();
+    auto  lhs_txt  = lhs_data.token.get_text();
 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: {
         ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;
       }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not:
-        {
-          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-          break;
-        }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: {
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        break;
+      }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: {
         // "%out" is stored as "out" in the symbol table (%out does not work properly)
         if (lhs_txt == "%out") {
           lhs_txt = lhs_txt.substr(1);
         }
-        //std::cout << lhs_txt << " : " << st.get_trivial(lhs_txt) << std::endl;
+        // std::cout << lhs_txt << " : " << st.get_trivial(lhs_txt) << std::endl;
         ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;
       }
