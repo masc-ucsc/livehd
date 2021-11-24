@@ -462,19 +462,12 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   // Stores value if reference value is known
   auto rhs_txt = mmap_lib::str::concat(var_root, var_field);
   auto bundle  = st.get_bundle(rhs_txt);
-  st.set(lhs_txt, bundle);
 
-  // TEMP CODE
-  // Creates a new assign node in the LNAST with the trivial value stored from tuple_get
-  // auto lhs_trivial = st.get_trivial(lhs_txt);
-  //
-  // auto node_assign = Lnast_node::create_assign();
-  // auto node_target = Lnast_node::create_ref("tempref");
-  // auto node_const  = Lnast_node::create_const(lhs_trivial.to_pyrope());
-  //
-  // auto idx_assign = ln->add_child(ln->get_parent(lnid), node_assign);
-  // ln->add_child(idx_assign, node_target);
-  // ln->add_child(idx_assign, node_const);
+  // Creates new trivial bundle that contains the desired trivial value
+  auto bundle_trivial = std::make_shared<Bundle>(lhs_txt);
+  bundle_trivial->set(0, bundle->flatten());
+
+  st.set(lhs_txt, bundle_trivial);
 }
 
 void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
@@ -607,16 +600,17 @@ yy = (1,a=3)
   }else
 #endif
 
+  // Store "%out" as "out" in symbol table (%out does not work properly)
+  if (lhs_txt == "%out") {
+    lhs_txt = lhs_txt.substr(1);
+  }
+
   if (rhs_data.type.is_ref()) {
     auto bundle = st.get_bundle(rhs_txt);
     st.set(lhs_txt, bundle);
   } else {
     auto v = Lconst::from_pyrope(rhs_txt);
     st.set(lhs_txt, v);
-  }
-
-  if (lhs_txt == "%out") {
-      std::cout << "OUT: " << st.get_trivial(lhs_txt).to_pyrope() << std::endl;
   }
 }
 
@@ -664,46 +658,50 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 
     auto  lhs_id   = ln->get_first_child(idx);
     auto &lhs_data = ln->get_data(lhs_id);
-    auto  lhs_text = lhs_data.token.get_text();
+    auto  lhs_txt = lhs_data.token.get_text();
 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: {
-        ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;
       }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not:
         {
-          ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+          ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
           break;
         }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: {
-        std::cout << lhs_text << " : " << st.get_trivial(lhs_text).to_pyrope() << std::endl;
-        ln2.create_assign_stmts(lhs_text, st.get_trivial(lhs_text).to_pyrope());
+        // "%out" is stored as "out" in the symbol table (%out does not work properly)
+        if (lhs_txt == "%out") {
+          lhs_txt = lhs_txt.substr(1);
+        }
+        //std::cout << lhs_txt << " : " << st.get_trivial(lhs_txt) << std::endl;
+        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;
       }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: break;
