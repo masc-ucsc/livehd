@@ -15,4 +15,3 @@ jobs:
       - run: sudo chmod +x /usr/local/bin/buildifier
 
       - run: buildifier -lint warn -r .
-      - run: buildifier -lint warn external/BUILD.*

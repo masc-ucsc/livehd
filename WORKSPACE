@@ -17,7 +17,7 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "mustache",
-    build_file = "BUILD.mustache",
+    build_file = "mustache.BUILD",
     sha256 = "c426178bf3fa0888a59c4d88977a9fc754a82039a2adad19239555466fb47a42",
     strip_prefix = "Mustache-a7eebc9bec92676c1931eddfff7637d7e819f2d2",
     urls = [
@@ -50,7 +50,7 @@ http_archive(
 
 http_archive(
     name = "fmt",
-    build_file = "BUILD.fmt",
+    build_file = "fmt.BUILD",
     sha256 = "fccfc86e4aff6c33bff9a1d907b2ba2de2a5a8ab84349be4964a93f8d8c21b62",
     strip_prefix = "fmt-7bdf0628b1276379886c7f6dda2cef2b3b374f0b",
     urls = [
@@ -60,7 +60,7 @@ http_archive(
 
 http_archive(
     name = "slang",
-    build_file = "BUILD.slang",
+    build_file = "slang.BUILD",
     sha256 = "e506656a98a5a0d2b5e7dc4f937f86d2b273b3a27681292ed88017f3ed2955b2",
     strip_prefix = "slang-344f4b415d03ef4dc5b9cfcd3a9fcffdf44d5e8a",
     urls = [
@@ -70,7 +70,7 @@ http_archive(
 
 http_archive(
     name = "tree-sitter-pyrope",
-    build_file = "BUILD.tree-sitter-pyrope",
+    build_file = "tree-sitter-pyrope.BUILD",
     sha256 = "fcdf4be791297e3a6ef9804e9a5254db6fcc3f675d401d0a0a58e2db4091bf6c",
     strip_prefix = "tree-sitter-pyrope-b543bf668055454c3e5bcd03fde64bfd8b3da984",
     urls = [
@@ -80,7 +80,7 @@ http_archive(
 
 http_archive(
     name = "tree-sitter",
-    build_file = "BUILD.tree-sitter",
+    build_file = "tree-sitter.BUILD",
     sha256 = "5dc3a775a41ee9592ffc324410d8cb56e4baa0607dda0fa18832d51f6538e75c",
     strip_prefix = "tree-sitter-2bee7c9b75e3e0163b321502f1f73e2e38943a7e",
     urls = [
@@ -90,7 +90,7 @@ http_archive(
 
 http_archive(
     name = "json",
-    build_file = "BUILD.json",
+    build_file = "json.BUILD",
     sha256 = "6bea5877b1541d353bd77bdfbdb2696333ae5ed8f9e8cc22df657192218cad91",
     urls = ["https://github.com/nlohmann/json/releases/download/v3.9.1/include.zip"],
 )
@@ -106,8 +106,8 @@ http_archive(
 
 http_archive(
     name = "cryptominisat",
-    build_file = "BUILD.cryptominisat",
-    patches = ["//external:patch.cryptominisat"],
+    build_file = "cryptominisat.BUILD",
+    patches = ["//external:cryptominisat.patch"],
     sha256 = "f03e082c94bb20ed672eefab2fc6016192d9fd2eed3a81f40924867c86788494",
     strip_prefix = "cryptominisat-f8b1da0eed202953912ff8cca10175eab61c0a1d",
     urls = [
@@ -117,8 +117,8 @@ http_archive(
 
 http_archive(
     name = "boolector",
-    build_file = "BUILD.boolector",
-    patches = ["//external:patch.boolector"],
+    build_file = "boolector.BUILD",
+    patches = ["//external:boolector.patch"],
     sha256 = "5339667ebfdc35156a1fc910b84cbcc3fd34028a381d5df9aad790f17e997d03",
     strip_prefix = "boolector-03d76134f86170ab0767194c339fd080e92ad371",
     urls = [
@@ -128,7 +128,7 @@ http_archive(
 
 http_archive(
     name = "rapidjson",
-    build_file = "BUILD.rapidjson",
+    build_file = "rapidjson.BUILD",
     sha256 = "a6b8da8f736b25689eb7fe36dff5d5ce8d491f1e08dd92f0729d6dd6da95e0ac",
     strip_prefix = "rapidjson-6534506e829a489bda78bc5eac5faa34da0a2c51/include",
     urls = [
@@ -138,7 +138,7 @@ http_archive(
 
 http_archive(
     name = "replxx",
-    build_file = "BUILD.replxx",
+    build_file = "replxx.BUILD",
     sha256 = "fd09cadbbe91f14da3e8899a9748ce312a73bf70e82e532555fcaeeba3148625",
     strip_prefix = "replxx-d13d26504f97ed2a54bc02dd37d20ef3b0179518",
     urls = [
@@ -148,8 +148,8 @@ http_archive(
 
 http_archive(
     name = "verilator",
-    build_file = "BUILD.verilator",
-    patches = ["//external:patch.verilator"],
+    build_file = "verilator.BUILD",
+    patches = ["//external:verilator.patch"],
     strip_prefix = "replxx-97d89cce35142d1a1f4c08571d436d5a65e34901",
     urls = [
         "https://github.com/verilator/verilator/archive/97d89cce35142d1a1f4c08571d436d5a65e34901.zip",
@@ -158,7 +158,7 @@ http_archive(
 
 http_archive(
     name = "anubis",
-    build_file = "BUILD.anubis",
+    build_file = "anubis.BUILD",
     strip_prefix = "anubis-93088bd3c05407ccd871e8d5067d024f812aeeaa",
     urls = [
         "https://github.com/masc-ucsc/anubis/archive/93088bd3c05407ccd871e8d5067d024f812aeeaa.zip",
@@ -167,7 +167,7 @@ http_archive(
 
 http_archive(
     name = "mockturtle",
-    build_file = "BUILD.mockturtle",
+    build_file = "mockturtle.BUILD",
     strip_prefix = "mockturtle-d1b697361d53b4f137d55a18582b290f54ee86bb",
     urls = [
         "https://github.com/lsils/mockturtle/archive/d1b697361d53b4f137d55a18582b290f54ee86bb.zip",
