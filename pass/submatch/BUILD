@@ -15,16 +15,17 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "//third_party/misc/ezsat",
     ],
     alwayslink = True,
 )
 
-cc_test(
-    name = "submatch_test",
-    srcs = ["test_submatch.cpp"],
-    deps = [
-        ":pass_submatch",
-        "@com_google_googletest//:gtest_main",
-    ],
+sh_test(
+    name = "basic-test",
+    srcs = ["tests/basic_test.sh"],
+    data = [
+        "//main:lgshell",
+        "//pass/cprop:pass_cprop",
+        "//pass/lnast_tolg:pass_lnast_tolg",
+        "//inou/yosys/tests:verilog_tests",
+    ]
 )
