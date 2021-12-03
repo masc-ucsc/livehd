@@ -19,3 +19,12 @@ cc_library(
     ],
     alwayslink = True,
 )
+
+cc_test(
+    name = "submatch_test",
+    srcs = ["test_submatch.cpp"],
+    deps = [
+        ":pass_submatch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
