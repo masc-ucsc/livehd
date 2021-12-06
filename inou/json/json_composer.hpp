@@ -123,8 +123,8 @@ struct JsonElement
   JsonElement& operator=(double v)  { value.f = v; type = etFloat; return *this; }
   JsonElement& operator=(bool v)    { value.b = v; type = etBool; return *this; }
   JsonElement& operator=(const char* v) { value.str = v; type = etString; return *this; }
-  JsonElement& operator=(const JsonElement* n)   { type = etNested; value.nested = n; return *this; }
-  JsonElement& operator=(const Object& obj) {return (*this = &obj); }
+  JsonElement& operator=(const JsonElement* n)  { type = etNested; value.nested = n; return *this; }
+  JsonElement& operator=(const Object& obj)     {return (*this = &obj); }
   JsonElement& operator=(const Object* obj)                       { type = etObject; SetObjectPtr(obj); return *this; }
   template <class T>  JsonElement& operator=(const Array<T>* arr) { type = etArray; SetObjectPtr(arr);  return *this; }
   template <class T>  JsonElement& operator=(const vector<T>* vec) {
@@ -157,7 +157,6 @@ class JsonComposer
     void Write(const JsonElement* el_list) const;  
 };
 
-
 template <class T> void jsn::Range<T>::WriteEach(IterType start, IterType end, const JsonComposer* jcm) const {
   if (start == end) 
     return;
@@ -184,6 +183,4 @@ template <class T> void jsn::VectorAsObject<T>::WriteItem(const T* item, JsonEle
 
 } // namespace jsn
 
-
 #endif
-
