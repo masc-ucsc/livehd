@@ -118,35 +118,35 @@ void Module::ToJson(const JsonComposer* jcm) const {
   using NetMapT = typename std::map<Wire*, std::string>;
   using NetMapItemT = typename std::iterator_traits<NetMapT::const_iterator>::value_type;  
 
-  NetMapT unique_nets;
+  NetMapT unique_nets; // maps each wire* to a name
   for (auto prt : *ports) { // map port wires to thier names
     auto port_wire = wires.find(prt->get_name());
     if ((port_wire == wires.end()) || unique_nets.count(port_wire->second)) // if unique_nets contains ...
       continue;
     unique_nets[port_wire->second] = port_wire->first;
   }
-  // find other wires:
+  // add non-port wires
   for (auto itr = wires.begin(); itr != wires.end(); ++itr) {
-    if (unique_nets.count(itr->second)) // if unique_nets contains ...
+    if (unique_nets.count(itr->second)) // if unique_nets already contains the wire
       continue;
     unique_nets[itr->second] = itr->first;
   }
 
-  auto netNames = RangeWriter {&unique_nets, 
+  auto writeNetNames = RangeWriter {&unique_nets, 
       [](NetMapItemT const* nam_wire , JsonElement* model , const JsonComposer* json){
-          JsonElement nestModel[] = {
+          JsonElement nested_net[] = {
                 {"hide_name", "1"},
                 {"bits", (nam_wire->first)? nam_wire->first->get_bits() : 0},
                 {}
               };
-          model[0][nam_wire->second.c_str()]= nestModel;
+          model[0][nam_wire->second.c_str()]= nested_net;
           json->Write(model);
   }};  
 
   JsonElement model[] = {
       {"ports",  VectorAsObject{ports}},
       {"cells",  VectorAsObject{&cells}},
-      {"netnames", &netNames},
+      {"netnames", &writeNetNames},
       {}
   };
   jcm->Write(model);
