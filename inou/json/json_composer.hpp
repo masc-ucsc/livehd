@@ -1,3 +1,6 @@
+/*
+Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+*/
 #ifndef JSON_COMPOSER_H
 #define JSON_COMPOSER_H
 
