@@ -152,6 +152,4 @@ void Module::ToJson(const JsonComposer* jcm) const {
   jcm->Write(model);
 }
 
-
-
 }  // end namespace
