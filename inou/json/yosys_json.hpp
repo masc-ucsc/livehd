@@ -1,3 +1,7 @@
+/*
+    Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+*/
+
 #ifndef YOSYS_JSON_H
 #define YOSYS_JSON_H
 
