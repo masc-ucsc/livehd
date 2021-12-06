@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-
+/*
+Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+*/
 #include "inou_json.hpp"
 #include "core/edge.hpp"
 #include "core/lgraph.hpp"
