@@ -13,7 +13,7 @@ using namespace std;
 
 namespace jsn
 {
-    
+
 class JsonComposer;
 struct JsonElement;
 
