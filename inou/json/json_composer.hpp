@@ -37,7 +37,7 @@ struct RangeWriter : public Object, Range<T>
 {
   using IterT = typename T::const_iterator;
   using ItemT = typename std::iterator_traits<IterT>::value_type;
-    
+ 
   IterT start;
   IterT end;
   void (*write_item_callback)(const ItemT* , JsonElement* , const JsonComposer* );
