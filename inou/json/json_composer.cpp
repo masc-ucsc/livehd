@@ -52,4 +52,4 @@ void JsonComposer::Write(const JsonElement* property) const {
   }
 }
 
-} //jsn
+} // namespase jsn
