@@ -1,3 +1,7 @@
+/*
+    Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+*/
+
 #include "yosys_json.hpp"
 #include <vector>
 #include <string>
