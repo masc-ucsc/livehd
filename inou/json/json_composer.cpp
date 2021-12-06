@@ -1,3 +1,6 @@
+/*
+Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+*/
 #include "json_composer.hpp"
 #include <vector>
 #include <iostream>
