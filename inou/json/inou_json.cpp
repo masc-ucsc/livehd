@@ -38,11 +38,6 @@ void Inou_json::fromlg(Eprp_var &var) {
   }
   LGtoYJson *conv = new LGtoYJson();
   conv->to_json(var);
-  //for (const auto &g : var.lgs) {
-  //  auto file = mmap_lib::str::concat(odir, "/", g->get_name(), ".json");
-
-  //  to_json(g, file);
-  //}
   delete conv;
 }
 
