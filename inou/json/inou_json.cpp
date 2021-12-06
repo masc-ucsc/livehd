@@ -36,9 +36,8 @@ void Inou_json::fromlg(Eprp_var &var) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
     return;
   }
-  LGtoYJson *conv = new LGtoYJson();
-  conv->to_json(var);
-  delete conv;
+  LGtoYJson conv;
+  conv.to_json(var);
 }
 
 void Inou_json::tolg(Eprp_var &var) {
