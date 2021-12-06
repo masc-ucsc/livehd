@@ -45,7 +45,7 @@ enum enPortDir {
 class Port : public jsn::Object {
   string name;
   enPortDir direction;
-  Wire* wire;  // used for modules (internal connection of the port)
+  Wire* wire;  // used in modules only (internal connection of the port)
 
 public:
   Port (const char* port_name, enPortDir dir)   { name = port_name; direction = dir; }
@@ -108,7 +108,6 @@ class Module : public jsn::Object, Prototype {
   private:
   string name;
   vector<Cell*>  cells;
-  // absl::flat_hash_map<std::string, Wire*>  wires;
   std::map<std::string, Wire*>  wires;
   long last_wire_id;
 
