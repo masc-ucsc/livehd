@@ -16,10 +16,5 @@ protected:
 
 public:
   Inou_json(const Eprp_var &var);
-
   static void setup();
 };
-
-//void from_json(Lgraph *g, rapidjson::Document &document);
-//void to_json(Lgraph *lg, const mmap_lib::str &filename);
-//void to_json(Eprp_var &var);
