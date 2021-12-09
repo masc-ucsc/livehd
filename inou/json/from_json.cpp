@@ -54,8 +54,8 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
     }
     if (nodes.HasMember("op")) {
       if (nodes["op"].IsString()) {
-        auto   op_txt = mmap_lib::str(nodes["op"].GetString());
-        auto   op     = Ntype::get_op(op_txt);
+        auto op_txt = mmap_lib::str(nodes["op"].GetString());
+        auto op     = Ntype::get_op(op_txt);
 
         if (op != Ntype_op::Invalid) {
           last_node.set_type(op);

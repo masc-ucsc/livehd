@@ -1,12 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "inou_json.hpp"
-#include "lg_to_yjson.hpp"
 
 #include <fstream>
 
 #include "absl/strings/substitute.h"
 #include "eprp_utils.hpp"
+#include "lg_to_yjson.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "rapidjson/document.h"
@@ -31,7 +31,7 @@ void Inou_json::fromlg(Eprp_var &var) {
   Inou_json p(var);
 
   mmap_lib::str odir(var.get("odir"));
-  bool ok   = p.setup_directory(odir);
+  bool          ok = p.setup_directory(odir);
   if (!ok) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
     return;
@@ -66,7 +66,7 @@ void Inou_json::tolg(Eprp_var &var) {
       continue;
     }
 
-    FILE *      pFile = fopen(f.to_s().c_str(), "rb");
+    FILE *pFile = fopen(f.to_s().c_str(), "rb");
     if (pFile == 0) {
       Pass::error("Inou_json::tolg could not open {} file", f);
       continue;
