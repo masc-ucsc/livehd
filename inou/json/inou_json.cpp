@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "inou_json.hpp"
+#include "lg_to_yjson.hpp"
 
 #include <fstream>
 
@@ -35,12 +36,8 @@ void Inou_json::fromlg(Eprp_var &var) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
     return;
   }
-
-  for (const auto &g : var.lgs) {
-    auto file = mmap_lib::str::concat(odir, "/", g->get_name(), ".json");
-
-    to_json(g, file);
-  }
+  LGtoYJson conv;
+  conv.to_json(var);
 }
 
 void Inou_json::tolg(Eprp_var &var) {
@@ -81,8 +78,6 @@ void Inou_json::tolg(Eprp_var &var) {
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
     rapidjson::Document       document;
     document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
-
-    from_json(lg, document);
     lg->sync();
     lgs.push_back(lg);
   }
