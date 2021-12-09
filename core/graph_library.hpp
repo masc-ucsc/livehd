@@ -136,7 +136,7 @@ protected:
 
   Lg_type_id  copy_lgraph_int(const mmap_lib::str &name, const mmap_lib::str &new_name);
   Lg_type_id  register_lgraph_int(const mmap_lib::str &name, const mmap_lib::str &source, Lgraph *lg);
-  void        unregister_int(const mmap_lib::str &name, Lg_type_id lgid, Lgraph *lg = 0);
+  void        unregister_int(const mmap_lib::str &name, Lg_type_id lgid, Lgraph *lg = nullptr);
   void        expunge_int(const mmap_lib::str &name);
   void        clear_int(Lg_type_id lgid);
   void        sync_int() { clean_library_int(); }
