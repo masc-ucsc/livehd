@@ -86,7 +86,7 @@ struct JsonElement {
     const char*        str;
     const Object*      obj;
     const JsonElement* nested;
-    char 			  _embedded_batch[sizeof(Array<vector<int>>)];
+    char               _embedded_batch[sizeof(Array<vector<int>>)];
   } value;
 
   JsonElement() { type = etEndOfList; }
