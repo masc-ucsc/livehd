@@ -15,7 +15,7 @@
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
-static  Pass_plugin sample("inou_json", Inou_json::setup);
+static Pass_plugin sample("inou_json", Inou_json::setup);
 
 void Inou_json::setup() {
   Eprp_method m1("inou.json.tolg", mmap_lib::str("import from json to lgraph"), &Inou_json::tolg);
