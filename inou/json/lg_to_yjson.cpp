@@ -99,7 +99,7 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
     }
   }
   for (auto node : lg->forward()) {  // add aliases for MASK outputs
-    if (node.get_type_op() == Ntype_op::Get_mask) {
+    if (node.get_type_op() == Ntype_op::Get_mask && node.out_edges().size() > 0) {
       module->add_wire_alias(OUT_DRV_NAME((&node), 0), node.get_sink_pin("a").get_driver_pin().get_wire_name().to_s());
     }
   }
