@@ -177,46 +177,45 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
   absl::flat_hash_map<mmap_lib::str, uint32_t> unique_inputs;
   auto                                         inp_io_node = lg->get_graph_input_node();
   // map each unique INPUT to its width
-
   for (const auto& edge : inp_io_node.out_edges()) {
-	  I(edge.driver.has_name());
-	  auto pin_name = edge.driver.get_name();
-	  if (unique_inputs.contains(pin_name))
-	    continue;
-	  unique_inputs[pin_name] = edge.get_bits();
+    I(edge.driver.has_name());
+    auto pin_name = edge.driver.get_name();
+    if (unique_inputs.contains(pin_name))
+      continue;
+    unique_inputs[pin_name] = edge.get_bits();
   }
   for (auto& inp : unique_inputs) {
-	  auto port_wire = module->create_single_wire(inp.first.to_s(), inp.second);
-	  module->add_port(&inp.first, pdInput, port_wire);
+    auto port_wire = module->create_single_wire(inp.first.to_s(), inp.second);
+    module->add_port(&inp.first, pdInput, port_wire);
   }
 
   // add aliases for newly created input wires
   auto internal_inp_edges = lg->get_graph_input_node().out_edges();
   for (auto& inp_edge : internal_inp_edges) {
-	  module->add_wire_alias(inp_edge.driver.get_wire_name().to_s(), inp_edge.driver.get_name().to_s());
+    module->add_wire_alias(inp_edge.driver.get_wire_name().to_s(), inp_edge.driver.get_name().to_s());
   }
 
   // map each unique output to its width
   absl::flat_hash_map<mmap_lib::str, uint32_t> unique_outputs;
   auto                                         out_io_node = lg->get_graph_output_node();
   for (const auto& edge : out_io_node.inp_edges()) {
-	  auto sink_pid = edge.sink.get_pid();
-	  auto out_pin  = edge.sink.get_node().get_driver_pin_raw(sink_pid);
-	  I(out_pin.has_name());
-	  auto pin_name = out_pin.get_name();
-	  if (unique_outputs.contains(pin_name))
-	  	continue;
-	  unique_outputs[pin_name] = edge.get_bits();
+    auto sink_pid = edge.sink.get_pid();
+    auto out_pin  = edge.sink.get_node().get_driver_pin_raw(sink_pid);
+    I(out_pin.has_name());
+    auto pin_name = out_pin.get_name();
+    if (unique_outputs.contains(pin_name))
+      continue;
+    unique_outputs[pin_name] = edge.get_bits();
   }
   for (auto& outp : unique_outputs) {
-	  auto port_wire = module->create_single_wire(outp.first.to_s(), outp.second);
-	  module->add_port(&outp.first, pdOutput, port_wire);
+    auto port_wire = module->create_single_wire(outp.first.to_s(), outp.second);
+    module->add_port(&outp.first, pdOutput, port_wire);
   }
 
   // add aliases for newly created output wires
   auto internal_out_edges = lg->get_graph_output_node().inp_edges();
   for (auto& out_edge : internal_out_edges) {
-	  module->add_wire_alias(out_edge.driver.get_wire_name().to_s(), out_edge.sink.get_name().to_s());
+    module->add_wire_alias(out_edge.driver.get_wire_name().to_s(), out_edge.sink.get_name().to_s());
   }
 }
 
