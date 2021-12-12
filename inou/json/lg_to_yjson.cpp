@@ -82,12 +82,10 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
       continue;
     else if (op == Ntype_op::Const) {
       for (auto e : node.out_edges()) {
-        // printf("^^^^^^^^^^^^^^^^^^: %s\n\n", e.driver.get_wire_name().to_s().c_str());
         if (e.sink.get_node().get_type_op() != Ntype_op::Get_mask) {
           // TODO: if const value is not -1
           module->create_wires(node.out_edges());
           // TODO: get proper const value as int
-          // int value = stoi(node.get_type_const().to_pyrope().to_s(), 0, 16);
           int value = node.get_type_const().to_i();
           module->get_wire(e.driver.get_wire_name().to_s())->set_const_value(value);
           break;
@@ -99,7 +97,7 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
     }
   }
   for (auto node : lg->forward()) {  // add aliases for MASK outputs
-    if (node.get_type_op() == Ntype_op::Get_mask) {
+    if (node.get_type_op() == Ntype_op::Get_mask && node.out_edges().size() > 0) {
       module->add_wire_alias(OUT_DRV_NAME((&node), 0), node.get_sink_pin("a").get_driver_pin().get_wire_name().to_s());
     }
   }
