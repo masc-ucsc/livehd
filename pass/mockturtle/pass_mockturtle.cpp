@@ -902,8 +902,8 @@ void Pass_mockturtle::convert_mockturtle_to_KLUT() {
 }
 
 void Pass_mockturtle::create_lutified_lgraph(Lgraph *old_lg) {
-  auto    new_lg_name = absl::StrCat(old_lg->get_name(), LUTIFIED_NETWORK_NAME_SIGNATURE);
-  Lgraph *new_lg      = old_lg->clone_skeleton(new_lg_name);
+  auto    new_lg_name = absl::StrCat(old_lg->get_name().to_s(), LUTIFIED_NETWORK_NAME_SIGNATURE);
+  Lgraph *new_lg      = old_lg->clone_skeleton(mmap_lib::str(new_lg_name));
 
   auto old_ginp_node                                = old_lg->get_graph_input_node();
   auto old_gout_node                                = old_lg->get_graph_output_node();
@@ -1008,7 +1008,7 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph *old_lg) {
       });
 
       auto encoding = std::string("0x") + kitty::to_hex(func);
-      auto new_node = new_lg->create_node_lut(Lconst(encoding));
+      auto new_node = new_lg->create_node_lut(Lconst::from_string(mmap_lib::str(encoding)));
 
       gid_klut_node2lg_node[std::make_pair(group_id, klut_ntk_node)] = new_node.get_compact();
     });

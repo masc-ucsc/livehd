@@ -9,9 +9,6 @@ cc_library(
     hdrs = ["pass_mockturtle.hpp"],
     copts = COPTS,
     includes = ["."],
-    tags = [
-        "fixme",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
