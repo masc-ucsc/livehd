@@ -183,9 +183,9 @@ http_archive(
 
 http_archive(
     name = "rules_hdl",
-    sha256 = "e233c7a590cc5b69818bb97cf447fd357a37cf050dcb1b27f1c3b9e87813d05d",
-    strip_prefix = "bazel_rules_hdl-c2c3bb868aef449a8a1b84ad45987d6216b01e26",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/c2c3bb868aef449a8a1b84ad45987d6216b01e26.zip",
+    sha256 = "88e13a04f078ea9b11b7c55609c1355a0f4b54189b1954e0b7026ad3ca3c7cd9",
+    strip_prefix = "bazel_rules_hdl-2603432e97e9b1a01ed71746dba52bc11fc7f022",
+    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/2603432e97e9b1a01ed71746dba52bc11fc7f022.zip",
 )
 
 load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
