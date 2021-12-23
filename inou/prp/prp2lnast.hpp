@@ -24,8 +24,10 @@ protected:
   bool is_lhs_fcall_or_variable(TSTreeCursor *tc) const;
 
   void process_fcall_or_variable(TSTreeCursor *tc);
+  void process_factor_second(TSTreeCursor *tc);
+  void process_assignment_cont2(TSTreeCursor *tc);
   void process_multiple_stmt(TSTreeCursor *tc);
-  void process_stmt_seq(TSTreeCursor *tc);
+  void process_stmt_base(TSTreeCursor *tc);
   void process_root();
 
 public:

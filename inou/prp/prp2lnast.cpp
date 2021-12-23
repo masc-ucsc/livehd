@@ -95,6 +95,39 @@ void Prp2lnast::process_fcall_or_variable(TSTreeCursor *tc) {
   }
 }
 
+void Prp2lnast::process_factor_second(TSTreeCursor *tc) {
+  const TSNode node = ts_tree_cursor_current_node(tc);
+  mmap_lib::str node_type(ts_node_type(node));
+
+  if (node_type == "fcall_or_variable") {
+    ts_tree_cursor_goto_first_child(tc);
+    process_fcall_or_variable(tc);
+    ts_tree_cursor_goto_parent(tc);
+  }else{
+    fmt::print("FIXME: add start {} to process_factor_second\n", node_type);
+  }
+}
+
+void Prp2lnast::process_assignment_cont2(TSTreeCursor *tc) {
+
+  in_lhs = false;
+
+  auto has_cont = ts_tree_cursor_goto_next_sibling(tc);
+  if (!has_cont) {
+    return Pass::error("expected a token after assignment");
+  }
+
+  const TSNode after_assign = ts_tree_cursor_current_node(tc);
+  mmap_lib::str after_assign_type(ts_node_type(after_assign));
+  if (after_assign_type == "factor_second") {
+    ts_tree_cursor_goto_first_child(tc);
+    process_factor_second(tc);
+    ts_tree_cursor_goto_parent(tc);
+  }else{
+    assert(false); // TODO
+  }
+}
+
 void Prp2lnast::process_multiple_stmt(TSTreeCursor *tc) {
 
   const TSNode node = ts_tree_cursor_current_node(tc);
@@ -114,21 +147,22 @@ void Prp2lnast::process_multiple_stmt(TSTreeCursor *tc) {
     const TSNode cont_node = ts_tree_cursor_current_node(tc);
     mmap_lib::str cont_type(ts_node_type(cont_node));
     if (cont_type == "assignment_cont2") {
-      in_lhs = false;
-      // TODO: HERE
+      ts_tree_cursor_goto_first_child(tc);
+      process_assignment_cont2(tc);
+      ts_tree_cursor_goto_parent(tc);
     }else{
       fmt::print("FIXME: add cont {} to process_multiple_stmt\n", cont_type);
     }
   }
 }
 
-void Prp2lnast::process_stmt_seq(TSTreeCursor *tc) {
+void Prp2lnast::process_stmt_base(TSTreeCursor *tc) {
 
   const TSNode node = ts_tree_cursor_current_node(tc);
 
   mmap_lib::str node_type(ts_node_type(node));
-  if (node_type != "stmt_seq") {
-    return Pass::error("invalid tree-sitter stmt_seq node");
+  if (node_type != "stmt_base") {
+    return Pass::error("invalid tree-sitter stmt_seq node {}", node_type);
   }
 
   auto has_stmt = ts_tree_cursor_goto_first_child(tc);
@@ -141,7 +175,7 @@ void Prp2lnast::process_stmt_seq(TSTreeCursor *tc) {
       process_multiple_stmt(tc);
       ts_tree_cursor_goto_parent(tc);
     }else{
-      fmt::print("FIXME: add {} to process_stmt_seq\n", stmt_type);
+      fmt::print("FIXME: add {} to process_stmt_base\n", stmt_type);
     }
 
     has_stmt = ts_tree_cursor_goto_next_sibling(tc);
@@ -198,7 +232,7 @@ void Prp2lnast::process_root() {
 
   auto has_child = ts_tree_cursor_goto_first_child(&tc);
   if (has_child) {
-    process_stmt_seq(&tc);
+    process_stmt_base(&tc);
   }
 
   ts_tree_cursor_delete(&tc);
