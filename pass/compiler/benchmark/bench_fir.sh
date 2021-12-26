@@ -20,8 +20,8 @@ PATTERN_PATH=./livehd_regression/synthetic/generated
 FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 
 if [ "${PWD##/home/}" != "${PWD}" ]; then
-  # LGDB=./lgdb
-  LGDB=/local/scrap/masc/swang203/lgdb
+  LGDB=./lgdb
+  # LGDB=/local/scrap/masc/swang203/lgdb
 else
   LGDB=${MADA_SCRAP}/lgdb   # NSF
 fi
@@ -52,7 +52,8 @@ pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 
 pts='Snxn100k Snxn200k Snxn300k Snxn400k Snxn500k Snxn600k Snxn700k Snxn800k Snxn900k Snxn1000k'
-pts='Snxn1000k'
+# pts='Snxn1000k'
+pts='Snxn100k'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
