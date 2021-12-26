@@ -72,6 +72,7 @@ public:
     eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
 #else
     (void)format;
+    ((void)args, ...);
 #endif
   }
 
