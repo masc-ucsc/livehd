@@ -1426,7 +1426,6 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
 
   field_dpin.connect_sink(pos_spin);
 
-  // std::unique_lock<std::mutex> guard(lgs_mutex);
   auto      *library = Graph_library::instance(path);
   Lg_type_id lgid;
   if (library->has_name(subg_module_name)) {

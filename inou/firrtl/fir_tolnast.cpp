@@ -1864,8 +1864,6 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
   auto idx_stmts = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
 
   // Iterate over I/O of the module.
-  // FIXME->sh: maybe only this method needs mutex protection if all other global object is just "READ" in the list_statement_info?
-  //            -> no, as far as I know, at least Memory interface will be "WRITEN" in the list_statement_info
   for (int i = 0; i < user_module.port_size(); i++) {
     const firrtl::FirrtlPB_Port& port = user_module.port(i);
     firmod.list_port_info(*lnast, port, idx_stmts);
@@ -1879,6 +1877,8 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
   }
 
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
+
+  std::lock_guard<std::mutex> guard(eprp_var_mutex);
   var.add(std::move(lnast));
 }
 

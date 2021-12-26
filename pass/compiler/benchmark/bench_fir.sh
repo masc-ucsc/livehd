@@ -108,6 +108,7 @@ fucntion() {
   # rm -f *.v
   rm -f ./*.tcl
   rm -f pp
+  echo "finished!"
 }
 
 

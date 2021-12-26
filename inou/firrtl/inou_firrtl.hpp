@@ -40,6 +40,7 @@ public:
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, mmap_lib::str> op2firsub;
   
 protected:
+  inline static std::mutex eprp_var_mutex;
 
   void iterate_circuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input, const mmap_lib::str &file_name);
   void iterate_modules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, const mmap_lib::str &file_name);

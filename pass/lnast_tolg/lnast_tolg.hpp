@@ -19,7 +19,6 @@ public:
   std::vector<Lgraph *> do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts);
 
 private:
-  inline static std::mutex lgs_mutex;
   std::shared_ptr<Lnast>   lnast;
   mmap_lib::str            module_name;
   mmap_lib::str            path;
