@@ -145,7 +145,7 @@ void Lbench::end() {
   auto to_sec   = (tp         - global_start_time).count();
 #endif
 
-  auto res = fmt::format("{:<20} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n"
+  auto res = fmt::format("{:<36} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n"
       ,sample_name
       ,Thread_pool::get_task_id()
       ,t

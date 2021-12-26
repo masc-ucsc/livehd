@@ -13,6 +13,7 @@
 #include "google/protobuf/util/time_util.h"
 #include "inou_firrtl.hpp"
 #include "lbench.hpp"
+#include "thread_pool.hpp"
 
 using google::protobuf::util::TimeUtil;
 
@@ -23,7 +24,7 @@ using google::protobuf::util::TimeUtil;
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
 void Inou_firrtl::to_lnast(Eprp_var& var) {
-  Lbench b("inou.fir_tolnast");
+  Lbench b("inou.fir_tolnast:all");
 
   Inou_firrtl p(var);
 
@@ -37,9 +38,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
         Pass::error("Failed to parse FIRRTL from protobuf format: {}", f);
         return;
       }
-      // p.tmp_var_cnt         = 0;
-      // p.seq_cnt             = 0;
-      // p.dummy_expr_node_cnt = 0;
+
       p.iterate_circuits(var, firrtl_input, f);
     }
   } else {
@@ -2147,11 +2146,16 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.module(i).has_user_module()) {
-      user_module_to_lnast(var, circuit.module(i), file_name);
+      // user_module_to_lnast(var, circuit.module(i), file_name);
+      thread_pool.add([this, &var, &circuit, i, &file_name] () -> void {
+        Lbench b("inou.fir_tolnast:module");
+        this->user_module_to_lnast(var, circuit.module(i), file_name);
+      });
     } else {
       Pass::error("Module not set.");
     }
   }
+  thread_pool.wait_all();
 }
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
