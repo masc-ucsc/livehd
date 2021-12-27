@@ -548,7 +548,7 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
 
   // If any parameters exist (for ext module), specify those.
   // NOTE->hunter: We currently specify parameters the same way as inputs.
-  for (const auto& param : emod_to_param_map[mmap_lib::str(inst.module_id())]) {
+  for (const auto& param : Inou_firrtl::glob_info.emod_to_param_map[mmap_lib::str(inst.module_id())]) {
     auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     if (isdigit(param.second[0])) {
       lnast.add_child(idx_dot_p, Lnast_node::create_const(param.second));
@@ -862,7 +862,7 @@ void Inou_firrtl_module::handle_bundle_vec_acc(Lnast& lnast, const firrtl::Firrt
     }
 
     auto module_name = inst_to_mod_map[inst_name];
-    auto dir         = mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
+    auto dir         = Inou_firrtl::glob_info.mod_to_io_dir_map[std::make_pair(module_name, str_without_inst)];
 
     if (is_hier_io) {
       if (dir == 1) {  // PORT_DIRECTION_IN
@@ -1854,7 +1854,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
   fmt::print("Module (user): {}\n", fmodule.user_module().id());
 #endif
 
-  Inou_firrtl_module firmod(glob_info);
+  Inou_firrtl_module firmod;
 
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(mmap_lib::str(fmodule.user_module().id()), file_name);
 
@@ -1878,8 +1878,9 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
 
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
-  std::lock_guard<std::mutex> guard(eprp_var_mutex);
-  var.add(std::move(lnast));
+  std::lock_guard<std::mutex> guard(eprp_var_mutex); {
+    var.add(std::move(lnast));
+  }
 }
 
 
@@ -2161,8 +2162,8 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, const mmap_lib::str& file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
-    glob_info.mod_to_io_dir_map.clear();
-    glob_info.emod_to_param_map.clear();
+    Inou_firrtl::glob_info.mod_to_io_dir_map.clear();
+    Inou_firrtl::glob_info.emod_to_param_map.clear();
 
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
     iterate_modules(var, circuit, file_name);

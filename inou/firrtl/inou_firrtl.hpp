@@ -26,11 +26,8 @@
 
 struct Global_module_info {
   absl::flat_hash_map<std::pair<mmap_lib::str, mmap_lib::str>, uint8_t> mod_to_io_dir_map;
-  // Map used by external modules to indicate parameters names + values.
   absl::flat_hash_map<mmap_lib::str, absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>>> emod_to_param_map;
 };
-
-
 
 
 class Inou_firrtl : public Pass {
@@ -38,6 +35,7 @@ public:
   static mmap_lib::str convert_bigint_to_str(const firrtl::FirrtlPB_BigInt &bigint);
   static void create_io_list(const firrtl::FirrtlPB_Type &type, uint8_t dir, const mmap_lib::str &port_id, std::vector<std::tuple<mmap_lib::str, uint8_t, uint32_t, bool>> &vec);
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, mmap_lib::str> op2firsub;
+  inline static Global_module_info glob_info;
   
 protected:
   inline static std::mutex eprp_var_mutex;
@@ -67,8 +65,6 @@ protected:
   void process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   void process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   firrtl::FirrtlPB_Statement_When *process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if);
-  // void                             process_ln_range_op(Lnast &ln, const Lnast_nid &lnidx_op);
-  // void                             process_ln_bitsel_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   bool process_ln_select(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
 
   void                                  handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
@@ -114,7 +110,6 @@ private:
   // // Map used by external modules to indicate parameters names + values.
   // absl::flat_hash_map<mmap_lib::str, absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>>> emod_to_param_map;
 
-  Global_module_info glob_info;
 
   //----------- FOR toFIRRTL ---------
   absl::flat_hash_map<mmap_lib::str, firrtl::FirrtlPB_Port *>      io_map;
@@ -148,12 +143,10 @@ public:
 class Inou_firrtl_module {
 friend Inou_firrtl;
 public:
-  Inou_firrtl_module(const Global_module_info &glob_info) {
+  Inou_firrtl_module() {
     dummy_expr_node_cnt = 0;
     tmp_var_cnt = 0;
     seq_cnt = 0;
-    mod_to_io_dir_map = glob_info.mod_to_io_dir_map;
-    emod_to_param_map = glob_info.emod_to_param_map;
   }
 
 protected:
@@ -239,11 +232,12 @@ protected:
 
 
 private:
-  // copied global tables
-  // Maps (module name + I/O name) pair to direction of that I/O in that module. 
-  absl::flat_hash_map<std::pair<mmap_lib::str, mmap_lib::str>, uint8_t> mod_to_io_dir_map;
-  // Map used by external modules to indicate parameters names + values.
-  absl::flat_hash_map<mmap_lib::str, absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>>> emod_to_param_map;
+  // FIXME: access from global table directly. It's read only so thread safe
+  // // copied global tables
+  // // Maps (module name + I/O name) pair to direction of that I/O in that module. 
+  // absl::flat_hash_map<std::pair<mmap_lib::str, mmap_lib::str>, uint8_t> mod_to_io_dir_map;
+  // // Map used by external modules to indicate parameters names + values.
+  // absl::flat_hash_map<mmap_lib::str, absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>>> emod_to_param_map;
 
   // module local tables
   absl::flat_hash_set<mmap_lib::str> input_names;
