@@ -15,6 +15,62 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 
 rules_foreign_cc_dependencies()
 
+
+# tcmalloc 
+http_archive(
+  name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
+  urls = [
+    "https://github.com/google/tcmalloc/archive/7e4c235ffe5313783b256f1c1add7932fd516b07.zip",
+  ],
+  strip_prefix = "tcmalloc-7e4c235ffe5313783b256f1c1add7932fd516b07",
+  sha256 = "269eeedfcca5f600d39c343154e1229a1a55b611ec475c1f791a83128bec1024",
+)
+
+
+# Python rules (required by tcmalloc)
+#
+# This is explicitly added to workaround
+# https://github.com/bazelbuild/rules_python/issues/437.
+http_archive(
+    name = "rules_python",
+    urls = ["https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz"],
+    sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
+)
+
+
+http_archive(
+    name = "rules_proto",
+    sha256 = "66bfdf8782796239d3875d37e7de19b1d94301e8972b3cbd2446b332429b4df1",
+    strip_prefix = "rules_proto-4.0.0",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0.tar.gz",
+    ],
+)
+
+load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+rules_proto_dependencies()
+rules_proto_toolchains()
+
+
+# Fuzzing (required by tcmalloc)
+http_archive(
+    name = "rules_fuzzing",
+    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
+    strip_prefix = "rules_fuzzing-0.1.1",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
+)
+
+# Protobuf
+load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
+
+rules_fuzzing_dependencies()
+
+load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
+
+rules_fuzzing_init()
+
+
 http_archive(
     name = "mustache",
     build_file = "mustache.BUILD",
@@ -25,20 +81,6 @@ http_archive(
     ],
 )
 
-http_archive(
-    name = "rules_proto",
-    sha256 = "d8992e6eeec276d49f1d4e63cfa05bbed6d4a26cfe6ca63c972827a0d141ea3b",
-    strip_prefix = "rules_proto-cfdc2fa31879c0aebe31ce7702b1a9c8a4be02d2",
-    urls = [
-        "https://github.com/bazelbuild/rules_proto/archive/cfdc2fa31879c0aebe31ce7702b1a9c8a4be02d2.tar.gz",
-    ],
-)
-
-load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
-
-rules_proto_dependencies()
-
-rules_proto_toolchains()
 
 
 http_archive(

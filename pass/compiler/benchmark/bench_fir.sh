@@ -16,7 +16,8 @@ FIRRTL_LEVEL='ch'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
-PATTERN_PATH=./livehd_regression/synthetic/generated
+# PATTERN_PATH=./livehd_regression/synthetic/generated
+PATTERN_PATH=./inou/firrtl/tests/proto
 FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 
 if [ "${PWD##/home/}" != "${PWD}" ]; then
@@ -53,7 +54,7 @@ pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 pts='Snxn100k Snxn200k Snxn300k Snxn400k Snxn500k Snxn600k Snxn700k Snxn800k Snxn900k Snxn1000k'
 # pts='Snxn1000k'
-pts='Snxn100k'
+pts='Snxn500k'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
