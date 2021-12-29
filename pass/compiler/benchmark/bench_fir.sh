@@ -107,7 +107,7 @@ fucntion() {
   # rm -f *.dot
   # rm -f *.v
   rm -f ./*.tcl
-  rm -f pp
+  # rm -f pp
   echo "finished!"
 }
 

@@ -32,6 +32,10 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
     auto files = var.get("files");
     for (const auto& f : files.split(',')) {
       fmt::print("FILE: {}\n", f);
+      // FIXME: even I make the PB object static, and it does get destructed after the 
+      // to_lnast() pass. The lbench still last untill the PB object really destroied, 
+      // is it a bug in lbench? 
+      // static firrtl::FirrtlPB firrtl_input;
       firrtl::FirrtlPB firrtl_input;
       std::fstream     input(f.to_s().c_str(), std::ios::in | std::ios::binary);
       if (!firrtl_input.ParseFromIstream(&input)) {
@@ -47,6 +51,8 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
   }
 
   // Optional:  Delete all global objects allocated by libprotobuf.
+  // FIXME: dispatch to a new thread to overlap with ln2lg
+  //        or defer to the end of lcompiler
   google::protobuf::ShutdownProtobufLibrary();
 }
 
@@ -83,12 +89,6 @@ mmap_lib::str Inou_firrtl_module::get_full_name(const mmap_lib::str &term, const
       return mmap_lib::str::concat("#", term);
     }
   } else {
-    // // We add _. in front of firrtl temporary names
-    // if (term.substr(0, 2) == "_T") {
-    //   return absl::StrCat("_.", term);
-    // if (term.substr(0, 4) == "_GEN") {
-    //   return absl::StrCat("_.", term);
-    // } else {
     return term;
   }
 }

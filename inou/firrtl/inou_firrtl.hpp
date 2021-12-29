@@ -151,7 +151,7 @@ public:
 
 protected:
   enum class Leaf_type { Const_num, Const_str, Ref };
-  //----------- FOR ToLnast ----------
+  //----------- for to_lnast ----------
   uint32_t dummy_expr_node_cnt;
   uint32_t tmp_var_cnt;
   uint32_t seq_cnt;
@@ -232,13 +232,6 @@ protected:
 
 
 private:
-  // FIXME: access from global table directly. It's read only so thread safe
-  // // copied global tables
-  // // Maps (module name + I/O name) pair to direction of that I/O in that module. 
-  // absl::flat_hash_map<std::pair<mmap_lib::str, mmap_lib::str>, uint8_t> mod_to_io_dir_map;
-  // // Map used by external modules to indicate parameters names + values.
-  // absl::flat_hash_map<mmap_lib::str, absl::flat_hash_set<std::pair<mmap_lib::str, mmap_lib::str>>> emod_to_param_map;
-
   // module local tables
   absl::flat_hash_set<mmap_lib::str> input_names;
   absl::flat_hash_set<mmap_lib::str> output_names;

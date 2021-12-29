@@ -53,6 +53,7 @@ void Pass_compiler::compile(Eprp_var &var) {
       setup_firmap_library(seed_lg);
     }
     firrtl_compilation(var, compiler);
+    // google::protobuf::ShutdownProtobufLibrary();
   } else {
     pyrope_compilation(var, compiler);
   }
