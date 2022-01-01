@@ -35,7 +35,7 @@ protected:
 
   constexpr Node_pin(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _idx, Port_ID _pid, bool _sink)
       : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
-    assert(_g);
+    I(_g);
     // Could be IDX=0 for invalid
   }
 
@@ -331,11 +331,11 @@ public:
   }
 
   constexpr bool is_sink() const {
-    assert(idx);
+    I(idx);
     return sink;
   }
   constexpr bool is_driver() const {
-    assert(idx);
+    I(idx);
     return !sink;
   }
 

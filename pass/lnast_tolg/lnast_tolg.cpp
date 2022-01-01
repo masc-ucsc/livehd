@@ -618,20 +618,22 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
 //          into a TA-chain for the future possible access.
 void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta) {
   mmap_lib::str no_pos_inp_hier_name;
-  mmap_lib::str full_inp_hier_name;
+  // mmap_lib::str full_inp_hier_name;
 
   Port_ID     io_pos = Port_invalid;
 
   for (const auto &child : lnast->children(lnidx_ta)) {
     if (child == lnast->get_first_child(lnidx_ta)) {
+      fmt::print("DEBUG-3 ta first child:{}\n", lnast->get_vname(child));
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
-      full_inp_hier_name = lnast->get_vname(c0_ta);
-      std::tie(io_pos, no_pos_inp_hier_name) = Lgtuple::convert_key_to_io(full_inp_hier_name);
+      // full_inp_hier_name = lnast->get_vname(c0_ta);
+      std::tie(io_pos, no_pos_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
 
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
       no_pos_inp_hier_name = mmap_lib::str::concat(no_pos_inp_hier_name, ".", lnast->get_vname(child));
+      // full_inp_hier_name = mmap_lib::str::concat(full_inp_hier_name, ".", lnast->get_vname(child));
 
     } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
@@ -659,22 +661,25 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       av_dpin.connect(av_spin);
       auto aset_dpin                = aset_node.setup_driver_pin();
       name2dpin[no_pos_inp_hier_name] = aset_dpin;
-      name2dpin[full_inp_hier_name] = aset_dpin;
+      // name2dpin[full_inp_hier_name] = aset_dpin;
+      fmt::print("DEBUG-4: no_pos_inp_hier_name :{}\n", no_pos_inp_hier_name);
 
-      create_inp_ta4dynamic_idx(lg, aset_dpin, full_inp_hier_name);
+      // create_inp_ta4runtime_idx(lg, aset_dpin, full_inp_hier_name);
+      create_inp_ta4runtime_idx(lg, aset_dpin, no_pos_inp_hier_name);
       break;  // no need to iterate to last child
     }
   }
 }
 
-void Lnast_tolg::create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
+void Lnast_tolg::create_inp_ta4runtime_idx(Lgraph *lg, const Node_pin &val_dpin, const mmap_lib::str &full_inp_hier_name) {
+  fmt::print("DEBUG-1: hello full_inp_hier_name:{}\n", full_inp_hier_name);
   auto pos          = full_inp_hier_name.rfind('.');
   if (pos == std::string::npos)
     return;
   auto last_subname = full_inp_hier_name.substr(pos + 1);
 
   // if the last subname is not a number(not a constant), means the tuple is not array-like, it's impossilbe
-  // future graph-inp will try to get the array-element from a dynamic index, so we don't need to construct the inp_ta
+  // future graph-inp will try to get the array-element from a dynamic-runtime index, so we don't need to construct the inp_ta
   // if (!std::isdigit(last_subname.at(0)))
   if (last_subname.substr(0,1).is_i())
     return;
@@ -706,6 +711,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
   // TupAdd is created
 
   if (is_hier_inp_bits_set(lnidx_ta)) {
+    fmt::print("DEBUG-2: process-hier_inp_bits_set\n");
     process_hier_inp_bits_set(lg, lnidx_ta);
     return;
   }
@@ -1714,6 +1720,7 @@ void Lnast_tolg::handle_inp_tg_runtime_idx(const mmap_lib::str &hier_name, Node 
   // (3) connect to the pre-constructed TA (constructed when hier-inputs bits are set)
   auto tn_spin = cur_tg.setup_sink_pin("parent");
   auto tn_dpin = name2dpin[hier_name];
+  fmt::print("DEBUG-0: hier_name:{}\n", hier_name);
   tn_dpin.connect_sink(tn_spin);
 
   return;

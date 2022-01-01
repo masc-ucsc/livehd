@@ -112,6 +112,9 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
+    # "Test1",     # FIXME: run-time index issue
+    # "VecSearch", # FIXME: run-time index issue
+    # "Mul"        # FIXME: run-time index issue
     "Test2",
     "VecShiftRegisterSimple",
     "VecShiftRegisterParam",
@@ -183,11 +186,6 @@ cc_library(
     "ClockGroupAggregator",
 
     # FIXME:
-
-    # issue1: runtime vector index
-    # "Test1",
-    # "VecSearch",
-    # "Mul",
 
     # issue2: memory
     # "Smem",

@@ -105,7 +105,7 @@ protected:
   static bool is_tup_get_target(const Node &tup_add, uint32_t tup_get_target);
   Node_pin    create_inp_tg(Lgraph *lg, const mmap_lib::str & input_field);
   void        create_out_ta(Lgraph *lg, const mmap_lib::str & key_name, Node_pin &val_dpin);
-  void        create_inp_ta4dynamic_idx(Lgraph *lg, const Node_pin &inp_dpin, const mmap_lib::str & full_inp_hier_name);
+  void        create_inp_ta4runtime_idx(Lgraph *lg, const Node_pin &inp_dpin, const mmap_lib::str & full_inp_hier_name);
   void        handle_inp_tg_runtime_idx(const mmap_lib::str & hier_name, Node &chain_head, Node &cur_node);
   void        create_ginp_as_runtime_idx(Lgraph *lg, const mmap_lib::str & hier_name, Node &chain_head, Node &cur_node);
 
