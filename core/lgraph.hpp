@@ -34,26 +34,26 @@ protected:
 
   Index_id get_root_idx(Index_id idx) const {
 
-    node_internal.ref_lock();
-    const auto *ref = node_internal.ref(idx);
+    //node_internal.ref_lock();
+    const auto *ref = &node_internal[idx];
     if (ref->is_root()) {
-      node_internal.ref_unlock();
+      //node_internal.ref_unlock();
       return idx;
     }
     auto ret = ref->get_nid();
-    node_internal.ref_unlock();
+    //node_internal.ref_unlock();
 
     return ret;
   }
 
   Index_id get_node_nid(Index_id idx) const {
-    node_internal.ref_lock();
+    //node_internal.ref_lock();
 
-    while (!node_internal.ref(idx)->is_master_root()) {
-      idx = node_internal.ref(idx)->get_nid();
+    while (!node_internal[idx].is_master_root()) {
+      idx = node_internal[idx].get_nid();
     }
 
-    node_internal.ref_unlock();
+    //node_internal.ref_unlock();
     return idx;
   }
 
@@ -129,11 +129,11 @@ protected:
         return 0;
       }
 
-      node_internal.ref_lock();
-      const auto *ref = node_internal.ref(nid);
+      //node_internal.ref_lock();
+      const auto *ref = &node_internal[nid];
       bool valid = ref->is_valid();
       auto mroot = valid?ref->is_master_root():false;
-      node_internal.ref_unlock();
+      //node_internal.ref_unlock();
 
       if (!valid) {
         continue;

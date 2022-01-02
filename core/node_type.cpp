@@ -27,11 +27,11 @@ void Lgraph_Node_Type::clear() {
 }
 
 void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
-  node_internal.ref_lock();
+  //node_internal.ref_lock();
 
-  I(node_internal.ref(nid)->is_master_root());
+  I(node_internal[nid].is_master_root());
 
-  auto type = node_internal.ref(nid)->get_type();
+  auto type = node_internal[nid].get_type();
   if (type == Ntype_op::Sub) {
     auto it = subid_map.find(Node::Compact_class(nid));
     I(it != subid_map.end());
@@ -45,14 +45,14 @@ void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
   }else if (type == Ntype_op::LUT)
     lut_map.erase(Node::Compact_class(nid));
 
-  node_internal.ref(nid)->set_type(op);
-  node_internal.ref_unlock();
+  node_internal[nid].set_type(op);
+  //node_internal.ref_unlock();
 }
 
 bool Lgraph_Node_Type::is_type_const(Index_id nid) const {
-  node_internal.ref_lock();
-  bool b = node_internal.ref(nid)->get_type() == Ntype_op::Const;
-  node_internal.ref_unlock();
+  //node_internal.ref_lock();
+  bool b = node_internal[nid].get_type() == Ntype_op::Const;
+  //node_internal.ref_unlock();
 
   return b;
 }
@@ -67,9 +67,9 @@ void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
     down_class_map.set(subgraphid, 1);
   }
 
-  node_internal.ref_lock();
-  node_internal.ref(nid)->set_type(Ntype_op::Sub);
-  node_internal.ref_unlock();
+  //node_internal.ref_lock();
+  node_internal[nid].set_type(Ntype_op::Sub);
+  //node_internal.ref_unlock();
 }
 
 Lg_type_id Lgraph_Node_Type::get_type_sub(Index_id nid) const {
@@ -121,9 +121,9 @@ Sub_node *Lgraph_Node_Type::ref_type_sub_node(const mmap_lib::str &sub_name) {
 }
 
 void Lgraph_Node_Type::set_type_lut(Index_id nid, const Lconst &lutid) {
-  node_internal.ref_lock();
-  node_internal.ref(nid)->set_type(Ntype_op::LUT);
-  node_internal.ref_unlock();
+  //node_internal.ref_lock();
+  node_internal[nid].set_type(Ntype_op::LUT);
+  //node_internal.ref_unlock();
 
   lut_map.set(Node::Compact_class(nid), lutid.serialize());
 }
@@ -142,11 +142,11 @@ Lconst Lgraph_Node_Type::get_type_const(Index_id nid) const {
 void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
   const_map.set(Node::Compact_class(nid), value.serialize());
 
-  node_internal.ref_lock();
-  auto *ptr = node_internal.ref(nid);
+  //node_internal.ref_lock();
+  auto *ptr = &node_internal[nid];
   ptr->set_type(Ntype_op::Const);
   ptr->set_bits(value.get_bits());
-  node_internal.ref_unlock();
+  //node_internal.ref_unlock();
 }
 
 void Lgraph_Node_Type::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }

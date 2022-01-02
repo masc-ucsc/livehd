@@ -94,20 +94,20 @@ void Lgraph::each_pin(const Node_pin &dpin, const std::function<bool(Index_id id
     if (!cont)
       return;
 
-    node_internal.ref_lock();
+    //node_internal.ref_lock();
     do {
-      if (node_internal.ref(idx2)->is_last_state()) {
-        node_internal.ref_unlock();
+      if (node_internal[idx2].is_last_state()) {
+        //node_internal.ref_unlock();
         return;
       } else {
-        idx2 = node_internal.ref(idx2)->get_next();
+        idx2 = node_internal[idx2].get_next();
       }
       if (idx2 == first_idx2) {
-        node_internal.ref_unlock();
+        //node_internal.ref_unlock();
         return;
       }
-    } while (node_internal.ref(idx2)->get_dst_pid() != dpin.get_pid());
-    node_internal.ref_unlock();
+    } while (node_internal[idx2].get_dst_pid() != dpin.get_pid());
+    //node_internal.ref_unlock();
   }
 }
 
