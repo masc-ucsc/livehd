@@ -635,7 +635,6 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       Node_pin flattened_inp;
       if (!lg->has_graph_input(full_inp_hier_name)) {
         flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, 0);
-        fmt::print("DEBUG-10: full_inp_hier_name:{}\n", full_inp_hier_name);
       } else {
         flattened_inp = name2dpin[full_inp_hier_name];
       }
