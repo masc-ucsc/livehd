@@ -65,94 +65,17 @@ void Pass_lec::work(Eprp_var &var) {
 void Pass_lec::check_lec(Lgraph *g) {
   fmt::print("\n---Test CHECK LEC \nLGraph name: {}\n", g->get_name());
 
-  /*Btor *btorInputs;     //creates boolector instance
-  BoolectorNode *x1, *bool_in_var; // *x2, *y1, *y2;
-  BoolectorSort s;
+  int i_num  = 0;   //counts inputs
 
-  boolector_set_opt(btorInputs, BTOR_OPT_MODEL_GEN, 2);     //allows model generation
-
-  btorInputs = boolector_new();
-
-  s = boolector_bitvec_sort(btorInputs, 1);
-
-  //x1 = boolector_var(btorInputs, s, NULL );
- // x2 = boolector_var(btorInputs, s, NULL );
-  //x3 = boolector_var(btorInputs, s, input_pin.get_name() );
- // y1 = boolector_var(btorInputs, s, NULL);
- // y2 = boolector_var(btorInputs, s, NULL );
- // y3 = boolector_var(btorInputs, s, input_pin.get_name() );*/
-
-   int i_num  = 0;   //counts inputs
-
-  // Store and match inputs
-  // finds dupliucates while looking at all inputs for given graph
   g->each_graph_input([&](const Node_pin &input_pin) {
     //(void)input_pin;
 
     i_num++;
 
-    //fmt::print("Hello");
     fmt::print("Lgraph input: {} {}\n", input_pin.get_name(), input_pin.get_pid() );
 
-    /*auto name = input_pin.get_name();
-
-    bool_in_var = boolector_var(btorInputs, s,std::string(name).c_str() );
-
-    graphInNames.insert(bool_in_var);*/
   });
 
-  /*
-  // Alternative way to find matches
-  std::map<std::string, int> countInpups;
-
-  std::set s(graphIOs.begin(), graphIOs.end());
-
-  int matchingInputs = graphIOs.size() - s.size();
-
-  if (matchingInputs > 0) {
-    fmt::print(" {} matches found!\n", matchingInputs);
-  } else {
-    fmt::print("no matching inputs found\n");
-  };
-  
-
-  // prints graphInputs (for now)
-  for (auto const &in : graphIOs) {
-    fmt::print("Input: {}, place: {}\n", in.first, in.second);
-  };
-  */
-
-  /*
-  Btor *btor;
-  BoolectorNode *x, *y, *bool_xor_node; // *c, *bool_and, *bool_nand;//  *not_a, *not_ab_or, *or_notab, *and_ab, *c;
-
-  BoolectorSort s;
-
-  btor = boolector_new();
-  s = boolector_bitvec_sort(btor, 8);
-  x = boolector_var(btor, s, NULL);
-  y = boolector_var(btor, s, NULL);
-  boolector_set_opt(btor,BTOR_OPT_AUTO_CLEANUP, 1);
-
-  */
-
-  /*not_a = boolector_not(btor, in_a);
-  or_notab = boolector_or(btor, not_a, in_b);
-  not_ab_or = boolector_not(btor, or_notab);
-
-  and_ab = boolector_and(btor, in_a, in_b);
-
-  bool_and = boolector_and(btor, in_a, in_b);
-  boolector_assert(btor, bool_and);
-
-  bool_nand = boolector_nand(btor, in_a, in_b);
-  boolector_assert(btor, bool_nand);
-
-
-  c = boolector_xor(btor, bool_and, bool_nand);
-  boolector_assert(btor, c);*/
-
-  // int result = boolector_sat(btor);
 
   // still need: Sum, Mult, Div, Ror, LT, GT, EQ, SHL, SRA, Mux
   Btor *btor;
@@ -174,10 +97,12 @@ void Pass_lec::check_lec(Lgraph *g) {
 
     if (node.get_type_op() == Ntype_op::And) {
        fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+       boolector_and(btor,x1,x2);
     }
     
     else if (node.get_type_op() == Ntype_op::Or) {
        fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+       boolector_or(btor,x1,x2);
     }
 
     else if (node.get_type_op() == Ntype_op::Xor) {
@@ -188,6 +113,7 @@ void Pass_lec::check_lec(Lgraph *g) {
 
     else if (node.get_type_op() == Ntype_op::Not) {
        fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
+       boolector_not(btor,x1);
     };
 
     //boolector_assert(btor, lg_temp_node);
@@ -216,36 +142,6 @@ void Pass_lec::check_lec(Lgraph *g) {
     abort();
   };*/
 
-
-/*
-  // print out map
-  for ( auto const& elements : graphMap1 ){
-    fmt::print("Node type: {}, place: {}\n", elements.first, elements.second);
-  };*/
-//}
-
-/*
-  BoolectorNode *in_a = boolector_var(btor, s, "x");
-  BoolectorNode *in_b = boolector_var(btor, s, "b");
-
-
-  c = boolector_xor(btor, bool_and, bool_nand);
-  boolector_assert(btor, c);
-*/
-
-/*
-  int result = boolector_sat(btor);
-
-  //fmt::print("Expect: unsat\n");
-  fmt::print("Boolector: {}\n",result == BOOLECTOR_SAT ? "sat" : (result == BOOLECTOR_UNSAT ? "unsat":"unknown"));
-
-  fmt::print("test");
-  
-if(result != BOOLECTOR_UNSAT)
-  {
-    abort();
-  };
-  */
 
   /*fmt::print("Boolector model:\n");
   std::string type = "btor";
