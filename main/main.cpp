@@ -396,12 +396,12 @@ int main(int argc, char** argv) {
 
   if (history) {
     history_file = std::string(env_home);
-    history_file.append("/.config/livehd/history.txt");
+    history_file.append("/.cache/livehd/history.txt");
 
     if (access(history_file.c_str(), F_OK) == -1) {
-      std::cout << "Setting history file to $HOME/.config/livehd/history.txt\n";
+      std::cout << "Setting history file to $HOME/.cache/livehd/history.txt\n";
       std::string livehd_path(env_home);
-      livehd_path.append("/.config");
+      livehd_path.append("/.cache");
       if (access(livehd_path.c_str(), F_OK) == -1) {
         int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
