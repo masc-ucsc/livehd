@@ -22,6 +22,8 @@ void Lgraph_Node_Type::clear() {
   subid_map.clear();
   down_class_map.clear();
   lut_map.clear();
+
+  Lgraph_Base::clear();  // last. Removes lock at the end
 }
 
 void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
