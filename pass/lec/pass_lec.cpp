@@ -111,6 +111,10 @@ void Pass_lec::check_lec(Lgraph *g) {
        //boolector_assert(btor, bool_xor_node);
     }
 
+    else if (node.get_type_op() == Ntype_op::EQ) {
+      boolector_eq(btor, x1, x2);
+    }
+
     else if (node.get_type_op() == Ntype_op::Not) {
        fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
        boolector_not(btor,x1);
