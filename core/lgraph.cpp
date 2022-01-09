@@ -103,6 +103,8 @@ void Lgraph::rename(const mmap_lib::str &path, const mmap_lib::str &orig, const 
 void Lgraph::clear() {
   Ann_support::clear(this);
 
+  Lgraph_Node_Type::clear(); // last. Removes lock at the end
+
   auto nid1 = create_node_int();
   auto nid2 = create_node_int();
 
@@ -114,7 +116,6 @@ void Lgraph::clear() {
 
   std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
 
-  Lgraph_Node_Type::clear(); // last. Removes lock at the end
 }
 
 void Lgraph::sync() {
