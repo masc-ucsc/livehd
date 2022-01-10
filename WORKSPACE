@@ -16,25 +16,33 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 rules_foreign_cc_dependencies()
 
 
-# tcmalloc 
-http_archive(
-  name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
-  urls = [
-    "https://github.com/google/tcmalloc/archive/7e4c235ffe5313783b256f1c1add7932fd516b07.zip",
-  ],
-  strip_prefix = "tcmalloc-7e4c235ffe5313783b256f1c1add7932fd516b07",
-  sha256 = "269eeedfcca5f600d39c343154e1229a1a55b611ec475c1f791a83128bec1024",
-)
+# # tcmalloc 
+# # enable when benchmarking
+#  http_archive(
+#    name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
+#    urls = [
+#      "https://github.com/google/tcmalloc/archive/7e4c235ffe5313783b256f1c1add7932fd516b07.zip",
+#    ],
+#    strip_prefix = "tcmalloc-7e4c235ffe5313783b256f1c1add7932fd516b07",
+#    sha256 = "269eeedfcca5f600d39c343154e1229a1a55b611ec475c1f791a83128bec1024",
+#  )
 
 
 # Python rules (required by tcmalloc)
-#
+
 # This is explicitly added to workaround
 # https://github.com/bazelbuild/rules_python/issues/437.
 http_archive(
     name = "rules_python",
     urls = ["https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz"],
     sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
+)
+# Fuzzing (required by tcmalloc)
+http_archive(
+    name = "rules_fuzzing",
+    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
+    strip_prefix = "rules_fuzzing-0.1.1",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
 )
 
 
@@ -53,13 +61,6 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 
-# Fuzzing (required by tcmalloc)
-http_archive(
-    name = "rules_fuzzing",
-    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
-    strip_prefix = "rules_fuzzing-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
-)
 
 # Protobuf
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")

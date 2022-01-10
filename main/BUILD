@@ -11,7 +11,7 @@ cc_binary(
     deps = [
         ":main",
     ],
-    malloc = "@com_google_tcmalloc//tcmalloc",
+    # malloc = "@com_google_tcmalloc//tcmalloc",
 )
 
 cc_library(
