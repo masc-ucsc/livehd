@@ -3,22 +3,33 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+config_setting(
+    name = "use_tcmalloc",
+    values = {"define": "tcmalloc=1"},
+)
+
 cc_binary(
     name = "lgshell",
     srcs = ["main.cpp"],
     copts = COPTS,
+    malloc = select({
+        ":use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
+        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":main",
     ],
-    # malloc = "@com_google_tcmalloc//tcmalloc",
 )
 
 cc_library(
     name = "main",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp", "main.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "main.cpp",
+        ],
     ) + glob([
         "*_api.hpp",
     ]),
