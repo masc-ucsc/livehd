@@ -15,28 +15,16 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 
 rules_foreign_cc_dependencies()
 
-
-# # tcmalloc 
-# # enable when benchmarking
-#  http_archive(
-#    name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
-#    urls = [
-#      "https://github.com/google/tcmalloc/archive/7e4c235ffe5313783b256f1c1add7932fd516b07.zip",
-#    ],
-#    strip_prefix = "tcmalloc-7e4c235ffe5313783b256f1c1add7932fd516b07",
-#    sha256 = "269eeedfcca5f600d39c343154e1229a1a55b611ec475c1f791a83128bec1024",
-#  )
-
-
-# Python rules (required by tcmalloc)
-
-# This is explicitly added to workaround
-# https://github.com/bazelbuild/rules_python/issues/437.
+# tcmalloc
 http_archive(
-    name = "rules_python",
-    urls = ["https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz"],
-    sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
+    name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
+    sha256 = "269eeedfcca5f600d39c343154e1229a1a55b611ec475c1f791a83128bec1024",
+    strip_prefix = "tcmalloc-7e4c235ffe5313783b256f1c1add7932fd516b07",
+    urls = [
+        "https://github.com/google/tcmalloc/archive/7e4c235ffe5313783b256f1c1add7932fd516b07.zip",
+    ],
 )
+
 # Fuzzing (required by tcmalloc)
 http_archive(
     name = "rules_fuzzing",
@@ -45,7 +33,15 @@ http_archive(
     urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
 )
 
+load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
 
+rules_fuzzing_dependencies()
+
+load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
+
+rules_fuzzing_init()
+
+# Protobuf
 http_archive(
     name = "rules_proto",
     sha256 = "66bfdf8782796239d3875d37e7de19b1d94301e8972b3cbd2446b332429b4df1",
@@ -57,20 +53,10 @@ http_archive(
 )
 
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+
 rules_proto_dependencies()
+
 rules_proto_toolchains()
-
-
-
-# Protobuf
-load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
-
-rules_fuzzing_dependencies()
-
-load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
-
-rules_fuzzing_init()
-
 
 http_archive(
     name = "mustache",
@@ -82,13 +68,11 @@ http_archive(
     ],
 )
 
-
-
 http_archive(
-  name = "com_google_benchmark",
-  sha256 = "ef0fab8058be682e382e155eeda1b22e1747fd6606e22e0c1b19f6da91e8b52d",
-  urls = ["https://github.com/google/benchmark/archive/69054ae50e07e9de7cb27f9e2d1d355f74605524.zip"],
-  strip_prefix = "benchmark-69054ae50e07e9de7cb27f9e2d1d355f74605524",
+    name = "com_google_benchmark",
+    sha256 = "ef0fab8058be682e382e155eeda1b22e1747fd6606e22e0c1b19f6da91e8b52d",
+    strip_prefix = "benchmark-69054ae50e07e9de7cb27f9e2d1d355f74605524",
+    urls = ["https://github.com/google/benchmark/archive/69054ae50e07e9de7cb27f9e2d1d355f74605524.zip"],
 )
 
 http_archive(
@@ -217,7 +201,6 @@ http_archive(
         "https://github.com/lsils/mockturtle/archive/refs/tags/v0.2.zip",
     ],
 )
-
 
 http_archive(
     name = "rules_hdl",
