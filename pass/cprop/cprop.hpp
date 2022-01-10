@@ -51,6 +51,7 @@ protected:
   void reconnect_tuple_sub(Node &node);
   void reconnect_tuple_add(Node &node);
   void reconnect_tuple_get(Node &node);
+  bool handle_runtime_index(Node &tg_node, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup); 
 
   Node_pin expand_data_and_attributes(Node &node, const mmap_lib::str &key_name, XEdge_iterator &pending_out_edges,
                                       const std::shared_ptr<Lgtuple const> &node_tup);
@@ -64,7 +65,7 @@ protected:
   // handle tuple issues but not allowed to "mutate"
   void tuple_subgraph(const Node &node);
   void tuple_tuple_add(const Node &node);
-  bool tuple_tuple_get(const Node &node);
+  bool tuple_tuple_get(Node &node);
   void tuple_attr_set(const Node &node);
 
   bool scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered);

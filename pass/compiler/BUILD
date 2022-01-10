@@ -112,7 +112,7 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    # "Test1",     # FIXME: run-time index issue
+    "Test1",     
     # "VecSearch", # FIXME: run-time index issue
     # "Mul"        # FIXME: run-time index issue
     "Test2",

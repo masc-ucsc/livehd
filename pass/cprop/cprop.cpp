@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "cprop.hpp"
 
 #include <cctype>
 #include <deque>
@@ -12,6 +11,7 @@
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "pass_cprop.hpp"
+#include "cprop.hpp"
 
 #define TRACE(x)
 //#define TRACE(x) x
@@ -258,7 +258,9 @@ void Cprop::replace_part_inputs_const(Node &node, XEdge_iterator &inp_edges_orde
     }
 
     if (a_pin.is_invalid()) {
+#ifndef NDEBUG
       Pass::info("WARNING: mux selector:{} for a disconnected pin in mux. Using zero\n", sel);
+#endif
       a_pin = node.create_const(0).get_driver_pin();
     }
 
@@ -470,7 +472,9 @@ void Cprop::replace_all_inputs_const(Node &node, XEdge_iterator &inp_edges_order
 
     if (result.get_bits() == 0) {
       result = Lconst(0);
+#ifndef NDEBUG
       Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", node.debug_name(), sel);
+#endif
     }
 
     replace_node(node, result);
@@ -558,7 +562,9 @@ void Cprop::try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, 
         sub_spin.connect_driver(dpin);
       }
     } else {
+#ifndef NDEBUG
       Pass::info("could not find IO {} in graph {}", it.first->name, sub.get_name());
+#endif
       // tuple_issues = true; // The tup may be fine, maybe it is just the sub which has issues (unclear)
     }
   }
@@ -665,10 +671,12 @@ void Cprop::tuple_mux_mut(Node &node) {
     if (tup) {
       auto n = tup->get_scalar_name();
       if (!n.empty() && !scalar_field.empty() && n != scalar_field) {
+#ifndef NDEBUG
         Pass::info("mux:{} has inputs with different scalar fields {} vs {} (must be dead code eliminated)",
                    node.debug_name(),
                    n,
                    scalar_field);
+#endif 
         return;
       }
       if (!n.empty())
@@ -704,7 +712,9 @@ void Cprop::tuple_mux_mut(Node &node) {
     return;
 
   if (pending_iterations) {
+#ifndef NDEBUG
     Pass::info("mux:{} has pending iterations to get all inputs as tuple", node.debug_name());
+#endif
     if (tup) {
       tup->dump();
     }
@@ -734,7 +744,9 @@ void Cprop::tuple_flop_mut(Node &node) {
 
   auto din_spin = node.get_sink_pin("din");
   if (!din_spin.is_connected()) {
+#ifndef NDEBUG
     Pass::info("flop:{} has no driving din (legal but strange)", node.debug_name());
+#endif
     return;
   }
 
@@ -759,7 +771,9 @@ void Cprop::tuple_flop_mut(Node &node) {
 
   auto [flop_tup, pending_iterations] = din_tup->get_flop_tup(node);
   if (!tuple_issues && pending_iterations) {
+#ifndef NDEBUG
     Pass::info("flop:{} has pending iterations to get all inputs as tuple", node.debug_name());
+#endif
     if (flop_tup) {
       flop_tup->dump();
     }
@@ -992,7 +1006,9 @@ void Cprop::tuple_subgraph(const Node &node) {
             }
           }
           if (n_ports == 0 || n_rd_ports <= 0 || !node_tup->is_correct()) {
+#ifndef NDEBUG
             Pass::info("Memory {} still can not figure out ports. (Maybe more iterations)", node.debug_name());
+#endif
             node_tup->set_issue();
           } else {
             fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
@@ -1126,20 +1142,24 @@ void Cprop::tuple_tuple_add(const Node &node) {
           if (v_dpin.is_invalid()) {
             node_tup->set_issue();
             tuple_issues = true;
+#ifndef NDEBUG
             Pass::info("node:{} field:{} can not find a non attribute field a on tuple:{}",
                        node.debug_name(),
                        key_name,
                        value_tup->get_name());
+#endif
           }
           node_tup->add(key_name, v_dpin);
         } else {
           if (Lgtuple::is_attribute(key_name)) {
             node_tup->set_issue();
             tuple_issues = true;
+#ifndef NDEBUG
             Pass::info("node:{} attribute:{} can not have a complex sub tuple:{}",
                        node.debug_name(),
                        key_name,
                        value_tup->get_name());
+#endif
           } else {
             node_tup->add(key_name, value_tup);
           }
@@ -1195,7 +1215,61 @@ void Cprop::tuple_tuple_add(const Node &node) {
   node2tuple[node.get_compact()] = node_tup;
 }
 
-bool Cprop::tuple_tuple_get(const Node &node) {
+bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup) {
+  auto [field_tup_name, field_key_name] = get_tuple_name_key(field_node);
+  bool is_bitset = false;
+  Node value_node;
+  if (Lgtuple::is_attribute(field_key_name)) {
+    auto attr_txt = Lgtuple::get_last_level(field_key_name);
+    if (attr_txt == "__sbits" || attr_txt == "__ubits") 
+      is_bitset = true;
+  }
+
+  if (is_bitset) {
+    value_node  = field_node.get_sink_pin("value").get_driver_node();
+    auto bits = value_node.get_type_const().to_i();
+
+    // delete TG and create Nto1-Mux 
+    auto mux_node = ori_tg.create(Ntype_op::Mux);
+
+    // connect mux select pin
+    auto sel_dpin = field_node.setup_driver_pin();
+    mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
+
+    // connect mux outputs
+    auto out_edges_list = ori_tg.out_edges();
+    auto mux_dpin = mux_node.setup_driver_pin();
+    for (auto e : out_edges_list) {
+      mux_dpin.connect(e.sink);
+    }
+    // connect mux inputs, #inputs = 2^bits
+    auto new_tg_parent_dpin = ori_tg.setup_sink_pin("parent").get_driver_pin();
+    for (int i = 0; i < 1 << bits; i++) {
+      // 1. create new tuple_get to fetch the value from the tuple_add 
+      //    and then connect the tg output to the corresponding mux input port
+        auto new_tg = ori_tg.create(Ntype_op::TupGet);
+        auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(i+1));
+        new_tg.setup_driver_pin().connect_sink(mux_spin);
+
+        auto new_tg_field_spin = new_tg.setup_sink_pin("field");
+        auto new_tg_field_dpin = ori_tg.create_const(i);
+        new_tg_field_spin.connect_driver(new_tg_field_dpin);
+        
+        auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
+        new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
+
+      // 2. fetch sub_tuple for the new TGs
+        auto sub_tuple = parent_tup->get_sub_tuple(mmap_lib::str(i));
+        node2tuple[new_tg.get_compact()] = sub_tuple;
+    }
+
+    ori_tg.del_node();
+  }
+
+  return true;
+}
+
+bool Cprop::tuple_tuple_get(Node &node) {
   auto parent_dpin          = node.get_sink_pin("parent").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
   auto [tup_name, key_name] = get_tuple_name_key(node);
@@ -1222,12 +1296,15 @@ bool Cprop::tuple_tuple_get(const Node &node) {
           node2tuple[node.get_compact()] = sub_tup;
           return true;
         }
+        // if sub_tup == nullptr -> a runtime index case!
         fieldtup_it->second->dump();
         node.dump();
-        Pass::info("FIXME: need to handle runtime tuple index node:{}\n", node.debug_name());
-        fieldtup_it->second->set_issue();
-        tuple_issues = true;
-        return false;
+
+
+#ifndef NDEBUG
+        Pass::info("handle runtime index node:{}\n", node.debug_name());
+#endif
+        return handle_runtime_index(node, field_node, node_tup);
       }
     }
     if (!tuple_issues) {
@@ -1250,7 +1327,9 @@ bool Cprop::tuple_tuple_get(const Node &node) {
       // No node2tuple. This node will be converted to AttrGet
       return true;
     }
+#ifndef NDEBUG    
     Pass::info("tuple_get {} for key:{} has no defined tuple (may be OK)", node.debug_name(), key_name);
+#endif
     return false;
   }
 
@@ -1278,14 +1357,18 @@ bool Cprop::tuple_tuple_get(const Node &node) {
       }
     }
     node_tup->dump();
+#ifndef NDEBUG
     Pass::info("tuple_get {} for key:{} field is not present (may be OK after iterations)", node.debug_name(), main_field);
+#endif
     tuple_issues = true;
     return false;
   }
 
   if (sub_tup->has_just_attributes() && !is_attr_get) {
     node_tup->dump();
+#ifndef NDEBUG
     Pass::info("tuple_get {} for key:{} just has attributes (may be OK)", node.debug_name(), main_field);
+#endif
     node2tuple[node.get_compact()] = sub_tup;
     return true;
   }
@@ -1296,6 +1379,7 @@ bool Cprop::tuple_tuple_get(const Node &node) {
 
   return true;
 }
+
 
 void Cprop::tuple_attr_set(const Node &node) {
   if (hier)  // hier still not supported
@@ -1706,6 +1790,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
+// FIXME: n20 TA should be handle here, maybe
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");
@@ -1761,7 +1846,9 @@ void Cprop::reconnect_tuple_add(Node &node) {
     } else if (node_tup->is_trivial_scalar()) {
       expand_data_and_attributes(node, "", pending_out_edges, node_tup);
     } else {
+#ifndef NDEBUG
       Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
+#endif
     }
   }
 }
@@ -1797,7 +1884,12 @@ void Cprop::reconnect_tuple_get(Node &node) {
   if (it->second->is_trivial_scalar()) {
     auto out_edges_list = node.out_edges();
     if (!out_edges_list.empty())
+      // FIXME: n20 TA should be handle here, maybe
       expand_data_and_attributes(node, "", out_edges_list, it->second);
+  } else {
+  // I(input should not be constant)
+  // replace the TGs with mux to handle the runtime index
+
   }
 }
 
@@ -2040,8 +2132,11 @@ void Cprop::tuple_pass(Lgraph *lg) {
       } else if (op == Ntype_op::TupGet) {
         auto ok = tuple_tuple_get(node);
         if (!ok) {
-          if (!tuple_issues)
+          if (!tuple_issues){
+#ifndef NDEBUG
             Pass::info("cprop could not simplify node:{}", node.debug_name());
+#endif
+          }
           tuple_issues = true;
         }
       } else if (op == Ntype_op::AttrSet) {
@@ -2171,7 +2266,9 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
 
     if (unlikely(it.first.empty() || out_name.empty())) {
       local_error = true;
+#ifndef NDEBUG
       Pass::info("Tuple {} for graph {} without named field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
+#endif
       continue;
     }
     if (lg->has_graph_output(out_name))
