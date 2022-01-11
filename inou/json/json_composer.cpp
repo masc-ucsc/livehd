@@ -1,5 +1,5 @@
 /*
-Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+  Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 */
 #include "json_composer.hpp"
 
@@ -15,10 +15,12 @@ void JsonComposer::Write(const JsonElement* property) const {
   if (property == NULL || property->type == etEndOfList)
     return;
 
+  indent += {'\t'};
   while (true) {
-    auto val = &property->value;
+    auto last_written_key = property->key;
     if (property->key)
-      target << '"' << property->key << "\":\t";
+      target << indent <<'"' << property->key << "\":\t";
+    auto val = &property->value;
     switch (property->type) {
       case etEndOfList: break;
       case etInt: target << val->i; break;
@@ -27,14 +29,14 @@ void JsonComposer::Write(const JsonElement* property) const {
       case etFloat: target << val->f; break;
       case etString: target << '"' << val->str << '"'; break;
       case etObject:
-        target << "{";
+        target << "{" << endl;
         WriteObject(property);
-        target << "}";
+        target << endl << indent << "}";
         break;
       case etNested:
-        target << "{";
+        target << "{" << endl;
         Write(val->nested);
-        target << "}";
+        target << endl << indent << "}";
         break;
       case etArray:
         target << "[";
@@ -43,10 +45,14 @@ void JsonComposer::Write(const JsonElement* property) const {
         break;
     }
     property++;
+    current_key = last_written_key;
     if (property->type == etEndOfList)
       break;
-    target << ",\n";
+    WriteDelimiter(); // writes ",\n"
   }
+
+  if (indent.size() > 0)
+    indent = indent.substr(0, indent.size()-1); // before leaving reduce indentation one level
 }
 
 }  // namespace jsn

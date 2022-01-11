@@ -120,7 +120,7 @@ void Module::ToJson(const JsonComposer* jcm) const {
     unique_nets[itr->second] = itr->first;
   }
 
-  auto writeNetNames = RangeWriter{
+  auto writeNetNames = BatchWriter{
       &unique_nets,
       [](NetMapItemT const* nam_wire, JsonElement* model, const JsonComposer* json) {
         JsonElement nested_net[] = {{"hide_name", "1"}, {"bits", (nam_wire->first) ? nam_wire->first->get_bits() : 0}, {}};

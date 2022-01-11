@@ -1,6 +1,7 @@
 /*
-Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
+  Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 */
+
 #ifndef JSON_COMPOSER_H
 #define JSON_COMPOSER_H
 
@@ -22,60 +23,44 @@ struct Object {
 };
 
 template <typename T>
-struct Range {
-  using IterType = typename T::const_iterator;
-  using ItemType = typename std::iterator_traits<IterType>::value_type;
-  void         WriteEach(IterType start, IterType end, const JsonComposer* jcm) const;
-  virtual void WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const = 0;
-};
-
-template <class T, typename Tlambda>
-struct RangeWriter : public Object, Range<T> {
+struct Batch : public Object
+{
   using IterT = typename T::const_iterator;
-  using ItemT = typename std::iterator_traits<IterT>::value_type;
+  using ItemType = typename std::iterator_traits<IterT>::value_type;
 
-  IterT start;
-  IterT end;
-  void (*write_item_callback)(const ItemT*, JsonElement*, const JsonComposer*);
+  const T* data;
+  Batch(const T* d) {data = d;}
+  void ToJson(const JsonComposer* jcm) const { if (data) this->WriteEach(data->cbegin(), data->cend(), jcm); }
 
-  RangeWriter(T* src, Tlambda item_writer) {
-    start               = src->cbegin();
-    end                 = src->cend();
-    write_item_callback = item_writer;
-  }
-  void ToJson(const JsonComposer* jcm) const { this->WriteEach(start, end, jcm); }
-  void WriteItem(const ItemT* item, JsonElement* model, const JsonComposer* jcm) const { write_item_callback(item, model, jcm); }
-};
-
-template <typename T>
-struct Batch : public Object, Range<vector<T> > {
-  const vector<T>* data;
-  Batch(const vector<T>* d) { data = d; }
-  void ToJson(const JsonComposer* jcm) const {
-    if (data)
-      this->WriteEach(data->cbegin(), data->cend(), jcm);
-  }
+  void WriteEach(IterT start, IterT end, const JsonComposer* jcm) const;
+  virtual void WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const = 0;
 };
 
 template <class T>
 struct Array : public Batch<T> {
-  Array(const vector<T>* d) : Batch<T>(d) {}
-  void WriteItem(const T* item, JsonElement* model, const JsonComposer* jcm) const;
+  using ItemType = typename std::iterator_traits<typename T::const_iterator>::value_type;
+  
+  Array(const T* d): Batch<T>(d) {}
+  void WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const;
 };
 
 template <class T>
 struct VectorAsObject : public Batch<T> {
-  VectorAsObject(const vector<T>* d) : Batch<T>(d) {}
-  void WriteItem(const T* item, JsonElement* model, const JsonComposer* jcm) const;
+  using ItemType = typename std::iterator_traits<typename T::const_iterator>::value_type;
+  
+  VectorAsObject(const T* d): Batch<T>(d) {}
+  void WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const;
 };
 
 template <class T, typename Tlambda>
 struct BatchWriter : public Batch<T> {
-  using WriterCallback = void (*)(const T*, JsonElement*, const JsonComposer*);
+  using ItemT = typename std::iterator_traits<typename T::const_iterator>::value_type;
+  using WriterCallback = void (*)(ItemT const*, JsonElement*, const JsonComposer*);
+
   WriterCallback write_item_callback;
 
-  BatchWriter(const vector<T>* src, Tlambda item_writer) : Batch<T>(src) { write_item_callback = item_writer; }
-  void WriteItem(const T* item, JsonElement* model, const JsonComposer* jcm) const { write_item_callback(item, model, jcm); };
+  BatchWriter(const T* src, Tlambda item_writer) : Batch<T>(src) { write_item_callback = item_writer; }
+  void WriteItem(ItemT const* item, JsonElement* model, const JsonComposer* jcm) const { write_item_callback(item, model, jcm); }
 };
 
 enum ElementType {
@@ -101,7 +86,7 @@ struct JsonElement {
     const char*        str;
     const Object*      obj;
     const JsonElement* nested;
-    char               _embedded_batch[sizeof(Array<int>)];
+    char               _embedded_batch[sizeof(Array<vector<int>>)];
   } value;
 
   JsonElement() { type = etEndOfList; }
@@ -194,13 +179,14 @@ struct JsonElement {
   template <class T>
   JsonElement& operator=(const vector<T>* vec) {
     type = etArray;
-    memcpy((void*)&value, vec->data(), sizeof(int) * vec->size());
+    auto to_embed = Array {vec}; // create a jsn::Object wrapper for vector<T>
+    memcpy((void*)&value, &to_embed, sizeof(to_embed)); // embed the wrapper
     return *this;
   }
   template <class T>
   JsonElement& operator=(const VectorAsObject<T>& vaobj) {
     type = etObject;
-    memcpy((void*)&value, vaobj.data->data(), sizeof(vaobj));
+    memcpy((void*)&value, &vaobj, sizeof(vaobj));
     return *this;
   }
   void SetObjectPtr(const Object* obj) {
@@ -212,22 +198,25 @@ struct JsonElement {
 
 class JsonComposer {
   ostream& target;
+  mutable std::string indent;
+  mutable const char* current_key;
 
   template <class T>
-  friend struct Range;
+  friend struct Batch;  
   void WriteObject(const JsonElement* prop) const {
     auto obj = prop->ActiveObject();
     if (obj)
       obj->ToJson(this);
   }
+  void WriteDelimiter() const {target << (current_key? ",\n" : ", ");}
 
 public:
-  JsonComposer(ostream& target_medium) : target(target_medium) {}
+  JsonComposer(ostream& target_medium) : target(target_medium) { indent = ""; current_key = nullptr; }
   void Write(const JsonElement* el_list) const;
 };
 
 template <class T>
-void jsn::Range<T>::WriteEach(IterType start, IterType end, const JsonComposer* jcm) const {
+void jsn::Batch<T>::WriteEach(IterT start, IterT end, const JsonComposer* jcm) const {
   if (start == end)
     return;
   JsonElement model[] = {{}, {}};
@@ -236,19 +225,19 @@ void jsn::Range<T>::WriteEach(IterType start, IterType end, const JsonComposer* 
     if (++itr == end)
       break;
     else
-      jcm->target << ", ";
+      jcm->WriteDelimiter();
   }
 }
 
 template <class T>
-void jsn::Array<T>::WriteItem(const T* item, JsonElement* model, const JsonComposer* jcm) const {
+void jsn::Array<T>::WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const {
   model[0]     = *item;
   model[0].key = nullptr;
   jcm->Write(model);
 }
 
 template <class T>
-void jsn::VectorAsObject<T>::WriteItem(const T* item, JsonElement* model, const JsonComposer* jcm) const {
+void jsn::VectorAsObject<T>::WriteItem(const ItemType* item, JsonElement* model, const JsonComposer* jcm) const {
   model[0][*item] = *item;
   jcm->Write(model);
 }
