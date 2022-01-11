@@ -113,7 +113,7 @@ cc_library(
     ],
 ) for t in [
     "Test1",     
-    # "VecSearch", # FIXME: run-time index issue
+    "VecSearch", 
     # "Mul"        # FIXME: run-time index issue
     "Test2",
     "VecShiftRegisterSimple",

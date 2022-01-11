@@ -705,6 +705,8 @@ void Cprop::tuple_mux_mut(Node &node) {
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
   if (tup) {
+    fmt::print("DEBUG-3\n");
+    tup->dump();
     node2tuple[node.get_compact()] = tup;
   }
 
@@ -1097,12 +1099,18 @@ void Cprop::tuple_tuple_add(const Node &node) {
   std::shared_ptr<Lgtuple> node_tup;
 
   if (has_key) {
+    if (node.get_nid() == 15) {
+      fmt::print("DEBUG-10\n");
+    }
     // When key is provided it is mostly variations of tuple add
 
     auto v = (has_parent_tup ? 0x4 : 0) + (has_parent_scalar ? 0x2 : 0) + (has_value_scalar ? 0x1 : 0);
 
     switch (v) {
       case 0x0: {
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-9\n");
+        }
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1114,11 +1122,18 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup = std::make_shared<Lgtuple>(tup_name);
         node_tup->add(key_name, value_tup);
       } break;
-      case 0x1: {
+      case 0x1: { // has_value_scalar
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-8 tup_name:{}, key_name:{}, value_dpin:{}\n", tup_name, key_name, value_dpin.debug_name());
+
+        }
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x2: {
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-7\n");
+        }
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1131,11 +1146,17 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x3: {
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-6\n");
+        }
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, "0", parent_dpin);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x4: {
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-5\n");
+        }
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         if (Lgtuple::is_attribute(key_name) && value_tup->is_scalar()) {
           auto v_dpin = value_tup->get_dpin();
@@ -1166,6 +1187,9 @@ void Cprop::tuple_tuple_add(const Node &node) {
         }
       } break;
       case 0x5: {
+        if (node.get_nid() == 15) {
+          fmt::print("DEBUG-4\n");
+        }
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
@@ -1216,57 +1240,49 @@ void Cprop::tuple_tuple_add(const Node &node) {
 }
 
 bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup) {
-  auto [field_tup_name, field_key_name] = get_tuple_name_key(field_node);
-  bool is_bitset = false;
-  Node value_node;
-  if (Lgtuple::is_attribute(field_key_name)) {
-    auto attr_txt = Lgtuple::get_last_level(field_key_name);
-    if (attr_txt == "__sbits" || attr_txt == "__ubits") 
-      is_bitset = true;
+  auto mux_node = ori_tg.create(Ntype_op::Mux);
+
+  // connect mux select pin
+  auto sel_dpin = field_node.setup_driver_pin();
+  mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
+
+  // connect mux outputs
+  auto out_edges_list = ori_tg.out_edges();
+  auto mux_dpin = mux_node.setup_driver_pin();
+  for (auto e : out_edges_list) {
+    mux_dpin.connect(e.sink);
   }
 
-  if (is_bitset) {
-    value_node  = field_node.get_sink_pin("value").get_driver_node();
-    auto bits = value_node.get_type_const().to_i();
+  auto new_tg_parent_dpin = ori_tg.setup_sink_pin("parent").get_driver_pin();
 
-    // delete TG and create Nto1-Mux 
-    auto mux_node = ori_tg.create(Ntype_op::Mux);
+  for (const auto &e : parent_tup->get_sort_map()) {
+    if (Lgtuple::is_attribute(e.first)) {
+      continue;
+    } 
 
-    // connect mux select pin
-    auto sel_dpin = field_node.setup_driver_pin();
-    mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
+    // 1. create new tuple_gets to fetch the value from the tuple_add 
+    //    and then connect the tg output to the corresponding mux input port
+    auto new_tg = ori_tg.create(Ntype_op::TupGet);
+    auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(e.first.to_i()+1));
+    new_tg.setup_driver_pin().connect_sink(mux_spin);
 
-    // connect mux outputs
-    auto out_edges_list = ori_tg.out_edges();
-    auto mux_dpin = mux_node.setup_driver_pin();
-    for (auto e : out_edges_list) {
-      mux_dpin.connect(e.sink);
-    }
-    // connect mux inputs, #inputs = 2^bits
-    auto new_tg_parent_dpin = ori_tg.setup_sink_pin("parent").get_driver_pin();
-    for (int i = 0; i < 1 << bits; i++) {
-      // 1. create new tuple_get to fetch the value from the tuple_add 
-      //    and then connect the tg output to the corresponding mux input port
-        auto new_tg = ori_tg.create(Ntype_op::TupGet);
-        auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(i+1));
-        new_tg.setup_driver_pin().connect_sink(mux_spin);
+    auto new_tg_field_spin = new_tg.setup_sink_pin("field");
+    auto new_tg_field_dpin = ori_tg.create_const(e.first.to_i());
+    new_tg_field_spin.connect_driver(new_tg_field_dpin);
+    
+    auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
+    new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
 
-        auto new_tg_field_spin = new_tg.setup_sink_pin("field");
-        auto new_tg_field_dpin = ori_tg.create_const(i);
-        new_tg_field_spin.connect_driver(new_tg_field_dpin);
-        
-        auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
-        new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
-
-      // 2. fetch sub_tuple for the new TGs
-        auto sub_tuple = parent_tup->get_sub_tuple(mmap_lib::str(i));
-        node2tuple[new_tg.get_compact()] = sub_tuple;
-    }
-
-    ori_tg.del_node();
+    // 2. fetch sub_tuple for the new TGs
+    auto sub_tuple = parent_tup->get_sub_tuple(mmap_lib::str(e.first));
+    node2tuple[new_tg.get_compact()] = sub_tuple;
   }
 
-  return true;
+  // node2tuple[mux_node.get_compact()] = parent_tup;
+  tuple_mux_mut(mux_node);
+  ori_tg.del_node();
+return true;
+
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
@@ -1297,8 +1313,8 @@ bool Cprop::tuple_tuple_get(Node &node) {
           return true;
         }
         // if sub_tup == nullptr -> a runtime index case!
-        fieldtup_it->second->dump();
-        node.dump();
+        // fieldtup_it->second->dump();
+        // node.dump();
 
 
 #ifndef NDEBUG
@@ -1824,6 +1840,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
   for (auto &e : node.out_edges()) {
     auto sink_type = e.sink.get_type_op();
     if (e.sink.is_graph_output() && e.sink.get_pin_name() == "%") {
+      node_tup->dump();
       try_create_graph_output(node, node_tup);  // first add outputs
     } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
       auto sub_node = e.sink.get_node();
@@ -2251,13 +2268,18 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
   bool  local_error = false;
   bool  tup_scalar  = tup->is_scalar();  // It could have just attributes
   for (const auto &it : tup->get_map()) {
+    mmap_lib::str out_name{it.first};
+    if (Lgtuple::is_attribute(out_name)) {
+      I(Lgtuple::get_last_level(out_name) != "__dp_assign");  // __dp_assign should not create a tuple
+      continue;
+    }
+
     if (unlikely(it.second.is_invalid())) {
       local_error = true;
       Pass::error("graph {} has output but it has invalid field {}", lg->get_name(), it.first);
       continue;
     }
 
-    mmap_lib::str out_name{it.first};
     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
       out_name = out_name.substr(2);
     }
@@ -2274,10 +2296,6 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
     if (lg->has_graph_output(out_name))
       continue;
 
-    if (Lgtuple::is_attribute(out_name)) {
-      I(Lgtuple::get_last_level(out_name) != "__dp_assign");  // __dp_assign should not create a tuple
-      continue;
-    }
 
 		auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
     auto flattened_gout = lg->add_graph_output(no_pos_name, io_pos, 0);
