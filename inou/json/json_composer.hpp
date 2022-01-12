@@ -180,13 +180,15 @@ struct JsonElement {
   JsonElement& operator=(const vector<T>* vec) {
     type = etArray;
     auto to_embed = Array {vec}; // create a jsn::Object wrapper for vector<T>
-    memcpy((void*)&value, &to_embed, sizeof(to_embed)); // embed the wrapper
+    void *array_ptr = (void*)&to_embed;
+    memcpy((void*)&value, array_ptr, sizeof(to_embed)); // embed the wrapper
     return *this;
   }
   template <class T>
   JsonElement& operator=(const VectorAsObject<T>& vaobj) {
     type = etObject;
-    memcpy((void*)&value, &vaobj, sizeof(vaobj));
+    void *vec_ptr = (void*)&vaobj;
+    memcpy((void*)&value, &vec_ptr, sizeof(vaobj));
     return *this;
   }
   void SetObjectPtr(const Object* obj) {
