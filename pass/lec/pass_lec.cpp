@@ -77,7 +77,7 @@ void Pass_lec::check_lec(Lgraph *g) {
   });
 
 
-  // still need: Sum, Mult, Div, Ror, LT, GT, EQ, SHL, SRA, Mux
+  // still need: Sum, Div, LT, GT,  SHL,  Mux
   Btor *btor;
   BoolectorNode *x1, *x2, *inZero1,  *eq1, *eq2,  *formula;
   //BoolectorNode *inOne;
@@ -118,7 +118,24 @@ void Pass_lec::check_lec(Lgraph *g) {
     else if (node.get_type_op() == Ntype_op::Not) {
        fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
        boolector_not(btor,x1);
+    }
+
+    else if (node.get_type_op() == Ntype_op::Ror) {
+      boolector_ror(btor, x1, x2);
+    }
+
+    else if (node.get_type_op() == Ntype_op::Mult) {
+      boolector_mul(btor, x1, x2);
+    }
+
+    else if (node.get_type_op() == Ntype_op::SRA) {
+      boolector_sra(btor, x1, x2);
+    }
+
+    else if (node.get_type_op() == Ntype_op::Sum) {
+      boolector_add(btor, x1, x2);
     };
+
 
     //boolector_assert(btor, lg_temp_node);
 
