@@ -705,8 +705,6 @@ void Cprop::tuple_mux_mut(Node &node) {
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
   if (tup) {
-    fmt::print("DEBUG-3\n");
-    tup->dump();
     node2tuple[node.get_compact()] = tup;
   }
 
@@ -1099,18 +1097,11 @@ void Cprop::tuple_tuple_add(const Node &node) {
   std::shared_ptr<Lgtuple> node_tup;
 
   if (has_key) {
-    if (node.get_nid() == 15) {
-      fmt::print("DEBUG-10\n");
-    }
     // When key is provided it is mostly variations of tuple add
-
     auto v = (has_parent_tup ? 0x4 : 0) + (has_parent_scalar ? 0x2 : 0) + (has_value_scalar ? 0x1 : 0);
 
     switch (v) {
       case 0x0: {
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-9\n");
-        }
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1123,17 +1114,10 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x1: { // has_value_scalar
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-8 tup_name:{}, key_name:{}, value_dpin:{}\n", tup_name, key_name, value_dpin.debug_name());
-
-        }
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x2: {
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-7\n");
-        }
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1146,17 +1130,11 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x3: {
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-6\n");
-        }
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, "0", parent_dpin);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x4: {
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-5\n");
-        }
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         if (Lgtuple::is_attribute(key_name) && value_tup->is_scalar()) {
           auto v_dpin = value_tup->get_dpin();
@@ -1187,9 +1165,6 @@ void Cprop::tuple_tuple_add(const Node &node) {
         }
       } break;
       case 0x5: {
-        if (node.get_nid() == 15) {
-          fmt::print("DEBUG-4\n");
-        }
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
@@ -1240,10 +1215,13 @@ void Cprop::tuple_tuple_add(const Node &node) {
 }
 
 bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup) {
+#ifndef NDEBUG
+  Pass::info("handle runtime index node:{}\n", ori_tg.debug_name());
+#endif
   auto mux_node = ori_tg.create(Ntype_op::Mux);
 
   // connect mux select pin
-  auto sel_dpin = field_node.setup_driver_pin();
+  auto sel_dpin = field_node.setup_driver_pin_raw(0);
   mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
 
   // connect mux outputs
@@ -1282,7 +1260,6 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
   tuple_mux_mut(mux_node);
   ori_tg.del_node();
 return true;
-
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
@@ -1301,6 +1278,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
   }
 
   if (key_name.empty()) {
+    bool runtime_idx_ok = false;
     if (node.is_sink_connected("field") && node_tup) {
       auto field_node  = node.get_sink_pin("field").get_driver_node();
       auto fieldtup_it = node2tuple.find(field_node.get_compact());
@@ -1312,18 +1290,11 @@ bool Cprop::tuple_tuple_get(Node &node) {
           node2tuple[node.get_compact()] = sub_tup;
           return true;
         }
-        // if sub_tup == nullptr -> a runtime index case!
-        // fieldtup_it->second->dump();
-        // node.dump();
-
-
-#ifndef NDEBUG
-        Pass::info("handle runtime index node:{}\n", node.debug_name());
-#endif
-        return handle_runtime_index(node, field_node, node_tup);
-      }
+      } 
+      runtime_idx_ok = handle_runtime_index(node, field_node, node_tup);
     }
-    if (!tuple_issues) {
+
+    if (!tuple_issues || !runtime_idx_ok) {
       node_tup->set_issue();  // It is not right
       tuple_issues = true;
       Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
