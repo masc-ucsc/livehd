@@ -12,6 +12,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
+#include "perf_tracing.hpp"
 
 unsigned int rseed = 123;
 
@@ -57,6 +58,8 @@ TEST_F(Setup_attr_test, data_test1) {
   unlink("lgdb_attr/lgraph_dtest2_dense_attr");
   unlink("lgdb_attr/lgraph_dtest2_dense_attr_max");
   unlink("lgdb_attr/lgraph_dtest2_dense_attr_size");
+
+  TRACE_EVENT("core", "ATTR_data_test1");
 
   Lbench b("core.ATTR_data_test1");
 
