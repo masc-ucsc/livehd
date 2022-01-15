@@ -30,25 +30,12 @@ Prp2lnast::Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_na
 
   dump();
 
-  process_root();
+  process_description();
 }
 
 Prp2lnast::~Prp2lnast() {
 
   ts_parser_delete(parser);
-}
-
-bool Prp2lnast::is_lhs_fcall_or_variable(TSTreeCursor *tc) const {
-  auto tc2 = ts_tree_cursor_copy(tc);
-
-  while(ts_tree_cursor_goto_next_sibling(&tc2)) {
-    const TSNode node = ts_tree_cursor_current_node(&tc2);
-    mmap_lib::str node_type(ts_node_type(node));
-    if (node_type == "assignment_cont2")
-      return true;
-  }
-
-  return false;
 }
 
 mmap_lib::str Prp2lnast::get_text(const TSNode &node) const {
@@ -58,130 +45,6 @@ mmap_lib::str Prp2lnast::get_text(const TSNode &node) const {
 
   I(end<=prp_file.size());
   return mmap_lib::str(prp_file.substr(start, length));
-}
-
-mmap_lib::str Prp2lnast::get_complex_identifier(const TSNode &node) const {
-  auto start = ts_node_start_byte(node);
-  auto end = ts_node_end_byte(node);
-  auto length = end - start;
-
-  if (length>2) {
-    // create a canonical name: $foo -> $.foo
-    auto ch1 = prp_file[start];
-    auto ch2 = prp_file[start+1];
-    if ((ch1=='$' || ch1=='#' || ch1 == '%') && ch2 != '.')
-      return mmap_lib::str::concat(mmap_lib::str(1,ch1), ".", prp_file.substr(start+1, length-1));
-  }
-
-  I(end<=prp_file.size());
-  return mmap_lib::str(prp_file.substr(start, length));
-}
-
-void Prp2lnast::process_fcall_or_variable(TSTreeCursor *tc) {
-
-  const TSNode node = ts_tree_cursor_current_node(tc);
-
-  mmap_lib::str node_type(ts_node_type(node));
-  if (node_type == "trivial_identifier") {
-    auto var = get_trivial_identifier(node);
-
-    fmt::print("trivial_identifier[{}]\n", var);
-  }else if (node_type == "complex_identifier") {
-    auto var = get_complex_identifier(node);
-
-    fmt::print("complex_identifier[{}]\n", var);
-  }else{
-    fmt::print("FIXME: add {} fcall_or_variable\n", node_type);
-  }
-}
-
-void Prp2lnast::process_factor_second(TSTreeCursor *tc) {
-  const TSNode node = ts_tree_cursor_current_node(tc);
-  mmap_lib::str node_type(ts_node_type(node));
-
-  if (node_type == "fcall_or_variable") {
-    ts_tree_cursor_goto_first_child(tc);
-    process_fcall_or_variable(tc);
-    ts_tree_cursor_goto_parent(tc);
-  }else{
-    fmt::print("FIXME: add start {} to process_factor_second\n", node_type);
-  }
-}
-
-void Prp2lnast::process_assignment_cont2(TSTreeCursor *tc) {
-
-  in_lhs = false;
-
-  auto has_cont = ts_tree_cursor_goto_next_sibling(tc);
-  if (!has_cont) {
-    return Pass::error("expected a token after assignment");
-  }
-
-  const TSNode after_assign = ts_tree_cursor_current_node(tc);
-  mmap_lib::str after_assign_type(ts_node_type(after_assign));
-  if (after_assign_type == "factor_second") {
-    ts_tree_cursor_goto_first_child(tc);
-    process_factor_second(tc);
-    ts_tree_cursor_goto_parent(tc);
-  }else{
-    assert(false); // TODO
-  }
-}
-
-void Prp2lnast::process_multiple_stmt(TSTreeCursor *tc) {
-
-  const TSNode node = ts_tree_cursor_current_node(tc);
-
-  mmap_lib::str node_type(ts_node_type(node));
-  if (node_type == "fcall_or_variable") {
-    in_lhs = is_lhs_fcall_or_variable(tc);
-    ts_tree_cursor_goto_first_child(tc);
-    process_fcall_or_variable(tc);
-    ts_tree_cursor_goto_parent(tc);
-  }else{
-    fmt::print("FIXME: add start {} to process_multiple_stmt\n", node_type);
-  }
-
-  auto has_cont = ts_tree_cursor_goto_next_sibling(tc);
-  if (has_cont) {
-    const TSNode cont_node = ts_tree_cursor_current_node(tc);
-    mmap_lib::str cont_type(ts_node_type(cont_node));
-    if (cont_type == "assignment_cont2") {
-      ts_tree_cursor_goto_first_child(tc);
-      process_assignment_cont2(tc);
-      ts_tree_cursor_goto_parent(tc);
-    }else{
-      fmt::print("FIXME: add cont {} to process_multiple_stmt\n", cont_type);
-    }
-  }
-}
-
-void Prp2lnast::process_stmt_base(TSTreeCursor *tc) {
-
-  const TSNode node = ts_tree_cursor_current_node(tc);
-
-  mmap_lib::str node_type(ts_node_type(node));
-  if (node_type != "stmt_base") {
-    return Pass::error("invalid tree-sitter stmt_seq node {}", node_type);
-  }
-
-  auto has_stmt = ts_tree_cursor_goto_first_child(tc);
-  while (has_stmt) {
-    const TSNode stmt = ts_tree_cursor_current_node(tc);
-    mmap_lib::str stmt_type(ts_node_type(stmt));
-
-    if (stmt_type == "multiple_stmt") {
-      ts_tree_cursor_goto_first_child(tc);
-      process_multiple_stmt(tc);
-      ts_tree_cursor_goto_parent(tc);
-    }else{
-      fmt::print("FIXME: add {} to process_stmt_base\n", stmt_type);
-    }
-
-    has_stmt = ts_tree_cursor_goto_next_sibling(tc);
-  }
-
-  ts_tree_cursor_goto_parent(tc);
 }
 
 void Prp2lnast::dump_tree_sitter() const {
@@ -220,21 +83,68 @@ void Prp2lnast::dump() const {
   dump_tree_sitter();
 }
 
-void Prp2lnast::process_root() {
-
+void Prp2lnast::process_description() {
   auto tc = ts_tree_cursor_new(ts_root_node);
 
-  const TSNode node = ts_tree_cursor_current_node(&tc);
-  mmap_lib::str node_type(ts_node_type(node));
-  if (node_type != "start") {
-    return Pass::error("invalid tree-sitter root node");
+  auto ti = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
+  tree_index.push(ti);
+  
+  bool go_next = ts_tree_cursor_goto_first_child(&tc);
+  while (go_next) {
+    process_statement(&tc);
+    go_next = ts_tree_cursor_goto_next_sibling(&tc);
   }
-
-  auto has_child = ts_tree_cursor_goto_first_child(&tc);
-  if (has_child) {
-    process_stmt_base(&tc);
-  }
+  ts_tree_cursor_goto_parent(&tc);
 
   ts_tree_cursor_delete(&tc);
 }
 
+void Prp2lnast::process_statement(TSTreeCursor* tc) {
+  ts_tree_cursor_goto_first_child(tc);
+  process_node(ts_tree_cursor_current_node(tc));
+  ts_tree_cursor_goto_parent(tc);
+}
+
+void Prp2lnast::process_node(TSNode node) {
+	if (ts_node_is_null(node)) return;
+  mmap_lib::str node_type(ts_node_type(node));
+
+  if      (node_type == "binary_expression") process_binary_expression(node);
+  else if (node_type == "simple_number"    ) process_simple_number(node);
+  else                                       process_node(ts_node_child(node, 0));
+}
+
+void Prp2lnast::process_binary_expression(TSNode node) {
+  auto lnode = ts_node_child_by_field_id(node, ts_language_field_id_for_name(tree_sitter_pyrope(), "left", 4));
+  auto onode = ts_node_child_by_field_id(node, ts_language_field_id_for_name(tree_sitter_pyrope(), "operator", 8));
+  auto rnode = ts_node_child_by_field_id(node, ts_language_field_id_for_name(tree_sitter_pyrope(), "right", 5));
+  
+  fmt::print("{} <{}> {}\n", get_text(lnode), get_text(onode), get_text(rnode));
+
+  auto op = get_text(onode);
+  Lnast_node lnast_node;
+  if      (op == "+" ) lnast_node = Lnast_node::create_plus();
+  else if (op == "-" ) lnast_node = Lnast_node::create_minus();
+  else if (op == "*" ) lnast_node = Lnast_node::create_mult();
+  else if (op == "/" ) lnast_node = Lnast_node::create_div();
+  else if (op == "&" ) lnast_node = Lnast_node::create_bit_and();
+  else if (op == "^" ) lnast_node = Lnast_node::create_bit_xor();
+  else if (op == "|" ) lnast_node = Lnast_node::create_bit_or();
+  else if (op == "<" ) lnast_node = Lnast_node::create_lt();
+  else if (op == "<=") lnast_node = Lnast_node::create_le();
+  else if (op == ">" ) lnast_node = Lnast_node::create_gt();
+  else if (op == ">=") lnast_node = Lnast_node::create_ge();
+  else if (op == "==") lnast_node = Lnast_node::create_eq();
+  else if (op == "!=") lnast_node = Lnast_node::create_ne();
+  else                 lnast_node = Lnast_node::create_invalid();
+
+  tree_index.push(lnast->add_child(tree_index.top(), lnast_node));
+  process_node(lnode);
+  process_node(rnode);
+  tree_index.pop();
+}
+
+void Prp2lnast::process_simple_number(TSNode node) {
+  auto text = get_text(node);
+  lnast->add_child(tree_index.top(), Lnast_node::create_const(text));
+}

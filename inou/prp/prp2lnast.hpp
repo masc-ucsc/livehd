@@ -4,6 +4,7 @@
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "symbol_table.hpp"
 
 class Prp2lnast {
 protected:
@@ -13,22 +14,52 @@ protected:
   std::string prp_file;
   TSParser   *parser;
   TSNode      ts_root_node;
-  bool        in_lhs;
+
+  std::stack<mmap_lib::Tree_index> tree_index; 
 
   mmap_lib::str get_text(const TSNode &node) const;
-  mmap_lib::str get_trivial_identifier(const TSNode &node) const {
-    return get_text(node);
-  }
-  mmap_lib::str get_complex_identifier(const TSNode &node) const;
 
-  bool is_lhs_fcall_or_variable(TSTreeCursor *tc) const;
+  // Top
+  void process_description();
+  
+  // Statements
+  void process_statement(TSTreeCursor*);
+  void process_assignment_or_declaration_statement(TSTreeCursor*);
+  // void process_function_call_statement(TSTreeCursor*);
+  // void process_control_statement(TSTreeCursor*);
+  // void process_if_statement(TSTreeCursor*);
+  // void process_for_statement(TSTreeCursor*);
+  // void process_while_statement(TSTreeCursor*);
+  // void process_match_statement(TSTreeCursor*);
+  // void process_enum_declaration(TSTreeCursor*);
+  // void process_type_declaration(TSTreeCursor*);
+  // void process_type_extension(TSTreeCursor*);
+  void process_expression_statement(TSTreeCursor*);
+  // void process_test_statement(TSTreeCursor*);
+  // void process_restrict_statement(TSTreeCursor*);
 
-  void process_fcall_or_variable(TSTreeCursor *tc);
-  void process_factor_second(TSTreeCursor *tc);
-  void process_assignment_cont2(TSTreeCursor *tc);
-  void process_multiple_stmt(TSTreeCursor *tc);
-  void process_stmt_base(TSTreeCursor *tc);
-  void process_root();
+  // Non-terminal rules
+  void process_node(TSNode);
+
+  // Expressions
+  // void process_selection(TSNode);
+  // void process_type_specification(TSNode);
+  // void process_type_cast(TSNode);
+  // void process_function_call(TSNode);
+  // void process_function_definition(TSNode);
+  // void process_unary_expression(TSNode);
+  // void process_optional_expression(TSNode);
+  void process_binary_expression(TSNode);
+  // void process_for_expression(TSNode);
+  // void process_if_expression(TSNode);
+  // void process_match_expression(TSNode);
+  // void process_scope_expression(TSNode);
+
+  // Basics
+  // void process_tuple(TSNode);
+  // void process_identifier(TSNode);
+  // void process_constant(TSNode);
+  void process_simple_number(TSNode);
 
 public:
   Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_name);

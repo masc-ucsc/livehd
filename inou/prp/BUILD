@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
+        "//elab:elab",
         "@tree-sitter-pyrope//:tree-sitter-pyrope",
     ],
     alwayslink = True,
