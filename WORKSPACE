@@ -237,3 +237,12 @@ rules_fuzzing_dependencies()
 load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
 
 rules_fuzzing_init()
+
+# Perfetto
+http_archive(
+    name = "com_google_perfetto",
+    build_file = "perfetto.BUILD",
+    sha256 = "9d2955736ce9d234e0f5153acfefea8facfa762c9167024902ea98f9010207aa",
+    strip_prefix = "perfetto-23.0/sdk",
+    urls = ["https://github.com/google/perfetto/archive/refs/tags/v23.0.tar.gz"],
+)
