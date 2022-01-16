@@ -5,6 +5,7 @@
 class Meta_api {
 protected:
   static void open(Eprp_var &var);
+  static void save(Eprp_var &var);
   static void create(Eprp_var &var);
   static void rename(Eprp_var &var);
   static void copy(Eprp_var &var);

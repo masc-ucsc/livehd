@@ -251,7 +251,8 @@ void Dlop::mut_add(spool_ptr<Dlop> other) {
 
 void Dlop::mut_add(int64_t other) {
   if (size>1) {
-    int64_t extended[size] = {0};
+    int64_t extended[size];
+    bzero(extended+1, sizeof(int64_t)*(size-1));
     extended[0] = other;
     Blop::addn(base, size, base, extended);
   }else{

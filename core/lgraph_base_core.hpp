@@ -65,6 +65,9 @@ protected:
   };
 
   Setup_path        _p;  // Must be first in base object
+
+  const char *version="0.1.0"; // LGraph semantic version (increase when store format becomes incompatible)
+
   mmap_lib::str       path;
   mmap_lib::str       name;
   const mmap_lib::str unique_name;
@@ -83,9 +86,10 @@ public:
   virtual void clear();
   virtual void sync();
 
-  const mmap_lib::str &get_unique_name() const { return unique_name; }
-  const mmap_lib::str &get_name() const { return name; }
-  const mmap_lib::str &get_path() const { return path; }
+  [[nodiscard]] mmap_lib::str get_unique_name() const { return unique_name; }
+  [[nodiscard]] mmap_lib::str get_name() const { return name; }
+  [[nodiscard]] mmap_lib::str get_path() const { return path; }
+  [[nodiscard]] mmap_lib::str get_save_filename() const { return mmap_lib::str::concat(path, "/", name); }
 
   const Lg_type_id get_lgid() const { return lgid; }
 };

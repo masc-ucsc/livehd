@@ -22,6 +22,7 @@ cc_library(
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:node_hash_map",
         "@iassert",
+        "@hif//hif",
         "@rapidjson//:headers",
     ],
     alwayslink = True,

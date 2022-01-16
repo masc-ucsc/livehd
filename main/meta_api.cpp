@@ -8,6 +8,7 @@
 #include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
+#include "eprp_utils.hpp"
 
 void Meta_api::open(Eprp_var &var) {
   auto path = var.get("path");
@@ -27,6 +28,21 @@ void Meta_api::open(Eprp_var &var) {
       lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { var.add(g); });
     }
     var.add(lg);
+  }
+}
+
+void Meta_api::save(Eprp_var &var) {
+  auto hier = var.get("hier");
+
+  for (Lgraph *lg : var.lgs) {
+    if (lg->is_empty()) {
+      Eprp_utils::clean_dir(lg->get_save_filename());
+    } else {
+      if (hier != "false" && hier != "0") {
+        lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
+      }
+      lg->save();
+    }
   }
 }
 
@@ -177,6 +193,12 @@ void Meta_api::setup(Eprp &eprp) {
   m1.add_label_optional("hier", "open all the subgraphs too", "false");
 
   eprp.register_method(m1);
+  //--------
+
+  Eprp_method m1b("lgraph.save", "save an lgraph", &Meta_api::save);
+  m1b.add_label_optional("hier", "save all the subgraphs too", "false");
+
+  eprp.register_method(m1b);
 
   //---------------------
   Eprp_method m2("lgraph.create", "create a new lgraph", &Meta_api::create);

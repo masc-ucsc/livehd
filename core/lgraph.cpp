@@ -15,6 +15,9 @@
 #include "lgedgeiter.hpp"
 #include "lgraph_base_core.hpp"
 
+#include "hif/hif_read.hpp"
+#include "hif/hif_write.hpp"
+
 Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_Node_Type(_path, _name, _lgid, _lib), htree(this) {
   I(!_name.contains('/'));  // No path in name
@@ -1364,6 +1367,41 @@ Bwd_edge_iterator Lgraph::backward(bool visit_sub) { return Bwd_edge_iterator(th
 
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub); }
+
+void Lgraph::save() {
+  fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
+
+  auto wr = Hif_write::create(get_save_filename().to_s());
+  if (wr==nullptr) {
+    error("cannot save {} in {}", name, get_save_filename());
+    return;
+  }
+
+  {
+    auto conf_stmt = Hif_write::create_attr();
+    conf_stmt.add_attr("tool","livehd");
+    conf_stmt.add_attr("version",Lgraph::version);
+
+    wr->add(conf_stmt);
+  }
+
+  for(const auto &node:forward(false)) {
+    auto n = Hif_write::create_node();
+    n.type = static_cast<uint16_t>(node.get_type_op());
+
+    for(const auto &dpin:node.out_connected_pins()) {
+      auto wname = dpin.get_wire_name().to_s();
+      assert(wname.size());
+      n.add_output(dpin.get_pin_name().to_s(), wname);
+    }
+    for(const auto &e:node.inp_edges()) {
+      auto wname = e.driver.get_wire_name().to_s();
+      assert(wname.size());
+      n.add_input(e.sink.get_pin_name().to_s(), wname);
+    }
+    wr->add(n);
+  }
+}
 
 void Lgraph::dump() {
   fmt::print("lgraph name: {}, size: {}\n", name, node_internal.size());
