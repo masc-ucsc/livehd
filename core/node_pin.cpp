@@ -444,7 +444,10 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
   {
     const auto it  = ref->find_val(wname);
     if (it != ref->end()) {
-      return Node_pin(top, it->first);
+      if (top->is_valid_node_pin(it->first.idx)) {
+        return {top, it->first};
+      }
+      ref->erase_key(it->first); // pending/lazy delete
     }
   }
 
@@ -452,11 +455,14 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
   if (can_wname != wname) {
     const auto it2 = ref->find_val(can_wname);
     if (it2 != ref->end()) {
-      return Node_pin(top, it2->first);
+      if (top->is_valid_node_pin(it2->first.idx)) {
+        return {top, it2->first};
+      }
+      ref->erase_key(it2->first); // pending/lazy delete
     }
   }
 
-  return Node_pin();
+  return {};
 }
 
 mmap_lib::str Node_pin::get_pin_name() const {

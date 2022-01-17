@@ -68,20 +68,55 @@ void Lgraph::load() {
         const auto &io=stmt.io[i];
 
         I(io.lhs_cat == Hif_base::ID_cat::String_cat);
-        I(io.rhs_cat == Hif_base::ID_cat::Base2_cat);
+        if (io.rhs_cat == Hif_base::ID_cat::Base2_cat) {
+          auto graph_pos = *reinterpret_cast<const int64_t *>(io.rhs.data());
+          auto lhs       = mmap_lib::str(io.lhs);
 
-        auto graph_pos = *reinterpret_cast<const int64_t *>(io.rhs.data());
-        auto lhs       = mmap_lib::str(io.lhs);
-
-        if (io.input) {
-          if (lhs!="$") { // Do not add implicit names
-            add_graph_input(lhs, graph_pos, 0);
+          if (io.input) {
+            if (lhs!="$") { // Do not add implicit names
+              add_graph_input(lhs, graph_pos, 0);
+            }
+          }else{
+            if (lhs!="%") {// Do not add implicit names
+              add_graph_output(lhs, graph_pos, 0);
+            }
           }
         }else{
-          if (lhs!="%") {// Do not add implicit names
-            add_graph_output(lhs, graph_pos, 0);
+          // Connect something to the output (topo sort)
+          I(io.rhs_cat == Hif_base::ID_cat::String_cat);
+          auto spin = get_graph_output(mmap_lib::str(io.lhs));
+
+          bool temp_name = !io.rhs.empty() && io.rhs[0] == '_';
+          Node_pin dpin;
+          if (temp_name) {
+            auto it = str2dpin.find(io.rhs);
+            I(it != str2dpin.end());
+            dpin = Node_pin(this, it->second);
+          }else{
+            dpin = Node_pin::find_driver_pin(this, mmap_lib::str(io.rhs));
           }
+
+          spin.connect_driver(dpin);
         }
+      }
+      for(const auto &attr:stmt.attr) {
+        I(attr.lhs_cat == Hif_base::ID_cat::String_cat);
+        I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);
+
+        const auto &lhs = attr.lhs;
+        const auto &rhs = attr.rhs;
+
+        auto lhs_pos = lhs.rfind('.');
+        I(lhs_pos != std::string::npos);
+        auto lhs_var = lhs.substr(0,lhs_pos);
+
+        auto bits = *reinterpret_cast<const int64_t *>(rhs.data());
+        I(bits>0);
+
+        auto dpin = Node_pin::find_driver_pin(this, mmap_lib::str(lhs_var));
+        I(!dpin.is_invalid());
+
+        dpin.set_bits(bits);
       }
       return;
     }else{
@@ -108,6 +143,15 @@ void Lgraph::load() {
       }else{ //----------- OUTPUT
 
         auto dpin = node.setup_driver_pin(mmap_lib::str(io.lhs));
+
+        auto lhs_bits = io.lhs + ".bits";
+        for(const auto &attr:stmt.attr) {
+          if (attr.lhs == lhs_bits) {
+            auto bits = *reinterpret_cast<const int64_t *>(attr.rhs.data());
+            dpin.set_bits(bits);
+            break;
+          }
+        }
 
         if (temp_name) {
           I(str2dpin.find(io.rhs) == str2dpin.end());
@@ -1030,6 +1074,12 @@ void Lgraph::del_node(const Node &node) {
     subid_map.erase(node.get_compact_class());
   }
 
+  // WARNING: In theory, we should delete all the Node and Node_pin attributes,
+  // but this will significnatly slowdown the process (10-20 hash map searches
+  // per pin). The solution is to leave them, but not to consider them valid of
+  // the pin/node is invalid (and this also means that we can not re-use
+  // IDX/NID after delete)
+
   // In hierarchy, not allowed to remove nodes (mark as deleted attribute?)
   I(node.get_class_lgraph() == node.get_top_lgraph());
 
@@ -1485,6 +1535,12 @@ void Lgraph::save() {
       if (io_pin.is_invalid())
         continue;
       ios.add(io_pin.is_input(), io_pin.name.to_s(), io_pin.get_io_pos());
+
+      auto dpin = Node_pin::find_driver_pin(this, io_pin.name);
+      if (!dpin.is_invalid()) {
+        auto bits = dpin.get_bits();
+        ios.add_attr(io_pin.name.to_s()+".bits", bits);
+      }
     }
 
     // Check if the $ or % is still there (it will not show in sub)
@@ -1523,7 +1579,12 @@ void Lgraph::save() {
       for(const auto &dpin:node.out_connected_pins()) {
         auto wname = dpin.get_wire_name().to_s();
         assert(wname.size());
-        n.add_output(dpin.get_pin_name().to_s(), wname);
+        auto pname = dpin.get_pin_name().to_s();
+        n.add_output(pname, wname);
+        auto bits = dpin.get_bits();
+        if (bits) {
+          n.add_attr(pname + ".bits", bits);
+        }
       }
     }else{
       auto dpin  = node.get_driver_pin();
@@ -1531,6 +1592,11 @@ void Lgraph::save() {
       I(wname.size());
       I(dpin.get_pin_name() == "Y");
       n.add_output("Y", wname);
+
+      auto bits = dpin.get_bits();
+      if (bits) {
+        n.add_attr("Y.bits", bits);
+      }
     }
     for(const auto &e:node.inp_edges()) {
       auto wname = e.driver.get_wire_name().to_s();
@@ -1539,6 +1605,16 @@ void Lgraph::save() {
     }
     wr->add(n);
   }
+
+  auto n = Hif_write::create_node();
+  n.type = static_cast<uint16_t>(Ntype_op::IO);
+  for(auto &e:get_graph_output_node(false).inp_edges()) {
+    if (e.driver.get_wire_name() == e.sink.get_name())
+      continue;
+    n.add(true, e.sink.get_name().to_s(), e.driver.get_wire_name().to_s());
+  }
+  if (!n.io.empty())
+    wr->add(n);
 }
 
 void Lgraph::dump() {
