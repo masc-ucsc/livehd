@@ -129,15 +129,15 @@ void Sub_node::dump() const {
 /* LCOV_EXCL_STOP */
 
 std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
-  std::vector<IO_pin> slist;
+  std::vector<IO_pin> sort_io;
   for (auto i = 1u; i < io_pins.size(); ++i) {
     if (io_pins[i].is_invalid())
       continue;
-    slist.emplace_back(io_pins[i]);
+    sort_io.emplace_back(io_pins[i]);
   }
 
   // Sort based on port_id first, then name
-  std::sort(slist.begin(), slist.end(), [](const IO_pin &a, const IO_pin &b) {
+  std::sort(sort_io.begin(), sort_io.end(), [](const IO_pin &a, const IO_pin &b) {
     if (a.graph_io_pos == Port_invalid && b.graph_io_pos == Port_invalid)
       return a.name < b.name;
     if (a.graph_io_pos == Port_invalid)
@@ -148,9 +148,10 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
     return a.graph_io_pos < b.graph_io_pos;
   });
 
+#if 0
   // make sure that if a graph_pos was explicit, it is respected
   Port_ID pos = 0;
-  for (auto &p : slist) {
+  for (auto &p : sort_io) {
     pos++;
     if (p.graph_io_pos == Port_invalid)
       continue;
@@ -158,19 +159,20 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
       continue;
 
     auto pos_swap = p.graph_io_pos;
-    int  ntries   = slist.size();
-    while (ntries) {
-      ntries--;
-      std::swap(slist[pos], slist[pos_swap]);
+
+    for (auto i=0u;i<sort_io.size();++i) {
+
+      std::swap(sort_io[pos], sort_io[pos_swap]);
       if (pos_swap > pos)
         break;
-      if (slist[pos].graph_io_pos == pos || slist[pos].graph_io_pos == Port_invalid)
+      if (sort_io[pos].graph_io_pos == pos || sort_io[pos].graph_io_pos == Port_invalid)
         break;
-      pos_swap = slist[pos].graph_io_pos;
+      pos_swap = sort_io[pos].graph_io_pos;
     }
   }
+#endif
 
-  return slist;
+  return sort_io;
 }
 
 void Sub_node::populate_graph_pos() {
@@ -201,6 +203,7 @@ void Sub_node::del_pin(Port_ID instance_pid) {
   auto keep_name = io_pins[instance_pid].name;
   io_pins[instance_pid].clear();  // do not erase to avoid remap of all the instance_pids (users)
   io_pins[instance_pid].name = keep_name;
+  I(io_pins[instance_pid].instance_pid == instance_pid);
 
   deleted.emplace_back(instance_pid);
   std::sort(deleted.begin(), deleted.end(), std::greater<>());

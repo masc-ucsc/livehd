@@ -512,17 +512,24 @@ void Graph_library::reload_int() {
 }
 
 Lgraph *Graph_library::setup_lgraph(const mmap_lib::str &name, const mmap_lib::str &source) {
+
+  Lg_type_id     lgid;
+  Graph_library *lib;
+  {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    auto                       *lg = try_find_lgraph_int(name);
+    if (lg)
+      return lg;
+
+    I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+
+    lgid = reset_id_int(name, source);
+    lib  = instance_int(path);
+  }
+  // ::Lgraph constructor can get the lock again. So release lock in graph_library
+
+  auto *lg = new Lgraph(path, name, lgid, lib);
   std::lock_guard<std::mutex> guard(lgs_mutex);
-  auto                       *lg = try_find_lgraph_int(name);
-  if (lg)
-    return lg;
-
-  I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
-
-  Lg_type_id lgid = reset_id_int(name, source);
-
-  auto *lib = instance_int(path);
-  lg        = new Lgraph(path, name, lgid, lib);
 
   global_name2lgraph[path][name] = lg;
   attributes[lgid].lg            = lg;  // It could be already set if there was a copy

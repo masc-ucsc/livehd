@@ -74,15 +74,11 @@ protected:
   const mmap_lib::str long_name;
   const Lg_type_id  lgid;
 
-  bool locked;
-
   Lgraph_base_core() = delete;
   explicit Lgraph_base_core(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid);
   virtual ~Lgraph_base_core(){};
 
 public:
-  void get_lock();
-
   virtual void clear();
   virtual void sync();
 

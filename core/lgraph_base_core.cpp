@@ -42,46 +42,15 @@ Lgraph_base_core::Lgraph_base_core(const mmap_lib::str &_path, const mmap_lib::s
     , name(_name)
     , unique_name(mmap_lib::str::concat(_path, "/", std::to_string(_lgid.value)))
     , long_name(mmap_lib::str::concat(mmap_lib::str("lgraph_"), _name))
-    , lgid(_lgid)
-    , locked(false) {
+    , lgid(_lgid) {
   assert(lgid);
 }
 
-void Lgraph_base_core::get_lock() {
-  if (locked)
-    return;
-
-  std::string lock = absl::StrCat(path.to_s(), "/", std::to_string(lgid), ".lock");
-  int         err  = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
-  if (err < 0) {
-    mmap_lib::mmap_gc::try_collect_fd();
-    err = ::open(lock.c_str(), O_CREAT | O_EXCL, 420);  // 644
-    if (err < 0) {
-      perror("Error: ");
-      fmt::print("error: could not get lock:{}. Already running? Unclear exit?", lock.c_str());
-      throw std::runtime_error("unable to acquire lock");
-    }
-  }
-  ::close(err);
-
-  locked = true;
-}
-
 void Lgraph_base_core::clear() {
-  // if (!locked) return;
-
   // whenever we clean, we unlock
   std::string lock = absl::StrCat(path.to_s(), "/", std::to_string(lgid), ".lock");
   unlink(lock.c_str());
-
-  locked = false;
 }
 
 void Lgraph_base_core::sync() {
-  if (!locked)
-    return;
-
-  std::string lock = absl::StrCat(path.to_s(), "/", std::to_string(lgid), ".lock");
-  unlink(lock.c_str());
-  locked = false;
 }

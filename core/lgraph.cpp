@@ -22,6 +22,107 @@ Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_i
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_Node_Type(_path, _name, _lgid, _lib), htree(this) {
   I(!_name.contains('/'));  // No path in name
   I(_name == get_name());
+
+  load();
+}
+
+void Lgraph::load() {
+  clear();
+
+  auto hif = Hif_read::open(get_save_filename().to_s());
+  if (hif == nullptr) { // no HIF file
+    //clear();
+    return;
+  }
+
+  absl::flat_hash_map<std::string, Node_pin::Compact_class_driver> str2dpin;
+
+  hif->each([this,&str2dpin](const Hif_base::Statement stmt) {
+    auto op = static_cast<Ntype_op>(stmt.type);
+
+    Node node;
+
+    if (op == Ntype_op::Const) {
+      I(!stmt.attr.empty() && stmt.attr[0].lhs == "const");
+      I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
+
+      Lconst lc = Lconst::unserialize(mmap_lib::str(stmt.attr[0].rhs));
+      node = create_node_const(lc);
+
+    }else if (op == Ntype_op::LUT) {
+      I(!stmt.attr.empty() && stmt.attr[0].lhs == "lut");
+      I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
+
+      Lconst lc = Lconst::unserialize(mmap_lib::str(stmt.attr[0].rhs));
+      node = create_node_lut(lc);
+
+    }else if (op == Ntype_op::Sub) {
+      I(!stmt.attr.empty() && stmt.attr[0].lhs == "subid");
+      I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::Base2_cat);
+      I(stmt.attr[0].lhs.size() == 8);
+
+      auto subid = *reinterpret_cast<const int64_t *>(stmt.attr[0].rhs.data());
+      node = create_node_sub(Lg_type_id(subid));
+    }else if (op == Ntype_op::IO) {
+      for(auto i=0u;i<stmt.io.size();++i) {
+        const auto &io=stmt.io[i];
+
+        I(io.lhs_cat == Hif_base::ID_cat::String_cat);
+        I(io.rhs_cat == Hif_base::ID_cat::Base2_cat);
+
+        auto graph_pos = *reinterpret_cast<const int64_t *>(io.rhs.data());
+        auto lhs       = mmap_lib::str(io.lhs);
+
+        if (io.input) {
+          if (lhs!="$") { // Do not add implicit names
+            add_graph_input(lhs, graph_pos, 0);
+          }
+        }else{
+          if (lhs!="%") {// Do not add implicit names
+            add_graph_output(lhs, graph_pos, 0);
+          }
+        }
+      }
+      return;
+    }else{
+      node = create_node(op);
+    }
+
+    for(const auto &io:stmt.io) {
+      bool temp_name = !io.rhs.empty() && io.rhs[0] == '_';
+      I(io.lhs_cat == Hif_base::ID_cat::String_cat);
+      I(io.rhs_cat == Hif_base::ID_cat::String_cat);
+
+      if (io.input) { //----------- INPUT
+        Node_pin dpin;
+
+        if (temp_name) {
+          auto it = str2dpin.find(io.rhs);
+          I(it != str2dpin.end());
+          dpin = Node_pin(this, it->second);
+        }else{
+          dpin = Node_pin::find_driver_pin(this, mmap_lib::str(io.rhs));
+        }
+
+        node.setup_sink_pin(mmap_lib::str(io.lhs)).connect_driver(dpin);
+      }else{ //----------- OUTPUT
+
+        auto dpin = node.setup_driver_pin(mmap_lib::str(io.lhs));
+
+        if (temp_name) {
+          I(str2dpin.find(io.rhs) == str2dpin.end());
+          str2dpin[io.rhs] = dpin.get_compact_class_driver();
+        }else{
+          dpin.set_name(mmap_lib::str(io.rhs));
+          if (has_graph_output(mmap_lib::str(io.rhs))) {
+            auto spin = get_graph_output(mmap_lib::str(io.rhs));
+            dpin.connect_sink(spin);
+          }
+        }
+      }
+    }
+  });
+
 }
 
 Lgraph::~Lgraph() {
@@ -118,7 +219,6 @@ void Lgraph::clear() {
   set_type(nid2, Ntype_op::IO);
 
   std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
-
 }
 
 void Lgraph::sync() {
@@ -1371,28 +1471,66 @@ Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this
 void Lgraph::save() {
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 
-  auto wr = Hif_write::create(get_save_filename().to_s());
+  auto wr = Hif_write::create(get_save_filename().to_s(), "livehd", Lgraph::version);
   if (wr==nullptr) {
     error("cannot save {} in {}", name, get_save_filename());
     return;
   }
 
   {
-    auto conf_stmt = Hif_write::create_attr();
-    conf_stmt.add_attr("tool","livehd");
-    conf_stmt.add_attr("version",Lgraph::version);
+    auto ios = Hif_write::create_node();
+    ios.type = static_cast<uint16_t>(Ntype_op::IO);
 
-    wr->add(conf_stmt);
+    for (const auto &io_pin : get_self_sub_node().get_sorted_io_pins()) {
+      if (io_pin.is_invalid())
+        continue;
+      ios.add(io_pin.is_input(), io_pin.name.to_s(), io_pin.get_io_pos());
+    }
+
+    // Check if the $ or % is still there (it will not show in sub)
+    // It can be disconnected like in a tuple_add/get or anywhere but there
+    // should be a driver pin with the name.
+
+    auto universal_input_dpin = Node_pin::find_driver_pin(this, "$");
+    if (!universal_input_dpin.is_invalid()) {
+      ios.add(true, "$", Port_invalid);
+    }
+    auto universal_output_dpin = Node_pin::find_driver_pin(this, "%");
+    if (!universal_output_dpin.is_invalid()) {
+      ios.add(false, "%", Port_invalid);
+    }
+
+    wr->add(ios);
   }
 
   for(const auto &node:forward(false)) {
     auto n = Hif_write::create_node();
-    n.type = static_cast<uint16_t>(node.get_type_op());
+    auto op = node.get_type_op();
+    n.type = static_cast<uint16_t>(op);
 
-    for(const auto &dpin:node.out_connected_pins()) {
+    if (op == Ntype_op::Sub) {
+      auto subid = node.get_type_sub();
+      n.add_attr("subid", subid.value);
+    }else if (op == Ntype_op::Const) {
+      auto str = node.get_type_const().serialize();
+      n.add_attr("const", str.to_s());
+    }else if (op == Ntype_op::LUT) {
+      auto str = node.get_type_lut().serialize();
+      n.add_attr("lut", str.to_s());
+    }
+
+    if (Ntype::is_multi_driver(op)) {
+      for(const auto &dpin:node.out_connected_pins()) {
+        auto wname = dpin.get_wire_name().to_s();
+        assert(wname.size());
+        n.add_output(dpin.get_pin_name().to_s(), wname);
+      }
+    }else{
+      auto dpin  = node.get_driver_pin();
       auto wname = dpin.get_wire_name().to_s();
-      assert(wname.size());
-      n.add_output(dpin.get_pin_name().to_s(), wname);
+      I(wname.size());
+      I(dpin.get_pin_name() == "Y");
+      n.add_output("Y", wname);
     }
     for(const auto &e:node.inp_edges()) {
       auto wname = e.driver.get_wire_name().to_s();

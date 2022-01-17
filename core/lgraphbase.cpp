@@ -52,8 +52,6 @@ void Lgraph_Base::sync() {
 }
 
 void Lgraph_Base::emplace_back() {
-  I(locked);
-
   Node_internal xx;
   node_internal.emplace_back(xx);
 
@@ -84,7 +82,6 @@ void Lgraph_Base::emplace_back() {
 }
 
 Index_id Lgraph_Base::create_node_int() {
-  get_lock();  // FIXME: change to Copy on Write permissions (mmap exception, and remap)
   emplace_back();
 
   I(node_internal[node_internal.size() - 1].get_dst_pid() == 0);

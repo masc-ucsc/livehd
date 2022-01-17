@@ -218,7 +218,7 @@ public:
 
 	// Lconst may contains a pure number or a pure string or a unkown number like '0bxx101',
 	// the developer has the responsibility to translate to proper Lconst before calling this function
-  Node create_node_const(const Lconst &value); 
+  Node create_node_const(const Lconst &value);
 
   Node create_node_const(int64_t val) { return create_node_const(Lconst(val)); }
 
@@ -229,6 +229,7 @@ public:
   const Sub_node &get_self_sub_node() const;  // Access all input/outputs
   Sub_node *      ref_self_sub_node();        // Access all input/outputs
 
+  void load();
   void save();
   void dump();
   void dump_down_nodes();

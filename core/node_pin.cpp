@@ -410,7 +410,7 @@ mmap_lib::str Node_pin::get_wire_name() const {
     return get_name();
   }
 
-  return mmap_lib::str::concat("p", get_root_idx().value, "_", pid);
+  return mmap_lib::str::concat("__p", get_root_idx().value, "_", pid);
 }
 
 mmap_lib::str Node_pin::get_name() const {
