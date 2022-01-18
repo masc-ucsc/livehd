@@ -1777,7 +1777,6 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
-// FIXME: n20 TA should be handle here, maybe
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");
@@ -1872,7 +1871,6 @@ void Cprop::reconnect_tuple_get(Node &node) {
   if (it->second->is_trivial_scalar()) {
     auto out_edges_list = node.out_edges();
     if (!out_edges_list.empty())
-      // FIXME: n20 TA should be handle here, maybe
       expand_data_and_attributes(node, "", out_edges_list, it->second);
   } else {
   // I(input should not be constant)
@@ -2312,7 +2310,8 @@ void Cprop::bwd_del_node(Node &node) {
 
     I(!n.is_invalid());
 
-    if (!n.is_type_loop_last() && !n.has_outputs()) {
+    // FIXME->sh: I think attrSet should never be deleted? 
+    if (!n.is_type_loop_last() && !n.has_outputs() && n.get_type_op() != Ntype_op::AttrSet) {
       for (auto e : n.inp_edges()) {
         if (e.driver.is_graph_io())
           continue;

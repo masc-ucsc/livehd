@@ -167,6 +167,7 @@ Bits_t Bitwidth_range::get_sbits() const {
       return 0;  // To indicate overflow (unable to compute)
     return bits;
   }
+   
 
   auto a    = Lconst(max).get_bits();  // 15 -> 5sbits
   auto b    = Lconst(min).get_bits();

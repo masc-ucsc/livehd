@@ -566,7 +566,7 @@ module MemAddrCalcUnit(
   assign io_resp_bits_fflags_bits_flags = 5'h0;
   assign io_resp_bits_addr = {ea_sign,sum[38:0]}; // @[Cat.scala 29:58]
   assign io_resp_bits_mxcpt_valid = ma_ld | ma_st; // @[functional-unit.scala 527:26]
-  assign io_resp_bits_mxcpt_bits = {{13'd0}, xcpt_cause}; // @[Mux.scala 47:69]
+  assign io_resp_bits_mxcpt_bits = {{13'd0}, xcpt_cause}; // @[functional-unit.scala 535:28]
   assign io_resp_bits_sfence_valid = io_req_valid & io_req_bits_uop_mem_cmd == 5'h14; // @[functional-unit.scala 538:45]
   assign io_resp_bits_sfence_bits_rs1 = io_req_bits_uop_mem_size[0]; // @[functional-unit.scala 539:59]
   assign io_resp_bits_sfence_bits_rs2 = io_req_bits_uop_mem_size[1]; // @[functional-unit.scala 540:59]

@@ -184,6 +184,7 @@ cc_library(
     "SimpleClockGroupSource",
     "FixedClockBroadcast",
     "ClockGroupAggregator",
+    "BreakpointUnit",
 
     # FIXME:
 
@@ -194,11 +195,11 @@ cc_library(
     # "MaskedSmemStruct",
     # "Router",
     # "ListBuffer",
+    # "BankedStore"
+    # "BoomDuplicatedDataArray",
 
     # ???
     # "Arbiter_10",
-    # "BankedStore",
-    # "BoomDuplicatedDataArray",
     # "DynamicMemorySearch",
     # "MaskedSmem",
     # "MaskedSmemStruct",

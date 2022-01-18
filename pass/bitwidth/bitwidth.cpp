@@ -1579,13 +1579,19 @@ void Bitwidth::set_subgraph_boundary_bw(Node &node) {
   auto sub_lg = node.ref_type_sub_lgraph();
 
   sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
+    fmt::print("DEBUG-10 dpin_gout:{}, bits:{}\n", dpin_gout.debug_name(), dpin_gout.get_bits());
     auto top_dpin = node.setup_driver_pin(dpin_gout.get_name());
-
+    
     Bitwidth_range bw;
-    if (dpin_gout.is_unsign())
-      bw.set_ubits_range(dpin_gout.get_bits() - 1);
-    else
+    if (dpin_gout.is_unsign()) {
+      if (dpin_gout.get_bits() == 1) {
+        bw.set_range(0, 1); // FIXME-sh: it's for sure not an overflow case. But if use set_ubits_range(), 1-ubit will be judged as overflow
+      } else {
+        bw.set_ubits_range(dpin_gout.get_bits() - 1);
+      }
+    } else {
       bw.set_sbits_range(dpin_gout.get_bits());
+    }
 
     adjust_bw(top_dpin, bw);
   });
