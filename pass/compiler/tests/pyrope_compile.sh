@@ -46,7 +46,7 @@ fi
 # pts='vector'
 # pts='vector2'
 # pts='hier_tuple_nested_if8'  # LNAST_TO failure
-# pts='tuple_if2'
+# pts='tuple_if'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
 #pts_hier='top'
@@ -86,7 +86,7 @@ Pyrope_step () {
 
 	rm -rf lgdb_prp
   ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module}"
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not direct compile with files:${all_files}!"
@@ -130,7 +130,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf lgdb_prp2prp
-	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module}"
+	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module} |> lgraph.save"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp compile with files:${all_files}!"

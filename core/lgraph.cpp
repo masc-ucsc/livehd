@@ -37,7 +37,9 @@ void Lgraph::load() {
 
   absl::flat_hash_map<std::string, Node_pin::Compact_class_driver> str2dpin;
 
-  hif->each([this,&str2dpin](const Hif_base::Statement stmt) {
+  std::vector<std::pair<Node_pin,mmap_lib::str>> pending;
+
+  hif->each([this,&str2dpin,&pending](const Hif_base::Statement stmt) {
     auto op = static_cast<Ntype_op>(stmt.type);
 
     Node node;
@@ -64,8 +66,7 @@ void Lgraph::load() {
       auto subid = *reinterpret_cast<const int64_t *>(stmt.attr[0].rhs.data());
       node = create_node_sub(Lg_type_id(subid));
     }else if (op == Ntype_op::IO) {
-      for(auto i=0u;i<stmt.io.size();++i) {
-        const auto &io=stmt.io[i];
+      for(const auto &io:stmt.io) {
 
         I(io.lhs_cat == Hif_base::ID_cat::String_cat);
         if (io.rhs_cat == Hif_base::ID_cat::Base2_cat) {
@@ -133,13 +134,18 @@ void Lgraph::load() {
 
         if (temp_name) {
           auto it = str2dpin.find(io.rhs);
-          I(it != str2dpin.end());
-          dpin = Node_pin(this, it->second);
+          if (it != str2dpin.end())
+            dpin = Node_pin(this, it->second);
         }else{
           dpin = Node_pin::find_driver_pin(this, mmap_lib::str(io.rhs));
         }
 
-        node.setup_sink_pin(mmap_lib::str(io.lhs)).connect_driver(dpin);
+        if (dpin.is_invalid()) {
+          pending.emplace_back(std::make_pair(node.setup_sink_pin(mmap_lib::str(io.lhs)), mmap_lib::str(io.rhs)));
+        }else{
+          node.setup_sink_pin(mmap_lib::str(io.lhs)).connect_driver(dpin);
+        }
+
       }else{ //----------- OUTPUT
 
         auto dpin = node.setup_driver_pin(mmap_lib::str(io.lhs));
@@ -166,6 +172,27 @@ void Lgraph::load() {
       }
     }
   });
+
+  for(const auto &p:pending) {
+    bool temp_name = p.second.front() == '_';
+    Node_pin dpin;
+
+    if (temp_name) {
+      auto it = str2dpin.find(p.second.to_s());
+      if (it != str2dpin.end())
+        dpin = Node_pin(this, it->second);
+    }else{
+      dpin = Node_pin::find_driver_pin(this, p.second);
+    }
+
+    if (dpin.is_invalid()) {
+      fmt::print("undriven input {}<-{}",p.first.get_wire_name(), p.second);
+    }else{
+      p.first.connect_driver(dpin);
+    }
+
+  }
+
 
 }
 
@@ -1536,9 +1563,16 @@ void Lgraph::save() {
         continue;
       ios.add(io_pin.is_input(), io_pin.name.to_s(), io_pin.get_io_pos());
 
-      auto dpin = Node_pin::find_driver_pin(this, io_pin.name);
-      if (!dpin.is_invalid()) {
-        auto bits = dpin.get_bits();
+      Bits_t bits=0;
+      if (io_pin.is_input()) {
+        auto old_dpin = get_graph_input(io_pin.name);
+        bits = old_dpin.get_bits();
+      }else{
+        auto old_spin = get_graph_output(io_pin.name);
+        bits = old_spin.change_to_driver_from_graph_out_sink().get_bits();
+      }
+
+      if (bits) {
         ios.add_attr(io_pin.name.to_s()+".bits", bits);
       }
     }
@@ -1609,9 +1643,18 @@ void Lgraph::save() {
   auto n = Hif_write::create_node();
   n.type = static_cast<uint16_t>(Ntype_op::IO);
   for(auto &e:get_graph_output_node(false).inp_edges()) {
-    if (e.driver.get_wire_name() == e.sink.get_name())
+    auto out_dpin = e.sink.change_to_driver_from_graph_out_sink();
+    if (!out_dpin.has_name()) {
+      if (e.driver.get_wire_name() == "%") {
+        n.add(true, "%", e.driver.get_wire_name().to_s());
+      }
       continue;
-    n.add(true, e.sink.get_name().to_s(), e.driver.get_wire_name().to_s());
+    }
+    if (e.driver.get_wire_name() == out_dpin.get_name()) {
+      continue;
+    }
+
+    n.add(true, out_dpin.get_name().to_s(), e.driver.get_wire_name().to_s());
   }
   if (!n.io.empty())
     wr->add(n);
