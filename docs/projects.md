@@ -22,7 +22,9 @@ Open projects are potential MS thesis/projects.
 
 ## Package Manager
 
-Create a cargo like package to interact with LiveHD shell.
+Create a cargo/npm-lite package to interact with LiveHD shell. The package manager
+is not to run, but to download, and setup bazel system for remote packages. If
+there are some run/bench/build, they are just proxies to bazel commands.
 
 Sample commands:
 
@@ -82,46 +84,75 @@ https://github.com/olofk/edalize
 Things that lhd is not:
 
 * It is not a build/make/bazel alternative. It tracks repos, but it has a
-  "toolchain" to decide/select how to run the tools. E.g: lhd run may create a
-makefile and call "make run", but this is hidden.
+  "toolchain" to decide/select how to run the tools. 
 
 * It does not have tons of options. The options are in toolchains that can be
   configured (not in the lhd.toml that should be quite minimal). The default is
 that everything should run in the LiveHD toolchain, but it can be extended to
 provide new toolchains.
 
-## mmap_lib projects
+* It hides some of the bazel complexities for new users, but it allows full bazel
+scripting to co-exists.
 
-* mmap_vset finish
-    * iterator: find: returns an iterator  begin/end to allow an iterator
-    * Use contains(key): to make it easy to port back/forth with abseil
-    * Add tests with Node_pin::Compact and Node::Compact
-* mmap_str
-    * Implement class
-    * replace sting_view/string for mmap_lib::str
-    * Replace the string_view storage from mmap_map to use the new mmap_lib::str
-* mmap_vector delete
-* Each structure mmap_vector, mmap_map, mmap_bimap, ... mmap_str should have a test and bench
+## HIF CIRCT 
+
+HIF (https://github.com/masc-ucsc/hif) stands for Hardware Interchange Format.
+It is designed to be a efficient binary representation with simple API that
+allows to have generic graph and tree representations commonly used by hardware
+tools. It is not designer to be a universal format, but rather a storate and
+traversal format for hardware tools.
+
+The goal of this project is to create a HIF read/write interface with different
+MLIR levels in CIRCT. This allows to have several tools/passes for simple
+queries without requiring the whole compiler.
+
+## HIF Javascript/rust/python
+
+
+HIF (https://github.com/masc-ucsc/hif) stands for Hardware Interchange Format.
+It is designed to be a efficient binary representation with simple API that
+allows to have generic graph and tree representations commonly used by hardware
+tools. It is not designer to be a universal format, but rather a storate and
+traversal format for hardware tools.
+
+
+The goal of this task is to create HIF read/write APIs for popular languages
+like Python, Javascript, and RUST.
+
+## HIF Yosys/nextpnr
+
+Use HIF for Yosys read/write, and read in nextpnr. This should allow a faster
+and more compact interaction between Yosys/nextpnr. Also, simplify the
+structure in nextpnr allowing other tools to interface more easily.
+
+## HIF Tooling
+
+HIF (https://github.com/masc-ucsc/hif) stands for Hardware Interchange Format.
+It is designed to be a efficient binary representation with simple API that
+allows to have generic graph and tree representations commonly used by hardware
+tools. It is not designer to be a universal format, but rather a storate and
+traversal format for hardware tools.
+
+LiveHD has 2 HIF interfaces, the tree (LNAST) and the graph (Lgraph). Both can
+read/write HIF format. The idea of this project is to expand the hif repository
+to create some small but useful tools around hif. Some projects:
+
+* hif_diff + hif_patch: Create the equivalent of the diff/patch commands that
+  exist for text but for HIF files. Since the HIF files have a more clear
+  structure, some patches changes are more constrained or better understood
+  (IOs and dependences are explicit).
+
+* hif_tree: Print the HIF hierarchy, somewhat similar to GNU tree but showing the HIF hieararchy.
+
+* hif_grep: capacity to grep for some tokens and outout a hif file only with those. Then a hif_tree/hif_cat can show the contents.
+
 
 ## ACT (Async) output
 
-Once pyrope with Fluid is in the flow, we could use Pyrope to program async designs too.
-It may be interesting to output ACT (https://avlsi.csl.yale.edu/act/doku.php) to interface
-with AVLSI flow.
+Once pyrope with Fluid is in the flow, we could use Pyrope to program async
+designs too.  It may be interesting to output ACT.
 
-## New Memoize Map
-
-Runtime (no persistence) memoization to reduce costly ops. Fixed size at
-compile time, with statistics about hit/miss utilization during DEBUG runs.
-Capacity to enable/disable at compile time if stats change.
-
-
-E.g: avoid calling costly Lgraph::open if frequently used. Or remember last
-insertion point in map/vector if just used....
-
-
-It should be very fast, and able to notify when not useful so that it can be
-enable/disabled per use if needed.
+(https://avlsi.csl.yale.edu/act/doku.php) to interface with AVLSI flow.
 
 
 ## Verilog input with a slang 2 LNAST pass
@@ -151,7 +182,8 @@ to handle classes.
 
 ## Lgraph to/from XLS IR
 
-Create a bridge between Lgraph and XLS IR. Not LNAST because the XLS IR is very close to Lgraph.
+Create a bridge between Lgraph and XLS IR. Not LNAST because the XLS IR is very
+close to Lgraph. Maybe the interface is with HIF format.
 
 Dependence: none
 
@@ -161,18 +193,6 @@ Main features:
 * Bridge to allow runs of DSLX to LiveHD
 * Bridge to allow from XLS IR to LiveHD
 * Bridge to allow from Lgraph to XLS IR
-
-## Lgraph to Yosys JSON
-
-The json format from yosys is used by several tools like nextpnr and netlistsvg. Creating the json interface
-could simplify the interface with yosys too.
-
-Dependence: none
-
-Main features:
-
-* Create a yosysjson pass that generates yosys compatible json files out of Lgraph
-* It may be also interesting to accept yosys json as input. Then, the bridge between yosys and LiveHD could be removed.
 
 ## Hot-Reload Simulation Console
 
@@ -205,80 +225,17 @@ Main features:
     * Allow to create markers for passing failing code to other people
     * Aloow to have command script file (load checkpoint, run X, mark Y, insert assert Y, continue x, peek X, poke Y, save waveform)
 
-## Tree-sitter Pyrope
-
-Using https://github.com/tekinengin/tree-sitter-pyrope as a starting point, complete the Pyrope grammar
-to correctly parse the Pyrope grammar (https://masc.soe.ucsc.edu/pyrope.html), interface with LiveHD
-and third party tools.
-
-Main features:
-
-* Pyrope tree-sitter grammar
-* tree-sitter to LNAST generation (Comparable to https://github.com/masc-ucsc/livehd/tree/master/inou/pyrope)
-* Atom and neovim integration
-* Atom go definition, highlight, and attribute
-* Atom capacity to query LNAST/Lgraph generated grammar for bit-width. The incremental grammar passed to LNAST, passed to Lgraph,
-  and incremental bit-width inference.
-* neovim highlight, indent, fold support
-* Integrate with atom-hide as extra language
-* create a prp-fmt that outputs formatted pyrope from the tree-sitter AST
-
-In addition to the packages, there should be an iterator that use the incremental builder to support incremental changes.
-
-## Parallel forward/backward traversal
-
-Lgraph has fwd/bwd/fast iterators. Those are efficient but single threaded. The idea is to create iterators
-that accept a lambda function. The idea is to "chunk" the graph in subgraphs and give a subchunk of the graph
-to each thread.
-
-Dependence: none
-
-Main features:
-
-* The workload distribution is with livehd/task Thread_pool
-* Possible to speedup the topological sort: https://link.springer.com/chapter/10.1007/978-981-10-5828-8_39
-* Fast is more straightforward (no hierarchical, just chunk the graph). 
-* The parallel should work with and without hierarchy, but it is more important
-  WITH hierarchy because those are the large graph traversals.
-
-To understand the forward, before a task starts with a sub-graph, all the inputs must be handled first.
-Similar to the backward but out all the subgraph outputs.
-
-A main challenge is that most data structures new a lock for read/writes. This
-would KILL performance. There could be several options, but the best would be
-to have a structure per thread. E.g: to compute bitwidth in parallel, each
-thread can have its own bitwidth data and populate the bits as an aggregation
-process once all the tasks have finished.
-
-This adds a significant complexity bar, so it should be handled per task. The
-most logical is bitwidth and cprop. Both can do the data structure per thread,
-and traverse to aggregate.
+## Keep Lgraph topologically sorted (incremental)
 
 
-The goal is to aim at 16 cores and achieve 10x speedup for those larger
-bitwidth/cprop tasks.
+Loading/saving a Lgraph is already topologically sorted. If we keep additions
+topologically sort, we can avoid the more costly forward/backward traversal
+operations.
 
-## Lgraph partition/decomposition
 
-Implement several partitioning algorithms in Lgraph. Each partition has a
-different attribute. The attributes/partitions could be used for
-synthesis/placement/...
+The goal is to have to track nodes not in topological order. The load/save does
+not need to keep it just during runtime.
 
-Dependence: none
-
-Main features:
-
-* Break graph partitions in disjoin sets and areas that do not have cross optimization (disjoin). Similar to MockTurtle partition method (separate by flops, large adders/multipliers/dividers).
-* Mincut partitioning. Use with https://github.com/SebastianSchlag/kahypar for min-cut
-* Port ESSENT acycling partitioning to C++. This reads a LGraph (or hierarchical lgraphs) and partitions the graph to several acycling partitions.
-* Live/Incremental partition. Given 2 graphs, find matching "partitions" across the graphs that finish in equivalent points (DAC paper has more details)
-
-Optional partitionings:
-* "Bottom-Up Disjoint-Support Decomposition Based on Cofactor and Boolean Difference Analysis" https://ieeexplore.ieee.org/abstract/document/7357181/
-* "Bi-decomposition of large Boolean functions using blocking edge graphs" https://dl.acm.org/citation.cfm?id=2133553
-
-Optional traversals:
-* It would be good to have extensions on the fast/forward/backward iterators that accept a "partition" to traverse instead of the whole graph
 
 ## Parallel and Hierarchical Synthesis with Mockturtle
 
@@ -317,19 +274,6 @@ Main features:
 * Benchmark the OpenWare against FPGA and ASIC default (designWare) targets
 * Specific target implementations for FPGA (Xilinx) and ASIC (generic)
 * Several speeds/trade-offs for each major block. E.g: adder RCA/Kogge/...
-
-## Synthesis (ASIC/FPGA) Competitive Analysis
-
-Competitive analysis finding main weakpoints for the synthesis flow. Both FPGA and ASIC targets.
-
-Dependence: Mockturtle + OpenWare projects
-
-Main features:
-
-* Goal to run several large tests (Anubis) and BOOM and Titan23 (http://www.eecg.utoronto.ca/~kmurray/titan.html).
-* Compare against vivado, quartus, DC, ABC, Mockturtle.... results can not be published directly but OK as A/B/C vs Lgraph+XX.
-* Important to focus on OpenWare Lgraph flow vs others
-* Create regression system that plots freq/area/power for several key benchmarks
 
 ## Useful Lgraph Passes
 
