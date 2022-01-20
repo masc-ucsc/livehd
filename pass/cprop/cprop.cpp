@@ -705,6 +705,7 @@ void Cprop::tuple_mux_mut(Node &node) {
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
   if (tup) {
+    tup->dump();
     node2tuple[node.get_compact()] = tup;
   }
 
@@ -1214,13 +1215,27 @@ void Cprop::tuple_tuple_add(const Node &node) {
   node2tuple[node.get_compact()] = node_tup;
 }
 
+bool Cprop::is_runtime_index_case(const std::shared_ptr<Lgtuple const> &node_tup) {
+	for (const auto &itr : node_tup->get_map()) {
+		if (Lgtuple::is_attribute(itr.first)) {
+			continue;
+		}
+
+		if (itr.first.is_string()) 
+			return false;
+	}
+	return true;
+}
+
+
 bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup) {
 #ifndef NDEBUG
-  Pass::info("handle runtime index node:{}\n", ori_tg.debug_name());
+	Pass::info("handle runtime index node:{}\n", ori_tg.debug_name());
 #endif
   auto mux_node = ori_tg.create(Ntype_op::Mux);
 
   // connect mux select pin
+  // auto sel_dpin = field_node.setup_driver_pin();
   auto sel_dpin = field_node.setup_driver_pin_raw(0);
   mux_node.setup_sink_pin("0").connect_driver(sel_dpin);
 
@@ -1233,33 +1248,33 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 
   auto new_tg_parent_dpin = ori_tg.setup_sink_pin("parent").get_driver_pin();
 
-  for (const auto &e : parent_tup->get_sort_map()) {
-    if (Lgtuple::is_attribute(e.first)) {
+  for (const auto &itr : parent_tup->get_sort_map()) {
+    if (Lgtuple::is_attribute(itr.first)) {
       continue;
     } 
 
     // 1. create new tuple_gets to fetch the value from the tuple_add 
     //    and then connect the tg output to the corresponding mux input port
     auto new_tg = ori_tg.create(Ntype_op::TupGet);
-    auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(e.first.to_i()+1));
+    auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(itr.first.to_i()+1));
     new_tg.setup_driver_pin().connect_sink(mux_spin);
 
     auto new_tg_field_spin = new_tg.setup_sink_pin("field");
-    auto new_tg_field_dpin = ori_tg.create_const(e.first.to_i());
+    auto new_tg_field_dpin = ori_tg.create_const(itr.first.to_i());
     new_tg_field_spin.connect_driver(new_tg_field_dpin);
     
     auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
     new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
 
     // 2. fetch sub_tuple for the new TGs
-    auto sub_tuple = parent_tup->get_sub_tuple(mmap_lib::str(e.first));
+    auto sub_tuple = parent_tup->get_sub_tuple(mmap_lib::str(itr.first));
     node2tuple[new_tg.get_compact()] = sub_tuple;
   }
 
   // node2tuple[mux_node.get_compact()] = parent_tup;
   tuple_mux_mut(mux_node);
   ori_tg.del_node();
-return true;
+	return true;
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
@@ -1276,9 +1291,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
       return false;
     }
   }
-
   if (key_name.empty()) {
-    bool runtime_idx_ok = false;
     if (node.is_sink_connected("field") && node_tup) {
       auto field_node  = node.get_sink_pin("field").get_driver_node();
       auto fieldtup_it = node2tuple.find(field_node.get_compact());
@@ -1290,11 +1303,15 @@ bool Cprop::tuple_tuple_get(Node &node) {
           node2tuple[node.get_compact()] = sub_tup;
           return true;
         }
+				// return handle_runtime_index(node, field_node, node_tup);
       } 
-      runtime_idx_ok = handle_runtime_index(node, field_node, node_tup);
+			// Note: if any of the index is not constant integer -> it's not a suit for runtime index
+			if (is_runtime_index_case(node_tup)) {
+				return handle_runtime_index(node, field_node, node_tup);
+			}
     }
 
-    if (!tuple_issues || !runtime_idx_ok) {
+    if (!tuple_issues) {
       node_tup->set_issue();  // It is not right
       tuple_issues = true;
       Pass::error("tuple_get {} for tuple {} has no way to find field", node.debug_name(), tup_name);
@@ -1777,6 +1794,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
+// FIXME: n20 TA should be handle here, maybe
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");
@@ -1871,6 +1889,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
   if (it->second->is_trivial_scalar()) {
     auto out_edges_list = node.out_edges();
     if (!out_edges_list.empty())
+      // FIXME: n20 TA should be handle here, maybe
       expand_data_and_attributes(node, "", out_edges_list, it->second);
   } else {
   // I(input should not be constant)
@@ -2310,8 +2329,7 @@ void Cprop::bwd_del_node(Node &node) {
 
     I(!n.is_invalid());
 
-    // FIXME->sh: I think attrSet should never be deleted? 
-    if (!n.is_type_loop_last() && !n.has_outputs() && n.get_type_op() != Ntype_op::AttrSet) {
+    if (!n.is_type_loop_last() && !n.has_outputs()) {
       for (auto e : n.inp_edges()) {
         if (e.driver.is_graph_io())
           continue;

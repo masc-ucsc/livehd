@@ -89,6 +89,7 @@ cc_library(
     "firrtl_gcd_3bits",
     "firrtl_tail3",
     "connect_through2",
+    "direct_io_assign",
     #"connect_through",  FIXME: re-enable
     "top",
 ]]

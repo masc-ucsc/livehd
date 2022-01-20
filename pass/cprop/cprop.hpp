@@ -52,6 +52,7 @@ protected:
   void reconnect_tuple_add(Node &node);
   void reconnect_tuple_get(Node &node);
   bool handle_runtime_index(Node &tg_node, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup); 
+  bool is_runtime_index_case(const std::shared_ptr<Lgtuple const> &node_tup);
 
   Node_pin expand_data_and_attributes(Node &node, const mmap_lib::str &key_name, XEdge_iterator &pending_out_edges,
                                       const std::shared_ptr<Lgtuple const> &node_tup);
