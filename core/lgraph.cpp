@@ -60,8 +60,8 @@ void Lgraph::load() {
 
     }else if (op == Ntype_op::Sub) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "subid");
-      I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::Base2_cat);
-      I(stmt.attr[0].lhs.size() == 8);
+      I(stmt.attr[0].rhs_cat == Hif_base::ID_cat::Base2_cat);
+      I(stmt.attr[0].rhs.size() == 8);
 
       auto subid = *reinterpret_cast<const int64_t *>(stmt.attr[0].rhs.data());
       node = create_node_sub(Lg_type_id(subid));
@@ -147,7 +147,6 @@ void Lgraph::load() {
         }
 
       }else{ //----------- OUTPUT
-
         auto dpin = node.setup_driver_pin(mmap_lib::str(io.lhs));
 
         auto lhs_bits = io.lhs + ".bits";
@@ -190,10 +189,7 @@ void Lgraph::load() {
     }else{
       p.first.connect_driver(dpin);
     }
-
   }
-
-
 }
 
 Lgraph::~Lgraph() {

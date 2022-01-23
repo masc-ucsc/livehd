@@ -32,7 +32,7 @@ private:
   inline static std::mutex lgs_mutex; // just needed for the once at a time setup of static reserved_keyword
   inline static absl::flat_hash_set<mmap_lib::str> reserved_keyword;
 
-  static mmap_lib::str get_wire_or_const(const Node_pin &dpin);
+  mmap_lib::str get_wire_or_const(const Node_pin &dpin) const;
   static mmap_lib::str get_scaped_name(const mmap_lib::str name);
 
   mmap_lib::str get_append_to_name(const mmap_lib::str name, const mmap_lib::str ext) const;

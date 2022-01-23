@@ -156,8 +156,13 @@ public:
   }
 
   static inline constexpr mmap_lib::str get_sink_name(Ntype_op op, int pid) {
-    if (pid > 10)
-      pid = pid % 11;  // wrap names around for multi inputs like memory cell
+    if (pid > 10) {
+      auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
+      auto name = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
+      assert(name != "invalid");
+
+      return mmap_lib::str::concat(pid, name);
+    }
 
     auto name = sink_pid2name[pid][static_cast<std::size_t>(op)];
     assert(name != "invalid");
@@ -179,7 +184,8 @@ public:
   }
 
   static inline constexpr mmap_lib::str get_driver_name(Ntype_op op) {
-    return is_multi_driver(op) ? mmap_lib::str("invalid") : mmap_lib::str("Y");
+    assert(!is_multi_driver(op)); // use <PID> for multidriveer pins
+    return {"Y"};
   }
 
   static inline constexpr bool has_driver(Ntype_op op, int pid) {

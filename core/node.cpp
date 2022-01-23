@@ -137,6 +137,20 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   return Node_pin(top_g, current_g, hidx, idx, pid, true);
 }
 
+Node_pin Node::setup_driver_pin(const mmap_lib::str &pname) const {
+  assert(pname.size());
+  if (std::isdigit(pname.front())) {
+    Port_ID pid = pname.to_i();
+    Index_id idx = current_g->setup_idx_from_pid(nid, pid);
+    return Node_pin(top_g, current_g, hidx, idx, pid, false);
+  }
+  if (unlikely(is_type_sub() && pname != "%")) {
+    return setup_driver_pin_slow(pname);
+  }
+  GI(pname != "%", !Ntype::is_multi_driver(get_type_op()));  // Use direct pid for multidriver
+  return Node_pin(top_g, current_g, hidx, nid, 0, false);
+}
+
 Node_pin Node::get_driver_pin_slow(const mmap_lib::str &pname) const {
   I(is_type_sub());
   I(pname != "%");

@@ -325,34 +325,13 @@ void Bitwidth::process_memory(Node &node) {
   {
     for (auto &e : node.inp_edges_ordered()) {
       auto n = e.sink.get_pin_name();
-      if (n == "clock") {
+      if (n.ends_with("clock")) {
         auto it = bwmap.find(e.driver.get_compact_class());
         if (it == bwmap.end()) {
           set_bw_1bit(e.driver);
 
           discovered_some_backward_nodes_try_again = true;
         }
-      } else if (n == "din" || n == "addr") {
-        auto   it    = bwmap.find(e.driver.get_compact_class());
-        Bits_t dbits = 0;
-        if (it != bwmap.end()) {
-          dbits = it->second.get_sbits();
-        } else {
-          if (n == "din")
-            mem_din_bits_missing = true;
-          else
-            mem_addr_bits_missing = true;
-        }
-
-        if (n == "din") {
-          mem_din_bits = std::max(dbits, mem_din_bits);
-          din_drivers.emplace_back(e.driver);
-        } else {
-          I(n == "addr");
-          mem_addr_bits = std::max(dbits, mem_addr_bits);
-          addr_drivers.emplace_back(e.driver);
-        }
-
       } else if (n == "bits" || n == "size") {
         auto val = e.driver.get_type_const();
         if (!e.driver.is_type_const()) {
@@ -371,6 +350,30 @@ void Bitwidth::process_memory(Node &node) {
         } else {
           I(n == "size");
           mem_size = v;
+        }
+      } else {
+        auto n_din = n.ends_with("din");
+        auto n_addr = n.ends_with("addr");
+        if (n_din || n_addr) {
+          auto   it    = bwmap.find(e.driver.get_compact_class());
+          Bits_t dbits = 0;
+          if (it != bwmap.end()) {
+            dbits = it->second.get_sbits();
+          } else {
+            if (n_din)
+              mem_din_bits_missing = true;
+            else
+              mem_addr_bits_missing = true;
+          }
+
+          if (n_din) {
+            mem_din_bits = std::max(dbits, mem_din_bits);
+            din_drivers.emplace_back(e.driver);
+          } else {
+            I(n_addr);
+            mem_addr_bits = std::max(dbits, mem_addr_bits);
+            addr_drivers.emplace_back(e.driver);
+          }
         }
       }
     }

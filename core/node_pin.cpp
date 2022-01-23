@@ -483,8 +483,12 @@ mmap_lib::str Node_pin::get_pin_name() const {
     return get_type_sub_pin_name();
   }
 
-  if (is_driver())
+  if (is_driver()) {
+    if (Ntype::is_multi_driver(op))
+      return mmap_lib::str(pid);
+
     return Ntype::get_driver_name(op);
+  }
 
   return Ntype::get_sink_name(op, pid);
 }

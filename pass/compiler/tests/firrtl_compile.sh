@@ -55,7 +55,7 @@ firrtl_test() {
     fi
     rm -rf ./lgdb_${pt}
     ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:true top:${pt} firrtl:true path:lgdb_${pt}"
+    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:true top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"

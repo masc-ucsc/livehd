@@ -34,7 +34,11 @@ Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str _odir) : verbose(_
   }
 }
 
-mmap_lib::str Cgen_verilog::get_wire_or_const(const Node_pin &dpin) {
+mmap_lib::str Cgen_verilog::get_wire_or_const(const Node_pin &dpin) const {
+  auto var_it = pin2var.find(dpin.get_compact_class());
+  if (var_it != pin2var.end())
+    return var_it->second;
+
   if (dpin.is_type_const())
     return dpin.get_type_const().to_verilog();
 
@@ -173,15 +177,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
         return;
       }
       mem_fwd = e.driver.get_type_const().to_i();
-    } else if (pin_name == "clock") {
+    } else if (pin_name.ends_with("clock")) {
       port_vector[port_id].clock = e.driver;
-    } else if (pin_name == "addr") {
+    } else if (pin_name.ends_with("addr")) {
       port_vector[port_id].addr = e.driver;
-    } else if (pin_name == "enable") {
+    } else if (pin_name.ends_with("enable")) {
       port_vector[port_id].enable = e.driver;
-    } else if (pin_name == "din") {
+    } else if (pin_name.ends_with("din")) {
       port_vector[port_id].din = e.driver;
-    } else if (pin_name == "rdport") {
+    } else if (pin_name.ends_with("rdport")) {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
@@ -748,7 +752,7 @@ void Cgen_verilog::create_memories(std::shared_ptr<File_output> fout, Lgraph *lg
 }
 
 void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, Lgraph *lg) {
-  lg->each_local_sub_fast([fout](Node &node, Lg_type_id lgid) {
+  lg->each_local_sub_fast([this,fout](Node &node, Lg_type_id lgid) {
     (void)lgid;
 
     auto        iname = get_scaped_name(node.default_instance_name());

@@ -86,7 +86,7 @@ Pyrope_step () {
 
 	rm -rf lgdb_prp
   ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save"
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save hier:true"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not direct compile with files:${all_files}!"
@@ -94,7 +94,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf tmp_prp_v
-	${LGSHELL} "lgraph.open hier:true path:lgdb_prp name:${top_module} |> inou.cgen.verilog odir:tmp_prp_v"
+	${LGSHELL} "lgraph.open hier:true path:lgdb_prp name:${top_module} |> pass.bitwidth |> inou.cgen.verilog odir:tmp_prp_v"
 	if [ $? -eq 0 ] && [ -f "tmp_prp_v/${pt}.v" ]; then
 		echo "Successfully generate Verilog: tmp_prp_v/${pt}.v"
 	else
@@ -130,7 +130,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf lgdb_prp2prp
-	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module} |> lgraph.save"
+	${LGSHELL} "files src_path:tmp_prp match:\"\.prp$\" filter:"_err\.prp$" |> inou.pyrope |> pass.compiler path:lgdb_prp2prp gviz:true top:${top_module} |> lgraph.save hier:true"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not prp2prp compile with files:${all_files}!"
@@ -138,7 +138,7 @@ Pyrope_step () {
 	fi
 
 	rm -rf tmp_prp2prp_v
-	${LGSHELL} "lgraph.open hier:true path:lgdb_prp2prp name:${top_module} |> inou.cgen.verilog odir:tmp_prp2prp_v"
+	${LGSHELL} "lgraph.open hier:true path:lgdb_prp2prp name:${top_module} |> pass.bitwidth |> inou.cgen.verilog odir:tmp_prp2prp_v"
 	if [ $? -eq 0 ] && [ -f "tmp_prp2prp_v/${pt}.v" ]; then
 		echo "Successfully generate Verilog: tmp_prp2prp_v/${pt}.v"
 	else
