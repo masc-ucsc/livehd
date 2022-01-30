@@ -10,6 +10,7 @@
 static Pass_plugin sample("pass_label", Pass_label::setup);
 
 Pass_label::Pass_label(const Eprp_var &var) : Pass("pass.label", var) {
+  
   auto hier_txt = var.get("hier");
 
   if (hier_txt != "false" && hier_txt != "0")
@@ -39,6 +40,7 @@ void Pass_label::setup() {
 
   Eprp_method m3(mmap_lib::str("pass.label.acyclic"), mmap_lib::str("Label a graph with aclyclic combinational calls"), &Pass_label::label_acyclic);
   m3.add_label_optional("hier", mmap_lib::str("hierarchical traversal/labeling"), "false");
+  m3.add_label_optional("cutoff", mmap_lib::str("small partition node count cutoff"), "1");
   m3.add_label_optional("verbose", mmap_lib::str("verbose statistics and information"), "false");
   register_pass(m3);
 }
@@ -67,8 +69,12 @@ void Pass_label::label_synth(Eprp_var &var) {
 
 void Pass_label::label_acyclic(Eprp_var &var) {
   Pass_label pp(var);
+  
+  // cutoff_str will be type mmap_lib::str
+  auto cutoff_str = var.get("cutoff");
+  auto cutoff = static_cast<uint8_t>(std::stoi(cutoff_str.to_s()));
 
-  Label_acyclic p(pp.verbose, pp.hier);
+  Label_acyclic p(pp.verbose, pp.hier, cutoff);
 
   for (const auto &l : var.lgs) {
     p.label(l);

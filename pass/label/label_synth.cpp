@@ -150,7 +150,7 @@ void Label_synth::dump() const {
   }
 }
 
-void Label_synth::label(Lgraph *g) {
+void Label_synth::label(Lgraph *g) {  
   last_free_id = 1;
 
   mark_ids(g);

@@ -11,9 +11,13 @@ class Label_acyclic {
 private:
   const bool verbose;
   const bool hier;
+  uint8_t    cutoff;
 
 public:
   void label(Lgraph *g);
 
-  Label_acyclic(bool _verbose, bool _hier);
+  Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff);
+
+  void dump() const;
+
 };
