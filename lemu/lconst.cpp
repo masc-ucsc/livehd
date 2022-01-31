@@ -327,9 +327,9 @@ Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
 
   if (negative) {
     num = -num;
-    if (unsigned_result && num<0) {
-      throw std::runtime_error(fmt::format("ERROR: {} negative value but it must be unsigned\n", orig_txt));
-    }
+    /* if (unsigned_result && num<0) { */
+    /*   throw std::runtime_error(fmt::format("ERROR: {} negative value but it must be unsigned\n", orig_txt)); */
+    /* } */
   }
 
   return Lconst(false, calc_num_bits(num), num);
@@ -1154,12 +1154,13 @@ mmap_lib::str Lconst::to_pyrope() const {
 
   const auto        v = get_num();
   if (is_i()) { // Most common case
-    if (v>=0 && v<=63) { // Integer
-      return mmap_lib::str(to_i());
-    }
-    char str2[12];
-
     auto val = to_i();
+    if (val>=-63 && val<=63) { // Integer
+      return {val};
+    }
+
+    char str2[20];
+
     size_t delta;
     if (val<0) {
       val = -val;
@@ -1173,7 +1174,7 @@ mmap_lib::str Lconst::to_pyrope() const {
       delta=2;
     }
 
-    auto [ptr, ec] = std::to_chars(str2+delta, str2 + 12, val, 16);
+    auto [ptr, ec] = std::to_chars(str2+delta, str2 + 20, val, 16);
     return mmap_lib::str(str2, ptr-str2);
   }
 
