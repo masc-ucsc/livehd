@@ -184,6 +184,7 @@ public:
   }
 
   static inline constexpr mmap_lib::str get_driver_name(Ntype_op op) {
+    (void)op;
     assert(!is_multi_driver(op)); // use <PID> for multidriveer pins
     return {"Y"};
   }
