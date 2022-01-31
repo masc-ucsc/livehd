@@ -6,6 +6,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "mmap_tree.hpp"
+#include "perf_tracing.hpp"
 #include "spmc.hpp"
 #include "thread_pool.hpp"
 
@@ -68,6 +69,9 @@ void check_test_order(Lgraph *top) {
 // performs Topological Sort on a given DAG
 void do_fwd_traversal(Lgraph *lg, const std::string &name) {
   {
+    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) {
+      ctx.event()->set_name("ITER_" + name + "_fast");
+    });
     Lbench b("core.ITER_" + name + "_fast");
 
     setup_test_order();
@@ -80,6 +84,9 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     }
   }
   {
+    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) {
+      ctx.event()->set_name("ITER_" + name + "_fwd");
+    });
     Lbench b("core.ITER_" + name + "_fwd");
 
     setup_test_order();
@@ -603,6 +610,7 @@ int main(int argc, char **argv) {
     fmt::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
     auto *lg = Lgraph::open(argv[1], argv[2]);
 
+    TRACE_EVENT("core", "fwd.custom");
     Lbench bench("fwd.custom");
     int    total = 0;
 //#define ITER_MMAP 1

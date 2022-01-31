@@ -9,6 +9,7 @@
 #include "lgraph.hpp"
 #include "lrand.hpp"
 #include "mmap_map.hpp"
+#include "perf_tracing.hpp"
 
 class Edge_test : public ::testing::Test {
 protected:
@@ -377,6 +378,7 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
   std::shuffle(all_edges.begin(), all_edges.end(), std::knuth_b());
 
   {
+    TRACE_EVENT("core", "EDGE_overflow_delete_del_edge");
     Lbench bench("core.EDGE_overflow_delete_del_edge");
 
     for (auto &e : all_edges) {
@@ -414,6 +416,7 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
   }
 
   {
+    TRACE_EVENT("core", "EDGE_overflow_delete_del_node");
     Lbench bench("core.EDGE_overflow_delete_del_node");
 
     s1.del_node();

@@ -11,11 +11,13 @@
 #include "lgraph.hpp"
 #include "lrand.hpp"
 #include "mmap_tree.hpp"
+#include "perf_tracing.hpp"
 #include "tree_lgdb_setup.hpp"
 
 class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {
+    TRACE_EVENT("core", "TRAVERSE_check_lgraph_fwd");
     Lbench bench("core.TRAVERSE_check_lgraph_fwd");
 
     I(lg_root);

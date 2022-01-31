@@ -13,6 +13,7 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
+#include "perf_tracing.hpp"
 
 class Setup_graph_core : public ::testing::Test {
 protected:
@@ -269,6 +270,9 @@ TEST_F(Setup_graph_core, delete_edge) {
 TEST_F(Setup_graph_core, bench_boost) {
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {  // test1
 
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test1_boost_insert_" + std::to_string(sz));
+    });
     Lbench b("test1_boost_insert_" + std::to_string(sz));
 
     boost::adjacency_list<boost::vecS,
@@ -289,6 +293,9 @@ TEST_F(Setup_graph_core, bench_boost) {
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {  // test2
 
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test2_boost_delete_" + std::to_string(sz));
+    });
     Lbench b("test2_boost_delete_" + std::to_string(sz));
 
     boost::adjacency_list<boost::vecS,
@@ -317,6 +324,9 @@ TEST_F(Setup_graph_core, bench_boost) {
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {  // test1
 
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test1_boost_chain_" + std::to_string(sz));
+    });
     Lbench b("test1_boost_chain_" + std::to_string(sz));
 
     boost::adjacency_list<boost::vecS,
@@ -342,6 +352,9 @@ TEST_F(Setup_graph_core, bench_boost) {
 
 TEST_F(Setup_graph_core, bench_gc) {
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test1_gc_insert_" + std::to_string(sz));
+    });
     Lbench b("test1_gc_insert_" + std::to_string(sz));
 
     Graph_core gc("lgdb_graph_core_test", "bench_test1");
@@ -357,6 +370,9 @@ TEST_F(Setup_graph_core, bench_gc) {
   }
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test2_gc_delete_" + std::to_string(sz));
+    });
     Lbench b("test2_gc_delete_" + std::to_string(sz));
 
     Graph_core gc("lgdb_graph_core_test", "bench_test1");
@@ -380,6 +396,9 @@ TEST_F(Setup_graph_core, bench_gc) {
   }
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test1_gc_chain_" + std::to_string(sz));
+    });
     Lbench b("test1_gc_chain_" + std::to_string(sz));
 
     Graph_core gc("lgdb_graph_core_test", "bench_test2");
@@ -403,6 +422,9 @@ TEST_F(Setup_graph_core, bench_lgraph) {
   // once it replaced node_internal)
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test1_lg_insert_" + std::to_string(sz));
+    });
     Lbench b("test1_lg_insert_" + std::to_string(sz));
 
     auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");
@@ -420,6 +442,9 @@ TEST_F(Setup_graph_core, bench_lgraph) {
   }
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test2_lg_delete_" + std::to_string(sz));
+    });
     Lbench b("test2_lg_delete_" + std::to_string(sz));
 
     auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");

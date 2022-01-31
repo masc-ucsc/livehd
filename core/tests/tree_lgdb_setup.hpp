@@ -10,6 +10,7 @@
 #include "lgraph.hpp"
 #include "lrand.hpp"
 #include "mmap_tree.hpp"
+#include "perf_tracing.hpp"
 
 using testing::HasSubstr;
 
@@ -40,6 +41,9 @@ protected:
   using Bwd_pos_attr               = Attribute<bwd_name, Node, mmap_lib::map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph(const std::string &test_name) {
+    TRACE_EVENT("core", nullptr, [&test_name](perfetto::EventContext ctx) {
+      ctx.event()->set_name(test_name + "_map_tree_to_lgraph");
+    });
     Lbench bench(test_name + "_map_tree_to_lgraph");
 
     std::vector<mmap_lib::Tree_index> index_order;

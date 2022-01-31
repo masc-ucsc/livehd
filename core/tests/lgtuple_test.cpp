@@ -60,6 +60,7 @@ protected:
 // FIXME
 #if 0
 TEST_F(Lgtuple_test, flat1) {
+  TRACE_EVENT("core", "lgtuple_test.FLAT1");
   Lbench b("lgtuple_test.FLAT1");
 
   std::vector<mmap_lib::str> names;
@@ -90,6 +91,7 @@ TEST_F(Lgtuple_test, flat1) {
 }
 
 TEST_F(Lgtuple_test, flat2) {
+  TRACE_EVENT("core", "lgtuple_test.FLAT2");
   Lbench b("lgtuple_test.FLAT2");
 
   std::vector<mmap_lib::str> names;
@@ -107,6 +109,7 @@ TEST_F(Lgtuple_test, flat2) {
 }
 
 TEST_F(Lgtuple_test, flat3) {
+  TRACE_EVENT("core", "lgtuple_test.FLAT3");
   Lbench b("lgtuple_test.FLAT3");
 
   std::vector<mmap_lib::str> names;
@@ -134,6 +137,7 @@ TEST_F(Lgtuple_test, flat3) {
 }
 
 TEST_F(Lgtuple_test, hier1) {
+  TRACE_EVENT("core", "lgtuple_test.HIER1");
   Lbench b("lgtuple_test.HIER1");
 
   std::vector<mmap_lib::str> names;
@@ -155,6 +159,7 @@ TEST_F(Lgtuple_test, hier1) {
 }
 
 TEST_F(Lgtuple_test, hier2) {
+  TRACE_EVENT("core", "lgtuple_test.HIER2");
   Lbench b("lgtuple_test.HIER2");
 
   std::vector<mmap_lib::str> names;
@@ -180,6 +185,7 @@ TEST_F(Lgtuple_test, hier2) {
 }
 
 TEST_F(Lgtuple_test, nested1) {
+  TRACE_EVENT("core", "lgtuple_test.NESTED1");
   Lbench b("lgtuple_test.NESTED1");
 
   auto top = std::make_shared<Lgtuple>("top");
