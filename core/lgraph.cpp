@@ -23,7 +23,7 @@ Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_i
   I(!_name.contains('/'));  // No path in name
   I(_name == get_name());
 
-  load();
+  // load();
 }
 
 void Lgraph::load() {
@@ -252,7 +252,9 @@ Lgraph *Lgraph::open(const mmap_lib::str &path, Lg_type_id lgid) {
   if (!lib->exists(lgid))
     return nullptr;
 
-  return lib->setup_lgraph(lib->get_name(lgid), lib->get_source(lgid));
+  lg = lib->setup_lgraph(lib->get_name(lgid), lib->get_source(lgid));
+  lg->load();
+  return lg;
 }
 
 Lgraph *Lgraph::open(const mmap_lib::str &path, const mmap_lib::str &name) {
@@ -268,7 +270,9 @@ Lgraph *Lgraph::open(const mmap_lib::str &path, const mmap_lib::str &name) {
   if (unlikely(!lib->has_name(name)))
     return nullptr;
 
-  return lib->setup_lgraph(name, lib->get_source(name));
+  lg = lib->setup_lgraph(name, lib->get_source(name));
+  lg->load();
+  return lg;
 }
 
 void Lgraph::rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest) {
