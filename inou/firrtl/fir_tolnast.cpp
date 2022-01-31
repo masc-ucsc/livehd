@@ -13,6 +13,7 @@
 #include "google/protobuf/util/time_util.h"
 #include "inou_firrtl.hpp"
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 #include "thread_pool.hpp"
 
 using google::protobuf::util::TimeUtil;
@@ -24,6 +25,7 @@ using google::protobuf::util::TimeUtil;
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
 void Inou_firrtl::to_lnast(Eprp_var& var) {
+  TRACE_EVENT("inou", "fir_tolnast:all");
   Lbench b("inou.fir_tolnast:all");
 
   Inou_firrtl p(var);
@@ -2172,6 +2174,7 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
     if (circuit.module(i).has_user_module()) {
       // user_module_to_lnast(var, circuit.module(i), file_name);
       thread_pool.add([this, &var, &circuit, i, &file_name] () -> void {
+        TRACE_EVENT("inou", "fir_tolnast:module");
         Lbench b("inou.fir_tolnast:module");
         this->user_module_to_lnast(var, circuit.module(i), file_name);
       });

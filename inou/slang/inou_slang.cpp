@@ -7,6 +7,7 @@
 
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 
 // clang-format on
 
@@ -28,6 +29,7 @@ void Inou_slang::setup() {
 Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Inou_slang::work(Eprp_var &var) {
+  TRACE_EVENT("inou", "SLANG_verilog");
   Lbench     b("inou.SLANG_verilog");
   Inou_slang p(var);
 

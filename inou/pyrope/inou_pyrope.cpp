@@ -6,6 +6,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 #include "prp_lnast.hpp"
 
 void setup_inou_pyrope() { Inou_pyrope::setup(); }
@@ -20,6 +21,7 @@ void Inou_pyrope::setup() {
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
 void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
+  TRACE_EVENT("inou", "PYROPE_parse_to_lnast");
   Lbench      b("inou.PYROPE_parse_to_lnast");
   Inou_pyrope p(var);
 

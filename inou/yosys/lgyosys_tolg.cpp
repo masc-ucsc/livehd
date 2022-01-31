@@ -20,6 +20,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 
 // When true, the cell bits should have no effect (set to zero or large num for
 // bitwidth to adjust should work too)
@@ -51,7 +52,7 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     // log("input %s\n",wire->name.c_str());
     I(!wire->port_output);  // any bidirectional port?
     I(wire->name.c_str()[0] == '\\');
-    Node_pin pin;
+    Node_pin      pin;
     mmap_lib::str wname(&wire->name.c_str()[1]);
     if (g->has_graph_input(wname)) {
       pin = g->get_graph_input(wname);
@@ -106,7 +107,7 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
   mmap_lib::str val;
   if (is_signed) {
     val = "0sb";
-  }else{
+  } else {
     val = "0b";
   }
 
@@ -1053,7 +1054,7 @@ static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, u
 
     auto n_z = current_dpin.get_bits();
 
-    auto local_or_node = g->create_node(Ntype_op::Or, nbits);
+    auto          local_or_node = g->create_node(Ntype_op::Or, nbits);
     mmap_lib::str mask("0b");
     mask = mask.append(n_x, '?');
     mask = mask.append(n_z, '0');
@@ -2226,7 +2227,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     log_header(design, "Executing yosys2lg pass (convert from yosys to lgraph).\n");
 
     // parse options
-    size_t      argidx;
+    size_t        argidx;
     mmap_lib::str path("lgdb");
 
     for (argidx = 1; argidx < args.size(); argidx++) {
@@ -2249,17 +2250,17 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     for (auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
-      mmap_lib::str mod_name(&mod->name.c_str()[1]);
+      mmap_lib::str  mod_name(&mod->name.c_str()[1]);
 
-      auto *g= library->try_find_lgraph(mod_name);
+      auto *g = library->try_find_lgraph(mod_name);
       if (g == nullptr) {
         g = ::Lgraph::create(path, mod_name, "-");
       }
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {
-        RTLIL::Wire *wire = mod->wire(port);
-        mmap_lib::str  wire_name(&wire->name.c_str()[1]);
+        RTLIL::Wire  *wire = mod->wire(port);
+        mmap_lib::str wire_name(&wire->name.c_str()[1]);
 
         auto cell_port = mmap_lib::str::concat(mod->name.str(), "_:_", wire->name.str());
         if (wire->port_input && !wire->port_output) {
@@ -2277,9 +2278,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
           else
             g->add_graph_output(wire_name, wire->port_id, wire->width);
         } else {
-          ::Lgraph::error("inou.yosys.tolg: mod:{} bidirectional:{} NOT supported by livehd\n",
-                          mod->name.str(),
-                          wire->name.str());
+          ::Lgraph::error("inou.yosys.tolg: mod:{} bidirectional:{} NOT supported by livehd\n", mod->name.str(), wire->name.str());
         }
       }
     }
@@ -2292,11 +2291,14 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
+        TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) {
+          ctx.event()->set_name("YOSYS_tolg_" + mod_name.to_s());
+        });
         Lbench b("inou.YOSYS_tolg_" + mod_name.to_s());
 
         for (const auto &port : mod->ports) {
-          RTLIL::Wire *wire = mod->wire(port);
-          mmap_lib::str  wire_name(&wire->name.c_str()[1]);
+          RTLIL::Wire  *wire = mod->wire(port);
+          mmap_lib::str wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {
             pending_outputs.emplace_back(wire);
           }

@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 int main(int argc, char **argv) {
   if (argc != 2) {
@@ -12,6 +13,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  TRACE_EVENT("inou", "PYROPE_prp");
   Lbench bench("inou.PYROPE_prp");
 
   Prp scanner;

@@ -6,6 +6,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
 
 static Pass_plugin sample("inou_prp", Inou_prp::setup);
@@ -20,7 +21,8 @@ void Inou_prp::setup() {
 Inou_prp::Inou_prp(const Eprp_var &var) : Pass("inou.prp", var) {}
 
 void Inou_prp::parse_to_lnast(Eprp_var &var) {
-  Lbench      b("inou.PRP_parse_to_lnast");
+  TRACE_EVENT("inou", "PRP_parse_to_lnast");
+  Lbench   b("inou.PRP_parse_to_lnast");
   Inou_prp p(var);
 
   for (auto f : p.files.split(',')) {

@@ -18,11 +18,12 @@
 #include "inou_liveparse.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 
 Chunkify_verilog::Chunkify_verilog(const mmap_lib::str &_path) : path(_path) { library = Graph_library::instance(path); }
 
 int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
-  int         fd = open(filename.to_s().c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  int fd = open(filename.to_s().c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
     throw scan_error(*this, "could not open {} for output", filename);
   }
@@ -111,8 +112,8 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, const mmap_lib::str &io
 void Chunkify_verilog::elaborate() {
   auto parse_path = path.to_s() + "/parse/";  // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
-    auto  spath = path.to_s();
-    int     err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    auto spath = path.to_s();
+    int  err   = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
       throw scan_error(*this, "could not create {} directory", path);
     }
@@ -136,14 +137,9 @@ void Chunkify_verilog::elaborate() {
     }
   }
 
-  std::string bench_name;
-  bench_name.append("inou.LIVEPARSE_");
-  bench_name.append(path.to_s());
-  bench_name.append("_");
-  bench_name.append(std::to_string(get_token_pos()));
-  bench_name.append("_");
-  bench_name.append(format_name);
-  Lbench bench(bench_name);
+  const std::string &bench_name = "LIVEPARSE_" + path.to_s() + "_" + std::to_string(get_token_pos()) + "_" + format_name;
+  TRACE_EVENT("inou", nullptr, [&bench_name](perfetto::EventContext ctx) { ctx.event()->set_name(bench_name); });
+  Lbench bench("inou." + bench_name);
 
   mmap_lib::str source(parse_path + "file_" + format_name);
 
@@ -162,7 +158,7 @@ void Chunkify_verilog::elaborate() {
   bool last_output = false;
 
   mmap_lib::str module_name;
-  Port_ID     module_io_pos = 1;
+  Port_ID       module_io_pos = 1;
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
@@ -188,7 +184,7 @@ void Chunkify_verilog::elaborate() {
         }
         format_append(in_module_text);
         scan_next();
-        module_name = mmap_lib::str::concat(module_name, scan_text());
+        module_name   = mmap_lib::str::concat(module_name, scan_text());
         module_io_pos = 1;
         in_module     = true;
 
@@ -219,7 +215,6 @@ void Chunkify_verilog::elaborate() {
                || scan_is_token(Token_id_comment)) {  // Before Token_id_comma
       if (last_input || last_output) {
         if (in_module && scan_is_prev_token(Token_id_alnum) && inside_task_function == 0) {
-
           add_io(sub, last_input, scan_prev_text(), module_io_pos);
 
           module_io_pos++;

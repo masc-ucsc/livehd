@@ -11,6 +11,7 @@
 #include "lgraph.hpp"
 #include "mmap_gc.hpp"
 #include "pass.hpp"
+#include "perf_tracing.hpp"
 #include "lbench.hpp"
 
 Cgen_verilog::Cgen_verilog(bool _verbose, const mmap_lib::str _odir) : verbose(_verbose), odir(_odir), nrunning(0) {
@@ -1025,6 +1026,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
 }
 
 void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
+  TRACE_EVENT("inou", "cgen.verilog");
   Lbench b("inou.cgen.verilog");
   // nrunning!=0 -> incorrect multithread API. Create a Cgen_verilog per thread
   // instance, and then call one do_from_lgraph at a time per object

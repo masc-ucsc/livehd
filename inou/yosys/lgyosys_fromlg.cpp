@@ -17,6 +17,7 @@
 // LiveHD includes
 #include "lbench.hpp"
 #include "lgyosys_dump.hpp"
+#include "perf_tracing.hpp"
 
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
@@ -72,6 +73,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     // handle extra options (e.g. selection)
     extra_args(args, argidx, design);
 
+    TRACE_EVENT("inou", "yosys_fromlg");
     Lbench b("inou.yosys_fromlg");
 
     std::vector<Lgraph *> lgs;
