@@ -7,6 +7,7 @@
 #include "firmap.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 #include "struct_firbits.hpp"
 
 void Firmap::dump() const {
@@ -31,6 +32,7 @@ void Firmap::add_map_entry(Lgraph *lg) {  // single-thread
 }
 
 void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
+  TRACE_EVENT("pass", "firbits");
   Lbench b("pass.firbits");
 
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry

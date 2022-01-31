@@ -12,6 +12,7 @@
 #include "absl/strings/match.h"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
+#include "perf_tracing.hpp"
 
 // Node colors
 #define WHITE 0
@@ -30,6 +31,7 @@ void Pass_lnast_fromlg::setup() {
 Pass_lnast_fromlg::Pass_lnast_fromlg(const Eprp_var& var) : Pass(mmap_lib::str("pass.lnast_fromlg"), var) {}
 
 void Pass_lnast_fromlg::trans(Eprp_var& var) {
+  TRACE_EVENT("pass", "LNAST_FROMLG_trans");
   Lbench b("pass.LNAST_FROMLG_trans");
 
   Pass_lnast_fromlg p(var);

@@ -5,7 +5,8 @@
 #include "perfetto.h"
 
 PERFETTO_DEFINE_CATEGORIES(perfetto::Category("core").SetDescription("Core functions"),
-                           perfetto::Category("inou").SetDescription("In and out"));
+                           perfetto::Category("inou").SetDescription("In and out"),
+                           perfetto::Category("pass").SetDescription("Passes"));
 
 void start_tracing();
 void stop_tracing();

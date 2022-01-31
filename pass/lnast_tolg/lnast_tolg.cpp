@@ -7,6 +7,7 @@
 #include "absl/strings/match.h"
 #include "cprop.hpp"
 #include "pass.hpp"
+#include "perf_tracing.hpp"
 
 Lnast_tolg::Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str &_path) : module_name(_module_name), path(_path) {
   setup_lnast_to_lgraph_primitive_type_mapping();
@@ -14,6 +15,7 @@ Lnast_tolg::Lnast_tolg(const mmap_lib::str &_module_name, const mmap_lib::str &_
 }
 
 std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts) {
+  TRACE_EVENT("pass", "lnast_tolg");
   Lbench b("pass.lnast_tolg");
 
   lnast = ln;

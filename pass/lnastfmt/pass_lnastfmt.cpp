@@ -9,6 +9,7 @@
 
 #include "absl/strings/match.h"
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 static Pass_plugin sample("Pass_lnastfmt", Pass_lnastfmt::setup);
 
@@ -22,6 +23,7 @@ void Pass_lnastfmt::setup() {
 
 void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   fmt::print("beginning LNAST formatting pass\n");
+  TRACE_EVENT("pass", "lnastfmt");
   Lbench b("pass.lnastfmt");
 
   Pass_lnastfmt p(var);

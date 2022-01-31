@@ -7,6 +7,7 @@
 #include "elab_scanner.hpp"
 #include "lbench.hpp"
 #include "mmap_vector.hpp"
+#include "perf_tracing.hpp"
 
 void Lnast_node::dump() const {
   fmt::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
@@ -16,6 +17,7 @@ Lnast::~Lnast() {
 }
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
+  TRACE_EVENT("pass", "lnast_ssa");
   Lbench    b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {

@@ -8,12 +8,16 @@
 
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 
 Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_map<Lgraph *, PinMap> &_pinmaps,
                absl::node_hash_map<Lgraph *, XorrMap> &_spinmaps_xorr)
     : fbmaps(_fbmaps), pinmaps(_pinmaps), spinmaps_xorr(_spinmaps_xorr) {}
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
+    ctx.event()->set_name("firmap." + lg->get_name().to_s());
+  });
   Lbench b("pass.firmap." + lg->get_name().to_s());
 
   auto    lg_name   = lg->get_name();

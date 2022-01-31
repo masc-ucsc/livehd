@@ -41,6 +41,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
+  TRACE_EVENT("pass", "OPENTIMER_work");
   Lbench b("pass.OPENTIMER_work");
 
   for (const auto &g : var.lgs) {
@@ -154,6 +155,7 @@ void Pass_opentimer::read_sdc() {
 }
 
 void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circuit
+  TRACE_EVENT("pass", "OPENTIMER_build_circuit");
   //  Lbench b("pass.OPENTIMER_build_circuit");
 
   g->each_graph_input([this](const Node_pin &pin) {
@@ -212,6 +214,7 @@ void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circu
 
 void Pass_opentimer::compute_timing() {  // Expand this method to compute timing information
                                          //  Lbench b("pass.OPENTIMER_compute_timing");
+  TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
   timer.update_timing();
 
@@ -237,5 +240,6 @@ void Pass_opentimer::compute_timing() {  // Expand this method to compute timing
 }
 
 void Pass_opentimer::populate_table() {  // Expand this method to populate the tables in lgraph
+  TRACE_EVENT("pass", "OPENTIMER_populate_table");
   //  Lbench b("pass.OPENTIMER_populate_table");
 }

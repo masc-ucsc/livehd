@@ -52,6 +52,7 @@ void Pass_punch::work(Eprp_var &var) {
 }
 
 void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
+  TRACE_EVENT("pass", "punch");
   Lbench b("pass.punch");
 
   /////////////////////////////////////

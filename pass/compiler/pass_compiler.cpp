@@ -22,6 +22,7 @@ void Pass_compiler::setup() {
 Pass_compiler::Pass_compiler(const Eprp_var &var) : Pass("pass.compiler", var) {}
 
 void Pass_compiler::compile(Eprp_var &var) {
+  TRACE_EVENT("pass", "compile.front");
   // Lbench b("pass.compile.front");
   Pass_compiler pc(var);
   auto path       = pc.get_path(var);

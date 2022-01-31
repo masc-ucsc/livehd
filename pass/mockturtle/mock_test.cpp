@@ -21,6 +21,7 @@
 #include <sstream>
 
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 using namespace mockturtle;
 
@@ -58,6 +59,9 @@ int tmap(mig_network &net) {
 }
 
 void mock_test_or(int net_size) {
+  TRACE_EVENT("pass", nullptr, [net_size](perfetto::EventContext ctx) {
+    ctx.event()->set_name("MOCKTURTLE_mock_test_or" + std::to_string(net_size));
+  });
   Lbench b("pass.MOCKTURTLE_mock_test_or" + std::to_string(net_size));
 
   b.sample("setup");
@@ -87,6 +91,9 @@ void mock_test_or(int net_size) {
 }
 
 void mock_test_xor(int net_size) {
+  TRACE_EVENT("pass", nullptr, [net_size](perfetto::EventContext ctx) {
+    ctx.event()->set_name("MOCKTURTLE_mock_test_xor" + std::to_string(net_size));
+  });
   Lbench b("pass.MOCKTURTLE_mock_test_xor" + std::to_string(net_size));
 
   b.sample("setup");

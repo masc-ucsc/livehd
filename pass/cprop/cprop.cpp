@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "cprop.hpp"
 
 #include <cctype>
 #include <deque>
@@ -11,7 +12,7 @@
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "pass_cprop.hpp"
-#include "cprop.hpp"
+#include "perf_tracing.hpp"
 
 #define TRACE(x)
 //#define TRACE(x) x
@@ -658,8 +659,8 @@ void Cprop::tuple_mux_mut(Node &node) {
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
   tup_list.resize(inp_edges_ordered.size() - 1);
 
-  bool        some_tuple_found = false;
-  bool        some_pending     = false;
+  bool          some_tuple_found = false;
+  bool          some_pending     = false;
   mmap_lib::str scalar_field;
   for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
     auto tup        = find_lgtuple(inp_edges_ordered[i].driver);
@@ -672,7 +673,7 @@ void Cprop::tuple_mux_mut(Node &node) {
                    node.debug_name(),
                    n,
                    scalar_field);
-#endif 
+#endif
         return;
       }
       if (!n.empty())
@@ -981,7 +982,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                 auto l = Lgtuple::get_first_level_name(e.first).to_lower();
                 if (l == "addr") {
                   ++n_ports;
-                } else if (l=="rdport") {
+                } else if (l == "rdport") {
                   if (!e.second.is_type_const()) {
                     node_tup->set_issue();
                     continue;  // Maybe later
@@ -1109,7 +1110,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup = std::make_shared<Lgtuple>(tup_name);
         node_tup->add(key_name, value_tup);
       } break;
-      case 0x1: { // has_value_scalar
+      case 0x1: {  // has_value_scalar
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
@@ -1185,7 +1186,8 @@ void Cprop::tuple_tuple_add(const Node &node) {
           pin_name = pin_name.substr(2);
         }
         if (it.first->has_io_pos()) {
-          auto io_name = mmap_lib::str::concat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
+          auto io_name
+              = mmap_lib::str::concat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
           node_tup->add(io_name, sub_dpin);
         } else {
           node_tup->add(pin_name, sub_dpin);
@@ -1236,7 +1238,7 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 
   // connect mux outputs
   auto out_edges_list = ori_tg.out_edges();
-  auto mux_dpin = mux_node.setup_driver_pin();
+  auto mux_dpin       = mux_node.setup_driver_pin();
   for (auto e : out_edges_list) {
     mux_dpin.connect(e.sink);
   }
@@ -1246,9 +1248,9 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
   for (const auto &itr : parent_tup->get_sort_map()) {
     if (Lgtuple::is_attribute(itr.first)) {
       continue;
-    } 
+    }
 
-    // 1. create new tuple_gets to fetch the value from the tuple_add 
+    // 1. create new tuple_gets to fetch the value from the tuple_add
     //    and then connect the tg output to the corresponding mux input port
     auto new_tg = ori_tg.create(Ntype_op::TupGet);
     auto mux_spin = mux_node.setup_sink_pin(mmap_lib::str(itr.first.to_i()+1));
@@ -1257,7 +1259,7 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
     auto new_tg_field_spin = new_tg.setup_sink_pin("field");
     auto new_tg_field_dpin = ori_tg.create_const(itr.first.to_i());
     new_tg_field_spin.connect_driver(new_tg_field_dpin);
-    
+
     auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
     new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
 
@@ -1326,7 +1328,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
       // No node2tuple. This node will be converted to AttrGet
       return true;
     }
-#ifndef NDEBUG    
+#ifndef NDEBUG
     Pass::info("tuple_get {} for key:{} has no defined tuple (may be OK)", node.debug_name(), key_name);
 #endif
     return false;
@@ -1334,7 +1336,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
 
   I(node_tup->is_correct());
 
-  bool        is_attr_get = false;
+  bool          is_attr_get = false;
   mmap_lib::str main_field{key_name};
   if (Lgtuple::is_attribute(key_name)) {
     main_field  = Lgtuple::get_all_but_last_level(key_name);
@@ -1378,7 +1380,6 @@ bool Cprop::tuple_tuple_get(Node &node) {
 
   return true;
 }
-
 
 void Cprop::tuple_attr_set(const Node &node) {
   if (hier)  // hier still not supported
@@ -1601,7 +1602,7 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
 
     if (type_dpin.is_invalid()) {
       connect_clock_pin_if_needed(node);
-    }else{
+    } else {
       auto v = type_dpin.get_node().get_type_const().to_i();
       if (v != 2)
         connect_clock_pin_if_needed(node);
@@ -1887,9 +1888,8 @@ void Cprop::reconnect_tuple_get(Node &node) {
       // FIXME: n20 TA should be handle here, maybe
       expand_data_and_attributes(node, "", out_edges_list, it->second);
   } else {
-  // I(input should not be constant)
-  // replace the TGs with mux to handle the runtime index
-
+    // I(input should not be constant)
+    // replace the TGs with mux to handle the runtime index
   }
 }
 
@@ -2132,7 +2132,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
       } else if (op == Ntype_op::TupGet) {
         auto ok = tuple_tuple_get(node);
         if (!ok) {
-          if (!tuple_issues){
+          if (!tuple_issues) {
 #ifndef NDEBUG
             Pass::info("cprop could not simplify node:{}", node.debug_name());
 #endif
@@ -2232,6 +2232,7 @@ void Cprop::clean_io(Lgraph *lg) {
 }
 
 void Cprop::do_trans(Lgraph *lg) {
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("cprop." + lg->get_name().to_s()); });
   Lbench b("pass.cprop." + lg->get_name().to_s());
 
   scalar_pass(lg);
@@ -2279,9 +2280,8 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
     if (lg->has_graph_output(out_name))
       continue;
 
-
-		auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
-    auto flattened_gout = lg->add_graph_output(no_pos_name, io_pos, 0);
+    auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
+    auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, 0);
     it.second.connect_sink(flattened_gout);
   }
 

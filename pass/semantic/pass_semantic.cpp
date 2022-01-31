@@ -4,6 +4,7 @@
 
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 #include "semantic_check.hpp"
 
 static Pass_plugin semantic("pass_semantic", Pass_semantic::setup);
@@ -28,6 +29,7 @@ void Pass_semantic::do_work(const std::shared_ptr<Lnast> &lnast) {
 }
 
 void Pass_semantic::work(Eprp_var &var) {
+  TRACE_EVENT("pass", "semantic");
   Lbench        b("pass.semantic");
   Pass_semantic p(var);
 

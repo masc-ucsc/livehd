@@ -9,11 +9,15 @@
 #include "bitwidth_range.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 #include "pass_bitwidth.hpp"
 
 Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterations), hier(_hier) {}
 
 void Bitwidth::do_trans(Lgraph *lg) {
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
+    ctx.event()->set_name("bitwidth." + lg->get_name().to_s());
+  });
   Lbench b("pass.bitwidth." + lg->get_name().to_s());
   bw_pass(lg);
 }

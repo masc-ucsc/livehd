@@ -1,4 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "perf_tracing.hpp"
+
 #include "pass_lnast_tolg.hpp"
 
 /* void setup_pass_lnast_tolg() { Pass_lnast_tolg::setup(); } */
@@ -22,6 +24,7 @@ void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
 }
 
 void Pass_lnast_tolg::tolg(Eprp_var &var) {
+  TRACE_EVENT("pass", "lnast_tolg.ssa");
   /* Lbench b1("pass.lnast_tolg.ssa"); */
   Pass_lnast_tolg p(var);
   auto            path = p.get_path(var);
@@ -30,6 +33,7 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
     lnast->ssa_trans();
   }
 
+  TRACE_EVENT("pass", "lnast_tolg.tolg");
   /* Lbench b2("pass.lnast_tolg.tolg"); */
   std::vector<Lgraph *> lgs;
   for (const auto &ln : var.lnasts) {
