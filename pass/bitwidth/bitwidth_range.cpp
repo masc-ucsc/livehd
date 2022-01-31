@@ -24,6 +24,7 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
     max      = val.to_i();
     min      = val.to_i();
   } else {
+    val.dump();
     overflow  = true;
     auto bits = val.get_bits();
 

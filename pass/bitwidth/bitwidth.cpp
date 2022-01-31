@@ -868,6 +868,7 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
     }
 
     Bits_t bw_sbits = it->second.get_sbits();
+    fmt::print("DEBUG-8 bw_sbits:{}\n", bw_sbits);
     I(bw_sbits);
 
     if (it->second.is_always_positive()) {

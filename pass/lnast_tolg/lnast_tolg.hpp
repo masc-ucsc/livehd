@@ -92,7 +92,6 @@ protected:
   }
 
   bool subgraph_outp_is_tuple(Sub_node *sub);
-  void process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc);
 
   // tuple related
   Node_pin    setup_tuple_ref(Lgraph *lg, const mmap_lib::str & tup_name);

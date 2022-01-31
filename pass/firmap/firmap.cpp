@@ -173,7 +173,7 @@ void Firmap::map_node_fir_ops(Node &node, const mmap_lib::str &op, Lgraph *new_l
   }
 }
 
-// e1 tail n = e1 & (pow(2, (e1.fbits - n) - 1))
+// e1 tail n = e1 & (pow(2, (e1.fbits - n)) - 1)
 void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap) {
   auto new_node_mask = new_lg->create_node(Ntype_op::And);
 
@@ -199,6 +199,8 @@ void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   auto mask_const = std::pow(2, mask_bits.to_i()) - 1;
 
   auto new_node_const = new_lg->create_node_const(mask_const);
+  fmt::print("DEBUG-9 e1_bits:{}, mask_const:{}, new_node_const:{}\n", e1_bits.to_i(), mask_const, new_node_const.get_type_const());
+  // I(false);
   new_node_const.connect_driver(new_node_mask.setup_sink_pin("A"));  // mask_val -> mask
 
   auto new_node_tp = new_lg->create_node(Ntype_op::Get_mask);

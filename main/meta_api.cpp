@@ -39,7 +39,8 @@ void Meta_api::save(Eprp_var &var) {
       Eprp_utils::clean_dir(lg->get_save_filename());
     } else {
       if (hier != "false" && hier != "0") {
-        lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
+        // lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
+        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { g->save(); });
       }
       lg->save();
     }

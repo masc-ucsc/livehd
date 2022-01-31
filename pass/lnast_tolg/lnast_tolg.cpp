@@ -800,7 +800,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        tup_sname = lnast->get_sname(c0_ta);
       auto        tup_vname = lnast->get_vname(c0_ta);
       auto        subs      = lnast->get_subs(c0_ta);
-      fmt::print("DEBUG-9 field_vname:{}\n", tup_sname);
 
       // exclude invalid scalar->tuple cases
       // auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
@@ -832,8 +831,6 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        pos_spin    = tup_add.setup_sink_pin("field");
       auto        field_vname = lnast->get_vname(c1_ta);
       auto        lntype      = lnast->get_type(c1_ta);
-
-      fmt::print("DEBUG-10 field_vname:{}\n", field_vname);
 
       if (lntype.is_ref()) {
         auto pos_dpin = setup_ref_node_dpin(lg, c1_ta);
@@ -971,7 +968,6 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
       exit_node = lg->create_node(op);
     }
   } else {  // handle normal lnast oprator
-
     auto lnopr_type = lnast->get_type(lnidx_opr);
     if (lnopr_type.is_ne()) {
       auto eq_node = lg->create_node(Ntype_op::EQ);
@@ -1315,7 +1311,7 @@ bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
   return false;
 }
 
-void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
+void Lnast_tolg::process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   Node fc_node;
   int  i = 0;
   for (const auto &child : lnast->children(lnidx_fc)) {
@@ -1325,9 +1321,8 @@ void Lnast_tolg::process_direct_op_connection(Lgraph *lg, const Lnast_nid &lnidx
     }
     if (i == 1) {  // func_name
       auto fir_func_name = lnast->get_vname(child);
-
       fc_node = setup_node_opr_and_lhs(lg, lnidx_fc, fir_func_name);
-      i++;
+      ++i;
       continue;
     }
 
@@ -1351,7 +1346,7 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   auto cn_fc_sname   = lnast->get_sname(cn_fc);
 
   if (func_name_ori.substr(0, 6) == "__fir_") {  // TODO: Can we do this generic, not FIRRTL specific?
-    process_direct_op_connection(lg, lnidx_fc);
+    process_firrtl_op_connection(lg, lnidx_fc);
     return;
   }
 

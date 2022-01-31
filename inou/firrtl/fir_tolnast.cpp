@@ -785,6 +785,21 @@ void Inou_firrtl_module::handle_static_shift_op(Lnast& lnast, const firrtl::Firr
   lnast.add_child(idx_shift, Lnast_node::create_const(mmap_lib::str(op.const_(0).value())));
 }
 
+void Inou_firrtl_module::handle_as_usint_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const mmap_lib::str& lhs) {
+  I(op.arg_size() == 1 && op.const__size() == 0);
+  auto lhs_str = lhs;
+  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+
+  auto sub_it = Inou_firrtl::op2firsub.find(op.op());
+  I(sub_it != Inou_firrtl::op2firsub.end());
+
+  auto idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call());
+
+  lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
+  lnast.add_child(idx_conv, Lnast_node::create_const(sub_it->second));
+  lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+}
+
 void Inou_firrtl_module::handle_type_conv_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const mmap_lib::str& lhs) {
   I(op.arg_size() == 1 && op.const__size() == 0);
   auto lhs_str = lhs;
@@ -798,6 +813,7 @@ void Inou_firrtl_module::handle_type_conv_op(Lnast& lnast, const firrtl::FirrtlP
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_const(sub_it->second));
   lnast.add_child(idx_conv, Lnast_node::create_const(e1_str));
+  // lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
 }
 
 // --------------------------------------- end of primitive op ----------------------------------------------
@@ -1265,7 +1281,11 @@ void Inou_firrtl_module::list_prime_op_info(Lnast& lnast, const firrtl::FirrtlPB
     }
 
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_UINT:
-    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_SINT:
+    case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_SINT: {
+      handle_as_usint_op(lnast, op, parent_node, lhs);
+      break;
+    }
+
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_CLOCK:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_FIXED_POINT:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_ASYNC_RESET: {

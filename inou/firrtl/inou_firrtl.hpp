@@ -200,6 +200,7 @@ protected:
 
   void handle_static_shift_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void handle_type_conv_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
+  void handle_as_usint_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, const mmap_lib::str &lhs);
   void attach_expr_str2node(Lnast &lnast, const mmap_lib::str &access_str, Lnast_nid &parent_node);
   mmap_lib::str flatten_expression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
 
