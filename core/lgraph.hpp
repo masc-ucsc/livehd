@@ -201,6 +201,7 @@ public:
   static Lgraph *create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source);
   static Lgraph *open(const mmap_lib::str &path, Lg_type_id lgid);
   static Lgraph *open(const mmap_lib::str &path, const mmap_lib::str &name);
+  static Lgraph *open_or_create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source);
   static void    rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest);
 
   void clear() override;

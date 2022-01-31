@@ -77,166 +77,166 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 }
 
 void Pass_compiler::setup_firmap_library(Lgraph *lg) {
-  auto &lg_fir_const = lg->ref_library()->setup_sub("__fir_const", "-");
-  lg_fir_const.add_output_pin("Y");
+  auto *lg_fir_const = Lgraph::create(lg->get_path(),"__fir_const", "-");
+  lg_fir_const->add_graph_output("Y",0,0);
 
-  auto &lg_fir_add = lg->ref_library()->setup_sub("__fir_add", "-");
-  lg_fir_add.add_input_pin("e1");
-  lg_fir_add.add_input_pin("e2");
-  lg_fir_add.add_output_pin("Y");
+  auto *lg_fir_add = Lgraph::create(lg->get_path(),"__fir_add", "-");
+  lg_fir_add->add_graph_input("e1",0,0);
+  lg_fir_add->add_graph_input("e2",1,0);
+  lg_fir_add->add_graph_output("Y",2,0);
 
-  auto &lg_fir_sub = lg->ref_library()->setup_sub("__fir_sub", "-");
-  lg_fir_sub.add_input_pin("e1");
-  lg_fir_sub.add_input_pin("e2");
-  lg_fir_sub.add_output_pin("Y");
+  auto *lg_fir_sub = Lgraph::create(lg->get_path(),"__fir_sub", "-");
+  lg_fir_sub->add_graph_input("e1", 0, 0);
+  lg_fir_sub->add_graph_input("e2", 1, 0);
+  lg_fir_sub->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_mul = lg->ref_library()->setup_sub("__fir_mul", "-");
-  lg_fir_mul.add_input_pin("e1");
-  lg_fir_mul.add_input_pin("e2");
-  lg_fir_mul.add_output_pin("Y");
+  auto *lg_fir_mul = Lgraph::create(lg->get_path(),"__fir_mul", "-");
+  lg_fir_mul->add_graph_input("e1", 0, 0);
+  lg_fir_mul->add_graph_input("e2", 1, 0);
+  lg_fir_mul->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_div = lg->ref_library()->setup_sub("__fir_div", "-");
-  lg_fir_div.add_input_pin("e1");
-  lg_fir_div.add_input_pin("e2");
-  lg_fir_div.add_output_pin("Y");
+  auto *lg_fir_div = Lgraph::create(lg->get_path(),"__fir_div", "-");
+  lg_fir_div->add_graph_input("e1", 0, 0);
+  lg_fir_div->add_graph_input("e2", 1, 0);
+  lg_fir_div->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_rem = lg->ref_library()->setup_sub("__fir_rem", "-");
-  lg_fir_rem.add_input_pin("e1");
-  lg_fir_rem.add_input_pin("e2");
-  lg_fir_rem.add_output_pin("Y");
+  auto *lg_fir_rem = Lgraph::create(lg->get_path(),"__fir_rem", "-");
+  lg_fir_rem->add_graph_input("e1", 0, 0);
+  lg_fir_rem->add_graph_input("e2", 1, 0);
+  lg_fir_rem->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_lt = lg->ref_library()->setup_sub("__fir_lt", "-");
-  lg_fir_lt.add_input_pin("e1");
-  lg_fir_lt.add_input_pin("e2");
-  lg_fir_lt.add_output_pin("Y");
+  auto *lg_fir_lt = Lgraph::create(lg->get_path(),"__fir_lt", "-");
+  lg_fir_lt->add_graph_input("e1", 0, 0);
+  lg_fir_lt->add_graph_input("e2", 1, 0);
+  lg_fir_lt->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_leq = lg->ref_library()->setup_sub("__fir_leq", "-");
-  lg_fir_leq.add_input_pin("e1");
-  lg_fir_leq.add_input_pin("e2");
-  lg_fir_leq.add_output_pin("Y");
+  auto *lg_fir_leq = Lgraph::create(lg->get_path(),"__fir_leq", "-");
+  lg_fir_leq->add_graph_input("e1", 0, 0);
+  lg_fir_leq->add_graph_input("e2", 1, 0);
+  lg_fir_leq->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_gt = lg->ref_library()->setup_sub("__fir_gt", "-");
-  lg_fir_gt.add_input_pin("e1");
-  lg_fir_gt.add_input_pin("e2");
-  lg_fir_gt.add_output_pin("Y");
+  auto *lg_fir_gt = Lgraph::create(lg->get_path(),"__fir_gt", "-");
+  lg_fir_gt->add_graph_input("e1", 0, 0);
+  lg_fir_gt->add_graph_input("e2", 1, 0);
+  lg_fir_gt->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_geq = lg->ref_library()->setup_sub("__fir_geq", "-");
-  lg_fir_geq.add_input_pin("e1");
-  lg_fir_geq.add_input_pin("e2");
-  lg_fir_geq.add_output_pin("Y");
+  auto *lg_fir_geq = Lgraph::create(lg->get_path(),"__fir_geq", "-");
+  lg_fir_geq->add_graph_input("e1", 0, 0);
+  lg_fir_geq->add_graph_input("e2", 1, 0);
+  lg_fir_geq->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_eq = lg->ref_library()->setup_sub("__fir_eq", "-");
-  lg_fir_eq.add_input_pin("e1");
-  lg_fir_eq.add_input_pin("e2");
-  lg_fir_eq.add_output_pin("Y");
+  auto *lg_fir_eq = Lgraph::create(lg->get_path(),"__fir_eq", "-");
+  lg_fir_eq->add_graph_input("e1", 0, 0);
+  lg_fir_eq->add_graph_input("e2", 1, 0);
+  lg_fir_eq->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_neq = lg->ref_library()->setup_sub("__fir_neq", "-");
-  lg_fir_neq.add_input_pin("e1");
-  lg_fir_neq.add_input_pin("e2");
-  lg_fir_neq.add_output_pin("Y");
+  auto *lg_fir_neq = Lgraph::create(lg->get_path(),"__fir_neq", "-");
+  lg_fir_neq->add_graph_input("e1", 0, 0);
+  lg_fir_neq->add_graph_input("e2", 1, 0);
+  lg_fir_neq->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_pad = lg->ref_library()->setup_sub("__fir_pad", "-");
-  lg_fir_pad.add_input_pin("e1");
-  lg_fir_pad.add_input_pin("e2");
-  lg_fir_pad.add_output_pin("Y");
+  auto *lg_fir_pad = Lgraph::create(lg->get_path(),"__fir_pad", "-");
+  lg_fir_pad->add_graph_input("e1", 0, 0);
+  lg_fir_pad->add_graph_input("e2", 1, 0);
+  lg_fir_pad->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_as_uint = lg->ref_library()->setup_sub("__fir_as_uint", "-");
-  lg_fir_as_uint.add_input_pin("e1");
-  lg_fir_as_uint.add_output_pin("Y");
+  auto *lg_fir_as_uint = Lgraph::create(lg->get_path(),"__fir_as_uint", "-");
+  lg_fir_as_uint->add_graph_input("e1", 0, 0);
+  lg_fir_as_uint->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_as_sint = lg->ref_library()->setup_sub("__fir_as_sint", "-");
-  lg_fir_as_sint.add_input_pin("e1");
-  lg_fir_as_sint.add_output_pin("Y");
+  auto *lg_fir_as_sint = Lgraph::create(lg->get_path(),"__fir_as_sint", "-");
+  lg_fir_as_sint->add_graph_input("e1", 0, 0);
+  lg_fir_as_sint->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_as_clock = lg->ref_library()->setup_sub("__fir_as_clock", "-");
-  lg_fir_as_clock.add_input_pin("e1");
-  lg_fir_as_clock.add_output_pin("Y");
+  auto *lg_fir_as_clock = Lgraph::create(lg->get_path(),"__fir_as_clock", "-");
+  lg_fir_as_clock->add_graph_input("e1", 0, 0);
+  lg_fir_as_clock->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_as_async = lg->ref_library()->setup_sub("__fir_as_async", "-");
-  lg_fir_as_async.add_input_pin("e1");
-  lg_fir_as_async.add_output_pin("Y");
+  auto *lg_fir_as_async = Lgraph::create(lg->get_path(),"__fir_as_async", "-");
+  lg_fir_as_async->add_graph_input("e1", 0, 0);
+  lg_fir_as_async->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_shl = lg->ref_library()->setup_sub("__fir_shl", "-");
-  lg_fir_shl.add_input_pin("e1");
-  lg_fir_shl.add_input_pin("e2");
-  lg_fir_shl.add_output_pin("Y");
+  auto *lg_fir_shl = Lgraph::create(lg->get_path(),"__fir_shl", "-");
+  lg_fir_shl->add_graph_input("e1", 0, 0);
+  lg_fir_shl->add_graph_input("e2", 1, 0);
+  lg_fir_shl->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_shr = lg->ref_library()->setup_sub("__fir_shr", "-");
-  lg_fir_shr.add_input_pin("e1");
-  lg_fir_shr.add_input_pin("e2");
-  lg_fir_shr.add_output_pin("Y");
+  auto *lg_fir_shr = Lgraph::create(lg->get_path(),"__fir_shr", "-");
+  lg_fir_shr->add_graph_input("e1", 0, 0);
+  lg_fir_shr->add_graph_input("e2", 1, 0);
+  lg_fir_shr->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_dshl = lg->ref_library()->setup_sub("__fir_dshl", "-");
-  lg_fir_dshl.add_input_pin("e1");
-  lg_fir_dshl.add_input_pin("e2");
-  lg_fir_dshl.add_output_pin("Y");
+  auto *lg_fir_dshl = Lgraph::create(lg->get_path(),"__fir_dshl", "-");
+  lg_fir_dshl->add_graph_input("e1", 0, 0);
+  lg_fir_dshl->add_graph_input("e2", 1, 0);
+  lg_fir_dshl->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_dshr = lg->ref_library()->setup_sub("__fir_dshr", "-");
-  lg_fir_dshr.add_input_pin("e1");
-  lg_fir_dshr.add_input_pin("e2");
-  lg_fir_dshr.add_output_pin("Y");
+  auto *lg_fir_dshr = Lgraph::create(lg->get_path(),"__fir_dshr", "-");
+  lg_fir_dshr->add_graph_input("e1", 0, 0);
+  lg_fir_dshr->add_graph_input("e2", 1, 0);
+  lg_fir_dshr->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_cvt = lg->ref_library()->setup_sub("__fir_cvt", "-");
-  lg_fir_cvt.add_input_pin("e1");
-  lg_fir_cvt.add_output_pin("Y");
+  auto *lg_fir_cvt = Lgraph::create(lg->get_path(),"__fir_cvt", "-");
+  lg_fir_cvt->add_graph_input("e1", 0, 0);
+  lg_fir_cvt->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_neg = lg->ref_library()->setup_sub("__fir_neg", "-");
-  lg_fir_neg.add_input_pin("e1");
-  lg_fir_neg.add_output_pin("Y");
+  auto *lg_fir_neg = Lgraph::create(lg->get_path(),"__fir_neg", "-");
+  lg_fir_neg->add_graph_input("e1", 0, 0);
+  lg_fir_neg->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_not = lg->ref_library()->setup_sub("__fir_not", "-");
-  lg_fir_not.add_input_pin("e1");
-  lg_fir_not.add_output_pin("Y");
+  auto *lg_fir_not = Lgraph::create(lg->get_path(),"__fir_not", "-");
+  lg_fir_not->add_graph_input("e1", 0, 0);
+  lg_fir_not->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_and = lg->ref_library()->setup_sub("__fir_and", "-");
-  lg_fir_and.add_input_pin("e1");
-  lg_fir_and.add_input_pin("e2");
-  lg_fir_and.add_output_pin("Y");
+  auto *lg_fir_and = Lgraph::create(lg->get_path(),"__fir_and", "-");
+  lg_fir_and->add_graph_input("e1", 0, 0);
+  lg_fir_and->add_graph_input("e2", 1, 0);
+  lg_fir_and->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_or = lg->ref_library()->setup_sub("__fir_or", "-");
-  lg_fir_or.add_input_pin("e1");
-  lg_fir_or.add_input_pin("e2");
-  lg_fir_or.add_output_pin("Y");
+  auto *lg_fir_or = Lgraph::create(lg->get_path(),"__fir_or", "-");
+  lg_fir_or->add_graph_input("e1", 0, 0);
+  lg_fir_or->add_graph_input("e2", 1, 0);
+  lg_fir_or->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_xor = lg->ref_library()->setup_sub("__fir_xor", "-");
-  lg_fir_xor.add_input_pin("e1");
-  lg_fir_xor.add_input_pin("e2");
-  lg_fir_xor.add_output_pin("Y");
+  auto *lg_fir_xor = Lgraph::create(lg->get_path(),"__fir_xor", "-");
+  lg_fir_xor->add_graph_input("e1", 0, 0);
+  lg_fir_xor->add_graph_input("e2", 1, 0);
+  lg_fir_xor->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_andr = lg->ref_library()->setup_sub("__fir_andr", "-");
-  lg_fir_andr.add_input_pin("e1");
-  lg_fir_andr.add_output_pin("Y");
+  auto *lg_fir_andr = Lgraph::create(lg->get_path(),"__fir_andr", "-");
+  lg_fir_andr->add_graph_input("e1", 0, 0);
+  lg_fir_andr->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_orr = lg->ref_library()->setup_sub("__fir_orr", "-");
-  lg_fir_orr.add_input_pin("e1");
-  lg_fir_orr.add_output_pin("Y");
+  auto *lg_fir_orr = Lgraph::create(lg->get_path(),"__fir_orr", "-");
+  lg_fir_orr->add_graph_input("e1", 0, 0);
+  lg_fir_orr->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_xorr = lg->ref_library()->setup_sub("__fir_xorr", "-");
-  lg_fir_xorr.add_input_pin("e1");
-  lg_fir_xorr.add_output_pin("Y");
+  auto *lg_fir_xorr = Lgraph::create(lg->get_path(),"__fir_xorr", "-");
+  lg_fir_xorr->add_graph_input("e1", 0, 0);
+  lg_fir_xorr->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_cat = lg->ref_library()->setup_sub("__fir_cat", "-");
-  lg_fir_cat.add_input_pin("e1");
-  lg_fir_cat.add_input_pin("e2");
-  lg_fir_cat.add_output_pin("Y");
+  auto *lg_fir_cat = Lgraph::create(lg->get_path(),"__fir_cat", "-");
+  lg_fir_cat->add_graph_input("e1", 0, 0);
+  lg_fir_cat->add_graph_input("e2", 1, 0);
+  lg_fir_cat->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_bits = lg->ref_library()->setup_sub("__fir_bits", "-");
-  lg_fir_bits.add_input_pin("e1");
-  lg_fir_bits.add_input_pin("e2");  // hi
-  lg_fir_bits.add_input_pin("e3");  // lo
-  lg_fir_bits.add_output_pin("Y");
+  auto *lg_fir_bits = Lgraph::create(lg->get_path(),"__fir_bits", "-");
+  lg_fir_bits->add_graph_input("e1", 0, 0);
+  lg_fir_bits->add_graph_input("e2", 1, 0);  // hi
+  lg_fir_bits->add_graph_input("e3", 2, 0);  // lo
+  lg_fir_bits->add_graph_output("Y", 3, 0);
 
-  auto &lg_fir_head = lg->ref_library()->setup_sub("__fir_head", "-");
-  lg_fir_head.add_input_pin("e1");
-  lg_fir_head.add_input_pin("e2");
-  lg_fir_head.add_output_pin("Y");
+  auto *lg_fir_head = Lgraph::create(lg->get_path(),"__fir_head", "-");
+  lg_fir_head->add_graph_input("e1", 0, 0);
+  lg_fir_head->add_graph_input("e2", 1, 0);
+  lg_fir_head->add_graph_output("Y", 2, 0);
 
-  auto &lg_fir_tail = lg->ref_library()->setup_sub("__fir_tail", "-");
-  lg_fir_tail.add_input_pin("e1");
-  lg_fir_tail.add_input_pin("e2");
-  lg_fir_tail.add_output_pin("Y");
+  auto *lg_fir_tail = Lgraph::create(lg->get_path(),"__fir_tail", "-");
+  lg_fir_tail->add_graph_input("e1", 0, 0);
+  lg_fir_tail->add_graph_input("e2", 1, 0);
+  lg_fir_tail->add_graph_output("Y", 2, 0);
 
-  lg->ref_library()->sync();
+  // lg->ref_library()->sync();
 }
 
 bool Pass_compiler::check_option_gviz(Eprp_var &var) {

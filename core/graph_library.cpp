@@ -325,9 +325,9 @@ Sub_node &Graph_library::reset_sub_int(const mmap_lib::str &name, const mmap_lib
   return *sub_nodes[lgid];
 }
 
-Sub_node &Graph_library::setup_sub_int(const mmap_lib::str &name) { return setup_sub_int(name, "-"_str); }
+Sub_node &Graph_library::ref_or_create_sub_int(const mmap_lib::str &name) { return ref_or_create_sub_int(name, "-"_str); }
 
-Sub_node &Graph_library::setup_sub_int(const mmap_lib::str &name, const mmap_lib::str &source) {
+Sub_node &Graph_library::ref_or_create_sub_int(const mmap_lib::str &name, const mmap_lib::str &source) {
   Lg_type_id lgid = get_lgid_int(name);
   if (lgid) {
     return *sub_nodes[lgid];

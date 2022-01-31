@@ -638,31 +638,33 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
     cell2node[cell] = g->create_node();
     auto &node      = cell2node[cell];
 
-    Sub_node *sub = nullptr;
+    Lgraph *sub_lg = nullptr;
 
     if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) {  // sub_cell type
       mmap_lib::str mod_name(&(cell->type.c_str()[1]));
 
-      sub = &g->ref_library()->setup_sub(mod_name);
+      sub_lg = Lgraph::open_or_create(g->get_path(), mod_name, "-");
     }
 
     for (const auto &conn : cell->connections()) {
-      if (sub) {
+      if (sub_lg) {
         mmap_lib::str pin_name(&(conn.first.c_str()[1]));
 
         if (pin_name.is_i()) {
           // hardcoded pin position
           int pos = pin_name.to_i();
 
+          auto *sub = sub_lg->ref_self_sub_node();
+
           if (!sub->has_instance_pin(pos)) {
             if (cell->output(conn.first)) {
-              sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
+              sub_lg->add_graph_output(pin_name, pos, 0);
             } else if (cell->input(conn.first)) {
-              sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+              sub_lg->add_graph_input(pin_name, pos, 0);
             } else if (conn.second.is_fully_undef()) {
-              sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
+              sub_lg->add_graph_output(pin_name, pos, 0);
             } else if (conn.second.is_fully_const()) {
-              sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+              sub_lg->add_graph_input(pin_name, pos, 0);
             } else {
               bool is_input  = false;
               bool is_output = false;
@@ -676,9 +678,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                 }
               }
               if (is_input && !is_output) {
-                sub->add_pin(pin_name, Sub_node::Direction::Input, pos);
+                sub_lg->add_graph_input(pin_name, pos, 0);
               } else if (!is_input && is_output) {
-                sub->add_pin(pin_name, Sub_node::Direction::Output, pos);
+                sub_lg->add_graph_output(pin_name, pos, 0);
               } else {
                 fprintf(stderr,
                         "Warning: impossible to figure out direction in module %s cell type %s pin_name to %s\n",
@@ -697,11 +699,13 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           printf("module %s cell type %s has output pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.to_s().c_str());
 #endif
         } else {
+          auto *sub = sub_lg->ref_self_sub_node();
+
           if (!sub->has_pin(pin_name)) {
             if (cell->input(conn.first) || is_black_box_input(mod, cell, conn.first))
-              sub->add_input_pin(pin_name);
+              sub_lg->add_graph_input(pin_name, Port_invalid, 0);
             else if (cell->output(conn.first) || is_black_box_output(mod, cell, conn.first))
-              sub->add_output_pin(pin_name);
+              sub_lg->add_graph_output(pin_name, Port_invalid, 0);
           }
 
           if (!sub->has_pin(pin_name) || sub->is_input(pin_name))
@@ -712,6 +716,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 #endif
         }
 
+        auto *sub = sub_lg->ref_self_sub_node();
         node.set_type_sub(sub->get_lgid());
       } else {
         node.set_type(Ntype_op::Or);  // it will be updated later. Just a generic 1 output cell

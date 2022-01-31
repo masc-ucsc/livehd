@@ -231,6 +231,14 @@ Lgraph *Lgraph::clone_skeleton(const mmap_lib::str &new_lg_name) {
   return new_lg;
 }
 
+Lgraph *Lgraph::open_or_create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source) {
+  auto *lg = open(path, name);
+  if (lg!=nullptr)
+    return lg;
+
+  return create(path, name, source);
+}
+
 Lgraph *Lgraph::open(const mmap_lib::str &path, Lg_type_id lgid) {
   auto *lib = Graph_library::instance(path);
   if (unlikely(lib == nullptr))
@@ -1462,7 +1470,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
 Node Lgraph::create_node_sub(const mmap_lib::str &sub_name) {
 
   auto  nid = create_node().get_nid();
-  auto &sub = library->setup_sub(sub_name);
+  auto &sub = library->ref_or_create_sub(sub_name);
   set_type_sub(nid, sub.get_lgid());
 
   return Node(this, Hierarchy::hierarchical_root(), nid);
@@ -1554,7 +1562,8 @@ void Lgraph::save() {
     auto ios = Hif_write::create_node();
     ios.type = static_cast<uint16_t>(Ntype_op::IO);
 
-    for (const auto &io_pin : get_self_sub_node().get_sorted_io_pins()) {
+    // WARNING: NOT SORTED, so that it uses the pid as position
+    for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
       if (io_pin.is_invalid())
         continue;
       ios.add(io_pin.is_input(), io_pin.name.to_s(), io_pin.get_io_pos());

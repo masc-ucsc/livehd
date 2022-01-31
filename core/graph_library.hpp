@@ -91,8 +91,8 @@ protected:
   Lgraph *       try_find_lgraph_int(const Lg_type_id lgid) const;
 
   Sub_node &      reset_sub_int(const mmap_lib::str &name, const mmap_lib::str &source);
-  Sub_node &      setup_sub_int(const mmap_lib::str &name, const mmap_lib::str &source);
-  Sub_node &      setup_sub_int(const mmap_lib::str &name);
+  Sub_node &      ref_or_create_sub_int(const mmap_lib::str &name, const mmap_lib::str &source);
+  Sub_node &      ref_or_create_sub_int(const mmap_lib::str &name);
   Sub_node *      ref_sub_int(Lg_type_id lgid);
   const Sub_node &get_sub_int(Lg_type_id lgid) const;
 
@@ -186,14 +186,14 @@ public:
     return reset_sub_int(name, source);
   }
 
-  Sub_node &setup_sub(const mmap_lib::str &name, const mmap_lib::str &source) {
+  Sub_node &ref_or_create_sub(const mmap_lib::str &name, const mmap_lib::str &source) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
-    return setup_sub_int(name, source);
+    return ref_or_create_sub_int(name, source);
   }
 
-  Sub_node &setup_sub(const mmap_lib::str &name) {
+  Sub_node &ref_or_create_sub(const mmap_lib::str &name) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
-    return setup_sub_int(name);
+    return ref_or_create_sub_int(name);
   }
 
   Sub_node *ref_sub(Lg_type_id lgid) {
