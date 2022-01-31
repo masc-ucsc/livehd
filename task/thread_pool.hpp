@@ -22,19 +22,16 @@
 #endif
 
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 // #define DISABLE_THREAD_POOL
 //
 //
 
-
 template <typename Func, typename... Args>
 static auto forward_as_lambda(Func &&func, Args &&...args) {
-//  -> std::enable_if_t<std::is_void_v<std::result_of<Func>::type>, int> {
-  return [
-    f   = std::forward<decltype(func)>(func),
-    args = std::make_tuple(std::forward<Args>(args) ...)
-  ]() mutable {
+  //  -> std::enable_if_t<std::is_void_v<std::result_of<Func>::type>, int> {
+  return [f = std::forward<decltype(func)>(func), args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
     return std::apply(std::move(f), std::move(args));
   };
 #if 0
@@ -46,11 +43,9 @@ static auto forward_as_lambda(Func &&func, Args &&...args) {
 
 template <class Func, class T, class... Args>
 inline auto forward_as_lambda2(Func &&func, T &&first, Args &&...args) {
-  return [
-    f   = std::forward<decltype(func)>(func),
-    tt  = std::forward<decltype(first)>(first),
-    args = std::make_tuple(std::forward<Args>(args) ...)
-  ]() mutable {
+  return [f    = std::forward<decltype(func)>(func),
+          tt   = std::forward<decltype(first)>(first),
+          args = std::make_tuple(std::forward<Args>(args)...)]() mutable {
     return std::apply(std::move(f), std::tuple_cat(std::forward_as_tuple(tt), std::move(args)));
   };
 #if 0
@@ -123,10 +118,10 @@ class Thread_pool {
   }
 
   void add_(const std::function<void(void)> &job) {
-    if(env_threads == 1) {
+    if (env_threads == 1) {
       job();
       return;
-    } else { // not specify $LIVEHD_THREADS at all -> run with full threads resources
+    } else {  // not specify $LIVEHD_THREADS at all -> run with full threads resources
       if (jobs_left > 48) {
         job();
         return;
@@ -135,27 +130,32 @@ class Thread_pool {
       queue.enqueue(job);
       job_available_var.notify_one();
     }
-// To be deprecated
-// #ifdef DISABLE_THREAD_POOL
-//     job();
-//     return;
-// #else
-//     if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
-//       job();
-//       return;
-//     }
-//     jobs_left.fetch_add(1, std::memory_order_relaxed);
-//     queue.enqueue(job);
-//     job_available_var.notify_one();
-// #endif
+    // To be deprecated
+    // #ifdef DISABLE_THREAD_POOL
+    //     job();
+    //     return;
+    // #else
+    //     if (jobs_left > 48) {  // FIXME->sh: what if not so much core?
+    //       job();
+    //       return;
+    //     }
+    //     jobs_left.fetch_add(1, std::memory_order_relaxed);
+    //     queue.enqueue(job);
+    //     job_available_var.notify_one();
+    // #endif
   }
 
 public:
-  Thread_pool(int _thread_count = 0):
+  Thread_pool(int _thread_count = 0)
+      :
 #ifdef MPMC
-      queue(256),
+      queue(256)
+      ,
 #endif
-      jobs_left(0), finishing(false) {
+      jobs_left(0)
+      , finishing(false) {
+
+    start_tracing();
 
     started_lock = false;
 
@@ -202,12 +202,14 @@ public:
     for (auto &x : threads)
       if (x.joinable())
         x.join();
+
+    stop_tracing();
   }
 
   inline unsigned size() const { return thread_count; }
 
   template <typename Func, typename... Args, std::enable_if_t<std::is_invocable_v<Func &&, Args &&...>, int> = 0>
-  //template <typename Func, typename... Args, std::enable_if_t<std::is_void_v<Func>, int> = 0>
+  // template <typename Func, typename... Args, std::enable_if_t<std::is_void_v<Func>, int> = 0>
   void add(Func &&func, Args &&...args) {
     return add_(forward_as_lambda(std::forward<decltype(func)>(func), std::forward<decltype(args)>(args)...));
   }
@@ -229,10 +231,10 @@ public:
       if (has_work) {
         res();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
-      /* } else { */
-      /*   Lbench b("waiting"); */
-      /*   while (jobs_left > 0) */
-      /*     ; */
+        /* } else { */
+        /*   Lbench b("waiting"); */
+        /*   while (jobs_left > 0) */
+        /*     ; */
       }
     }
   }
