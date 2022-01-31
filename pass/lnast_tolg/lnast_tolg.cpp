@@ -800,6 +800,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        tup_sname = lnast->get_sname(c0_ta);
       auto        tup_vname = lnast->get_vname(c0_ta);
       auto        subs      = lnast->get_subs(c0_ta);
+      fmt::print("DEBUG-9 field_vname:{}\n", tup_sname);
 
       // exclude invalid scalar->tuple cases
       // auto field_name = lnast->get_sname(lnast->get_sibling_next(c0_ta));  // peep for field_name ...
@@ -831,6 +832,8 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       auto        pos_spin    = tup_add.setup_sink_pin("field");
       auto        field_vname = lnast->get_vname(c1_ta);
       auto        lntype      = lnast->get_type(c1_ta);
+
+      fmt::print("DEBUG-10 field_vname:{}\n", field_vname);
 
       if (lntype.is_ref()) {
         auto pos_dpin = setup_ref_node_dpin(lg, c1_ta);

@@ -548,16 +548,17 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
 
   // If any parameters exist (for ext module), specify those.
   // NOTE->hunter: We currently specify parameters the same way as inputs.
-  for (const auto& param : Inou_firrtl::glob_info.emod_to_param_map[mmap_lib::str(inst.module_id())]) {
-    auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    if (isdigit(param.second[0])) {
-      lnast.add_child(idx_dot_p, Lnast_node::create_const(param.second));
-    } else {
-      lnast.add_child(idx_dot_p, Lnast_node::create_ref(param.second));
-    }
-    lnast.add_child(idx_dot_p, Lnast_node::create_ref(inp_name));
-    lnast.add_child(idx_dot_p, Lnast_node::create_ref(param.first));
-  }
+  // FIXME->sh: we should think about another mechanism instead of create fake input (io connection issue later) ?
+  // for (const auto& param : Inou_firrtl::glob_info.emod_to_param_map[mmap_lib::str(inst.module_id())]) {
+  //   auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+  //   if (isdigit(param.second[0])) {
+  //     lnast.add_child(idx_dot_p, Lnast_node::create_const(param.second));
+  //   } else {
+  //     lnast.add_child(idx_dot_p, Lnast_node::create_ref(param.second));
+  //   }
+  //   lnast.add_child(idx_dot_p, Lnast_node::create_ref(inp_name));
+  //   lnast.add_child(idx_dot_p, Lnast_node::create_ref(param.first));
+  // }
 }
 
 /* No mux node type exists in LNAST. To support FIRRTL muxes, we instead
@@ -2139,8 +2140,10 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   populate_all_mods_io(var, circuit, file_name);
 
   for (int i = 0; i < circuit.module_size(); i++) {
-    if (circuit.module(i).has_external_module()) 
+    if (circuit.module(i).has_external_module()) {
+      // circuit.module(i).external_module();
       grab_ext_module_info(circuit.module(i).external_module());
+    }
   }
   // so far you collect all global table informations
 
@@ -2152,6 +2155,8 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
         Lbench b("inou.fir_tolnast:module");
         this->user_module_to_lnast(var, circuit.module(i), file_name);
       });
+    } else if (circuit.module(i).has_external_module()){
+      Pass::info("External Module, nothing to translate to LNAST");
     } else {
       Pass::error("Module not set.");
     }
@@ -2166,6 +2171,8 @@ void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl
     Inou_firrtl::glob_info.emod_to_param_map.clear();
 
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
+    fmt::print("Hello\n");
     iterate_modules(var, circuit, file_name);
+
   }
 }

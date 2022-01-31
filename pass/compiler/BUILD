@@ -186,6 +186,7 @@ cc_library(
     "FixedClockBroadcast",
     "ClockGroupAggregator",
     "BreakpointUnit",
+    "Arbiter_10",
 
     # FIXME:
 
@@ -199,15 +200,11 @@ cc_library(
     # "BankedStore"
     # "BoomDuplicatedDataArray",
 
+
     # ???
-    # "Arbiter_10",
     # "DynamicMemorySearch",
-    # "MaskedSmem",
-    # "MaskedSmemStruct",
     # "Memo",
     # "Router",
-    # "Smem",
-    # "SmemStruct",
 ]]
 
 sh_test(

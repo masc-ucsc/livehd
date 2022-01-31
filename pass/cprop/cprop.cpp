@@ -700,10 +700,9 @@ void Cprop::tuple_mux_mut(Node &node) {
   Node_pin &sel_dpin = inp_edges_ordered[0].driver;
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
-  if (tup) {
-    tup->dump();
+  if (tup) 
     node2tuple[node.get_compact()] = tup;
-  }
+  
 
   if (tup == nullptr && tuple_issues)
     return;

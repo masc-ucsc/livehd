@@ -46,6 +46,7 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
     }
   }
 
+ 
   std::sort(pin_pair.begin(), pin_pair.end(), [](const Pair_type &a, const Pair_type &b) -> bool {
     if (a.pos == Port_invalid && b.pos == Port_invalid) {
       if (a.dpin.is_graph_input() && b.dpin.is_graph_output()) {
@@ -56,11 +57,11 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
       }
       if (a.dpin.is_graph_input() && b.dpin.is_graph_input()) {
         auto a_name = a.dpin.get_name();
-        if (a_name == "clock")
-          return true;
-        if (a_name == "reset")
-          return true;
         auto b_name = b.dpin.get_name();
+        if (a_name == "clock" && b_name != "clock")
+          return true;
+        if (a_name == "reset" && b_name != "reset")
+          return true;
         if (b_name == "clock")
           return false;
         if (b_name == "reset")
