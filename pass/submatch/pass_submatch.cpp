@@ -230,8 +230,8 @@ void pass_submatch::find_subs(Lgraph *g) {
   std::vector<absl::flat_hash_map<uint64_t, std::vector<Node::Compact>>> depth_hash2node;
   for (const auto &compact_node : sorted_compact_nodes) {
     auto node = Node(g, compact_node);
-    for (uint64_t depth = 0; depth < submatch_depth; ++depth) {
-      uint64_t max_depth = 0;
+    for (size_t depth = 0; depth < submatch_depth; ++depth) {
+      size_t max_depth = 0;
       std::vector<uint64_t> i_hash;
       for (auto e : node.inp_edges()) {
         auto it = node2depth_hash.find(e.driver.get_node().get_compact());
