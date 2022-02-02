@@ -596,15 +596,18 @@ bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(ge
 
 // LCOV_EXCL_START
 void Node::dump() const {
-  fmt::print("nid: {} type: {} lgraph: {} ", nid, get_type_name(), current_g->get_name());
+  fmt::print("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
+  if (has_color()) {
+    fmt::print(" color:{} ", get_color());
+  }
   if (get_type_op() == Ntype_op::LUT) {
-    fmt::print(" lut = {}\n", get_type_lut().to_pyrope());
+    fmt::print(" lut:{}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {
-    fmt::print(" const = {}\n", get_type_const().to_pyrope());
+    fmt::print(" const:{}\n", get_type_const().to_pyrope());
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);
-    fmt::print(" sub = {} (lgid:{})\n", sub_name, sub_lgid);
+    fmt::print(" sub:{} (lgid:{})\n", sub_name, sub_lgid);
   } else {
     fmt::print("\n");
   }
