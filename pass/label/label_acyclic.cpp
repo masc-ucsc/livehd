@@ -23,6 +23,7 @@ void Label_acyclic::label(Lgraph *g) {
     n.set_color(8);
   }
 
+  /*
   // Inputs
   g->each_graph_input([&](const Node_pin &pin) {
     auto n = pin.get_node();
@@ -35,7 +36,7 @@ void Label_acyclic::label(Lgraph *g) {
     auto n = pin.get_node();
     //fmt::print("Outputs: {}\n", n.debug_name()); 
   });
-
+*/
 
   /*
   // Iterating through graph inputs 
@@ -101,7 +102,7 @@ void Label_acyclic::label(Lgraph *g) {
     //    
   }
 
-  
+/*  
   for (auto &it : part_roots) {
     Node n(g, it);
     //fmt::print("Root Node: {}\n", n.debug_name());
@@ -111,7 +112,7 @@ void Label_acyclic::label(Lgraph *g) {
     Node n(g, it.first);
     //fmt::print("Node: {}, Part ID: {}\n", n.debug_name(), it.second);
   }
-
+*/
 
   for (auto node : g->fast(hier)) {
     (void)node;  // to avoid warning
