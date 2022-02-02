@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <vector>
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -12,6 +15,12 @@ private:
   const bool verbose;
   const bool hier;
   uint8_t    cutoff;
+  uint8_t    part_id;
+
+  std::vector<Node::Compact>             node_preds;  // predecessors of a node
+  absl::flat_hash_set<Node::Compact>     part_roots;  // potential roots of partitions
+  absl::flat_hash_map<Node::Compact,int> part_nodes;  // <Node, Partition ID>
+
 
 public:
   void label(Lgraph *g);
