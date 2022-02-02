@@ -16,11 +16,19 @@ void Label_acyclic::dump() const {
 
 void Label_acyclic::label(Lgraph *g) {
   if (cutoff) fmt::print("small partition cutoff: {}\n", cutoff);
- 
+
+
+  if (hier) {
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
+  }
+  Ann_node_color::clear(g); 
+  
   // Internal Nodes printing 
+  int my_color = 0;
   for (auto n : g->forward(hier)) {
-    //fmt::print("Node: {}\n", n.debug_name());
-    n.set_color(8);
+    fmt::print("Node: {}\n", n.debug_name());
+    n.set_color(my_color++);
+    if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
   }
 
   /*
