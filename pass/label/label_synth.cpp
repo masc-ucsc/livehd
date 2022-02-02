@@ -164,6 +164,9 @@ void Label_synth::label(Lgraph *g) {
   for (auto &it : flat_node2id) {
     Node node(g, it.first);
     node.set_color(it.second);
+
+    fmt::print("Node: {}, Color: {}\n", node.debug_name(), node.get_color());
+
   }
 
   if (verbose) {
