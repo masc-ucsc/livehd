@@ -155,29 +155,26 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
 }
 
 void Graphviz::create_color_map(Lgraph *lg) {
-  std::set<int>                 colors_used;
-  absl::flat_hash_map<int, int> color2size;
+  absl::flat_hash_map<int, size_t> color2id;
 
-  float max_size = 1;
   for (auto node : lg->fast()) {
     if (!node.has_color())
       continue;
 
     auto c = node.get_color();
-    colors_used.insert(c);
-    auto sz = color2size[c]++;
-    if (sz > max_size)
-      max_size = sz;
+    if (color2id.contains(c))
+      continue;
+
+    color2id.insert({c, color2id.size()});
   }
 
   std::string data = "digraph {\n";
 
   color2rgb.clear();
-  for (auto c : colors_used) {
-    auto sz = color2size[c];
-    RGB  color(sz / max_size);
-    color2rgb[c] = color.to_s();
-    data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", c, sz, color.to_s());
+  for (auto e : color2id) {
+    RGB  color(static_cast<double>(e.second) / color2id.size());
+    color2rgb[e.first] = color.to_s();
+    data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", e.second, e.first, color.to_s());
   }
 
   absl::flat_hash_set<uint64_t> edges;  // hackish graph
