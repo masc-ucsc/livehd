@@ -19,11 +19,9 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue };
-  enum class Identifier_state { Set, Get, Const, None };
+  enum class Expression_state { Type, Lvalue, Rvalue, Const };
 
   std::stack<Expression_state> expr_state_stack;
-  std::stack<Identifier_state> id_state_stack;
 
   // Top
   void process_description();
@@ -33,28 +31,32 @@ protected:
 
   // Non-terminal rules
   void process_node(TSNode);
-  void process_each_list_item(TSNode, std::function<void()>, std::function<void()>);
 
   // Assignment/Declaration
   void process_assignment(TSNode);
-  void process_declaration(TSNode);
+  void process_assignment_or_declaration(TSNode);
 
   // Expressions
   void process_binary_expression(TSNode);
+  void process_dot_expression(TSNode);
+  void process_member_selection(TSNode);
 
   // Basics
   void process_tuple(TSNode);
   void process_tuple_or_expression_list(TSNode);
+  void process_lvalue_list(TSNode);
+  void process_rvalue_list(TSNode);
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
 
   // Lnast Tree Helpers
   std::unique_ptr<Lnast> lnast;
   mmap_lib::Tree_index stmts_index;
-  Lnast_node rvalue_node;
+  std::stack<Lnast_node> rvalue_node_stack;
   std::vector<int> tuple_lvalue_positions;
   std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
   std::stack<Lnast_node> primary_node_stack;
+  std::stack<std::vector<Lnast_node>> member_select_stack;
   
   // Lnast_node Helpers
   int tmp_ref_count;

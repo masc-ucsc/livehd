@@ -12,6 +12,6 @@ cc_library(
     srcs = glob(["src/*.c"]),
     includes = ["src/tree_sitter"],
     visibility = ["//visibility:public"],
-    deps = ["@tree-sitter//:tree-sitter" ],
+    deps = ["@tree-sitter" ],
 )
 
