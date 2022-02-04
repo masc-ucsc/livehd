@@ -19,33 +19,48 @@ void Label_acyclic::dump() const {
 void Label_acyclic::label(Lgraph *g) {
   if (cutoff) fmt::print("small partition cutoff: {}\n", cutoff);
 
-
   if (hier) {
     g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
   }
   Ann_node_color::clear(g); 
 
+
 #if DEBUG
   // Internal Nodes printing 
   int my_color = 0;
+  int input_color = 11;
+  int output_color = 22;
+  int node_tracker = 0;
+  
   for (auto n : g->forward(hier)) {
     fmt::print("Node: {}\n", n.debug_name());
-    n.set_color(my_color++);
+    my_color = (node_tracker < 8) ? (8) : (16);
+    n.set_color(my_color);
     if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
+    //n.set_name(mmap_lib::str(n.debug_name()));
+    n.set_name(mmap_lib::str(fmt::format("MFFC_{}", my_color)));
+    node_tracker++;
   }
+  fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
 
   // Inputs
   g->each_graph_input([&](const Node_pin &pin) {
     auto n = pin.get_node();
-    fmt::print("Inputs: {}\n", n.debug_name()); 
+    //fmt::print("Inputs: {}\n", n.debug_name()); 
+    n.set_color(input_color);
+    n.set_name(mmap_lib::str(fmt::format("in_{}", input_color)));
   });
 
 
   // Outputs
   g->each_graph_output([&](const Node_pin &pin) {
     auto n = pin.get_node();
-    fmt::print("Outputs: {}\n", n.debug_name()); 
+    //fmt::print("Outputs: {}\n", n.debug_name()); 
+    n.set_color(output_color);
+    n.set_name(mmap_lib::str(fmt::format("out_{}", output_color)));
   });
+
+  /*
 
   // Iterating through graph inputs 
   g->each_graph_input([&](const Node_pin &pin) {
@@ -55,13 +70,16 @@ void Label_acyclic::label(Lgraph *g) {
       fmt::print("sink_node: {}, driver_node: {}\n", sink_node.debug_name(), driver_node.debug_name());
     }
   });
+
+  */
 #endif
   
   // Iterating through outputs of the graphs (0 out edges), all are potential roots
   g->each_graph_output([&](const Node_pin &pin) {
     const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
-    roots.insert(nodec);      // Inserting node compact
-    node2id[nodec] = part_id;   // Adding node to map and assigning id 
+    roots.insert(nodec);             // Saving roots
+    node2id[nodec] = part_id;        // Saving part ID of nodes
+    id2nodes[part_id].insert(nodec); // Saving nodes under part IDs
     part_id++;                       
   });
 
@@ -71,10 +89,13 @@ void Label_acyclic::label(Lgraph *g) {
       const auto nodec = n.get_compact();
       roots.insert(nodec); 
       node2id[nodec] = part_id;
+      id2nodes[part_id].insert(nodec);
       //fmt::print("Root: {}, ID: {}\n", n.debug_name(), part_id);
-      part_id++;
-    } else {
-      //fmt::print("Not a Root: {}\n", n.debug_name());
+      part_id+=5;
+    } else if (n.get_num_out_edges() == 1) {
+      // TODO
+      // Get the node on the head of this edge
+      // access the out edge
     }
   } 
 
@@ -106,25 +127,30 @@ void Label_acyclic::label(Lgraph *g) {
 
   for (auto n : g->forward(hier)) {
     if (node2id.find(n.get_compact()) != node2id.end()) {
-      fmt::print("Found\n");
+      fmt::print("Found {} in node2id\n", n.debug_name());
       n.set_color(node2id[n.get_compact()]);
+      n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
     } else {
+      fmt::print("Not found {} in node2id\n", n.debug_name());
       n.set_color(8);
-      fmt::print("Not found\n");
+      n.set_name(mmap_lib::str("MISSING"));
     }
   }
 
-
+#if DEBUG
+  fmt::print("Roots: \n");
   for (auto &it : roots) {
     Node n(g, it);
-    fmt::print("Root Node: {}\n", n.debug_name());
+    fmt::print("    {}\n", n.debug_name());
   }
 
+  fmt::print("node2id: \n");
   for (auto &it : node2id) {
     Node n(g, it.first);
-    fmt::print("Node: {}, Part ID: {}\n", n.debug_name(), it.second);
-    n.set_color(it.second);
+    fmt::print("    {}, ID: {}\n", n.debug_name(), it.second);
+    //n.set_color(it.second);
   }
+#endif
 
   /*
   for (auto node : g->fast(hier)) {
