@@ -73,43 +73,46 @@ void Label_acyclic::label(Lgraph *g) {
 
   */
 #endif
-  
+ 
+
+
   // Iterating through outputs of the graphs (0 out edges), all are potential roots
   g->each_graph_output([&](const Node_pin &pin) {
     const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
     roots.insert(nodec);             // Saving roots
     node2id[nodec] = part_id;        // Saving part ID of nodes
     id2nodes[part_id].push_back(nodec); // Saving nodes under part IDs
-    part_id++;                       
+    part_id+=5;                       
   });
 
-  // Also adding all nodes with more than 1 out_edge to potential roots
+  // Adding potential roots to the root list
   bool add_root = false;
-  for (auto n : g->forward(hier)) {
-    if (n.get_num_out_edges() > 1 || n.get_num_out_edges() == 0) {
-      add_root = true;
-    } else if (n.get_num_out_edges() == 1) {
-      // TODO
-      // Get the node on the head of this edge
-      // access the out edge  
-      for (auto &oe : n.out_edges()) { 
-        auto sink_node_name = oe.sink.get_node().debug_name();
-        if (static_cast<int>(sink_node_name.find("_io_")) != -1) {
-          add_root = true;
+  
+  for (const auto &n : g->forward(hier)) {
+    if (n.get_num_out_edges() > 1) {
+      //TODO 
+      //The sink of these outedges can be outNeighs of the Part
+      for (const auto &oe : n.out_edges()) {
+        const auto sink_nodec = oe.sink.get_node().get_compact();
+        auto curr_outg = id2outgoing[part_id];
+        // Only add if not there
+        if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
+          id2outgoing[part_id].push_back(sink_nodec);
         }
       }
 
-#if DEBUG
-      fmt::print("** One Out Edge Case:\n");
-      for (auto &oe : n.out_edges()) {
-        auto sink_pin = oe.sink;
-        //auto sink_pin_id = sink_pin.get_pid();
-        auto sink_node = oe.sink.get_node();
-        auto sink_pin_name = sink_pin.has_name() ? sink_pin.get_name() : "NoName";
-        auto sink_node_name = sink_node.debug_name();
-        fmt::print("** Node:{}, Sink Pin:{}, Sink Node:{}\n", n.debug_name(), sink_pin_name, sink_node_name);
+      add_root = true;
+    } else if (n.get_num_out_edges() == 0) {
+      add_root = true;
+    } else if (n.get_num_out_edges() == 1) {
+      // Handle case with one out edge that leads to an output pin
+      for (const auto &oe : n.out_edges()) { 
+        const auto sink_node_name = oe.sink.get_node().debug_name();
+        if (static_cast<int>(sink_node_name.find("_io_")) != -1) {
+          add_root = true;
+        }
+        //else we do nothing cause Not a Root
       }
-#endif
     }
 
     if (add_root == true) {
@@ -118,40 +121,77 @@ void Label_acyclic::label(Lgraph *g) {
       roots.insert(nodec); 
       node2id[nodec] = part_id;
       id2nodes[part_id].push_back(nodec);
-      //fmt::print("Root: {}, ID: {}\n", n.debug_name(), part_id);
       part_id+=5;    
     }
   } 
 
+
   // Iterating through all the potential roots
-  for (auto n : roots) {
-    if (!node_preds.empty()) node_preds.clear();
-    auto curr_id = node2id[n];
+  for (auto &n : roots) {
+    if (!node_preds.empty()) { node_preds.clear(); }
+    const auto curr_id = node2id[n];
     node_preds.push_back(n);              // Adding yourself as a predecessor
+    
     while (node_preds.size() != 0) {
-      auto curr_pred = node_preds.back(); // Getting a predecessor to explore
+      const auto curr_pred = node_preds.back(); // Getting a predecessor to explore
       node_preds.pop_back();              
-      
+
       // Checking the predecessors of curr_pred to add more nodes to explore
+      // Get driver of all inp_edges and add to pot list if not already in a Part
       Node temp_n(g, curr_pred);
-      for (auto ie : temp_n.inp_edges()) {
-        
-        auto pot_pred = ie.driver.get_node().get_compact();
+      for (auto &ie : temp_n.inp_edges()) { 
+        const auto pot_pred = ie.driver.get_node();
+        const auto pot_predc = pot_pred.get_compact();
+       
         // Only add node if node is not a root or node is not already assigned
-        if (!roots.contains(pot_pred)) {
-          if (!node2id.contains(pot_pred)) {
-            node2id[pot_pred] = curr_id;
-            node_preds.push_back(pot_pred);
+        if (!roots.contains(pot_predc) && !node2id.contains(pot_predc)) {
+          node2id[pot_predc] = curr_id;
+          node_preds.push_back(pot_predc);
+          //TODO
+          //All the outNeighs of nodes being added are outNeighs of the Part
+          for (auto &oe : pot_pred.out_edges()) {
+            const auto sink_nodec = oe.sink.get_node().get_compact();
+            auto curr_outg = id2outgoing[curr_id];
+            // Only add if not there
+            if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
+              id2outgoing[curr_id].push_back(sink_nodec);
+            }
           }
+        } else {
+          //TODO
+          //Nodes that can't be added, can be inNeighs of the Part
+          id2incoming[curr_id].push_back(pot_predc);
         }
       }
     }
   }
 
 
-  for (auto n : g->forward(hier)) {
+  fmt::print("node2incoming: \n");
+  for (auto &it : id2incoming) {
+    fmt::print("  Part ID: {}\n", it.first);
+    for (auto &n : it.second) {
+      Node node(g, n);
+      fmt::print("    {}\n", node.debug_name());
+    }
+  }
+  
+  fmt::print("node2outgoing: \n");
+  for (auto &it : id2outgoing) {
+    fmt::print("  Part ID: {}\n", it.first);
+    for (auto &n : it.second) {
+      Node node(g, n);
+      fmt::print("    {}\n", node.debug_name());
+    }
+  }
+
+
+  // Actual Labeling happens here:
+  for (auto n : g->fast(hier)) {
+    // Searching for nodes that did not get accessed when partitioning
+    // Ones that are found will be labeled/colored
     if (node2id.find(n.get_compact()) != node2id.end()) {
-      fmt::print("Found {} in node2id\n", n.debug_name());
+      //fmt::print("Found {} in node2id\n", n.debug_name());
       n.set_color(node2id[n.get_compact()]);
       n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
     } else {
@@ -160,6 +200,7 @@ void Label_acyclic::label(Lgraph *g) {
       n.set_name(mmap_lib::str("MISSING"));
     }
   }
+
 
 #if DEBUG
   fmt::print("Roots: \n");
@@ -176,12 +217,6 @@ void Label_acyclic::label(Lgraph *g) {
   }
 #endif
 
-  /*
-  for (auto node : g->fast(hier)) {
-    fmt::print("Node: {}, Part ID: {}\n", node.debug_name(), node2id[node]);
-    n.set_color(it.second);
-  }
-  */
 
   if (verbose) {
     dump();

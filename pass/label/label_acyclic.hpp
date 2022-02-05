@@ -19,11 +19,12 @@ private:
 
 
   using NodeVector = std::vector<Node::Compact>;
-  NodeVector                             node_preds; // predecessors of a node
-  absl::flat_hash_set<Node::Compact>     roots;      // potential roots of partitions
-  absl::flat_hash_map<Node::Compact,int> node2id;    // <Node, Partition ID>
-  absl::flat_hash_map<int, NodeVector>   id2nodes;   // <Partition ID, Nodes in Partition>
-
+  NodeVector                             node_preds;  // predecessors of a node
+  absl::flat_hash_set<Node::Compact>     roots;       // potential roots of partitions
+  absl::flat_hash_map<Node::Compact,int> node2id;     // <Node, Partition ID>
+  absl::flat_hash_map<int, NodeVector>   id2nodes;    // <Partition ID, Nodes in Partition>
+  absl::flat_hash_map<int, NodeVector>   id2incoming; // <Partition ID, Incoming Neighbors>
+  absl::flat_hash_map<int, NodeVector>   id2outgoing; // <Partition ID, Outgoing Neighbors>
 
 public:
   void label(Lgraph *g);
