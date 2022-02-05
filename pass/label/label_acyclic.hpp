@@ -17,7 +17,8 @@ private:
   uint8_t    cutoff;
   uint8_t    part_id;
 
-  using NodeVector = std::vector<Node:;Compact>;
+
+  using NodeVector = std::vector<Node::Compact>;
   NodeVector                             node_preds; // predecessors of a node
   absl::flat_hash_set<Node::Compact>     roots;      // potential roots of partitions
   absl::flat_hash_map<Node::Compact,int> node2id;    // <Node, Partition ID>

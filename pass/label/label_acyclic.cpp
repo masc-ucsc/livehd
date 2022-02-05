@@ -79,23 +79,47 @@ void Label_acyclic::label(Lgraph *g) {
     const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
     roots.insert(nodec);             // Saving roots
     node2id[nodec] = part_id;        // Saving part ID of nodes
-    id2nodes[part_id].insert(nodec); // Saving nodes under part IDs
+    id2nodes[part_id].push_back(nodec); // Saving nodes under part IDs
     part_id++;                       
   });
 
   // Also adding all nodes with more than 1 out_edge to potential roots
+  bool add_root = false;
   for (auto n : g->forward(hier)) {
     if (n.get_num_out_edges() > 1 || n.get_num_out_edges() == 0) {
-      const auto nodec = n.get_compact();
-      roots.insert(nodec); 
-      node2id[nodec] = part_id;
-      id2nodes[part_id].insert(nodec);
-      //fmt::print("Root: {}, ID: {}\n", n.debug_name(), part_id);
-      part_id+=5;
+      add_root = true;
     } else if (n.get_num_out_edges() == 1) {
       // TODO
       // Get the node on the head of this edge
-      // access the out edge
+      // access the out edge  
+      for (auto &oe : n.out_edges()) { 
+        auto sink_node_name = oe.sink.get_node().debug_name();
+        if (static_cast<int>(sink_node_name.find("_io_")) != -1) {
+          add_root = true;
+        }
+      }
+
+#if DEBUG
+      fmt::print("** One Out Edge Case:\n");
+      for (auto &oe : n.out_edges()) {
+        auto sink_pin = oe.sink;
+        //auto sink_pin_id = sink_pin.get_pid();
+        auto sink_node = oe.sink.get_node();
+        auto sink_pin_name = sink_pin.has_name() ? sink_pin.get_name() : "NoName";
+        auto sink_node_name = sink_node.debug_name();
+        fmt::print("** Node:{}, Sink Pin:{}, Sink Node:{}\n", n.debug_name(), sink_pin_name, sink_node_name);
+      }
+#endif
+    }
+
+    if (add_root == true) {
+      add_root = false;
+      const auto nodec = n.get_compact();
+      roots.insert(nodec); 
+      node2id[nodec] = part_id;
+      id2nodes[part_id].push_back(nodec);
+      //fmt::print("Root: {}, ID: {}\n", n.debug_name(), part_id);
+      part_id+=5;    
     }
   } 
 
