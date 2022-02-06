@@ -201,11 +201,9 @@ void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
 
   auto mask_bits  = e1_bits - n;
   // auto mask_const = std::pow(2, mask_bits.to_i()) - 1;
-
   Lconst mask_const = ((Lconst(1UL) << Lconst(mask_bits))) - Lconst(1);
 
   auto new_node_const = new_lg->create_node_const(mask_const);
-  fmt::print("DEBUG-9 e1_bits:{}, mask_const:{}, new_node_const:{}\n", e1_bits.to_i(), mask_const, new_node_const.get_type_const());
   // I(false);
   new_node_const.connect_driver(new_node_mask.setup_sink_pin("A"));  // mask_val -> mask
 

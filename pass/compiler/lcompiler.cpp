@@ -174,24 +174,20 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 
   //fmt::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", mmap_lib::str::concat("__firrtl_", ln->get_top_module_name()));
   auto mod_name = mmap_lib::str::concat("__firrtl_", ln->get_top_module_name());
-
   Lnast_tolg ln2lg(mod_name, path);
 
   auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
-
-  // auto tp = std::chrono::system_clock::now();
-
-  // Lbench foo("pass.wierd");
-
 
   if (gviz)
     for (const auto &lg : local_lgs) gv.do_from_lgraph(lg, "raw");
 
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
-  for (auto *lg : local_lgs)
+  for (auto *lg : local_lgs) {
+    lg->dump();
     lgs.emplace_back(lg);
+  }
 
   // auto tp2 = std::chrono::system_clock::now();
   // fmt::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);

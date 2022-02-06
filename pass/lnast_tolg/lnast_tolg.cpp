@@ -519,9 +519,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       c0_tg_subs        = lnast->get_subs(c0_tg);
       i++;
       continue;
-    }
-
-    if (i == 1) {
+    } else if (i == 1) {
       const auto &c1_tg      = child;
       auto        c1_tg_name = lnast->get_sname(c1_tg);
       auto        tup_get    = lg->create_node(Ntype_op::TupGet);
@@ -534,16 +532,13 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
         tn_dpin = setup_tuple_ref(lg, c1_tg_name);
       }
 
-      if (!tn_dpin.is_invalid()) {
-        auto tn_spin = tup_get.setup_sink_pin("parent");
-        lg->add_edge(tn_dpin, tn_spin);
-      }
+      I(!tn_dpin.is_invalid());
+      auto tn_spin = tup_get.setup_sink_pin("parent");
+      lg->add_edge(tn_dpin, tn_spin);
       i++;
       continue;
-    }
-
-    // i >= 2
-    if (child == lnast->get_last_child(lnidx_tg)) {
+    } else if (child == lnast->get_last_child(lnidx_tg)) {
+      // i >= 2
       const auto &cn_tg      = child;
       auto        cn_tg_name = lnast->get_vname(cn_tg);
       auto        tup_get    = tg_map[i - 1];
@@ -1619,8 +1614,9 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
   auto unified_out_dpin = name2dpin["%"];             // TA node
   auto unified_out_spin = lg->get_graph_output("%");  // Must be created before
   I(!unified_out_spin.is_invalid());
-  I(!unified_out_dpin.is_invalid());
-  unified_out_dpin.connect_sink(unified_out_spin);
+  // I(!unified_out_dpin.is_invalid());
+  if (!unified_out_dpin.is_invalid())
+    unified_out_dpin.connect_sink(unified_out_spin);
 
   // try to create flattened inputs
   try_create_flattened_inp(lg);

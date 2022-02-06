@@ -799,7 +799,8 @@ void Inou_firrtl_module::handle_as_usint_op(Lnast& lnast, const firrtl::FirrtlPB
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_const(sub_it->second));
-  lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+  // lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+  attach_expr_str2node(lnast, e1_str, idx_conv);
 }
 
 void Inou_firrtl_module::handle_type_conv_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node, const mmap_lib::str& lhs) {
@@ -1083,14 +1084,19 @@ void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_
   split_hier_name(full_name, hier_subnames);
 
   for (auto subname : hier_subnames) {
+    mmap_lib::str field_name = subname.first;
+    if (inst_to_mod_map.count(subname.first)) {
+      field_name = mmap_lib::str::concat("otup_", field_name);
+    } 
+
     switch (subname.second) {
       case Leaf_type::Ref: {
-        ln.add_child(selc_node, Lnast_node::create_ref(subname.first));
+        ln.add_child(selc_node, Lnast_node::create_ref(field_name));
         break;
       }
       case Leaf_type::Const_num: 
       case Leaf_type::Const_str: {
-        ln.add_child(selc_node, Lnast_node::create_const(subname.first));
+        ln.add_child(selc_node, Lnast_node::create_const(field_name));
         break;
       }
       default: Pass::error("Unknown port type.");
@@ -1105,14 +1111,18 @@ void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_
   split_hier_name(full_name, hier_subnames);
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_add());
   for (auto subname : hier_subnames) {
+    mmap_lib::str field_name = subname.first;
+    if (inst_to_mod_map.count(subname.first)) {
+      field_name = mmap_lib::str::concat("itup_", field_name);
+    } 
     switch (subname.second) {
       case Leaf_type::Ref: {
-        ln.add_child(selc_node, Lnast_node::create_ref(subname.first));
+        ln.add_child(selc_node, Lnast_node::create_ref(field_name));
         break;
       }
       case Leaf_type::Const_num: 
       case Leaf_type::Const_str: {
-        ln.add_child(selc_node, Lnast_node::create_const(subname.first));
+        ln.add_child(selc_node, Lnast_node::create_const(field_name));
         break;
       }
       default: Pass::error("Unknown port type.");
@@ -2194,7 +2204,6 @@ void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl
     Inou_firrtl::glob_info.emod_to_param_map.clear();
 
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
-    fmt::print("Hello\n");
     iterate_modules(var, circuit, file_name);
 
   }
