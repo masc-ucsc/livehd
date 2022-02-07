@@ -43,23 +43,6 @@ void Label_acyclic::label(Lgraph *g) {
   }
   fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
 
-  // Inputs
-  g->each_graph_input([&](const Node_pin &pin) {
-    auto n = pin.get_node();
-    //fmt::print("Inputs: {}\n", n.debug_name()); 
-    n.set_color(input_color);
-    n.set_name(mmap_lib::str(fmt::format("in_{}", input_color)));
-  });
-
-
-  // Outputs
-  g->each_graph_output([&](const Node_pin &pin) {
-    auto n = pin.get_node();
-    //fmt::print("Outputs: {}\n", n.debug_name()); 
-    n.set_color(output_color);
-    n.set_name(mmap_lib::str(fmt::format("out_{}", output_color)));
-  });
-
 #endif
  
 
@@ -77,19 +60,19 @@ void Label_acyclic::label(Lgraph *g) {
   
   for (const auto &n : g->forward(hier)) {
     if (n.get_num_out_edges() > 1) {
-      //TODO 
-      //The sink of these outedges can be outNeighs of the Part
 
+      //The sink of these outedges can be outNeighs of the Part
       for (const auto &oe : n.out_edges()) {
         auto sink_nodec = oe.sink.get_node().get_compact();
         auto curr_outg = id2out[part_id];
-        // Only add if not there
+        
+        // Only add if not there and not _io_
         if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-
-#ifdef S_DEBUG      
-          fmt::print("Adding {} to outNeigh of {}\n", sink_nodec.get_node(g).debug_name(), n.debug_name());
-#endif
-          id2out[part_id].push_back(sink_nodec);
+          if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
+            //id2out[part_id].push_back(sink_nodec);
+            // TODO 
+            id2out[part_id].push_back(sink_nodec);
+          }
         }
       }
 
@@ -97,7 +80,9 @@ void Label_acyclic::label(Lgraph *g) {
     } else if (n.get_num_out_edges() == 0) {
       add_root = true;
     } else if (n.get_num_out_edges() == 1) {
+      
       // Handle case with one out edge that leads to an output pin
+      //   If the sink of the out edge IS an io, add_root
       for (const auto &oe : n.out_edges()) { 
         const auto sink_node_name = oe.sink.get_node().debug_name();
         if (static_cast<int>(sink_node_name.find("_io_")) != -1) {
@@ -138,49 +123,42 @@ void Label_acyclic::label(Lgraph *g) {
         // Three conditions that must be false for node to be addable
         bool is_root = roots.contains(pot_predc);
         bool is_labeled = node2id.contains(pot_predc);
-        //bool is_io = (static_cast<int>(pot_pred.debug_name().find("_io_")) == -1);
-
-        if (!(is_root) && !(is_labeled)) {
-
-#ifdef S_DEBUG
-          fmt::print("Not a Root and Not labeled: {}\n", pot_pred.debug_name());
-#endif
-
+        bool not_io = (static_cast<int>(pot_pred.debug_name().find("_io_")) == -1);
+        
+        if (!(is_root) && !(is_labeled) && not_io) {
           node2id[pot_predc] = curr_id;
           node_preds.push_back(pot_predc);
-          //TODO
+          
           //All the outNeighs of nodes being added are outNeighs of the Part
-
-
           for (auto &oe : pot_pred.out_edges()) {
             auto sink_nodec = oe.sink.get_node().get_compact();
             auto curr_outg = id2out[curr_id];
             
-            // Only add node if:
+            // Only add outgoing neighbor if:
             //   Not in the outNeigh list for this part ID
-            //   Not the same part ID as curr_id but has an ID
-            
+            //   In node2id BUT Not the same part ID as curr_id
             if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-            /*
-              if ((node2id[sink_nodec] != curr_id) && (node2id.contains(sink_nodec))) {
-
-#ifdef S_DEBUG                
-                fmt::print("Adding {} to outNeigh of {}\n", sink_nodec.get_node(g).debug_name(), n.get_node(g).debug_name());
-#endif
-
-                id2out[curr_id].push_back(sink_nodec);
-              }
-              */
+              if (node2id.contains(sink_nodec)) {
+                if (node2id[sink_nodec] != curr_id) {
+                  //id2out[curr_id].push_back(sink_nodec);
+                  //TODO
+                  id2out[curr_id].push_back(sink_nodec);
+                }
+              } 
             }
-            
-            
-            fmt::print("{}, {}\n", sink_nodec.get_node(g).debug_name(), curr_outg.size());
           }
-
         } else {
-          //TODO
-          //Nodes that can't be added, can be inNeighs of the Part
-          id2inc[curr_id].push_back(pot_predc);
+          
+          // Nodes are not of the Part, can be inNeighs of the Part
+          //   Must NOT be in the incoming vector & NOT be an _io_
+          auto curr_inc = id2inc[curr_id];
+          if (std::find(curr_inc.begin(), curr_inc.end(), pot_predc) == curr_inc.end()) {
+            if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
+              //id2inc[curr_id].push_back(pot_predc);
+              //TODO
+              id2inc[curr_id].push_back(pot_predc);
+            }
+          }
         }
       }
     }
