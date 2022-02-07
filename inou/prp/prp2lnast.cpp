@@ -124,12 +124,69 @@ void Prp2lnast::process_node(TSNode node) {
   else if (node_type == "select"           ) process_select(node);
   else if (node_type == "declaration"      ) process_assignment_or_declaration(node);
   else if (node_type == "assignment"       ) process_assignment_or_declaration(node);
+	else if (node_type == "scope_statement"  ) process_scope_statement(node);
+	else if (node_type == "if_statement"     ) process_if_statement(node);
   else if (node_type == "tuple"            ) process_tuple(node);
   else if (node_type == "tuple_list"       ) process_tuple_or_expression_list(node);
   else if (node_type == "expression_list"  ) process_tuple_or_expression_list(node);
   else if (node_type == "identifier"       ) process_identifier(node);
   else if (node_type == "simple_number"    ) process_simple_number(node);
   else                                       process_node(get_child(node));
+}
+
+void Prp2lnast::process_scope_statement(TSNode node) {
+	node = get_child(node);
+	while (!ts_node_is_null(node)) {
+		if (mmap_lib::str(ts_node_type(node)) == "statement") {
+			process_node(node);
+		}
+		node = get_sibling(node);
+	}
+}
+
+void Prp2lnast::process_if_statement(TSNode node) {
+	node = get_named_child(node);
+
+	// TODO: Handle unique if
+	std::vector<Lnast_node> cond_refs;
+	std::vector<TSNode> code_blocks;
+	
+	expr_state_stack.push(Expression_state::Rvalue);
+
+	process_node(node);
+	cond_refs.push_back(primary_node_stack.top()); primary_node_stack.pop();
+	node = get_sibling(node);
+	code_blocks.push_back(node);
+
+	node = get_sibling(node);
+	while (!ts_node_is_null(node)) {
+		if (get_text(node) == "elif") {
+			node = get_sibling(node);
+			process_node(node);
+			cond_refs.push_back(primary_node_stack.top()); primary_node_stack.pop();
+			node = get_sibling(node);
+			code_blocks.push_back(node);
+		} else if (get_text(node) == "else") {
+			node = get_sibling(node);
+			code_blocks.push_back(node);
+		}
+		node = get_sibling(node);
+	}
+
+	auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
+	for (size_t i = 0; i < cond_refs.size(); ++i) {
+		lnast->add_child(if_index, cond_refs[i]);
+		stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+		process_node(code_blocks[i]);
+		stmts_index = lnast->get_parent(stmts_index);
+	}
+	if (code_blocks.size() > cond_refs.size()) {
+		stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+		process_node(code_blocks.back());
+		stmts_index = lnast->get_parent(stmts_index);
+	}
+	
+	expr_state_stack.pop();
 }
 
 void Prp2lnast::process_assignment_or_declaration(TSNode node) {

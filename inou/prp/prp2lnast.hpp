@@ -32,8 +32,11 @@ protected:
   // Non-terminal rules
   void process_node(TSNode);
 
+	// Statements
+	void process_scope_statement(TSNode);
+	void process_if_statement(TSNode);
+
   // Assignment/Declaration
-  void process_assignment(TSNode);
   void process_assignment_or_declaration(TSNode);
 
   // Expressions
