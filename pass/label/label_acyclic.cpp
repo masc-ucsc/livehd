@@ -60,18 +60,6 @@ void Label_acyclic::label(Lgraph *g) {
     n.set_name(mmap_lib::str(fmt::format("out_{}", output_color)));
   });
 
-  /*
-
-  // Iterating through graph inputs 
-  g->each_graph_input([&](const Node_pin &pin) {
-    for (const auto &e : pin.out_edges()) {
-      auto sink_node = e.sink.get_node();
-      auto driver_node = e.driver.get_node();
-      fmt::print("sink_node: {}, driver_node: {}\n", sink_node.debug_name(), driver_node.debug_name());
-    }
-  });
-
-  */
 #endif
  
 
@@ -91,6 +79,7 @@ void Label_acyclic::label(Lgraph *g) {
     if (n.get_num_out_edges() > 1) {
       //TODO 
       //The sink of these outedges can be outNeighs of the Part
+
       for (const auto &oe : n.out_edges()) {
         auto sink_nodec = oe.sink.get_node().get_compact();
         auto curr_outg = id2out[part_id];
@@ -161,6 +150,8 @@ void Label_acyclic::label(Lgraph *g) {
           node_preds.push_back(pot_predc);
           //TODO
           //All the outNeighs of nodes being added are outNeighs of the Part
+
+          /*
           for (auto &oe : pot_pred.out_edges()) {
             auto sink_nodec = oe.sink.get_node().get_compact();
             auto curr_outg = id2out[curr_id];
@@ -178,6 +169,8 @@ void Label_acyclic::label(Lgraph *g) {
               }
             }
           }
+          */
+
         } else {
           //TODO
           //Nodes that can't be added, can be inNeighs of the Part
@@ -186,6 +179,7 @@ void Label_acyclic::label(Lgraph *g) {
       }
     }
   }
+
 
 
   fmt::print("node2incoming: \n");
@@ -207,7 +201,7 @@ void Label_acyclic::label(Lgraph *g) {
   }
 
   // Actual Labeling happens here:
-  for (auto n : g->fast(hier)) {
+  for (auto n : g->forward(hier)) {
     // Searching for nodes that did not get accessed when partitioning
     // Ones that are found will be labeled/colored
     if (node2id.find(n.get_compact()) != node2id.end()) {
