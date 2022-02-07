@@ -93,8 +93,10 @@ void Prp2lnast::process_description() {
 
   bool go_next = ts_tree_cursor_goto_first_child(&tc);
   while (go_next) {
+		expr_state_stack.push(Expression_state::Rvalue);
     select_stack.push(std::vector<Lnast_node>());
     process_statement(&tc);
+		expr_state_stack.pop();
     select_stack.pop();
     I(primary_node_stack.size() == 0);
     I(select_stack.size() == 0);
@@ -126,6 +128,8 @@ void Prp2lnast::process_node(TSNode node) {
   else if (node_type == "assignment"       ) process_assignment_or_declaration(node);
 	else if (node_type == "scope_statement"  ) process_scope_statement(node);
 	else if (node_type == "if_statement"     ) process_if_statement(node);
+	else if (node_type == "for_statement"    ) process_for_statement(node);
+	else if (node_type == "while_statement"  ) process_while_statement(node);
   else if (node_type == "tuple"            ) process_tuple(node);
   else if (node_type == "tuple_list"       ) process_tuple_or_expression_list(node);
   else if (node_type == "expression_list"  ) process_tuple_or_expression_list(node);
@@ -151,8 +155,6 @@ void Prp2lnast::process_if_statement(TSNode node) {
 	std::vector<Lnast_node> cond_refs;
 	std::vector<TSNode> code_blocks;
 	
-	expr_state_stack.push(Expression_state::Rvalue);
-
 	process_node(node);
 	cond_refs.push_back(primary_node_stack.top()); primary_node_stack.pop();
 	node = get_sibling(node);
@@ -185,8 +187,39 @@ void Prp2lnast::process_if_statement(TSNode node) {
 		process_node(code_blocks.back());
 		stmts_index = lnast->get_parent(stmts_index);
 	}
+}
+
+void Prp2lnast::process_for_statement(TSNode node) {
+	// TODO: Handle `mut` type qualifier
 	
-	expr_state_stack.pop();
+	auto inode = get_child(node, "index");
+	auto dnode = get_child(node, "data");
+	auto cnode = get_child(node, "code");
+
+	process_node(inode);
+	auto index = primary_node_stack.top(); primary_node_stack.pop();
+	process_node(dnode);
+	auto data = primary_node_stack.top(); primary_node_stack.pop();
+	auto for_index = lnast->add_child(stmts_index, Lnast_node::create_for());
+	lnast->add_child(for_index, index);
+	lnast->add_child(for_index, data);
+	stmts_index = lnast->add_child(for_index, Lnast_node::create_stmts());
+	process_node(cnode);
+	stmts_index = lnast->get_parent(stmts_index);
+}
+
+void Prp2lnast::process_while_statement(TSNode node) {
+	auto cond = get_child(node, "condition");
+	auto code = get_child(node, "code");
+
+	auto while_index = lnast->add_child(stmts_index, Lnast_node::create_while());
+	stmts_index = lnast->add_child(while_index, Lnast_node::create_stmts());
+	process_node(cond);
+	stmts_index = lnast->get_parent(stmts_index);
+	lnast->add_child(while_index, primary_node_stack.top()); primary_node_stack.pop();
+	stmts_index = lnast->add_child(while_index, Lnast_node::create_stmts());
+	process_node(code);
+	stmts_index = lnast->get_parent(stmts_index);
 }
 
 void Prp2lnast::process_assignment_or_declaration(TSNode node) {

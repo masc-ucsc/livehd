@@ -35,6 +35,8 @@ protected:
 	// Statements
 	void process_scope_statement(TSNode);
 	void process_if_statement(TSNode);
+	void process_for_statement(TSNode);
+	void process_while_statement(TSNode);
 
   // Assignment/Declaration
   void process_assignment_or_declaration(TSNode);
