@@ -1275,9 +1275,9 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
+  auto [tup_name, key_name] = get_tuple_name_key(node);
   auto parent_dpin          = node.get_sink_pin("parent").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
-  auto [tup_name, key_name] = get_tuple_name_key(node);
 
   std::shared_ptr<Lgtuple const> node_tup;
 

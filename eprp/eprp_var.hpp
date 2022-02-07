@@ -57,8 +57,11 @@ public:
 
   void delete_label(const mmap_lib::str &name);
 
-  bool             has_label(const mmap_lib::str &name) const { return dict.find(name) != dict.end(); };
-  mmap_lib::str    get(const mmap_lib::str &name) const;
+  bool has_label(const mmap_lib::str &name) const { 
+    return dict.find(name) != dict.end(); 
+  };
+  
+  mmap_lib::str get(const mmap_lib::str &name) const;
 
   void clear() {
     dict.clear();

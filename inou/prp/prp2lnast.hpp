@@ -2,19 +2,13 @@
 
 #include "tree_sitter/api.h"
 
+#include <functional>
 #include <stack>
+#include <vector>
 
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "symbol_table.hpp"
-
-struct Prp_tuple_item {
-public:
-  mmap_lib::str ref_name;
-  bool is_named;
-};
-
-using Prp_tuple = mmap_lib::tree<Prp_tuple_item>;
 
 class Prp2lnast {
 protected:
@@ -25,15 +19,9 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue };
-  enum class Identifier_state { Set, Get, None };
+  enum class Expression_state { Type, Lvalue, Rvalue, Const };
 
-  std::stack<Identifier_state> id_state_stack;
-
-  // Tuple Handling (Matching)
-  // TODO: change these to stack to allow recursive assignments
-  // Prp_tuple lvalue_tuple;
-  // Prp_tuple rvalue_tuple;
+  std::stack<Expression_state> expr_state_stack;
 
   // Top
   void process_description();
@@ -43,29 +31,40 @@ protected:
 
   // Non-terminal rules
   void process_node(TSNode);
-  void process_each_child(TSNode);
-  void process_each_named_child(TSNode);
 
   // Assignment/Declaration
   void process_assignment(TSNode);
-  void process_declaration(TSNode);
+  void process_assignment_or_declaration(TSNode);
 
   // Expressions
-  void process_expression_list(TSNode);
   void process_binary_expression(TSNode);
+  void process_dot_expression(TSNode);
+  void process_member_selection(TSNode);
+
+  // Select
+  void process_select(TSNode);
+  void process_member_select(TSNode);
 
   // Basics
   void process_tuple(TSNode);
+  void process_tuple_or_expression_list(TSNode);
+  void process_lvalue_list(TSNode);
+  void process_rvalue_list(TSNode);
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
 
   // Lnast Tree Helpers
   std::unique_ptr<Lnast> lnast;
   mmap_lib::Tree_index stmts_index;
-  std::stack<Lnast_node> primary_node_stack; // ref or const
-
+  std::stack<Lnast_node> rvalue_node_stack;
+  std::vector<int> tuple_lvalue_positions;
+  std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
+  std::stack<Lnast_node> primary_node_stack;
+  std::stack<std::vector<Lnast_node>> select_stack;
+  
   // Lnast_node Helpers
   int tmp_ref_count;
+  mmap_lib::str get_tmp_name();
   inline Lnast_node get_tmp_ref();
 
   // TS API Helpers

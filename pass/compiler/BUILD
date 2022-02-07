@@ -190,7 +190,7 @@ cc_library(
 
     # FIXME:
 
-    # issue2: memory
+    # issue1: memory
     # "Smem",
     # "SmemStruct",
     # "MaskedSmem",
@@ -199,9 +199,12 @@ cc_library(
     # "ListBuffer",
     # "BankedStore"
     # "BoomDuplicatedDataArray",
-
+    
+    # issue2: design too large and not LEC
+    # MemAddrCalcUnit
 
     # ???
+    # "MemAddrCalcUnit"
     # "DynamicMemorySearch",
     # "Memo",
     # "Router",

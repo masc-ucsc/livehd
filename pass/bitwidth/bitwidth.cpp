@@ -872,7 +872,6 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
     }
 
     Bits_t bw_sbits = it->second.get_sbits();
-    fmt::print("DEBUG-8 bw_sbits:{}\n", bw_sbits);
     I(bw_sbits);
 
     if (it->second.is_always_positive()) {
@@ -1587,7 +1586,6 @@ void Bitwidth::set_subgraph_boundary_bw(Node &node) {
   auto sub_lg = node.ref_type_sub_lgraph();
 
   sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
-    fmt::print("DEBUG-10 dpin_gout:{}, bits:{}\n", dpin_gout.debug_name(), dpin_gout.get_bits());
     auto top_dpin = node.setup_driver_pin(dpin_gout.get_name());
     
     Bitwidth_range bw;

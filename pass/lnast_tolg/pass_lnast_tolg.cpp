@@ -1,6 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "perf_tracing.hpp"
-
 #include "pass_lnast_tolg.hpp"
 
 /* void setup_pass_lnast_tolg() { Pass_lnast_tolg::setup(); } */
@@ -27,7 +26,7 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
   TRACE_EVENT("pass", "lnast_tolg.ssa");
   /* Lbench b1("pass.lnast_tolg.ssa"); */
   Pass_lnast_tolg p(var);
-  auto            path = p.get_path(var);
+  auto path = p.get_path(var);
 
   for (const auto &lnast : var.lnasts) {
     lnast->ssa_trans();
@@ -37,8 +36,8 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
   /* Lbench b2("pass.lnast_tolg.tolg"); */
   std::vector<Lgraph *> lgs;
   for (const auto &ln : var.lnasts) {
-    auto       module_name = ln->get_top_module_name();
-    const auto top_stmts   = ln->get_first_child(mmap_lib::Tree_index::root());
+    auto module_name = mmap_lib::str::concat("__firrtl_", ln->get_top_module_name());
+    const auto top_stmts = ln->get_first_child(mmap_lib::Tree_index::root());
 
     Lnast_tolg pp(module_name, path);
     lgs = pp.do_tolg(ln, top_stmts);
@@ -49,3 +48,4 @@ void Pass_lnast_tolg::tolg(Eprp_var &var) {
     error("failed to generate any lgraph from lnast");
   }
 }
+

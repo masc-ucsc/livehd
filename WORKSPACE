@@ -78,13 +78,14 @@ http_archive(
     ],
 )
 
+# tree-sitter-pyrope
 http_archive(
     name = "tree-sitter-pyrope",
     build_file = "tree-sitter-pyrope.BUILD",
-    sha256 = "6566311b528351181b6b97ab6188f1341e8e7252bb25d4966c6f0bf631741ca0",
-    strip_prefix = "tree-sitter-pyrope-d796da1e6c2986bab9f49a1c8f2914126c09d332",
+    sha256 = "2678da85824ea8860551adbc1ce290f2925f9bb5921f3638f41e1af25713d42a",
+    strip_prefix = "tree-sitter-pyrope-47eb11ef0b23ffe0d81bf7970d5513dff349a2ec",
     urls = [
-        "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/d796da1e6c2986bab9f49a1c8f2914126c09d332.zip",
+        "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/47eb11ef0b23ffe0d81bf7970d5513dff349a2ec.zip",
     ],
 )
 
