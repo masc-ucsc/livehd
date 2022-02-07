@@ -151,14 +151,17 @@ void Label_acyclic::label(Lgraph *g) {
           //TODO
           //All the outNeighs of nodes being added are outNeighs of the Part
 
-          /*
+
           for (auto &oe : pot_pred.out_edges()) {
             auto sink_nodec = oe.sink.get_node().get_compact();
             auto curr_outg = id2out[curr_id];
+            
             // Only add node if:
             //   Not in the outNeigh list for this part ID
             //   Not the same part ID as curr_id but has an ID
+            
             if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
+            /*
               if ((node2id[sink_nodec] != curr_id) && (node2id.contains(sink_nodec))) {
 
 #ifdef S_DEBUG                
@@ -167,9 +170,12 @@ void Label_acyclic::label(Lgraph *g) {
 
                 id2out[curr_id].push_back(sink_nodec);
               }
+              */
             }
+            
+            
+            fmt::print("{}, {}\n", sink_nodec.get_node(g).debug_name(), curr_outg.size());
           }
-          */
 
         } else {
           //TODO
