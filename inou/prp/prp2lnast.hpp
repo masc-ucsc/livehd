@@ -41,6 +41,10 @@ protected:
   void process_dot_expression(TSNode);
   void process_member_selection(TSNode);
 
+  // Select
+  void process_select(TSNode);
+  void process_member_select(TSNode);
+
   // Basics
   void process_tuple(TSNode);
   void process_tuple_or_expression_list(TSNode);
@@ -56,7 +60,7 @@ protected:
   std::vector<int> tuple_lvalue_positions;
   std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
   std::stack<Lnast_node> primary_node_stack;
-  std::stack<std::vector<Lnast_node>> member_select_stack;
+  std::stack<std::vector<Lnast_node>> select_stack;
   
   // Lnast_node Helpers
   int tmp_ref_count;

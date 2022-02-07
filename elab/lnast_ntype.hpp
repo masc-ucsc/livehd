@@ -74,6 +74,9 @@ public:
     Lnast_ntype_ref,
     Lnast_ntype_const,
 
+    // range
+    Lnast_ntype_range,
+
     // Tuple ops
     Lnast_ntype_tuple_concat,  // ++
     Lnast_ntype_tuple_add,
@@ -147,6 +150,8 @@ protected:
 
       "ref",
       "const",
+
+      "range",
 
       "tuple_concat",
       "tuple_add",
@@ -224,6 +229,8 @@ public:
 
   static constexpr Lnast_ntype create_ref() { return Lnast_ntype(Lnast_ntype_ref); }
   static constexpr Lnast_ntype create_const() { return Lnast_ntype(Lnast_ntype_const); }
+
+  static constexpr Lnast_ntype create_range() { return Lnast_ntype(Lnast_ntype_range); }
 
   static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
   static constexpr Lnast_ntype create_tuple_add() { return Lnast_ntype(Lnast_ntype_tuple_add); }
