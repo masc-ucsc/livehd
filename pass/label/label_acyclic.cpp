@@ -56,26 +56,27 @@ void Label_acyclic::label(Lgraph *g) {
   });
 
   // Adding potential roots to the root list
-  bool add_root = false;
-  
+  bool add_root = false;  
   for (const auto &n : g->forward(hier)) {
     if (n.get_num_out_edges() > 1) {
 
       //The sink of these outedges can be outNeighs of the Part
       for (const auto &oe : n.out_edges()) {
         auto sink_nodec = oe.sink.get_node().get_compact();
-        auto curr_outg = id2out[part_id];
         
-        // Only add if not there and not _io_
-        if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-          if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
-            //id2out[part_id].push_back(sink_nodec);
-            // TODO 
+        // Only add to outgoing neighbors if not _io_
+        if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
+          // Add check to avoid empty vectors from being made
+          if (id2out.contains(part_id)) { 
+            auto curr_outg = id2out[part_id];
+            if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
+              id2out[part_id].push_back(sink_nodec);
+            }
+          } else {
             id2out[part_id].push_back(sink_nodec);
           }
         }
       }
-
       add_root = true;
     } else if (n.get_num_out_edges() == 0) {
       add_root = true;
@@ -132,38 +133,43 @@ void Label_acyclic::label(Lgraph *g) {
           //All the outNeighs of nodes being added are outNeighs of the Part
           for (auto &oe : pot_pred.out_edges()) {
             auto sink_nodec = oe.sink.get_node().get_compact();
-            auto curr_outg = id2out[curr_id];
-            
-            // Only add outgoing neighbor if:
-            //   Not in the outNeigh list for this part ID
-            //   In node2id BUT Not the same part ID as curr_id
-            if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-              if (node2id.contains(sink_nodec)) {
-                if (node2id[sink_nodec] != curr_id) {
-                  //id2out[curr_id].push_back(sink_nodec);
-                  //TODO
+
+            // Only add to outgoing neighbors if:
+            //   Node is labeled & Node is not of current id
+            //   Also make sure it does not exist to prevent empty vectors
+            if (node2id.contains(sink_nodec)) {
+              if (node2id[sink_nodec] != curr_id) {
+                if (id2out.contains(curr_id)) {
+                  auto curr_outg = id2out[part_id];
+                  if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
+                    id2out[curr_id].push_back(sink_nodec);
+                  }
+                } else {
                   id2out[curr_id].push_back(sink_nodec);
                 }
-              } 
+              }
             }
           }
         } else {
           
-          // Nodes are not of the Part, can be inNeighs of the Part
+          // Nodes are not of the Part, can be incoming neighbors of the Part
           //   Must NOT be in the incoming vector & NOT be an _io_
-          auto curr_inc = id2inc[curr_id];
-          if (std::find(curr_inc.begin(), curr_inc.end(), pot_predc) == curr_inc.end()) {
-            if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
-              //id2inc[curr_id].push_back(pot_predc);
-              //TODO
+          
+          if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
+            if (id2inc.contains(curr_id)) {
+              auto curr_inc = id2inc[curr_id];
+              if (std::find(curr_inc.begin(), curr_inc.end(), pot_predc) == curr_inc.end()) {
+                id2inc[curr_id].push_back(pot_predc);
+              }
+            } else {
               id2inc[curr_id].push_back(pot_predc);
             }
           }
         }
-      }
-    }
-  }
 
+      } // END of inp_edge iteration for loop
+    } // END of node_preds clearing while loop 
+  } // END of root iteration for loop
 
 
   fmt::print("node2incoming: \n");
