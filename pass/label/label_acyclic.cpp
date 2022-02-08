@@ -6,6 +6,7 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
+//#define S_DEBUG 1
 
 
 Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff) : verbose(_verbose), hier(_hier), cutoff(_cutoff) { 
@@ -15,6 +16,17 @@ Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff) : verbo
 void Label_acyclic::dump() const {
   fmt::print("Label_acyclic dump\n");
 }
+
+bool Label_acyclic::set_cmp(NodeSet a, NodeSet b) const {
+  if (a.size() != b.size()) { return false; }
+  
+  for (auto &n : a) {
+    if (!(b.contains(n))) { return false; }
+  }
+
+  return true;
+}
+
 
 void Label_acyclic::label(Lgraph *g) {
   if (cutoff) fmt::print("small partition cutoff: {}\n", cutoff);
@@ -28,8 +40,6 @@ void Label_acyclic::label(Lgraph *g) {
 #ifdef S_DEBUG
   // Internal Nodes printing 
   int my_color = 0;
-  int input_color = 11;
-  int output_color = 22;
   int node_tracker = 0;
   
   for (auto n : g->forward(hier)) {
@@ -51,8 +61,8 @@ void Label_acyclic::label(Lgraph *g) {
     const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
     roots.insert(nodec);             // Saving roots
     node2id[nodec] = part_id;        // Saving part ID of nodes
-    id2nodes[part_id].push_back(nodec); // Saving nodes under part IDs
-    part_id+=5;                       
+    id2nodes[part_id].insert(nodec); // Saving nodes under part IDs
+    part_id+=1;                       
   });
 
   // Adding potential roots to the root list
@@ -66,7 +76,12 @@ void Label_acyclic::label(Lgraph *g) {
         
         // Only add to outgoing neighbors if not _io_
         if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
-          // Add check to avoid empty vectors from being made
+          
+          //XXX
+          id2out[part_id].insert(sink_nodec);
+          
+          /*
+          // Add check to prevent empty sets from being made
           if (id2out.contains(part_id)) { 
             auto curr_outg = id2out[part_id];
             if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
@@ -75,6 +90,8 @@ void Label_acyclic::label(Lgraph *g) {
           } else {
             id2out[part_id].push_back(sink_nodec);
           }
+          */
+
         }
       }
       add_root = true;
@@ -98,8 +115,8 @@ void Label_acyclic::label(Lgraph *g) {
       const auto nodec = n.get_compact();
       roots.insert(nodec); 
       node2id[nodec] = part_id;
-      id2nodes[part_id].push_back(nodec);
-      part_id+=5;    
+      id2nodes[part_id].insert(nodec);
+      part_id+=1;    
     }
   } 
 
@@ -139,6 +156,12 @@ void Label_acyclic::label(Lgraph *g) {
             //   Also make sure it does not exist to prevent empty vectors
             if (node2id.contains(sink_nodec)) {
               if (node2id[sink_nodec] != curr_id) {
+               
+                //XXX 
+                id2out[curr_id].insert(sink_nodec);
+
+                /*
+                // Prevent empty vector creation
                 if (id2out.contains(curr_id)) {
                   auto curr_outg = id2out[part_id];
                   if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
@@ -147,15 +170,20 @@ void Label_acyclic::label(Lgraph *g) {
                 } else {
                   id2out[curr_id].push_back(sink_nodec);
                 }
+                */
               }
             }
           }
         } else {
           
           // Nodes are not of the Part, can be incoming neighbors of the Part
-          //   Must NOT be in the incoming vector & NOT be an _io_
-          
+          //   Must NOT be in the incoming vector & NOT be an _io_          
           if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
+            // Prevent empty vector creation
+            
+            id2inc[curr_id].insert(pot_predc);
+
+            /*
             if (id2inc.contains(curr_id)) {
               auto curr_inc = id2inc[curr_id];
               if (std::find(curr_inc.begin(), curr_inc.end(), pot_predc) == curr_inc.end()) {
@@ -164,6 +192,8 @@ void Label_acyclic::label(Lgraph *g) {
             } else {
               id2inc[curr_id].push_back(pot_predc);
             }
+            */
+          
           }
         }
 
@@ -171,7 +201,59 @@ void Label_acyclic::label(Lgraph *g) {
     } // END of node_preds clearing while loop 
   } // END of root iteration for loop
 
+#ifdef MERGE
+  while (true) {
+    for (auto &outer : id2in) {
+      auto curr_id = outer.first;
+      auto curr_inc = outer.second;
 
+      for (auto &inner : id2in) {
+        auto alt_id = inner.first;
+        auto alt_inc = inner.second;
+
+        if (curr_id != alt_id) {
+          if (curr_inc == alt_inc) {
+            // TODO Merging Algo here:
+            //
+            // Always merge into curr_id (outer.first)
+            //
+            // Alter all the actual part ID's for the nodes
+            for (auto n : id2in[alt_id]) {
+              node2id[n] = curr_id;  
+            }
+
+            // Remove alt_id from id2in
+            id2in.erase(alt_id);
+
+            // Merge the outgoing, incoming is the same for the parts
+            //id2out[curr_id].insert(id2out[curr_id].end(), id2out[alt_id], id2out[])
+             
+            
+          }
+        }
+      }
+    }
+  }
+#endif
+
+
+  // Actual Labeling happens here:
+  for (auto n : g->fast(hier)) {
+    // Searching for nodes that did not get accessed when partitioning
+    // Ones that are found will be labeled/colored
+    if (node2id.find(n.get_compact()) != node2id.end()) {
+      //fmt::print("Found {} in node2id\n", n.debug_name());
+      n.set_color(node2id[n.get_compact()]);
+      n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+    } else {
+      fmt::print("Not found {} in node2id\n", n.debug_name());
+      n.set_color(8);
+      n.set_name(mmap_lib::str("MISSING"));
+    }
+  }
+
+
+#ifdef S_DEBUG
   fmt::print("node2incoming: \n");
   for (auto &it : id2inc) {
     fmt::print("  Part ID: {}\n", it.first);
@@ -189,23 +271,7 @@ void Label_acyclic::label(Lgraph *g) {
       fmt::print("    {}\n", node.debug_name());
     }
   }
-
-  // Actual Labeling happens here:
-  for (auto n : g->forward(hier)) {
-    // Searching for nodes that did not get accessed when partitioning
-    // Ones that are found will be labeled/colored
-    if (node2id.find(n.get_compact()) != node2id.end()) {
-      //fmt::print("Found {} in node2id\n", n.debug_name());
-      n.set_color(node2id[n.get_compact()]);
-      n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
-    } else {
-      fmt::print("Not found {} in node2id\n", n.debug_name());
-      n.set_color(8);
-      n.set_name(mmap_lib::str("MISSING"));
-    }
-  }
-
-#ifdef S_DEBUG
+  
   fmt::print("Roots: \n");
   for (auto &it : roots) {
     Node n(g, it);
