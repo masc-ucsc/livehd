@@ -68,6 +68,7 @@ protected:
   std::stack<std::vector<Lnast_node>> select_stack;
   
   // Lnast_node Helpers
+  // TODO: Forward location to Lnast_node
   int tmp_ref_count;
   mmap_lib::str get_tmp_name();
   inline Lnast_node get_tmp_ref();
