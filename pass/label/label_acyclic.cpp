@@ -6,8 +6,6 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
-//#define S_DEBUG 1
-
 
 Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff) : verbose(_verbose), hier(_hier), cutoff(_cutoff) { 
   part_id = 0; 
@@ -37,7 +35,7 @@ void Label_acyclic::label(Lgraph *g) {
   Ann_node_color::clear(g); 
 
 
-#ifdef S_DEBUG
+#ifdef A_DEBUG
   // Internal Nodes printing 
   int my_color = 0;
   int node_tracker = 0;
@@ -76,22 +74,7 @@ void Label_acyclic::label(Lgraph *g) {
         
         // Only add to outgoing neighbors if not _io_
         if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
-          
-          //XXX
           id2out[part_id].insert(sink_nodec);
-          
-          /*
-          // Add check to prevent empty sets from being made
-          if (id2out.contains(part_id)) { 
-            auto curr_outg = id2out[part_id];
-            if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-              id2out[part_id].push_back(sink_nodec);
-            }
-          } else {
-            id2out[part_id].push_back(sink_nodec);
-          }
-          */
-
         }
       }
       add_root = true;
@@ -123,7 +106,10 @@ void Label_acyclic::label(Lgraph *g) {
 
   // Iterating through all the potential roots
   for (auto &n : roots) {
-    if (!node_preds.empty()) { node_preds.clear(); }
+    if (!node_preds.empty()) { 
+      node_preds.clear(); 
+    }
+
     auto curr_id = node2id[n];
     node_preds.push_back(n);              // Adding yourself as a predecessor
     
@@ -156,21 +142,7 @@ void Label_acyclic::label(Lgraph *g) {
             //   Also make sure it does not exist to prevent empty vectors
             if (node2id.contains(sink_nodec)) {
               if (node2id[sink_nodec] != curr_id) {
-               
-                //XXX 
                 id2out[curr_id].insert(sink_nodec);
-
-                /*
-                // Prevent empty vector creation
-                if (id2out.contains(curr_id)) {
-                  auto curr_outg = id2out[part_id];
-                  if (std::find(curr_outg.begin(), curr_outg.end(), sink_nodec) == curr_outg.end()) {
-                    id2out[curr_id].push_back(sink_nodec);
-                  }
-                } else {
-                  id2out[curr_id].push_back(sink_nodec);
-                }
-                */
               }
             }
           }
@@ -179,21 +151,7 @@ void Label_acyclic::label(Lgraph *g) {
           // Nodes are not of the Part, can be incoming neighbors of the Part
           //   Must NOT be in the incoming vector & NOT be an _io_          
           if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
-            // Prevent empty vector creation
-            
             id2inc[curr_id].insert(pot_predc);
-
-            /*
-            if (id2inc.contains(curr_id)) {
-              auto curr_inc = id2inc[curr_id];
-              if (std::find(curr_inc.begin(), curr_inc.end(), pot_predc) == curr_inc.end()) {
-                id2inc[curr_id].push_back(pot_predc);
-              }
-            } else {
-              id2inc[curr_id].push_back(pot_predc);
-            }
-            */
-          
           }
         }
 
@@ -202,38 +160,7 @@ void Label_acyclic::label(Lgraph *g) {
   } // END of root iteration for loop
 
 #ifdef MERGE
-  while (true) {
-    for (auto &outer : id2in) {
-      auto curr_id = outer.first;
-      auto curr_inc = outer.second;
-
-      for (auto &inner : id2in) {
-        auto alt_id = inner.first;
-        auto alt_inc = inner.second;
-
-        if (curr_id != alt_id) {
-          if (curr_inc == alt_inc) {
-            // TODO Merging Algo here:
-            //
-            // Always merge into curr_id (outer.first)
-            //
-            // Alter all the actual part ID's for the nodes
-            for (auto n : id2in[alt_id]) {
-              node2id[n] = curr_id;  
-            }
-
-            // Remove alt_id from id2in
-            id2in.erase(alt_id);
-
-            // Merge the outgoing, incoming is the same for the parts
-            //id2out[curr_id].insert(id2out[curr_id].end(), id2out[alt_id], id2out[])
-             
-            
-          }
-        }
-      }
-    }
-  }
+  // Need more efficient new Algo
 #endif
 
 
@@ -284,6 +211,7 @@ void Label_acyclic::label(Lgraph *g) {
     fmt::print("    {}, ID: {}\n", n.debug_name(), it.second);
     //n.set_color(it.second);
   }
+
 #endif
 
   if (verbose) { dump(); }
