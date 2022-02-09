@@ -52,13 +52,3 @@ cc_test(
     ],
 )
 
-cc_binary(
-    name = "lconst_dump",
-    srcs = ["tests/lconst_dump.cpp"],
-    copts = COPTS,
-    deps = [
-        ":lemu",
-        "//mmap_lib:headers",
-        "//simlib:headers",
-    ],
-)

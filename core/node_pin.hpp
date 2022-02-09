@@ -9,7 +9,6 @@ class Node;
 
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
-#include "mmap_map.hpp"
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;

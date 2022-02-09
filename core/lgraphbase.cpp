@@ -8,7 +8,6 @@
 #include "graph_library.hpp"
 #include "iassert.hpp"
 #include "lgedgeiter.hpp"
-#include "mmap_map.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
 
