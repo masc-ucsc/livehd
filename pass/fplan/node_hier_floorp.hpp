@@ -12,9 +12,9 @@
 class Node_hier_floorp : public Lhd_floorplanner {
 public:
   Node_hier_floorp(Node_tree&& nt_arg);
-  void load();
+  void load() override;
 
 private:
   // load all the nodes in a given lgraph into an ArchFP geogLayout instance and return that instance
-  FPContainer* load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg, const Tree_index tidx);
+  FPContainer* load_lg_nodes(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg, const Tree_index tidx);
 };

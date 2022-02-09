@@ -2,14 +2,14 @@
 
 #pragma once
 
+#include "absl/container/flat_hash_map.h"
+
 #include <memory>
 #include <string_view>
 
 #include "AnnLayout.hpp"
 #include "GeogLayout.hpp"
-#include "absl/container/flat_hash_map.h"
 #include "lgraph.hpp"
-#include "mmap_map.hpp"
 #include "node_tree.hpp"
 #include "node_type_area.hpp"
 
@@ -62,12 +62,12 @@ protected:
   GeographyHint randomHint(int count) const;
 
   // create a node with the proper type (geog or ann layout)
-  FPContainer* makeNode(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx, size_t size);
+  FPContainer* makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx, size_t size);
 
-  void addSub(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
+  void addSub(FPContainer* c, const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
               FPObject* comp, int count);
 
-  void addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
+  void addLeaf(FPContainer* c, const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
                Ntype_op type, int count, double area, double maxARArg, double minARArg);
 
   // information for layout of root node, used frequently

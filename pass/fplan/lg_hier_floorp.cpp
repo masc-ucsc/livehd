@@ -28,7 +28,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
   if (sub_lg_count.empty()) {
     l->setType(Ntype_op::Const);
 
-    Ntype_area narea(path);
+    Ntype_area narea;
 
     float area = 0.0;
     for (auto n : lg->fast()) {

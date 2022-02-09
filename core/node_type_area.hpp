@@ -1,8 +1,10 @@
+//  this file is distributed under the bsd 3-clause license. see license for details.
 #pragma once
+
+#include "absl/container/flat_hash_map.h"
 
 #include "cell.hpp"
 #include "iassert.hpp"
-#include "mmap_map.hpp"
 
 class Ntype_area {
 public:
@@ -12,17 +14,18 @@ public:
     float area;
   };
 
-  Ntype_area() = delete;  // don't want to create new area maps all the time
-  Ntype_area(const mmap_lib::str &path) : type_area_map(path.to_s(), "node_type_areas") {}
+  Ntype_area() = default;  // don't want to create new area maps all the time
 
-  void       set_dim(Ntype_op op, const dim& d) { type_area_map.set(op, d); }
-  const dim& get_dim(Ntype_op op) const {
+  void       set_dim(Ntype_op op, const dim& d) { type_area_map.insert_or_assign(op, d); }
+  [[nodiscard]] const dim& get_dim(Ntype_op op) const {
     I(has_dim(op));
-    return type_area_map.get(op);
+    auto it = type_area_map.find(op);
+    I(it != type_area_map.end());
+    return it->second;
   };
-  bool has_dim(Ntype_op op) const { return type_area_map.has(op); }
+  [[nodiscard]] bool has_dim(Ntype_op op) const { return type_area_map.contains(op); }
   void clear() { type_area_map.clear(); }
 
 protected:
-  mmap_lib::map<Ntype_op, dim> type_area_map;
+  absl::flat_hash_map<Ntype_op, dim> type_area_map;
 };

@@ -16,7 +16,7 @@ void Node_flat_floorp::load() {
 
   root_layout = new annLayout(count);
 
-  Ntype_area narea(nt.get_root_lg()->get_path());
+  Ntype_area narea;
 
   for (auto n : nt.get_root_lg()->fast(true)) {
     Ntype_op op = n.get_type_op();

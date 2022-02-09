@@ -11,7 +11,7 @@
 #include "helpers.hpp"
 
 Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg)
-    : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), na(root_lg->get_path()), root_layout(nullptr) {
+    : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), root_layout(nullptr) {
   // set how many nodes of a given type must be encountered before they are put in a grid together
   // thresholds can be 0, in which case that type of leaf is never put in a grid.
   for (uint8_t type = 0; type < (uint8_t)Ntype_op::Last_invalid; type++) {
@@ -45,10 +45,10 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   return hint_seq[sel];
 }
 
-FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx,
+FPContainer* Lhd_floorplanner::makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx,
                                         size_t size) {
   FPContainer* l;
-  if (!tidx.is_root() && hint_map.has(nt.get_data(tidx).get_compact())) {
+  if (!tidx.is_root() && hint_map.contains(nt.get_data(tidx).get_compact())) {
     l = new geogLayout(size);
   } else {
     l = new annLayout(size);
@@ -57,12 +57,13 @@ FPContainer* Lhd_floorplanner::makeNode(const mmap_lib::map<Node::Compact, Geogr
   return l;
 }
 
-void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map,
+void Lhd_floorplanner::addSub(FPContainer* c, const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map,
                               const Node::Compact& child_c, FPObject* comp, int count) {
   if (typeid(*c) == typeid(geogLayout)) {
-    if (hint_map.has(child_c)) {
-      GeographyHint hint = hint_map.get(child_c);
-      static_cast<geogLayout*>(c)->addComponent(comp, count, hint);
+    auto it = hint_map.find(child_c);
+
+    if (it != hint_map.end()) {
+      static_cast<geogLayout*>(c)->addComponent(comp, count, it->second);
     } else {
       static_cast<geogLayout*>(c)->addComponent(comp, count, randomHint(count));
     }
@@ -71,13 +72,13 @@ void Lhd_floorplanner::addSub(FPContainer* c, const mmap_lib::map<Node::Compact,
   }
 }
 
-void Lhd_floorplanner::addLeaf(FPContainer* c, const mmap_lib::map<Node::Compact, GeographyHint>& hint_map,
+void Lhd_floorplanner::addLeaf(FPContainer* c, const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map,
                                const Node::Compact& child_c, Ntype_op type, int count, double area, double maxARArg,
                                double minARArg) {
   if (typeid(*c) == typeid(geogLayout)) {
-    if (hint_map.has(child_c)) {
-      GeographyHint hint = hint_map.get(child_c);
-      static_cast<geogLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg, hint);
+    auto it = hint_map.find(child_c);
+    if (it != hint_map.end()) {
+      static_cast<geogLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg, it->second);
     } else {
       static_cast<geogLayout*>(c)->addComponentCluster(type, count, area, maxARArg, minARArg, randomHint(count));
     }

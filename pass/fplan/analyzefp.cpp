@@ -1,12 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "analyzefp.hpp"
-
 #include <limits>
+
+#include "absl/container/flat_hash_set.h"
 
 #include "ann_place.hpp"
 #include "floorplan.hpp"
-#include "mmap_map.hpp"
+#include "analyzefp.hpp"
 
 void Pass_fplan_analyzefp::setup() {
   auto a = Eprp_method(mmap_lib::str("pass.fplan.analyzefp"),
@@ -133,7 +133,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
       if ((n.has_instance_name() && n.get_instance_name() == name) || (n.default_instance_name() == name)) {
         found = true;
 
-        mmap_lib::map<Node::Compact, GeographyHint> hint_map(path.to_s(), "node_hints");
+        absl::flat_hash_map<Node::Compact, GeographyHint> hint_map;
 
         auto hint = var.get("hint");
         if (hint != "") {
@@ -142,19 +142,20 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
             error("invalid hint type!");
           }
 
-          hint_map.set(n.get_compact(), hint_enum);
+          hint_map.insert_or_assign(n.get_compact(), hint_enum);
           const Tree_index parent_idx = nt.get_parent(index);
           const Node&      parent     = nt.get_data(parent_idx);
-          if (!parent_idx.is_root() && !hint_map.has(parent.get_compact())) {
-            hint_map.set(parent.get_compact(), UnknownHint);
+          if (!parent_idx.is_root() && !hint_map.contains(parent.get_compact())) {
+            hint_map.insert_or_assign(parent.get_compact(), UnknownHint);
             fmt::print("setting UnknownHint for parent {} due to child having hint\n", safe_name(parent));
           }
         }
 
         fmt::print("module {}\t", safe_name(n));
 
-        if (hint_map.has(n.get_compact())) {
-          fmt::print("hint: {}, ", hintToName(hint_map.get(n.get_compact())));
+        auto it = hint_map.find(n.get_compact());
+        if (it != hint_map.end()) {
+          fmt::print("hint: {}, ", hintToName(it->second));
         }
 
         print_area(nt, index);

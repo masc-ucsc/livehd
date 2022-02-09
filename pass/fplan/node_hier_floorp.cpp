@@ -6,11 +6,10 @@
 #include <memory>
 
 #include "ann_place.hpp"
-#include "mmap_map.hpp"
 
 Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
-FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg,
+FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg,
                                              const Tree_index tidx) {
   /*
     It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
@@ -104,7 +103,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const mmap_lib::map<Node::Compact, 
 }
 
 void Node_hier_floorp::load() {
-  mmap_lib::map<Node::Compact, GeographyHint> hint_map(root_lg->get_path().to_s(), "node_hints");
+  absl::flat_hash_map<Node::Compact, GeographyHint> hint_map;
   root_layout = load_lg_nodes(hint_map, root_lg, mmap_lib::Tree_index::root());
   I(root_layout);
 }
