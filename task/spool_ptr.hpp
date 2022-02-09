@@ -5,7 +5,10 @@
 
 template<class T>
 class spool_ptr_pool {
- public:
+private:
+  spsc256<T*> _pointer_queue;
+
+public:
   explicit spool_ptr_pool() {
     T* raw_ptr = new T();
     raw_ptr->shared_count = 1;
@@ -15,7 +18,7 @@ class spool_ptr_pool {
 
   ~spool_ptr_pool() {
     while(!_pointer_queue.empty()) {
-      T* raw_ptr;
+      T* raw_ptr=nullptr;
       bool something = _pointer_queue.dequeue(raw_ptr);
       assert(something);
       delete raw_ptr;
@@ -23,12 +26,13 @@ class spool_ptr_pool {
   }
 
   T *get_ptr() {
-    T* raw_retval;
+    T* raw_retval=nullptr;
     bool recycle_success = _pointer_queue.dequeue(raw_retval);
-    if(!recycle_success) {
+    if(raw_retval == nullptr) {
       raw_retval = new T();
-      raw_retval->shared_count = 1;
     }
+    assert(raw_retval);
+    raw_retval->shared_count = 1;
     return raw_retval;
   }
 
@@ -40,8 +44,6 @@ class spool_ptr_pool {
     delete to_release;
   }
 
- private:
-  spsc256<T*> _pointer_queue;
 };
 
 

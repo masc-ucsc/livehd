@@ -31,24 +31,25 @@
 //
 // [1] http://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
 
-#ifndef __SPSC_BOUNDED_QUEUE_INCLUDED__
-#define __SPSC_BOUNDED_QUEUE_INCLUDED__
+#pragma once
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <iostream>
 
+#include <climits>  // for CHAR_BIT
+#include <cstdlib>
 #include <atomic>
 #include <cassert>
 
+#if 0
 template <typename T>
 class spsc {
+public:
   spsc() = delete;
 
-public:
   spsc(size_t size)
       : _size(size)
       , _mask(size - 1)
-      , _buffer(reinterpret_cast<T *>(aligned_alloc(128, sizeof(T) * (size + 1))))
+      , _buffer(reinterpret_cast<T *>(aligned_malloc(size + 1)))
       ,  // need one extra element for a guard
       _head(0)
       , _tail(0) {
@@ -99,19 +100,47 @@ private:
   spsc(const spsc &) {}
   void operator=(const spsc &) {}
 };
+#endif
 
 template <typename T>
 class spsc256 {
+protected:
+  static inline char* align_for(char* ptr) {
+    const std::size_t alignment = 256;
+    return ptr + (alignment - (reinterpret_cast<std::uintptr_t>(ptr) % alignment)) % alignment;
+  }
+
+  static inline void* aligned_malloc(size_t size) {
+    if (std::alignment_of<T>::value >= 256)
+      return std::malloc(size);
+    size_t alignment = 256;
+    void*  raw       = std::malloc(size + alignment - 1 + sizeof(void*));
+    if (!raw)
+      return nullptr;
+    char* ptr                            = align_for(reinterpret_cast<char*>(raw) + sizeof(void*));
+    assert(ptr > raw);
+    *(reinterpret_cast<void**>(ptr) - 1) = raw;
+    return ptr;
+  }
+
+  static inline void aligned_free(void* ptr) {
+    if (ptr == nullptr)
+      return;
+
+    if (std::alignment_of<T>::value >= 256)
+      return std::free(ptr);
+
+    std::free(*(reinterpret_cast<void**>(ptr) - 1));
+  }
 
 public:
   spsc256()
-      : _buffer(reinterpret_cast<T *>(aligned_alloc(128, sizeof(T) * (256 + 1))))
-      ,  // need one extra element for a guard
-      _head(0)
+      : _buffer(reinterpret_cast<T *>(aligned_malloc(sizeof(void *)*(256 + 1))))
+      , _head(0)
       , _tail(0) {
   }
 
-  ~spsc256() { free(_buffer); }
+  ~spsc256() { aligned_free(_buffer); }
 
   bool empty() const { return _head == _tail; }
 
@@ -141,7 +170,7 @@ private:
   typedef char cache_line_pad_t[64];
 
   cache_line_pad_t _pad0;
-  T *const         _buffer;
+  T *              _buffer;
 
   cache_line_pad_t    _pad1;
   std::atomic<size_t> _head;
@@ -153,5 +182,3 @@ private:
   void operator=(const spsc256 &) {}
 };
 
-
-#endif

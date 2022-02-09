@@ -1,5 +1,4 @@
-#ifndef ALIGNED_VECTOR_HPP_
-#define ALIGNED_VECTOR_HPP_
+#pragma once
 
 #include <cmath>
 #include <functional>
@@ -163,7 +162,7 @@ class aligned_vector {
     return ss.str();
   }
 #endif
-  
+
   // begin()
   // end()
   // assign
@@ -203,4 +202,3 @@ class aligned_vector {
 
 }
 
-#endif

@@ -37,6 +37,7 @@ static void BM_spmc(benchmark::State& state) {
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
 }
 
+#if 0
 static void BM_spsc(benchmark::State& state) {
 
   for (auto _ : state) {
@@ -52,6 +53,7 @@ static void BM_spsc(benchmark::State& state) {
 
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
 }
+#endif
 
 static void BM_spsc256(benchmark::State& state) {
 
@@ -134,7 +136,7 @@ static void BM_make_unique_ptr(benchmark::State& state) {
 #ifndef NDEBUG
 BENCHMARK(BM_mpmc)->Arg(512);
 BENCHMARK(BM_spmc)->Arg(512);
-BENCHMARK(BM_spsc)->Arg(512);
+//BENCHMARK(BM_spsc)->Arg(512);
 BENCHMARK(BM_spsc256)->Arg(512);
 BENCHMARK(BM_moodycamel)->Arg(512);
 BENCHMARK(BM_make_shared_pool)->Arg(512);
@@ -143,7 +145,7 @@ BENCHMARK(BM_make_unique_ptr)->Arg(512);
 #else
 BENCHMARK(BM_mpmc)->Arg(512);
 BENCHMARK(BM_spmc)->Arg(512);
-BENCHMARK(BM_spsc)->Arg(512);
+//BENCHMARK(BM_spsc)->Arg(512);
 BENCHMARK(BM_spsc256)->Arg(512);
 BENCHMARK(BM_moodycamel)->Arg(512);
 BENCHMARK(BM_make_shared_pool)->Arg(512);
