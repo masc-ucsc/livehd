@@ -9,7 +9,6 @@
 
 #include "lgraph.hpp"
 #include "mmap_bimap.hpp"
-#include "mmap_map.hpp"
 #include "mmap_str.hpp"
 
 template <const char *Name, typename Base, typename Attr_data>

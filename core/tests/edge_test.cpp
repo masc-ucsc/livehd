@@ -2,13 +2,14 @@
 
 #include <random>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
-#include "mmap_map.hpp"
 #include "perf_tracing.hpp"
 
 class Edge_test : public ::testing::Test {
@@ -22,16 +23,16 @@ protected:
   Lrand<bool> rbool;
   Lrand<int>  rint;
 
-  mmap_lib::map<mmap_lib::str, Node_pin> track_n1_inp_connected_pins;
-  mmap_lib::map<mmap_lib::str, Node_pin> track_n2_inp_connected_pins;
+  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n1_inp_connected_pins;
+  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n2_inp_connected_pins;
 
-  mmap_lib::map<mmap_lib::str, Node_pin> track_n1_out_connected_pins;
-  mmap_lib::map<mmap_lib::str, Node_pin> track_n2_out_connected_pins;
+  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n1_out_connected_pins;
+  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n2_out_connected_pins;
 
-  mmap_lib::map<XEdge::Compact, int> track_edge_count;
+  absl::flat_hash_map<XEdge::Compact, int> track_edge_count;
 
-  mmap_lib::map<int, bool> n1_graph_pos_created;
-  mmap_lib::map<int, bool> n2_graph_pos_created;
+  absl::flat_hash_map<int, bool> n1_graph_pos_created;
+  absl::flat_hash_map<int, bool> n2_graph_pos_created;
 
   void SetUp() override {
     g = Lgraph::create("lgdb_edge_test", "test0", "test");
@@ -57,7 +58,7 @@ protected:
       pos = rint.max((1 << Port_bits) - 1);
     } while (n1_graph_pos_created.find(pos) != n1_graph_pos_created.end());
 
-    n1_graph_pos_created.set(pos, true);
+    n1_graph_pos_created.insert_or_assign(pos, true);
 
     return pos;
   }
@@ -68,7 +69,7 @@ protected:
       pos = rint.max((1 << Port_bits) - 1);
     } while (n2_graph_pos_created.find(pos) != n2_graph_pos_created.end());
 
-    n2_graph_pos_created.set(pos, true);
+    n2_graph_pos_created.insert_or_assign(pos, true);
 
     return pos;
   }
@@ -119,7 +120,7 @@ protected:
 
       auto dpin = n1.setup_driver_pin(pname);
       I(dpin.get_pid() == instance_pid);
-      track_n1_out_connected_pins.set(pname, dpin);
+      track_n1_out_connected_pins.insert_or_assign(pname, dpin);
       return dpin;
     }
 
@@ -149,15 +150,12 @@ protected:
 
       auto spin = n2.setup_sink_pin(pname);
       I(spin.get_pid() == instance_pid);
-      track_n2_inp_connected_pins.set(pname, spin);
+      track_n2_inp_connected_pins.insert_or_assign(pname, spin);
       return spin;
     }
 
-    Node_pin spin;
-    if (rbool.any())
-      spin = n2.setup_sink_pin(pname);
-    else
-      spin = n2.setup_sink_pin(pname);
+    Node_pin spin = n2.setup_sink_pin(pname);
+
     EXPECT_TRUE(!spin.is_driver());
     EXPECT_TRUE(spin.is_sink());
 
@@ -200,7 +198,7 @@ protected:
     EXPECT_TRUE(it == track_edge_count.end());
     g->add_edge(dpin, spin);
 
-    track_edge_count.set(edge.get_compact(), 1);
+    track_edge_count.insert_or_assign(edge.get_compact(), 1);
   }
 };
 
