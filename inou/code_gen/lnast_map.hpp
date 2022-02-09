@@ -33,7 +33,7 @@ protected:
                                              "ref",       "const",
 
 
-                                             "++",        "tuple_add", "tuple_get", "tuple_set",
+                                             "++",        "++", "tuple_get", "tuple_set",
 
                                              "attr_set", "attr_get",
 
