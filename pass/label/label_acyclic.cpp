@@ -6,9 +6,14 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
+//#define A_DEBUG 1  // toggle for prelim debug print
+//#define M_DEBUG 1  // toggle to get print when merge detected
+//#define S_DEBUG 1  // toggle for after partition print
 
-Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff) : verbose(_verbose), hier(_hier), cutoff(_cutoff) { 
-  part_id = 0; 
+#define MERGE 1
+
+Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff, bool _merge_en) : verbose(_verbose), hier(_hier), merge_en(_merge_en), cutoff(_cutoff) {
+  part_id = 0;  
 }
 
 void Label_acyclic::dump() const {
@@ -16,10 +21,10 @@ void Label_acyclic::dump() const {
 }
 
 bool Label_acyclic::set_cmp(NodeSet a, NodeSet b) const {
-  if (a.size() != b.size()) { return false; }
+  if (a.size() != b.size()) return false;
   
   for (auto &n : a) {
-    if (!(b.contains(n))) { return false; }
+    if (!(b.contains(n))) return false;
   }
 
   return true;
@@ -27,7 +32,7 @@ bool Label_acyclic::set_cmp(NodeSet a, NodeSet b) const {
 
 
 void Label_acyclic::label(Lgraph *g) {
-  if (cutoff) fmt::print("small partition cutoff: {}\n", cutoff);
+  fmt::print("Small Partition Cutoff: {}, Merge: {}\n", cutoff, merge_en);
 
   if (hier) {
     g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
@@ -81,7 +86,6 @@ void Label_acyclic::label(Lgraph *g) {
     } else if (n.get_num_out_edges() == 0) {
       add_root = true;
     } else if (n.get_num_out_edges() == 1) {
-      
       // Handle case with one out edge that leads to an output pin
       //   If the sink of the out edge IS an io, add_root
       for (const auto &oe : n.out_edges()) { 
@@ -106,9 +110,7 @@ void Label_acyclic::label(Lgraph *g) {
 
   // Iterating through all the potential roots
   for (auto &n : roots) {
-    if (!node_preds.empty()) { 
-      node_preds.clear(); 
-    }
+    if (!node_preds.empty()) node_preds.clear(); 
 
     auto curr_id = node2id[n];
     node_preds.push_back(n);              // Adding yourself as a predecessor
@@ -148,7 +150,7 @@ void Label_acyclic::label(Lgraph *g) {
           }
         } else {
           
-          // Nodes are not of the Part, can be incoming neighbors of the Part
+          // Nodes not added to the Part can be incoming neighbors of the Part
           //   Must NOT be in the incoming vector & NOT be an _io_          
           if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
             id2inc[curr_id].insert(pot_predc);
@@ -160,9 +162,103 @@ void Label_acyclic::label(Lgraph *g) {
   } // END of root iteration for loop
 
 #ifdef MERGE
-  // Need more efficient new Algo
-#endif
+  // Use part_id to generate Partition lists
+  //    we can use lists to directly access the map
+  if (merge_en) {
+    std::vector<int> pwi;     // Partitions with incoming
+    std::vector<int> pwo;     // partitions with outgoing
+    std::vector<int> parts;   // Partitions
+    
+    // Populate vectors with Part ids
+    for (int i = 0; i < part_id; ++i) {
+      if (id2inc.contains(i)) pwi.push_back(i);
+      if (id2out.contains(i)) pwo.push_back(i);
+      parts.push_back(i);
+    }
 
+    auto pivot = pwi.begin();  // increment till pwi.end()
+
+    // Declare outside of loop for better access
+    bool merge_flag = true;
+    bool keep_going = true;
+    int merge_into = -1;      // The partition that will grow
+    int merge_from = -1;      // The partition that will be eaten
+
+    while (keep_going) {
+      // reset the flags and ids
+      merge_flag = false;
+      keep_going = false;
+      merge_into = -1;
+      merge_from = -1;
+
+      // Iterate through pwi to check which are the same
+      for (auto i = pwi.begin(); i != pwi.end(); ++i) { 
+        if (i == pivot) continue;  // Same partition, no need to compare
+       
+        // Merge condition 
+        if (set_cmp(id2inc[*i], id2inc[*pivot])) {
+          // two flags are always toggled together in the loop
+          merge_flag = true;
+          keep_going = true;
+          merge_into = *pivot;
+          merge_from = *i;
+          // Dip out
+          break;
+        }
+      }
+
+      // Here means for loop ran to completion
+      if (merge_flag) {
+
+#ifdef M_DEBUG
+        fmt::print("Merge Detected, {} -> {}\n", merge_from, merge_into); 
+#endif
+        // merge id2inc and erase merge_from
+        id2inc[merge_into].merge(id2inc[merge_from]);
+        id2inc.erase(merge_from);
+
+        // merge_into & merge_from in id2out: merge and erase merge_from
+        // only merge_from in id2out: merge_from -> merge_into, erase merge_from
+        bool merge_into_has_out = id2out.contains(merge_into);
+        bool merge_from_has_out = id2out.contains(merge_from);
+        if (merge_into_has_out && merge_from_has_out) {
+          id2out[merge_into].merge(id2out[merge_from]);
+          id2out.erase(merge_from);
+        } else if (!merge_into_has_out && merge_from_has_out) {
+          id2out[merge_into] = id2out[merge_from];
+          id2out.erase(merge_from);
+        }
+        // all other cases do nothing
+
+        // Replace all merge_from ids with merge_into
+        for (auto &it : node2id) {
+          if (it.second == merge_from) node2id[it.first] = merge_into;
+        }
+
+        // merge id2nodes and erase merge_from
+        id2nodes[merge_into].merge(id2nodes[merge_from]);
+        id2nodes.erase(merge_from);
+
+        // Removing merge_from from pwi, pwo, and parts for merge re-scan
+        auto parts_rm_iter = std::find(parts.begin(), parts.end(), merge_from);
+        auto pwi_rm_iter = std::find(pwi.begin(), pwi.end(), merge_from);
+        auto pwo_rm_iter = std::find(pwo.begin(), pwo.end(), merge_from);
+        
+        if (parts_rm_iter != parts.end()) parts.erase(parts_rm_iter);
+        if (pwi_rm_iter != pwi.end()) pwi.erase(pwi_rm_iter);
+        if (pwo_rm_iter != pwo.end()) pwo.erase(pwo_rm_iter);
+ 
+        pivot = pwi.begin(); // reset pivot to begin() for merge re-scan
+      } else {
+        // No merge possible, check if pivot can be changed
+        if (pivot != pwi.end()) {
+          ++pivot;            // change pivot
+          keep_going = true;  // keep scanning for merges
+        }
+      }
+    }
+  }
+#endif
 
   // Actual Labeling happens here:
   for (auto n : g->fast(hier)) {

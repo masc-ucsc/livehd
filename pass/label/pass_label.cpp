@@ -41,6 +41,7 @@ void Pass_label::setup() {
   Eprp_method m3(mmap_lib::str("pass.label.acyclic"), mmap_lib::str("Label a graph with aclyclic combinational calls"), &Pass_label::label_acyclic);
   m3.add_label_optional("hier", mmap_lib::str("hierarchical traversal/labeling"), "false");
   m3.add_label_optional("cutoff", mmap_lib::str("small partition node count cutoff"), "1");
+  m3.add_label_optional("merge", mmap_lib::str("enables merging of acyclic partitions"), "false");
   m3.add_label_optional("verbose", mmap_lib::str("verbose statistics and information"), "false");
   register_pass(m3);
 }
@@ -74,7 +75,11 @@ void Pass_label::label_acyclic(Eprp_var &var) {
   auto cutoff_str = var.get("cutoff");
   auto cutoff = static_cast<uint8_t>(std::stoi(cutoff_str.to_s()));
 
-  Label_acyclic p(pp.verbose, pp.hier, cutoff);
+  auto merge_txt = var.get("merge");
+  bool merge_en = false;
+  if (merge_txt != "false" && merge_txt != "0") merge_en = true;
+
+  Label_acyclic p(pp.verbose, pp.hier, cutoff, merge_en);
 
   for (const auto &l : var.lgs) {
     p.label(l);
