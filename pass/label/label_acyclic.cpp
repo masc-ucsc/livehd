@@ -197,13 +197,17 @@ void Label_acyclic::label(Lgraph *g) {
        
         // Merge condition 
         if (set_cmp(id2inc[*i], id2inc[*pivot])) {
-          // two flags are always toggled together in the loop
-          merge_flag = true;
-          keep_going = true;
-          merge_into = *pivot;
-          merge_from = *i;
-          // Dip out
-          break;
+          // At least one of the partitions has to be a small partition
+          auto pivot_part_size = (id2nodes[*pivot]).size();
+          auto i_part_size = (id2nodes[*i]).size();
+          if (pivot_part_size >= cutoff || i_part_size >= cutoff) { 
+            // two flags are always toggled together in the loop
+            merge_flag = true;
+            keep_going = true;
+            merge_into = *pivot;
+            merge_from = *i;
+            break;    // Do merge outside the loop
+          }
         }
       }
 

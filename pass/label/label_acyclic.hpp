@@ -15,7 +15,7 @@ private:
   const bool verbose;
   const bool hier;
   const bool merge_en;
-  uint8_t    cutoff;  // currently not being used
+  uint8_t    cutoff;
   uint8_t    part_id;
 
   using NodeVector = std::vector<Node::Compact>;
