@@ -15,7 +15,7 @@ private:
   const bool verbose;
   const bool hier;
   const bool merge_en;
-  uint8_t    cutoff;
+  uint8_t    cutoff;  // currently not being used
   uint8_t    part_id;
 
   using NodeVector = std::vector<Node::Compact>;
@@ -29,6 +29,13 @@ private:
   absl::flat_hash_map<int, NodeSet>      id2inc;      // <Partition ID, Incoming Neighbors>
   absl::flat_hash_map<int, NodeSet>      id2out;      // <Partition ID, Outgoing Neighbors>
 
+  bool set_cmp(NodeSet a, NodeSet b) const;
+
+  void gather_roots(Lgraph *g);
+  void grow_partitions(Lgraph *g);
+  void merge_partitions();
+
+
 public:
   void label(Lgraph *g);
 
@@ -36,6 +43,5 @@ public:
 
   void dump() const;
 
-  bool set_cmp(NodeSet a, NodeSet b) const;
 
 };

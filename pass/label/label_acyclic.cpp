@@ -9,17 +9,21 @@
 //#define A_DEBUG 1  // toggle for prelim debug print
 //#define M_DEBUG 1  // toggle to get print when merge detected
 //#define S_DEBUG 1  // toggle for after partition print
+//#define F_DEBUG 1  // toggle for final partition coloring print
 
-#define MERGE 1
-
+// Constructor for Label_acyclic
 Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff, bool _merge_en) : verbose(_verbose), hier(_hier), merge_en(_merge_en), cutoff(_cutoff) {
   part_id = 0;  
 }
 
+// dump()
 void Label_acyclic::dump() const {
   fmt::print("Label_acyclic dump\n");
 }
 
+/* * * * * * *  
+ Compares absl::flat_hash_set<Node::Compact>'s
+ * * * * * * */
 bool Label_acyclic::set_cmp(NodeSet a, NodeSet b) const {
   if (a.size() != b.size()) return false;
   
@@ -30,35 +34,10 @@ bool Label_acyclic::set_cmp(NodeSet a, NodeSet b) const {
   return true;
 }
 
-
-void Label_acyclic::label(Lgraph *g) {
-  fmt::print("Small Partition Cutoff: {}, Merge: {}\n", cutoff, merge_en);
-
-  if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
-  }
-  Ann_node_color::clear(g); 
-
-
-#ifdef A_DEBUG
-  // Internal Nodes printing 
-  int my_color = 0;
-  int node_tracker = 0;
-  
-  for (auto n : g->forward(hier)) {
-    fmt::print("Node: {}\n", n.debug_name());
-    my_color = (node_tracker < 8) ? (8) : (16);
-    n.set_color(my_color);
-    if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
-    //n.set_name(mmap_lib::str(n.debug_name()));
-    n.set_name(mmap_lib::str(fmt::format("MFFC_{}", my_color)));
-    node_tracker++;
-  }
-  fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
-
-#endif
- 
-
+/* * * * * * *  
+ Loops through an lgraph and grabs all nodes that are potential partition roots
+ * * * * * * */
+void Label_acyclic::gather_roots(Lgraph *g) {
   // Iterating through outputs of the graphs (0 out edges), all are potential roots
   g->each_graph_output([&](const Node_pin &pin) {
     const auto nodec = (pin.get_node()).get_compact();  // Node compact flat
@@ -106,9 +85,16 @@ void Label_acyclic::label(Lgraph *g) {
       part_id+=1;    
     }
   } 
+}
 
-
+/* * * * * * *  
+ Runs through all the potential roots 
+ tries to grow each partition as much as possible
+ * * * * * * */
+void Label_acyclic::grow_partitions(Lgraph *g) {
   // Iterating through all the potential roots
+  if (roots.empty()) return; 
+
   for (auto &n : roots) {
     if (!node_preds.empty()) node_preds.clear(); 
 
@@ -149,7 +135,6 @@ void Label_acyclic::label(Lgraph *g) {
             }
           }
         } else {
-          
           // Nodes not added to the Part can be incoming neighbors of the Part
           //   Must NOT be in the incoming vector & NOT be an _io_          
           if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
@@ -160,128 +145,164 @@ void Label_acyclic::label(Lgraph *g) {
       } // END of inp_edge iteration for loop
     } // END of node_preds clearing while loop 
   } // END of root iteration for loop
+}
 
-#ifdef MERGE
+
+
+/* * * * * * *  
+ Goes through all the current partitions 
+ Tries to merge as many as possible as long as one is <= cutoff
+ * * * * * * */
+void Label_acyclic::merge_partitions() {
   // Use part_id to generate Partition lists
   //    we can use lists to directly access the map
-  if (merge_en) {
-    std::vector<int> pwi;     // Partitions with incoming
-    std::vector<int> pwo;     // partitions with outgoing
-    std::vector<int> parts;   // Partitions
-    
-    // Populate vectors with Part ids
-    for (int i = 0; i < part_id; ++i) {
-      if (id2inc.contains(i)) pwi.push_back(i);
-      if (id2out.contains(i)) pwo.push_back(i);
-      parts.push_back(i);
+  std::vector<int> pwi;     // Partitions with incoming
+  std::vector<int> pwo;     // partitions with outgoing
+  std::vector<int> parts;   // Partitions
+  
+  // Populate vectors with Part ids
+  for (int i = 0; i < part_id; ++i) {
+    if (id2inc.contains(i)) pwi.push_back(i);
+    if (id2out.contains(i)) pwo.push_back(i);
+    parts.push_back(i);
+  }
+
+  auto pivot = pwi.begin();  // increment till pwi.end()
+
+  // Declare outside of loop for better access
+  bool merge_flag = true;
+  bool keep_going = true;
+  int merge_into = -1;      // The partition that will grow
+  int merge_from = -1;      // The partition that will be eaten
+
+  while (keep_going) {
+    // reset the flags and ids
+    merge_flag = false;
+    keep_going = false;
+    merge_into = -1;
+    merge_from = -1;
+
+    // Iterate through pwi to check which are the same
+    for (auto i = pwi.begin(); i != pwi.end(); ++i) { 
+      if (i == pivot) continue;  // Same partition, no need to compare
+     
+      // Merge condition: same set and small partition cutoff matches
+      if (set_cmp(id2inc[*i], id2inc[*pivot])) {
+        // At least one of the partitions has to be a small partition
+        auto pivot_part_size = (id2nodes[*pivot]).size();
+        auto i_part_size = (id2nodes[*i]).size();
+        if (pivot_part_size <= cutoff || i_part_size <= cutoff) { 
+          // two flags are always toggled together in the loop
+          merge_flag = true;
+          keep_going = true;
+          merge_into = *pivot;
+          merge_from = *i;
+          break;    // Do merge outside the loop
+        }
+      }
     }
 
-    auto pivot = pwi.begin();  // increment till pwi.end()
-
-    // Declare outside of loop for better access
-    bool merge_flag = true;
-    bool keep_going = true;
-    int merge_into = -1;      // The partition that will grow
-    int merge_from = -1;      // The partition that will be eaten
-
-    while (keep_going) {
-      // reset the flags and ids
-      merge_flag = false;
-      keep_going = false;
-      merge_into = -1;
-      merge_from = -1;
-
-      // Iterate through pwi to check which are the same
-      for (auto i = pwi.begin(); i != pwi.end(); ++i) { 
-        if (i == pivot) continue;  // Same partition, no need to compare
-       
-        // Merge condition 
-        if (set_cmp(id2inc[*i], id2inc[*pivot])) {
-          // At least one of the partitions has to be a small partition
-          auto pivot_part_size = (id2nodes[*pivot]).size();
-          auto i_part_size = (id2nodes[*i]).size();
-          if (pivot_part_size >= cutoff || i_part_size >= cutoff) { 
-            // two flags are always toggled together in the loop
-            merge_flag = true;
-            keep_going = true;
-            merge_into = *pivot;
-            merge_from = *i;
-            break;    // Do merge outside the loop
-          }
-        }
-      }
-
-      // Here means for loop ran to completion
-      if (merge_flag) {
-
+    if (merge_flag) {     
 #ifdef M_DEBUG
-        fmt::print("Merge Detected, {} -> {}\n", merge_from, merge_into); 
+      fmt::print("Merge Detected, {} -> {}\n", merge_from, merge_into); 
 #endif
-        // merge id2inc and erase merge_from
-        id2inc[merge_into].merge(id2inc[merge_from]);
-        id2inc.erase(merge_from);
+      // merge id2inc and erase merge_from
+      id2inc[merge_into].merge(id2inc[merge_from]);
+      id2inc.erase(merge_from);
 
-        // merge_into & merge_from in id2out: merge and erase merge_from
-        // only merge_from in id2out: merge_from -> merge_into, erase merge_from
-        bool merge_into_has_out = id2out.contains(merge_into);
-        bool merge_from_has_out = id2out.contains(merge_from);
-        if (merge_into_has_out && merge_from_has_out) {
-          id2out[merge_into].merge(id2out[merge_from]);
-          id2out.erase(merge_from);
-        } else if (!merge_into_has_out && merge_from_has_out) {
-          id2out[merge_into] = id2out[merge_from];
-          id2out.erase(merge_from);
-        }
-        // all other cases do nothing
-
-        // Replace all merge_from ids with merge_into
-        for (auto &it : node2id) {
-          if (it.second == merge_from) node2id[it.first] = merge_into;
-        }
-
-        // merge id2nodes and erase merge_from
-        id2nodes[merge_into].merge(id2nodes[merge_from]);
-        id2nodes.erase(merge_from);
-
-        // Removing merge_from from pwi, pwo, and parts for merge re-scan
-        auto parts_rm_iter = std::find(parts.begin(), parts.end(), merge_from);
-        auto pwi_rm_iter = std::find(pwi.begin(), pwi.end(), merge_from);
-        auto pwo_rm_iter = std::find(pwo.begin(), pwo.end(), merge_from);
-        
-        if (parts_rm_iter != parts.end()) parts.erase(parts_rm_iter);
-        if (pwi_rm_iter != pwi.end()) pwi.erase(pwi_rm_iter);
-        if (pwo_rm_iter != pwo.end()) pwo.erase(pwo_rm_iter);
- 
-        pivot = pwi.begin(); // reset pivot to begin() for merge re-scan
-      } else {
-        // No merge possible, check if pivot can be changed
-        if (pivot != pwi.end()) {
-          ++pivot;            // change pivot
-          keep_going = true;  // keep scanning for merges
-        }
+      // merge_into & merge_from in id2out: merge and erase merge_from
+      // only merge_from in id2out: merge_from -> merge_into, erase merge_from
+      bool merge_into_has_out = id2out.contains(merge_into);
+      bool merge_from_has_out = id2out.contains(merge_from);
+      if (merge_into_has_out && merge_from_has_out) {
+        id2out[merge_into].merge(id2out[merge_from]);
+        id2out.erase(merge_from);
+      } else if (!merge_into_has_out && merge_from_has_out) {
+        id2out[merge_into] = id2out[merge_from];
+        id2out.erase(merge_from);
       }
+      // all other cases do nothing
+
+      // Replace all merge_from ids with merge_into
+      for (auto &it : node2id) {
+        if (it.second == merge_from) node2id[it.first] = merge_into;
+      }
+
+      // merge id2nodes and erase merge_from
+      id2nodes[merge_into].merge(id2nodes[merge_from]);
+      id2nodes.erase(merge_from);
+
+      // Removing merge_from from pwi, pwo, and parts for merge re-scan
+      auto parts_rm_iter = std::find(parts.begin(), parts.end(), merge_from);
+      auto pwi_rm_iter = std::find(pwi.begin(), pwi.end(), merge_from);
+      auto pwo_rm_iter = std::find(pwo.begin(), pwo.end(), merge_from);
+      
+      if (parts_rm_iter != parts.end()) parts.erase(parts_rm_iter);
+      if (pwi_rm_iter != pwi.end()) pwi.erase(pwi_rm_iter);
+      if (pwo_rm_iter != pwo.end()) pwo.erase(pwo_rm_iter);
+
+      pivot = pwi.begin(); // reset pivot to begin() for merge re-scan
+    } else {
+      // No merge possible, check if pivot can be changed
+      if (pivot != pwi.end()) {
+        ++pivot;            // change pivot
+        keep_going = true;  // keep scanning for merges
+      }
+    }
+  }
+}
+
+
+
+void Label_acyclic::label(Lgraph *g) {
+  fmt::print("Cutoff is {}\n", cutoff);
+
+  if (hier) {
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
+  }
+  Ann_node_color::clear(g); 
+
+
+#ifdef A_DEBUG
+  // Internal Nodes printing 
+  int my_color = 0;
+  int node_tracker = 0;
+  
+  for (auto n : g->forward(hier)) {
+    fmt::print("Node: {}\n", n.debug_name());
+    my_color = (node_tracker < 8) ? (8) : (16);
+    n.set_color(my_color);
+    if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
+    //n.set_name(mmap_lib::str(n.debug_name()));
+    n.set_name(mmap_lib::str(fmt::format("MFFC_{}", my_color)));
+    node_tracker++;
+  }
+  fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
+#endif
+ 
+  gather_roots(g);
+  grow_partitions(g);
+  if (merge_en) merge_partitions();
+
+#ifdef F_DEBUG
+  for (auto n : g->forward(hier)) {
+    if (node2id.find(n.get_compact()) != node2id.end()) {
+      fmt::print("Found {} in node2id\n", n.debug_name());
+    } else {
+      fmt::print("Not found {} in node2id\n", n.debug_name());
     }
   }
 #endif
 
   // Actual Labeling happens here:
-  for (auto n : g->fast(hier)) {
-    // Searching for nodes that did not get accessed when partitioning
-    // Ones that are found will be labeled/colored
-    if (node2id.find(n.get_compact()) != node2id.end()) {
-      //fmt::print("Found {} in node2id\n", n.debug_name());
-      n.set_color(node2id[n.get_compact()]);
-      n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
-    } else {
-      fmt::print("Not found {} in node2id\n", n.debug_name());
-      n.set_color(8);
-      n.set_name(mmap_lib::str("MISSING"));
-    }
+  for (auto n : g->fast(hier)) { 
+    n.set_color(node2id[n.get_compact()]);
+    n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
   }
 
 
 #ifdef S_DEBUG
-  fmt::print("node2incoming: \n");
+  fmt::print("id2inc: \n");
   for (auto &it : id2inc) {
     fmt::print("  Part ID: {}\n", it.first);
     for (auto &n : it.second) {
@@ -290,7 +311,7 @@ void Label_acyclic::label(Lgraph *g) {
     }
   }
   
-  fmt::print("node2outgoing: \n");
+  fmt::print("id2out: \n");
   for (auto &it : id2out) {
     fmt::print("  Part ID: {}\n", it.first);
     for (auto &n : it.second) {
@@ -314,6 +335,6 @@ void Label_acyclic::label(Lgraph *g) {
 
 #endif
 
-  if (verbose) { dump(); }
+  if (verbose) dump();
 
 }
