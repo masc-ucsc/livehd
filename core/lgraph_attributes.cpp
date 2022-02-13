@@ -1,27 +1,37 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "node_type.hpp"
+#include "lgraph_attributes.hpp"
 
-#include "annotate.hpp"
 #include "graph_library.hpp"
 #include "node.hpp"
 
 static_assert(static_cast<int>(Ntype_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 
-Lgraph_Node_Type::Lgraph_Node_Type(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+Lgraph_attributes::Lgraph_attributes(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept
     : Lgraph_Base(_path, _name, _lgid, _lib) {
 }
 
-void Lgraph_Node_Type::clear() {
+void Lgraph_attributes::clear() {
   const_map.clear();
   subid_map.clear();
   down_class_map.clear();
+
   lut_map.clear();
+
+  node_pin_offset_map.clear();
+  node_pin_name_map.clear();
+  node_pin_name_rmap.clear();
+  node_pin_delay_map.clear();
+  node_pin_unsigned_map.clear();
+
+  node_name_map.clear();
+  node_color_map.clear();
+  node_place_map.clear();
 
   Lgraph_Base::clear(); // last. Removes lock at the end
 }
 
-void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
+void Lgraph_attributes::set_type(Index_id nid, const Ntype_op op) {
 
   I(node_internal[nid].is_master_root());
 
@@ -42,13 +52,13 @@ void Lgraph_Node_Type::set_type(Index_id nid, const Ntype_op op) {
   node_internal[nid].set_type(op);
 }
 
-bool Lgraph_Node_Type::is_type_const(Index_id nid) const {
+bool Lgraph_attributes::is_type_const(Index_id nid) const {
   bool b = node_internal[nid].get_type() == Ntype_op::Const;
 
   return b;
 }
 
-void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
+void Lgraph_attributes::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
 
   subid_map.insert_or_assign(Node::Compact_class(nid), subgraphid.value);
 
@@ -62,7 +72,7 @@ void Lgraph_Node_Type::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
   node_internal[nid].set_type(Ntype_op::Sub);
 }
 
-Lg_type_id Lgraph_Node_Type::get_type_sub(Index_id nid) const {
+Lg_type_id Lgraph_attributes::get_type_sub(Index_id nid) const {
   I(node_internal[nid].get_type() == Ntype_op::Sub);
 
   auto it = subid_map.find(Node::Compact_class(nid));
@@ -71,7 +81,7 @@ Lg_type_id Lgraph_Node_Type::get_type_sub(Index_id nid) const {
   return it->second;
 }
 
-std::tuple<Lg_type_id, Index_id> Lgraph_Node_Type::go_next_down(Index_id nid) const {
+std::tuple<Lg_type_id, Index_id> Lgraph_attributes::go_next_down(Index_id nid) const {
 
   Index_id   n_nid=0;
   Lg_type_id n_lgid=0;
@@ -89,35 +99,35 @@ std::tuple<Lg_type_id, Index_id> Lgraph_Node_Type::go_next_down(Index_id nid) co
   return std::make_tuple(n_lgid, n_nid);
 }
 
-const Sub_node &Lgraph_Node_Type::get_type_sub_node(Index_id nid) const {
+const Sub_node &Lgraph_attributes::get_type_sub_node(Index_id nid) const {
   auto sub_lgid = get_type_sub(nid);
   I(sub_lgid != lgid);  // No recursion
   return library->get_sub(sub_lgid);
 }
 
-const Sub_node &Lgraph_Node_Type::get_type_sub_node(const mmap_lib::str &sub_name) const {
+const Sub_node &Lgraph_attributes::get_type_sub_node(const mmap_lib::str &sub_name) const {
   I(name != sub_name);  // No recursion
   return library->get_sub(sub_name);
 }
 
-Sub_node *Lgraph_Node_Type::ref_type_sub_node(Index_id nid) {
+Sub_node *Lgraph_attributes::ref_type_sub_node(Index_id nid) {
   auto sub_lgid = get_type_sub(nid);
   I(sub_lgid != lgid);  // No recursion
   return library->ref_sub(sub_lgid);
 }
 
-Sub_node *Lgraph_Node_Type::ref_type_sub_node(const mmap_lib::str &sub_name) {
+Sub_node *Lgraph_attributes::ref_type_sub_node(const mmap_lib::str &sub_name) {
   I(name != sub_name);  // No recursion
   return library->ref_sub(sub_name);
 }
 
-void Lgraph_Node_Type::set_type_lut(Index_id nid, const Lconst &lutid) {
+void Lgraph_attributes::set_type_lut(Index_id nid, const Lconst &lutid) {
   node_internal[nid].set_type(Ntype_op::LUT);
 
   lut_map.insert_or_assign(Node::Compact_class(nid), lutid.serialize());
 }
 
-Lconst Lgraph_Node_Type::get_type_lut(Index_id nid) const {
+Lconst Lgraph_attributes::get_type_lut(Index_id nid) const {
   I(node_internal[nid].get_type() == Ntype_op::LUT);
 
   auto it = lut_map.find(Node::Compact_class(nid));
@@ -126,7 +136,7 @@ Lconst Lgraph_Node_Type::get_type_lut(Index_id nid) const {
   return Lconst::unserialize(it->second);
 }
 
-Lconst Lgraph_Node_Type::get_type_const(Index_id nid) const {
+Lconst Lgraph_attributes::get_type_const(Index_id nid) const {
 
   auto it = const_map.find(Node::Compact_class(nid));
   I(it != const_map.end());
@@ -134,7 +144,7 @@ Lconst Lgraph_Node_Type::get_type_const(Index_id nid) const {
   return Lconst::unserialize(it->second);
 }
 
-void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
+void Lgraph_attributes::set_type_const(Index_id nid, const Lconst &value) {
   const_map.insert_or_assign(Node::Compact_class(nid), value.serialize());
 
   auto *ptr = &node_internal[nid];
@@ -142,6 +152,6 @@ void Lgraph_Node_Type::set_type_const(Index_id nid, const Lconst &value) {
   ptr->set_bits(value.get_bits());
 }
 
-void Lgraph_Node_Type::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }
+void Lgraph_attributes::set_type_const(Index_id nid, const mmap_lib::str &sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }
 
-void Lgraph_Node_Type::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }
+void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }

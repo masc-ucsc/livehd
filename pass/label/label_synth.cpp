@@ -2,7 +2,6 @@
 
 #include "label_synth.hpp"
 
-#include "annotate.hpp"
 #include "cell.hpp"
 #include "pass.hpp"
 
@@ -157,9 +156,11 @@ void Label_synth::label(Lgraph *g) {
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
+      lg->ref_node_color_map()->clear();
+    });
   }
-  Ann_node_color::clear(g);
+  g->ref_node_color_map()->clear();
 
   for (auto &it : flat_node2id) {
     Node node(g, it.first);

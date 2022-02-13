@@ -4,7 +4,6 @@
 
 #include <charconv>
 
-#include "annotate.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -500,13 +499,7 @@ Node Node::create_const(const Lconst &value) const {
   return node;
 }
 
-void Node::set_name(const mmap_lib::str &iname) { Ann_node_name::ref(current_g)->set(get_compact_class(), iname); }
-
-void Node::set_instance_name(const mmap_lib::str &iname) { Ann_inst_name::ref(current_g)->set(get_compact(), iname); }
-
-mmap_lib::str Node::get_instance_name() const { return Ann_inst_name::ref(current_g)->get(get_compact()); }
-
-bool Node::has_instance_name() const { return Ann_inst_name::ref(current_g)->has(get_compact()); }
+void Node::set_name(const mmap_lib::str &iname) { current_g->ref_node_name_map()->insert_or_assign(get_compact_class(), iname); }
 
 mmap_lib::str Node::default_instance_name() const {
   mmap_lib::str name{"i"};
@@ -526,18 +519,25 @@ mmap_lib::str Node::default_instance_name() const {
 }
 
 mmap_lib::str Node::create_name() const {
-  auto *     ref = Ann_node_name::ref(current_g);
+  auto      *ref = current_g->ref_node_name_map();
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end())
     return it->second;
 
   auto cell_name = Ntype::get_name(get_type_op());
   auto sig       = mmap_lib::str::concat("lg_", cell_name, std::to_string(nid));
-  ref->set(get_compact_class(), sig);
+  ref->insert_or_assign(get_compact_class(), sig);
   return sig;
 }
 
-mmap_lib::str Node::get_name() const { return Ann_node_name::ref(current_g)->get_val(get_compact_class()); }
+mmap_lib::str Node::get_name() const {
+
+  const auto &ptr = current_g->get_node_name_map();
+  auto it = ptr.find(get_compact_class());
+  I(it != ptr.end());
+
+  return it->second;
+}
 
 std::string Node::debug_name() const {
 #ifndef NDEBUG
@@ -551,7 +551,7 @@ std::string Node::debug_name() const {
   }
   I(current_g);
 
-  auto *      ref = Ann_node_name::ref(current_g);
+  auto *      ref = current_g->ref_node_name_map();
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
@@ -571,13 +571,15 @@ std::string Node::debug_name() const {
   return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name().to_s());
 }
 
-bool Node::has_name() const { return Ann_node_name::ref(current_g)->has_key(get_compact_class()); }
+bool Node::has_name() const { return current_g->get_node_name_map().contains(get_compact_class()); }
 
-void Node::set_place(const Ann_place &p) { Ann_node_place::ref(top_g)->set(get_compact(), p); }
+void Node::set_place(const Ann_place &p) { top_g->ref_node_place_map()->insert_or_assign(get_compact(), p); }
 
 const Ann_place Node::get_place() const {
-  auto data = Ann_node_place::ref(top_g)->get(get_compact());
-  return data;
+  const auto &ptr = top_g->get_node_place_map();
+  const auto it = ptr.find(get_compact());
+  I(it != ptr.end());
+  return it->second;
 }
 
 Bits_t Node::get_bits() const {
@@ -585,14 +587,23 @@ Bits_t Node::get_bits() const {
   return current_g->get_bits(nid);
 }
 
-bool Node::has_place() const { return Ann_node_place::ref(top_g)->has(get_compact()); }
+bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
 //----- Subject to changes in the future:
-void Node::set_color(int new_color) { Ann_node_color::ref(current_g)->set(get_compact_class(), new_color); }
+void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or_assign(get_compact(), new_color); }
 
-int Node::get_color() const { return Ann_node_color::ref(current_g)->get_val(get_compact_class()); }
+int Node::get_color() const {
+  const auto &ptr = current_g->get_node_color_map();
+  const auto it = ptr.find(get_compact());
+  I(it != ptr.end());
+  return it->second;
+}
 
-bool Node::has_color() const { return Ann_node_color::ref(current_g)->has_key(get_compact_class()); }
+bool Node::has_color() const {
+  const auto &ptr = current_g->get_node_color_map();
+  const auto it = ptr.find(get_compact());
+  return it != ptr.end();
+}
 
 // LCOV_EXCL_START
 void Node::dump() const {

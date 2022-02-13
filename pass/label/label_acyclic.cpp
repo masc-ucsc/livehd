@@ -2,7 +2,6 @@
 
 #include "label_acyclic.hpp"
 
-#include "annotate.hpp"
 #include "cell.hpp"
 #include "pass.hpp"
 
@@ -258,9 +257,9 @@ void Label_acyclic::label(Lgraph *g) {
   fmt::print("Cutoff is {}\n", cutoff);
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { Ann_node_color::clear(lg); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
   }
-  Ann_node_color::clear(g); 
+  g->ref_node_color_map()->clear();
 
 
 #ifdef A_DEBUG

@@ -31,7 +31,7 @@ void Pass_fplan_analyzefp::setup() {
 
 std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
   // FIXME: better to not use std::string use mmap_lib::str directly
-  return n.has_instance_name() ? n.get_instance_name().to_s() : n.default_instance_name().to_s();
+  return n.has_name() ? n.get_name().to_s() : n.default_instance_name().to_s();
 }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
@@ -130,7 +130,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
       I(!n.is_invalid());
 
-      if ((n.has_instance_name() && n.get_instance_name() == name) || (n.default_instance_name() == name)) {
+      if ((n.has_name() && n.get_name() == name) || (n.default_instance_name() == name)) {
         found = true;
 
         absl::flat_hash_map<Node::Compact, GeographyHint> hint_map;

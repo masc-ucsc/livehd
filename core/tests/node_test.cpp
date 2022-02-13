@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "annotate.hpp"
+
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgedgeiter.hpp"
@@ -104,11 +104,6 @@ protected:
     top->add_edge(s2_sss, top_s2_out, 1);
   }
 
-  void TearDown() override {
-    top->sync();
-    c1->sync();
-    c2->sync();
-  }
 };
 
 TEST_F(Setup_graphs_test, iterate_sub_graph) {
@@ -124,13 +119,10 @@ TEST_F(Setup_graphs_test, iterate_sub_graph) {
 }
 
 TEST_F(Setup_graphs_test, annotate1a) {
-#ifndef NDEBUG
   for (const auto &node : top->forward()) {
-    EXPECT_DEATH({ node.get_place().get_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
+    EXPECT_FALSE(node.has_place());
+    //EXPECT_DEATH({ node.get_place().get_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
   }
-#else
-  EXPECT_TRUE(true);
-#endif
 }
 
 TEST_F(Setup_graphs_test, annotate1b) {

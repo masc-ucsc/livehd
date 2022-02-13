@@ -2,7 +2,6 @@
 
 #include "node_pin.hpp"
 
-#include "annotate.hpp"
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "node.hpp"
@@ -249,11 +248,11 @@ void Node_pin::set_bits(uint32_t bits) {
   current_g->set_bits(get_root_idx(), bits);
 }
 
-void Node_pin::set_unsign() { Ann_node_pin_unsign::ref(get_lg())->set(get_compact_driver(), true); }
+void Node_pin::set_unsign() { get_lg()->ref_node_pin_unsigned_map()->insert(get_compact_driver()); }
 
-void Node_pin::set_sign() { Ann_node_pin_unsign::ref(get_lg())->erase(get_compact_driver()); }
+void Node_pin::set_sign() { get_lg()->ref_node_pin_unsigned_map()->erase(get_compact_driver()); }
 
-bool Node_pin::is_unsign() const { return Ann_node_pin_unsign::ref(top_g)->has(get_compact_driver()) ? true : false; }
+bool Node_pin::is_unsign() const { return get_lg()->get_node_pin_unsigned_map().contains(get_compact_driver()); }
 
 mmap_lib::str Node_pin::get_type_sub_pin_name() const {
   const auto node = get_node();
@@ -267,29 +266,44 @@ mmap_lib::str Node_pin::get_type_sub_pin_name() const {
   return io_pin.name;
 }
 
-void  Node_pin::set_delay(float val) { Ann_node_pin_delay::ref(top_g)->set(get_compact_driver(), val); }
-bool  Node_pin::has_delay() const { return Ann_node_pin_delay::ref(top_g)->has(get_compact_driver()); }
-float Node_pin::get_delay() const { return Ann_node_pin_delay::ref(top_g)->get(get_compact_driver()); }
+void  Node_pin::set_delay(float val) { top_g->ref_node_pin_delay_map()->insert_or_assign(get_compact_driver(), val); }
+bool  Node_pin::has_delay() const { return top_g->get_node_pin_delay_map().contains(get_compact_driver()); }
+float Node_pin::get_delay() const {
+  const auto &ptr = top_g->get_node_pin_delay_map();
+  const auto it = ptr.find(get_compact_driver());
+  I(it != ptr.end());
+  return it->second;
+}
 
-void Node_pin::del_delay() { Ann_node_pin_delay::ref(top_g)->erase(get_compact_driver()); }
+void Node_pin::del_delay() { top_g->ref_node_pin_delay_map()->erase(get_compact_driver()); }
 
 void Node_pin::set_name(const mmap_lib::str &wname) {
   I(wname.size());  // empty names not allowed
-  Ann_node_pin_name::ref(current_g)->set(get_compact_class_driver(), wname);
+
+  auto *ref = current_g->ref_node_pin_name_map();
+  ref->insert_or_assign(get_compact_class_driver(), wname);
+
+  auto *rref = current_g->ref_node_pin_name_rmap();
+  rref->insert_or_assign(wname, get_compact_class_driver());
+  // auto [rref_it, rref_inserted] = rref->insert_or_assign(wname, get_compact_class_driver());
+  //I(rref_inserted); // name was not previously bound to something (erase or move API to cache errors)
 }
 
 void Node_pin::reset_name(const mmap_lib::str &wname) {
-  auto *ref = Ann_node_pin_name::ref(current_g);
+  auto *ref  = current_g->ref_node_pin_name_map();
 
   auto it = ref->find(get_compact_class_driver());
   if (it != ref->end()) {
     if (it->second == wname)
       return;
 
-    ref->erase(it);
+    it->second = wname;
+  }else{
+    ref->insert_or_assign(get_compact_class_driver(), wname);
   }
 
-  ref->set(get_compact_class_driver(), wname);
+  auto *rref = current_g->ref_node_pin_name_rmap();
+  rref->insert_or_assign(wname, get_compact_class_driver());
 }
 
 void Node_pin::del() {
@@ -315,31 +329,13 @@ void Node_pin::del() {
 
 void Node_pin::del_name() {
   I(has_name());
-  if (is_hierarchical()) {
-    I(false);
-    // the flow still does not have hierarchical compact_class delete. Are you
-    // sure that you do not need a not hierarchical node?
-    //
-    // pin.get_non_hierarchical().del() will work if you got a hierarchical pin for some reason
-  } else {
-    Ann_node_pin_name::ref(current_g)->erase_key(get_compact_class_driver());
-  }
-}
+  I(!is_hierarchical());
+  auto *ref  = current_g->ref_node_pin_name_map();
+  auto *rref = current_g->ref_node_pin_name_rmap();
 
-// FIXME->sh: could be deprecated if ann_ssa could be mmapped for a mmap_lib::str
-void Node_pin::set_prp_vname(const mmap_lib::str &prp_vname) {
-  Ann_node_pin_prp_vname::ref(current_g)->set(get_compact_class_driver(), prp_vname);
-}
-
-void Node_pin::dump_all_prp_vname() const {
-  auto *ref = Ann_node_pin_prp_vname::ref(current_g);
-
-  for (const auto &it : *ref) {
-    if (current_g->is_valid_node_pin(it.first.idx)) {
-      Node_pin a(current_g, it.first);
-      fmt::print("prp_vname pin:{} vname:{}\n", a.debug_name(), it.second);
-    }
-  }
+  auto it = ref->find(get_compact_class_driver());
+  rref->erase(it->second);
+  ref->erase(it);
 }
 
 void Node_pin::nuke() {
@@ -359,9 +355,12 @@ std::string Node_pin::debug_name() const {
   I(current_g);
 
   std::string name;
-  if (!sink)
-    if (Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()))
-      name = Ann_node_pin_name::ref(current_g)->get_val(get_compact_class_driver()).to_s();
+  if (!sink) {
+    const auto &ptr = current_g->get_node_pin_name_map();
+    const auto it = ptr.find(get_compact_class_driver());
+    if (it != ptr.end())
+      name = it->second.to_s();
+  }
 
   const auto node = get_node();
   if (name.empty()) {
@@ -421,44 +420,37 @@ mmap_lib::str Node_pin::get_name() const {
   }
 #endif
   // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
-  return Ann_node_pin_name::ref(current_g)->get_val(Compact_class_driver(get_root_idx()));
+  const auto &ptr = current_g->get_node_pin_name_map();
+  const auto   it = ptr.find(get_compact_class_driver());
+  I(it != ptr.end());
+  return it->second;
 }
 
-mmap_lib::str Node_pin::get_prp_vname() const {
-#ifndef NDEBUG
-  if (!is_graph_io()) {
-    I(is_driver());
-    I(has_prp_vname());  // get_name should be called for named driver_pins
-  }
-#endif
-  // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
-  return Ann_node_pin_prp_vname::ref(current_g)->get(Compact_class_driver(get_root_idx()));
-}
-
-bool Node_pin::has_name() const { return Ann_node_pin_name::ref(current_g)->has_key(get_compact_class_driver()); }
-
-bool Node_pin::has_prp_vname() const { return Ann_node_pin_prp_vname::ref(current_g)->has(get_compact_class_driver()); }
+bool Node_pin::has_name() const { return current_g->get_node_pin_name_map().contains(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
-  auto       ref = Ann_node_pin_name::ref(top);
+  auto       *ref = top->ref_node_pin_name_map();
+  auto      *rref = top->ref_node_pin_name_rmap();
   {
-    const auto it  = ref->find_val(wname);
-    if (it != ref->end()) {
-      if (top->is_valid_node_pin(it->first.idx)) {
-        return {top, it->first};
+    const auto it  = rref->find(wname);
+    if (it != rref->end()) {
+      if (top->is_valid_node_pin(it->second.idx)) {
+        return {top, it->second};
       }
-      ref->erase_key(it->first); // pending/lazy delete
+      ref->erase(it->second);
+      rref->erase(it); // pending/lazy delete
     }
   }
 
   auto can_wname = Lgtuple::get_canonical_name(wname);
   if (can_wname != wname) {
-    const auto it2 = ref->find_val(can_wname);
-    if (it2 != ref->end()) {
-      if (top->is_valid_node_pin(it2->first.idx)) {
-        return {top, it2->first};
+    const auto it2 = rref->find(can_wname);
+    if (it2 != rref->end()) {
+      if (top->is_valid_node_pin(it2->second.idx)) {
+        return {top, it2->second};
       }
-      ref->erase_key(it2->first); // pending/lazy delete
+      ref->erase(it2->second);
+      rref->erase(it2); // pending/lazy delete
     }
   }
 
@@ -494,31 +486,22 @@ mmap_lib::str Node_pin::get_pin_name() const {
 }
 
 void Node_pin::set_offset(Bits_t offset) {
-  if (offset == 0)
-    return;
-
-  Ann_node_pin_offset::ref(current_g)->set(get_compact_class_driver(), offset);
+  auto *ref = current_g->ref_node_pin_offset_map();
+  if (offset == 0) {
+    ref->erase(get_compact_class_driver());
+  }else{
+    ref->insert_or_assign(get_compact_class_driver(), offset);
+  }
 }
 
 Bits_t Node_pin::get_offset() const {
-  auto ref = Ann_node_pin_offset::ref(current_g);
-  if (!ref->has(get_compact_class_driver()))
+  const auto &ptr = current_g->get_node_pin_offset_map();
+  const auto it = ptr.find(get_compact_class_driver());
+  if (it == ptr.end())
     return 0;
 
-  auto off = ref->get(get_compact_class_driver());
-  I(off);
-  return off;
+  return it->second;
 }
-
-uint32_t Node_pin::get_ssa() const {
-  return Ann_node_pin_ssa::ref(top_g)->get(get_compact_class_driver());
-}
-
-void Node_pin::set_ssa(uint32_t v) {
-  Ann_node_pin_ssa::ref(top_g)->set(get_compact_class_driver(), v);
-}
-
-bool Node_pin::has_ssa() const { return Ann_node_pin_ssa::ref(top_g)->has(get_compact_class_driver()); }
 
 bool Node_pin::is_connected() const {
   if (is_invalid())

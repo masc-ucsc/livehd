@@ -45,11 +45,6 @@ void Lgraph_Base::clear() {
   library->clear(lgid);
 }
 
-void Lgraph_Base::sync() {
-  Lgraph_base_core::sync();
-  // Avoid recursion library->sync();
-}
-
 void Lgraph_Base::emplace_back() {
   Node_internal xx;
   node_internal.emplace_back(xx);

@@ -23,7 +23,7 @@ protected:
   Index_id        nid;
 
   friend class Lgraph;
-  friend class Lgraph_Node_Type;
+  friend class Lgraph_attributes;
   friend class Node_pin;
   friend class XEdge;
   friend class Fast_edge_iterator;
@@ -51,7 +51,7 @@ public:
     uint64_t        nid : Index_bits;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -94,7 +94,7 @@ public:
     uint64_t nid : Index_bits;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -130,7 +130,7 @@ public:
     uint64_t nid : Index_bits;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -360,11 +360,6 @@ public:
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;
   mmap_lib::str default_instance_name() const;
-
-  // user-defined node instance name (1 per node instance)
-  void             set_instance_name(const mmap_lib::str &iname);
-  mmap_lib::str    get_instance_name() const;
-  bool             has_instance_name() const;
 
   // non-hierarchical node name (1 for all nodes)
   void             set_name(const mmap_lib::str &iname);

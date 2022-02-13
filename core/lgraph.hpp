@@ -11,9 +11,9 @@
 #include "lgraphbase.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
-#include "node_type.hpp"
+#include "lgraph_attributes.hpp"
 
-class Lgraph : public Lgraph_Node_Type {
+class Lgraph : public Lgraph_attributes {
 protected:
   friend class Node;
   friend class Hierarchy;
@@ -205,7 +205,6 @@ public:
   static void    rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest);
 
   void clear() override;
-  void sync() override;
 
   Node_pin add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t bits);
   Node_pin add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t bits);

@@ -3,7 +3,6 @@
 
 #include <string>
 
-#include "annotate.hpp"
 #include "cell.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
@@ -163,7 +162,7 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 
   int x_pos = 0;
 
-  Ann_node_place::clear(g);  // Not needed, but clears all the previous placement info
+  g->ref_node_place_map()->clear();
 
   for (auto node : g->forward()) {
     auto p = node.get_place();

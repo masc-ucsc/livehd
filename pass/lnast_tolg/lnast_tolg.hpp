@@ -33,6 +33,15 @@ private:
   absl::flat_hash_map<mmap_lib::str, Node>                    vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
 
+  struct Ssa_info {
+    Ssa_info(const mmap_lib::str _var_name, uint16_t _subs) : var_name(_var_name), subs(_subs) { }
+
+    mmap_lib::str var_name;
+    uint16_t      subs;
+  };
+
+  absl::flat_hash_map<Node_pin::Compact_class_driver, Ssa_info>  ssa_info_map;
+
 protected:
   void top_stmts2lgraph(Lgraph *lg, const Lnast_nid &lnidx_stmts);
   void process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts);

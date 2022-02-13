@@ -2,7 +2,6 @@
 
 #include "pass_sat_opt.hpp"
 
-#include "annotate.hpp"
 #include "lbench.hpp"
 #include "lezminisat.hpp"
 #include "lezsat.hpp"

@@ -2,7 +2,6 @@
 
 #include "pass_opentimer.hpp"
 
-#include "annotate.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"

@@ -96,8 +96,8 @@ void Node_tree::dump() const {
     if (id.is_invalid()) {
       name = mmap_lib::str("(root module)");
     } else {
-      if (id.has_instance_name()) {
-        name = id.get_instance_name();
+      if (id.has_name()) {
+        name = id.get_name();
       } else {
         name = id.default_instance_name();
       }

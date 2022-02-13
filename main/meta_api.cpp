@@ -45,6 +45,8 @@ void Meta_api::save(Eprp_var &var) {
       lg->save();
     }
   }
+
+  Graph_library::sync_all(); // nice but not needed
 }
 
 void Meta_api::create(Eprp_var &var) {

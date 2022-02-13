@@ -610,10 +610,6 @@ void Graph_library::clear_int(Lg_type_id lgid) {
 Lg_type_id Graph_library::copy_lgraph_int(const mmap_lib::str &name, const mmap_lib::str &new_name) {
   I(false);
   graph_library_clean = false;
-  auto it2            = global_name2lgraph[path].find(name);
-  if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
-    it2->second->sync();
-  }
   const auto &it = name2id.find(name);
   I(it != name2id.end());
   auto id_orig = it->second;

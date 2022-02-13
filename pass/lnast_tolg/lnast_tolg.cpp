@@ -1499,8 +1499,7 @@ void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
 }
 
 void Lnast_tolg::setup_dpin_ssa(Node_pin &dpin, const mmap_lib::str &var_name, uint16_t subs) {
-  dpin.set_ssa(subs);
-  dpin.set_prp_vname(var_name);
+  ssa_info_map.insert_or_assign(dpin.get_compact_class_driver(), Ssa_info(var_name, subs));
 }
 
 void Lnast_tolg::create_out_ta(Lgraph *lg, const mmap_lib::str &field_name, Node_pin &val_dpin) {
@@ -1559,13 +1558,16 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     }
 
     // collect vname table info
-    if (dpin.has_ssa() && dpin.has_prp_vname()) {
-      auto vname = dpin.get_prp_vname();
-      auto subs  = dpin.get_ssa();
-
-      auto it = vname2ssa_dpin.find(vname);
-      if (it == vname2ssa_dpin.end() || subs >= it->second.get_ssa()) 
-        vname2ssa_dpin.insert_or_assign(vname, dpin);
+    auto ssa_it = ssa_info_map.find(dpin.get_compact_class_driver());
+    if (ssa_it != ssa_info_map.end()) {
+      auto it2 = vname2ssa_dpin.find(ssa_it->second.var_name);
+      if (it2 != vname2ssa_dpin.end()) {
+        auto ssa_it2 = ssa_info_map.find(it2->second.get_compact_class_driver());
+        if (ssa_it2 != ssa_info_map.end() && ssa_it2->second.subs < ssa_it->second.subs)
+          vname2ssa_dpin.insert_or_assign(ssa_it->second.var_name, dpin);
+      }else{
+        vname2ssa_dpin.insert_or_assign(ssa_it->second.var_name, dpin);
+      }
     }
   }
 

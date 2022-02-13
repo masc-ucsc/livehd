@@ -80,7 +80,6 @@ protected:
 
 public:
   virtual void clear();
-  virtual void sync();
 
   [[nodiscard]] mmap_lib::str get_unique_name() const { return unique_name; }
   [[nodiscard]] mmap_lib::str get_name() const { return name; }

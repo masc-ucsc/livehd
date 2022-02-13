@@ -78,7 +78,6 @@ void Inou_json::tolg(Eprp_var &var) {
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
     rapidjson::Document       document;
     document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
-    lg->sync();
     lgs.push_back(lg);
   }
 

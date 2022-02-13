@@ -39,10 +39,8 @@ protected:
   };
 
   void TearDown() override {
-    top->sync();
     delete top;
     for (auto &sub : subs) {
-      sub->sync();
       delete sub;
     }
   };

@@ -2,7 +2,6 @@
 
 #include "hierarchy.hpp"
 
-#include "annotate.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"

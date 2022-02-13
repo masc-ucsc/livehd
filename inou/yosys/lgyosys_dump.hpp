@@ -14,7 +14,6 @@
 #pragma GCC diagnostic pop
 // LiveHD includes
 
-#include "annotate.hpp"
 #include "inou.hpp"
 #include "lgraph.hpp"
 #include "pass.hpp"
@@ -53,9 +52,7 @@ private:
     while (true) {
       tmp = mmap_lib::str(absl::StrCat(test, "_", std::to_string(ids++)));
 
-      if (Ann_node_pin_name::ref(g)->has_val(tmp))
-        continue;
-      if (Ann_node_name::ref(g)->has_val(tmp))
+      if (g->get_node_pin_name_rmap().contains(tmp))
         continue;
 
       return tmp;

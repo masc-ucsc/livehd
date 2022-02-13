@@ -12,7 +12,6 @@
 #include <set>
 #include <string>
 
-#include "annotate.hpp"
 #include "boolector.h"
 #include "cell.hpp"
 #include "lbench.hpp"

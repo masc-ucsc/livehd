@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "floorplanner.hpp"
 
 #include <stdexcept>
 #include <typeinfo>
 
-#include "annotate.hpp"
+#include "floorplanner.hpp"
+
 #include "cell.hpp"
 #include "core/ann_place.hpp"
 #include "core/lgedgeiter.hpp"
@@ -106,8 +106,8 @@ void Lhd_floorplanner::write_file(const std::string_view filename) {
 }
 
 void Lhd_floorplanner::write_lhd_node() {
-  Ann_node_place::clear(nt.get_root_lg());  // clear out any existing node placements
-  clearCount();                             // clear ArchFP name counts
+  nt.get_root_lg()->ref_node_place_map()->clear(); // clear out any existing node placements
+  clearCount();                                    // clear ArchFP name counts
 
   unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, mmap_lib::Tree_index::root());
 
@@ -129,7 +129,7 @@ void Lhd_floorplanner::write_lhd_node() {
       fmt::print("hidx {} ", n.get_hidx());
     }
 
-    I(n.has_instance_name());
+    I(n.has_name());
 
     I(n.has_place());
     I(n.get_place().is_valid());

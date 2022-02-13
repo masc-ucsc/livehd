@@ -307,7 +307,7 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
-      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry:{}\n", e.driver.debug_name());
+      //GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n"); // e.driver.debug_name());
 
       not_finished = true;
       return;
@@ -525,7 +525,7 @@ void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
-      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry:{}\n", e.driver.debug_name());
+      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n"); // e.driver.debug_name());
 
       not_finished = true;
       return;

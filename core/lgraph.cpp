@@ -10,7 +10,7 @@
 #include <set>
 
 #include "absl/strings/match.h"
-#include "annotate.hpp"
+
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph_base_core.hpp"
@@ -19,7 +19,7 @@
 #include "hif/hif_write.hpp"
 
 Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib)
-    : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_Node_Type(_path, _name, _lgid, _lib), htree(this) {
+    : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_attributes(_path, _name, _lgid, _lib), htree(this) {
   I(!_name.contains('/'));  // No path in name
   I(_name == get_name());
 
@@ -193,7 +193,6 @@ void Lgraph::load() {
 }
 
 Lgraph::~Lgraph() {
-  sync();
   library->unregister(name, lgid, this);
 }
 
@@ -284,9 +283,7 @@ void Lgraph::rename(const mmap_lib::str &path, const mmap_lib::str &orig, const 
 }
 
 void Lgraph::clear() {
-  Ann_support::clear(this);
-
-  Lgraph_Node_Type::clear(); // last. Removes lock at the end
+  Lgraph_attributes::clear(); // last. Removes lock at the end
 
   auto nid1 = create_node_int();
   auto nid2 = create_node_int();
@@ -298,14 +295,6 @@ void Lgraph::clear() {
   set_type(nid2, Ntype_op::IO);
 
   std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
-}
-
-void Lgraph::sync() {
-  Ann_support::sync(this);
-
-  Lgraph_Node_Type::sync();
-
-  Lgraph_Base::sync();  // last. Removes lock at the end
 }
 
 Node_pin Lgraph::get_graph_input(const mmap_lib::str &str) {

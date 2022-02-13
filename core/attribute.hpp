@@ -74,28 +74,9 @@ public:
       lg2attr.erase(key);
     }
 
-    last_attr->clear();
-    delete last_attr;  // Delete does not clear
+    delete last_attr;
 
     last_lg   = nullptr;
     last_attr = nullptr;
-  }
-
-  static void sync(const Lgraph *lg) {
-    if (last_lg == lg) {
-      last_lg   = nullptr;
-      last_attr = nullptr;
-    }
-    return;  // FIXME: Why does this create a deadlock/livelock with OPT only??? (not needed beyond asan, but it should not happen)
-
-    const auto key = std::pair(lg->get_unique_name(), mmap_lib::str(Name));
-
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-
-    auto it = lg2attr.find(key);
-    if (it == lg2attr.end())
-      return;
-    delete it->second;
-    lg2attr.erase(it);
   }
 };

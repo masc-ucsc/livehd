@@ -5,7 +5,6 @@
 
 #include "pass_submatch.hpp"
 
-#include "annotate.hpp"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"

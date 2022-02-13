@@ -51,5 +51,3 @@ void Lgraph_base_core::clear() {
   unlink(lock.c_str());
 }
 
-void Lgraph_base_core::sync() {
-}

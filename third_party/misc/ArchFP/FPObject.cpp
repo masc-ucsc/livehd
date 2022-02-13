@@ -88,7 +88,7 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
       Ann_place p(calcX(cX), calcY(cY), getWidth(), getHeight());
 
       child->set_place(p);
-      child->set_instance_name(getUniqueName());
+      child->set_name(getUniqueName());
 
       sub_count = outputLgraphLayout(tree, child_idx, cX, cY);
       found     = true;
@@ -130,7 +130,7 @@ unsigned int FPObject::outputLgraphLayout(Node_tree& tree, Tree_index tidx, doub
 
     Ann_place p(calcX(startX), calcY(startY), getWidth(), getHeight());
     child->set_place(p);
-    child->set_instance_name(getUniqueName());
+    child->set_name(getUniqueName());
 
     tree.set_last_free(tidx, getType(), child_idx);
 

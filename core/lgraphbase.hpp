@@ -73,7 +73,6 @@ public:
   virtual ~Lgraph_Base();
 
   virtual void clear();
-  virtual void sync();
 
   void emplace_back();
 

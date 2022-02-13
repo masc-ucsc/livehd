@@ -16,7 +16,7 @@ using Node_pin_iterator = std::vector<Node_pin>;
 class Node_pin {
 protected:
   friend class Lgraph;
-  friend class Lgraph_Node_Type;
+  friend class Lgraph_attributes;
   friend class XEdge;
   friend class Node;
   friend class Fast_edge_iterator;
@@ -38,14 +38,14 @@ protected:
     // Could be IDX=0 for invalid
   }
 
-  const Index_id get_idx() const {
+  [[nodiscard]] const Index_id get_idx() const {
     I(idx);
     return idx;
   }
-  const Index_id get_root_idx() const;
+  [[nodiscard]] const Index_id get_root_idx() const;
 
-  Node_pin switch_to_driver() const;
-  Node_pin switch_to_sink() const;
+  [[nodiscard]] Node_pin switch_to_driver() const;
+  [[nodiscard]] Node_pin switch_to_sink() const;
 
 public:
   class __attribute__((packed)) Compact {
@@ -55,7 +55,7 @@ public:
     uint32_t        sink : 1;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -82,12 +82,12 @@ public:
       return *this;
     };
 
-    constexpr bool is_invalid() const { return idx == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    constexpr bool operator==(const Compact &other) const {
+    [[nodiscard]] constexpr bool operator==(const Compact &other) const {
       return idx == other.idx && sink == other.sink && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
-    constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
@@ -101,7 +101,7 @@ public:
     uint32_t sink : 1;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -127,12 +127,12 @@ public:
       return *this;
     };
 
-    constexpr bool is_invalid() const { return idx == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    constexpr bool operator==(const Compact_flat &other) const {
-      return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid == 0 || other.lgid == 0);
+    [[nodiscard]] constexpr bool operator==(const Compact_flat &other) const {
+      return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid == 0u || other.lgid == 0u);
     }
-    constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_flat &s) {
@@ -146,7 +146,7 @@ public:
     uint32_t        idx : Index_bits;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -170,12 +170,12 @@ public:
       return *this;
     };
 
-    constexpr bool is_invalid() const { return idx == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    constexpr bool operator==(const Compact_driver &other) const {
+    [[nodiscard]] constexpr bool operator==(const Compact_driver &other) const {
       return idx == other.idx && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
-    constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator!=(const Compact_driver &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_driver &s) {
@@ -189,7 +189,7 @@ public:
     uint32_t sink : 1;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -229,7 +229,7 @@ public:
     uint32_t idx : Index_bits;
 
     friend class Lgraph;
-    friend class Lgraph_Node_Type;
+    friend class Lgraph_attributes;
     friend class Node;
     friend class Node_pin;
     friend class XEdge;
@@ -252,10 +252,10 @@ public:
       return *this;
     }
 
-    constexpr bool is_invalid() const { return idx == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
-    constexpr bool operator==(const Compact_class_driver &other) const { return idx == other.idx; }
-    constexpr bool operator!=(const Compact_class_driver &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator==(const Compact_class_driver &other) const { return idx == other.idx; }
+    [[nodiscard]] constexpr bool operator!=(const Compact_class_driver &other) const { return !(*this == other); }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_class_driver &s) {
@@ -268,7 +268,7 @@ public:
     return H::combine(std::move(h), s.hidx, (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
   }
 
-  constexpr Node_pin() : top_g(0), current_g(0), idx(0), pid(0), sink(false) {}
+  constexpr Node_pin() : top_g(nullptr), current_g(nullptr), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
   Node_pin(Lgraph *_g, const Compact &comp);
   Node_pin(const mmap_lib::str &path, const Compact_flat &comp);
@@ -279,73 +279,73 @@ public:
 
   // No constexpr (get_root_idx)
 
-  Compact get_compact() const {
+  [[nodiscard]] Compact get_compact() const {
     if (Hierarchy::is_invalid(hidx))
       return Compact(Hierarchy::hierarchical_root(), get_root_idx(), sink);
     return Compact(hidx, get_root_idx(), sink);
   }
-  Compact_flat   get_compact_flat() const;
-  Compact_driver get_compact_driver() const;
-  Compact_class  get_compact_class() const {
+  [[nodiscard]] Compact_flat   get_compact_flat() const;
+  [[nodiscard]] Compact_driver get_compact_driver() const;
+  [[nodiscard]] Compact_class  get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
     return Compact_class(idx, sink);
   }
 
-  Compact_class_driver get_compact_class_driver() const {
+  [[nodiscard]] Compact_class_driver get_compact_class_driver() const {
     // OK to pick a hierarchical to avoid replication of info like names
     I(!sink);  // Only driver pin allowed
     return Compact_class_driver(get_root_idx());
   }
 
-  Lgraph *        get_top_lgraph() const { return top_g; };
-  Lgraph *        get_class_lgraph() const { return current_g; };
-  Lgraph *        get_lg() const { return current_g; };
-  Hierarchy_index get_hidx() const { return hidx; };
+  [[nodiscard]] Lgraph *        get_top_lgraph() const { return top_g; };
+  [[nodiscard]] Lgraph *        get_class_lgraph() const { return current_g; };
+  [[nodiscard]] Lgraph *        get_lg() const { return current_g; };
+  [[nodiscard]] Hierarchy_index get_hidx() const { return hidx; };
 
-  constexpr Port_ID get_pid() const { return pid; }
+  [[nodiscard]] constexpr Port_ID get_pid() const { return pid; }
 
-  bool has_inputs() const;
-  bool has_outputs() const;
+  [[nodiscard]] bool has_inputs() const;
+  [[nodiscard]] bool has_outputs() const;
 
-  bool is_graph_io() const;
-  bool is_graph_input() const;
-  bool is_graph_output() const;
+  [[nodiscard]] bool is_graph_io() const;
+  [[nodiscard]] bool is_graph_input() const;
+  [[nodiscard]] bool is_graph_output() const;
 
   // Some redundant code with node (implemented because frequent)
-  bool   is_type_const() const;
-  bool   is_type_tup() const;
-  bool   is_type_flop() const;
-  bool   is_type_register() const;
-  bool   is_type(const Ntype_op op) const;
-  Lconst get_type_const() const;
+  [[nodiscard]] bool   is_type_const() const;
+  [[nodiscard]] bool   is_type_tup() const;
+  [[nodiscard]] bool   is_type_flop() const;
+  [[nodiscard]] bool   is_type_register() const;
+  [[nodiscard]] bool   is_type(const Ntype_op op) const;
+  [[nodiscard]] Lconst get_type_const() const;
 
-  Node_pin change_to_sink_from_graph_out_driver() const {
+  [[nodiscard]] Node_pin change_to_sink_from_graph_out_driver() const {
     I(is_graph_output());
     return switch_to_sink();
   }
 
-  Node_pin change_to_driver_from_graph_out_sink() const {
+  [[nodiscard]] Node_pin change_to_driver_from_graph_out_sink() const {
     I(is_graph_output());
     return switch_to_driver();
   }
 
-  constexpr bool is_sink() const {
+  [[nodiscard]] constexpr bool is_sink() const {
     I(idx);
     return sink;
   }
-  constexpr bool is_driver() const {
+  [[nodiscard]] constexpr bool is_driver() const {
     I(idx);
     return !sink;
   }
 
-  Index_id get_node_nid() const;
-  Node     get_node() const;
-  Ntype_op get_type_op() const;
+  [[nodiscard]] Index_id get_node_nid() const;
+  [[nodiscard]] Node     get_node() const;
+  [[nodiscard]] Ntype_op get_type_op() const;
 
-  Node              get_driver_node() const;  // common 0 or 1 driver case
-  Node_pin          get_driver_pin() const;   // common 0 or 1 driver case
-  Node_pin_iterator inp_drivers() const;
-  Node_pin_iterator out_sinks() const;
+  [[nodiscard]] Node              get_driver_node() const;  // common 0 or 1 driver case
+  [[nodiscard]] Node_pin          get_driver_pin() const;   // common 0 or 1 driver case
+  [[nodiscard]] Node_pin_iterator inp_drivers() const;
+  [[nodiscard]] Node_pin_iterator out_sinks() const;
 
   void del_driver(Node_pin &dst);
   void del_sink(Node_pin &dst);
@@ -360,8 +360,8 @@ public:
   }
   void del();  // del self and all connections
 
-  Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
-  Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
+  [[nodiscard]] Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
+  [[nodiscard]] Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
 
   void connect_sink(const Node_pin &dst) const;
   void connect_sink(const Node &dst) const;
@@ -373,77 +373,68 @@ public:
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
-  int get_num_edges() const;
+  [[nodiscard]] int get_num_edges() const;
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
   void           invalidate() { idx = 0; }
-  constexpr bool is_invalid() const { return idx == 0; }
-  constexpr bool is_down_node() const { return top_g != current_g; }
-  constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
-  Node_pin       get_non_hierarchical() const;
-  Node_pin       get_hierarchical() const;
+  [[nodiscard]] constexpr bool is_invalid() const { return idx == 0; }
+  [[nodiscard]] constexpr bool is_down_node() const { return top_g != current_g; }
+  [[nodiscard]] constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
+  [[nodiscard]] Node_pin       get_non_hierarchical() const;
+  [[nodiscard]] Node_pin       get_hierarchical() const;
 
-  bool operator==(const Node_pin &other) const {
+  [[nodiscard]] bool operator==(const Node_pin &other) const {
     GI(idx == 0, Hierarchy::is_invalid(hidx));
     GI(other.idx == 0, Hierarchy::is_invalid(other.hidx));
     // GI(idx && other.idx, top_g == other.top_g);
     return get_root_idx() == other.get_root_idx() && sink == other.sink
            && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
   }
-  bool operator!=(const Node_pin &other) const { return !(*this == other); }
+  [[nodiscard]] bool operator!=(const Node_pin &other) const { return !(*this == other); }
 
   void nuke();  // Delete all the edges, and attributes of this node_pin
 
   // BEGIN ATTRIBUTE ACCESSORS
-  std::string debug_name() const;
-  mmap_lib::str get_wire_name() const;
+  [[nodiscard]] std::string debug_name() const;
+  [[nodiscard]] mmap_lib::str get_wire_name() const;
 
   void             set_name(const mmap_lib::str &wname);
   void             reset_name(const mmap_lib::str &wname);
   void             del_name();
-  mmap_lib::str get_name() const;
-  bool             has_name() const;
-  static Node_pin  find_driver_pin(Lgraph *top, mmap_lib::str wname);
-  mmap_lib::str get_pin_name() const;
-
-  void             set_prp_vname(const mmap_lib::str &prp_vname);
-  mmap_lib::str get_prp_vname() const;
-  bool             has_prp_vname() const;
-  void             dump_all_prp_vname() const;
+  [[nodiscard]] mmap_lib::str get_name() const;
+  [[nodiscard]] bool             has_name() const;
+  [[nodiscard]] static Node_pin  find_driver_pin(Lgraph *top, mmap_lib::str wname);
+  [[nodiscard]] mmap_lib::str get_pin_name() const;
 
   void  set_delay(float val);
   void  del_delay();
-  float get_delay() const;
-  bool  has_delay() const;
+  [[nodiscard]] float get_delay() const;
+  [[nodiscard]] bool  has_delay() const;
 
   void set_size(const Node_pin &dpin);  // set size and sign
 
-  Bits_t get_bits() const;
+  [[nodiscard]] Bits_t get_bits() const;
   void   set_bits(Bits_t bits);
 
   void set_unsign();
   void set_sign();
-  bool is_unsign() const;
+  [[nodiscard]] bool is_unsign() const;
 
-  mmap_lib::str get_type_sub_pin_name() const;
+  [[nodiscard]] mmap_lib::str get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
-  Bits_t get_offset() const;
+  [[nodiscard]] Bits_t get_offset() const;
 
-  uint32_t       get_ssa() const;
-  void           set_ssa(uint32_t v);
-  bool           has_ssa() const;
-
-  bool           is_connected() const;
-  bool           is_connected(const Node_pin &pin) const;
+  [[nodiscard]] bool           is_connected() const;
+  [[nodiscard]] bool           is_connected(const Node_pin &pin) const;
 
   // END ATTRIBUTE ACCESSORS
-  XEdge_iterator out_edges() const;
-  XEdge_iterator inp_edges() const;
+  [[nodiscard]] XEdge_iterator out_edges() const;
+  [[nodiscard]] XEdge_iterator inp_edges() const;
 
-  Node_pin get_down_pin() const;
-  Node_pin get_up_pin() const;
+  [[nodiscard]] Node_pin get_down_pin() const;
+  [[nodiscard]] Node_pin get_up_pin() const;
 };
 
 namespace mmap_lib {
