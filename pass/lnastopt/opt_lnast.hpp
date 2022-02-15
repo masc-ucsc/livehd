@@ -21,6 +21,8 @@ protected:
   void process_bit_and(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_bit_or(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_bit_not(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_eq(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
+  void process_if(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_stmts(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_set(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_tuple_get(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);

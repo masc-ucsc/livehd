@@ -356,6 +356,82 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
+void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst val;
+
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (data.type.is_ref()) {  // if reference, check stored trivial value for conditional
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      val = st.get_trivial(var);
+
+      if (val == 1) {
+        process_stmts(ln, ln->get_sibling_next(child));  // process the statements of the conditional that passed
+        return;
+      }
+      else {
+        continue;
+      }
+    }
+    else if (child == ln->get_last_child(lnid)) {  // statements of the final else, process if reached
+      process_stmts(ln, child);
+      return;
+    }
+    else {  // contents of a reference that failed the conditional
+      continue;
+    }
+  }
+}
+
+void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  mmap_lib::str var;
+  Lconst        result_trivial;
+  Lconst        arg1;
+  Lconst        arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {  // first child
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 == arg2) {
+    result_trivial = 1;
+  }
+  else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
 void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   //-------------------------------
   auto        idx              = ln->get_first_child(lnid);
@@ -641,6 +717,10 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: process_tuple_get(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_eq: process_eq(ln, idx); break;
+      // case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: process_if(ln, idx); break;
+      // case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: std::cout << "BLAAAAAAAAAAAAAAAA\n"; break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts: process_stmts(ln, idx); break;
       default: process_todo(ln, idx);
     }
@@ -654,6 +734,8 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 
   auto idx = ln->get_first_child(lnid);
 
+  bool nested_flag = false;  // flag to indicate whether the loop is currently checking grandchildren
+  auto return_node = idx;  //  node to return to after a node's grandchildren are done being checked
   while (!idx.is_invalid()) {
     const auto &data = ln->get_data(idx);
 
@@ -690,6 +772,33 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
         ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;
       }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: {
+        nested_flag = true;
+        return_node = idx;
+
+        for (auto child : ln->children(idx)) {
+          const auto &child_data = ln->get_data(child);
+
+          if (child_data.type.is_ref()) {  // if reference, check stored trivial value for conditional
+            if (st.get_trivial(lhs_txt).to_pyrope() == 1) {
+              idx = ln->get_first_child(ln->get_sibling_next(child));
+              break;
+            }
+            else {
+              continue;
+            }
+          }
+          else if (child == ln->get_last_child(idx)) {  // contents of the final else
+            idx = ln->get_first_child(child);
+            break;
+          }
+          else {  // contents of a reference that failed the conditional
+            continue;
+          }
+        }
+        continue;
+        break;
+      }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: {
         // "%out" is stored as "out" in the symbol table (%out does not work properly)
         if (lhs_txt == "%out") {
@@ -702,9 +811,15 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_eq: break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts: reconstruct_stmts(ln, idx, ln2); break;
       // default: process_todo(ln, idx);
       default: break;
+    }
+
+    if (nested_flag) {  // done traversing grandchildren, return to the node it was at before
+      nested_flag = false;
+      idx = return_node;
     }
 
     idx = ln->get_sibling_next(idx);
