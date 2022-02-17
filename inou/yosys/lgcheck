@@ -204,7 +204,7 @@ ${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; proc; opt; flatten
               write_verilog trace2.v
               sat -tempinduct -prove trigger 0 ${RESET_STMT} -set-init-undef -enable_undef -set-def-inputs -ignore_unknown_cells -show-ports miter
               " \
-    2> /dev/null | tee lgcheck2.log | grep "proven: SUCC"
+    2> lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
   echo "2.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0

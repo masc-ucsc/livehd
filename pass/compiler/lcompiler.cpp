@@ -185,7 +185,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 
   std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs) {
-    lg->dump();
+    // lg->dump();
     lgs.emplace_back(lg);
   }
 

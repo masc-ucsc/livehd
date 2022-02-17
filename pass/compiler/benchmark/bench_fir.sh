@@ -16,8 +16,8 @@ FIRRTL_LEVEL='ch'
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 POST_IO_RENAME=./inou/firrtl/post_io_renaming.py
-PATTERN_PATH=./inou/firrtl/tests/proto
 PATTERN_PATH=./livehd_regression/synthetic/generated
+PATTERN_PATH=./inou/firrtl/tests/proto
 FIRRTL_EXE=./livehd_regression/tools/firrtl/utils/bin/firrtl
 
 if [ "${PWD##/home/}" != "${PWD}" ]; then
