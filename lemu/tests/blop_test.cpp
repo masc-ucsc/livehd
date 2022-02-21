@@ -15,7 +15,6 @@
 #include "lbench.hpp"
 #include "lconst.hpp"
 #include "lrand.hpp"
-#include "mmap_map.hpp"
 
 
 class Blop_test : public ::testing::Test {
@@ -23,11 +22,9 @@ protected:
 
 public:
   void TearDown() override {
-    mmap_lib::str::nuke();
   }
 
   void SetUp() override {
-    mmap_lib::str::setup();
 
   };
 };

@@ -103,9 +103,7 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  mmap_lib::str::setup();
-
   Test_scanner scanner;
 
-  scanner.parse_file(mmap_lib::str(argv[1]));
+  scanner.parse_file(argv[1]);
 }

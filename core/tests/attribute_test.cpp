@@ -26,7 +26,7 @@ protected:
     mkdir("lgdb_attr", 0755);
     top = Lgraph::create("lgdb_attr", "top", "-");
     for (int i = 0; i < 1024; i++) {
-      mmap_lib::str lg_name(std::string("sub_") + std::to_string(i));
+      std::string lg_name(std::string("sub_") + std::to_string(i));
       subs[i] = Lgraph::create("lgdb_attr", lg_name, "-");
     }
 
@@ -65,7 +65,7 @@ TEST_F(Setup_attr_test, data_test1) {
     char b;
   };
   static constexpr char name[] = "dest1";
-  using dtest1                 = Attribute<name, Node, mmap_lib::map<Node::Compact_class, Data> >;
+  using dtest1                 = Attribute<name, Node, absl::flat_hash_map<Node::Compact_class, Data> >;
 
   b.sample("setup");
 

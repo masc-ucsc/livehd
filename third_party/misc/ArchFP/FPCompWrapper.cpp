@@ -12,7 +12,7 @@ dummyComponent::dummyComponent(Ntype_op typeArg) {
 }
 
 dummyComponent::dummyComponent(const std::string& nameArg) {
-  type = Ntype::get_op(mmap_lib::str(nameArg));
+  type = Ntype::get_op(nameArg);
   if (type == Ntype_op::Invalid)
     type = Ntype_op::Sub;
   name = nameArg;
@@ -26,7 +26,7 @@ FPCompWrapper::FPCompWrapper(dummyComponent* comp, double minAR, double maxAR, d
   maxAspectRatio = maxAR;
   area           = areaArg;
   count          = countArg;
-  name           = mmap_lib::str(comp->getName());
+  name           = comp->getName();
   type           = comp->getType();
 }
 
@@ -38,7 +38,7 @@ FPCompWrapper::FPCompWrapper(std::string nameArg, double xArg, double yArg, doub
   minAspectRatio = width / height;
   maxAspectRatio = width / height;
   count          = 1;
-  name           = mmap_lib::str(DC->getName());
+  name           = DC->getName();
   type           = DC->getType();
 }
 

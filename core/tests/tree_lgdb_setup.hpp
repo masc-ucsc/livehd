@@ -9,7 +9,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 #include "perf_tracing.hpp"
 
 using testing::HasSubstr;
@@ -28,7 +28,7 @@ protected:
     std::string         name;
   };
 
-  mmap_lib::tree<Node_data> tree;
+  lh::tree<Node_data> tree;
   std::vector<Node>         node_order;
   Lgraph *                  lg_root;
 
@@ -37,8 +37,8 @@ protected:
 
   static constexpr char fwd_name[] = "fwd_pos";
   static constexpr char bwd_name[] = "bwd_pos";
-  using Fwd_pos_attr               = Attribute<fwd_name, Node, mmap_lib::map<Node::Compact, uint64_t> >;
-  using Bwd_pos_attr               = Attribute<bwd_name, Node, mmap_lib::map<Node::Compact, uint64_t> >;
+  using Fwd_pos_attr               = Attribute<fwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
+  using Bwd_pos_attr               = Attribute<bwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph(const std::string &test_name) {
     TRACE_EVENT("core", nullptr, [&test_name](perfetto::EventContext ctx) {
@@ -46,9 +46,9 @@ protected:
     });
     Lbench bench(test_name + "_map_tree_to_lgraph");
 
-    std::vector<mmap_lib::Tree_index> index_order;
+    std::vector<lh::Tree_index> index_order;
 
-    tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
+    tree.each_top_down_fast([&index_order](const lh::Tree_index &index, const Node_data &node) {
       (void)node;
       // fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
@@ -301,7 +301,7 @@ protected:
       level     = rint.max(max_level);
       I(level < max_depth);
 
-      mmap_lib::Tree_index index(level, rint.max(tree.get_tree_width(level)));
+      lh::Tree_index index(level, rint.max(tree.get_tree_width(level)));
 
       Node_data data;
       data.create_pos = i + 1;
@@ -348,8 +348,8 @@ protected:
 
     if (!unique) {
       for (int i = 0; i < size / 32; i++) {
-        mmap_lib::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
-        mmap_lib::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
+        lh::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
+        lh::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
 
         if (tree.is_child_of(copy_point, insert_point))  // No recursion insert
           continue;

@@ -10,18 +10,18 @@
 #include "node_type_area.hpp"
 
 void Pass_fplan_write_range::setup() {
-  auto wr = Eprp_method(mmap_lib::str("pass.fplan.write_range"),
-                        mmap_lib::str("randomly generates aspect ratio and area for nodes, within bounds"),
+  auto wr = Eprp_method("pass.fplan.write_range",
+                        "randomly generates aspect ratio and area for nodes, within bounds",
                         &Pass_fplan_write_range::pass);
 
-  wr.add_label_optional("min_ar", mmap_lib::str("minimum aspect ratio of nodes in lgraph"), "1.0");
+  wr.add_label_optional("min_ar", "minimum aspect ratio of nodes in lgraph", "1.0");
   // aspect ratio is super high to try and avoid overlapping floorplans as much as possible, but
   // can be reduced if required
-  wr.add_label_optional("max_ar", mmap_lib::str("maximum aspect ratio of nodes in lgraph"), "50.0");
-  wr.add_label_optional("min_area", mmap_lib::str("minimum area of nodes in lgraph (mm²)"), "1.0");
-  wr.add_label_optional("max_area", mmap_lib::str("maximum area of nodes in lgraph (mm²)"), "4.0");
+  wr.add_label_optional("max_ar", "maximum aspect ratio of nodes in lgraph", "50.0");
+  wr.add_label_optional("min_area", "minimum area of nodes in lgraph (mm²)", "1.0");
+  wr.add_label_optional("max_area", "maximum area of nodes in lgraph (mm²)", "4.0");
 
-  wr.add_label_optional("path", mmap_lib::str("where to write area information"), "lgdb");
+  wr.add_label_optional("path", "where to write area information", "lgdb");
 
   register_pass(wr);
 }
@@ -43,7 +43,7 @@ Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass
   float max_area = std::stof(var.get("max_area").to_s());
 
   // FIXME: See docs/cleanup.md node_type_area TODO to re-enable this code
-  Ntype_area na(mmap_lib::str(path));
+  Ntype_area na(path);
 
   for (uint8_t op = start; op < end; op++) {
     const Ntype_op nop = static_cast<Ntype_op>(op);

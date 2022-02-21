@@ -23,11 +23,11 @@ protected:
   Lrand<bool> rbool;
   Lrand<int>  rint;
 
-  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n1_inp_connected_pins;
-  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n2_inp_connected_pins;
+  absl::flat_hash_map<std::string, Node_pin> track_n1_inp_connected_pins;
+  absl::flat_hash_map<std::string, Node_pin> track_n2_inp_connected_pins;
 
-  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n1_out_connected_pins;
-  absl::flat_hash_map<mmap_lib::str, Node_pin> track_n2_out_connected_pins;
+  absl::flat_hash_map<std::string, Node_pin> track_n1_out_connected_pins;
+  absl::flat_hash_map<std::string, Node_pin> track_n2_out_connected_pins;
 
   absl::flat_hash_map<XEdge::Compact, int> track_edge_count;
 
@@ -109,8 +109,7 @@ protected:
 #endif
   }
 
-  Node_pin add_n1_setup_driver_pin(const std::string& pname_std) {
-    mmap_lib::str pname(pname_std);
+  Node_pin add_n1_setup_driver_pin(const std::string& pname) {
 
     const auto &it = track_n1_out_connected_pins.find(pname);
     if (it == track_n1_out_connected_pins.end()) {
@@ -140,8 +139,7 @@ protected:
     return dpin;
   }
 
-  Node_pin add_n2_setup_sink_pin(const std::string& pname_std) {
-    mmap_lib::str pname(pname_std);
+  Node_pin add_n2_setup_sink_pin(const std::string& pname) {
 
     const auto &it = track_n2_inp_connected_pins.find(pname);
     if (it == track_n2_inp_connected_pins.end()) {
@@ -168,27 +166,27 @@ protected:
   }
 
   void check_edges() {
-    for (auto e : n1.inp_edges()) {
+    for (const auto &e : n1.inp_edges()) {
       (void)e;
       EXPECT_TRUE(false);
     }
-    for (auto e : n2.out_edges()) {
+    for (const auto &e : n2.out_edges()) {
       (void)e;
       EXPECT_TRUE(false);
     }
 
-    for (auto e : n1.out_edges()) {
+    for (const auto &e : n1.out_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it != track_edge_count.end());
     }
 
-    for (auto e : n2.inp_edges()) {
+    for (const auto &e : n2.inp_edges()) {
       auto it = track_edge_count.find(e.get_compact());
       EXPECT_TRUE(it != track_edge_count.end());
     }
   }
 
-  void add_edge(Node_pin dpin, Node_pin spin) {
+  void add_edge(const Node_pin &dpin, const Node_pin &spin) {
     XEdge edge(dpin, spin);
     auto  it = track_edge_count.find(edge.get_compact());
     if (spin.is_connected(dpin)) {
@@ -435,14 +433,10 @@ TEST_F(Edge_test, trivial_delete2) {
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
 
-  g2->ref_library()->sync_all();
-
   auto *sub1 = g2->ref_library()->ref_sub("n1");
   auto *sub2 = g2->ref_library()->ref_sub("n2");
-  sub1->add_output_pin(mmap_lib::str(" quite a long name with % spaces both ends "), Port_invalid);
-  sub2->add_input_pin(mmap_lib::str(" uff this is bad too% "), Port_invalid);
-
-  g2->ref_library()->sync_all();
+  sub1->add_output_pin(" quite a long name with % spaces both ends ", Port_invalid);
+  sub2->add_input_pin(" uff this is bad too% ", Port_invalid);
 
   EXPECT_FALSE(nn1.has_inputs());
   EXPECT_FALSE(nn1.has_outputs());
@@ -461,11 +455,11 @@ TEST_F(Edge_test, trivial_delete2) {
   EXPECT_EQ(nn2.inp_edges().size(), 0);
   EXPECT_EQ(nn2.out_edges().size(), 0);
 
-  auto dpin = nn1.setup_driver_pin(mmap_lib::str(" quite a long name with % spaces both ends "));
-  auto spin = nn2.setup_sink_pin(mmap_lib::str(" uff this is bad too% "));
+  auto dpin = nn1.setup_driver_pin(" quite a long name with % spaces both ends ");
+  auto spin = nn2.setup_sink_pin(" uff this is bad too% ");
 
-  EXPECT_EQ(dpin, nn1.get_driver_pin(mmap_lib::str(" quite a long name with % spaces both ends ")));
-  EXPECT_EQ(spin, nn2.get_sink_pin(mmap_lib::str(" uff this is bad too% ")));
+  EXPECT_EQ(dpin, nn1.get_driver_pin(" quite a long name with % spaces both ends "));
+  EXPECT_EQ(spin, nn2.get_sink_pin(" uff this is bad too% "));
 
   g2->add_edge(dpin, spin, 33);
 
@@ -506,11 +500,11 @@ TEST_F(Edge_test, trivial_delete3) {
 
   auto *sub1 = g2->ref_library()->ref_sub("n1");
   auto *sub2 = g2->ref_library()->ref_sub("n2");
-  sub1->add_output_pin(mmap_lib::str(" another % $ # long name "), Port_invalid);
+  sub1->add_output_pin(" another % $ # long name ", Port_invalid);
   sub2->add_input_pin("foo", Port_invalid);
 
-  nn1.setup_driver_pin(mmap_lib::str(" another % $ # long name "));
-  g2->add_edge(nn1.get_driver_pin(mmap_lib::str(" another % $ # long name ")), nn2.setup_sink_pin("foo"));
+  nn1.setup_driver_pin(" another % $ # long name ");
+  g2->add_edge(nn1.get_driver_pin(" another % $ # long name "), nn2.setup_sink_pin("foo"));
 
   for (auto &inp : nn2.inp_edges()) {
     inp.del_edge();

@@ -183,7 +183,7 @@ BENCHMARK(BM_SetInsert)
 #endif
 
 int main(int argc, char* argv[]) {
-  mmap_lib::str lgdb("lconst_bench");
+  std::string lgdb("lconst_bench");
 
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();

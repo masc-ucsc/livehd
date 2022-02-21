@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "absl/strings/str_cat.h"
+
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -11,7 +13,7 @@
 #include "iassert.hpp"
 #include "lconst.hpp"
 #include "likely.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 
 using Lg_id_t = uint32_t;
 
@@ -30,7 +32,7 @@ public:
   bool is_invalid() const { return lgid == 0; }
 };
 
-using Hierarchy_index = mmap_lib::str;
+using Hierarchy_index = std::string;
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }
@@ -58,33 +60,33 @@ class Lgraph_base_core {
 protected:
   class Setup_path {
   private:
-    static mmap_lib::str last_path;  // Just try to optimize to avoid too many frequent syscalls
+    static inline std::string last_path{""};  // Just try to optimize to avoid too many frequent syscalls
 
   public:
-    Setup_path(const mmap_lib::str &path);
+    Setup_path(std::string_view path);
   };
 
   Setup_path        _p;  // Must be first in base object
 
   const char *version="0.1.0"; // LGraph semantic version (increase when store format becomes incompatible)
 
-  mmap_lib::str       path;
-  mmap_lib::str       name;
-  const mmap_lib::str unique_name;
-  const mmap_lib::str long_name;
+  std::string       path;
+  std::string       name;
+  const std::string unique_name;
+  const std::string long_name;
   const Lg_type_id  lgid;
 
   Lgraph_base_core() = delete;
-  explicit Lgraph_base_core(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid);
+  explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
   virtual ~Lgraph_base_core(){};
 
 public:
   virtual void clear();
 
-  [[nodiscard]] mmap_lib::str get_unique_name() const { return unique_name; }
-  [[nodiscard]] mmap_lib::str get_name() const { return name; }
-  [[nodiscard]] mmap_lib::str get_path() const { return path; }
-  [[nodiscard]] mmap_lib::str get_save_filename() const { return mmap_lib::str::concat(path, "/", name); }
+  [[nodiscard]] std::string get_unique_name() const { return unique_name; }
+  [[nodiscard]] std::string get_name() const { return name; }
+  [[nodiscard]] std::string get_path() const { return path; }
+  [[nodiscard]] std::string get_save_filename() const { return absl::StrCat(path, "/", name); }
 
   const Lg_type_id get_lgid() const { return lgid; }
 };

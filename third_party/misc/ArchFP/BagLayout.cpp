@@ -92,7 +92,7 @@ void bagLayout::recalcSize() {
 void bagLayout::outputHotSpotLayout(std::ostream& o, double startX, double startY) {
   pushMirrorContext(startX, startY);
   int         itemCount = getComponentCount();
-  mmap_lib::str groupName;
+  std::string groupName;
   if (itemCount != 1) {
     groupName = getUniqueName();
     o << "# " << groupName << " stats: X=" << calcX(startX) << ", Y=" << calcY(startY) << ", W=" << width << ", H=" << height

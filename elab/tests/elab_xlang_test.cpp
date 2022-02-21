@@ -42,7 +42,7 @@ constexpr uint8_t Xlanguage_id_in        = 147;
 constexpr uint8_t Xlanguage_id_by        = 148;
 
 class Xlanguage_scanner : public Elab_scanner {
-  absl::flat_hash_map<mmap_lib::str, uint8_t> xlang_keyword;
+  absl::flat_hash_map<std::string, uint8_t> xlang_keyword;
 
 public:
   // pub vars for testing
@@ -104,7 +104,7 @@ public:
 int main(int argc, char **argv) {
   Xlanguage_scanner scanner;
   if (argc == 2) {
-    scanner.parse_file(mmap_lib::str(argv[1]));
+    scanner.parse_file(argv[1]);
   } else {
     const char *txt
         = "a = 3\n"

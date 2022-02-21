@@ -5,7 +5,7 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 #include "perf_tracing.hpp"
 #include "spmc.hpp"
 #include "thread_pool.hpp"
@@ -710,7 +710,7 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_TREE
-    mmap_lib::tree<Node::Compact_class> fwd_order;
+    lh::tree<Node::Compact_class> fwd_order;
     Node                                invalid;
     fwd_order.set_root(invalid.get_compact_class());
 
@@ -720,7 +720,7 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_MMAP
-    mmap_lib::map<Node::Compact_class, Node::Compact_class> fwd_order;
+    absl::flat_hash_map<Node::Compact_class, Node::Compact_class> fwd_order;
     Node                                                    invalid;
     Node::Compact_class                                     first_cnode = invalid.get_compact_class();
     Node::Compact_class                                     last_cnode  = invalid.get_compact_class();

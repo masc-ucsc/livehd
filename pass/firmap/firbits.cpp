@@ -9,6 +9,7 @@
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "struct_firbits.hpp"
+#include "str_tools.hpp"
 
 void Firmap::dump() const {
   for (const auto &maps_it : fbmaps) {
@@ -323,38 +324,38 @@ void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
   fbmap.insert_or_assign(node_dp.setup_driver_pin("Y").get_compact_class_driver(), fb_lhs);
 }
 
-Firmap::Attr Firmap::get_key_attr(const mmap_lib::str &key) {
+Firmap::Attr Firmap::get_key_attr(std::string_view key) {
   // FIXME: code duplicated in bitwidth. Create a separate class for Attr
   const auto sz = key.size();
 
   if (sz < 5)
     return Attr::Set_other;
 
-  if (key.ends_with("__max"))
+  if (str_tools::ends_with(key,"__max"))
     return Attr::Set_max;
 
-  if (key.ends_with("__min"))
+  if (str_tools::ends_with(key,"__min"))
     return Attr::Set_min;
 
   if (sz < 7)
     return Attr::Set_other;
 
-  if (key.ends_with("__ubits"))
+  if (str_tools::ends_with(key,"__ubits"))
     return Attr::Set_ubits;
 
-  if (key.ends_with("__sbits"))
+  if (str_tools::ends_with(key,"__sbits"))
     return Attr::Set_sbits;
 
   if (sz < 11)
     return Attr::Set_other;
 
-  if (key.ends_with("__dp_assign"))
+  if (str_tools::ends_with(key,"__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
 }
 
-void Firmap::analysis_fir_ops(Node &node, const mmap_lib::str &op, FBMap &fbmap) {
+void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
   // TODO: Create a map that indexed by op and returns a std::function (faster)
 
   auto inp_edges = node.inp_edges();

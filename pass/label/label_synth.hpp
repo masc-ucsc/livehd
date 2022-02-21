@@ -32,7 +32,7 @@ private:
 public:
   void label(Lgraph *g);
 
-  Label_synth(bool _verbose, bool _hier, const mmap_lib::str &alg);
+  Label_synth(bool _verbose, bool _hier, std::string_view alg);
 
   void dump() const;
 };

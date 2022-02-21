@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "prp.hpp"
+#include <cstdio>
 
-#include <stdio.h>
+#include "prp.hpp"
 
 #include "lbench.hpp"
 #include "perf_tracing.hpp"
@@ -18,8 +18,8 @@ int main(int argc, char **argv) {
 
   Prp scanner;
 
-  scanner.parse_file(mmap_lib::str(argv[1]));
-  scanner.ast_dump(mmap_lib::Tree_index::root());
+  scanner.parse_file(argv[1]);
+  scanner.ast_dump(lh::Tree_index::root());
 
   return 0;
 }

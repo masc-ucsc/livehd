@@ -14,8 +14,6 @@
 #include "fmt/format.h"
 #include "iassert.hpp"
 
-#include "mmap_str.hpp"
-
 using Token_id = uint8_t;
 
 using Token_entry = Explicit_type<uint32_t, struct Token_entry_struct, 0>;
@@ -83,7 +81,7 @@ constexpr Token_id Token_id_keyword_last  = 254;
 
 class Etoken {
 protected:
-  mmap_lib::str text;
+  std::string_view text;
 
 public:
   struct Tracker {
@@ -113,7 +111,7 @@ public:
   };
 
   constexpr Etoken() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
-  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, const mmap_lib::str &_text) {
+  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
     tok  = _tok;
     pos1 = _pos1;
     pos2 = _pos2;
@@ -126,19 +124,20 @@ public:
     pos2 = t.pos2;
     line = t.line;
     assert(pos2>pos1); // empty token otherwise
-    text = mmap_lib::str(memblock+pos1 , pos2-pos1);
+    text = std::string_view(memblock+pos1 , pos2-pos1);
   }
 
   void fuse_token(Token_id new_tok, const char extra_char) {
+    (void)extra_char;
     tok = new_tok;
 
     pos2         = pos2 + 1;
-    text         = text.append(extra_char);
+    text         = std::string_view(text.data(), text.size()+1);
   }
 
   void append_token(std::string_view t2) {
     pos2         = pos2 + t2.size();
-    text         = mmap_lib::str::concat(text, t2);
+    text         = std::string_view(text.data(), text.size() + t2.size());
   }
 
   Token_id tok;   // Token (identifier, if, while...)
@@ -146,7 +145,7 @@ public:
   uint64_t pos2;  // end position in original memblock for debugging
   uint32_t line;  // line of code
 
-  const mmap_lib::str &get_text() const { return text; }
+  std::string_view get_text() const { return text; }
 };
 
 class Elab_scanner {
@@ -156,7 +155,7 @@ public:
 protected:
   Token_list token_list;
 
-  mmap_lib::str    buffer_name;
+  std::string      buffer_name;
 
   const char      *memblock;
   size_t           memblock_size;
@@ -202,13 +201,13 @@ protected:
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
-  void parse_setup(const mmap_lib::str &filename);
+  void parse_setup(std::string_view filename);
   void parse_setup();
   void parse_step();
 
 protected:
   std::string_view get_memblock() const { assert(memblock); return std::string_view(memblock, memblock_size); }
-  mmap_lib::str get_filename() const {
+  std::string_view get_filename() const {
     I(memblock_fd != -1);
     return buffer_name;
   }
@@ -281,14 +280,14 @@ public:
     return token_list[scanner_pos].tok;
   }
 
-  const mmap_lib::str &scan_prev_text() const {
+  std::string_view scan_prev_text() const {
     size_t p = scanner_pos - 1;
     if (scanner_pos <= 0)
       p = 0;
     return token_list[p].get_text();
   }
 
-  const mmap_lib::str &scan_next_text() const {
+  std::string_view scan_next_text() const {
     size_t p = scanner_pos + 1;
     if (p >= token_list.size())
       p = token_list.size() - 1;
@@ -302,7 +301,7 @@ public:
     return token_list[p].tok == tok;
   }
 
-  const mmap_lib::str &scan_peep_text(int offset) const {
+  std::string_view scan_peep_text(int offset) const {
     I(offset != 0);
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
@@ -312,12 +311,12 @@ public:
     return token_list[p].get_text();
   }
 
-  inline const mmap_lib::str &scan_text(const Token_entry te) const {
+  inline std::string_view scan_text(const Token_entry te) const {
     I(token_list.size() > te);
     return token_list[te].get_text();
   }
 
-  const mmap_lib::str &scan_text() const { return token_list[scanner_pos].get_text(); }
+  std::string_view scan_text() const { return token_list[scanner_pos].get_text(); }
   uint32_t         scan_line() const;
 
   size_t get_token_pos() const { return token_list[scan_token_entry()].pos1; }
@@ -345,14 +344,14 @@ public:
     ;
   }
 
-  void patch_pass(const absl::flat_hash_map<mmap_lib::str, Token_id> &keywords);
+  void patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords);
 
   void patch_pass() {
-    absl::flat_hash_map<mmap_lib::str, Token_id> no_keywords;
+    absl::flat_hash_map<std::string, Token_id> no_keywords;
     patch_pass(no_keywords);
   }
 
-  void parse_file(const mmap_lib::str &filename) {
+  void parse_file(std::string_view filename) {
     parse_setup(filename);
     parse_step();
   }

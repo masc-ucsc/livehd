@@ -17,7 +17,6 @@ cc_library(
     deps = [
         "//task",
         "//lemu",
-        "//mmap_lib:headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@fmt",

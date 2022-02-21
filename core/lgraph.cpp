@@ -18,7 +18,7 @@
 #include "hif/hif_read.hpp"
 #include "hif/hif_write.hpp"
 
-Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib)
+Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_attributes(_path, _name, _lgid, _lib), htree(this) {
   I(!_name.contains('/'));  // No path in name
   I(_name == get_name());
@@ -29,7 +29,7 @@ Lgraph::Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_i
 void Lgraph::load() {
   clear();
 
-  auto hif = Hif_read::open(get_save_filename().to_s());
+  auto hif = Hif_read::open(get_save_filename());
   if (hif == nullptr) { // no HIF file
     //clear();
     return;
@@ -37,7 +37,7 @@ void Lgraph::load() {
 
   absl::flat_hash_map<std::string, Node_pin::Compact_class_driver> str2dpin;
 
-  std::vector<std::pair<Node_pin,mmap_lib::str>> pending;
+  std::vector<std::pair<Node_pin,std::string>> pending; // TODO_sv: could be std::string_view
 
   hif->each([this,&str2dpin,&pending](const Hif_base::Statement stmt) {
     auto op = static_cast<Ntype_op>(stmt.type);
@@ -48,14 +48,14 @@ void Lgraph::load() {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "const");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
-      Lconst lc = Lconst::unserialize(mmap_lib::str(stmt.attr[0].rhs));
+      Lconst lc = Lconst::unserialize(stmt.attr[0].rhs);
       node = create_node_const(lc);
 
     }else if (op == Ntype_op::LUT) {
       I(!stmt.attr.empty() && stmt.attr[0].lhs == "lut");
       I(stmt.attr[0].lhs_cat == Hif_base::ID_cat::String_cat);
 
-      Lconst lc = Lconst::unserialize(mmap_lib::str(stmt.attr[0].rhs));
+      Lconst lc = Lconst::unserialize(stmt.attr[0].rhs);
       node = create_node_lut(lc);
 
     }else if (op == Ntype_op::Sub) {
@@ -71,7 +71,7 @@ void Lgraph::load() {
         I(io.lhs_cat == Hif_base::ID_cat::String_cat);
         if (io.rhs_cat == Hif_base::ID_cat::Base2_cat) {
           auto graph_pos = *reinterpret_cast<const int64_t *>(io.rhs.data());
-          auto lhs       = mmap_lib::str(io.lhs);
+          auto lhs       = io.lhs;
 
           if (io.input) {
             if (lhs!="$") { // Do not add implicit names
@@ -85,7 +85,7 @@ void Lgraph::load() {
         }else{
           // Connect something to the output (topo sort)
           I(io.rhs_cat == Hif_base::ID_cat::String_cat);
-          auto spin = get_graph_output(mmap_lib::str(io.lhs));
+          auto spin = get_graph_output(io.lhs);
 
           bool temp_name = !io.rhs.empty() && io.rhs[0] == '_';
           Node_pin dpin;
@@ -94,7 +94,7 @@ void Lgraph::load() {
             I(it != str2dpin.end());
             dpin = Node_pin(this, it->second);
           }else{
-            dpin = Node_pin::find_driver_pin(this, mmap_lib::str(io.rhs));
+            dpin = Node_pin::find_driver_pin(this, io.rhs);
           }
 
           spin.connect_driver(dpin);
@@ -114,7 +114,7 @@ void Lgraph::load() {
         auto bits = *reinterpret_cast<const int64_t *>(rhs.data());
         I(bits>0);
 
-        auto dpin = Node_pin::find_driver_pin(this, mmap_lib::str(lhs_var));
+        auto dpin = Node_pin::find_driver_pin(this, lhs_var);
         I(!dpin.is_invalid());
 
         dpin.set_bits(bits);
@@ -137,17 +137,17 @@ void Lgraph::load() {
           if (it != str2dpin.end())
             dpin = Node_pin(this, it->second);
         }else{
-          dpin = Node_pin::find_driver_pin(this, mmap_lib::str(io.rhs));
+          dpin = Node_pin::find_driver_pin(this, io.rhs);
         }
 
         if (dpin.is_invalid()) {
-          pending.emplace_back(std::make_pair(node.setup_sink_pin(mmap_lib::str(io.lhs)), mmap_lib::str(io.rhs)));
+          pending.emplace_back(std::make_pair(node.setup_sink_pin(io.lhs), io.rhs));
         }else{
-          node.setup_sink_pin(mmap_lib::str(io.lhs)).connect_driver(dpin);
+          node.setup_sink_pin(io.lhs).connect_driver(dpin);
         }
 
       }else{ //----------- OUTPUT
-        auto dpin = node.setup_driver_pin(mmap_lib::str(io.lhs));
+        auto dpin = node.setup_driver_pin(io.lhs);
 
         auto lhs_bits = io.lhs + ".bits";
         for(const auto &attr:stmt.attr) {
@@ -162,9 +162,9 @@ void Lgraph::load() {
           I(str2dpin.find(io.rhs) == str2dpin.end());
           str2dpin[io.rhs] = dpin.get_compact_class_driver();
         }else{
-          dpin.set_name(mmap_lib::str(io.rhs));
-          if (has_graph_output(mmap_lib::str(io.rhs))) {
-            auto spin = get_graph_output(mmap_lib::str(io.rhs));
+          dpin.set_name(io.rhs);
+          if (has_graph_output(io.rhs)) {
+            auto spin = get_graph_output(io.rhs);
             dpin.connect_sink(spin);
           }
         }
@@ -177,7 +177,7 @@ void Lgraph::load() {
     Node_pin dpin;
 
     if (temp_name) {
-      auto it = str2dpin.find(p.second.to_s());
+      auto it = str2dpin.find(p.second);
       if (it != str2dpin.end())
         dpin = Node_pin(this, it->second);
     }else{
@@ -196,9 +196,9 @@ Lgraph::~Lgraph() {
   library->unregister(name, lgid, this);
 }
 
-bool Lgraph::exists(const mmap_lib::str &path, const mmap_lib::str &name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
+bool Lgraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
 
-Lgraph *Lgraph::create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source) {
+Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string_view source) {
   auto *lib = Graph_library::instance(path);
   I(lib);
   auto *lg = lib->setup_lgraph(name, source);
@@ -207,7 +207,7 @@ Lgraph *Lgraph::create(const mmap_lib::str &path, const mmap_lib::str &name, con
   return lg;
 }
 
-Lgraph *Lgraph::clone_skeleton(const mmap_lib::str &new_lg_name) {
+Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
   auto  lg_source = get_library().get_source(get_lgid());
   auto  *new_lg   = Lgraph::create(get_path(), new_lg_name, lg_source);
 
@@ -230,7 +230,7 @@ Lgraph *Lgraph::clone_skeleton(const mmap_lib::str &new_lg_name) {
   return new_lg;
 }
 
-Lgraph *Lgraph::open_or_create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source) {
+Lgraph *Lgraph::open_or_create(std::string_view path, std::string_view name, std::string_view source) {
   auto *lg = open(path, name);
   if (lg!=nullptr)
     return lg;
@@ -238,7 +238,7 @@ Lgraph *Lgraph::open_or_create(const mmap_lib::str &path, const mmap_lib::str &n
   return create(path, name, source);
 }
 
-Lgraph *Lgraph::open(const mmap_lib::str &path, Lg_type_id lgid) {
+Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
   auto *lib = Graph_library::instance(path);
   if (unlikely(lib == nullptr))
     return nullptr;
@@ -256,7 +256,7 @@ Lgraph *Lgraph::open(const mmap_lib::str &path, Lg_type_id lgid) {
   return lg;
 }
 
-Lgraph *Lgraph::open(const mmap_lib::str &path, const mmap_lib::str &name) {
+Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
   Lgraph *lg = Graph_library::try_find_lgraph(path, name);
   if (lg) {
     return lg;
@@ -274,7 +274,7 @@ Lgraph *Lgraph::open(const mmap_lib::str &path, const mmap_lib::str &name) {
   return lg;
 }
 
-void Lgraph::rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest) {
+void Lgraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
   bool valid = Graph_library::instance(path)->rename_name(orig, dest);
   if (valid)
     warn("lgraph::rename find original graph {} in path {}", orig, path);
@@ -297,28 +297,28 @@ void Lgraph::clear() {
   std::fill(memoize_const_hint.begin(), memoize_const_hint.end(), 0);  // Not needed but neat
 }
 
-Node_pin Lgraph::get_graph_input(const mmap_lib::str &str) {
+Node_pin Lgraph::get_graph_input(std::string_view str) {
   I(get_self_sub_node().is_input(str));  // The input does not exist, do not call get_input
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy::hierarchical_root(), Hardcoded_input_nid).setup_driver_pin_raw(io_pid);
 }
 
-Node_pin Lgraph::get_graph_output(const mmap_lib::str &str) {
+Node_pin Lgraph::get_graph_output(std::string_view str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid).setup_sink_pin_raw(io_pid);
 }
 
-Node_pin Lgraph::get_graph_output_driver_pin(const mmap_lib::str &str) {
+Node_pin Lgraph::get_graph_output_driver_pin(std::string_view str) {
   I(get_self_sub_node().is_output(str));  // The output does not exist, do not call get_output
   auto io_pid = get_self_sub_node().get_instance_pid(str);
 
   return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid).setup_driver_pin_raw(io_pid);
 }
 
-bool Lgraph::has_graph_input(const mmap_lib::str &io_name) const {
+bool Lgraph::has_graph_input(std::string_view io_name) const {
   if (!get_self_sub_node().is_input(io_name))
     return false;
 
@@ -328,7 +328,7 @@ bool Lgraph::has_graph_input(const mmap_lib::str &io_name) const {
   return (idx != 0);
 }
 
-bool Lgraph::has_graph_output(const mmap_lib::str &io_name) const {
+bool Lgraph::has_graph_output(std::string_view io_name) const {
   if (!get_self_sub_node().is_output(io_name))
     return false;
 
@@ -337,7 +337,7 @@ bool Lgraph::has_graph_output(const mmap_lib::str &io_name) const {
   return (idx != 0);
 }
 
-Node_pin Lgraph::add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bits) {
   I(str != "$");
   I(!has_graph_output(str));
 
@@ -362,7 +362,7 @@ Node_pin Lgraph::add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t 
   return pin;
 }
 
-Node_pin Lgraph::add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bits) {
   I(str != "%");
   I(!has_graph_input(str));
 
@@ -1460,7 +1460,7 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   return Node(this, Hierarchy::hierarchical_root(), nid);
 }
 
-Node Lgraph::create_node_sub(const mmap_lib::str &sub_name) {
+Node Lgraph::create_node_sub(std::string_view sub_name) {
 
   auto  nid = create_node().get_nid();
   auto &sub = library->ref_or_create_sub(sub_name);
@@ -1545,7 +1545,7 @@ Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this
 void Lgraph::save() {
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 
-  auto wr = Hif_write::create(get_save_filename().to_s(), "livehd", Lgraph::version);
+  auto wr = Hif_write::create(get_save_filename(), "livehd", Lgraph::version);
   if (wr==nullptr) {
     error("cannot save {} in {}", name, get_save_filename());
     return;
@@ -1559,7 +1559,7 @@ void Lgraph::save() {
     for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
       if (io_pin.is_invalid())
         continue;
-      ios.add(io_pin.is_input(), io_pin.name.to_s(), io_pin.get_io_pos());
+      ios.add(io_pin.is_input(), io_pin.name, io_pin.get_io_pos());
 
       Bits_t bits=0;
       if (io_pin.is_input()) {
@@ -1571,7 +1571,7 @@ void Lgraph::save() {
       }
 
       if (bits) {
-        ios.add_attr(io_pin.name.to_s()+".bits", bits);
+        ios.add_attr(absl::StrCat(io_pin.name, ".bits"), bits);
       }
     }
 
@@ -1601,17 +1601,17 @@ void Lgraph::save() {
       n.add_attr("subid", subid.value);
     }else if (op == Ntype_op::Const) {
       auto str = node.get_type_const().serialize();
-      n.add_attr("const", str.to_s());
+      n.add_attr("const", str);
     }else if (op == Ntype_op::LUT) {
       auto str = node.get_type_lut().serialize();
-      n.add_attr("lut", str.to_s());
+      n.add_attr("lut", str);
     }
 
     if (Ntype::is_multi_driver(op)) {
       for(const auto &dpin:node.out_connected_pins()) {
-        auto wname = dpin.get_wire_name().to_s();
+        auto wname = dpin.get_wire_name();
         assert(wname.size());
-        auto pname = dpin.get_pin_name().to_s();
+        auto pname = dpin.get_pin_name();
         n.add_output(pname, wname);
         auto bits = dpin.get_bits();
         if (bits) {
@@ -1620,7 +1620,7 @@ void Lgraph::save() {
       }
     }else{
       auto dpin  = node.get_driver_pin();
-      auto wname = dpin.get_wire_name().to_s();
+      auto wname = dpin.get_wire_name();
       I(wname.size());
       I(dpin.get_pin_name() == "Y");
       n.add_output("Y", wname);
@@ -1631,9 +1631,9 @@ void Lgraph::save() {
       }
     }
     for(const auto &e:node.inp_edges()) {
-      auto wname = e.driver.get_wire_name().to_s();
+      auto wname = e.driver.get_wire_name();
       assert(wname.size());
-      n.add_input(e.sink.get_pin_name().to_s(), wname);
+      n.add_input(e.sink.get_pin_name(), wname);
     }
     wr->add(n);
   }
@@ -1644,7 +1644,7 @@ void Lgraph::save() {
     auto out_dpin = e.sink.change_to_driver_from_graph_out_sink();
     if (!out_dpin.has_name()) {
       if (e.driver.get_wire_name() == "%") {
-        n.add(true, "%", e.driver.get_wire_name().to_s());
+        n.add(true, "%", e.driver.get_wire_name());
       }
       continue;
     }
@@ -1652,7 +1652,7 @@ void Lgraph::save() {
       continue;
     }
 
-    n.add(true, out_dpin.get_name().to_s(), e.driver.get_wire_name().to_s());
+    n.add(true, out_dpin.get_name(), e.driver.get_wire_name());
   }
   if (!n.io.empty())
     wr->add(n);

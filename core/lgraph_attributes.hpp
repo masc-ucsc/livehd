@@ -18,7 +18,7 @@
 class Lgraph_attributes : virtual public Lgraph_Base {
 public:
   Lgraph_attributes() = delete;
-  explicit Lgraph_attributes(const mmap_lib::str &path, const mmap_lib::str &name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
+  explicit Lgraph_attributes(std::string_view path, std::string_view name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
 
   using Node_down_map  = absl::flat_hash_map<Node::Compact_class, Lg_type_id>;
   [[nodiscard]] const Node_down_map  &get_down_nodes_map() const { return subid_map; };
@@ -32,8 +32,8 @@ public:
   [[nodiscard]] const Node_pin_offset_map &get_node_pin_offset_map() const { return  node_pin_offset_map; };
   [[nodiscard]]       Node_pin_offset_map *ref_node_pin_offset_map()       { return &node_pin_offset_map; };
 
-  using Node_pin_name_map  = absl::flat_hash_map<Node_pin::Compact_class_driver, mmap_lib::str>;
-  using Node_pin_name_rmap = absl::flat_hash_map<mmap_lib::str, Node_pin::Compact_class_driver>;
+  using Node_pin_name_map  = absl::flat_hash_map<Node_pin::Compact_class_driver, std::string>;
+  using Node_pin_name_rmap = absl::flat_hash_map<std::string, Node_pin::Compact_class_driver>;
   [[nodiscard]] const Node_pin_name_map &get_node_pin_name_map() const { return  node_pin_name_map; };
   [[nodiscard]]       Node_pin_name_map *ref_node_pin_name_map()       { return &node_pin_name_map; };
 
@@ -48,7 +48,7 @@ public:
   [[nodiscard]] const Node_pin_unsigned_map &get_node_pin_unsigned_map() const { return  node_pin_unsigned_map; };
   [[nodiscard]]       Node_pin_unsigned_map *ref_node_pin_unsigned_map()       { return &node_pin_unsigned_map; };
 
-  using Node_name_map = absl::flat_hash_map<Node::Compact_class, mmap_lib::str>;
+  using Node_name_map = absl::flat_hash_map<Node::Compact_class, std::string>;
   [[nodiscard]] const Node_name_map &get_node_name_map() const { return  node_name_map; };
   [[nodiscard]]       Node_name_map *ref_node_name_map()       { return &node_name_map; };
 
@@ -61,8 +61,8 @@ public:
   [[nodiscard]]       Node_place_map *ref_node_place_map()       { return &node_place_map; };
 
 protected:
-  using Node_value_map = absl::flat_hash_map<Node::Compact_class, mmap_lib::str>;
-  using Node_lut_map   = absl::flat_hash_map<Node::Compact_class, mmap_lib::str>;
+  using Node_value_map = absl::flat_hash_map<Node::Compact_class, std::string>;
+  using Node_lut_map   = absl::flat_hash_map<Node::Compact_class, std::string>;
 
   Node_value_map        const_map;  // TODO?: bimap to avoid unnecessary constant replication
   Node_down_map         subid_map;
@@ -95,15 +95,15 @@ protected:
   [[nodiscard]] Lg_type_id get_type_sub(Index_id nid) const;
 
   [[nodiscard]] const Sub_node &get_type_sub_node(Index_id nid) const;
-  [[nodiscard]] const Sub_node &get_type_sub_node(const mmap_lib::str &sub_name) const;
+  [[nodiscard]] const Sub_node &get_type_sub_node(std::string_view sub_name) const;
   [[nodiscard]] Sub_node *      ref_type_sub_node(Index_id nid);
-  [[nodiscard]] Sub_node *      ref_type_sub_node(const mmap_lib::str &sub_name);
+  [[nodiscard]] Sub_node *      ref_type_sub_node(std::string_view sub_name);
 
   void   set_type_lut(Index_id nid, const Lconst &lutid);
   [[nodiscard]] Lconst get_type_lut(Index_id nid) const;
 
   void set_type_const(Index_id nid, const Lconst &value);
-  void set_type_const(Index_id nid, const mmap_lib::str &value);
+  void set_type_const(Index_id nid, std::string_view value);
   void set_type_const(Index_id nid, int64_t value);
 
   // No const because Lconst created

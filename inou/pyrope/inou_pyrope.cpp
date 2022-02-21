@@ -11,8 +11,8 @@
 void setup_inou_pyrope() { Inou_pyrope::setup(); }
 
 void Inou_pyrope::setup() {
-  Eprp_method m1("inou.pyrope", mmap_lib::str("Parse the input file and convert to an LNAST"), &Inou_pyrope::parse_to_lnast);
-  m1.add_label_required("files", mmap_lib::str("pyrope files to process (comma separated)"));
+  Eprp_method m1("inou.pyrope", "Parse the input file and convert to an LNAST", &Inou_pyrope::parse_to_lnast);
+  m1.add_label_required("files", "pyrope files to process (comma separated)");
 
   register_pass(m1);
 }

@@ -14,29 +14,28 @@
 #include "core/edge.hpp"
 #include "inou_json.hpp"
 #include "json_composer.hpp"
-#include "mmap_gc.hpp"
 
 using namespace std;
 using namespace jsn;
 
 namespace yjson {
 
-using StrTyp = mmap_lib::str;
+using StrTyp = std::string;
 
 class Wire : public jsn::Object {
   vector<int> bits;
 
 public:
-  Wire(int width, long& starting_wire_id) {
-    for (int i = 0; i < width; i++) {
+  Wire(int width, int &starting_wire_id) {
+    for (auto i = 0; i < width; i++) {
       bits.push_back(starting_wire_id++);
     }
   }
 
-  const vector<int>* get_bits() const { return &bits; }
+  [[nodiscard]] const vector<int>* get_bits() const { return &bits; }
   void               set_const_value(int const_val);
-  size_t             get_width() const { return bits.size(); }
-  void               ToJson(const JsonComposer* jcm) const;
+  [[nodiscard]] size_t             get_width() const { return bits.size(); }
+  void               ToJson(const JsonComposer* jcm) const override;
 };
 
 enum enPortDir { pdInput, pdOutput };
@@ -51,18 +50,18 @@ public:
     name      = port_name;
     direction = dir;
   }
-  Port(const StrTyp* port_name, enPortDir dir, Wire* port_wire) {
-    name      = port_name->to_s();
+  Port(std::string_view port_name, enPortDir dir, Wire* port_wire) {
+    name      = port_name;
     direction = dir;
     wire      = port_wire;
   }
 
-  const char*        JsonKey() const { return name.c_str(); }
-  const std::string& get_name() const { return name; }
-  const Wire*        get_wire() const { return wire; }
-  enPortDir          get_dir() const { return direction; }
-  const char*        dir_str() const { return ((int)direction == 0) ? "input" : "output"; }
-  void               ToJson(const JsonComposer* jcm) const {
+  [[nodiscard]] const char*        JsonKey() const override { return name.c_str(); }
+  [[nodiscard]] const std::string& get_name() const { return name; }
+  [[nodiscard]] const Wire*        get_wire() const { return wire; }
+  [[nodiscard]] enPortDir          get_dir() const { return direction; }
+  [[nodiscard]] const char*        dir_str() const { return direction == enPortDir::pdInput ? "input" : "output"; }
+  void               ToJson(const JsonComposer* jcm) const override {
     JsonElement model[] = {{"direction", dir_str()}, {"bits", wire ? wire->get_bits() : 0}, {}};
     jcm->Write(model);
   }

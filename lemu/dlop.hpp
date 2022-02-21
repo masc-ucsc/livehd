@@ -4,10 +4,9 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <vector>
-
-#include "mmap_str.hpp"
 
 #include "raw_ptr_pool.hpp"
 #include "spool_ptr.hpp"
@@ -153,9 +152,9 @@ public:
 
   static spool_ptr<Dlop> create_bool(bool val);
   static spool_ptr<Dlop> create_integer(int64_t val);
-  static spool_ptr<Dlop> create_string(const mmap_lib::str orig_txt);
-  static spool_ptr<Dlop> from_binary(const mmap_lib::str txt, bool unsigned_result);
-  static spool_ptr<Dlop> from_pyrope(const mmap_lib::str orig_txt);
+  static spool_ptr<Dlop> create_string(std::string_view orig_txt);
+  static spool_ptr<Dlop> from_binary(std::string_view txt, bool unsigned_result);
+  static spool_ptr<Dlop> from_pyrope(std::string_view orig_txt);
 
   spool_ptr<Dlop> add_op(spool_ptr<Dlop> other);
   spool_ptr<Dlop> add_op(int64_t other);

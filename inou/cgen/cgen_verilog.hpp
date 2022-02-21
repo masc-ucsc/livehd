@@ -12,33 +12,33 @@
 class Cgen_verilog {
 private:
   const bool          verbose;
-  const mmap_lib::str odir;
+  std::string_view odir;
 
-  using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, mmap_lib::str>;
+  using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, std::string>;
 
   struct Expr {
-    Expr(mmap_lib::str v, bool n) : var(v), needs_parenthesis(n) { }
-    mmap_lib::str var;
+    Expr(std::string_view v, bool n) : var(v), needs_parenthesis(n) { }
+    std::string var;
     bool needs_parenthesis;
   };
 
   absl::flat_hash_map<Node_pin::Compact_class, Expr>           pin2expr;
-  absl::flat_hash_map<Node_pin::Compact_class, mmap_lib::str>  pin2var;
-  absl::flat_hash_map<Node    ::Compact_class, mmap_lib::str>  mux2vector;
+  absl::flat_hash_map<Node_pin::Compact_class, std::string>  pin2var;
+  absl::flat_hash_map<Node    ::Compact_class, std::string>  mux2vector;
 
   bool first_array_block;
 
   std::atomic<int> nrunning;
   inline static std::mutex lgs_mutex; // just needed for the once at a time setup of static reserved_keyword
-  inline static absl::flat_hash_set<mmap_lib::str> reserved_keyword;
+  inline static absl::flat_hash_set<std::string> reserved_keyword;
 
-  mmap_lib::str get_wire_or_const(const Node_pin &dpin) const;
-  static mmap_lib::str get_scaped_name(const mmap_lib::str name);
+  std::string get_wire_or_const(const Node_pin &dpin) const;
+  static std::string get_scaped_name(std::string_view name);
 
-  mmap_lib::str get_append_to_name(const mmap_lib::str name, const mmap_lib::str ext) const;
-  mmap_lib::str get_expression(const Node_pin &dpin) const;
-  mmap_lib::str get_expression(const Node_pin &&dpin) const { return get_expression(dpin); }
-  mmap_lib::str add_expression(const mmap_lib::str txt_seq, const mmap_lib::str txt_op, Node_pin &dpin) const;
+  std::string get_append_to_name(std::string_view name, std::string_view ext) const;
+  std::string get_expression(const Node_pin &dpin) const;
+  std::string get_expression(const Node_pin &&dpin) const { return get_expression(dpin); }
+  std::string add_expression(std::string_view txt_seq, std::string_view txt_op, Node_pin &dpin) const;
 
   void process_flop(std::shared_ptr<File_output> fout, Node &node);
   void process_memory(std::shared_ptr<File_output> fout, Node &node);
@@ -52,10 +52,10 @@ private:
   void create_outputs(std::shared_ptr<File_output> fout, Lgraph *lg);
   void create_registers(std::shared_ptr<File_output> fout, Lgraph *lg);
 
-  void add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &dpin, const mmap_lib::str name, bool out_unsigned);
+  void add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &dpin, std::string_view name, bool out_unsigned);
   void create_locals(std::shared_ptr<File_output> fout, Lgraph *lg);
 public:
   void do_from_lgraph(Lgraph *lg_parent);
 
-  Cgen_verilog(bool _verbose, const mmap_lib::str _odir);
+  Cgen_verilog(bool _verbose, std::string_view _odir);
 };

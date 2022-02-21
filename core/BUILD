@@ -16,7 +16,6 @@ cc_library(
     deps = [
         "//eprp",
         "//lemu",
-        "//mmap_lib:headers",
         "//task",
         "@boost//:multiprecision",
         "@com_google_absl//absl/container:btree",

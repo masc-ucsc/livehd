@@ -130,7 +130,7 @@ public:
     bool last_input  = false;
     bool last_output = false;
 
-    mmap_lib::str module_name;
+    std::string_view module_name;
     while (!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
         auto token = scan_text().to_lower();
@@ -150,7 +150,7 @@ public:
             throw scan_error(*this, fmt::format("found endmodule without corresponding module"));
           }
           fmt::print("{}={}\n", token, module_name);
-          module_name = mmap_lib::str();
+          module_name = "";
         }
       } else if (scan_is_token(Token_id_comma) || scan_is_token(Token_id_semicolon) || scan_is_token(Token_id_cp)) {
         if (last_input || last_output) {
@@ -178,9 +178,7 @@ int main(int argc, char **argv) {
     exit(-3);
   }
 
-  mmap_lib::str::setup();
-
   Verilog_scanner scanner;
 
-  scanner.parse_file(mmap_lib::str(argv[1]));
+  scanner.parse_file(argv[1]);
 }

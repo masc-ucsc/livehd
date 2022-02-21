@@ -98,7 +98,7 @@ void Meta_api::match(Eprp_var &var) {
   std::vector<Lgraph *> lgs;
 
   try {
-    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, const mmap_lib::str &name) {
+    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
       Lgraph *lg = Lgraph::open(path, name);

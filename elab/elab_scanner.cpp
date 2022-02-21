@@ -145,7 +145,7 @@ void Elab_scanner::add_token(const Etoken::Tracker &t) {
   token_list.emplace_back(t, memblock);
 }
 
-void Elab_scanner::patch_pass(const absl::flat_hash_map<mmap_lib::str, Token_id> &keywords) {
+void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &keywords) {
   for (size_t i = 0; i < token_list.size(); ++i) {
     auto &t = token_list[i];
     if (t.tok != Token_id_alnum)
@@ -177,7 +177,7 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<mmap_lib::str, Token_id>
   }
 }
 
-void Elab_scanner::parse_setup(const mmap_lib::str &filename) {
+void Elab_scanner::parse_setup(std::string_view filename) {
   if (memblock_fd == -1) {
     unregister_memblock();
   }
@@ -220,7 +220,7 @@ void Elab_scanner::parse_setup() {
   }
 
   memblock_fd = -1;
-  buffer_name = "inline"_str;
+  buffer_name = "inline";
 
   token_list.clear();
 }

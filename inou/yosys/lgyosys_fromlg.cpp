@@ -50,17 +50,17 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     size_t      argidx;
     bool        single_graph_mode = false;
     bool        hierarchy         = false;
-    mmap_lib::str name;
-    mmap_lib::str path("lgdb");
+    std::string name;
+    std::string path("lgdb");
 
     for (argidx = 1; argidx < args.size(); argidx++) {
       if (args[argidx] == "-name") {
         single_graph_mode = true;
-        name              = mmap_lib::str(args[++argidx]);
+        name              = std::to_string(args[++argidx]);
         continue;
       }
       if (args[argidx] == "-path") {
-        path = mmap_lib::str(args[++argidx]);
+        path = args[++argidx];
         continue;
       }
       if (args[argidx] == "-hierarchy") {

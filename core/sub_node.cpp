@@ -2,7 +2,7 @@
 
 #include "sub_node.hpp"
 
-void Sub_node::copy_from(const mmap_lib::str &new_name, Lg_type_id new_lgid, const Sub_node &sub) {
+void Sub_node::copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub) {
   name                   = new_name;
   lgid                   = new_lgid;
   io_pins                = sub.io_pins;
@@ -59,9 +59,8 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   I(entry.HasMember("name"));
   I(entry["name"].IsString());
   // fmt::print("DEBUG18 old lgid:{}, new lgid:{}\n", lgid, entry["lgid"].GetUint64());
-  lgid            = entry["lgid"].GetUint64();
-  std::string str = entry["name"].GetString();
-  name            = mmap_lib::str(str);
+  lgid = entry["lgid"].GetUint64();
+  name = entry["name"].GetString();
 
   io_pins.resize(1);  // No id ZERO
 
@@ -92,7 +91,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     }
     size_t instance_pid = io_pin["instance_pid"].GetUint();
 
-    auto io_name     = mmap_lib::str(io_pin["name"].GetString());
+    auto io_name     = io_pin["name"].GetString();
     name2id[io_name] = instance_pid;
     if (io_pins.size() <= instance_pid)
       io_pins.resize(instance_pid + 1);

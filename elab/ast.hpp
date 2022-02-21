@@ -2,7 +2,7 @@
 #pragma once
 
 #include "elab_scanner.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 
 using Rule_id = int;  // FIXME explicit_type
 
@@ -14,16 +14,16 @@ public:
   constexpr Ast_parser_node(const Rule_id rid, const Token_entry te) : rule_id(rid), token_entry(te) { I(rid); }
 };
 
-class Ast_parser : public mmap_lib::tree<Ast_parser_node> {
+class Ast_parser : public lh::tree<Ast_parser_node> {
 private:
 protected:
-  mmap_lib::Tree_level   level;
-  mmap_lib::Tree_level   down_added;
+  lh::Tree_level   level;
+  lh::Tree_level   down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 
-  std::vector<mmap_lib::Tree_index> last_added;
+  std::vector<lh::Tree_index> last_added;
 
-  void add_track_parent(const mmap_lib::Tree_index &index);
+  void add_track_parent(const lh::Tree_index &index);
 
 public:
   Ast_parser(std::string_view buffer, Rule_id top_rule);

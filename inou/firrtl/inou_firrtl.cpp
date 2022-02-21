@@ -12,13 +12,13 @@
 static Pass_plugin sample("Inou_firrtl", Inou_firrtl::setup);
 
 void Inou_firrtl::setup() {
-  Eprp_method m1(mmap_lib::str("inou.firrtl.tolnast"), mmap_lib::str("Translate FIRRTL to LNAST (in progress)"), &Inou_firrtl::to_lnast);
-  m1.add_label_required("files", mmap_lib::str("FIRRTL-protobuf data file[s]"));
-  m1.add_label_optional("path", mmap_lib::str("location to store lgraph subgraph nodes"), "lgdb");
+  Eprp_method m1("inou.firrtl.tolnast", "Translate FIRRTL to LNAST (in progress)", &Inou_firrtl::to_lnast);
+  m1.add_label_required("files", "FIRRTL-protobuf data file[s]");
+  m1.add_label_optional("path", "location to store lgraph subgraph nodes", "lgdb");
   register_inou("firrtl", m1);
 
-  Eprp_method m2(mmap_lib::str("inou.firrtl.tofirrtl"), mmap_lib::str("LNAST to FIRRTL"), &Inou_firrtl::toFIRRTL);
-  m2.add_label_optional("odir", mmap_lib::str("output directory for generated firrtl files"), ".");
+  Eprp_method m2("inou.firrtl.tofirrtl", "LNAST to FIRRTL", &Inou_firrtl::toFIRRTL);
+  m2.add_label_optional("odir", "output directory for generated firrtl files", ".");
   register_inou("firrtl", m2);
 }
 

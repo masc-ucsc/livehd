@@ -104,7 +104,7 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
   (void)pos;
   assert(pin.has_name());  // IO must have name
   // RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
-  RTLIL::IdString name = mmap_lib::str::concat("\\", pin.get_name()).to_s();
+  RTLIL::IdString name = absl::StrCat("\\", pin.get_name()).to_s();
 
   RTLIL::Wire *new_wire = mod->addWire(name, pin.get_bits());
   // WARNING: In yosys, the IOs can be signed or unsigned
@@ -124,7 +124,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
   created_sub.insert(sub.get_name());
 
   auto *mod                     = new RTLIL::Module;
-  mod->name                     = mmap_lib::str::concat("\\", sub.get_name()).to_s();
+  mod->name                     = absl::StrCat("\\", sub.get_name()).to_s();
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
 
   bdesign->add(mod);
@@ -134,7 +134,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
     if (io_pin.is_invalid())
       continue;
     // fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
-    auto  name = mmap_lib::str::concat("\\", io_pin.name).to_s();
+    auto  name = absl::StrCat("\\", io_pin.name).to_s();
     RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
     wire->port_id     = port_id++;
     if (io_pin.is_input()) {
@@ -154,7 +154,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   assert(node.get_type_op() == Ntype_op::Memory);
 
-  RTLIL::Cell *memory = mod->addCell(mmap_lib::str::concat("\\", node.create_name()).to_s(), RTLIL::IdString("$mem"));
+  RTLIL::Cell *memory = mod->addCell(absl::StrCat("\\", node.create_name()).to_s(), RTLIL::IdString("$mem"));
 
   RTLIL::SigSpec wr_addr;
   RTLIL::SigSpec wr_data;
@@ -307,20 +307,20 @@ void Lgyosys_dump::create_subgraph(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   create_blackbox(sub, mod->design);
 
-  RTLIL::Cell *new_cell = mod->addCell(mmap_lib::str::concat("\\", node.create_name()).to_s(), mmap_lib::str::concat("\\", sub.get_name()).to_s());
+  RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.create_name()).to_s(), absl::StrCat("\\", sub.get_name()).to_s());
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for (const auto &e : node.inp_edges_ordered()) {
     auto port_name = e.sink.get_type_sub_pin_name();
     fmt::print("input:{} pin:{}\n", port_name, e.driver.debug_name());
     RTLIL::Wire *input = get_wire(e.driver);
-    new_cell->setPort(mmap_lib::str::concat("\\", port_name).to_s(), input);
+    new_cell->setPort(absl::StrCat("\\", port_name).to_s(), input);
   }
   for (const auto &dpin : node.out_connected_pins()) {
     auto port_name = dpin.get_type_sub_pin_name();
     fmt::print("output:{} pin:{}\n", port_name, dpin.debug_name());
     RTLIL::Wire *output = get_wire(dpin);
-    new_cell->setPort(mmap_lib::str::concat("\\", port_name).to_s(), output);
+    new_cell->setPort(absl::StrCat("\\", port_name).to_s(), output);
   }
 }
 
@@ -428,7 +428,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
   }
 #endif
 
-  RTLIL::Module *mod = design->addModule(mmap_lib::str::concat("\\", name).to_s());
+  RTLIL::Module *mod = design->addModule(absl::StrCat("\\", name).to_s());
 
   created_sub.clear();
   input_map.clear();

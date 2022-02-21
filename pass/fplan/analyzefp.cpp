@@ -9,29 +9,28 @@
 #include "analyzefp.hpp"
 
 void Pass_fplan_analyzefp::setup() {
-  auto a = Eprp_method(mmap_lib::str("pass.fplan.analyzefp"),
-                       mmap_lib::str("return information about a given floorplan within a livehd hierarchy"),
+  auto a = Eprp_method("pass.fplan.analyzefp",
+                       "return information about a given floorplan within a livehd hierarchy",
                        &Pass_fplan_analyzefp::pass);
 
-  a.add_label_required("top", mmap_lib::str("top level module in floorplan"));
-  a.add_label_required("nodes", mmap_lib::str("modules to analyze, or \"dump\" to dump node names"));
+  a.add_label_required("top", "top level module in floorplan");
+  a.add_label_required("nodes", "modules to analyze, or \"dump\" to dump node names");
 
-  a.add_label_optional("hint", mmap_lib::str("set a geographical hint for the specified node"), "");
+  a.add_label_optional("hint", "set a geographical hint for the specified node", "");
   a.add_label_optional(
       "report",
-      mmap_lib::str("return information about the most recent floorplan, valid options are \"regularity\", \"hpwl\", and \"all\"."),
+      "return information about the most recent floorplan, valid options are \"regularity\", \"hpwl\", and \"all\".",
       "");
 
   a.add_label_optional("path",
-                       mmap_lib::str("lgdb directory to analyze"),
+                       "lgdb directory to analyze",
                        "lgdb");  // can't pass lgraphs because lgraph names are the same per instance
 
   register_pass(a);
 }
 
 std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
-  // FIXME: better to not use std::string use mmap_lib::str directly
-  return n.has_name() ? n.get_name().to_s() : n.default_instance_name().to_s();
+  return n.has_name() ? n.get_name() : n.default_instance_name();
 }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
@@ -70,12 +69,12 @@ void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index&
 }
 
 Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fplan", var) {
-  Lgraph* root = Lgraph::open(mmap_lib::str(path), mmap_lib::str(var.get("top")));
+  Lgraph* root = Lgraph::open(path, var.get("top"));
   if (root == nullptr) {
     error("cannot find top level lgraph!");
   }
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   auto   nodestr = var.get("nodes");
   size_t starti  = 0;

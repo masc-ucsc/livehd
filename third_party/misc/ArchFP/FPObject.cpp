@@ -13,7 +13,7 @@ FPObject::FPObject()
     , height(0.0)
     , area(0.0)
     , type(Ntype_op::Invalid)
-    , name(Ntype::get_name(Ntype_op::Invalid).to_s())
+    , name(Ntype::get_name(Ntype_op::Invalid))
     , hint(UnknownHint)
     , count(1) {}
 
@@ -33,11 +33,11 @@ void FPObject::outputHotSpotLayout(std::ostream& o, double startX, double startY
     << calcY(startY) / 1000 << "\n";
 }
 
-mmap_lib::str FPObject::getUniqueName() const {
+std::string FPObject::getUniqueName() const {
   if (name == " " || name == "")
     return name;
 
-  return mmap_lib::str::concat(name, std::to_string(Name2Count(name.to_s())));
+  return absl::StrCat(name, std::to_string(Name2Count(name)));
 }
 
 double FPObject::calcX(double startX) const {

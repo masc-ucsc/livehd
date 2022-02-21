@@ -2,13 +2,12 @@
 #include "lnast_create.hpp"
 
 #include "iassert.hpp"
-#include "mmap_str.hpp"
 
 Lnast_create::Lnast_create() {}
 
-mmap_lib::str Lnast_create::create_lnast_tmp() { return mmap_lib::str::concat("___", ++tmp_var_cnt); }
+std::string Lnast_create::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
 
-mmap_lib::str Lnast_create::get_lnast_name(mmap_lib::str vname) {
+std::string Lnast_create::get_lnast_name(std::string_view vname) {
   const auto &it = vname2lname.find(vname);
   if (it == vname2lname.end()) {  // OOPS, use before assignment (can not be IOs mapped before)
     auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
@@ -24,7 +23,7 @@ mmap_lib::str Lnast_create::get_lnast_name(mmap_lib::str vname) {
   return it->second;
 }
 
-mmap_lib::str Lnast_create::get_lnast_lhs_name(mmap_lib::str vname) {
+std::string Lnast_create::get_lnast_lhs_name(std::string_view vname) {
   const auto &it = vname2lname.find(vname);
   if (it == vname2lname.end()) {
     // vname2lname.emplace(vname,vname);
@@ -34,12 +33,12 @@ mmap_lib::str Lnast_create::get_lnast_lhs_name(mmap_lib::str vname) {
   return it->second;
 }
 
-void Lnast_create::new_lnast(mmap_lib::str name) {
+void Lnast_create::new_lnast(std::string_view name) {
   lnast = std::make_unique<Lnast>(name);
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
   auto node_stmts = Lnast_node::create_stmts();
-  idx_stmts       = lnast->add_child(mmap_lib::Tree_index::root(), node_stmts);
+  idx_stmts       = lnast->add_child(lh::Tree_index::root(), node_stmts);
 
   vname2lname.clear();
 
@@ -60,7 +59,7 @@ void Lnast_create::new_lnast(mmap_lib::str name) {
 // }
 
 // Return a __tmp for (1<<expr)-1
-mmap_lib::str Lnast_create::create_mask_stmts(mmap_lib::str dest_max_bit) {
+std::string Lnast_create::create_mask_stmts(std::string_view dest_max_bit) {
   if (dest_max_bit.empty())
     return dest_max_bit;
 
@@ -79,7 +78,7 @@ mmap_lib::str Lnast_create::create_mask_stmts(mmap_lib::str dest_max_bit) {
   return mask_h_var;
 }
 
-mmap_lib::str Lnast_create::create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib::str min_bit) {
+std::string Lnast_create::create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit) {
   if (max_bit.is_i() && min_bit.is_i()) {
     auto a = max_bit.to_i();
     auto b = min_bit.to_i();
@@ -106,7 +105,7 @@ mmap_lib::str Lnast_create::create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib
   return create_shl_stmts(upper_mask, min_bit);
 }
 
-mmap_lib::str Lnast_create::create_bit_not_stmts(mmap_lib::str var_name) {
+std::string Lnast_create::create_bit_not_stmts(std::string_view var_name) {
   if (var_name.empty())
     return var_name;
 
@@ -121,7 +120,7 @@ mmap_lib::str Lnast_create::create_bit_not_stmts(mmap_lib::str var_name) {
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_logical_not_stmts(mmap_lib::str var_name) {
+std::string Lnast_create::create_logical_not_stmts(std::string_view var_name) {
   if (var_name.empty())
     return var_name;
 
@@ -136,7 +135,7 @@ mmap_lib::str Lnast_create::create_logical_not_stmts(mmap_lib::str var_name) {
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_reduce_or_stmts(mmap_lib::str var_name) {
+std::string Lnast_create::create_reduce_or_stmts(std::string_view var_name) {
   if (var_name.empty())
     return var_name;
   auto res_var = create_lnast_tmp();
@@ -150,7 +149,7 @@ mmap_lib::str Lnast_create::create_reduce_or_stmts(mmap_lib::str var_name) {
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_sra_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_sra_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
@@ -170,13 +169,13 @@ mmap_lib::str Lnast_create::create_sra_stmts(mmap_lib::str a_var, mmap_lib::str 
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_pick_bit_stmts(mmap_lib::str a_var, mmap_lib::str pos) {
+std::string Lnast_create::create_pick_bit_stmts(std::string_view a_var, std::string_view pos) {
   auto v = create_sra_stmts(a_var, pos);
 
   return create_bit_and_stmts(v, 1);
 }
 
-mmap_lib::str Lnast_create::create_sext_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_sext_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());
   I(!b_var.empty());
 
@@ -195,7 +194,7 @@ mmap_lib::str Lnast_create::create_sext_stmts(mmap_lib::str a_var, mmap_lib::str
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_bit_and_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_bit_and_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return b_var;
   if (b_var.empty())
@@ -216,8 +215,8 @@ mmap_lib::str Lnast_create::create_bit_and_stmts(mmap_lib::str a_var, mmap_lib::
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_bit_or_stmts(const std::vector<mmap_lib::str> &var) {
-  mmap_lib::str res_var;
+std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string> &var) {
+  std::string res_var;
   Lnast_nid     lid;
 
   for (auto v : var) {
@@ -239,7 +238,7 @@ mmap_lib::str Lnast_create::create_bit_or_stmts(const std::vector<mmap_lib::str>
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_bit_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_bit_xor_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return b_var;
   if (b_var.empty())
@@ -260,7 +259,7 @@ mmap_lib::str Lnast_create::create_bit_xor_stmts(mmap_lib::str a_var, mmap_lib::
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_shl_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_shl_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return a_var;
   if (b_var.empty())
@@ -281,7 +280,7 @@ mmap_lib::str Lnast_create::create_shl_stmts(mmap_lib::str a_var, mmap_lib::str 
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_mask_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_mask_xor_stmts(std::string_view a_var, std::string_view b_var) {
   I(!a_var.empty());  // mask
   I(!b_var.empty());  // data
 
@@ -300,7 +299,7 @@ mmap_lib::str Lnast_create::create_mask_xor_stmts(mmap_lib::str a_var, mmap_lib:
   return res_var;
 }
 
-void Lnast_create::create_dp_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs_var) {
+void Lnast_create::create_dp_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
   I(lhs_var.size());
   I(rhs_var.size());
 
@@ -312,7 +311,7 @@ void Lnast_create::create_dp_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str r
     lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
 }
 
-void Lnast_create::create_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs_var) {
+void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_view rhs_var) {
   I(lhs_var.size());
   I(rhs_var.size());
 
@@ -324,7 +323,7 @@ void Lnast_create::create_assign_stmts(mmap_lib::str lhs_var, mmap_lib::str rhs_
     lnast->add_child(idx_assign, Lnast_node::create_const(rhs_var));
 }
 
-void Lnast_create::create_declare_bits_stmts(mmap_lib::str a_var, bool is_signed, int bits) {
+void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
   lnast->add_child(idx_dot, Lnast_node::create_ref(a_var));
   if (is_signed) {
@@ -335,7 +334,7 @@ void Lnast_create::create_declare_bits_stmts(mmap_lib::str a_var, bool is_signed
   lnast->add_child(idx_dot, Lnast_node::create_const(bits));
 }
 
-mmap_lib::str Lnast_create::create_minus_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty())
     return a_var;
 
@@ -358,7 +357,7 @@ mmap_lib::str Lnast_create::create_minus_stmts(mmap_lib::str a_var, mmap_lib::st
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_plus_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_plus_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty())
     return b_var;
   if (b_var.empty())
@@ -379,7 +378,7 @@ mmap_lib::str Lnast_create::create_plus_stmts(mmap_lib::str a_var, mmap_lib::str
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_mult_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_mult_stmts(std::string_view a_var, std::string_view b_var) {
   if (a_var.empty() || a_var == "1")
     return b_var;
   if (b_var.empty() || b_var == "1")
@@ -400,7 +399,7 @@ mmap_lib::str Lnast_create::create_mult_stmts(mmap_lib::str a_var, mmap_lib::str
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_div_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_div_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty() || b_var == "1")
     return a_var;
 
@@ -425,7 +424,7 @@ mmap_lib::str Lnast_create::create_div_stmts(mmap_lib::str a_var, mmap_lib::str 
   return res_var;
 }
 
-mmap_lib::str Lnast_create::create_mod_stmts(mmap_lib::str a_var, mmap_lib::str b_var) {
+std::string Lnast_create::create_mod_stmts(std::string_view a_var, std::string_view b_var) {
   I(a_var.size() && b_var.size());
 
   auto res_var = create_lnast_tmp();
@@ -444,7 +443,7 @@ mmap_lib::str Lnast_create::create_mod_stmts(mmap_lib::str a_var, mmap_lib::str 
 }
 
 #if 0
-mmap_lib::str Lnast_create::create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field) {
+std::string Lnast_create::create_select_stmts(std::string_view sel_var, std::string_view sel_field) {
   I(sel_var.size() && sel_field.size());
 
   auto res_var = create_lnast_tmp();
@@ -460,7 +459,7 @@ mmap_lib::str Lnast_create::create_select_stmts(mmap_lib::str sel_var, mmap_lib:
 }
 #endif
 
-mmap_lib::str Lnast_create::create_get_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask) {
+std::string Lnast_create::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
   I(sel_var.size() && bitmask.size());
 
   auto res_var = create_lnast_tmp();
@@ -475,7 +474,7 @@ mmap_lib::str Lnast_create::create_get_mask_stmts(mmap_lib::str sel_var, mmap_li
   return res_var;
 }
 
-void Lnast_create::create_set_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask, mmap_lib::str value) {
+void Lnast_create::create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value) {
   I(sel_var.size() && bitmask.size() && value.size());
 
   auto idx = lnast->add_child(idx_stmts, Lnast_node::create_set_mask());

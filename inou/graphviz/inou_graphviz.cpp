@@ -20,13 +20,13 @@ Inou_graphviz::Inou_graphviz(const Eprp_var &var) : Pass("inou.graphviz", var) {
 }
 
 void Inou_graphviz::setup() {
-  Eprp_method m1(mmap_lib::str("inou.graphviz.from"), mmap_lib::str("export lgraph/lnast to graphviz dot format"), &Inou_graphviz::from);
+  Eprp_method m1("inou.graphviz.from", "export lgraph/lnast to graphviz dot format", &Inou_graphviz::from);
 
-  m1.add_label_optional("bits", mmap_lib::str("dump bits (true/false)"), "false");
-  m1.add_label_optional("verbose", mmap_lib::str("dump bits and wirename (true/false)"), "false");
+  m1.add_label_optional("bits", "dump bits (true/false)", "false");
+  m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
   register_inou("graphviz", m1);
 
-  Eprp_method m2(mmap_lib::str("inou.graphviz.fromlg.hierarchy"), mmap_lib::str("export lgraph hierarchy to graphviz dot format"), &Inou_graphviz::hierarchy);
+  Eprp_method m2("inou.graphviz.fromlg.hierarchy", "export lgraph hierarchy to graphviz dot format", &Inou_graphviz::hierarchy);
   register_inou("graphviz", m2);
 }
 

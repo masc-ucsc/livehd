@@ -166,15 +166,12 @@ protected:
       "hot_phi"
   };
 
-  Lnast_ntype_int val;
+  Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
   constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
-
 public:
-  constexpr Lnast_ntype() : val(Lnast_ntype_invalid) {}
+  [[nodiscard]] std::string_view to_sv() const { return namemap[val]; }
 
-  mmap_lib::str to_str() const { return mmap_lib::str(namemap[val]); }
-
-  Lnast_ntype_int get_raw_ntype() const { return val; }
+  [[nodiscard]] Lnast_ntype_int get_raw_ntype() const { return val; }
 
   static constexpr Lnast_ntype create_invalid() { return Lnast_ntype(Lnast_ntype_invalid); }
   static constexpr Lnast_ntype create_top() { return Lnast_ntype(Lnast_ntype_top); }

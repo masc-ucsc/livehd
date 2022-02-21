@@ -11,7 +11,7 @@
 
 extern "C" TSLanguage *tree_sitter_pyrope();
 
-Prp2lnast::Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_name) {
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name) {
   lnast = std::make_unique<Lnast>(module_name);
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
@@ -41,13 +41,13 @@ Prp2lnast::~Prp2lnast() {
   ts_parser_delete(parser);
 }
 
-mmap_lib::str Prp2lnast::get_text(const TSNode &node) const {
+std::string_view Prp2lnast::get_text(const TSNode &node) const {
   auto start = ts_node_start_byte(node);
   auto end = ts_node_end_byte(node);
   auto length = end - start;
 
   I(end<=prp_file.size());
-  return mmap_lib::str(prp_file.substr(start, length));
+  return prp_file.substr(start, length);
 }
 
 void Prp2lnast::dump_tree_sitter() const {
@@ -60,13 +60,13 @@ void Prp2lnast::dump_tree_sitter() const {
 
 void Prp2lnast::dump_tree_sitter(TSTreeCursor *tc, int level) const {
 
-  auto indent = mmap_lib::str(level*2,' ');
+  auto indent = std::string(level*2,' ');
 
   bool go_next = true;
   while (go_next) {
     auto node         = ts_tree_cursor_current_node(tc);
     auto num_children = ts_node_child_count(node);
-    auto node_type    = mmap_lib::str(ts_node_type(node));
+    auto node_type    = ts_node_type(node);
 
     fmt::print("{}{} {}\n", indent, node_type, num_children);
 
@@ -89,7 +89,7 @@ void Prp2lnast::dump() const {
 void Prp2lnast::process_description() {
   auto tc = ts_tree_cursor_new(ts_root_node);
 
-  stmts_index = lnast->add_child(mmap_lib::Tree_index::root(), Lnast_node::create_stmts());
+  stmts_index = lnast->add_child(lh::Tree_index::root(), Lnast_node::create_stmts());
 
   bool go_next = ts_tree_cursor_goto_first_child(&tc);
   while (go_next) {
@@ -115,7 +115,7 @@ void Prp2lnast::process_statement(TSTreeCursor* tc) {
 
 void Prp2lnast::process_node(TSNode node) {
 	if (ts_node_is_null(node)) return;
-  mmap_lib::str node_type(ts_node_type(node));
+  auto node_type=ts_node_type(node);
 
   fmt::print("-> {}\n", node_type);
 
@@ -142,7 +142,7 @@ void Prp2lnast::process_node(TSNode node) {
 void Prp2lnast::process_scope_statement(TSNode node) {
 	node = get_child(node);
 	while (!ts_node_is_null(node)) {
-		if (mmap_lib::str(ts_node_type(node)) == "statement") {
+		if (ts_node_type(node) == "statement") {
 			process_node(node);
 		}
 		node = get_sibling(node);
@@ -327,7 +327,7 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
   node = get_named_child(node);
   while (!ts_node_is_null(node)) {
     process_node(node);
-    if (mmap_lib::str(ts_node_type(node)) != "tuple") {
+    if (ts_node_type(node) != "tuple") {
       // RHS
       Lnast_node rvalue_node;
       if (has_multiple_items) {
@@ -642,8 +642,8 @@ void Prp2lnast::process_simple_number(TSNode node) {
   primary_node_stack.push(Lnast_node::create_const(text));
 }
 
-inline mmap_lib::str Prp2lnast::get_tmp_name() {
-  return mmap_lib::str::concat("___t", tmp_ref_count++);
+inline std::string Prp2lnast::get_tmp_name() {
+  return absl::StrCat("___t", tmp_ref_count++);
 }
 
 inline Lnast_node Prp2lnast::get_tmp_ref() {

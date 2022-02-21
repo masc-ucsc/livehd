@@ -10,16 +10,16 @@
 
 class Pass_lnastfmt : public Pass {
 protected:
-  void parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, const mmap_lib::str & module_name);
+  void parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view  module_name);
   void observe_lnast(Lnast* ln);
-  void process_node(Lnast* ln, const mmap_lib::Tree_index& it);
+  void process_node(Lnast* ln, const lh::Tree_index& it);
 
-  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> ref_hash_map;
+  absl::flat_hash_map<std::string, std::string> ref_hash_map;
 
-  static bool is_temp_var(const mmap_lib::str & test_string);
-  static bool is_ssa(const mmap_lib::str & test_string);
+  static bool is_temp_var(std::string_view  test_string);
+  static bool is_ssa(std::string_view  test_string);
 
-  Lnast_node duplicate_node(std::shared_ptr<Lnast>& lnastfmted, const std::shared_ptr<Lnast>& ln, const mmap_lib::Tree_index& it);
+  Lnast_node duplicate_node(std::shared_ptr<Lnast>& lnastfmted, const std::shared_ptr<Lnast>& ln, const lh::Tree_index& it);
 
 public:
   static void fmt_begin(Eprp_var& var);

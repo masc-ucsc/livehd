@@ -14,7 +14,7 @@
 class Lgtuple_test : public ::testing::Test {
 protected:
   std::vector<Node_pin> dpin;
-  std::set<mmap_lib::str> name_set;
+  std::set<std::string> name_set;
 
   void SetUp() override {
     auto* lg = Lgraph::create("lgdb_lgtest", "constants", "-");
@@ -26,25 +26,25 @@ protected:
     name_set.clear();
   }
 
-  mmap_lib::str create_rand_name(int levels) {
-    std::vector<mmap_lib::str> pool
+  std::string create_rand_name(int levels) {
+    std::vector<std::string> pool
         = {"a", "xx", " ", "not_a_dot", "long_name", "zz", "not here", "foo33", "potato", "__b", "nothing", "x", "Zoom"};
 
     Lrand<uint8_t> rng;
 
-    mmap_lib::str name;
+    std::string name;
     while (name.empty() || name_set.count(name)) {
       name = ""_str;
 
       for (int i = 0; i < levels; ++i) {
         auto part = pool[rng.max(pool.size())];
 
-        part = mmap_lib::str::concat(part, rng.max(32));
+        absl::StrAppend(&part, rng.max(32));
 
         if (name.empty()) {
           name = part;
         } else {
-          name = mmap_lib::str::concat(name, ".", part);
+          absl::StrAppend(&name, ".", part);
         }
       }
     }
@@ -63,7 +63,7 @@ TEST_F(Lgtuple_test, flat1) {
   TRACE_EVENT("core", "lgtuple_test.FLAT1");
   Lbench b("lgtuple_test.FLAT1");
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   Lgtuple tup("flat");
 
@@ -94,7 +94,7 @@ TEST_F(Lgtuple_test, flat2) {
   TRACE_EVENT("core", "lgtuple_test.FLAT2");
   Lbench b("lgtuple_test.FLAT2");
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   Lgtuple tup("flat");
 
@@ -112,7 +112,7 @@ TEST_F(Lgtuple_test, flat3) {
   TRACE_EVENT("core", "lgtuple_test.FLAT3");
   Lbench b("lgtuple_test.FLAT3");
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   Lgtuple tup("flat");
 
@@ -140,7 +140,7 @@ TEST_F(Lgtuple_test, hier1) {
   TRACE_EVENT("core", "lgtuple_test.HIER1");
   Lbench b("lgtuple_test.HIER1");
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   Lgtuple tup("hier");
 
@@ -162,7 +162,7 @@ TEST_F(Lgtuple_test, hier2) {
   TRACE_EVENT("core", "lgtuple_test.HIER2");
   Lbench b("lgtuple_test.HIER2");
 
-  std::vector<mmap_lib::str> names;
+  std::vector<std::string> names;
 
   Lgtuple tup("hier");
 
@@ -279,7 +279,7 @@ TEST_F(Lgtuple_test, internal_test) {
 TEST_F(Lgtuple_test, sort) {
   auto top = std::make_shared<Lgtuple>("top");
 
-  const std::vector<mmap_lib::str> names = {":0:a", ":0:a.__sbits", ":1:b", ":2:c", ":2:c.__ubits", "3", "3.__sbits", "4"};
+  const std::vector<std::string> names = {":0:a", ":0:a.__sbits", ":1:b", ":2:c", ":2:c.__ubits", "3", "3.__sbits", "4"};
 
   for (const auto& name : names) {
     top->add(name, dpin[1]);

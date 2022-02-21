@@ -25,11 +25,11 @@ public:
 
   static void parse_inline(std::string_view line) { Pass::eprp.parse_inline(line); }
 
-  static void get_commands(std::function<void(const mmap_lib::str &, const mmap_lib::str &)> fn) { Pass::eprp.get_commands(fn); };
+  static void get_commands(std::function<void(std::string_view , std::string_view )> fn) { Pass::eprp.get_commands(fn); };
 
-  static const mmap_lib::str get_command_help(const mmap_lib::str &cmd) { return Pass::eprp.get_command_help(cmd); }
+  static std::string get_command_help(std::string_view cmd) { return Pass::eprp.get_command_help(cmd); }
 
-  static void get_labels(const mmap_lib::str &cmd, std::function<void(const mmap_lib::str &, const mmap_lib::str &, bool required)> fn) {
+  static void get_labels(std::string_view cmd, std::function<void(std::string_view , std::string_view , bool required)> fn) {
     Pass::eprp.get_labels(cmd, fn);
   }
 

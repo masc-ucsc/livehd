@@ -10,6 +10,8 @@
 #include <math.h>
 #include <stdint.h>
 
+namespace lh {
+
 constexpr uint64_t _waterp0 = 0xa0761d65ull, _waterp1 = 0xe7037ed1ull, _waterp2 = 0x8ebc6af1ull;
 constexpr uint64_t _waterp3 = 0x589965cdull, _waterp4 = 0x1d8e4e27ull, _waterp5 = 0xeb44accbull;
 
@@ -78,4 +80,5 @@ static inline constexpr uint32_t waterhash(const void *key, uint32_t len, uint64
   }
   seed = (seed ^ seed << 16) * (len ^ _waterp0);
   return (uint32_t)(seed - (seed >> 32));
+}
 }

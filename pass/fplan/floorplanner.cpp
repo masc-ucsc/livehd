@@ -109,7 +109,7 @@ void Lhd_floorplanner::write_lhd_node() {
   nt.get_root_lg()->ref_node_place_map()->clear(); // clear out any existing node placements
   clearCount();                                    // clear ArchFP name counts
 
-  unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, mmap_lib::Tree_index::root());
+  unsigned int placed_nodes = root_layout->outputLgraphLayout(nt, lh::Tree_index::root());
 
   unsigned int node_count = 0;
   for(const auto n:root_lg->fast(true)) {

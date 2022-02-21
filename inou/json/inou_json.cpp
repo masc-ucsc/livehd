@@ -18,10 +18,10 @@
 static Pass_plugin sample("inou_json", Inou_json::setup);
 
 void Inou_json::setup() {
-  Eprp_method m1("inou.json.tolg", mmap_lib::str("import from json to lgraph"), &Inou_json::tolg);
+  Eprp_method m1("inou.json.tolg", "import from json to lgraph", &Inou_json::tolg);
   register_inou("json", m1);
 
-  Eprp_method m2(mmap_lib::str("inou.json.fromlg"), mmap_lib::str("export from lgraph to json"), &Inou_json::fromlg);
+  Eprp_method m2("inou.json.fromlg", "export from lgraph to json", &Inou_json::fromlg);
   register_inou("json", m2);
 }
 
@@ -30,8 +30,8 @@ Inou_json::Inou_json(const Eprp_var &var) : Pass("inou.json", var) {}
 void Inou_json::fromlg(Eprp_var &var) {
   Inou_json p(var);
 
-  mmap_lib::str odir(var.get("odir"));
-  bool          ok = p.setup_directory(odir);
+  auto odir = var.get("odir");
+  bool   ok = p.setup_directory(odir);
   if (!ok) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
     return;

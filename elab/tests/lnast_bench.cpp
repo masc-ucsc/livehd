@@ -7,7 +7,7 @@ static void BM_assign_const(benchmark::State& state) {
 
   for (auto _ : state) {
     Lnast_create ln;
-    ln.new_lnast(mmap_lib::str::concat("t", state.range(0)));
+    ln.new_lnast(absl::StrCat("t", state.range(0)));
 
 #if 0
     state.PauseTiming();
@@ -16,7 +16,7 @@ static void BM_assign_const(benchmark::State& state) {
 #endif
 
     for (int j = 0; j < state.range(0); ++j) {
-      ln.create_assign_stmts("tmp"_str, mmap_lib::str(j));
+      ln.create_assign_stmts("tmp"_str, std::to_string(j));
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -28,7 +28,7 @@ static void BM_assign_pyrope_const(benchmark::State& state) {
 
   for (auto _ : state) {
     Lnast_create ln;
-    ln.new_lnast(mmap_lib::str::concat("t", state.range(0)));
+    ln.new_lnast(absl::StrCat("t", state.range(0)));
 
 #if 0
     state.PauseTiming();
@@ -66,7 +66,7 @@ BENCHMARK(BM_SetInsert)
 #endif
 
 int main(int argc, char* argv[]) {
-  mmap_lib::str lgdb("lnast_bench");
+  std::string lgdb("lnast_bench");
 
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();

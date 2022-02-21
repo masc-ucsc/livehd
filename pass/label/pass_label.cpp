@@ -27,22 +27,22 @@ Pass_label::Pass_label(const Eprp_var &var) : Pass("pass.label", var) {
 }
 
 void Pass_label::setup() {
-  Eprp_method m1(mmap_lib::str("pass.label.mincut"), mmap_lib::str("Label a graph with mincut"), &Pass_label::label_mincut);
-  m1.add_label_optional("hier", mmap_lib::str("hierarchical traversal/labeling"), "false");
-  m1.add_label_optional("verbose", mmap_lib::str("verbose statistics and information"), "false");
+  Eprp_method m1("pass.label.mincut", "Label a graph with mincut", &Pass_label::label_mincut);
+  m1.add_label_optional("hier", "hierarchical traversal/labeling", "false");
+  m1.add_label_optional("verbose", "verbose statistics and information", "false");
   register_pass(m1);
 
-  Eprp_method m2(mmap_lib::str("pass.label.synth"), mmap_lib::str("Label a graph with synthesis boundaries"), &Pass_label::label_synth);
-  m2.add_label_optional("hier", mmap_lib::str("hierarchical traversal/labeling"), "false");
-  m2.add_label_optional("alg", mmap_lib::str("algorithm (pipe, synth)"), "pipe");
-  m2.add_label_optional("verbose", mmap_lib::str("verbose statistics and information"), "false");
+  Eprp_method m2("pass.label.synth", "Label a graph with synthesis boundaries", &Pass_label::label_synth);
+  m2.add_label_optional("hier", "hierarchical traversal/labeling", "false");
+  m2.add_label_optional("alg", "algorithm (pipe, synth)", "pipe");
+  m2.add_label_optional("verbose", "verbose statistics and information", "false");
   register_pass(m2);
 
-  Eprp_method m3(mmap_lib::str("pass.label.acyclic"), mmap_lib::str("Label a graph with aclyclic combinational calls"), &Pass_label::label_acyclic);
-  m3.add_label_optional("hier", mmap_lib::str("hierarchical traversal/labeling"), "false");
-  m3.add_label_optional("cutoff", mmap_lib::str("small partition node count cutoff"), "1");
-  m3.add_label_optional("merge", mmap_lib::str("enables merging of acyclic partitions"), "false");
-  m3.add_label_optional("verbose", mmap_lib::str("verbose statistics and information"), "false");
+  Eprp_method m3("pass.label.acyclic", "Label a graph with aclyclic combinational calls", &Pass_label::label_acyclic);
+  m3.add_label_optional("hier", "hierarchical traversal/labeling", "false");
+  m3.add_label_optional("cutoff", "small partition node count cutoff", "1");
+  m3.add_label_optional("merge", "enables merging of acyclic partitions", "false");
+  m3.add_label_optional("verbose", "verbose statistics and information", "false");
   register_pass(m3);
 }
 
@@ -71,7 +71,6 @@ void Pass_label::label_synth(Eprp_var &var) {
 void Pass_label::label_acyclic(Eprp_var &var) {
   Pass_label pp(var);
   
-  // cutoff_str will be type mmap_lib::str
   auto cutoff_str = var.get("cutoff");
   auto cutoff = static_cast<uint8_t>(std::stoi(cutoff_str.to_s()));
 

@@ -10,7 +10,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "lbench.hpp"
 #include "lgraph_base_core.hpp"
-#include "mmap_str.hpp"
 
 enum class Ntype_op : uint8_t {
   Invalid,  // Detect bugs/unset (not used anywhere)
@@ -71,9 +70,7 @@ protected:
       "sext",    "lt",    "gt",   "eq",    "shl",     "sra",     "lut",      "mux",      "io",          "memory",      "flop",
       "latch",   "fflop", "sub",  "const", "tup_add", "tup_get", "attr_set", "attr_get", "compile_err", "last_invalid"};
 
-  inline static std::array<mmap_lib::str,32> cell_name;
-
-  inline static absl::flat_hash_map<mmap_lib::str, Ntype_op> cell_name_map;
+  inline static absl::flat_hash_map<std::string, Ntype_op> cell_name_map;
 
   class _init {
   public:
@@ -83,11 +80,11 @@ protected:
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
   inline static std::array<std::array<Port_ID, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>         sink_name2pid;
-  inline static std::array<std::array<mmap_lib::str, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11>    sink_pid2name;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11>    sink_pid2name;
   inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                             ntype2single_input;
-  inline static absl::flat_hash_map<mmap_lib::str, int>                                                        name2pid;
+  inline static absl::flat_hash_map<std::string, int>                                                        name2pid;
 
-  static constexpr mmap_lib::str get_sink_name_slow(Ntype_op op, int pid);
+  static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
 
 public:
   static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Const; }
@@ -120,7 +117,7 @@ public:
     return c[0] >= 'a' && c[0] <= 'z';
   }
 
-  static inline constexpr int get_sink_pid(Ntype_op op, const mmap_lib::str &str) {
+  static inline constexpr int get_sink_pid(Ntype_op op, std::string_view str) {
     auto c = str.front();
     // Common case speedup
     if (c >= 'a' && c <= 'f') {
@@ -155,13 +152,13 @@ public:
     return pid;
   }
 
-  static inline constexpr mmap_lib::str get_sink_name(Ntype_op op, int pid) {
+  static inline constexpr std::string get_sink_name(Ntype_op op, int pid) {
     if (pid > 10) {
       auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
       auto name = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
       assert(name != "invalid");
 
-      return mmap_lib::str::concat(pid, name);
+      return absl::StrCat(pid, name);
     }
 
     auto name = sink_pid2name[pid][static_cast<std::size_t>(op)];
@@ -169,21 +166,21 @@ public:
     return name;
   }
 
-  static bool                  has_sink(Ntype_op op, mmap_lib::str str);
+  static bool                  has_sink(Ntype_op op, std::string_view str);
   static inline constexpr bool has_sink(Ntype_op op, int pid) {
     if (pid > 10)
       return is_unlimited_sink(op);
     return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
   }
 
-  static int get_driver_pid(Ntype_op op, mmap_lib::str pin_name) {
+  static int get_driver_pid(Ntype_op op, std::string_view pin_name) {
     if (likely(!is_multi_driver(op) || pin_name == "%")) {
       return 0;
     }
     return pin_name.to_i();
   }
 
-  static inline constexpr mmap_lib::str get_driver_name(Ntype_op op) {
+  static inline constexpr std::string_view get_driver_name(Ntype_op op) {
     (void)op;
     assert(!is_multi_driver(op)); // use <PID> for multidriveer pins
     return {"Y"};
@@ -197,9 +194,9 @@ public:
 
   static inline constexpr bool is_single_sink(Ntype_op op) { return ntype2single_input[static_cast<int>(op)]; }
 
-  static mmap_lib::str get_name(Ntype_op op) { return cell_name[static_cast<size_t>(op)]; }
+  static std::string_view get_name(Ntype_op op) { return cell_name_sv[static_cast<size_t>(op)]; }
 
-  static Ntype_op get_op(mmap_lib::str name) {
+  static Ntype_op get_op(std::string_view name) {
     const auto it = cell_name_map.find(name);
     if (it == cell_name_map.end())
       return Ntype_op::Invalid;

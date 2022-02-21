@@ -10,7 +10,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 #include "perf_tracing.hpp"
 #include "tree_lgdb_setup.hpp"
 

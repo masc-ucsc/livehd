@@ -9,7 +9,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 
 class Tree_lgdb_setup : public ::testing::Test {
 protected:
@@ -19,10 +19,10 @@ protected:
     int           fwd_pos;
     int           bwd_pos;
     bool          leaf;
-    mmap_lib::str name;
+    std::string name;
   };
 
-  mmap_lib::tree<Node_data> tree;
+  lh::tree<Node_data> tree;
   std::vector<Node>         node_order;
   Lgraph *                  lg_root;
 
@@ -31,13 +31,13 @@ protected:
 
   static constexpr char fwd_name[] = "fwd_pos";
   static constexpr char bwd_name[] = "bwd_pos";
-  using Fwd_pos_attr               = Attribute<fwd_name, Node, mmap_lib::map<Node::Compact, uint64_t> >;
-  using Bwd_pos_attr               = Attribute<bwd_name, Node, mmap_lib::map<Node::Compact, uint64_t> >;
+  using Fwd_pos_attr               = Attribute<fwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
+  using Bwd_pos_attr               = Attribute<bwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph() {
-    std::vector<mmap_lib::Tree_index> index_order;
+    std::vector<lh::Tree_index> index_order;
 
-    tree.each_top_down_fast([&index_order](const mmap_lib::Tree_index &index, const Node_data &node) {
+    tree.each_top_down_fast([&index_order](const lh::Tree_index &index, const Node_data &node) {
       (void)node;
       // fmt::print(" level:{} pos:{} create_pos:{} fwd:{} bwd:{} leaf:{}\n", index.level, index.pos, node.create_pos, node.fwd_pos,
       // node.bwd_pos, node.leaf);
@@ -84,13 +84,13 @@ protected:
         int n_outputs = rint.between(1, 2);
         int max_pos   = 0;
         for (int i = 0; i < n_inputs; ++i) {
-          mmap_lib::str name(std::string("i") + std::to_string(i));
+          std::string name(std::string("i") + std::to_string(i));
           int         pos  = max_pos + rint.between(1, 5);
           max_pos          = pos;
           sub_lg->add_graph_input(name, pos, rint.max(60));
         }
         for (int i = 0; i < n_outputs; ++i) {
-          mmap_lib::str name(std::string("o") + std::to_string(i));
+          std::string name(std::string("o") + std::to_string(i));
           int         pos  = max_pos + rint.between(1, 5);
           max_pos          = pos;
           sub_lg->add_graph_output(name, pos, rint.max(60));
@@ -174,7 +174,7 @@ protected:
       }
     }
 
-    lg_root->get_library().each_lgraph([this](Lg_type_id lgid, const mmap_lib::str &name) {
+    lg_root->get_library().each_lgraph([this](Lg_type_id lgid, const std::string &name) {
       (void)lgid;
       Lgraph *lg = Lgraph::open(lg_root->get_path(), name);
       I(lg);
@@ -250,7 +250,7 @@ protected:
       level     = rint.max(max_level);
       I(level < max_depth);
 
-      mmap_lib::Tree_index index(level, rint.max(tree.get_tree_width(level)));
+      lh::Tree_index index(level, rint.max(tree.get_tree_width(level)));
 
       Node_data data;
       data.create_pos = i + 1;
@@ -285,19 +285,19 @@ protected:
       data->leaf    = tree.is_leaf(index);
       if (data->leaf) {
         std::string name("leaf_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data->name = mmap_lib::str(name);
+        data->name = name;
         n_leafs++;
       } else {
         std::string name("node_l" + std::to_string(index.level) + "p" + std::to_string(index.pos));
-        data->name = mmap_lib::str(name);
+        data->name = name;
       }
       ++pos;
     }
 
     if (!unique) {
       for (int i = 0; i < size / 32; i++) {
-        mmap_lib::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
-        mmap_lib::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
+        lh::Tree_index insert_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
+        lh::Tree_index copy_point(rint.max(max_level), rint.max(tree.get_tree_width(max_level)));
 
         if (tree.is_child_of(copy_point, insert_point))  // No recursion insert
           continue;

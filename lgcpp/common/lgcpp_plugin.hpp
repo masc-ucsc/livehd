@@ -11,14 +11,14 @@
 class Lgcpp_plugin {
 public:
   using Comptime_fn = std::function<void(Lgraph *lg, const std::shared_ptr<Lgtuple> inp, std::shared_ptr<Lgtuple> out)>;
-  using Map_setup   = absl::flat_hash_map<mmap_lib::str, Comptime_fn>;
+  using Map_setup   = absl::flat_hash_map<std::string, Comptime_fn>;
 
 protected:
   static Map_setup registry;
 
 public:
   // Lgcpp_plugin(const std::string &name, Comptime_fn fn) {
-  Lgcpp_plugin(mmap_lib::str &name, Comptime_fn fn) {
+  Lgcpp_plugin(std::string_view name, Comptime_fn fn) {
     if (registry.find(name) != registry.end()) {
       Pass::error("Lgcpp_plugin: {} is already registered", name);
       return;

@@ -90,7 +90,7 @@ void Opt_lnast::hierarchy_info_int(const std::string &msg) {
 }
 
 void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child = true;
@@ -117,7 +117,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
 }
 
 void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child   = true;
@@ -154,7 +154,7 @@ void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
 }
 
 void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child   = true;
@@ -191,7 +191,7 @@ void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
 }
 
 void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child   = true;
@@ -230,7 +230,7 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 // MODULO IS NOT CONSIDERED FOR NOW
 //
 // void Opt_lnast::process_mod(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-//   mmap_lib::str var;
+//   std::string var;
 //   Lconst        result_trivial;
 //
 //   bool first_child   = true;
@@ -268,7 +268,7 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 // }
 
 void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child   = true;
@@ -305,7 +305,7 @@ void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
 }
 
 void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child = true;
@@ -331,7 +331,7 @@ void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
 }
 
 void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
 
   bool first_child = true;
@@ -357,7 +357,7 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
 }
 
 void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst val;
 
   for (auto child : ln->children(lnid)) {
@@ -387,7 +387,7 @@ void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
 }
 
 void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
-  mmap_lib::str var;
+  std::string var;
   Lconst        result_trivial;
   Lconst        arg1;
   Lconst        arg2;
@@ -439,7 +439,7 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   I(first_child_data.type.is_ref());
 
   auto          var_root = first_child_data.token.get_text();
-  mmap_lib::str var_field;
+  std::string var_field;
 
   //-------------------------------
   auto rhs_id = ln->get_last_child(lnid);
@@ -448,14 +448,14 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   while (idx != rhs_id) {
     const auto &data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: foo.bar
-      var_field = mmap_lib::str::concat(var_field, ".", data.token.get_text());
+      absl::StrAppend(&var_field, ".", data.token.get_text());
     } else {
       I(data.type.is_ref());
       auto ref = data.token.get_text();
 
       auto v = st.get_trivial(ref);
       if (!v.is_invalid()) {  // CASE 2: foo['bar'] or foo[123]
-        var_field = mmap_lib::str::concat(var_field, ".", v.to_field());
+        absl::StrAppend(&var_field, ".", v.to_field());
       } else {
         auto var_bundle = st.get_bundle(var_root);
         if (var_bundle == nullptr) {  // CASE 3: foo[$runtime] foo is unknown and $runtime may not be constant
@@ -480,7 +480,7 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   const auto &rhs_data = ln->get_data(rhs_id);
   auto        rhs_txt  = rhs_data.token.get_text();
 
-  auto lhs_txt = mmap_lib::str::concat(var_root, var_field);
+  auto lhs_txt = absl::StrCat(var_root, var_field);
 
   if (rhs_data.type.is_ref()) {
     auto bundle = st.get_bundle(rhs_txt);
@@ -501,7 +501,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   I(second_child_data.type.is_ref());
 
   auto          var_root = second_child_data.token.get_text();
-  mmap_lib::str var_field;
+  std::string var_field;
 
   //-------------------------------
   auto rhs_id = ln->get_last_child(lnid);
@@ -509,7 +509,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   while (idx != rhs_id) {
     const auto &data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: foo.bar
-      var_field = mmap_lib::str::concat(var_field, ".", data.token.get_text());
+      absl::StrAppend(&var_field, ".", data.token.get_text());
     } else {
       I(data.type.is_ref());
       auto ref        = data.token.get_text();
@@ -525,7 +525,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   // Repeat one last time for last child
   const auto &rhs_data = ln->get_data(rhs_id);
   if (rhs_data.type.is_const()) {  // CASE 1: foo.bar
-    var_field = mmap_lib::str::concat(var_field, ".", rhs_data.token.get_text());
+    absl::StrAppend(&var_field, ".", rhs_data.token.get_text());
   } else {
     I(rhs_data.type.is_ref());
     auto ref        = rhs_data.token.get_text();
@@ -537,7 +537,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   }
 
   // Stores value if reference value is known
-  auto rhs_txt = mmap_lib::str::concat(var_root, var_field);
+  auto rhs_txt = absl::StrCat(var_root, var_field);
   auto bundle  = st.get_bundle(rhs_txt);
 
   // Creates new trivial bundle that contains the desired trivial value
@@ -567,7 +567,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
 
   int pos = 0;
   while (!idx.is_invalid()) {
-    auto pos_txt = mmap_lib::str(pos);
+    auto pos_txt = std::string(pos);
 
     const auto &data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: (..., 123, ...)
@@ -586,7 +586,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
       if (data_lhs_txt.is_i()) {
         throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs_txt);
       }
-      auto field_lhs = mmap_lib::str::concat(":", pos_txt, ":", data_lhs_txt);
+      auto field_lhs = absl::StrCat(":", pos_txt, ":", data_lhs_txt);
 
       if (data_rhs.type.is_const()) {  // CASE 1: (..., a=123, ...)
         bundle->set(field_lhs, Lconst::from_pyrope(data_rhs.token.get_text()));
@@ -637,7 +637,7 @@ yy = (1,a=3)
   if (st.has_bundle(lhs_txt)) {
     auto lhs_bundle = st.get_bundle(lhs_txt);
 
-    std::vector<mmap_lib::str> lhs_ids;
+    std::vector<std::string> lhs_ids;
     for(const auto &e:lhs_bundle->get_sort_map()) {
       if (e.first.contains('.')) {
         lhs_bundle->dump();
@@ -661,7 +661,7 @@ yy = (1,a=3)
       }
 
       for(auto i=0u;i<lhs_ids.size();++i) {
-        auto b = bundle->get_bundle(mmap_lib::str(i));
+        auto b = bundle->get_bundle(std::string(i));
         st.set(lhs_ids[i], b);
       }
     }else{

@@ -29,7 +29,7 @@ protected:
 
   // Top
   void process_description();
-  
+
   // Statements
   void process_statement(TSTreeCursor*);
 
@@ -67,21 +67,21 @@ protected:
 
   // Lnast Tree Helpers
   std::unique_ptr<Lnast> lnast;
-  mmap_lib::Tree_index stmts_index;
+  lh::Tree_index stmts_index;
   std::stack<Lnast_node> rvalue_node_stack;
   std::vector<int> tuple_lvalue_positions;
   std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
   std::stack<Lnast_node> primary_node_stack;
   std::stack<std::vector<Lnast_node>> select_stack;
-  
+
   // Lnast_node Helpers
   // TODO: Forward location to Lnast_node
   int tmp_ref_count;
-  mmap_lib::str get_tmp_name();
+  std::string get_tmp_name();
   inline Lnast_node get_tmp_ref();
 
   // TS API Helpers
-  mmap_lib::str get_text(const TSNode &node) const;
+  std::string_view get_text(const TSNode &node) const;
   inline TSNode get_child(const TSNode &, const char*) const;
   inline TSNode get_child(const TSNode &, unsigned int) const;
   inline TSNode get_child(const TSNode &) const;
@@ -89,7 +89,7 @@ protected:
   inline TSNode get_named_child(const TSNode &) const ;
   inline TSNode get_named_sibling(const TSNode &) const;
 public:
-  Prp2lnast(const mmap_lib::str filename, const mmap_lib::str module_name);
+  Prp2lnast(std::string_view filename, std::string_view module_name);
 
   ~Prp2lnast();
 

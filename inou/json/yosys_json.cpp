@@ -12,7 +12,6 @@
 #include "core/lgraph.hpp"
 #include "core/node_pin.hpp"
 #include "inou_json.hpp"
-#include "mmap_gc.hpp"
 
 namespace yjson {
 

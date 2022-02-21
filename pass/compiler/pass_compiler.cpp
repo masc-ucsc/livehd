@@ -4,11 +4,12 @@
 #include <cstddef>
 
 #include "lcompiler.hpp"
+#include "str_tools.hpp"
 
 static Pass_plugin sample("pass_compiler", Pass_compiler::setup);
 
 void Pass_compiler::setup() {
-  Eprp_method m1(mmap_lib::str("pass.compiler"), mmap_lib::str("LiveHD multi-HDLs compilation, default language: Pyrope"), &Pass_compiler::compile);
+  Eprp_method m1("pass.compiler", "LiveHD multi-HDLs compilation, default language: Pyrope", &Pass_compiler::compile);
   m1.add_label_optional("path", "lgraph path", "lgdb");
   m1.add_label_optional("files", "files to process (comma separated)");
   m1.add_label_optional("firrtl", "is firrtl front-end");
@@ -41,8 +42,9 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : files.mmap_lib::str::split(',')) 
+    for (auto f : str_tools::split(files, ',')) {
       Pass::warn("todo: start from prp parser:{}", f);
+    }
   }
 
   if (!get_firrtl.empty()) {
@@ -251,18 +253,18 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
   return gviz_en;
 }
 
-mmap_lib::str Pass_compiler::check_option_top(Eprp_var &var) {
-  mmap_lib::str top;
+std::string_view Pass_compiler::check_option_top(Eprp_var &var) {
   if (var.has_label("top")) {
-    top = var.get("top");
+    return var.get("top");
   }
-  return top;
+  return "";
 }
-mmap_lib::str Pass_compiler::check_option_firrtl(Eprp_var &var) {
-  mmap_lib::str get_firrtl;
+
+std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
+  std::string_view get_firrtl;
   if (var.has_label("firrtl")) {
     auto fir = var.get("firrtl");
-    if (fir != mmap_lib::str("false") && fir != mmap_lib::str("0")) {
+    if (fir != "false" && fir != "0") {
       get_firrtl = fir;
     } else {
       get_firrtl = "";
@@ -270,5 +272,7 @@ mmap_lib::str Pass_compiler::check_option_firrtl(Eprp_var &var) {
   } else {
     get_firrtl = "";
   }
+
   return get_firrtl;
 }
+

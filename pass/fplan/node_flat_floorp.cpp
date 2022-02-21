@@ -21,7 +21,7 @@ void Node_flat_floorp::load() {
   for (auto n : nt.get_root_lg()->fast(true)) {
     Ntype_op op = n.get_type_op();
 
-    mmap_lib::str name;
+    std::string_view name;
     if (n.has_name()) {
       name = n.get_name();
     } else {

@@ -1,11 +1,13 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "mmap_str.hpp"
+#include <string>
+#include <string_view>
 
 // List of useful methods for parsers in lgraph
 class Eprp_utils {
 public:
-  static mmap_lib::str get_exe_path();
+  static std::string get_exe_path();
 
-  static void clean_dir(const mmap_lib::str &dir);
+  static void clean_dir(std::string_view dir);
 };

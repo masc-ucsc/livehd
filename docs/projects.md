@@ -316,7 +316,6 @@ Main features:
 * Liberty. We have some "read" pass in lgraph
 * Create an object to hide the interface with a C++17 iterator
 * Capacity to merge many files in the same object (inou_liberty)
-* The read formats should be backed with mmap_lib (zero load time). Single per lgdb directory
 * Multithread ready (infrequent update, frequent read)
 * Unit tests for correctness and performance
 * Wrapper to get timing for cells considering load
@@ -630,13 +629,6 @@ This is a list of small tasks. Each should take 1-3 weeks to implement. These
 are not thesis/projects but good ideas to get to know the setup and help, and they
 can evolve for undergraduate senior design.
 
-## mmap_lib::vector erase (pop_back)
-
-The current only way to shrink a mmap_lib::vector is with a resize command. It
-should be good to allow a pop_back (erase last element). Notice that the mmap
-call is expensive, we just need to really reduce size when there is a
-significant fraction to be saved.
-
 ## Setup a vagrant image
 
 We have several dockers for testing, a simple vagrant (ubuntu based?) for most users may
@@ -700,11 +692,6 @@ track performance changes.
 
 Maybe expand tmt_test and main_test to be a more stand-alone testing setup.
 
-## OS X Support
-
-LiveHD compiles (it did) with OS X, but there are some issues with the mmap infrastructure inside mmap_lib. The code functionality
-should be able to run (the mmap_remap does not exist in OS X, but a more costly alternative is implemented for OS X, just not tested
-and it seems faulty).
 
 ## Smaller tasks
 
@@ -741,7 +728,6 @@ Main features:
  * Annotated source window: A window that shows text (verilog/pyrope) and the values for variables. Simvision calls this the "source browser window".
  * Waveform window. A gtkwave like capacity to show waveforms.
  * Signals search window
- * Reads mmap_lib structures so that it automatically gets updated as the simulation runs (live updates)
 
  ### Source Window
 

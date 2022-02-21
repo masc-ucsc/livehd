@@ -11,7 +11,6 @@
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
-#include "mmap_vector.hpp"
 
 #include "aligned_vector.hpp"
 
@@ -23,7 +22,6 @@ class Graph_library;
 class Lgraph_Base : public Lgraph_base_core {
 private:
 protected:
-  //mmap_lib::vector<Node_internal> node_internal;
   is::aligned_vector<Node_internal, 4096> node_internal;
 
   Graph_library *                          library;
@@ -69,7 +67,7 @@ public:
 
   Lgraph_Base(const Lgraph_Base &) = delete;
 
-  explicit Lgraph_Base(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
+  explicit Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept;
   virtual ~Lgraph_Base();
 
   virtual void clear();

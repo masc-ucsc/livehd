@@ -1,17 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <string>
+#include <string_view>
+#include <cstdint>
 #include <functional>
 #include <vector>
+#include <iostream>
 
 #include "iassert.hpp"
-#include "mmap_map.hpp"  // To add the hash for trees
 
-namespace mmap_lib {
+namespace lh {
 using Tree_level = int32_t;
 using Tree_pos   = int32_t;
 
@@ -58,15 +60,6 @@ public:
   }
 };
 
-template <>
-struct hash<Tree_index> {
-  constexpr size_t operator()(Tree_index const &o) const {
-    uint64_t h = o.level;
-    h          = (h << 32) | o.pos;
-    return hash<uint64_t>{}(h);
-  }
-};
-
 template <typename X>
 class tree {
 protected:
@@ -108,7 +101,7 @@ protected:
     dsp.emplace_back();
     dsp.emplace_back();
 
-    assert((parent.pos >> 2) < pointers_stack[parent.level].size());
+    I(static_cast<size_t>(parent.pos >> 2) < pointers_stack[parent.level].size());
     pointers_stack[parent.level + 1].emplace_back(parent.pos);
 
     I(pointers_stack[parent.level + 1].back().next_sibling == 1);
@@ -1057,4 +1050,4 @@ Tree_index tree<X>::get_child(const Tree_index &top) const {
   return Tree_index(top.level + 1, fc);
 }
 
-}  // namespace mmap_lib
+}  // namespace lh

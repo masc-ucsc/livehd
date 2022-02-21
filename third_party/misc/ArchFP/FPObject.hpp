@@ -25,7 +25,7 @@ protected:
   double        height;  // The height of the component in millimeters.
   double        area;    // The area of the component in sq millimeters.
   Ntype_op      type;    // The type of the component.
-  mmap_lib::str name;    // The name of the component.
+  std::string   name;    // The name of the component.
   GeographyHint hint;    // Arguably, we should form a map of hints to components.
                          // But for now this is simpler.
   int count;             // The number of the these components in this group of components.
@@ -46,10 +46,10 @@ public:
   virtual double      getWidth() const { return width; }
   virtual double      getHeight() const { return height; }
   virtual double      getArea() const { return area; }
-  virtual mmap_lib::str getName() const { return name; }
+  virtual std::string_view getName() const { return name; }
   virtual Ntype_op    getType() const { return type; }
   virtual int         getCount() const { return count; }
-  mmap_lib::str       getUniqueName() const;
+  std::string         getUniqueName() const;
 
   virtual double totalArea() { return area * count; }
 
@@ -72,7 +72,7 @@ public:
   virtual GeographyHint setHint(GeographyHint newHint) { return hint = newHint; }
   virtual void          setSize(double widthArg, double heightArg);
   virtual void          setLocation(double xArg, double yArg);
-  virtual void          setName(mmap_lib::str nameArg) { name = nameArg; }
+  virtual void          setName(std::string_view nameArg) { name = nameArg; }
   virtual void          setType(Ntype_op typeArg) { type = typeArg; }
 
   virtual bool         layout(FPOptimization opt, double targetAR = 1.0) = 0;

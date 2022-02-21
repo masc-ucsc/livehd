@@ -9,18 +9,18 @@
 #include "cell.hpp"
 #include "pass.hpp"
 
-Graphviz::Graphviz(bool _bits, bool _verbose, mmap_lib::str _odir) : verbose(_verbose), odir(_odir) {
+Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(_verbose), odir(_odir) {
   // NOTE: since 'bits' is removed as a private member (unused), '_bits' is unused but might be used in the future
   (void)_bits;
 }
 
-void Graphviz::save_graph(const mmap_lib::str &name, std::string_view dot_postfix, const std::string &data) {
-  mmap_lib::str file = mmap_lib::str::concat(odir, "/", name);
+void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
+  auto file = absl::StrCat(odir, "/", name);
 
   if (dot_postfix == "")
-    file = mmap_lib::str::concat(file, mmap_lib::str(".dot"));
+    absl::StrAppend(&file, ".dot");
   else
-    file = mmap_lib::str::concat(file, std::string(".") + std::string(dot_postfix) + ".dot");
+    absl::StrAppend(&file, "." + dot_postfix + ".dot");
 
   int fd = ::open(file.to_s().c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {

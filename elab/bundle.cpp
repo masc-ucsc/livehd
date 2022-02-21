@@ -14,7 +14,7 @@ static bool inline compare_less(char c1, char c2) {
   return (c1 == '_' || c1 < c2) && c2 != '_';
 }
 
-static bool bundle_sort(const std::pair<mmap_lib::str, Bundle::Entry> &lhs, const std::pair<mmap_lib::str, Bundle::Entry> &rhs) {
+static bool bundle_sort(const std::pair<const std::string &, Bundle::Entry> &lhs, const std::pair<const std::string &, Bundle::Entry> &rhs) {
 
   auto l     = 0u;
   auto l_end = lhs.first.size();
@@ -43,7 +43,7 @@ static bool bundle_sort(const std::pair<mmap_lib::str, Bundle::Entry> &lhs, cons
   return v;
 }
 
-std::tuple<bool, size_t, size_t> Bundle::match_int_advance(const mmap_lib::str &a, const mmap_lib::str &b, size_t a_pos, size_t b_pos) {
+std::tuple<bool, size_t, size_t> Bundle::match_int_advance(std::string_view a, std::string_view b, size_t a_pos, size_t b_pos) {
   I(a[a_pos] == ':');
   I(b[b_pos] != ':');
 
@@ -95,7 +95,7 @@ std::tuple<bool, size_t, size_t> Bundle::match_int_advance(const mmap_lib::str &
   return std::make_tuple(true, a_pos, b_pos);
 }
 
-std::tuple<bool, bool, size_t> Bundle::match_int(const mmap_lib::str &a, const mmap_lib::str &b) {
+std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string_view b) {
   auto a_last_section = 0u;
   auto b_last_section = 0u;
   auto a_pos          = 0u;
@@ -174,21 +174,21 @@ std::tuple<bool, bool, size_t> Bundle::match_int(const mmap_lib::str &a, const m
   return std::make_tuple(a_match, b_match, b_pos);
 }
 
-mmap_lib::str Bundle::append_field(const mmap_lib::str &a, const mmap_lib::str &b) {
+std::string Bundle::append_field(std::string_view a, std::string_view b) {
   if (a.empty())
-    return b;
+    return std::string(b);
 
-  return mmap_lib::str::concat(a, ".", b);
+  return absl::StrCat(a, ".", b);
 }
 
-std::tuple<mmap_lib::str, mmap_lib::str> Bundle::learn_fix_int(const mmap_lib::str &a, const mmap_lib::str &b) {
+std::tuple<std::string, std::string> Bundle::learn_fix_int(std::string_view a, std::string_view b) {
   auto a_last_section = 0u;
   auto b_last_section = 0u;
   auto a_pos          = 0u;
   auto b_pos          = 0u;
 
-  mmap_lib::str new_a;
-  mmap_lib::str new_b;
+  std::string new_a;
+  std::string new_b;
 
   bool a_last_match;
   bool b_last_match;
@@ -320,7 +320,7 @@ std::tuple<mmap_lib::str, mmap_lib::str> Bundle::learn_fix_int(const mmap_lib::s
   return std::make_tuple(new_a, new_b);
 }
 
-bool Bundle::match(const mmap_lib::str &a, const mmap_lib::str &b) {
+bool Bundle::match(std::string_view a, std::string_view b) {
   if (a == b)
     return true;
   if (a.empty()) {
@@ -337,7 +337,7 @@ bool Bundle::match(const mmap_lib::str &a, const mmap_lib::str &b) {
   return m1 && m2;  // both reach the end in match_int
 }
 
-size_t Bundle::match_first_partial(const mmap_lib::str &a, const mmap_lib::str &b) {
+size_t Bundle::match_first_partial(std::string_view a, std::string_view b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)m2;
   if (m1)
@@ -345,13 +345,13 @@ size_t Bundle::match_first_partial(const mmap_lib::str &a, const mmap_lib::str &
   return 0;
 }
 
-bool Bundle::match_either_partial(const mmap_lib::str &a, const mmap_lib::str &b) {
+bool Bundle::match_either_partial(std::string_view a, std::string_view b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)x;
   return m1 || m2;  // either reached the end it match_int
 }
 
-void Bundle::add_int(const mmap_lib::str &key, const std::shared_ptr<Bundle const> tup) {
+void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
     I(!has_trivial(key));  // It was deleted before
@@ -362,14 +362,14 @@ void Bundle::add_int(const mmap_lib::str &key, const std::shared_ptr<Bundle cons
   bool root = is_root_attribute(key);
   for (auto &ent : tup->key_map) {
     if (root) {
-      key_map.emplace_back(mmap_lib::str::concat(ent.first, ".", key), ent.second);
+      key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
     } else {
-      key_map.emplace_back(mmap_lib::str::concat(key, ".", ent.first), ent.second);
+      key_map.emplace_back(absl::StrCat(key, ".", ent.first), ent.second);
     }
   }
 }
 
-void Bundle::del_int(const mmap_lib::str &key) {
+void Bundle::del_int(std::string_view key) {
   if (key.empty()) {
     key_map.clear();
     return;
@@ -413,7 +413,7 @@ void Bundle::del_int(const mmap_lib::str &key) {
   key_map.swap(new_map);
 }
 
-int Bundle::get_first_level_pos(const mmap_lib::str &key) {
+int Bundle::get_first_level_pos(std::string_view key) {
   if (key.empty())
     return -1;
 
@@ -430,7 +430,7 @@ int Bundle::get_first_level_pos(const mmap_lib::str &key) {
   return key.substr(skip).to_i();
 }
 
-mmap_lib::str Bundle::get_first_level(const mmap_lib::str &key) {
+std::string_view Bundle::get_first_level(std::string_view key) {
   auto dot_pos = key.find('.');
   if (dot_pos == std::string::npos)
     return key;
@@ -438,7 +438,7 @@ mmap_lib::str Bundle::get_first_level(const mmap_lib::str &key) {
   return key.substr(0, dot_pos);
 }
 
-mmap_lib::str Bundle::get_first_level_name(const mmap_lib::str &key) {
+std::string_view Bundle::get_first_level_name(std::string_view key) {
   auto dot_pos = key.find('.');
   if (key.size() > 0 && key.front() != ':') {
     if (dot_pos == std::string::npos)
@@ -452,9 +452,9 @@ mmap_lib::str Bundle::get_first_level_name(const mmap_lib::str &key) {
   return key.substr(1 + 1 + n, dot_pos - 1 - 1 - n);
 }
 
-mmap_lib::str Bundle::get_canonical_name(const mmap_lib::str &key) {
+std::string_view Bundle::get_canonical_name(std::string_view key) {
 
-  mmap_lib::str key2{key};
+  std::string_view key2{key};
 
   // Remove xxx.0.0.0
   while (key2.size() > 1 && key2.back() == '0') {
@@ -472,7 +472,7 @@ mmap_lib::str Bundle::get_canonical_name(const mmap_lib::str &key) {
   return key2;
 }
 
-mmap_lib::str Bundle::get_last_level(const mmap_lib::str &key) {
+std::string_view Bundle::get_last_level(std::string_view key) {
   auto n = key.rfind('.');
   if (n == std::string::npos)
     return key;
@@ -481,16 +481,16 @@ mmap_lib::str Bundle::get_last_level(const mmap_lib::str &key) {
   return key.substr(n + 1);
 }
 
-mmap_lib::str Bundle::get_all_but_last_level(const mmap_lib::str &key) {
+std::string_view Bundle::get_all_but_last_level(std::string_view key) {
   auto n = key.rfind('.');
   if (n != std::string::npos) {
     return key.substr(0, n);
   }
 
-  return mmap_lib::str("");
+  return std::string_view("");
 }
 
-std::pair<int, mmap_lib::str> Bundle::convert_key_to_io(const mmap_lib::str &key) {
+std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key) {
   size_t skip=0;
 
   if (key[skip] == '$' || key[skip] == '%') {
@@ -520,7 +520,7 @@ std::pair<int, mmap_lib::str> Bundle::convert_key_to_io(const mmap_lib::str &key
   return std::pair(x, key2.substr(n + 1));
 }
 
-mmap_lib::str Bundle::get_all_but_first_level(const mmap_lib::str &key) {
+std::string_view Bundle::get_all_but_first_level(std::string_view key) {
   auto n = key.find('.');
   if (n != std::string::npos) {
     return key.substr(n + 1);
@@ -529,11 +529,11 @@ mmap_lib::str Bundle::get_all_but_first_level(const mmap_lib::str &key) {
 	if (key.front() == '$' || key.front() == '%' || key.front() == '#')
 		return key.substr(1);
 
-  return mmap_lib::str("");  // empty if no dot left
+  return std::string_view("");  // empty if no dot left
 }
 
-mmap_lib::str Bundle::learn_fix(const mmap_lib::str &a) {
-  mmap_lib::str key{a};
+std::string Bundle::learn_fix(std::string_view key) {
+  std::string key{a};
 
   for (auto &e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
@@ -542,7 +542,7 @@ mmap_lib::str Bundle::learn_fix(const mmap_lib::str &a) {
   return key;
 }
 
-Bundle::Entry Bundle::get_entry(const mmap_lib::str &key) const {
+Bundle::Entry Bundle::get_entry(std::string_view key) const {
   for (auto &e : key_map) {
     if (match(e.first, key))
       return e.second;
@@ -566,7 +566,7 @@ Lconst Bundle::get_trivial() const {
   return key_map[pos].second.trivial;
 }
 
-bool Bundle::has_trivial(const mmap_lib::str &key) const {
+bool Bundle::has_trivial(std::string_view key) const {
   for (auto &e : key_map) {
     if (match(e.first, key))
       return true;
@@ -574,7 +574,7 @@ bool Bundle::has_trivial(const mmap_lib::str &key) const {
   return false;
 }
 
-bool Bundle::has_bundle(const mmap_lib::str &key) const {
+bool Bundle::has_bundle(std::string_view key) const {
   if (key.empty()) {
     return false;
   }
@@ -592,7 +592,7 @@ bool Bundle::has_bundle(const mmap_lib::str &key) const {
   return false;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(const mmap_lib::str &key) const {
+std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   if (key.empty()) {
     return std::make_shared<Bundle>(*this);
   }
@@ -608,10 +608,10 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const mmap_lib::str &key) const {
     GI(e_pos<e.first.size(), e.first[e_pos] != '.');  // . not included
 
     if (!tup) {
-      mmap_lib::str key_with_pos{key};
-      mmap_lib::str expanded{e.first};
+      std::string key_with_pos{key};
+      std::string expanded{e.first};
       std::tie(key_with_pos, expanded) = learn_fix_int(key_with_pos, expanded);
-      tup = std::make_shared<Bundle>(mmap_lib::str::concat(name, ".", key_with_pos));
+      tup = std::make_shared<Bundle>(absl::StrCat(name, ".", key_with_pos));
     }
 
     if (e_pos >= e.first.size()) {
@@ -620,7 +620,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const mmap_lib::str &key) const {
       auto key2 = e.first.substr(e_pos);
       I(!key2.empty());
       if (is_root_attribute(key2)) {
-        tup->key_map.emplace_back(mmap_lib::str::concat("0."_str, key2), e.second);
+        tup->key_map.emplace_back(absl::StrCat("0."_str, key2), e.second);
       } else {
         tup->key_map.emplace_back(key2, e.second);
       }
@@ -660,7 +660,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
 }
 
 
-void Bundle::set(const mmap_lib::str &key, const std::shared_ptr<Bundle const>& tup) {
+void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
   I(!key.empty());
 
   if (tup == nullptr) {
@@ -677,11 +677,11 @@ void Bundle::set(const mmap_lib::str &key, const std::shared_ptr<Bundle const>& 
   bool tup_scalar = tup->is_scalar();
 
   for (const auto &e : tup->key_map) {
-    mmap_lib::str key2;
+    std::string_view key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
       if (e.first.size() == 1)
-        key2 = mmap_lib::str("");  // remove "0"
+        key2 = "";  // remove "0"
       else
         key2 = e.first.substr(2);  // remove "0."
     } else {
@@ -691,20 +691,20 @@ void Bundle::set(const mmap_lib::str &key, const std::shared_ptr<Bundle const>& 
     if (key2.empty()) {
       set(key, e.second);
     } else {
-      auto key3 = mmap_lib::str::concat(key, ".", key2);
+      auto key3 = absl::StrCat(key, ".", key2);
       set(key3, e.second);
     }
   }
 }
 
-void Bundle::set(const mmap_lib::str &key, const Entry &&entry) {
+void Bundle::set(std::string_view key, const Entry &&entry) {
   I(!key.empty());
 
-  mmap_lib::str uncanonical_key{key};
+  std::string uncanonical_key{key};
   bool        pending_adjust = false;
   if (is_scalar()) {
     if (key.substr(0, 2) == "__" && key[3] != '_') {  // is_root_attribute BUT not with 0.__xxx
-      uncanonical_key = mmap_lib::str::concat("0.", key);
+      uncanonical_key = absl::StrCat("0.", key);
     } else {
       pending_adjust = true;
     }
@@ -731,13 +731,13 @@ void Bundle::set(const mmap_lib::str &key, const Entry &&entry) {
     // a.c.xx...
     // a.b.foo.1.bar ....
 
-    mmap_lib::str key_part{fixed_key};
+    std::string_view key_part{fixed_key};
     if (is_attribute(fixed_key)) {
       key_part = get_all_but_last_level(fixed_key);
     }
     for (auto &e : key_map) {
-      mmap_lib::str fpart{e.first};
-      mmap_lib::str lpart;
+      std::string_view fpart{e.first};
+      std::string_view lpart;
       if (is_attribute(e.first)) {
         fpart = get_all_but_last_level(e.first);
         lpart = get_last_level(e.first);
@@ -749,9 +749,9 @@ void Bundle::set(const mmap_lib::str &key, const Entry &&entry) {
       // NOTE: full match foo.bar == foo not foo.bar == foo match
       if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
         if (lpart.empty())
-          e.first = mmap_lib::str::concat(fpart, ".0"sv);
+          e.first = absl::StrCat(fpart, ".0"sv);
         else
-          e.first = mmap_lib::str::concat(fpart, ".0.", lpart);
+          e.first = absl::StrCat(fpart, ".0.", lpart);
         if (e.first == fixed_key) {
           e.second = entry;
           return;
@@ -787,7 +787,7 @@ void Bundle::set(const mmap_lib::str &key, const Entry &&entry) {
 bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
   bool ok = true;
 
-  std::vector<std::pair<mmap_lib::str, Lconst>> delayed_numbers;
+  std::vector<std::pair<std::string, Lconst>> delayed_numbers;
 
   for (auto &it : tup->key_map) {
     if (has_trivial(it.first)) {
@@ -824,7 +824,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     }
     for (const auto &e : delayed_numbers) {
       auto x = e.first.to_i();
-      mmap_lib::str new_key(std::to_string(x + max_pos + 1));
+      std::string new_key(std::to_string(x + max_pos + 1));
 
       key_map.emplace_back(new_key, Entry(false, e.second));
     }
@@ -981,7 +981,7 @@ bool Bundle::concat(const Lconst &trivial) {
       max_pos = x;
   }
 
-  mmap_lib::str new_key(std::to_string(max_pos + 1));
+  std::string new_key(std::to_string(max_pos + 1));
 
   key_map.emplace_back(new_key, Entry(false, trivial));
 
@@ -1000,10 +1000,10 @@ bool Bundle::is_scalar() const {
   return true;
 }
 
-bool Bundle::is_ordered(const mmap_lib::str key) const {
+bool Bundle::is_ordered(std::string_view key) const {
   for (const auto &e : key_map) {
     auto e_pos = 0u;
-    mmap_lib::str field;
+    std::string_view field;
     if (key.empty()) {
       if (is_root_attribute(e.first))
         continue;  // attributes do not affect order
@@ -1031,18 +1031,18 @@ bool Bundle::is_ordered(const mmap_lib::str key) const {
   return true;
 }
 
-mmap_lib::str Bundle::get_scalar_name() const {
-  mmap_lib::str sname;
+std::string_view Bundle::get_scalar_name() const {
+  std::string_view sname;
 
   for (const auto &e : key_map) {
-    mmap_lib::str s;
+    std::string_view s;
     if (is_attribute(e.first)) {
       s = get_all_but_last_level(e.first);
     } else {
       s = e.first;
     }
     if (!sname.empty() && sname != s)
-      return mmap_lib::str();
+      return "";
     sname = s;
   }
 
@@ -1053,7 +1053,7 @@ bool Bundle::is_trivial_scalar() const {
   auto conta = 0;
 
   for (const auto &e : key_map) {
-    mmap_lib::str field{e.first};
+    std::string_view field{e.first};
 
     if (is_attribute(field)) {
       field = get_all_but_last_level(field);

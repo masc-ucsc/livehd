@@ -956,7 +956,7 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-Bitwidth::Attr Bitwidth::get_key_attr(const mmap_lib::str &key) {
+Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
   // FIXME: code duplicated in Firmap. Create a separate class for Attr
 
   if (key.ends_with("__max"))
@@ -1082,7 +1082,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
   auto attr_dpin = node_attr.get_driver_pin("Y");
 
-  mmap_lib::str dpin_name;
+  std::string dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
@@ -1204,7 +1204,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     return;
 
   auto             attr_dpin = node_attr.get_driver_pin("Y");
-  mmap_lib::str  dpin_name;
+  std::string  dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 

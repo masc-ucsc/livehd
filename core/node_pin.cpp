@@ -13,7 +13,7 @@ Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx)
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(const mmap_lib::str &path, const Compact_flat &comp) {
+Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   current_g = Lgraph::open(path, Lg_type_id(comp.lgid));
   top_g     = current_g;
 
@@ -254,7 +254,7 @@ void Node_pin::set_sign() { get_lg()->ref_node_pin_unsigned_map()->erase(get_com
 
 bool Node_pin::is_unsign() const { return get_lg()->get_node_pin_unsigned_map().contains(get_compact_driver()); }
 
-mmap_lib::str Node_pin::get_type_sub_pin_name() const {
+std::string_view Node_pin::get_type_sub_pin_name() const {
   const auto node = get_node();
 
   const auto &sub    = node.get_type_sub_node();
@@ -277,7 +277,7 @@ float Node_pin::get_delay() const {
 
 void Node_pin::del_delay() { top_g->ref_node_pin_delay_map()->erase(get_compact_driver()); }
 
-void Node_pin::set_name(const mmap_lib::str &wname) {
+void Node_pin::set_name(std::string_view wname) {
   I(wname.size());  // empty names not allowed
 
   auto *ref = current_g->ref_node_pin_name_map();
@@ -289,7 +289,7 @@ void Node_pin::set_name(const mmap_lib::str &wname) {
   //I(rref_inserted); // name was not previously bound to something (erase or move API to cache errors)
 }
 
-void Node_pin::reset_name(const mmap_lib::str &wname) {
+void Node_pin::reset_name(std::string_view wname) {
   auto *ref  = current_g->ref_node_pin_name_map();
 
   auto it = ref->find(get_compact_class_driver());
@@ -395,7 +395,7 @@ std::string Node_pin::debug_name() const {
                       current_g->get_name().to_s());
 }
 
-mmap_lib::str Node_pin::get_wire_name() const {
+std::string Node_pin::get_wire_name() const {
   if (is_sink()) {
     auto dpin = get_driver_pin();
     if (dpin.is_invalid())
@@ -405,14 +405,14 @@ mmap_lib::str Node_pin::get_wire_name() const {
 
   if (has_name()) {
     if (is_hierarchical())
-      return mmap_lib::str::concat(hidx, "_", get_name());
+      return absl::StrCat(hidx, "_", get_name());
     return get_name();
   }
 
-  return mmap_lib::str::concat("__p", get_root_idx().value, "_", pid);
+  return absl::StrCat("__p", get_root_idx().value, "_", pid);
 }
 
-mmap_lib::str Node_pin::get_name() const {
+std::string Node_pin::get_name() const {
 #ifndef NDEBUG
   if (!is_graph_io()) {
     I(is_driver());
@@ -428,7 +428,7 @@ mmap_lib::str Node_pin::get_name() const {
 
 bool Node_pin::has_name() const { return current_g->get_node_pin_name_map().contains(get_compact_class_driver()); }
 
-Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
+Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
   auto       *ref = top->ref_node_pin_name_map();
   auto      *rref = top->ref_node_pin_name_rmap();
   {
@@ -457,7 +457,7 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, mmap_lib::str wname) {
   return {};
 }
 
-mmap_lib::str Node_pin::get_pin_name() const {
+std::string Node_pin::get_pin_name() const {
   if (is_graph_io()) {
     if (pid == 0) {
       return is_graph_output() ? "%" : "$";
@@ -477,7 +477,7 @@ mmap_lib::str Node_pin::get_pin_name() const {
 
   if (is_driver()) {
     if (Ntype::is_multi_driver(op))
-      return mmap_lib::str(pid);
+      return std::to_string(pid);
 
     return Ntype::get_driver_name(op);
   }

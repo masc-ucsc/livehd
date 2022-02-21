@@ -3,7 +3,7 @@
 #pragma once
 
 #include "lgraph_base_core.hpp"
-#include "mmap_tree.hpp"
+#include "lhtree.hpp"
 
 class Node;
 class Lgraph;

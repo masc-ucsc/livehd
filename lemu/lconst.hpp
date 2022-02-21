@@ -6,7 +6,6 @@
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
 #include "iassert.hpp"
-#include "mmap_str.hpp"
 
 using Bits_t               = uint32_t;  // bits type (future use)
 constexpr int    Bits_bits = 17;
@@ -41,7 +40,7 @@ protected:
   Bits_t bits;
   Number num;
 
-  mmap_lib::str skip_underscores(const mmap_lib::str txt) const;
+  std::string_view skip_underscores(std::string_view txt) const;
 
   Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {
     assert(d<Bits_max);
@@ -59,16 +58,16 @@ protected:
   const Number &get_num() const { return num; }
   void          adjust(const Lconst &o);
 
-  static std::pair<mmap_lib::str, mmap_lib::str> match_binary(const Lconst &l, const Lconst &r);
+  static std::pair<std::string, std::string> match_binary(const Lconst &l, const Lconst &r);
 
-  static mmap_lib::str to_string(Number num);
-  mmap_lib::str to_string() const { // use to_pyrope, to_verilog not the to_str directly
+  [[nodiscard]] static std::string to_string(Number num);
+  [[nodiscard]] std::string to_string() const { // use to_pyrope, to_verilog not the to_str directly
     I(explicit_str);
     return to_string(num);
   }
 
 public:
-  using Container = mmap_lib::str;
+  using Container = std::string;
 
   explicit Lconst(absl::Span<unsigned char> v);
   explicit Lconst(Number v);
@@ -76,24 +75,24 @@ public:
 
   Lconst();
 
-  mmap_lib::str to_field() const;  // tuple field (a subset of pyrope allowed)
-  mmap_lib::str to_binary() const;
-  mmap_lib::str to_verilog() const;
-  mmap_lib::str to_pyrope() const;
-  mmap_lib::str to_firrtl() const;
+  [[nodiscard]] std::string to_field() const;  // tuple field (a subset of pyrope allowed)
+  [[nodiscard]] std::string to_binary() const;
+  [[nodiscard]] std::string to_verilog() const;
+  [[nodiscard]] std::string to_pyrope() const;
+  [[nodiscard]] std::string to_firrtl() const;
 
   // TODO for from_verilog from_firrtl ...
-  static Lconst from_pyrope(const mmap_lib::str txt);
-  static Lconst from_binary(const mmap_lib::str txt, bool unsigned_result);
-  static Lconst from_string(const mmap_lib::str txt);
+  static Lconst from_pyrope(std::string_view txt);
+  static Lconst from_binary(std::string_view txt, bool unsigned_result);
+  static Lconst from_string(std::string_view txt);
   static Lconst invalid() { return Lconst(true, 0, 0); }
 
   static Lconst unknown(Bits_t nbits);
   static Lconst unknown_positive(Bits_t nbits);
   static Lconst unknown_negative(Bits_t nbits);
 
-  static Lconst unserialize(const mmap_lib::str &v);
-  mmap_lib::str serialize() const;
+  static Lconst unserialize(std::string_view v);
+  [[nodiscard]] std::string serialize() const;
 
   bool is_invalid() const { return explicit_str && bits == 0; }
 

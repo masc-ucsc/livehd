@@ -10,6 +10,9 @@
 
 #include <math.h>
 #include <stdint.h>
+
+namespace lh {
+
 constexpr uint64_t _wootp0 = 0xa0761d6478bd642full, _wootp1 = 0xe7037ed1a0b428dbull, _wootp2 = 0x8ebc6af09c88c6e3ull;
 constexpr uint64_t _wootp3 = 0x589965cc75374cc3ull, _wootp4 = 0x1d8e4e27c47d124full, _wootp5 = 0xeb44accab455d165ull;
 
@@ -258,3 +261,6 @@ static inline constexpr uint32_t woothash32(const void *key, uint64_t len, uint6
   seed = (seed ^ seed << 16) * (len ^ _wootp0 ^ seed >> 32);
   return (uint32_t)(seed - (seed >> 32));
 }
+
+}; // lh namespace
+

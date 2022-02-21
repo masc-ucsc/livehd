@@ -216,7 +216,7 @@ protected:
     void dump(uint32_t self_id) const;
   };
 
-  std::vector<Master_entry> table;  // to be replaced by mmap_lib::vector once it works
+  std::vector<Master_entry> table;
 
   uint32_t free_master_id;
   uint32_t free_overflow_id;

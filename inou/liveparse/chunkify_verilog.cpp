@@ -20,9 +20,9 @@
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 
-Chunkify_verilog::Chunkify_verilog(const mmap_lib::str &_path) : path(_path) { library = Graph_library::instance(path); }
+Chunkify_verilog::Chunkify_verilog(std::string_view _path) : path(_path) { library = Graph_library::instance(path); }
 
-int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
+int Chunkify_verilog::open_write_file(std::string_view filename) const {
   int fd = open(filename.to_s().c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
     throw scan_error(*this, "could not open {} for output", filename);
@@ -31,7 +31,7 @@ int Chunkify_verilog::open_write_file(const mmap_lib::str &filename) const {
   return fd;
 }
 
-bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, std::string_view text1, std::string_view text2) const {
+bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_view text1, std::string_view text2) const {
   if (elab_path.empty())
     return false;
 
@@ -67,7 +67,7 @@ bool Chunkify_verilog::is_same_file(const mmap_lib::str &module_name, std::strin
   return n == 0;  // same file if n==0
 }
 
-void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_view text1, std::string_view text2) const {
+void Chunkify_verilog::write_file(std::string_view filename, std::string_view text1, std::string_view text2) const {
   int fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -84,7 +84,7 @@ void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_vie
   close(fd);
 }
 
-void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_view text) const {
+void Chunkify_verilog::write_file(std::string_view filename, std::string_view text) const {
   auto fd = open_write_file(filename);
   if (fd < 0)
     return;
@@ -97,7 +97,7 @@ void Chunkify_verilog::write_file(const mmap_lib::str &filename, std::string_vie
   close(fd);
 }
 
-void Chunkify_verilog::add_io(Sub_node *sub, bool input, const mmap_lib::str &io_name, Port_ID pos) {
+void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos) {
   I(sub);
 
   auto dir = input ? Sub_node::Direction::Input : Sub_node::Direction::Output;
@@ -141,23 +141,23 @@ void Chunkify_verilog::elaborate() {
   TRACE_EVENT("inou", nullptr, [&bench_name](perfetto::EventContext ctx) { ctx.event()->set_name(bench_name); });
   Lbench bench("inou." + bench_name);
 
-  mmap_lib::str source(parse_path + "file_" + format_name);
+  auto source = absl::StrCat(parse_path , "file_" , format_name);
 
   write_file(source, get_memblock());
 
-  chunk_dir = mmap_lib::str(parse_path + "chunk_" + format_name);
+  chunk_dir = absl::StrCat(parse_path , "chunk_" , format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
-  elab_chunk_dir = mmap_lib::str();
+  elab_chunk_dir = "";
   if (!elab_path.empty()) {
-    elab_chunk_dir = mmap_lib::str::concat(elab_path, "/parse/chunk_", format_name);
+    elab_chunk_dir = absl::StrCat(elab_path, "/parse/chunk_", format_name);
   }
 
   bool in_module   = false;
   bool last_input  = false;
   bool last_output = false;
 
-  mmap_lib::str module_name;
+  std::string   module_name;
   Port_ID       module_io_pos = 1;
 
   // This has to be cut&pasted to each file
@@ -184,11 +184,11 @@ void Chunkify_verilog::elaborate() {
         }
         format_append(in_module_text);
         scan_next();
-        module_name   = mmap_lib::str::concat(module_name, scan_text());
+        absl::StrAppend(&module_name, scan_text());
         module_io_pos = 1;
         in_module     = true;
 
-        sub = &library->reset_sub(module_name, mmap_lib::str(source));
+        sub = &library->reset_sub(module_name, source);
         I(sub);
 
       } else if (txt == "input") {
@@ -242,10 +242,10 @@ void Chunkify_verilog::elaborate() {
       if (endmodule_found) {
         bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
-          auto outfile = mmap_lib::str(chunk_dir.to_s() + "/" + module_name.to_s() + ".v");
+          auto outfile = abls::StrCat(chunk_dir.to_s() , "/" , module_name.to_s() , ".v");
           write_file(outfile, not_in_module_text, in_module_text);
         }
-        module_name = mmap_lib::str();
+        module_name = "";
         in_module_text.clear();
       }
     }

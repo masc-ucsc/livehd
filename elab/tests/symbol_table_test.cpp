@@ -9,7 +9,6 @@
 class Symbol_table_test : public ::testing::Test {
 protected:
   void SetUp() override {
-    mmap_lib::str::setup(); // needed for overflowing strings
   }
 
   void TearDown() override {

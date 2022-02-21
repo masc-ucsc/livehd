@@ -12,12 +12,12 @@
 static Pass_plugin sample("pass_sample", Pass_sample::setup);
 
 void Pass_sample::setup() {
-  Eprp_method m1("pass.sample", mmap_lib::str("counts number of nodes in an lgraph"), &Pass_sample::work);
-  m1.add_label_optional("data", mmap_lib::str("just a sample parameter"));
+  Eprp_method m1("pass.sample", "counts number of nodes in an lgraph", &Pass_sample::work);
+  m1.add_label_optional("data", "just a sample parameter");
 
   register_pass(m1);
 
-  Eprp_method m2(mmap_lib::str("pass.sample.wirecount"), mmap_lib::str("counts number of wires the hierarchy"), &Pass_sample::wirecount);
+  Eprp_method m2("pass.sample.wirecount", "counts number of wires the hierarchy", &Pass_sample::wirecount);
   register_pass(m2);
 }
 

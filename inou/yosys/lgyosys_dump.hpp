@@ -30,7 +30,7 @@ private:
   void to_yosys(Lgraph *g);
 
   // absl::flat_hash_set<std::string_view>                            created_sub;
-  absl::flat_hash_set<mmap_lib::str>                               created_sub;
+  absl::flat_hash_set<std::string>                               created_sub;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            input_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            cell_output_map;
@@ -41,16 +41,16 @@ private:
 
   bool hierarchy;
 
-  mmap_lib::str unique_name(Lgraph *g, const std::string &test) {
-    mmap_lib::str tmp;
+  std::string unique_name(Lgraph *g, const std::string &test) {
+    std::string tmp;
     assert(test.size() >= 1);
     if (test[0] == '\\')
-      tmp = mmap_lib::str(test.substr(1));
+      tmp = test.substr(1);
     else
-      tmp = mmap_lib::str(test);
+      tmp = test;
 
     while (true) {
-      tmp = mmap_lib::str(absl::StrCat(test, "_", std::to_string(ids++)));
+      tmp = absl::StrCat(test, "_", std::to_string(ids++));
 
       if (g->get_node_pin_name_rmap().contains(tmp))
         continue;

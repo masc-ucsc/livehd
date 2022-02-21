@@ -16,7 +16,7 @@
 static Pass_plugin sample("pass_submatch", pass_submatch::setup);
 
 void pass_submatch::setup() {
-  Eprp_method m1("pass.submatch", mmap_lib::str("Find identical subgraphs"), &pass_submatch::work);
+  Eprp_method m1("pass.submatch", "Find identical subgraphs", &pass_submatch::work);
 
   register_pass(m1);
 }
@@ -50,12 +50,12 @@ uint64_t pass_submatch::hash_mffc_root(Node n) {
 
 uint64_t pass_submatch::hash_mffc_node(Node n_driver, uint64_t h_sink, Port_ID pid) {
   uint64_t i_hash[3] = { h_sink, hash_node(n_driver), static_cast<uint64_t>(pid) };
-  return mmap_lib::woothash64(i_hash, 24);
+  return lh::woothash64(i_hash, 24);
 }
 
 uint64_t pass_submatch::hash_mffc_leaf(uint64_t h_sink, Port_ID pid) {
   uint64_t i_hash[2] = { h_sink, static_cast<uint64_t>(pid) };
-  return mmap_lib::woothash64(i_hash, 16);
+  return lh::woothash64(i_hash, 16);
 }
 
 uint64_t pass_submatch::hash_node(Node n) {
@@ -65,8 +65,8 @@ uint64_t pass_submatch::hash_node(Node n) {
   for (auto e : n.inp_edges()) {
     i_hash.push_back(static_cast<uint16_t>(e.sink.get_pid()));
   }
-  h = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 2);
-  h = mmap_lib::woothash64(&h, 8, static_cast<uint64_t>(n.get_type_op()) & 0xFFFF);
+  h = lh::woothash64(i_hash.data(), i_hash.size() * 2);
+  h = lh::woothash64(&h, 8, static_cast<uint64_t>(n.get_type_op()) & 0xFFFF);
   return h;
 }
 
@@ -153,7 +153,7 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
       }
       if (i_hash.empty()) break;
       std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h_mffc = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 8);
+      uint64_t h_mffc = lh::woothash64(i_hash.data(), i_hash.size() * 8);
       h_mffc ^= mffc_depth_tree[id].back().h;
       mffc_depth_tree[id].push_back({h_mffc, mffc_size});
       max_mffc_depth = std::max(max_mffc_depth, mffc_depth);
@@ -244,9 +244,9 @@ void pass_submatch::find_subs(Lgraph *g) {
       }
       if (depth != max_depth) break;
       std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h = mmap_lib::woothash64(i_hash.data(), i_hash.size() * 8);
+      uint64_t h = lh::woothash64(i_hash.data(), i_hash.size() * 8);
       uint64_t n = static_cast<uint64_t>(node.get_type_op());
-      h = mmap_lib::waterhash(&n, 4, h & 0xFFFF);
+      h = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {
         node2depth_hash[node.get_compact()] = {h};
       } else {
@@ -279,7 +279,7 @@ void pass_submatch::find_subs(Lgraph *g) {
     Node node = Node(g, compact_node);
     uint64_t pid;
     uint64_t n = static_cast<uint64_t>(node.get_type_op());
-    uint64_t h = mmap_lib::woothash64(&n, 8);
+    uint64_t h = lh::woothash64(&n, 8);
     node2height_hash[compact_node] = {Root_hash(compact_node, h)};
     for (uint64_t height = 1; has_output; ++height) {
       has_output = false;
@@ -294,7 +294,7 @@ void pass_submatch::find_subs(Lgraph *g) {
       if (!has_output) break;
       if (node2depth_hash[node.get_compact()].size() < height) break;
       h ^= node2depth_hash[node.get_compact()][height-1];
-      h = mmap_lib::waterhash(&h, 4, pid & 0xFFFF);
+      h = lh::waterhash(&h, 4, pid & 0xFFFF);
       node2height_hash[compact_node].emplace_back(Root_hash(node.get_compact(), h));
 
       if (height_hash2node.size() < height) {

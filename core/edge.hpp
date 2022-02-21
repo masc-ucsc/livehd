@@ -83,13 +83,3 @@ public:
   // END ATTRIBUTE ACCESSORS
 };
 
-namespace mmap_lib {
-template <>
-struct hash<XEdge::Compact> {
-  size_t operator()(XEdge::Compact const &o) const {
-    auto key = woothash64(static_cast<const void *>(&o), sizeof(o));
-    return hash<uint64_t>{}(key);
-  }
-};
-
-}  // namespace mmap_lib

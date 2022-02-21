@@ -12,47 +12,45 @@ public:
 
   // static std::vector<std::shared_ptr<Lnast>> pick_lnast();
 
-  // static inline absl::flat_hash_map<mmap_lib::str, std::shared_ptr<Lnast>> parsed_lnasts;
-
   int                    tmp_var_cnt;
   std::shared_ptr<Lnast> lnast;
   Lnast_nid              idx_stmts;
 
   enum class Net_attr { Input, Output, Register, Local };
 
-  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> vname2lname;
+  absl::flat_hash_map<std::string, std::string> vname2lname;
 
-  mmap_lib::str create_lnast_tmp();
-  mmap_lib::str get_lnast_name(mmap_lib::str val);
-  mmap_lib::str get_lnast_lhs_name(mmap_lib::str val);
+  std::string create_lnast_tmp();
+  std::string get_lnast_name(std::string_view val);
+  std::string get_lnast_lhs_name(std::string_view val);
 
-  void new_lnast(mmap_lib::str name);
+  void new_lnast(std::string name);
 
-  // static bool has_lnast(mmap_lib::str name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
+  // static bool has_lnast(std::string name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
-  mmap_lib::str create_mask_stmts(mmap_lib::str dest_max_bit);
-  mmap_lib::str create_bitmask_stmts(mmap_lib::str max_bit, mmap_lib::str min_bit);
-  mmap_lib::str create_bit_not_stmts(mmap_lib::str var_name);
-  mmap_lib::str create_logical_not_stmts(mmap_lib::str var_name);
-  mmap_lib::str create_reduce_or_stmts(mmap_lib::str var_name);
+  std::string create_mask_stmts(std::string_view dest_max_bit);
+  std::string create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit);
+  std::string create_bit_not_stmts(std::string_view var_name);
+  std::string create_logical_not_stmts(std::string_view var_name);
+  std::string create_reduce_or_stmts(std::string_view var_name);
 
-  mmap_lib::str create_sra_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_pick_bit_stmts(mmap_lib::str a_var, mmap_lib::str pos);
-  mmap_lib::str create_sext_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_bit_and_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_bit_or_stmts(const std::vector<mmap_lib::str>& var);
-  mmap_lib::str create_bit_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_shl_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_mask_xor_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  void          create_dp_assign_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  void          create_assign_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  void          create_declare_bits_stmts(mmap_lib::str a_var, bool is_signed, int bits);
-  mmap_lib::str create_minus_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_plus_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_mult_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_div_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  mmap_lib::str create_mod_stmts(mmap_lib::str a_var, mmap_lib::str b_var);
-  // mmap_lib::str create_select_stmts(mmap_lib::str sel_var, mmap_lib::str sel_field);
-  mmap_lib::str create_get_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask);
-  void          create_set_mask_stmts(mmap_lib::str sel_var, mmap_lib::str bitmask, mmap_lib::str value);
+  std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_pick_bit_stmts(std::string_view a_var, std::string_view pos);
+  std::string create_sext_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_bit_or_stmts(const std::vector<std::string>& var);
+  std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_mask_xor_stmts(std::string_view a_var, std::string_view b_var);
+  void          create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
+  void          create_assign_stmts(std::string_view a_var, std::string_view b_var);
+  void          create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
+  std::string create_minus_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_plus_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_mult_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_div_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
+  // std::string create_select_stmts(std::string_view sel_var, std::string_view sel_field);
+  std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
+  void          create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
 };

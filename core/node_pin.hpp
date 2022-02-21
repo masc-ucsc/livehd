@@ -63,7 +63,6 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class mmap_lib::hash<Node_pin::Compact>;
 
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -109,7 +108,6 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class mmap_lib::hash<Node_pin::Compact_flat>;
 
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -154,7 +152,6 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class mmap_lib::hash<Node_pin::Compact_driver>;
 
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -197,7 +194,6 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class mmap_lib::hash<Node_pin::Compact_class>;
 
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -237,7 +233,6 @@ public:
     friend class Flow_base_iterator;
     friend class Fwd_edge_iterator;
     friend class Bwd_edge_iterator;
-    friend class mmap_lib::hash<Node_pin::Compact_class_driver>;
 
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
@@ -271,7 +266,7 @@ public:
   constexpr Node_pin() : top_g(nullptr), current_g(nullptr), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
   Node_pin(Lgraph *_g, const Compact &comp);
-  Node_pin(const mmap_lib::str &path, const Compact_flat &comp);
+  Node_pin(std::string_view path, const Compact_flat &comp);
   Node_pin(Lgraph *_g, const Compact_driver &comp);
   Node_pin(Lgraph *_g, const Compact_class &comp);
   Node_pin(Lgraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
@@ -397,15 +392,15 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
   [[nodiscard]] std::string debug_name() const;
-  [[nodiscard]] mmap_lib::str get_wire_name() const;
+  [[nodiscard]] std::string get_wire_name() const;
 
-  void             set_name(const mmap_lib::str &wname);
-  void             reset_name(const mmap_lib::str &wname);
+  void             set_name(std::string_view wname);
+  void             reset_name(std::string_view wname);
   void             del_name();
-  [[nodiscard]] mmap_lib::str get_name() const;
+  [[nodiscard]] std::string get_name() const;
   [[nodiscard]] bool             has_name() const;
-  [[nodiscard]] static Node_pin  find_driver_pin(Lgraph *top, mmap_lib::str wname);
-  [[nodiscard]] mmap_lib::str get_pin_name() const;
+  [[nodiscard]] static Node_pin  find_driver_pin(Lgraph *top, std::string_view wname);
+  [[nodiscard]] std::string get_pin_name() const;
 
   void  set_delay(float val);
   void  del_delay();
@@ -421,7 +416,7 @@ public:
   void set_sign();
   [[nodiscard]] bool is_unsign() const;
 
-  [[nodiscard]] mmap_lib::str get_type_sub_pin_name() const;
+  [[nodiscard]] std::string_view get_type_sub_pin_name() const;
 
   void   set_offset(Bits_t offset);
   [[nodiscard]] Bits_t get_offset() const;
@@ -437,44 +432,3 @@ public:
   [[nodiscard]] Node_pin get_up_pin() const;
 };
 
-namespace mmap_lib {
-template <>
-struct hash<Node_pin::Compact> {
-  size_t operator()(Node_pin::Compact const &o) const {
-    uint64_t h = o.idx;
-    h          = (h << 12) ^ o.hidx.hash() ^ o.idx;
-    return hash<uint64_t>{}((h << 1) + o.sink);
-  }
-};
-
-template <>
-struct hash<Node_pin::Compact_flat> {
-  size_t operator()(Node_pin::Compact_flat const &o) const {
-    uint64_t h = o.lgid;
-    h          = (h << 12) ^ o.idx;
-    return hash<uint64_t>{}((h << 1) + o.sink);
-  }
-};
-
-template <>
-struct hash<Node_pin::Compact_driver> {
-  size_t operator()(Node_pin::Compact_driver const &o) const {
-    uint64_t h = o.idx;
-    h          = (h << 12) ^ o.hidx.hash() ^ o.idx;
-    return hash<uint64_t>{}(h);
-  }
-};
-
-template <>
-struct hash<Node_pin::Compact_class> {
-  size_t operator()(Node_pin::Compact_class const &o) const {
-    uint32_t h = o.idx;
-    return hash<uint32_t>{}((h << 1) + o.sink);
-  }
-};
-
-template <>
-struct hash<Node_pin::Compact_class_driver> {
-  size_t operator()(Node_pin::Compact_class_driver const &o) const { return hash<uint32_t>{}(o.idx); }
-};
-}  // namespace mmap_lib

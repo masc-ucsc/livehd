@@ -15,7 +15,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//task",
-        "//mmap_lib:headers",
         "@boost//:multiprecision",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",

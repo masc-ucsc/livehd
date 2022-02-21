@@ -15,7 +15,7 @@ pts_hier='sum funcall'
 pts_hier2='sum2 funcall2'
 
 #TO ADD, BUT BUGS:
-#  Hits mmap_lib assertion failure in pass.bitwidth
+#  Hits assertion failure in pass.bitwidth
 #     - scalar_tuple
 #  Problems with registers (attr specified into ln during lg->ln don't all work yet in ln->lg)
 #     - reg_bits_set

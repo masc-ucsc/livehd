@@ -20,7 +20,7 @@ class Graphviz {
 private:
   // const bool bits;
   const bool        verbose;
-  const mmap_lib::str odir;
+  const std::string odir;
 
   absl::flat_hash_map<int, std::string> color2rgb;
 
@@ -28,17 +28,17 @@ private:
 
   static void        populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose);
   static std::string graphviz_legalize_name(std::string_view name);
-  static std::string graphviz_legalize_name(const mmap_lib::str &name) {
+  static std::string graphviz_legalize_name(std::string_view name) {
     return graphviz_legalize_name(name.to_s());
   }
   void               populate_lg_data(Lgraph *g, std::string_view dot_postfix = "");
 
-  void save_graph(const mmap_lib::str &name, std::string_view dot_postfix, const std::string &data);
+  void save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data);
 
 public:
   void do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_view dot_postfix = "");
   void do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix = "");
   void do_hierarchy(Lgraph *g);
 
-  Graphviz(bool _bits, bool _verbose, mmap_lib::str _odir);
+  Graphviz(bool _bits, bool _verbose, std::string_view _odir);
 };

@@ -10,7 +10,7 @@
 static Pass_plugin semantic("pass_semantic", Pass_semantic::setup);
 
 void Pass_semantic::setup() {
-  Eprp_method m1("pass.semantic", mmap_lib::str("semantic check for LANST"), &Pass_semantic::work);
+  Eprp_method m1("pass.semantic", "semantic check for LANST", &Pass_semantic::work);
 
   register_pass(m1);
 }

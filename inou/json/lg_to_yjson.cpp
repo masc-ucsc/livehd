@@ -174,7 +174,7 @@ yjson::Module* LGtoYJson::add_new_module(yjson::StrTyp name) {
 }
 
 void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
-  absl::flat_hash_map<mmap_lib::str, uint32_t> unique_inputs;
+  absl::flat_hash_map<std::string, uint32_t> unique_inputs;
   auto                                         inp_io_node = lg->get_graph_input_node();
   // map each unique INPUT to its width
   for (const auto& edge : inp_io_node.out_edges()) {
@@ -196,7 +196,7 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
   }
 
   // map each unique output to its width
-  absl::flat_hash_map<mmap_lib::str, uint32_t> unique_outputs;
+  absl::flat_hash_map<std::string, uint32_t> unique_outputs;
   auto                                         out_io_node = lg->get_graph_output_node();
   for (const auto& edge : out_io_node.inp_edges()) {
     auto sink_pid = edge.sink.get_pid();
@@ -287,8 +287,8 @@ void LGtoYJson::to_json(Eprp_var& var) {
     import_module(lg);
   }
 
-  mmap_lib::str odir(var.get("odir"));
-  auto          file_name = mmap_lib::str::concat(odir, "/", var.lgs[0]->get_name(), ".json");
+  std::string odir(var.get("odir"));
+  auto          file_name = absl::StrCat(odir, "/", var.lgs[0]->get_name(), ".json");
 
   ofstream outdata;  // outdata is like cin
   outdata.open(file_name.to_s());

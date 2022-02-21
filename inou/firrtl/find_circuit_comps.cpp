@@ -10,7 +10,7 @@
  * Firrtl Module. */
 void Inou_firrtl::FindCircuitComps(Lnast &ln, firrtl::FirrtlPB_Module_UserModule *umod) {
   fmt::print("FindCircuitComps\n");
-  const auto stmts = ln.get_first_child(mmap_lib::Tree_index::root());
+  const auto stmts = ln.get_first_child(lh::Tree_index::root());
   for (const auto &lnidx : ln.children(stmts)) {
     SearchNode(ln, lnidx, umod);
   }
@@ -107,7 +107,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
   } else if (tup_node_name == "memory2") {
     // memory2 tuple helps map memory1 temp names to port names
     auto             first = true;
-    mmap_lib::str tup_name;
+    std::string tup_name;
     for (const auto &child : ln.children(tup_node)) {
       if (first) {
         tup_name = ln.get_name(child);
@@ -397,7 +397,7 @@ void Inou_firrtl::CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrt
  * Thus, we must specify what name we will use. In general, take
  * output tuple name and make that the standard (means changing
  * input tuple names to match output tuple when seen in LNAST). */
-mmap_lib::str Inou_firrtl::ConvergeFCallName(const mmap_lib::str &func_out, const mmap_lib::str &func_inp) {
+std::string Inou_firrtl::ConvergeFCallName(std::string_view func_out, std::string_view func_inp) {
   if (func_inp.substr(0, 4) == "inp_" && func_out.substr(0, 4) == "out_" && func_inp.substr(4) == func_out.substr(4)) {
     // Specific case from FIRRTL->LNAST translation.
     // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo

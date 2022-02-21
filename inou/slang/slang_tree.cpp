@@ -5,7 +5,6 @@
 
 #include "fmt/format.h"
 #include "iassert.hpp"
-#include "mmap_str.hpp"
 #include "slang/compilation/Compilation.h"
 #include "slang/compilation/Definition.h"
 #include "slang/symbols/ASTSerializer.h"
@@ -73,12 +72,12 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
       I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
-      mmap_lib::str var_name;
+      std::string var_name;
       if (port.direction == slang::ArgumentDirection::In) {
-        var_name = mmap_lib::str::concat("$.:", decl_pos, ":", port.name);
+        var_name = absl::StrCat("$.:", decl_pos, ":", port.name);
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       } else {
-        var_name = mmap_lib::str::concat("%.:", decl_pos, ":", port.name);
+        var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       }
 
@@ -109,7 +108,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       const auto &ns   = member.as<slang::NetSymbol>();
       auto *      expr = ns.getInitializer();
       if (expr) {
-        // mmap_lib::str lhs_var = lnast_create_obj.get_lnast_name(member.name);
+        // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
         lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr));
       }
     } else if (member.kind == slang::SymbolKind::ContinuousAssign) {
@@ -170,12 +169,12 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 bool Slang_tree::process(const slang::AssignmentExpression &expr) {
   const auto &lhs = expr.left();
 
-  mmap_lib::str var_name;
+  std::string var_name;
   bool          dest_var_sign;
   int           dest_var_bits;
 
-  mmap_lib::str dest_max_bit;
-  mmap_lib::str dest_min_bit;
+  std::string dest_max_bit;
+  std::string dest_min_bit;
 
   if (lhs.kind == slang::ExpressionKind::NamedValue) {
     const auto &var = lhs.as<slang::NamedValueExpression>();
@@ -231,7 +230,7 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
   return true;
 }
 
-mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
+std::string Slang_tree::process_expression(const slang::Expression &expr) {
   if (expr.kind == slang::ExpressionKind::NamedValue) {
     const auto &nv = expr.as<slang::NamedValueExpression>();
     return lnast_create_obj.get_lnast_name(nv.symbol.name);
@@ -243,11 +242,11 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
     slang::SmallVectorSized<char, 32> buffer;
     if (!svint.hasUnknown() && svint.getMinRepresentedBits() < 8) {
       svint.writeTo(buffer, slang::LiteralBase::Decimal, false);
-      return mmap_lib::str(buffer.data(), buffer.size());
+      return std::string(buffer.data(), buffer.size());
     }
 
     svint.writeTo(buffer, slang::LiteralBase::Hex, false);
-    return mmap_lib::str::concat("0x", mmap_lib::str(buffer.data(), buffer.size()));
+    return absl::StrCat("0x", std::string_view(buffer.data(), buffer.size()));
   }
 
   if (expr.kind == slang::ExpressionKind::BinaryOp) {
@@ -255,7 +254,7 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
     auto        lhs = process_expression(op.left());
     auto        rhs = process_expression(op.right());
 
-    mmap_lib::str var;
+    std::string var;
     switch (op.op) {
       case slang::BinaryOperator::Add: var = lnast_create_obj.create_plus_stmts(lhs, rhs); break;
       case slang::BinaryOperator::Subtract: var = lnast_create_obj.create_minus_stmts(lhs, rhs); break;
@@ -360,7 +359,7 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
 
     auto offset = 0u;
 
-    std::vector<mmap_lib::str> adjusted_fields;
+    std::vector<std::string> adjusted_fields;
 
     for (const auto &e : concat.operands()) {
       auto bits = e->type->getBitWidth();
@@ -410,7 +409,7 @@ mmap_lib::str Slang_tree::process_expression(const slang::Expression &expr) {
   return "FIXME_op";
 }
 
-mmap_lib::str Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
+std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
   // reduce and does not have a direct mapping in Lgraph
   // And(Not(Ror(Not(inp))), inp.MSB)
 
@@ -425,7 +424,7 @@ mmap_lib::str Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) 
                                                lnast_create_obj.create_sra_stmts(inp, msb_pos));  // No need pick (reduce is 1 bit)
 }
 
-mmap_lib::str Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
+std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
   const auto &op = uexpr.operand();
 
   auto inp = process_expression(op);

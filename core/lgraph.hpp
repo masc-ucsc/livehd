@@ -30,7 +30,7 @@ protected:
 
   Hierarchy htree;
 
-  explicit Lgraph(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib);
+  explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
 
   Index_id get_root_idx(Index_id idx) const {
 
@@ -195,19 +195,19 @@ public:
   Bwd_edge_iterator  backward(bool visit_sub = false);
   Fast_edge_iterator fast(bool visit_sub = false);
 
-  Lgraph *clone_skeleton(const mmap_lib::str &new_lg_name);
+  Lgraph *clone_skeleton(std::string_view new_lg_name);
 
-  static bool    exists(const mmap_lib::str &path, const mmap_lib::str &name);
-  static Lgraph *create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source);
-  static Lgraph *open(const mmap_lib::str &path, Lg_type_id lgid);
-  static Lgraph *open(const mmap_lib::str &path, const mmap_lib::str &name);
-  static Lgraph *open_or_create(const mmap_lib::str &path, const mmap_lib::str &name, const mmap_lib::str &source);
-  static void    rename(const mmap_lib::str &path, const mmap_lib::str &orig, const mmap_lib::str &dest);
+  static bool    exists(std::string_view path, std::string_view name);
+  static Lgraph *create(std::string_view path, std::string_view name, std::string_view source);
+  static Lgraph *open(std::string_view path, Lg_type_id lgid);
+  static Lgraph *open(std::string_view path, std::string_view name);
+  static Lgraph *open_or_create(std::string_view path, std::string_view name, std::string_view source);
+  static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
 
   void clear() override;
 
-  Node_pin add_graph_input(const mmap_lib::str str, Port_ID pos, uint32_t bits);
-  Node_pin add_graph_output(const mmap_lib::str str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_input(std::string_view str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_output(std::string_view str, Port_ID pos, uint32_t bits);
 
   Node create_node();
 
@@ -224,7 +224,7 @@ public:
 
   Node create_node_lut(const Lconst &value);
   Node create_node_sub(Lg_type_id sub);
-  Node create_node_sub(const mmap_lib::str &sub_name);
+  Node create_node_sub(std::string_view sub_name);
 
   const Sub_node &get_self_sub_node() const;  // Access all input/outputs
   Sub_node *      ref_self_sub_node();        // Access all input/outputs
@@ -237,12 +237,12 @@ public:
   Node get_graph_input_node(bool hier = false);
   Node get_graph_output_node(bool hier = false);
 
-  Node_pin get_graph_input(const mmap_lib::str &str);
-  Node_pin get_graph_output(const mmap_lib::str &str);
-  Node_pin get_graph_output_driver_pin(const mmap_lib::str &str);
+  Node_pin get_graph_input(std::string_view str);
+  Node_pin get_graph_output(std::string_view str);
+  Node_pin get_graph_output_driver_pin(std::string_view str);
 
-  bool has_graph_input(const mmap_lib::str &name) const;
-  bool has_graph_output(const mmap_lib::str &name) const;
+  bool has_graph_input(std::string_view name) const;
+  bool has_graph_output(std::string_view name) const;
 
   // Iterators defined in the lgraph_each.cpp
 

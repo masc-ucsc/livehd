@@ -3,6 +3,7 @@
 
 #include "bitwidth.hpp"
 #include "lgraph.hpp"
+#include "pass.hpp"
 
 // Useful for debug
 //#define PRESERVE_ATTR_NODE
@@ -10,10 +11,10 @@
 static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
 void Pass_bitwidth::setup() {
-  Eprp_method m1("pass.bitwidth", mmap_lib::str("MIT algorithm for bitwidth optimization"), &Pass_bitwidth::trans);
+  Eprp_method m1("pass.bitwidth", "MIT algorithm for bitwidth optimization", &Pass_bitwidth::trans);
 
-  m1.add_label_optional("max_iterations", mmap_lib::str("maximum number of iterations to try"), "3");
-  m1.add_label_optional("hier", mmap_lib::str("hierarchical bitwidth"), "false");
+  m1.add_label_optional("max_iterations", "maximum number of iterations to try", "3");
+  m1.add_label_optional("hier", "hierarchical bitwidth", "false");
 
   register_pass(m1);
 }

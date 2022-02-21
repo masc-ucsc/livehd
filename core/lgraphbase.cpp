@@ -14,7 +14,7 @@
 // Checks internal invalid insertions. Worth only if the node_internal is patched
 // #define DEBUG_SLOW
 
-Lgraph_Base::Lgraph_Base(const mmap_lib::str &_path, const mmap_lib::str &_name, Lg_type_id _lgid, Graph_library *_lib) noexcept
+Lgraph_Base::Lgraph_Base(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
     : Lgraph_base_core(_path, _name, _lgid)
     // , node_internal(path.to_s(), absl::StrCat("lg_", std::to_string(_lgid), "_nodes"))
     , library(_lib) {}

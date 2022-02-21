@@ -24,7 +24,7 @@ void Top_api::files(Eprp_var &var) {
       Main_api::error("invalid src_path:{}, is it a valid directory?", src_path);
       return;
     }
-    std::vector<mmap_lib::str> sort_files;
+    std::vector<std::string> sort_files;
     struct dirent *          dp;
     while ((dp = readdir(dirp)) != NULL) {
       if (dp->d_type == DT_DIR)
@@ -32,27 +32,27 @@ void Top_api::files(Eprp_var &var) {
       std::string filename(dp->d_name); // string looks for 0 sequence
       if (match.empty()) {
         if (filter.empty()) {
-          sort_files.push_back(mmap_lib::str(filename));
+          sort_files.push_back(filename);
         } else if (!std::regex_search(filename, filter_regex)) {
-          sort_files.push_back(mmap_lib::str(filename));
+          sort_files.push_back(filename);
         }
       } else if (std::regex_search(filename, txt_regex)) {
         if (filter.empty()) {
-          sort_files.push_back(mmap_lib::str(filename));
+          sort_files.push_back(filename);
         } else if (!std::regex_search(filename, filter_regex)) {
-          sort_files.push_back(mmap_lib::str(filename));
+          sort_files.push_back(filename);
         }
       }
     }
     closedir(dirp);
 
     std::sort(sort_files.begin(), sort_files.end());
-    mmap_lib::str files;
+    std::string files;
     for (const auto &s : sort_files) {
       if (!files.empty())
-        files = mmap_lib::str::concat(files, ",", src_path, "/", s);
+        absl::StrAppend(&files, ",", src_path, "/", s);
       else
-        files = mmap_lib::str::concat(            src_path, "/", s);
+        files = abls::StrCat(        src_path, "/", s);
     }
 
     var.add("files", files);

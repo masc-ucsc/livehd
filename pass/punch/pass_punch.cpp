@@ -12,10 +12,10 @@ static Pass_plugin sample("pass_punch", Pass_punch::setup);
 Pass_punch::Pass_punch(const Eprp_var &var) : Pass("pass.punch", var) {}
 
 void Pass_punch::setup() {
-  Eprp_method m1("pass.punch", mmap_lib::str("punch wires between modules"), &Pass_punch::work);
+  Eprp_method m1("pass.punch", "punch wires between modules", &Pass_punch::work);
 
-  m1.add_label_required("src", mmap_lib::str("source module:net name to tap. E.g: top_mod:a_instance.b_instance->a_wire_name"));
-  m1.add_label_required("dst", mmap_lib::str("destination module:net name to connect. E.g: top_mod:c_instance.d_instance->b_wire_name"));
+  m1.add_label_required("src", "source module:net name to tap. E.g: top_mod:a_instance.b_instance->a_wire_name");
+  m1.add_label_required("dst", "destination module:net name to connect. E.g: top_mod:c_instance.d_instance->b_wire_name");
 
   register_pass(m1);
 }

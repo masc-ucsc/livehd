@@ -41,7 +41,7 @@ void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move
 
 void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(lnast); }
 
-void Eprp_var::add(const mmap_lib::str &name, const mmap_lib::str &value) {
+void Eprp_var::add(std::string_view name, std::string_view value) {
 
   if (name == "files") {
     for (const auto &v : value.split(',')) {
@@ -81,16 +81,16 @@ void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<
   // lnasts[indx] = lnast_new;
 }
 
-void Eprp_var::delete_label(const mmap_lib::str &name) {
+void Eprp_var::delete_label(std::string_view name) {
   auto it = dict.find(name);
   if (it != dict.end())
     dict.erase(it);
 }
 
-mmap_lib::str Eprp_var::get(const mmap_lib::str &name) const {
+std::string_view Eprp_var::get(std::string_view name) const {
   const auto &elem = dict.find(name);
   if (elem == dict.end()) {
-    return mmap_lib::str();
+    return "";
   }
   return elem->second;
 }

@@ -12,7 +12,6 @@
 #include "gtest/gtest.h"
 #include "lbench.hpp"
 #include "lrand.hpp"
-#include "mmap_map.hpp"
 #include "sint.hpp"
 #include "uint.hpp"
 
@@ -68,11 +67,9 @@ protected:
 
 public:
   void TearDown() override {
-    mmap_lib::str::nuke();
   }
 
   void SetUp() override {
-    mmap_lib::str::setup();
 
     a16u  = UInt<16>(0xcafe);
     b16u  = UInt<16>(0xbebe);
@@ -903,9 +900,9 @@ TEST_F(Lconst_test, Storage) {
   print_method(076543210765432107654321_uint);
   fmt::print("verilog: {}\n", (076543210765432107654321_uint).to_verilog());
 
-  mmap_lib::map<uint32_t, mmap_lib::str> map;
+  absl::flat_hash_map<uint32_t, std::string> map;
 
-  map.set(12345, mmap_lib::str((0x12345_uint).to_string()));
+  map.set(12345, (0x12345_uint).to_string());
   EXPECT_TRUE(map.has(12345));
   auto v = map.get(12345);
   EXPECT_EQ(v, "0x12345");
@@ -977,7 +974,7 @@ TEST_F(Lconst_test, hexa_check) {
   //auto v1 = Lconst::from_pyrope("0xdbd7b0ac8a3a5dcb7ada8e8a30ea6dc54ebe6bc7a37d2d8b2cd2a");
   auto v1 = Lconst::from_pyrope("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
 
-  mmap_lib::str str("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
+  std::string str("0x64a02e47a5ceca6e50ccbded70bbc7ca56e644d5ee1eb447ea14e33d53a6e5d");
 
   auto s1 = v1.serialize();
 
@@ -1003,12 +1000,12 @@ TEST_F(Lconst_test, hexa_check_long) {
 
   unlink("lgdb_attr/c_map");
 
-  mmap_lib::map<uint32_t, mmap_lib::str> c_map("lgdb_attr","c_map");
+  absl::flat_hash_map<uint32_t, std::string> c_map("lgdb_attr","c_map");
 
   Lrand<size_t> rnd;
   const size_t  n_const = rnd.between(200, 3000);
 
-  std::vector<mmap_lib::str> rnd_list;
+  std::vector<std::string> rnd_list;
   Lrand_range<int>         num_digits(1, 200);
   Lrand_range<char>        hex1_digits('0', '9');
   Lrand_range<char>        hex2_digits('a', 'f');
@@ -1102,7 +1099,7 @@ TEST_F(Lconst_test, dec_check) {
   for (auto i = 0u; i < n_const; ++i) {
     boost::multiprecision::cpp_int c(rnd_list[i]);
 
-    mmap_lib::str padded;
+    std::string padded;
     bool digit_found=false;
     for (const auto ch : rnd_list[i]) {
       if (flip.any() && digit_found)
@@ -1112,7 +1109,7 @@ TEST_F(Lconst_test, dec_check) {
         digit_found = true;
     }
 
-    auto a1 = Lconst::from_pyrope(mmap_lib::str(rnd_list[i]));
+    auto a1 = Lconst::from_pyrope(rnd_list[i]);
     EXPECT_EQ(a1.get_raw_num(), c);
 
     auto a2 = Lconst::from_pyrope(padded);
@@ -1146,19 +1143,19 @@ TEST_F(Lconst_test, string) {
   EXPECT_EQ(a.to_pyrope(), "'cadena'");
   EXPECT_EQ(b.to_pyrope(), "'cadena'");
 
-  EXPECT_EQ(Lconst::from_string("a longer chain of text").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("a longer chain of text").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_string("'a longer chain of text'").to_pyrope(), mmap_lib::str("'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("\'a longer chain of text").to_pyrope(), mmap_lib::str("'\'a longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), mmap_lib::str("0"));
-  EXPECT_EQ(Lconst::from_pyrope("''").to_pyrope(), mmap_lib::str("''"));
-  EXPECT_EQ(Lconst::from_string("''").to_pyrope(), mmap_lib::str("''"));
-  EXPECT_EQ(Lconst::from_string("''''").to_pyrope(), mmap_lib::str("''''")); // Lconst::from_pyrope("''''") raises an exception
+  EXPECT_EQ(Lconst::from_string("a longer chain of text").to_pyrope(), "'a longer chain of text'");
+  EXPECT_EQ(Lconst::from_pyrope("a longer chain of text").to_pyrope(), "'a longer chain of text'");
+  EXPECT_EQ(Lconst::from_pyrope("'a longer chain of text'").to_pyrope(), "'a longer chain of text'");
+  EXPECT_EQ(Lconst::from_string("'a longer chain of text'").to_pyrope(), "'a longer chain of text'");
+  EXPECT_EQ(Lconst::from_pyrope("\'a longer chain of text").to_pyrope(), "'\'a longer chain of text'");
+  EXPECT_EQ(Lconst::from_pyrope("").to_pyrope(), "0");
+  EXPECT_EQ(Lconst::from_pyrope("''").to_pyrope(), "''");
+  EXPECT_EQ(Lconst::from_string("''").to_pyrope(), "''");
+  EXPECT_EQ(Lconst::from_string("''''").to_pyrope(), "''''"); // Lconst::from_pyrope("''''") raises an exception
 
-  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), mmap_lib::str("'__longer chain of text'"));
-  EXPECT_EQ(Lconst::from_pyrope("_").to_pyrope(), mmap_lib::str("'_'"));
-  EXPECT_EQ(Lconst::from_pyrope("a").to_pyrope(), mmap_lib::str("'a'"));
+  EXPECT_EQ(Lconst::from_pyrope("__longer chain of text").to_pyrope(), "'__longer chain of text'");
+  EXPECT_EQ(Lconst::from_pyrope("_").to_pyrope(), "'_'");
+  EXPECT_EQ(Lconst::from_pyrope("a").to_pyrope(), "'a'");
 
   EXPECT_TRUE(Lconst::from_pyrope("_").is_string());
   EXPECT_FALSE(Lconst::from_pyrope("0").is_string());
@@ -1300,7 +1297,7 @@ TEST_F(Lconst_test, binary) {
 }
 
 TEST_F(Lconst_test, serialize) {
-  mmap_lib::map<uint32_t, Lconst::Container> map;
+  absl::flat_hash_map<uint32_t, Lconst::Container> map;
 
   Lconst a(255);
   Lconst b = Lconst::from_pyrope("0xFF");
@@ -1331,7 +1328,7 @@ TEST_F(Lconst_test, serialize) {
 TEST_F(Lconst_test, serialize2a) {
   {
     unlink("tmp_lemu/const");
-    mmap_lib::map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
+    absl::flat_hash_map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
 
     Lconst a(255);
     Lconst b = Lconst::from_pyrope("0xFF");
@@ -1342,7 +1339,7 @@ TEST_F(Lconst_test, serialize2a) {
     map.set(3, c.serialize());
   }
   {
-    mmap_lib::map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
+    absl::flat_hash_map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
 
     auto s_a = Lconst::unserialize(map.get(1));
     auto s_b = Lconst::unserialize(map.get(2));

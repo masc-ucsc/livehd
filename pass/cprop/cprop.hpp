@@ -25,7 +25,7 @@ protected:
 
   std::tuple<Node_pin, std::shared_ptr<Lgtuple const>> get_value(const Node &node) const;
 
-  void add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, const mmap_lib::str &key, Node_pin &pin);
+  void add_pin_with_check(const std::shared_ptr<Lgtuple> &tup, std::string_view key, Node_pin &pin);
 
   void collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_ordered);
   void collapse_forward_sum(Node &node, XEdge_iterator &inp_edges_ordered);
@@ -54,7 +54,7 @@ protected:
   bool handle_runtime_index(Node &tg_node, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup); 
   bool is_runtime_index_case(const std::shared_ptr<Lgtuple const> &node_tup);
 
-  Node_pin expand_data_and_attributes(Node &node, const mmap_lib::str &key_name, XEdge_iterator &pending_out_edges,
+  Node_pin expand_data_and_attributes(Node &node, std::string_view key_name, XEdge_iterator &pending_out_edges,
                                       const std::shared_ptr<Lgtuple const> &node_tup);
 
   // handle tuple issues but allowed to "mutate" the node
@@ -78,7 +78,7 @@ protected:
   // Delete node and all the previous nodes feeding this one if single user
   void bwd_del_node(Node &node);
 
-  std::tuple<mmap_lib::str, mmap_lib::str> get_tuple_name_key(const Node &node) const;
+  std::tuple<std::string, std::string> get_tuple_name_key(const Node &node) const;
 
   void scalar_pass(Lgraph *orig);
   void tuple_pass(Lgraph *orig);

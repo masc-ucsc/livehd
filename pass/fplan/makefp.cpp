@@ -13,19 +13,19 @@
 #include "profile_time.hpp"
 
 void Pass_fplan_makefp::setup() {
-  auto m = Eprp_method(mmap_lib::str("pass.fplan.makefp")
-      ,mmap_lib::str("generate a floorplan from an Lgraph"), &Pass_fplan_makefp::pass);
+  auto m = Eprp_method("pass.fplan.makefp"
+      ,"generate a floorplan from an Lgraph", &Pass_fplan_makefp::pass);
 
   m.add_label_optional("traversal",
-                       mmap_lib::str("Lgraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\""),
+                       "Lgraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
                        "hier_node");
 
   m.add_label_optional("strategy",
-                       mmap_lib::str("What to optimize for.  Valid options are \"area\", \"wirelength\", and \"area_wirelength\""),
+                       "What to optimize for.  Valid options are \"area\", \"wirelength\", and \"area_wirelength\"",
                        "area_wirelength");
 
-  m.add_label_optional("filename", mmap_lib::str("If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD."));
-  m.add_label_optional("aspect", mmap_lib::str("Requested aspect ratio of the entire floorplan, default is 1.0."), "1.0");
+  m.add_label_optional("filename", "If set, write the floorplan to a file named <filename>.flp as well as back into LiveHD.");
+  m.add_label_optional("aspect", "Requested aspect ratio of the entire floorplan, default is 1.0.", "1.0");
 
   register_pass(m);
 }
@@ -81,8 +81,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
   return;
 
-  mmap_lib::str t_str = var.get("traversal");
-
+  auto t_str = var.get("traversal");
   auto whole_t = profile_time::Timer();
 
   fmt::print("generating floorplan...\n");

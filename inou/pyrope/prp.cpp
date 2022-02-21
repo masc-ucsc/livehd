@@ -1871,7 +1871,7 @@ void Prp::elaborate() {
     // scan_text(term_token + base_token));
     PRINT_DBG_AST("base token: {}, term token: {}\n", base_token, term_token);
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
-    ast_dump(mmap_lib::Tree_index::root());
+    ast_dump(lh::Tree_index::root());
     fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     err_tracker::err_logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
@@ -1980,7 +1980,7 @@ void Prp::ast_handler() {
   }
 }
 
-void Prp::ast_dump(mmap_lib::Tree_index tree_idx) const {
+void Prp::ast_dump(lh::Tree_index tree_idx) const {
   for (const auto &index : ast->depth_preorder(tree_idx)) {
     const auto &d          = ast->get_data(index);
     auto        rule_name  = rule_id_to_string(d.rule_id);
@@ -2219,7 +2219,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   return false;
 }
 
-mmap_lib::str Prp::rule_id_to_string(Rule_id rid) {
+std::string Prp::rule_id_to_string(Rule_id rid) {
   switch (rid) {
     case Prp_invalid: return "Invalid";
     case Prp_rule: return "Program";
@@ -2278,7 +2278,7 @@ mmap_lib::str Prp::rule_id_to_string(Rule_id rid) {
     case Prp_rule_overload_notation: return "Overload notation";
     case Prp_rule_overload_name: return "Overload name";
     case Prp_rule_function_pipe: return "Function pipe";
-    default: return mmap_lib::str(fmt::format("{}", rid));
+    default: return fmt::format("{}", rid);
   }
 }
 

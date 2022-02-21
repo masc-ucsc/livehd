@@ -24,8 +24,8 @@
 
 using Replxx = replxx::Replxx;
 
-void help(const mmap_lib::str& cmd, const mmap_lib::str& txt) { fmt::print("{:20s} {}\n", cmd, txt); }
-void help_labels(const mmap_lib::str& cmd, const mmap_lib::str& txt, bool required) {
+void help(std::string_view  txt) { fmt::print("{:20s} {}\n", cmd, txt); }
+void help_labels(std::string_view  txt, bool required) {
   if (required)
     fmt::print("  {:20s} {} (required)\n", cmd, txt);
   else
@@ -121,7 +121,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       std::vector<std::string> name_files;
       auto*                    library = Graph_library::instance("lgdb/");
 
-      library->each_lgraph([&name_files, path](Lg_type_id id, mmap_lib::str name) {
+      library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name) {
         (void)id;
         name_files.push_back(name.to_s());
       });
@@ -167,7 +167,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       cmd = cmd.substr(0, pos);
     }
     // fmt::print("cmd[{}]\n", cmd);
-    Main_api::get_labels(mmap_lib::str(cmd), [&fields](const mmap_lib::str &label, const mmap_lib::str &txt, bool required) {
+    Main_api::get_labels(cmd, [&fields](std::string_view txt, bool required) {
       (void)required;
       (void)txt;
       fields.push_back(label.to_s() + ":");
@@ -286,8 +286,7 @@ constexpr unsigned long major_version = 0;
 constexpr unsigned long minor_version = 0;
 
 void dummy_call_to_preserve_methods_useful_for_debugging() {
-  mmap_lib::str str;
-  str.dump();
+  std::cout << "dummy_called\n";
 }
 
 int main(int argc, char** argv) {
@@ -380,7 +379,7 @@ int main(int argc, char** argv) {
   };
 
   // init all the livehd libraries used
-  Main_api::get_commands([&examples](const mmap_lib::str& _cmd, const mmap_lib::str& help_msg) {
+  Main_api::get_commands([&examples](std::string_view  help_msg) {
     (void)help_msg;
     examples.push_back(_cmd.to_s());
   });
@@ -488,8 +487,8 @@ int main(int argc, char** argv) {
           if (pos2 != std::string::npos)
             cmd2 = cmd2.substr(0, pos2);
 
-          help(mmap_lib::str(cmd2), Main_api::get_command_help(mmap_lib::str(cmd2)));
-          Main_api::get_labels(mmap_lib::str(cmd2), help_labels);
+          help(cmd2, Main_api::get_command_help(cmd2));
+          Main_api::get_labels(cmd2, help_labels);
         }
 
         rx.history_add(input);

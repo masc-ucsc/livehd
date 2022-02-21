@@ -294,8 +294,7 @@ void Label_acyclic::label(Lgraph *g) {
     my_color = (node_tracker < 8) ? (8) : (16);
     n.set_color(my_color);
     if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
-    //n.set_name(mmap_lib::str(n.debug_name()));
-    n.set_name(mmap_lib::str(fmt::format("MFFC_{}", my_color)));
+    n.set_name(fmt::format("MFFC_{}", my_color));
     node_tracker++;
   }
   fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
@@ -318,7 +317,7 @@ void Label_acyclic::label(Lgraph *g) {
   // Actual Labeling happens here:
   for (auto n : g->fast(hier)) { 
     n.set_color(node2id[n.get_compact()]);
-    n.set_name(mmap_lib::str(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+    n.set_name(fmt::format("ACYCPART{}", node2id[n.get_compact()]));
   }
 
 

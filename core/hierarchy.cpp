@@ -1,10 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "hierarchy.hpp"
+#include "absl/strings/str_cat.h"
 
+#include "str_tools.hpp"
+#include "hierarchy.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
+#include "str_tools.hpp"
 
 Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {}
 
@@ -13,9 +16,9 @@ Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
   if (Hierarchy::is_root(hidx))
     return top;
 
-  auto parent = hidx.get_str_after_last_if_exists(':');
+  auto parent = str_tools::get_str_after_last_if_exists(hidx, ':');
 
-  auto lgid = parent.to_u64_from_hex();
+  auto lgid = str_tools::to_hex(parent);
   I(lgid);
 
   auto *lg = Lgraph::open(top->get_path(), Lg_type_id(lgid));
@@ -37,7 +40,7 @@ std::tuple<Hierarchy_index, Lgraph *, Index_id> Hierarchy::get_instance_up(const
       up_hidx = hidx.substr(0, parent_lgid_pos);
       I(!up_hidx.empty()); // up_hidx = Hierarchy::hierarchical_root();
 
-      Lg_type_id  lgid(hidx.substr(parent_lgid_pos+1).to_u64_from_hex());
+      auto lgid = Lg_type_id(str_tools::to_hex(hidx.substr(parent_lgid_pos+1)));
       lg = Lgraph::open(top->get_path(), lgid);
     }
   }
@@ -46,7 +49,7 @@ std::tuple<Hierarchy_index, Lgraph *, Index_id> Hierarchy::get_instance_up(const
   {
     auto parent_nid_pos   = hidx.rfind('.');
     I(parent_nid_pos != std::string::npos);
-    nid = hidx.substr(parent_nid_pos+1).to_u64_from_hex();
+    nid = str_tools::to_hex(hidx.substr(parent_nid_pos+1));
   }
 
   return std::make_tuple(up_hidx, lg, nid);
@@ -65,7 +68,7 @@ Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) {
 
   auto parent_lgid_pos = hidx.rfind(':');
   if (parent_lgid_pos == std::string::npos) {
-    return ""_str;
+    return "";
   }
 
   return hidx.substr(0, parent_lgid_pos);
@@ -120,9 +123,9 @@ std::tuple<Hierarchy_index, Lgraph *> Hierarchy::get_next(const Hierarchy_index 
 
 Hierarchy_index Hierarchy::go_down(Hierarchy_index hidx, Lg_type_id lgid, Index_id nid) {
   if (Hierarchy::is_root(hidx))
-    return mmap_lib::str::concat(mmap_lib::str::from_u64_to_hex(lgid), ".", mmap_lib::str::from_u64_to_hex(nid));
+    return absl::StrCat(str_tool::to_hex(lgid), ".", src_tools:to_hex(nid));
 
-  return mmap_lib::str::concat(hidx, ":", mmap_lib::str::from_u64_to_hex(lgid), ".", mmap_lib::str::from_u64_to_hex(nid));
+  return absl::StrCat(hidx, ":", str_tool::to_hex(lgid), ".", str_tool::to_hex(nid));
 }
 
 Hierarchy_index Hierarchy::go_down(const Node &node) {

@@ -7,9 +7,9 @@
 #include "iassert.hpp"
 #include "lbench.hpp"
 #include "lrand.hpp"
-#include "mmap_hash.hpp"
+#include "woothash.hpp"
 
-mmap_lib::str Lconst::serialize() const {
+std::string Lconst::serialize() const {
   std::vector<unsigned char> v;
   unsigned char c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   v.emplace_back(c);
@@ -19,7 +19,7 @@ mmap_lib::str Lconst::serialize() const {
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 8);
 
-  auto str = mmap_lib::str(v.data(), v.size());
+  auto str = std::string(v.data(), v.size());
 
   Number res_num1;
   boost::multiprecision::import_bits(res_num1, v.begin() + 4, v.end());
@@ -33,7 +33,7 @@ mmap_lib::str Lconst::serialize() const {
   return str;
 }
 
-Lconst Lconst::unserialize(const mmap_lib::str &v) {
+Lconst Lconst::unserialize(std::string_view v) {
 
   I(v.size() > 4);  // invalid otherwise
 
@@ -68,7 +68,7 @@ uint64_t Lconst::hash() const {
 
   boost::multiprecision::export_bits(num, std::back_inserter(v), 64);
 
-  return mmap_lib::hash64(v.data(), v.size() * 8);
+  return woothash64(v.data(), v.size() * 8);
 }
 
 Lconst::Lconst(absl::Span<unsigned char> v) {
@@ -110,10 +110,10 @@ Lconst::Lconst(Number v) {
 }
 
 
-Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
+Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
 
   // handle binary with special characters ?xZ...
-  mmap_lib::str bin;
+  std::string bin;
   if (unsigned_result) {
     bin = "0"; // always unsigned, must have a leading 0 (implicit)
   }else{
@@ -173,7 +173,7 @@ Lconst Lconst::from_binary(const mmap_lib::str txt, bool unsigned_result) {
   return Lconst(false, calc_num_bits(num), num);
 }
 
-Lconst Lconst::from_string(mmap_lib::str orig_txt) {
+Lconst Lconst::from_string(std::string_view orig_txt) {
   Number num;
 
   for (int i = orig_txt.size() - 1; i >= 0; --i) {
@@ -184,12 +184,12 @@ Lconst Lconst::from_string(mmap_lib::str orig_txt) {
   return Lconst(true, orig_txt.size() * 8, num);
 }
 
-Lconst Lconst::from_pyrope(const mmap_lib::str orig_txt) {
+Lconst Lconst::from_pyrope(std::string_view orig_txt) {
 
   if (orig_txt.empty())
     return Lconst();
 
-  mmap_lib::str txt = orig_txt.to_lower();
+  std::string txt = str_tools::to_lower(orig_txt);
 
   // Special cases
   if (txt == "true"_str) {
@@ -396,7 +396,7 @@ void Lconst::adjust(const Lconst &o) {
   bits         = calc_num_bits(num);
 }
 
-std::pair<mmap_lib::str, mmap_lib::str> Lconst::match_binary(const Lconst &l, const Lconst &r) {
+std::pair<std::string, std::string> Lconst::match_binary(const Lconst &l, const Lconst &r) {
 
   auto l_str = l.to_binary();
   auto r_str = r.to_binary();
@@ -618,14 +618,14 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   }
 
   if (has_unknowns()) {
-    auto str = mmap_lib::str::concat("0b", to_string(res_num));  // Use the string to remove leading zeroes
+    auto str = absl::StrCat("0b", to_string(res_num));  // Use the string to remove leading zeroes
     return Lconst::from_pyrope(str);
   }
 
   if (!is_string())
     return Lconst(false, calc_num_bits(res_num), res_num);
 
-  mmap_lib::str str;
+  std::string str;
   while (res_num) {
     unsigned char ch = static_cast<unsigned char>(res_num & 0xFF);
     if (ch)  // remove zeroes from string
@@ -688,7 +688,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     auto a_bin     = to_binary();
     auto value_bin = value.to_binary();
 
-    mmap_lib::str bin_txt;
+    std::string bin_txt;
     for (std::size_t i = 0u; i < end_bits; ++i) {
       if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero) {
         auto a_pos = std::min(i, a_bin.size()-1);
@@ -735,7 +735,7 @@ Lconst Lconst::add_op(const Lconst &o) const {
     auto o_txt = o.to_binary();
 
     auto        max_size = std::max(s_txt.size(), o_txt.size());
-    mmap_lib::str result("0b");
+    std::string result("0b");
 
     char carry = '0';
     for (auto i = 0u; i < max_size; ++i) {
@@ -802,23 +802,23 @@ Lconst Lconst::add_op(const Lconst &o) const {
 
 Lconst Lconst::concat_op(const Lconst &o) const {
   if (unlikely(is_string() || o.is_string())) {
-    mmap_lib::str str;
-    mmap_lib::str o_str;
+    std::string str;
+    std::string o_str;
     if (is_string())
       str = to_string();
     else if (is_i())
-      str = mmap_lib::str(to_i());
+      str = std::to_string(to_i());
     else
       str = to_binary();
 
     if (o.is_string())
       o_str = o.to_string();
     else if (o.is_i())
-      o_str = mmap_lib::str(o.to_i());
+      o_str = std::to_string(o.to_i());
     else
       o_str = o.to_binary();
 
-    return Lconst::from_string(mmap_lib::str::concat(str, o_str));
+    return Lconst::from_string(absl::StrCat(str, o_str));
   }
 
   Number res_num = get_num() << o.get_bits() | o.get_num();
@@ -949,7 +949,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
     auto [l_str,r_str] = match_binary(*this, o);
 
-    mmap_lib::str result;
+    std::string result;
 
     for (auto i = 0u; i < l_str.size(); ++i) {
       if (l_str[i] == '1' || r_str[i] == '1') {
@@ -989,7 +989,7 @@ Lconst Lconst::and_op(const Lconst &o) const {
 
     auto [l_str,r_str] = match_binary(*this, o);
 
-    mmap_lib::str result;
+    std::string result;
 
     for (auto i = 0u; i < l_str.size(); ++i) {
       if (l_str[i] == '0' || r_str[i] == '0') {
@@ -1052,8 +1052,8 @@ Lconst Lconst::adjust_bits(Bits_t amount) const {
   return Lconst(is_string(), calc_num_bits(res_num), res_num);
 }
 
-mmap_lib::str Lconst::to_string(Number num) {
-  mmap_lib::str str;
+std::string Lconst::to_string(Number num) {
+  std::string str;
   Number      tmp = num;
   while (tmp) {
     auto ch = static_cast<unsigned char>(tmp & 0xFF);
@@ -1071,7 +1071,7 @@ Lconst Lconst::to_known_rand() const {
   static Lrand<bool> rbool;
 
   I(is_string());
-  mmap_lib::str str;
+  std::string str;
   Number      tmp = num;
   while (tmp) {
     auto ch = static_cast<unsigned char>(tmp & 0xFF);
@@ -1087,7 +1087,7 @@ Lconst Lconst::to_known_rand() const {
   return Lconst::from_binary(str,sign=='0');
 }
 
-mmap_lib::str Lconst::to_field() const {
+std::string Lconst::to_field() const {
   if (explicit_str) {
     I(!has_unknowns()); // no tuple field should have unknown
     return to_string();
@@ -1100,23 +1100,23 @@ mmap_lib::str Lconst::to_field() const {
     ss << -v;
 
     fmt::print("warning: strange negative {} field\n", ss.str());
-    return mmap_lib::str::concat("-",ss.str());
+    return absl::StrCat("-",ss.str());
   }
   ss << v;
 
-  return mmap_lib::str(ss.str());
+  return ss.str();
 }
 
-mmap_lib::str Lconst::to_pyrope() const {
+std::string Lconst::to_pyrope() const {
   if (explicit_str) {
     auto str_no_underscore = to_string();
     if (str_no_underscore.empty())
-      return mmap_lib::str("''");
+      return "''";
 
     if (has_unknowns()) {
       auto sign = static_cast<unsigned char>(num & 0xFF);
 
-      mmap_lib::str str;
+      std::string str;
       if (sign=='0') {
         str = "0b";
       }else{
@@ -1149,7 +1149,7 @@ mmap_lib::str Lconst::to_pyrope() const {
     if (str_no_underscore.front()=='\'' && str_no_underscore.back() == '\'')
       return str_no_underscore;
 
-    return mmap_lib::str::concat("'", str_no_underscore, "'");
+    return absl::StrCat("'", str_no_underscore, "'");
   }
 
   const auto        v = get_num();
@@ -1175,7 +1175,7 @@ mmap_lib::str Lconst::to_pyrope() const {
     }
 
     auto [ptr, ec] = std::to_chars(str2+delta, str2 + 20, val, 16);
-    return mmap_lib::str(str2, ptr-str2);
+    return std::string(str2, ptr-str2);
   }
 
   std::stringstream ss;
@@ -1188,16 +1188,16 @@ mmap_lib::str Lconst::to_pyrope() const {
   if (v < 0) {
     ss << -v;
     if (print_hexa)
-      return mmap_lib::str::concat("-0x", ss.str());
+      return absl::StrCat("-0x", ss.str());
 
-    return mmap_lib::str::concat("-",ss.str());
+    return absl::StrCat("-",ss.str());
   }
   ss << v;
 
   if (print_hexa)
-    return mmap_lib::str::concat("0x", ss.str());
+    return absl::StrCat("0x", ss.str());
 
-  return mmap_lib::str(ss.str());
+  return ss.str();
 }
 
 size_t Lconst::popcount() const {
@@ -1218,7 +1218,7 @@ size_t Lconst::popcount() const {
   return popcount;
 }
 
-mmap_lib::str Lconst::to_firrtl() const {
+std::string Lconst::to_firrtl() const {
   // Note->hunter: FIRRTL-Proto requires the string output here is a decimal
   // value (no 0x or 0d allowed. Only #).  Also means it can't have 'x' or 'z'.
 
@@ -1239,9 +1239,9 @@ mmap_lib::str Lconst::to_firrtl() const {
     ss << v;
 
   if (is_negative())
-    return mmap_lib::str::concat("-", ss.str());
+    return absl::StrCat("-", ss.str());
 
-  return mmap_lib::str(ss.str());
+  return ss.str();
 }
 
 int64_t Lconst::to_i() const {
@@ -1249,7 +1249,7 @@ int64_t Lconst::to_i() const {
   return static_cast<long int>(num);
 }
 
-mmap_lib::str Lconst::to_binary() const {
+std::string Lconst::to_binary() const {
   if (has_unknowns()) {
     return to_string();
   }
@@ -1258,7 +1258,7 @@ mmap_lib::str Lconst::to_binary() const {
   if (v == 0)
     return "0";
 
-  mmap_lib::str txt;
+  std::string txt;
   for (auto i = 0u; i < get_bits(); ++i) {
     if (v & 1) {
       txt = txt.prepend('1');
@@ -1271,7 +1271,7 @@ mmap_lib::str Lconst::to_binary() const {
   return txt;
 }
 
-mmap_lib::str Lconst::to_verilog() const {
+std::string Lconst::to_verilog() const {
   if (num==0)
     return "'b0"_str;
 
@@ -1280,12 +1280,12 @@ mmap_lib::str Lconst::to_verilog() const {
       //auto sign = static_cast<unsigned char>(num & 0xFF);
 
       //if (sign=='0')
-        //return mmap_lib::str::concat(get_bits()-1, "'b", to_string().substr(1));
+        //return absl::StrCat(get_bits()-1, "'b", to_string().substr(1));
 
-      return mmap_lib::str::concat(get_bits(), "'sb", to_string());
+      return absl::StrCat(get_bits(), "'sb", to_string());
     }
 
-    return mmap_lib::str::concat("\"", to_string(), "\"");
+    return absl::StrCat("\"", to_string(), "\"");
   }
 
   std::stringstream ss;
@@ -1293,10 +1293,10 @@ mmap_lib::str Lconst::to_verilog() const {
 
   if (num < 0) {
     ss << (Number(1)<<get_bits())+num;
-    return mmap_lib::str::concat(get_bits(), "'sh", ss.str());
+    return absl::StrCat(get_bits(), "'sh", ss.str());
   }
   ss << num;
 
-  return mmap_lib::str::concat(get_bits(), "'sh", ss.str());
+  return absl::StrCat(get_bits(), "'sh", ss.str());
 }
 

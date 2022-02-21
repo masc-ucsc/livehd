@@ -9,7 +9,7 @@
 static Pass_plugin lnastopt("pass_lnastopt", Pass_lnastopt::setup);
 
 void Pass_lnastopt::setup() {
-  Eprp_method m1("pass.lnastopt", mmap_lib::str("LNAST optimization"), &Pass_lnastopt::work);
+  Eprp_method m1("pass.lnastopt", "LNAST optimization", &Pass_lnastopt::work);
 
   register_pass(m1);
 }

@@ -1,9 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <stdlib.h>
+#include <cstdlib>
+
+#include "fmt/format.h"
 
 #include "dlop.hpp"
 #include "lbench.hpp"
+#include "str_tools.hpp"
 
 void Dlop::free(size_t sz, int64_t *ptr) {
   assert(free_pool.size() > (sz>>3));
@@ -43,7 +46,7 @@ spool_ptr<Dlop> Dlop::create_integer(int64_t val) {
   return dlop;
 }
 
-spool_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
+spool_ptr<Dlop> Dlop::create_string(std::string_view txt) {
 
   auto dlop = spool_ptr<Dlop>::make(Type::String, txt.size());
 
@@ -56,7 +59,7 @@ spool_ptr<Dlop> Dlop::create_string(const mmap_lib::str txt) {
   return dlop;
 }
 
-spool_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_result) {
+spool_ptr<Dlop> Dlop::from_binary(std::string_view txt, bool unsigned_result) {
 
   auto dlop = spool_ptr<Dlop>::make(Type::Integer, 1+txt.size()/64);
   if (!unsigned_result) {
@@ -96,17 +99,17 @@ spool_ptr<Dlop> Dlop::from_binary(const mmap_lib::str txt, bool unsigned_result)
   return dlop;
 }
 
-spool_ptr<Dlop> Dlop::from_pyrope(const mmap_lib::str orig_txt) {
+spool_ptr<Dlop> Dlop::from_pyrope(std::string_view orig_txt) {
 
   if (orig_txt.empty())
     return spool_ptr<Dlop>::make(Type::Invalid, 0);
 
-  mmap_lib::str txt = orig_txt.to_lower();
+  auto txt = str_tools::to_lower(orig_txt);
 
   // Special cases
-  if (txt == "true"_str) {
+  if (txt == "true") {
     return Dlop::create_bool(true);
-  } else if (txt == "false"_str) {
+  } else if (txt == "false") {
     return Dlop::create_bool(false);
   }
 

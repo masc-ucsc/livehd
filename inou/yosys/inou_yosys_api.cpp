@@ -264,7 +264,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   call_yosys(vars);
 
   std::vector<Lgraph *> lgs;
-  gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, const mmap_lib::str &name) {
+  gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
     (void)name;
     if (gl->get_version(id) > max_version) {
       Lgraph *lg = Lgraph::open(path, id);
@@ -293,7 +293,7 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
     vars.set("path", p.path.to_s());
     vars.set("odir", p.odir.to_s());
 
-    auto file = mmap_lib::str::concat(p.odir, "/", lg->get_name(), ".v");
+    auto file = absl::StrCat(p.odir, "/", lg->get_name(), ".v");
     vars.set("file", file.to_s());
     vars.set("name", lg->get_name().to_s());
 
@@ -309,24 +309,24 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 }
 
 void Inou_yosys_api::setup() {
-  Eprp_method m1(mmap_lib::str("inou.yosys.tolg"), mmap_lib::str("read verilog using yosys to lgraph"), &Inou_yosys_api::tolg);
-  m1.add_label_required("files",                   mmap_lib::str("verilog files to process (comma separated)"));
-  m1.add_label_optional("path",                    mmap_lib::str("path to build the lgraph[s]"), "lgdb");
-  m1.add_label_optional("techmap",                 mmap_lib::str("Either full or alumac techmap or none from yosys. Cannot be used with liberty"), "");
-  m1.add_label_optional("liberty",                 mmap_lib::str("Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap"), "");
-  m1.add_label_optional("abc",                     mmap_lib::str("run ABC inside yosys before loading lgraph"), "false");
-  m1.add_label_optional("script",                  mmap_lib::str("alternative custom inou_yosys_read.ys command"));
-  m1.add_label_optional("yosys",                   mmap_lib::str("path for yosys command"), "");
-  m1.add_label_optional("top",                     mmap_lib::str("define top module, will call yosys hierarchy pass (-auto-top allowed)"));
+  Eprp_method m1("inou.yosys.tolg", "read verilog using yosys to lgraph", &Inou_yosys_api::tolg);
+  m1.add_label_required("files",                   "verilog files to process (comma separated)");
+  m1.add_label_optional("path",                    "path to build the lgraph[s]", "lgdb");
+  m1.add_label_optional("techmap",                 "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
+  m1.add_label_optional("liberty",                 "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
+  m1.add_label_optional("abc",                     "run ABC inside yosys before loading lgraph", "false");
+  m1.add_label_optional("script",                  "alternative custom inou_yosys_read.ys command");
+  m1.add_label_optional("yosys",                   "path for yosys command", "");
+  m1.add_label_optional("top",                     "define top module, will call yosys hierarchy pass (-auto-top allowed)");
 
   register_inou("yosys",                           m1);
 
-  Eprp_method m2(mmap_lib::str("inou.yosys.fromlg"),mmap_lib::str("write verilog using yosys from lgraph"), &Inou_yosys_api::fromlg);
-  m2.add_label_optional("path",                    mmap_lib::str("path to read the lgraph[s]"), "lgdb");
-  m2.add_label_optional("odir",                    mmap_lib::str("output directory for generated verilog files"), ".");
-  m2.add_label_optional("script",                  mmap_lib::str("alternative custom inou_yosys_write.ys command"));
-  m2.add_label_optional("yosys",                   mmap_lib::str("path for yosys command"), "");
-  m2.add_label_optional("hier",                    mmap_lib::str("hierarchy pass in LiveHD (like flat in yosys)"));
+  Eprp_method m2("inou.yosys.fromlg" ,"write verilog using yosys from lgraph", &Inou_yosys_api::fromlg);
+  m2.add_label_optional("path",                    "path to read the lgraph[s]", "lgdb");
+  m2.add_label_optional("odir",                    "output directory for generated verilog files", ".");
+  m2.add_label_optional("script",                  "alternative custom inou_yosys_write.ys command");
+  m2.add_label_optional("yosys",                   "path for yosys command", "");
+  m2.add_label_optional("hier",                    "hierarchy pass in LiveHD (like flat in yosys)");
 
   register_inou("yosys", m2);
 }

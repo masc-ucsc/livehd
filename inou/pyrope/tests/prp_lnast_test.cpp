@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
 
   TRACE_EVENT("inou", "PYROPE_prp_lnast_parse");
   Lbench b("inou.PYROPE_prp_lnast_parse");
-  converter.parse_file(mmap_lib::str(argv[1]));
+  converter.parse_file(argv[1]);
   b.end();
 
   TRACE_EVENT("inou", "PYROPE_prp_lnast_convert");

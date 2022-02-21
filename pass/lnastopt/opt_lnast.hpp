@@ -11,7 +11,7 @@ protected:
   Symbol_table  st;
   bool          needs_hierarchy;
   bool          hier_mode;
-  mmap_lib::str top;
+  std::string   top;
 
   void process_assign(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);
   void process_plus(const std::shared_ptr<Lnast>& ln, const Lnast_nid& lnid);

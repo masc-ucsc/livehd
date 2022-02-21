@@ -11,16 +11,19 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "lnast.hpp"
+#include "str_tools.hpp"
 
-struct eprp_casecmp_str : public std::binary_function<const mmap_lib::str, const mmap_lib::str, bool> {
-  bool operator()(const mmap_lib::str &lhs, const mmap_lib::str &rhs) const { return lhs.to_lower() < rhs.to_lower(); }
+struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
+  bool operator()(std::string_view lhs, std::string_view rhs) const {
+    return str_tools::lo_lower(lhs) < str_tools::to_lower(rhs);
+  }
 };
 
 class Lgraph;
 
 class Eprp_var {
 public:
-  using Eprp_dict   = absl::flat_hash_map<mmap_lib::str, mmap_lib::str>;
+  using Eprp_dict   = absl::flat_hash_map<std::string, std::string>;
   using Eprp_lgs    = std::vector<Lgraph *>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
 
@@ -45,23 +48,16 @@ public:
   void add(Lgraph *lg);
   void add(std::unique_ptr<Lnast> lnast);
   void add(const std::shared_ptr<Lnast> &lnast);
-  void add(const mmap_lib::str &name, const mmap_lib::str &value);
+  void add(std::string_view name, std::string_view value);
   void replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new);
 
-#if 0
-  template <typename Str>
-  std::enable_if_t<std::is_convertible_v<mmap_lib::str_view, Str>, void> add(const Str &name, mmap_lib::str_view value) {
-    add(mmap_lib::str(name), value);
-  }
-#endif
+  void delete_label(std::string_view name);
 
-  void delete_label(const mmap_lib::str &name);
-
-  bool has_label(const mmap_lib::str &name) const { 
-    return dict.find(name) != dict.end(); 
+  [[nodiscard]] bool has_label(std::string_view name) const {
+    return dict.find(name) != dict.end();
   };
-  
-  mmap_lib::str get(const mmap_lib::str &name) const;
+
+  [[nodiscard]] std::string_view get(std::string_view name) const;
 
   void clear() {
     dict.clear();
@@ -69,5 +65,5 @@ public:
     lnasts.clear();
   }
 
-  bool empty() const { return dict.empty() && lgs.empty(); }
+  [[nodiscard]] bool empty() const { return dict.empty() && lgs.empty(); }
 };

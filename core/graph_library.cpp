@@ -163,7 +163,7 @@ void Graph_library::clean_library_int() {
   graph_library_clean = true;
 }
 
-Graph_library *Graph_library::instance_int(const mmap_lib::str &path) {
+Graph_library *Graph_library::instance_int(std::string_view path) {
   auto it1 = Graph_library::global_instances.find(path);
   if (it1 != Graph_library::global_instances.end()) {
     return it1->second;
@@ -183,7 +183,7 @@ Graph_library *Graph_library::instance_int(const mmap_lib::str &path) {
     I(ptr);
   }
 
-  auto full_path = mmap_lib::str(std::string(full_path_char));
+  std::string_view full_path(full_path_char, strnlen(full_path_char, PATH_MAX));
 
   auto it = global_instances.find(full_path);
   if (it != global_instances.end()) {
@@ -208,7 +208,7 @@ Graph_library *Graph_library::instance_int(const mmap_lib::str &path) {
   return graph_library;
 }
 
-Lg_type_id Graph_library::reset_id_int(const mmap_lib::str &name, const mmap_lib::str &source) {
+Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view source) {
   graph_library_clean = false;
 
   const auto &it = name2id.find(name);
@@ -237,7 +237,7 @@ Lg_type_id Graph_library::reset_id_int(const mmap_lib::str &name, const mmap_lib
   return add_name_int(name, source);
 }
 
-bool Graph_library::exists_int(const mmap_lib::str &path, const mmap_lib::str &name) {
+bool Graph_library::exists_int(std::string_view path, std::string_view name) {
   const Graph_library *lib = instance_int(path);
   return lib->name2id.find(name) != lib->name2id.end();
 }
@@ -250,7 +250,7 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
   return sub_nodes[lgid]->get_lgid() == lgid;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(const mmap_lib::str &path, const mmap_lib::str &name) {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, std::string_view name) {
   const Graph_library *lib = instance_int(path);  // path must be full path
 
   const auto &glib2 = global_name2lgraph[lib->path];  // WARNING: This inserts name too when needed
@@ -261,7 +261,7 @@ Lgraph *Graph_library::try_find_lgraph_int(const mmap_lib::str &path, const mmap
   return nullptr;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(const mmap_lib::str &name) const {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view name) const {
   I(global_name2lgraph.find(path) != global_name2lgraph.end());
 
   const auto &glib2 = global_name2lgraph[path];
@@ -300,12 +300,12 @@ Lgraph *Graph_library::try_find_lgraph_int(const Lg_type_id lgid) const {
   return lg;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(const mmap_lib::str &path, Lg_type_id lgid) {
+Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
   const Graph_library *lib = instance_int(path);  // path must be full path
   return lib->try_find_lgraph_int(lgid);
 }
 
-Sub_node &Graph_library::reset_sub_int(const mmap_lib::str &name, const mmap_lib::str &source) {
+Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
   graph_library_clean = false;
 
   Lg_type_id lgid = get_lgid_int(name);
@@ -325,9 +325,9 @@ Sub_node &Graph_library::reset_sub_int(const mmap_lib::str &name, const mmap_lib
   return *sub_nodes[lgid];
 }
 
-Sub_node &Graph_library::ref_or_create_sub_int(const mmap_lib::str &name) { return ref_or_create_sub_int(name, "-"_str); }
+Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"_str); }
 
-Sub_node &Graph_library::ref_or_create_sub_int(const mmap_lib::str &name, const mmap_lib::str &source) {
+Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid_int(name);
   if (lgid) {
     return *sub_nodes[lgid];
@@ -355,7 +355,7 @@ const Sub_node &Graph_library::get_sub_int(Lg_type_id lgid) const {
   return *sub_nodes[lgid];
 }
 
-Lg_type_id Graph_library::add_name_int(const mmap_lib::str &name, const mmap_lib::str &source) {
+Lg_type_id Graph_library::add_name_int(std::string_view name, std::string_view source) {
   I(source != "");
 
   Lg_type_id id = try_get_recycled_id_int();
@@ -380,7 +380,7 @@ Lg_type_id Graph_library::add_name_int(const mmap_lib::str &name, const mmap_lib
   return id;
 }
 
-bool Graph_library::rename_name_int(const mmap_lib::str &orig, const mmap_lib::str &dest) {
+bool Graph_library::rename_name_int(std::string_view orig, std::string_view dest) {
   auto it = name2id.find(orig);
   if (it == name2id.end()) {
     Lgraph::error("graph_library: file to rename {} does not exit", orig);
@@ -495,7 +495,7 @@ void Graph_library::reload_int() {
         max_next_version = version;
 
       I(lg_entry.HasMember("source"));
-      attributes[id].source  = mmap_lib::str(lg_entry["source"].GetString());
+      attributes[id].source  = lg_entry["source"].GetString();
       attributes[id].version = version;
 
       sub_nodes[id]->from_json(lg_entry);
@@ -511,7 +511,7 @@ void Graph_library::reload_int() {
   }
 }
 
-Lgraph *Graph_library::setup_lgraph(const mmap_lib::str &name, const mmap_lib::str &source) {
+Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
 
   Lg_type_id     lgid;
   Graph_library *lib;
@@ -543,7 +543,7 @@ Lgraph *Graph_library::setup_lgraph(const mmap_lib::str &name, const mmap_lib::s
   return lg;
 }
 
-Graph_library::Graph_library(const mmap_lib::str &_path) : path(_path), library_file(path.to_s() + "/" + "graph_library.json") {
+Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path.to_s() + "/" + "graph_library.json") {
   graph_library_clean = true;
   reload_int();
 }
@@ -563,7 +563,7 @@ Lg_type_id Graph_library::try_get_recycled_id_int() {
 
 void Graph_library::recycle_id_int(Lg_type_id lgid) { recycled_id.insert(lgid); }
 
-void Graph_library::expunge_int(const mmap_lib::str &name) {
+void Graph_library::expunge_int(std::string_view name) {
   auto it2 = name2id.find(name);
   if (it2 == name2id.end()) {
     I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
@@ -607,7 +607,7 @@ void Graph_library::clear_int(Lg_type_id lgid) {
   sub_nodes[lgid]->reset_pins();
 }
 
-Lg_type_id Graph_library::copy_lgraph_int(const mmap_lib::str &name, const mmap_lib::str &new_name) {
+Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_view new_name) {
   I(false);
   graph_library_clean = false;
   const auto &it = name2id.find(name);
@@ -664,7 +664,7 @@ Lg_type_id Graph_library::copy_lgraph_int(const mmap_lib::str &name, const mmap_
   return id_new;
 }
 
-Lg_type_id Graph_library::register_lgraph_int(const mmap_lib::str &name, const mmap_lib::str &source, Lgraph *lg) {
+Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string_view source, Lgraph *lg) {
   I(false);  // deprecated
 
   if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
@@ -690,7 +690,7 @@ Lg_type_id Graph_library::register_lgraph_int(const mmap_lib::str &name, const m
   return id;
 }
 
-void Graph_library::unregister_int(const mmap_lib::str &name, Lg_type_id lgid, Lgraph *lg) {
+void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgraph *lg) {
   I(attributes.size() > (size_t)lgid);
   auto it = global_name2lgraph[path].find(name);
   if (lg) {
@@ -706,13 +706,13 @@ void Graph_library::unregister_int(const mmap_lib::str &name, Lg_type_id lgid, L
     expunge_int(name);
 }
 
-void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, const mmap_lib::str &name)> f1) const {
+void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
   for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
 
-void Graph_library::each_lgraph(const mmap_lib::str &match, const std::function<void(Lg_type_id lgid, const mmap_lib::str &name)> f1) const {
+void Graph_library::each_lgraph(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
   const std::string string_match(match.to_s());  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 

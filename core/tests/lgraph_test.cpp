@@ -15,8 +15,8 @@
 
 class Setup_lgraph : public ::testing::Test {
 protected:
-  std::map<mmap_lib::str, int> name2pos;
-  std::map<mmap_lib::str, int> name2bits;
+  std::map<std::string, int> name2pos;
+  std::map<std::string, int> name2bits;
   std::set<int>                posinput;
 
   std::set<int> posused;
@@ -64,7 +64,7 @@ protected:
   }
 
   void add_input(Lgraph *lg, const std::string &name_std) {
-    mmap_lib::str name{name_std};
+    std::string name{name_std};
 
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
@@ -97,7 +97,7 @@ protected:
   }
 
   void add_output(Lgraph *lg, const std::string &name_std) {
-    mmap_lib::str name{name_std};
+    std::string name{name_std};
 
     EXPECT_FALSE(lg->has_graph_output(name));
     EXPECT_FALSE(lg->has_graph_input(name));
@@ -181,7 +181,7 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
   TRACE_EVENT("core", "LgRAPH_add_remove_inputs");
   Lbench b("core.LgRAPH_add_remove_inputs");
 
-  mmap_lib::str lgdb("lgdb_lgraph_test");
+  std::string lgdb("lgdb_lgraph_test");
 
   Eprp_utils::clean_dir(lgdb);
 

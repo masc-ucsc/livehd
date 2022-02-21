@@ -26,7 +26,8 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
-        "//mmap_lib:headers",
+        "@fmt",
+        "@iassert",
     ] + select({
         ":use_profiling": [
             "@com_google_perfetto//:perfetto",
