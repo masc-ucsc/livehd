@@ -19,9 +19,13 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue, Const };
-
+  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl };
   std::stack<Expression_state> expr_state_stack;
+
+  // FIXME: Temporary fix for generating input/output refs
+  bool is_function_input;
+  bool is_function_output;
+  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> ref_name_map;
 
   // Top
   void process_description();
@@ -45,6 +49,7 @@ protected:
   void process_binary_expression(TSNode);
   void process_dot_expression(TSNode);
   void process_member_selection(TSNode);
+  void process_function_definition(TSNode);
 
   // Select
   void process_select(TSNode);
@@ -55,6 +60,8 @@ protected:
   void process_tuple_or_expression_list(TSNode);
   void process_lvalue_list(TSNode);
   void process_rvalue_list(TSNode);
+  void process_tuple_type_list(TSNode);
+  void process_declaration_list(TSNode);
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
 
@@ -76,6 +83,7 @@ protected:
   // TS API Helpers
   mmap_lib::str get_text(const TSNode &node) const;
   inline TSNode get_child(const TSNode &, const char*) const;
+  inline TSNode get_child(const TSNode &, unsigned int) const;
   inline TSNode get_child(const TSNode &) const;
   inline TSNode get_sibling(const TSNode &) const;
   inline TSNode get_named_child(const TSNode &) const ;
