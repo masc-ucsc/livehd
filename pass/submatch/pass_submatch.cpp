@@ -141,7 +141,7 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
         fringe.pop();
         for (auto e : nc_sink.get_node(g).inp_edges()) {
           auto nc_driver = e.driver.get_node().get_compact();
-          if (mffc_root_set.contains(nc_driver) | mffc.contains(nc_driver))
+          if (mffc_root_set.contains(nc_driver) || mffc.contains(nc_driver))
             continue;
           auto h_driver   = hash_mffc_node(e.driver.get_node(), h_sink, e.sink.get_pid());
           mffc[nc_driver] = {mffc[nc_sink].id, h_driver, depth + 1};
