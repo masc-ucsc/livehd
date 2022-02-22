@@ -3,8 +3,8 @@
 #pragma once
 
 #include <vector>
-#include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
+
+#include "pass.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"

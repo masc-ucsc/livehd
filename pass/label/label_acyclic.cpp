@@ -53,12 +53,22 @@ void Label_acyclic::gather_roots(Lgraph *g) {
 
       //The sink of these outedges can be outNeighs of the Part
       for (const auto &oe : n.out_edges()) {
-        auto sink_nodec = oe.sink.get_node().get_compact();
-        
+        auto sink_node = oe.sink.get_node();
+        auto sink_nodec = sink_node.get_compact();
+        //---
+        // Checking for Not an IO
+        auto sink_node_op = sink_node.get_type_op();
+        if (sink_node_op != Ntype_op::IO) {
+          id2out[part_id].insert(sink_nodec);
+        }
+        //---
+
+        /*
         // Only add to outgoing neighbors if not _io_
         if (static_cast<int>(sink_nodec.get_node(g).debug_name().find("_io_")) == -1) {
           id2out[part_id].insert(sink_nodec);
         }
+        */
       }
       add_root = true;
     } else if (n.get_num_out_edges() == 0) {
@@ -68,10 +78,20 @@ void Label_acyclic::gather_roots(Lgraph *g) {
       //   If the sink of the out edge IS an io, add_root
       for (const auto &oe : n.out_edges()) { 
         const auto sink_node_name = oe.sink.get_node().debug_name();
+        //---
+        auto sink_node_op = oe.sink.get_node().get_type_op();
+        // Checking for is IO
+        if (sink_node_op == Ntype_op::IO) {
+          add_root = true;
+        }
+        //---
+
+        /*
         if (static_cast<int>(sink_node_name.find("_io_")) != -1) {
           add_root = true;
         }
         //else we do nothing cause Not a Root
+        */
       }
     }
 
@@ -114,7 +134,9 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
         // Three conditions that must be false for node to be addable
         bool is_root = roots.contains(pot_predc);
         bool is_labeled = node2id.contains(pot_predc);
-        bool not_io = (static_cast<int>(pot_pred.debug_name().find("_io_")) == -1);
+
+        //bool not_io = (static_cast<int>(pot_pred.debug_name().find("_io_")) == -1);
+        bool not_io = (pot_pred.get_type_op() != Ntype_op::IO);
         
         if (!(is_root) && !(is_labeled) && not_io) {
           node2id[pot_predc] = curr_id;
@@ -136,7 +158,7 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
         } else {
           // Nodes not added to the Part can be incoming neighbors of the Part
           //   Must NOT be in the incoming vector & NOT be an _io_          
-          if (static_cast<int>(pot_predc.get_node(g).debug_name().find("_io_")) == -1) {
+          if (not_io) {
             id2inc[curr_id].insert(pot_predc);
           }
         }
