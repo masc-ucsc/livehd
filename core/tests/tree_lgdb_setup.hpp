@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 
-#include "attribute.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgedgeiter.hpp"
@@ -37,8 +36,6 @@ protected:
 
   static constexpr char fwd_name[] = "fwd_pos";
   static constexpr char bwd_name[] = "bwd_pos";
-  using Fwd_pos_attr               = Attribute<fwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
-  using Bwd_pos_attr               = Attribute<bwd_name, Node, absl::flat_hash_map<Node::Compact, uint64_t> >;
 
   void map_tree_to_lgraph(const std::string &test_name) {
     TRACE_EVENT("core", nullptr, [&test_name](perfetto::EventContext ctx) {
@@ -63,8 +60,6 @@ protected:
 
     absl_fwd_pos.clear();
     absl_bwd_pos.clear();
-    Fwd_pos_attr::clear(lg_root);
-    Bwd_pos_attr::clear(lg_root);
 
     node_order.clear();
 
@@ -113,8 +108,6 @@ protected:
 
       absl_fwd_pos[node.get_compact()] = data->fwd_pos;
       absl_bwd_pos[node.get_compact()] = data->bwd_pos;
-      Fwd_pos_attr::ref(lg_root)->set(node.get_compact(), data->fwd_pos);
-      Bwd_pos_attr::ref(lg_root)->set(node.get_compact(), data->bwd_pos);
 
       // fmt::print("create {} class {}\n", hnode.debug_name(), hnode.get_class_lgraph()->get_name());
       node_order.emplace_back(node);

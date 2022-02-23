@@ -103,7 +103,7 @@ void Graph_library::clean_library_int() {
     writer.Uint64(it.version);
 
     writer.Key("source");
-    writer.String(it.source.to_s().c_str());
+    writer.String(it.source.c_str());
 
     sub_nodes[i]->to_json(writer);
 
@@ -169,7 +169,7 @@ Graph_library *Graph_library::instance_int(std::string_view path) {
     return it1->second;
   }
 
-  std::string spath(path.to_s());
+  std::string spath(path);
 
   char  full_path_char[PATH_MAX + 1];
   char *ptr = realpath(spath.c_str(), full_path_char);
@@ -183,7 +183,7 @@ Graph_library *Graph_library::instance_int(std::string_view path) {
     I(ptr);
   }
 
-  std::string_view full_path(full_path_char, strnlen(full_path_char, PATH_MAX));
+  std::string full_path(full_path_char, strnlen(full_path_char, PATH_MAX));
 
   auto it = global_instances.find(full_path);
   if (it != global_instances.end()) {
@@ -197,7 +197,7 @@ Graph_library *Graph_library::instance_int(std::string_view path) {
 
   Graph_library *graph_library = new Graph_library(full_path);
   global_instances.insert(std::make_pair(full_path, graph_library));
-  global_instances.insert(std::make_pair(path, graph_library));
+  global_instances.insert(std::make_pair(spath, graph_library));
 
   auto it2 = global_name2lgraph.find(graph_library->path);
   if (it2 == global_name2lgraph.end()) {
@@ -440,7 +440,7 @@ void Graph_library::reload_int() {
     sub_nodes.resize(1, new Sub_node());  // 0 is not a valid ID
   }
   if (access(library_file.c_str(), F_OK) == -1) {
-    mkdir(path.to_s().c_str(), 0755);  // At least make sure directory exists for future
+    mkdir(path.c_str(), 0755);  // At least make sure directory exists for future
     return;
   }
   FILE *pFile = fopen(library_file.c_str(), "rb");
@@ -543,7 +543,7 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
   return lg;
 }
 
-Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(path.to_s() + "/" + "graph_library.json") {
+Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(absl::StrCat(path , "/" , "graph_library.json")) {
   graph_library_clean = true;
   reload_int();
 }
@@ -580,7 +580,7 @@ void Graph_library::expunge_int(std::string_view name) {
   attributes[id].expunge();
   recycle_id_int(id);
 
-  DIR *dr = opendir(path.to_s().c_str());
+  DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
     Lgraph::error("graph_library: unable to access path {}", path);
     return;
@@ -591,7 +591,7 @@ void Graph_library::expunge_int(std::string_view name) {
   while ((de = readdir(dr)) != NULL) {
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
-      std::string file = absl::StrCat(path.to_s(), "/", de->d_name);
+      std::string file = absl::StrCat(path, "/", de->d_name);
       fmt::print("deleting... {}\n", file);
       unlink(file.c_str());
     }
@@ -620,7 +620,7 @@ Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_vie
   attributes[id_new] = attributes[id_orig];
   sub_nodes[id_new]->copy_from(new_name, id_new, *sub_nodes[id_orig]);
 
-  DIR *dr = opendir(path.to_s().c_str());
+  DIR *dr = opendir(path.c_str());
   if (dr == NULL) {
     Lgraph::error("graph_library: unable to access path {}", path);
     return false;
@@ -634,10 +634,10 @@ Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_vie
     std::string chop_name(de->d_name, match.size());
     if (chop_name == match) {
       std::string_view dname(de->d_name);
-      std::string      file      = absl::StrCat(path.to_s(), "/", dname);
+      std::string      file      = absl::StrCat(path, "/", dname);
       std::string_view extension = dname.substr(match.size());
 
-      auto new_file = absl::StrCat(path.to_s(), "/", rematch, extension);
+      auto new_file = absl::StrCat(path, "/", rematch, extension);
 
       int source = open(file.c_str(), O_RDONLY, 0);
       int dest   = open(new_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -713,11 +713,11 @@ void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::s
 }
 
 void Graph_library::each_lgraph(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
-  const std::string string_match(match.to_s());  // NOTE: regex does not support string_view, c++20 may fix this missing feature
+  const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 
   for (const auto &[name, id] : name2id) {
-    const std::string line(name.to_s());
+    const std::string line(name);
     if (!std::regex_search(line, txt_regex))
       continue;
 
