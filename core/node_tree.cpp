@@ -7,7 +7,7 @@
 #include "lgraph.hpp"
 
 Node_tree::Node_tree(Lgraph* root_arg)
-    : lh::tree<Node>(root_arg->get_path().to_s(), absl::StrCat(root_arg->get_name().to_s(), "_ntree")), root(root_arg), last_free() {
+    : lh::tree<Node>(root_arg->get_path(), absl::StrCat(root_arg->get_name(), "_ntree")), root(root_arg), last_free() {
   set_root(Node());
 
 #if 1

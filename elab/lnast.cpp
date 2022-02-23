@@ -1193,7 +1193,7 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
                  it.level,
                  it.pos,
                  indent,
-                 node.type.to_str(),
+                 node.type.to_sv(),
                  node.token.get_text(),
                  node.subs);
     } else {
@@ -1201,7 +1201,7 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
                  it.level,
                  it.pos,
                  indent,
-                 node.type.to_str(),
+                 node.type.to_sv(),
                  node.token.get_text());
     }
   }

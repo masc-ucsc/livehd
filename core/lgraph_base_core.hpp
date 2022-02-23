@@ -32,7 +32,7 @@ public:
   bool is_invalid() const { return lgid == 0; }
 };
 
-using Hierarchy_index = std::string;
+using Hierarchy_index = int32_t; // -1 is invalid, 0 is root
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }

@@ -654,7 +654,7 @@ yy = (1,a=3)
 
     if (rhs_data.type.is_ref()) {
       auto bundle = st.get_bundle(rhs_txt);
-      if (!bundle->is_ordered(""_str)) {
+      if (!bundle->is_ordered("")) {
         bundle->dump();
         hierarchy_info_int("bundle assigned must be between ordered bundles");
         return;

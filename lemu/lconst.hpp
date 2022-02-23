@@ -212,6 +212,6 @@ struct fmt::formatter<Lconst> : formatter<string_view> {
   // parse is inherited from formatter<string_view>.
   template <typename FormatContext>
   auto format(Lconst c, FormatContext &ctx) {
-    return formatter<string_view>::format(c.to_pyrope().to_s(), ctx);
+    return formatter<string_view>::format(c.to_pyrope(), ctx);
   }
 };

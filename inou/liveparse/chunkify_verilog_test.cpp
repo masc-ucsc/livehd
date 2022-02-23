@@ -13,10 +13,10 @@ protected:
 };
 
 TEST_F(VTest1, interface) {
-  Eprp_utils::clean_dir("tbase"_str);
-  Eprp_utils::clean_dir("tdelta"_str);
+  Eprp_utils::clean_dir("tbase");
+  Eprp_utils::clean_dir("tdelta");
 
-  Chunkify_verilog chunker("tbase"_str);
+  Chunkify_verilog chunker("tbase");
 
   std::string test1_verilog
       = "  "
@@ -52,7 +52,7 @@ TEST_F(VTest1, interface) {
   EXPECT_EQ(access("tbase/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
 
   // No code change delta
-  Chunkify_verilog chunker2("tdelta"_str);
+  Chunkify_verilog chunker2("tdelta");
   EXPECT_NE(access("tdelta/parse/chunk_inline/test1_moda.v", R_OK), F_OK);
   EXPECT_NE(access("tdelta/parse/chunk_inline/test1_modb.v", R_OK), F_OK);
   chunker2.parse_inline(test1_verilog);

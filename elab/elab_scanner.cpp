@@ -182,7 +182,9 @@ void Elab_scanner::parse_setup(std::string_view filename) {
     unregister_memblock();
   }
 
-  memblock_fd = open(filename.to_s().c_str(), O_RDONLY);
+  std::string fname(filename);
+
+  memblock_fd = open(fname.c_str(), O_RDONLY);
   if (memblock_fd < 0) {
     throw parser_error(*this, "::parse could not open file {}", filename);
   }
@@ -206,10 +208,6 @@ void Elab_scanner::parse_setup(std::string_view filename) {
 
   memblock      = b;
   memblock_size = sb.st_size;
-
-  // THIS CAN BE HUGE!! err_tracker::sot_log("{}\n", memblock);  // this is the correct(original) version
-
-  buffer_name = filename;
 
   token_list.clear();
 }

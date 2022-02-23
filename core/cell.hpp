@@ -10,6 +10,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "lbench.hpp"
 #include "lgraph_base_core.hpp"
+#include "str_tools.hpp"
 
 enum class Ntype_op : uint8_t {
   Invalid,  // Detect bugs/unset (not used anywhere)
@@ -110,7 +111,7 @@ public:
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
   }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
-  static inline constexpr bool is_single_driver_per_pin(Ntype_op op) {
+  static inline bool is_single_driver_per_pin(Ntype_op op) {
     if (is_unlimited_sink(op))
       return true;
     auto c = sink_pid2name[0][static_cast<std::size_t>(op)];  // Is first port Upper or lower case
@@ -143,7 +144,7 @@ public:
     }
 
     if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9', 0)) {  // unlikely case
-      return str.to_i();
+      return str_tools::to_i(str);
     }
 
     auto pid = sink_name2pid[str.front()][static_cast<std::size_t>(op)];
@@ -152,7 +153,7 @@ public:
     return pid;
   }
 
-  static inline constexpr std::string get_sink_name(Ntype_op op, int pid) {
+  static inline std::string get_sink_name(Ntype_op op, int pid) {
     if (pid > 10) {
       auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
       auto name = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
@@ -177,7 +178,7 @@ public:
     if (likely(!is_multi_driver(op) || pin_name == "%")) {
       return 0;
     }
-    return pin_name.to_i();
+    return str_tools::to_i(pin_name);
   }
 
   static inline constexpr std::string_view get_driver_name(Ntype_op op) {

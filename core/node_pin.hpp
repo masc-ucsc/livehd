@@ -32,7 +32,7 @@ protected:
   Port_ID         pid;
   bool            sink;
 
-  constexpr Node_pin(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _idx, Port_ID _pid, bool _sink)
+  constexpr Node_pin(Lgraph *_g, Lgraph *_c_g, Hierarchy_index _hidx, Index_id _idx, Port_ID _pid, bool _sink)
       : top_g(_g), current_g(_c_g), hidx(_hidx), idx(_idx), pid(_pid), sink(_sink) {
     I(_g);
     // Could be IDX=0 for invalid
@@ -263,13 +263,13 @@ public:
     return H::combine(std::move(h), s.hidx, (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
   }
 
-  constexpr Node_pin() : top_g(nullptr), current_g(nullptr), idx(0), pid(0), sink(false) {}
+  constexpr Node_pin() : top_g(nullptr), current_g(nullptr), hidx(-1), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
   Node_pin(Lgraph *_g, const Compact &comp);
   Node_pin(std::string_view path, const Compact_flat &comp);
   Node_pin(Lgraph *_g, const Compact_driver &comp);
   Node_pin(Lgraph *_g, const Compact_class &comp);
-  Node_pin(Lgraph *_g, const Hierarchy_index &hidx, const Compact_class &comp);
+  Node_pin(Lgraph *_g, Hierarchy_index hidx, const Compact_class &comp);
   Node_pin(Lgraph *_g, const Compact_class_driver &comp);
 
   // No constexpr (get_root_idx)

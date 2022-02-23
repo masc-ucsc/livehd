@@ -95,7 +95,6 @@ std::tuple<Lg_type_id, Index_id> Lgraph_attributes::go_next_down(Index_id nid) c
     }
   }
 
-
   return std::make_tuple(n_lgid, n_nid);
 }
 

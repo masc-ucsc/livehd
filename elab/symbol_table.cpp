@@ -5,7 +5,8 @@
 #include "symbol_table.hpp"
 
 bool Symbol_table::var(std::string_view key) {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (unlikely(it != varmap.end())) {
@@ -20,7 +21,8 @@ bool Symbol_table::var(std::string_view key) {
 }
 
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
-  auto [var, field] = get_var_field(key);
+  auto [v_sv, field] = get_var_field(key);
+  std::string var(v_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
 
@@ -47,7 +49,8 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
 }
 
 bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
 
@@ -66,7 +69,8 @@ bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
 }
 
 bool Symbol_table::mut(std::string_view key, const Lconst &trivial) {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (unlikely(it == varmap.end())) {
@@ -85,7 +89,8 @@ bool Symbol_table::mut(std::string_view key, const Lconst &trivial) {
 }
 
 bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (unlikely(it != varmap.end())) {
@@ -130,7 +135,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 
   std::shared_ptr<Bundle> outputs;
   if (stack.back().type == Scope_type::Function) {
-    auto it = varmap.find(std::pair(stack.back().scope, "%"_str));
+    auto it = varmap.find(std::pair(stack.back().scope, "%"));
     if (it != varmap.end()) {
       I(has_bundle("%"));
       outputs = it->second;
@@ -160,7 +165,8 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 }
 
 bool Symbol_table::has_trivial(std::string_view key) const {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())
@@ -170,7 +176,8 @@ bool Symbol_table::has_trivial(std::string_view key) const {
 }
 
 Lconst Symbol_table::get_trivial(std::string_view key) const {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())
@@ -180,7 +187,8 @@ Lconst Symbol_table::get_trivial(std::string_view key) const {
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())
@@ -193,7 +201,8 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
 }
 
 bool Symbol_table::has_bundle(std::string_view key) const {
-  auto [var, field] = get_var_field(key);
+  auto [var_sv, field] = get_var_field(key);
+  std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())

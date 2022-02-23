@@ -11,7 +11,7 @@
 
 class Prp_parser : public Code_gen_all_lang {
   const std::string         stmt_separator = "\n";
-  std::string         lang_type      = "prp"_str;
+  std::string         lang_type      = "prp";
   absl::flat_hash_set<std::string> unsigned_vars;
 
 public:
@@ -40,8 +40,8 @@ public:
 
 class Cpp_parser : public Code_gen_all_lang {
   const std::string stmt_separator = " ;\n";
-  const std::string lang_type   = "cpp"_str;
-  const std::string supp_ftype  = "hpp"_str;
+  const std::string lang_type   = "cpp";
+  const std::string supp_ftype  = "hpp";
 
   absl::flat_hash_map<std::string, std::string> inp_bw;   // first->input port name, second->UInt<bw>
   absl::flat_hash_map<std::string, std::string> outp_bw;  // first->o/p port name, sec->UInt<bw>
@@ -93,7 +93,7 @@ public:
 
 class Ver_parser : public Code_gen_all_lang {
   const std::string stmt_separator = ";\n";
-  const std::string lang_type      = "v"_str;
+  const std::string lang_type      = "v";
 
   absl::flat_hash_set<std::string> unsigned_vars;
 

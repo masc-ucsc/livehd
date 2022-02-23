@@ -169,6 +169,8 @@ protected:
   Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
   constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 public:
+  constexpr explicit Lnast_ntype() = default;
+
   [[nodiscard]] std::string_view to_sv() const { return namemap[val]; }
 
   [[nodiscard]] Lnast_ntype_int get_raw_ntype() const { return val; }

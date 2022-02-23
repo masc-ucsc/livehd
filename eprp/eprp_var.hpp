@@ -15,7 +15,7 @@
 
 struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
   bool operator()(std::string_view lhs, std::string_view rhs) const {
-    return str_tools::lo_lower(lhs) < str_tools::to_lower(rhs);
+    return str_tools::to_lower(lhs) < str_tools::to_lower(rhs);
   }
 };
 

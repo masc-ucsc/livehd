@@ -106,6 +106,9 @@ struct Lnast_node {
 
   CREATE_LNAST_NODE(_ref)
   CREATE_LNAST_NODE(_const)
+  static Lnast_node create_const(int64_t v) {
+    return Lnast_node(Lnast_ntype::create_const(), Etoken(0, 0, 0, 0, std::to_string(v)));
+  }
 
   CREATE_LNAST_NODE(_range)
 
@@ -222,8 +225,8 @@ public:
   Etoken      get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
   std::string get_sname(const Lnast_nid &nid) const {  // sname = ssa name
     if (get_type(nid).is_const())
-      return get_name(nid);
-    return abls::StrCat(get_name(nid), "_", get_subs(nid));
+      return std::string(get_name(nid));
+    return absl::StrCat(get_name(nid), "_", get_subs(nid));
   }
 
   // bitwidth table functions

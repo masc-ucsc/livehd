@@ -15,7 +15,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
   writer.Uint64(lgid);
 
   writer.Key("name");
-  writer.String(name.to_s().c_str());
+  writer.String(name.c_str());
 
   writer.Key("io_pins");
   writer.StartArray();
@@ -28,7 +28,7 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.StartObject();
 
     writer.Key("name");
-    writer.String(pin.name.to_s().c_str());
+    writer.String(pin.name.c_str());
 
     if (pin.graph_io_pos != Port_invalid) {
       writer.Key("graph_io_pos");

@@ -27,7 +27,7 @@ public:
 
   static void get_commands(std::function<void(std::string_view , std::string_view )> fn) { Pass::eprp.get_commands(fn); };
 
-  static std::string get_command_help(std::string_view cmd) { return Pass::eprp.get_command_help(cmd); }
+  static std::string_view get_command_help(std::string_view cmd) { return Pass::eprp.get_command_help(cmd); }
 
   static void get_labels(std::string_view cmd, std::function<void(std::string_view , std::string_view , bool required)> fn) {
     Pass::eprp.get_labels(cmd, fn);

@@ -45,7 +45,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
-      return H::combine(std::move(h), s.driver_hidx.hash(), s.driver_idx, s.sink_hidx.hash(), s.sink_idx);
+      return H::combine(std::move(h), s.driver_hidx, s.driver_idx, s.sink_hidx, s.sink_idx);
     }
   };
 

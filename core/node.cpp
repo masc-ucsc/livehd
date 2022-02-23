@@ -10,17 +10,17 @@
 void Node::invalidate(Lgraph *_g) {
   top_g     = _g;
   current_g = _g;
-  hidx = "";
+  hidx = -1;
   nid = 0;
 }
 
 void Node::invalidate() {
   current_g = top_g;
-  hidx = "";
+  hidx = -1;
   nid = 0;
 }
 
-void Node::update(const Hierarchy_index &_hidx, Index_id _nid) {
+void Node::update(Hierarchy_index _hidx, Index_id _nid) {
   if (_hidx != hidx) {
     current_g = top_g->ref_htree()->ref_lgraph(_hidx);
     hidx      = _hidx;
@@ -29,7 +29,7 @@ void Node::update(const Hierarchy_index &_hidx, Index_id _nid) {
   I(current_g->is_valid_node(nid));
 }
 
-void Node::update(const Hierarchy_index &_hidx) {
+void Node::update(Hierarchy_index _hidx) {
   I(_hidx != hidx);
   current_g = top_g->ref_htree()->ref_lgraph(_hidx);
   hidx      = _hidx;
@@ -80,7 +80,7 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
+Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp)
     : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
@@ -139,7 +139,7 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
 Node_pin Node::setup_driver_pin(std::string_view pname) const {
   assert(pname.size());
   if (std::isdigit(pname.front())) {
-    Port_ID pid = pname.to_i();
+    Port_ID pid = str_tools::to_i(pname);
     Index_id idx = current_g->setup_idx_from_pid(nid, pid);
     return Node_pin(top_g, current_g, hidx, idx, pid, false);
   }
@@ -272,8 +272,8 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
   Port_ID pid;
 
-  if (name.is_i()) {
-    int pos = name.to_i();
+  if (str_tools::is_i(name)) {
+    int pos = str_tools::to_i(name);
 
     if (!sub.has_instance_pin(pos))
       return Node_pin();  // invalid pin
@@ -515,7 +515,7 @@ std::string Node::default_instance_name() const {
     return absl::StrCat(name, get_name());
   }
 
-  return absl::StrCat(name, "_nid" , str_tools::to_s(nid.value));
+  return absl::StrCat(name, "_nid" , std::to_string(nid.value));
 }
 
 std::string Node::create_name() const {
@@ -555,20 +555,20 @@ std::string Node::debug_name() const {
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
-    name = it->second.to_s();
+    name = it->second;
   }
 
   if (is_type_sub()) {
-    auto n = get_type_sub_node().get_name().to_s();
+    auto n = get_type_sub_node().get_name();
     if (name.find(n) == std::string::npos) {  // filter out unnecessary module name
       absl::StrAppend(&name, n);
     }
   }
 
-  auto cell_name = Ntype::get_name(get_type_op()).to_s();
+  auto cell_name = Ntype::get_name(get_type_op());
   if (name.empty())
-    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name().to_s());
-  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name().to_s());
+    return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
+  return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
 }
 
 bool Node::has_name() const { return current_g->get_node_name_map().contains(get_compact_class()); }

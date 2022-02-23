@@ -32,7 +32,7 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Hierarchy;
 
-  constexpr Node(Lgraph *_g, Lgraph *_c_g, const Hierarchy_index &_hidx, Index_id _nid)
+  constexpr Node(Lgraph *_g, Lgraph *_c_g, Hierarchy_index _hidx, Index_id _nid)
       : top_g(_g), current_g(_c_g), hidx(_hidx), nid(_nid) {
     assert(nid);
     assert(top_g);
@@ -42,13 +42,13 @@ protected:
   void invalidate(Lgraph *_g);
   void invalidate();
   void update(Index_id _nid) { nid = _nid; }
-  void update(const Hierarchy_index &_hidx, Index_id _nid);
+  void update(Hierarchy_index _hidx, Index_id _nid);
 
 public:
   class __attribute__((packed)) Compact {
   protected:
-    Hierarchy_index hidx;
-    uint64_t        nid : Index_bits;
+    Hierarchy_index hidx;                 // 4 bytes
+    uint64_t        nid : Index_bits;     // 4 bytes
 
     friend class Lgraph;
     friend class Lgraph_attributes;
@@ -61,8 +61,8 @@ public:
     friend class Bwd_edge_iterator;
 
   public:
-    constexpr Compact(const Hierarchy_index &_hidx, Index_id _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
-    constexpr Compact() : nid(0){};
+    constexpr Compact(Hierarchy_index _hidx, Index_id _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
+    constexpr Compact() : hidx(-1), nid(0){};
 
     constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
@@ -83,7 +83,7 @@ public:
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact &s) {
-      return H::combine(std::move(h), s.hidx.hash(), s.nid);
+      return H::combine(std::move(h), s.hidx, s.nid);
     };
   };
 
@@ -144,7 +144,7 @@ public:
 
     constexpr Compact_class(const Index_id &_nid) : nid(_nid){};
 
-    constexpr Node get_node(Lgraph *lg) const { return Node(lg, *this); }
+    Node get_node(Lgraph *lg) const { return Node(lg, *this); }
 
     constexpr Index_id get_nid() const { return nid; }
     constexpr bool     is_invalid() const { return nid == 0; }
@@ -158,11 +158,11 @@ public:
     };
   };
 
-  void update(const Hierarchy_index &_hidx);
+  void update(Hierarchy_index _hidx);
 
   template <typename H>
   friend H AbslHashValue(H h, const Node &s) {
-    return H::combine(std::move(h), (int)s.hidx.hash(), (int)s.nid);  // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), s.hidx, s.nid);  // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
@@ -170,12 +170,12 @@ public:
   void update(const Node::Compact &comp);
   void update(const Node &node);
 
-  constexpr Node() : top_g(nullptr), current_g(nullptr), nid(0) {}
+  constexpr Node() : top_g(nullptr), current_g(nullptr), hidx(-1), nid(0) {}
 
   Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
   Node(std::string_view path, const Compact_flat &comp);
   Node(Lgraph *_g, const Compact_flat &comp);
-  Node(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp);
+  Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp);
   constexpr Node(Lgraph *_g, const Compact_class &comp)
       : top_g(_g), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
     I(nid);

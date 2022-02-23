@@ -57,7 +57,7 @@ public:
   void set_immutable()       { immutable = true; }
 
   bool has_trivial(std::string_view key) const;
-  bool has_trivial()                         const { return has_trivial("0"_str); }
+  bool has_trivial()                         const { return has_trivial("0"); }
 
   std::string learn_fix(std::string_view key);
 
@@ -96,7 +96,7 @@ public:
   }
 
   void set(const Lconst &trivial) { // clear everything that is not 0.__attr. set 0
-    return set("0"_str, trivial);
+    return set("0", trivial);
   }
 
   bool concat(const std::shared_ptr<Bundle const>& tup2);

@@ -1,8 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "pass_compiler.hpp"
 
 #include <cstddef>
 
+#include "absl/strings/str_split.h"
+
+#include "pass_compiler.hpp"
 #include "lcompiler.hpp"
 #include "str_tools.hpp"
 
@@ -42,7 +44,7 @@ void Pass_compiler::compile(Eprp_var &var) {
       return;
     }
 
-    for (auto f : str_tools::split(files, ',')) {
+    for (auto f : absl::StrSplit(files, ',')) {
       Pass::warn("todo: start from prp parser:{}", f);
     }
   }

@@ -34,7 +34,7 @@ protected:
 
     std::string name;
     while (name.empty() || name_set.count(name)) {
-      name = ""_str;
+      name = "";
 
       for (int i = 0; i < levels; ++i) {
         auto part = pool[rng.max(pool.size())];

@@ -22,9 +22,9 @@ public:
 
   std::string create_lnast_tmp();
   std::string get_lnast_name(std::string_view val);
-  std::string get_lnast_lhs_name(std::string_view val);
+  std::string_view get_lnast_lhs_name(std::string_view val);
 
-  void new_lnast(std::string name);
+  void new_lnast(std::string_view name);
 
   // static bool has_lnast(std::string name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 

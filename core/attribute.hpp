@@ -41,7 +41,7 @@ class Attribute {
     if (likely(it != lg2attr.end())) {
       last_attr = it->second;
     } else {
-      last_attr    = new Attr_data(lg->get_path().to_s(), get_filename(lg->get_lgid()));
+      last_attr    = new Attr_data(lg->get_path(), get_filename(lg->get_lgid()));
       lg2attr[key] = last_attr;
     }
   };

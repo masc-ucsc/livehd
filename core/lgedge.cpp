@@ -16,7 +16,6 @@ static_assert(sizeof(SEdge) == sizeof(SEdge_Internal), "SEdge should be 2 bytes"
 static_assert(sizeof(Edge_raw) == 3, "Edge_raw should be 3 bytes like SEdge");
 static_assert(sizeof(Node_internal) == 32, "Node should be 32 bytes and 32 bytes aligned");
 static_assert(sizeof(Node_internal_Page) == 32, "Node should 32 bytes and 32 bytes aligned");
-static_assert((1ULL << Index_bits) <= MMAPA_MAX_ENTRIES, "Max number of entries in Dense");
 
 Index_id SEdge_Internal::get_page_idx() const { return Node_internal_Page::get(this).get_idx(); }
 

@@ -52,17 +52,17 @@ public:
   Eprp();
 
   void register_method(const Eprp_method &method) {
-    assert(methods.find(method.get_name()) == methods.end());
-    methods.insert({method.get_name(), method});
+    assert(methods.find(std::string(method.get_name())) == methods.end());
+    methods.insert({std::string(method.get_name()), method});
   }
 
-  bool has_method(std::string_view cmd) const { return methods.find(cmd) != methods.end(); }
+  bool has_method(std::string_view cmd) const { return methods.find(std::string(cmd)) != methods.end(); }
 
   void run_cmd(std::string_view cmd, const Eprp_var &cmd_var_fields);
 
   bool readline(const char *line);
 
-  std::string get_command_help(std::string_view cmd) const;
+  std::string_view get_command_help(std::string_view cmd) const;
 
   void get_commands(const std::function<void(std::string_view , std::string_view )> &fn) const;
   void get_labels(std::string_view cmd,

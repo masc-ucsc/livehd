@@ -44,14 +44,15 @@ void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(ln
 void Eprp_var::add(std::string_view name, std::string_view value) {
 
   if (name == "files") {
-    for (const auto &v : value.split(',')) {
-      if (access(v.to_s().c_str(), R_OK) == -1) {
+    for (const auto &v : absl::StrSplit(value,',')) {
+      std::string v_str(v);
+      if (access(v_str.c_str(), R_OK) == -1) {
         fmt::print("ERROR: file '{}' is not accessible (skipping)\n", v);
         throw std::runtime_error("not valid file");
       }
     }
   } else if (name == "path" || name == "src_path") {
-    auto path = value.to_s();
+    std::string path(value);
     if (access(path.c_str(), R_OK) == -1) {
       mkdir(path.c_str(), 0755);
       if (access(path.c_str(), R_OK) == -1) {
@@ -67,7 +68,7 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
 void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new) {
   // lnast_old.swap(lnast_new);
 
-  std::vector<std::shared_ptr<Lnast> >::iterator itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
+  auto itr = std::find(lnasts.begin(), lnasts.end(), lnast_old);
 
   // auto indx = lnasts.begin();
   if (itr != lnasts.cend()) {

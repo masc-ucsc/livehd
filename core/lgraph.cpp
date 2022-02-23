@@ -14,13 +14,14 @@
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph_base_core.hpp"
+#include "str_tools.hpp"
 
 #include "hif/hif_read.hpp"
 #include "hif/hif_write.hpp"
 
 Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_attributes(_path, _name, _lgid, _lib), htree(this) {
-  I(!_name.contains('/'));  // No path in name
+  I(!str_tools::contains(_name,'/'));  // No path in name
   I(_name == get_name());
 
   // load();

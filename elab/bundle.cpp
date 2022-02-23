@@ -5,6 +5,7 @@
 #include "bundle.hpp"
 #include "likely.hpp"
 #include "lnast.hpp"
+#include "str_tools.hpp"
 
 using namespace std::literals;
 
@@ -427,7 +428,7 @@ int Bundle::get_first_level_pos(std::string_view key) {
     return -1;
   }
 
-  return key.substr(skip).to_i();
+  return str_tools::to_i(key.substr(skip));
 }
 
 std::string_view Bundle::get_first_level(std::string_view key) {
@@ -514,8 +515,8 @@ std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key)
     throw Lnast::error("name should have a format like :digits:name not {}\n", key2);
   }
 
-  auto x = key2.to_i();
-  I(x == key2.substr(0,n).to_i());
+  auto x = str_tools::to_i(key2);
+  I(x == str_tools::to_i(key2.substr(0,n)));
 
   return std::pair(x, key2.substr(n + 1));
 }
@@ -533,13 +534,12 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
 }
 
 std::string Bundle::learn_fix(std::string_view key) {
-  std::string key{a};
 
   for (auto &e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
 
-  return key;
+  return std::string(key);
 }
 
 Bundle::Entry Bundle::get_entry(std::string_view key) const {
@@ -620,7 +620,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
       auto key2 = e.first.substr(e_pos);
       I(!key2.empty());
       if (is_root_attribute(key2)) {
-        tup->key_map.emplace_back(absl::StrCat("0."_str, key2), e.second);
+        tup->key_map.emplace_back(absl::StrCat("0.", key2), e.second);
       } else {
         tup->key_map.emplace_back(key2, e.second);
       }
@@ -810,10 +810,10 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
     auto max_pos = 0;
     for (const auto &e : key_map) {
       int x = 0;
-      if (e.first.is_i()) {
-        x = e.first.to_i();
+      if (str_tools::is_i(e.first)) {
+        x = str_tools::to_i(e.first);
       } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
-        x = e.first.substr(1).to_i();
+        x = str_tools::to_i(e.first.substr(1));
       } else {
         dump();
         Lnast::info("can not concat bundle pin to bundle unordered {} field {}", get_name(), e.first);
@@ -823,7 +823,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
         max_pos = x;
     }
     for (const auto &e : delayed_numbers) {
-      auto x = e.first.to_i();
+      auto x = str_tools::to_i(e.first);
       std::string new_key(std::to_string(x + max_pos + 1));
 
       key_map.emplace_back(new_key, Entry(false, e.second));
@@ -968,10 +968,10 @@ bool Bundle::concat(const Lconst &trivial) {
   auto max_pos = 0;
   for (const auto &e : key_map) {
     int x = 0;
-    if (e.first.is_i()) {
-      x = e.first.to_i();
+    if (str_tools::is_i(e.first)) {
+      x = str_tools::to_i(e.first);
     } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
-      x = e.first.substr(1).to_i();
+      x = str_tools::to_i(e.first.substr(1));
     } else {
       dump();
       Lnast::info("can not concat trivial:{} to bundle unordered {} field {}", trivial, get_name(), e.first);

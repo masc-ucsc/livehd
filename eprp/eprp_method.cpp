@@ -10,11 +10,11 @@ Eprp_method::Eprp_method(std::string_view _name, std::string_view _help, const s
 bool Eprp_method::has_label(std::string_view label) const { return labels.find(label) != labels.end(); }
 
 void Eprp_method::add_label(std::string_view attr, std::string_view help_txt, bool required, std::string_view default_value) {
-  labels.insert({attr, {help_txt, required, default_value}});
+  labels.insert({std::string(attr), {help_txt, required, default_value}});
 }
 
 std::string_view Eprp_method::get_label_help(std::string_view label) const {
-  const auto it = labels.find(label);
+  const auto it = labels.find(std::string(label));
   if (it == labels.end()) {
     return "";
   }

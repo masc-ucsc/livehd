@@ -32,7 +32,7 @@ Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(com
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(Lgraph *_g, const Hierarchy_index &_hidx, const Compact_class &comp)
+Node_pin::Node_pin(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp)
     : top_g(_g), hidx(_hidx), idx(comp.idx), sink(comp.sink) {
   I(!Hierarchy::is_invalid(hidx));
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -359,21 +359,21 @@ std::string Node_pin::debug_name() const {
     const auto &ptr = current_g->get_node_pin_name_map();
     const auto it = ptr.find(get_compact_class_driver());
     if (it != ptr.end())
-      name = it->second.to_s();
+      name = it->second;
   }
 
   const auto node = get_node();
   if (name.empty()) {
     if (node.is_type_sub()) {
-      name = node.get_type_sub_node().get_name_from_instance_pid(pid).to_s();
+      name = node.get_type_sub_node().get_name_from_instance_pid(pid);
     } else if (node.is_type_const()) {
-      name = node.get_type_const().to_pyrope().to_s();
+      name = node.get_type_const().to_pyrope();
       return absl::StrCat("pin_", "n", std::to_string(node.nid), "_", name);
     } else if (node.has_name()) {
-      name = node.get_name().to_s();
+      name = node.get_name();
     } else {
       if (is_sink()) {
-        name = Ntype::get_sink_name(node.get_type_op(), pid).to_s();
+        name = Ntype::get_sink_name(node.get_type_op(), pid);
       } else {
         if (Ntype::is_multi_driver(node.get_type_op()))
           name = std::to_string(pid);
@@ -392,14 +392,14 @@ std::string Node_pin::debug_name() const {
                       sink ? "s" : "d",
                       std::to_string(pid),
                       "_lg",
-                      current_g->get_name().to_s());
+                      current_g->get_name());
 }
 
 std::string Node_pin::get_wire_name() const {
   if (is_sink()) {
     auto dpin = get_driver_pin();
     if (dpin.is_invalid())
-      return ""_str;
+      return "";
     return dpin.get_wire_name();
   }
 
@@ -472,17 +472,17 @@ std::string Node_pin::get_pin_name() const {
     if (pid == 0) {
       return is_driver() ? "%" : "$";
     }
-    return get_type_sub_pin_name();
+    return std::string(get_type_sub_pin_name());
   }
 
   if (is_driver()) {
     if (Ntype::is_multi_driver(op))
-      return std::to_string(pid);
+      return std::to_string(pid); // this is the reason for std::string return
 
-    return Ntype::get_driver_name(op);
+    return std::string(Ntype::get_driver_name(op));
   }
 
-  return Ntype::get_sink_name(op, pid);
+  return std::string(Ntype::get_sink_name(op, pid));
 }
 
 void Node_pin::set_offset(Bits_t offset) {
@@ -536,7 +536,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(node.is_type_sub_present());
 
   // 1st: Get down_hidx
-	auto down_hidx = top_g->get_htree().go_down(node);
+	auto down_hidx = top_g->ref_htree()->go_down(node);
 
   // 2nd: get down_pid
   I(pid != Port_invalid);

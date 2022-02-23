@@ -67,7 +67,7 @@ public:
                                                              const std::vector<std::shared_ptr<Lgtuple const>> &tup_list);
 
   std::tuple<std::shared_ptr<Lgtuple>, bool>      get_flop_tup(Node &flop) const;
-  static std::pair<std::string,std::string>   get_flop_attr_name(std::string_view flop_root_name, std::string_view cname);
+  static std::pair<std::string_view,std::string>  get_flop_attr_name(std::string_view flop_root_name, std::string_view cname);
   std::shared_ptr<Lgtuple>                        make_flop(Node &flop) const;
 
   bool is_correct() const { return correct; }

@@ -25,7 +25,7 @@ public:
   public:
     constexpr Fast_iter(Lgraph *_g, Lgraph *_cg, const Hierarchy_index &_hidx, const Index_id _nid, bool _visit_sub)
         : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) {}
-    constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), visit_sub(_visit_sub) {}
+    constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), hidx(-1), visit_sub(_visit_sub) {}
 
     constexpr Fast_iter(const Fast_iter &it)
         : top_g(it.top_g), current_g(it.current_g), hidx(it.hidx), nid(it.nid), visit_sub(it.visit_sub) {}

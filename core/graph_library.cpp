@@ -325,7 +325,7 @@ Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view s
   return *sub_nodes[lgid];
 }
 
-Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"_str); }
+Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"); }
 
 Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid_int(name);

@@ -19,7 +19,7 @@ void Pipe_step::run(Eprp_var &last_cmd_var) {
   auto [err, err_msg] = m.check_labels(last_cmd_var);
   if (err) {
     fmt::print("error:{}\n", err_msg);
-    throw std::runtime_error(err_msg.to_s());
+    throw std::runtime_error(err_msg);
     return;
   }
 

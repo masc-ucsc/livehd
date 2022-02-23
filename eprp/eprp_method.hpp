@@ -35,5 +35,5 @@ public:
     add_label(attr, help_txt, false, default_value);
   };
   void               add_label_required(std::string_view attr, std::string_view help_txt) { add_label(attr, help_txt, true); };
-  [[nodiscard]] std::string get_label_help(std::string_view label) const;
+  [[nodiscard]] std::string_view get_label_help(std::string_view label) const;
 };

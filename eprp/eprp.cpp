@@ -264,7 +264,7 @@ void Eprp::process_ast() {
 }
 
 void Eprp::run_cmd(std::string_view cmd, const Eprp_var &cmd_var_fields) {
-  const auto &it = methods.find(cmd);
+  const auto &it = methods.find(std::string(cmd));
   if (it == methods.end()) {
     throw parser_error(*this, "method {} not registered", cmd);
   }
@@ -272,8 +272,8 @@ void Eprp::run_cmd(std::string_view cmd, const Eprp_var &cmd_var_fields) {
   pipe.add_command(it->second, cmd_var_fields);
 }
 
-std::string Eprp::get_command_help(std::string_view cmd) const {
-  const auto &it = methods.find(cmd);
+std::string_view Eprp::get_command_help(std::string_view cmd) const {
+  const auto it = methods.find(std::string(cmd));
   if (it == methods.end()) {
     return "";
   }
@@ -289,7 +289,7 @@ void Eprp::get_commands(const std::function<void(std::string_view , std::string_
 
 void Eprp::get_labels(std::string_view cmd,
                       const std::function<void(std::string_view , std::string_view , bool required)> &fn) const {
-  const auto &it = methods.find(cmd);
+  const auto &it = methods.find(std::string(cmd));
   if (it == methods.end())
     return;
 

@@ -180,7 +180,7 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
 
 std::string Lgtuple::append_field(std::string_view a, std::string_view b) {
   if (a.empty())
-    return b;
+    return std::string(b);
 
   return absl::StrCat(a, ".", b);
 }
@@ -465,7 +465,7 @@ std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key)
     ++skip;
 
   if (key[skip] != ':') {
-    return std::pair(Port_invalid, key.substr(skip));
+    return std::pair(Port_invalid, std::string(key.substr(skip)));
   }
 
   auto key2 = key.substr(skip+1);
@@ -482,7 +482,7 @@ std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key)
   auto x = str_tools::to_i(key2);
   I(x == str_tools::to_i(key2.substr(0,n)));
 
-  return std::pair(static_cast<Port_ID>(x), key2.substr(n + 1));
+  return std::pair(static_cast<Port_ID>(x), std::string(key2.substr(n + 1)));
 }
 
 std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
@@ -808,7 +808,7 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
     auto max_pos = 0;
     for (const auto &e : key_map) {
       int x = 0;
-      if (e.first.is_i()) {
+      if (str_tools::is_i(e.first)) {
         x = str_tools::to_i(e.first);
       } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
         x = str_tools::to_i(e.first.substr(1));
@@ -1162,7 +1162,7 @@ bool Lgtuple::concat(const Node_pin &dpin) {
   auto max_pos = 0;
   for (const auto &e : key_map) {
     int x = 0;
-    if (e.first.is_i()) {
+    if (str_tools::is_i(e.first)) {
       x = str_tools::to_i(e.first);
     } else if (e.first.front() == ':' && std::isdigit(e.first[1])) {
       x = str_tools::to_i(e.first.substr(1));
@@ -1440,7 +1440,7 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) con
   return std::tuple(ret_tup, pending_iterations);
 }
 
-std::pair<std::string, std::string> Lgtuple::get_flop_attr_name(std::string_view flop_root_name, std::string_view cname) {
+std::pair<std::string_view, std::string> Lgtuple::get_flop_attr_name(std::string_view flop_root_name, std::string_view cname) {
   auto attr = get_attribute(cname);
 
   std::string new_flop_name;

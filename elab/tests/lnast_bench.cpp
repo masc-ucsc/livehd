@@ -16,7 +16,7 @@ static void BM_assign_const(benchmark::State& state) {
 #endif
 
     for (int j = 0; j < state.range(0); ++j) {
-      ln.create_assign_stmts("tmp"_str, std::to_string(j));
+      ln.create_assign_stmts("tmp", std::to_string(j));
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -38,7 +38,7 @@ static void BM_assign_pyrope_const(benchmark::State& state) {
 
     for (int j = 0; j < state.range(0); ++j) {
       Lconst val(j);
-      ln.create_assign_stmts("tmp"_str, val.to_pyrope());
+      ln.create_assign_stmts("tmp", val.to_pyrope());
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
