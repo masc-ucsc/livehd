@@ -1,0 +1,5 @@
+lgshell:
+  bin: './main/lgshell'
+
+lgcheck:
+  bin: './inou/yosys/lgcheck'

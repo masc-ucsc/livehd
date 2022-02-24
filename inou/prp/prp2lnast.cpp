@@ -272,18 +272,20 @@ void Prp2lnast::process_function_definition(TSNode node) {
   // TODO: Handle func_type/capture/generic/condition
 
   auto inode = get_child(node, "input");
-  auto onode = get_sibling(get_child(node, "output"));
+  auto onode = get_child(node, "output");
   auto cnode = get_child(node, "code");
 
-  fmt::print(">I: {}\n>O: {}\n>C: {}\n", get_text(inode), get_text(onode), get_text(cnode));
-
   expr_state_stack.push(Expression_state::Type);
-  is_function_input = true;
-  process_node(inode);
-  is_function_input = false;
-  is_function_output = true;
-  process_node(onode);
-  is_function_output = false;
+  if (!ts_node_is_null(inode)) {
+    is_function_input = true;
+    process_node(inode);
+    is_function_input = false;
+  }
+  if (!ts_node_is_null(onode)) {
+    is_function_output = true;
+    process_node(get_sibling(onode));
+    is_function_output = false;
+  }
   expr_state_stack.pop();
 
   process_node(cnode);

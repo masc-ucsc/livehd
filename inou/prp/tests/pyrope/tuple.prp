@@ -1,0 +1,16 @@
+/*
+:name: tuple
+:type: parsing
+*/
+
+pub let top = fun {
+  x = (1, (2, 0), (4, (0, 6)), 7)
+  x[1][1] = 3
+  x[2][1][0] = 5
+
+  a = x[1]
+  b = x[2][1]
+  c = x[3]
+
+  return (a, b, c)
+}

@@ -1,0 +1,9 @@
+/*
+:name: simple
+:type: parsing lgraph compile
+*/
+
+let top = fun(a, b) -> (c, d) {
+  c = a + b;
+  d = a - b;
+}
