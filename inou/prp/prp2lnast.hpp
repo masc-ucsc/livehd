@@ -25,7 +25,7 @@ protected:
   // FIXME: Temporary fix for generating input/output refs
   bool is_function_input;
   bool is_function_output;
-  absl::flat_hash_map<mmap_lib::str, mmap_lib::str> ref_name_map;
+  absl::flat_hash_map<std::string, std::string> ref_name_map;
 
   // Top
   void process_description();

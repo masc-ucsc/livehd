@@ -619,13 +619,11 @@ void Prp2lnast::process_identifier(TSNode node) {
     case Expression_state::Lvalue:
     case Expression_state::Rvalue:
       if (ref_name_map.count(name) == 0) {
-        mmap_lib::str directed_name;
+        std::string directed_name(name);
         if (is_function_input) {
-          directed_name = mmap_lib::str::concat("$.", name);
+          directed_name = absl::StrCat("$.", name);
         } else if (is_function_output) {
-          directed_name = mmap_lib::str::concat("%.", name);
-        } else {
-          directed_name = name;
+          directed_name = absl::StrCat("%.", name);
         }
         ref_name_map[name] = directed_name;
       }
