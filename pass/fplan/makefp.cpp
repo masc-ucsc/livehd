@@ -91,11 +91,11 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
   auto nt = Node_tree(root_lg);
   fmt::print(" done ({} ms).\n", whole_t.time());
 
-  float ar = std::stof(var.get("aspect").to_s());
+  float ar = std::stof(std::string(var.get("aspect")));
 
   if (t_str == "hier_lg") {
     Lg_hier_floorp hfp(std::move(nt));
-    makefp_int(hfp, var.get("filename").to_s(), var.get("strategy").to_s(), ar);
+    makefp_int(hfp, var.get("filename"), var.get("strategy"), ar);
 
     profile_time::Timer t;
     t.start();
@@ -104,12 +104,12 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     fmt::print(" done ({} ms).\n", t.time());
   } else if (t_str == "flat_node") {
     Node_flat_floorp nffp(std::move(nt));
-    makefp_int(nffp, var.get("filename").to_s(), var.get("strategy").to_s(), ar);
+    makefp_int(nffp, var.get("filename"), var.get("strategy"), ar);
 
     // flat floorplans have no hierarchy and cannot be written to LiveHD
   } else if (t_str == "hier_node") {
     Node_hier_floorp nhfp(std::move(nt));
-    makefp_int(nhfp, var.get("filename").to_s(), var.get("strategy").to_s(), ar);
+    makefp_int(nhfp, var.get("filename"), var.get("strategy"), ar);
 
     profile_time::Timer t;
     t.start();
@@ -118,7 +118,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
     fmt::print(" done ({} ms).\n", t.time());
   } else {
     std::string errstr = "unknown traversal method ";
-    error(errstr.append(t_str.to_s()));
+    error(errstr.append(t_str));
   }
 
   fmt::print("done ({} ms).\n\n", whole_t.time());

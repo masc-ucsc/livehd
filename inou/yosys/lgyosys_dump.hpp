@@ -59,7 +59,7 @@ private:
     }
   }
 
-  RTLIL::IdString next_id(Lgraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg").to_s())); }
+  RTLIL::IdString next_id(Lgraph *lg) { return RTLIL::IdString(absl::StrCat("\\", unique_name(lg, "lg"))); }
 
   // FIXME: any way of merging these two?
   typedef RTLIL::Cell *(RTLIL::Module::*add_cell_fnc_sign)(RTLIL::IdString, const RTLIL::SigSpec &, const RTLIL::SigSpec &,

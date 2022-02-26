@@ -1026,10 +1026,10 @@ void Firmap::analysis_fir_const(Node &node, FBMap &fbmap) {
   I(pos1 != std::string_view::npos || pos2 != std::string_view::npos);
   if (pos1 != std::string_view::npos) {
     sign = false;
-    bits = const_str.substr(pos1 + 5).to_i();
+    bits = str_tools::to_i(const_str.substr(pos1 + 5));
   } else {
     sign = true;
-    bits = const_str.substr(pos2 + 5).to_i();
+    bits = str_tools::to_i(const_str.substr(pos2 + 5));
   }
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits, sign));
 }

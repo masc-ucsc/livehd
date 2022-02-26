@@ -19,7 +19,7 @@ protected:
 
   void format_append(std::string &text) const {
     assert(scanner_pos < token_list.size());
-    auto txt = token_list[scanner_pos].get_text().to_s();
+    auto txt = token_list[scanner_pos].get_text();
 
     if (scanner_pos > 0) {
       if (token_list[scanner_pos - 1].line != token_list[scanner_pos].line) {

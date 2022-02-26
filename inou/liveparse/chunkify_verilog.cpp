@@ -23,9 +23,11 @@
 Chunkify_verilog::Chunkify_verilog(std::string_view _path) : path(_path) { library = Graph_library::instance(path); }
 
 int Chunkify_verilog::open_write_file(std::string_view filename) const {
-  int fd = open(filename.to_s().c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  std::string fname(filename);
+
+  int fd = open(fname.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
-    throw scan_error(*this, "could not open {} for output", filename);
+    throw scan_error(*this, "could not open {} for output", fname);
   }
 
   return fd;
@@ -35,7 +37,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
   if (elab_path.empty())
     return false;
 
-  const std::string elab_filename = elab_chunk_dir.to_s() + "/" + module_name.to_s() + ".v";
+  const std::string elab_filename = absl::StrCat(elab_chunk_dir , "/" , module_name , ".v");
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
@@ -110,9 +112,9 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-  auto parse_path = path.to_s() + "/parse/";  // Keep trailing /
+  auto parse_path = absl::StrCat(path , "/parse/");  // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
-    auto spath = path.to_s();
+    std::string spath(path);
     int  err   = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
       throw scan_error(*this, "could not create {} directory", path);
@@ -129,15 +131,15 @@ void Chunkify_verilog::elaborate() {
   if (is_parse_inline()) {
     format_name = "inline";
   } else {
-    format_name = get_filename().to_s();
+    std::string fname(get_filename());
 
-    for (char &c : format_name) {
+    for (char &c : fname) {
       if (c == '/')
         c = '.';
     }
   }
 
-  const std::string &bench_name = "LIVEPARSE_" + path.to_s() + "_" + std::to_string(get_token_pos()) + "_" + format_name;
+  const std::string &bench_name = "LIVEPARSE_" + path + "_" + std::to_string(get_token_pos()) + "_" + format_name;
   TRACE_EVENT("inou", nullptr, [&bench_name](perfetto::EventContext ctx) { ctx.event()->set_name(bench_name); });
   Lbench bench("inou." + bench_name);
 
@@ -242,7 +244,7 @@ void Chunkify_verilog::elaborate() {
       if (endmodule_found) {
         bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
-          auto outfile = abls::StrCat(chunk_dir.to_s() , "/" , module_name.to_s() , ".v");
+          auto outfile = absl::StrCat(chunk_dir , "/" , module_name , ".v");
           write_file(outfile, not_in_module_text, in_module_text);
         }
         module_name = "";

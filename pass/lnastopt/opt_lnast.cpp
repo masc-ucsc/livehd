@@ -542,7 +542,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
 
   // Creates new trivial bundle that contains the desired trivial value
   auto bundle_trivial = std::make_shared<Bundle>(lhs_txt);
-  bundle_trivial->set(0, bundle->flatten());
+  bundle_trivial->set("0", bundle->flatten());
 
   st.set(lhs_txt, bundle_trivial);
 }
@@ -567,7 +567,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
 
   int pos = 0;
   while (!idx.is_invalid()) {
-    auto pos_txt = std::string(pos);
+    auto pos_txt = std::to_string(pos);
 
     const auto &data = ln->get_data(idx);
     if (data.type.is_const()) {  // CASE 1: (..., 123, ...)
@@ -583,7 +583,7 @@ void Opt_lnast::process_tuple_add(const std::shared_ptr<Lnast> &ln, const Lnast_
       const auto &data_rhs = ln->get_data(rhs_id);
       I(data_lhs.type.is_ref());
       auto data_lhs_txt = data_lhs.token.get_text();
-      if (data_lhs_txt.is_i()) {
+      if (str_tools::is_i(data_lhs_txt)) {
         throw Lnast::error("bundle '{}' can not have '{}' as field (numeric not allowed)", var_root, data_lhs_txt);
       }
       auto field_lhs = absl::StrCat(":", pos_txt, ":", data_lhs_txt);
@@ -780,7 +780,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
           const auto &child_data = ln->get_data(child);
 
           if (child_data.type.is_ref()) {  // if reference, check stored trivial value for conditional
-            if (st.get_trivial(lhs_txt).to_pyrope() == 1) {
+            if (st.get_trivial(lhs_txt).is_known_true()) {
               idx = ln->get_first_child(ln->get_sibling_next(child));
               break;
             }

@@ -21,7 +21,7 @@ bool Semantic_check::is_temp_var(std::string_view node_name) {
 }
 
 bool Semantic_check::is_a_number(std::string_view node_name) {
-  return node_name.is_i();
+  return str_tools::is_i(node_name);
 }
 
 bool Semantic_check::in_map(const FlatHashMap &dict, std::string_view node_name) {
@@ -52,7 +52,7 @@ std::string Semantic_check::in_lhs_list(Lnast *lnast, int index) {
   for (auto name : lhs_list) {
     lhs_index++;
     if (lhs_index == index) {
-      return lnast->get_name(name);
+      return std::string(lnast->get_name(name));
     }
   }
   return "";
@@ -90,7 +90,7 @@ bool Semantic_check::in_in_scope_stack(std::string_view node_name) {
 
 void Semantic_check::add_to_output_vars(std::string_view node_name) {
   if (!in_output_vars(node_name)) {
-    output_vars.insert(node_name);
+    output_vars.insert(std::string(node_name));
   }
 }
 
@@ -152,7 +152,7 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
 
     std::string indent(2*(it.level+1),' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_str(), node.token.get_text());
+    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (node.token.get_text() == error_name && !printed) {
       fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
@@ -175,9 +175,9 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
 
     std::string indent(2*(it.level+1),' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_str(), node.token.get_text());
+    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
-    if (node.type.to_str() == error_name && !printed) {
+    if (node.type.to_sv() == error_name && !printed) {
       fmt::print(fmt::fg(fmt::color::red), "    <==========\n");
       printed = true;
     } else {
@@ -199,7 +199,7 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
 
     std::string indent(2*(it.level+1),' ');
 
-    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_str(), node.token.get_text());
+    fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
     if (error_names.size() != 0) {
       for (auto node_name = error_names.begin(); node_name != error_names.end(); *node_name++) {
@@ -226,7 +226,7 @@ void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
   int rhs_index = 0;
   for (const auto &group : rhs_list) {
     for (auto node_name : group) {
-      std::string_view read_node_name = lnast->get_name(node_name);
+      std::string read_node_name(lnast->get_name(node_name));
       if (is_temp_var(read_node_name)) {
         continue;
       }
@@ -380,7 +380,7 @@ void Semantic_check::resolve_lhs_rhs_lists(Lnast *lnast) {
       continue;
     }
     if (rhs_not_temp && lhs_not_temp && !in_inefficient_LNAST(lnast->get_name(lhs_list[lhs_index]))) {
-      inefficient_LNAST.insert(lnast->get_name(lhs_list[lhs_index]));
+      inefficient_LNAST.insert(std::string(lnast->get_name(lhs_list[lhs_index])));
     }
   }
   if (inefficient_LNAST.size() != 0) {
@@ -466,7 +466,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       rhs_list.push_back(rhs_args);
       // Missing Nodes
       if (num_of_ref != 3) {
-        error_print_lnast_by_type(lnast, node_type.to_str());
+        error_print_lnast_by_type(lnast, node_type.to_sv());
         Pass::error("Tuple Concatenation Operation Error: Missing Reference Node\n");
       }
 #if 0
@@ -487,7 +487,7 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       }
       // Missing Nodes
       if (num_of_ref != 3) {
-        error_print_lnast_by_type(lnast, node_type.to_str());
+        error_print_lnast_by_type(lnast, node_type.to_sv());
         Pass::error("Select Operation Error: Missing Reference Node(s)\n");
       }
 #endif
@@ -516,11 +516,11 @@ void Semantic_check::check_primitive_ops(Lnast *lnast, const Lnast_nid &lnidx_op
       }
       rhs_list.push_back(rhs_args);
     } else {
-      error_print_lnast_by_type(lnast, node_type.to_str());
+      error_print_lnast_by_type(lnast, node_type.to_sv());
       Pass::error("Primitive Operation Error: Not a Valid Node Type\n");
     }
   } else {
-    error_print_lnast_by_type(lnast, node_type.to_str());
+    error_print_lnast_by_type(lnast, node_type.to_sv());
     Pass::error("Primitive Operation Error: Requires at least 2 LNAST Nodes (lhs, rhs)\n");
   }
 }
@@ -544,7 +544,7 @@ void Semantic_check::check_tree_struct_ops(Lnast *lnast, const Lnast_nid &lnidx_
     check_func_def(lnast, lnidx_opr, stmt_name);
   } else {
     // Invalid Node Type
-    error_print_lnast_by_type(lnast, node_type.to_str());
+    error_print_lnast_by_type(lnast, node_type.to_sv());
     Pass::error("Tree Structure Operation Error: Not a Valid Node Type\n");
   }
   // fmt::print("Write Dict\n");
@@ -573,7 +573,7 @@ void Semantic_check::check_if_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std::
     const auto ntype_child = lnast->get_data(lnidx_opr_child).type;
 
     if (ntype_child.is_stmts()) {
-      std::string_view new_stmt_name = lnast->get_name(lnidx_opr_child);
+      auto new_stmt_name = lnast->get_name(lnidx_opr_child);
       for (const auto &lnidx_opr_child_child : lnast->children(lnidx_opr_child)) {
         const auto ntype_child_child = lnast->get_data(lnidx_opr_child_child).type;
 
@@ -627,10 +627,10 @@ void Semantic_check::check_for_op(Lnast *lnast, const Lnast_nid &lnidx_opr, std:
   }
   // Missing Nodes
   if (num_of_ref < 2) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("For Operation Error: Missing Reference Node(s)\n");
   } else if (!stmts) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("For Operation Error: Missing Statements Node\n");
   }
 }
@@ -663,10 +663,10 @@ void Semantic_check::check_while_op(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
   // Missing Nodes
   if (!cond) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("While Operation Error: Missing Condition Node\n");
   } else if (!stmt) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("While Operation Error: Missing Statement Node\n");
   }
 }
@@ -684,11 +684,11 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
       num_of_refs += 1;
       // Store type 'ref' variables
       add_to_write_list(lnast, lnast->get_name(lnidx_opr_child), stmt_name);
-      functions.insert(lnast->get_name(lnidx_opr_child));
+      functions.insert(std::string(lnast->get_name(lnidx_opr_child)));
       continue;
     }
     if (ntype_child.is_stmts()) {
-      std::string new_stmt_name = stmt_name;
+      auto new_stmt_name = stmt_name;
       if (ntype_child.is_stmts()) {
         stmts         = true;
         new_stmt_name = lnast->get_name(lnidx_opr_child);
@@ -717,13 +717,13 @@ void Semantic_check::check_func_def(Lnast *lnast, const Lnast_nid &lnidx_opr, st
   }
   // Missing Nodes
   if (num_of_refs < 1) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("Func Def Operation Error: Missing Reference Node\n");
   } else if (!cond) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("Func Def Operation Error: Missing Condition Node\n");
   } else if (!stmts) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("Func Def Operation Error: Missing Statement Node\n");
   }
   // From resolve_read_write_lists()
@@ -794,7 +794,7 @@ void Semantic_check::check_func_call(Lnast *lnast, const Lnast_nid &lnidx_opr, s
   }
   // Missing Nodes
   if (num_of_refs != 3) {
-    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_str());
+    error_print_lnast_by_type(lnast, lnast->get_data(lnidx_opr).type.to_sv());
     Pass::error("Func Call Operation Error: Missing Reference Node(s)\n");
   }
 }

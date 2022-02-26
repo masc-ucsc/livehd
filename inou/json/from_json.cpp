@@ -54,8 +54,9 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
     }
     if (nodes.HasMember("op")) {
       if (nodes["op"].IsString()) {
-        auto op_txt = nodes["op"].GetString();
-        auto op     = Ntype::get_op(op_txt);
+        std::string op_txt(nodes["op"].GetString());
+
+        auto op = Ntype::get_op(op_txt);
 
         if (op != Ntype_op::Invalid) {
           last_node.set_type(op);
@@ -102,8 +103,8 @@ void from_json(Lgraph *g, rapidjson::Document &document) {
         }
 
         auto     dst_pid = output_edge["sink_pid"].GetString();
-        Node_pin dpin    = last_node.setup_driver_pin(std::to_string(dst_pid));
-        Node_pin spin    = dst_node.setup_sink_pin(std::to_string(src_pid));
+        Node_pin dpin    = last_node.setup_driver_pin(dst_pid);
+        Node_pin spin    = dst_node.setup_sink_pin(src_pid);
         if (output_edge.HasMember("bits")) {
           g->add_edge(dpin, spin, output_edge["bits"].GetInt());
         } else {

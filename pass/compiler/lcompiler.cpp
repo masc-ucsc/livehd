@@ -163,7 +163,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
 
 
-  //fmt::print("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", abls::StrCat("__firrtl_", ln->get_top_module_name()));
+  //fmt::print("-------- {:<28} ({:<30}) -------- (LN-0)\n", "Firrtl_Protobuf -> LNAST-SSA", absl::StrCat("__firrtl_", ln->get_top_module_name()));
   ln->ssa_trans();
   gviz == true ? gv.do_from_lnast(ln) : void();
 
@@ -172,8 +172,8 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   // in the end, we should keep the original mod_name for the firrtl_op
   // mapped lgraph, so here I attached "__firrtl_" prefix for the firrtl_op_lgs
 
-  //fmt::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", abls::StrCat("__firrtl_", ln->get_top_module_name()));
-  auto mod_name = abls::StrCat("__firrtl_", ln->get_top_module_name());
+  //fmt::print("-------- {:<28} ({:<30}) -------- (LN-1)\n", "LNAST -> Lgraph", absl::StrCat("__firrtl_", ln->get_top_module_name()));
+  auto mod_name = absl::StrCat("__firrtl_", ln->get_top_module_name());
   Lnast_tolg ln2lg(mod_name, path);
 
   auto top_stmts = ln->get_first_child(lh::Tree_index::root());
@@ -196,7 +196,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 void Lcompiler::do_fir_cprop() {
   auto lgcnt                   = 0;
   auto hit                     = false;
-  auto top_name_before_mapping = abls::StrCat("__firrtl_", top);
+  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
 
   // hierarchical traversal
   for (auto &lg : lgs) {
@@ -250,7 +250,7 @@ void Lcompiler::setup_maps() {  // single-thread
 void Lcompiler::do_fir_firmap_bitwidth() {
   auto lgcnt                  = 0;
   auto hit                    = false;
-  auto top_name_before_firmap = abls::StrCat("__firrtl_", top);
+  auto top_name_before_firmap = absl::StrCat("__firrtl_", top);
 
   std::mutex                    lg_visited_mutex;
   absl::flat_hash_set<Lgraph *> lg_visited;
@@ -363,7 +363,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 void Lcompiler::do_fir_firbits() {
   auto lgcnt                   = 0;
   auto hit                     = false;
-  auto top_name_before_mapping = abls::StrCat("__firrtl_", top);
+  auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
 
   // hierarchical traversal
   // create a lamda function for every firrtl/pyrope passes. if top provided, use it, if not, use the visited table

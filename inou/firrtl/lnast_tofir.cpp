@@ -18,9 +18,9 @@ void Inou_firrtl::toFIRRTL(Eprp_var &var) {
 
   for (const auto &lnast : var.lnasts) {
     p.do_tofirrtl(lnast, circuit);
-    auto n = lnast->get_name(lh::Tree_index::root());
+    std::string n(lnast->get_name(lh::Tree_index::root()));
 
-    top_msg->set_name(n.to_s());  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
+    top_msg->set_name(n);  // FIXME: Placeholder for now, need to figure out which LNAST is "top"
   }
 
   // fir_design.PrintDebugString();
@@ -40,11 +40,11 @@ void Inou_firrtl::do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB
 
   constexpr auto top      = lh::Tree_index::root();
   const auto     stmts    = ln->get_first_child(top);
-  const auto     top_name = ln->get_name(top);
+  std::string top_name(ln->get_name(top));
 
   auto *mod  = circuit->add_module();
   auto *umod = new firrtl::FirrtlPB_Module_UserModule();
-  umod->set_id(top_name.to_s());  // FIXME: Need to make sure top node has module name
+  umod->set_id(top_name);  // FIXME: Need to make sure top node has module name
   FindCircuitComps(*ln, umod);
 
   for (const auto &lnidx : ln->children(stmts)) {
@@ -247,9 +247,9 @@ void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, std::st
   firrtl::FirrtlPB_Expression_SubField *subfield_expr;
   if (wire_rename_map.contains(lhs)) {
     auto rename_str = wire_rename_map[lhs];
-    subfield_expr   = make_subfield_expr(abls::StrCat(rename_str, ".", ln.get_name(c0)));
+    subfield_expr   = make_subfield_expr(absl::StrCat(rename_str, ".", ln.get_name(c0)));
   } else {
-    subfield_expr = make_subfield_expr(abls::StrCat(lhs, ".", ln.get_name(c0)));
+    subfield_expr = make_subfield_expr(absl::StrCat(lhs, ".", ln.get_name(c0)));
   }
   auto lhs_expr = new firrtl::FirrtlPB_Expression();
   lhs_expr->set_allocated_sub_field(subfield_expr);
@@ -269,7 +269,10 @@ void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, std::st
 // FIXME: See if I can't make this more general (SubInd, SubAcc, SubF)
 firrtl::FirrtlPB_Expression_SubField *Inou_firrtl::make_subfield_expr(std::string_view name) {
 
-  auto subnames = name.split('.');
+  std::vector<std::string> subnames;
+  for(const auto &e:absl::StrSplit(name,'.')) {
+    subnames.emplace_back(e);
+  }
   I(subnames.size() >= 2);
 
   // This currently only works if subname.size() == 2
@@ -278,11 +281,11 @@ firrtl::FirrtlPB_Expression_SubField *Inou_firrtl::make_subfield_expr(std::strin
   // Make bundle accessor
   auto tup_expr = new firrtl::FirrtlPB_Expression();
   auto ref_expr = new firrtl::FirrtlPB_Expression_Reference();
-  ref_expr->set_id(subnames[0].to_s());
+  ref_expr->set_id(subnames[0]);
   tup_expr->set_allocated_reference(ref_expr);
   subfield_expr->set_allocated_expression(tup_expr);
   // Set field
-  subfield_expr->set_field(subnames[1].to_s());
+  subfield_expr->set_field(subnames[1]);
 
   // subfield_expr->PrintDebugString();
   return subfield_expr;
@@ -483,7 +486,7 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
       tup_name = wire_rename_map[tup_name];
     }
     auto field_name    = ln.get_name(field);
-    auto subfield_expr = make_subfield_expr(abls::StrCat(tup_name, ".", field_name));
+    auto subfield_expr = make_subfield_expr(absl::StrCat(tup_name, ".", field_name));
     auto expr          = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_sub_field(subfield_expr);
 
@@ -492,7 +495,7 @@ bool Inou_firrtl::process_ln_select(Lnast &ln, const Lnast_nid &lnidx_dot, firrt
   } else if (ln.get_name(field) == "__q_pin") {
     // For FIRRTL, this is just the same lhs = tup
     auto *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id(ln.get_name(tup).substr(1).to_s());  // Remove 1st char since it's a '#'
+    rhs_ref->set_id(std::string(ln.get_name(tup).substr(1)));  // Remove 1st char since it's a '#'
     auto expr = new firrtl::FirrtlPB_Expression();
     expr->set_allocated_reference(rhs_ref);
     make_assignment(ln, lhs, expr, fstmt);
@@ -652,7 +655,7 @@ void Inou_firrtl::handle_clock_attr(Lnast &ln, std::string_view var_name, const 
 // Note: __reseet_async has to come before __reset_pin
 void Inou_firrtl::handle_async_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs) {
   if (ln.get_name(rhs) == "true") {
-    async_regs.insert(var_name.substr(1));
+    async_regs.insert(std::string(var_name.substr(1)));
     fmt::print("Adding to async_regs: {}\n", var_name.substr(1));
   }
 }
@@ -732,7 +735,7 @@ bool Inou_firrtl::is_wire(std::string_view str) {
   return !(str.substr(0, 3) == "___") && !(first_char == '#') && !(first_char == '$') && !(first_char == '%');
 }
 
-std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx) {
+std::string_view Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx) {
   auto       ntype = ln.get_type(lnidx);
   const auto str   = ln.get_name(lnidx);
   if (ntype.is_ref() || ntype.is_const()) {
@@ -745,7 +748,7 @@ std::string Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnid
   return "";
 }
 
-std::string Inou_firrtl::strip_prefixes(std::string_view str) {
+std::string_view Inou_firrtl::strip_prefixes(std::string_view str) {
 
   auto skip=0u;
 
@@ -766,7 +769,7 @@ std::string Inou_firrtl::strip_prefixes(std::string_view str) {
 void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr,
                                       firrtl::FirrtlPB_Statement *fstmt) {
   auto *lhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-  lhs_ref->set_id(get_firrtl_name_format(ln, lhs).to_s());
+  lhs_ref->set_id(std::string(get_firrtl_name_format(ln, lhs)));
 
   auto *lhs_expr = new firrtl::FirrtlPB_Expression();
   lhs_expr->set_allocated_reference(lhs_ref);
@@ -784,7 +787,7 @@ void Inou_firrtl::create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::F
 void Inou_firrtl::create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr,
                                    firrtl::FirrtlPB_Statement *fstmt) {
   auto *node = new firrtl::FirrtlPB_Statement_Node();
-  node->set_id(ln.get_name(lhs).to_s());
+  node->set_id(std::string(ln.get_name(lhs)));
   node->set_allocated_expression(rhs_expr);
 
   fstmt->set_allocated_node(node);
@@ -834,15 +837,15 @@ firrtl::FirrtlPB_Expression_PrimOp_Op Inou_firrtl::get_firrtl_oper_code(const Ln
 void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression *expr) {
   if (ln.get_data(lnidx).type.is_ref()) {
     // Lnidx is a variable, so I need to make a Reference argument.
-    auto                                   str     = get_firrtl_name_format(ln, lnidx);
+    std::string str(get_firrtl_name_format(ln, lnidx));
     auto *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
-    rhs_ref->set_id(str.to_s());
+    rhs_ref->set_id(str);
     expr->set_allocated_reference(rhs_ref);
 
   } else if (ln.get_data(lnidx).type.is_const()) {
     // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
     auto lconst_holder = Lconst::from_string(ln.get_name(lnidx));
-    auto lconst_str    = ln.get_name(lnidx).to_s();
+    std::string lconst_str(ln.get_name(lnidx));
 
     auto *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();
     num->set_value(lconst_str);
@@ -872,7 +875,7 @@ void Inou_firrtl::add_const_as_ilit(Lnast &ln, const Lnast_nid &lnidx, firrtl::F
   I(ln.get_data(lnidx).type.is_const());
 
   auto lconst_holder = Lconst::from_string(ln.get_name(lnidx));
-  auto lconst_str    = lconst_holder.to_firrtl().to_s();
+  auto lconst_str    = lconst_holder.to_firrtl();
 
   ilit->set_value(lconst_str);
 }

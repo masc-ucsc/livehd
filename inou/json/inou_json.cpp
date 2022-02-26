@@ -57,16 +57,16 @@ void Inou_json::tolg(Eprp_var &var) {
   }
 
   std::vector<Lgraph *> lgs;
-  for (const auto &f : files.split(',')) {
-    auto name = f.get_str_after_last_if_exists('/');
-    if (name.ends_with(".json")) {
+  for (const auto &f : absl::StrSplit(files,',')) {
+    auto name = str_tools::get_str_after_last_if_exists(f, '/');
+    if (str_tools::ends_with(name,".json")) {
       name = name.substr(0, name.size() - 5);  // remove .json
     } else {
       error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));
       continue;
     }
 
-    FILE *pFile = fopen(f.to_s().c_str(), "rb");
+    FILE *pFile = fopen(std::string(f).c_str(), "rb");
     if (pFile == 0) {
       Pass::error("Inou_json::tolg could not open {} file", f);
       continue;

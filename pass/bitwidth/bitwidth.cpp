@@ -16,9 +16,9 @@ Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterat
 
 void Bitwidth::do_trans(Lgraph *lg) {
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
-    ctx.event()->set_name("bitwidth." + lg->get_name().to_s());
+    ctx.event()->set_name("bitwidth." + lg->get_name());
   });
-  Lbench b("pass.bitwidth." + lg->get_name().to_s());
+  Lbench b("pass.bitwidth." + lg->get_name());
   bw_pass(lg);
 }
 
@@ -329,7 +329,7 @@ void Bitwidth::process_memory(Node &node) {
   {
     for (auto &e : node.inp_edges_ordered()) {
       auto n = e.sink.get_pin_name();
-      if (n.ends_with("clock")) {
+      if (str_tools::ends_with(n,"clock")) {
         auto it = bwmap.find(e.driver.get_compact_class());
         if (it == bwmap.end()) {
           set_bw_1bit(e.driver);
@@ -356,8 +356,8 @@ void Bitwidth::process_memory(Node &node) {
           mem_size = v;
         }
       } else {
-        auto n_din = n.ends_with("din");
-        auto n_addr = n.ends_with("addr");
+        auto n_din = str_tools::ends_with(n,"din");
+        auto n_addr = str_tools::ends_with(n,"addr");
         if (n_din || n_addr) {
           auto   it    = bwmap.find(e.driver.get_compact_class());
           Bits_t dbits = 0;
@@ -959,19 +959,19 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
 Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
   // FIXME: code duplicated in Firmap. Create a separate class for Attr
 
-  if (key.ends_with("__max"))
+  if (str_tools::ends_with(key,"__max"))
     return Attr::Set_max;
 
-  if (key.ends_with("__min"))
+  if (str_tools::ends_with(key,"__min"))
     return Attr::Set_min;
 
-  if (key.ends_with("__ubits"))
+  if (str_tools::ends_with(key,"__ubits"))
     return Attr::Set_ubits;
 
-  if (key.ends_with("__sbits"))
+  if (str_tools::ends_with(key,"__sbits"))
     return Attr::Set_sbits;
 
-  if (key.ends_with("__dp_assign"))
+  if (str_tools::ends_with(key,"__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;

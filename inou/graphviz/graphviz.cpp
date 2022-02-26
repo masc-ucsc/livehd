@@ -20,9 +20,9 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
   if (dot_postfix == "")
     absl::StrAppend(&file, ".dot");
   else
-    absl::StrAppend(&file, "." + dot_postfix + ".dot");
+    absl::StrAppend(&file, "." , dot_postfix , ".dot");
 
-  int fd = ::open(file.to_s().c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+  int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
     Pass::error("inou.graphviz unable to create {}", file);
     return;
@@ -106,7 +106,7 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
-  absl::flat_hash_set<std::pair<Hierarchy_index, Hierarchy_index>> added;
+  absl::flat_hash_set<std::pair<std::string, std::string>> added;
 
   lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
 

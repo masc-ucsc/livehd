@@ -979,7 +979,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                 if (Lgtuple::is_attribute(e.first))
                   continue;
 
-                auto l = Lgtuple::get_first_level_name(e.first).to_lower();
+                auto l = str_tools::to_lower(Lgtuple::get_first_level_name(e.first));
                 if (l == "addr") {
                   ++n_ports;
                 } else if (l == "rdport") {
@@ -1058,7 +1058,7 @@ void Cprop::tuple_subgraph(const Node &node) {
     }
     if (it.first->has_io_pos()) {
       auto pos = it.first->get_io_pos();
-      pin_name = abls::StrCat(":", pos, ":", pin_name);
+      pin_name = absl::StrCat(":", pos, ":", pin_name);
     }
     auto dpin = node.setup_driver_pin_raw(it.second);
     I(dpin == node.get_driver_pin(it.first->name));
@@ -1187,7 +1187,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
         }
         if (it.first->has_io_pos()) {
           auto io_name
-              = abls::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
+              = absl::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
           node_tup->add(io_name, sub_dpin);
         } else {
           node_tup->add(pin_name, sub_dpin);
@@ -1218,7 +1218,7 @@ bool Cprop::is_runtime_index_case(const std::shared_ptr<Lgtuple const> &node_tup
 			continue;
 		}
 
-		if (itr.first.is_string()) 
+		if (str_tools::is_string(itr.first)) 
 			return false;
 	}
 	return true;
@@ -1253,11 +1253,11 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
     // 1. create new tuple_gets to fetch the value from the tuple_add
     //    and then connect the tg output to the corresponding mux input port
     auto new_tg = ori_tg.create(Ntype_op::TupGet);
-    auto mux_spin = mux_node.setup_sink_pin(std::to_string(itr.first.to_i()+1));
+    auto mux_spin = mux_node.setup_sink_pin(std::to_string(str_tools::to_i(itr.first)+1));
     new_tg.setup_driver_pin().connect_sink(mux_spin);
 
     auto new_tg_field_spin = new_tg.setup_sink_pin("field");
-    auto new_tg_field_dpin = ori_tg.create_const(itr.first.to_i());
+    auto new_tg_field_dpin = ori_tg.create_const(Lconst::from_string(itr.first));
     new_tg_field_spin.connect_driver(new_tg_field_dpin);
 
     auto new_tg_parent_spin = new_tg.setup_sink_pin("parent");
@@ -2232,8 +2232,8 @@ void Cprop::clean_io(Lgraph *lg) {
 }
 
 void Cprop::do_trans(Lgraph *lg) {
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("cprop." + lg->get_name().to_s()); });
-  Lbench b("pass.cprop." + lg->get_name().to_s());
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("cprop." + lg->get_name()); });
+  Lbench b("pass.cprop." + lg->get_name());
 
   scalar_pass(lg);
   tuple_pass(lg);

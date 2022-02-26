@@ -19,7 +19,7 @@ public:
 
   bool                 layout(FPOptimization opt, double targetAR = 1.0);
   void                 outputHotSpotLayout(std::ostream& o, double startX = 0.0, double startY = 0.0);
-  virtual unsigned int outputLGraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
+  virtual unsigned int outputLGraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX = 0.0, double startY = 0.0);
 
   // A grid handles its counts different than other components?
 };

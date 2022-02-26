@@ -162,7 +162,7 @@ public:
 
   template <typename H>
   friend H AbslHashValue(H h, const Node &s) {
-    return H::combine(std::move(h), s.hidx, s.nid);  // Ignore lgraph pointer in hash
+    return H::combine(std::move(h), (int)s.hidx, (int)s.nid);  // Ignore lgraph pointer in hash
   };
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed

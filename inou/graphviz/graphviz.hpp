@@ -28,9 +28,6 @@ private:
 
   static void        populate_lg_handle_xedge(const Node &node, const XEdge &out, std::string &data, bool verbose);
   static std::string graphviz_legalize_name(std::string_view name);
-  static std::string graphviz_legalize_name(std::string_view name) {
-    return graphviz_legalize_name(name.to_s());
-  }
   void               populate_lg_data(Lgraph *g, std::string_view dot_postfix = "");
 
   void save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data);

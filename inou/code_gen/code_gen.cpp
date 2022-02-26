@@ -1,6 +1,8 @@
 
 #include "code_gen.hpp"
 
+#include "absl/strings/str_cat.h"
+
 //#ifndef NDEBUG
 //#define NDEBUG
 //#endif
@@ -204,7 +206,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
     }
     auto key_sec         = it->second;
     bool param_converted = false;
-    if (key_sec.ends_with(".__sbits") || key_sec.ends_with(".__ubits")) {
+    if (str_tools::ends_with(key_sec,".__sbits") || str_tools::ends_with(key_sec,".__ubits")) {
       param_converted = lnast_to->set_convert_parameters(key_sec, ref);  // for getting UInt<3> a from $a.___bits=3
     }
     if (!param_converted) {
@@ -311,7 +313,7 @@ void Code_gen::do_while(const lh::Tree_index& while_node_index) {
   lnast_to->add_to_buff_vec_for_cpp("while");
 
   auto curr_index = lnast->get_first_child(while_node_index);
-  auto ref        = lnast->get_name(curr_index);
+  std::string ref(lnast->get_name(curr_index));
   if (is_temp_var(ref)) {
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -355,7 +357,7 @@ void Code_gen::do_for(const lh::Tree_index& for_node_index) {
                   lnast_to->for_cond_mid()));
 
   curr_index = lnast->get_sibling_next(curr_index);
-  auto ref   = lnast->get_name(curr_index);
+  std::string ref(lnast->get_name(curr_index));
   if (is_temp_var(ref)) {
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -363,15 +365,15 @@ void Code_gen::do_for(const lh::Tree_index& for_node_index) {
     }
   }
   buffer_to_print->append(lnast_to->ref_name_str(ref), lnast_to->for_cond_end());
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(lnast_to->ref_name_str(ref), lnast_to->for_cond_end()));
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(lnast_to->ref_name_str(ref), lnast_to->for_cond_end()));
 
   buffer_to_print->append(lnast_to->for_stmt_beg());
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(lnast_to->for_stmt_beg()));
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(lnast_to->for_stmt_beg()));
   indendation++;
   do_stmts(stmt_index);
   indendation--;
   buffer_to_print->append( indent(), lnast_to->for_stmt_end());
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat( indent(), lnast_to->for_stmt_end()));
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat( indent(), lnast_to->for_stmt_end()));
 }
 //-------------------------------------------------------------------------------------
 // Process the "func_def" node:Eg.:
@@ -409,14 +411,14 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
       if (parameters.empty())
         parameters = lnast->get_name(curr_index);
       else
-        parameters = abls::StrCat(parameters, lnast_to->func_param_sep(), lnast_to->ref_name_str(lnast->get_name(curr_index)));
+        parameters = absl::StrCat(parameters, lnast_to->func_param_sep(), lnast_to->ref_name_str(lnast->get_name(curr_index)));
       curr_index = lnast->get_sibling_next(curr_index);
     }
   } else {
     param_exist = false;
   }
 
-  buffer_to_print->append(abls::StrCat(indent(),
+  buffer_to_print->append(absl::StrCat(indent(),
                   lnast_to->func_begin(),
                   lnast_to->func_name(func_name),
                   lnast_to->param_start(param_exist),
@@ -424,7 +426,7 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
                   lnast_to->param_end(param_exist),
                   lnast_to->print_cond(cond_val),
                   lnast_to->func_stmt_strt()));
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(),
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(),
                   lnast_to->func_begin(),
                   lnast_to->func_name(func_name),
                   lnast_to->param_start(param_exist),
@@ -436,7 +438,7 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
   do_stmts(stmt_index);
   indendation--;
   buffer_to_print->append( indent(), lnast_to->func_stmt_end(), lnast_to->func_end());
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat( indent(), lnast_to->func_stmt_end(), lnast_to->func_end()));
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat( indent(), lnast_to->func_stmt_end(), lnast_to->func_end()));
 }
 //-------------------------------------------------------------------------------------
 // Process the func-cond node:
@@ -446,7 +448,7 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
 std::string Code_gen::resolve_func_cond(const lh::Tree_index& func_cond_index) {
   fmt::print("node:function cond\n");
 
-  auto ref = lnast->get_name(func_cond_index);
+  std::string ref(lnast->get_name(func_cond_index));
   if (is_temp_var(ref)) {
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -469,7 +471,7 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
   fmt::print("node:func_call\n");
   auto curr_index = lnast->get_first_child(func_call_node_index);
   // const auto& curr_node_data = lnast->get_data(func_cond_index);//returns the entire node contents.
-  auto lhs = lnast->get_name(curr_index);
+  std::string lhs(lnast->get_name(curr_index));
   if (is_temp_var(lhs)) {
     auto map_it = ref_map.find(lhs);
     if (map_it != ref_map.end()) {
@@ -485,7 +487,7 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
   fmt::print("func_call 2nd child: {}\n", funcname);
 
   curr_index = lnast->get_sibling_next(curr_index);
-  auto ref   = lnast->get_name(curr_index);
+  std::string ref(lnast->get_name(curr_index));
   if (is_temp_var(ref)) {
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
@@ -495,12 +497,12 @@ void Code_gen::do_func_call(const lh::Tree_index& func_call_node_index) {
   fmt::print("func_call 3rd child: {}\n", ref);
 
   if (is_temp_var(lhs)) {  //|| !op_is_unary) {
-    ref_map.insert(std::pair<std::string, std::string>(lhs, abls::StrCat(funcname, lnast_to->ref_name_str(ref))));
+    ref_map.insert(std::pair<std::string, std::string>(lhs, absl::StrCat(funcname, lnast_to->ref_name_str(ref))));
   } else {
     buffer_to_print->append( lhs, " = ");  // lhs and assignment op to further assign the func name and arguments to lhs
     buffer_to_print->append(funcname);  // printitng the func name(the func called)
     buffer_to_print->append(lnast_to->ref_name_str(ref), lnast_to->stmt_sep());  // parameters for the func call
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(lhs, " = ", funcname, lnast_to->ref_name_str(ref), lnast_to->stmt_sep()));
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(lhs, " = ", funcname, lnast_to->ref_name_str(ref), lnast_to->stmt_sep()));
   }
 }
 //-------------------------------------------------------------------------------------
@@ -525,28 +527,28 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
     if (node_num > 2) {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         buffer_to_print->append( indent(), lnast_to->start_else_if());
-        lnast_to->add_to_buff_vec_for_cpp(abls::StrCat( indent(), lnast_to->start_else_if()));
+        lnast_to->add_to_buff_vec_for_cpp(absl::StrCat( indent(), lnast_to->start_else_if()));
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
         bool prev_was_cond = (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_const()
                              || (lnast->get_data(lnast->get_sibling_prev(curr_index))).type.is_ref();
         if (!prev_was_cond) {
           buffer_to_print->append( indent(), lnast_to->start_else());
-          lnast_to->add_to_buff_vec_for_cpp(abls::StrCat( indent(), lnast_to->start_else()));
+          lnast_to->add_to_buff_vec_for_cpp(absl::StrCat( indent(), lnast_to->start_else()));
         }
         indendation++;
         do_stmts(curr_index);
         indendation--;
         if (!prev_was_cond) {
           buffer_to_print->append( indent(), lnast_to->end_if_or_else());
-          lnast_to->add_to_buff_vec_for_cpp(abls::StrCat( indent(), lnast_to->end_if_or_else()));
+          lnast_to->add_to_buff_vec_for_cpp(absl::StrCat( indent(), lnast_to->end_if_or_else()));
           if_closed = true;
         }
       }
     } else {
       if (curr_node_type.is_ref() || curr_node_type.is_const()) {
         buffer_to_print->append(indent(), lnast_to->start_cond());
-        lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(), lnast_to->start_cond()));
+        lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->start_cond()));
         do_cond(curr_index);
       } else if (curr_node_type.is_stmts()) {
         indendation++;
@@ -562,7 +564,7 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
 
   if (node_num <= 2 || !if_closed) {
     buffer_to_print->append(indent(), lnast_to->end_if_or_else());
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(), lnast_to->end_if_or_else()));
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->end_if_or_else()));
   }
 }
 
@@ -571,14 +573,14 @@ void Code_gen::do_if(const lh::Tree_index& if_node_index) {
 void Code_gen::do_cond(const lh::Tree_index& cond_node_index) {
   fmt::print("node:cond\n");
   // const auto& curr_node_data = lnast->get_data(cond_node_index);
-  auto ref    = lnast->get_name(cond_node_index);
+  std::string ref(lnast->get_name(cond_node_index));
   auto map_it = ref_map.find(ref);
   if (map_it != ref_map.end()) {
     ref = map_it->second;
   }
   buffer_to_print->append(lnast_to->ref_name_str(ref));
   buffer_to_print->append(lnast_to->end_cond());
-  lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(lnast_to->ref_name_str(ref), lnast_to->end_cond()));
+  lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(lnast_to->ref_name_str(ref), lnast_to->end_cond()));
 }
 
 //-------------------------------------------------------------------------------------
@@ -624,8 +626,8 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
     auto ref    = op_str_vect[i];
     auto map_it = ref_map.find(ref);
     if (map_it != ref_map.end()) {
-      if (map_it->second.contains(" ")) {
-        ref = abls::StrCat("(", map_it->second, ")");
+      if (str_tools::contains(map_it->second,' ')) {
+        ref = absl::StrCat("(", map_it->second, ")");
       } else {
         ref = map_it->second;
         if (lnast_to->is_unsigned(ref) && lnast_to->get_lang_type() == "cpp") {
@@ -654,12 +656,12 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
         auto bw_num = Lconst::from_pyrope(ref);  //(int)log2(ref)+1;
 
         fmt::print("{}\n", bw_num.get_bits());
-        ref = abls::StrCat("UInt<", bw_num.get_bits(), ">(", ref.to_s(), ")");
+        ref = absl::StrCat("UInt<", bw_num.get_bits(), ">(", ref, ")");
       }
     }
 
     if (op_type == "tup_concat") {
-      val = abls::StrCat(val,
+      val = absl::StrCat(val,
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const),
                       lnast_to->ref_name_str(ref),
                       lnast_to->str_qoute(!is_number(ref) && ref_is_const));
@@ -668,7 +670,7 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
     }
     if ((i + 1) != op_str_vect.size()
         && !op_is_unary) {  // check that another entry is left in op_str_vect && it is a binary operation
-      val = abls::StrCat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
+      val = absl::StrCat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
     }
   }
 
@@ -677,19 +679,19 @@ void Code_gen::do_op(const lh::Tree_index& op_node_index, std::string_view op_ty
   } else {
     // absl::StrAppend (&buffer_to_print->append(indent(), lnast_to->ref_name_str(key), " ", lnast_to->debug_name_lang(op_node_data.type), " ",
     // lnast_to->ref_name_str(val), lnast_to->stmt_sep());
-    buffer_to_print->append(abls::StrCat(indent(),
+    buffer_to_print->append(absl::StrCat(indent(),
                     lnast_to->ref_name_str(key),
                     " ",
                     "=",
                     " ",
-                    lnast_to->ref_name_str(std::to_string(val)),
+                    lnast_to->ref_name_str(val),
                     lnast_to->stmt_sep()));
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(),
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(),
                     lnast_to->ref_name_str(key),
                     " ",
                     "=",
                     " ",
-                    lnast_to->ref_name_str(std::to_string(val)),
+                    lnast_to->ref_name_str(val),
                     lnast_to->stmt_sep()));
   }
 }
@@ -704,7 +706,7 @@ void Code_gen::do_tposs(const lh::Tree_index& tposs_node_index) {
 
   auto first_child_index = lnast->get_first_child(tposs_node_index);
   auto first_child       = lnast->get_name(first_child_index);
-  auto sec_child         = lnast->get_name(lnast->get_sibling_next(first_child_index));
+  std::string sec_child(lnast->get_name(lnast->get_sibling_next(first_child_index)));
 
   auto map_it = ref_map.find(sec_child);
   // bool sec_child_is_temp = false;
@@ -751,7 +753,7 @@ void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
       ref = map_it->second;
     }
 
-    val = abls::StrCat(val, ref.to_s(), lnast_to->gmask_op(), (i == 1 ? "(" : ""));
+    val = absl::StrCat(val, ref, lnast_to->gmask_op(), (i == 1 ? "(" : ""));
   }
   val = val.substr(0,val.size()-1);//pop_back()
   val = val.append(")");
@@ -759,8 +761,8 @@ void Code_gen::do_set_mask(const lh::Tree_index& smask_node_index) {
   if (is_temp_var(key)) {
     ref_map.insert(std::pair<std::string, std::string>(key, val));
   } else {
-    buffer_to_print->append(abls::StrCat(indent(), lnast_to->ref_name_str(val), "=", smask_str_vect.back(), "\n"));
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(), lnast_to->ref_name_str(val), "=", smask_str_vect.back(), "\n"));
+    buffer_to_print->append(absl::StrCat(indent(), lnast_to->ref_name_str(val), "=", smask_str_vect.back(), "\n"));
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->ref_name_str(val), "=", smask_str_vect.back(), "\n"));
     // I(false, "Error: expected temp str as first child of get_mask.\n\tMight need to check this issue!\n");
   }
 }
@@ -804,8 +806,8 @@ void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
 			ref_is_ref = false;
 		}
 
-		//absl::StrAppend(&val, ref.to_s(), ((i==1)?lnast_to->gmask_op():""), ((i>1)?"":"(") );
-    val = abls::StrCat(val, ((!ref_is_ref&&i>1)?"(":"") , ref, ((i==1)?lnast_to->gmask_op():""));
+		//absl::StrAppend(&val, ref, ((i==1)?lnast_to->gmask_op():""), ((i>1)?"":"(") );
+    val = absl::StrCat(val, ((!ref_is_ref&&i>1)?"(":"") , ref, ((i==1)?lnast_to->gmask_op():""));
   }
   val = val.append(ref_is_ref?"":")" );
 
@@ -818,7 +820,7 @@ void Code_gen::do_get_mask(const lh::Tree_index& gmask_node_index) {
 //-------------------------------------------------------------------------------------
 // processing dot operator
 // best testing case: cfg/tests/ring.prp
-void Code_gen::do_dot(const lh::Tree_index& dot_node_index, const std::string& select_type) {
+void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view select_type) {
   fmt::print("node:dot\n");
 
   auto                     curr_index = lnast->get_first_child(dot_node_index);
@@ -887,7 +889,7 @@ void Code_gen::do_dot(const lh::Tree_index& dot_node_index, const std::string& s
         I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
 
       buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = ", key, "\n");
-      lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(), lnast_to->ref_name_str(value), " = ", key, "\n"));
+      lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->ref_name_str(value), " = ", key, "\n"));
     } else {
       // ref_map.insert(std::pair<std::string_view, std::string>(key, lnast_to->ref_name_str(value)));
       // this value is preserved with "$"/"%"/"#" so that during "set_convert_parameters()", we have the char to decide i/p or o/p
@@ -898,13 +900,13 @@ void Code_gen::do_dot(const lh::Tree_index& dot_node_index, const std::string& s
     }
   } else {
     buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = ", key, "\n");
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(indent(), lnast_to->ref_name_str(value), " = ", key, "\n"));
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->ref_name_str(value), " = ", key, "\n"));
   }
 }
 //-------------------------------------------------------------------------------------
 // Process the select node:
 // ref LNAST subtree: select,""  ->  ref,"___l" , ref,"A" , const,"0"
-void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::string& select_type) {
+void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_view select_type) {
   fmt::print("node:select\n");
   auto                     curr_index = lnast->get_first_child(select_node_index);
   std::vector<std::string> sel_str_vect;
@@ -950,18 +952,18 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::str
       }
 
       if (is_number(ref)) {  // for numbers or temp vars only; we want "[]"
-        value = abls::StrCat(value,
+        value = absl::StrCat(value,
                         lnast_to->select_init(select_type),
                         lnast_to->ref_name_str(ref),
                         lnast_to->select_end(select_type));  // test case:tuple_nested1.prp
       } else if ((map_it != ref_map.end() && is_temp_var(map_it->first)) || /*last child is of type ref(not const)*/ lastIsRef) {
         // if ref_map.end is not checked then ERROR: std::bad_alloc (std::exception) is thrown
-        value = abls::StrCat(value,
+        value = absl::StrCat(value,
                         lnast_to->select_init(select_type),
                         lnast_to->ref_name_str(ref),
                         lnast_to->select_end(select_type));  // test case:tuple_nested1.prp
       } else {                                               // for alphanumeric, we want"."
-        value = abls::StrCat(value, lnast_to->dot_type_op(), lnast_to->ref_name_str(ref));
+        value = absl::StrCat(value, lnast_to->dot_type_op(), lnast_to->ref_name_str(ref));
       }
       i++;
     }
@@ -981,14 +983,14 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::str
     } else {
       assert(sel_str_vect.size() >= 2);
       if (is_temp_var(key)) {
-        auto value = abls::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
+        auto value = absl::StrCat(lnast_to->select_init(select_type), sel_str_vect[1]);
 
         auto i = 2u;
         // if (i == sel_str_vect.size()) {
         //  absl::StrAppend(&value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
         //}
         while (i < sel_str_vect.size()) {
-          value = abls::StrCat(value, ",");
+          value = absl::StrCat(value, ",");
           auto ref = sel_str_vect[i];
 
           auto map_it = ref_map.find(ref);
@@ -996,10 +998,10 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::str
             ref = map_it->second;
           }
 
-          value = abls::StrCat(value, lnast_to->ref_name_str(ref));
+          value = absl::StrCat(value, lnast_to->ref_name_str(ref));
           i++;
         }
-        value = abls::StrCat(value, lnast_to->select_end(select_type));
+        value = absl::StrCat(value, lnast_to->select_end(select_type));
 
         // std::string value = absl::StrCat(sel_str_vect[1], "[", ref, "]");
         ref_map.insert(std::pair<std::string, std::string>(key, value));
@@ -1024,7 +1026,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::str
 
     auto i = 2u;
     if (i == sel_str_vect.size()) {
-      value = abls::StrCat(value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
+      value = absl::StrCat(value, lnast_to->select_init(select_type), lnast_to->select_end(select_type));
     }
     while (i < sel_str_vect.size()) {
       auto ref = sel_str_vect[i];
@@ -1034,7 +1036,7 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, const std::str
         ref = map_it->second;
       }
 
-      value = abls::StrCat(value, lnast_to->select_init(select_type), lnast_to->ref_name_str(ref), lnast_to->select_end(select_type));
+      value = absl::StrCat(value, lnast_to->select_init(select_type), lnast_to->ref_name_str(ref), lnast_to->select_end(select_type));
       i++;
     }
 
@@ -1066,7 +1068,7 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   while (curr_index != lnast->invalid_index()) {
     assert(!(lnast->get_type(curr_index)).is_invalid());
     if (lnast->is_leaf(curr_index)) {
-      auto ref = lnast->get_name(curr_index);
+      std::string ref(lnast->get_name(curr_index));
       // For case like:
       // tuple :
       //    ref : ___b
@@ -1079,12 +1081,12 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
       }
       fmt::print("tuple's next leaf child: {}\n", ref);
       if (lnast->get_type(curr_index).is_const()) {
-        tuple_value = abls::StrCat(tuple_value, "\"", lnast_to->ref_name_str(ref), "\"", lnast_to->tuple_stmt_sep());
+        tuple_value = absl::StrCat(tuple_value, "\"", lnast_to->ref_name_str(ref), "\"", lnast_to->tuple_stmt_sep());
       } else {
-        tuple_value = abls::StrCat(tuple_value, lnast_to->ref_name_str(ref), lnast_to->tuple_stmt_sep());
+        tuple_value = absl::StrCat(tuple_value, lnast_to->ref_name_str(ref), lnast_to->tuple_stmt_sep());
       }
     } else {
-      tuple_value = abls::StrCat(tuple_value, resolve_tuple_assign(curr_index));
+      tuple_value = absl::StrCat(tuple_value, resolve_tuple_assign(curr_index));
     }
     curr_index = lnast->get_sibling_next(curr_index);
   }
@@ -1092,12 +1094,12 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   // for formatting purposes:
   if (tuple_value.size() > 2) {
     if (tuple_value.substr(tuple_value.size() - 2) == lnast_to->tuple_stmt_sep()) {
-      tuple_value = abls::StrCat(lnast_to->tuple_begin(), tuple_value);
+      tuple_value = absl::StrCat(lnast_to->tuple_begin(), tuple_value);
       tuple_value = tuple_value.substr(0,tuple_value.size()-2);// to remove the extra (last) tuple stmt sep inserted
       tuple_value = tuple_value.append(lnast_to->tuple_end());
     }
   } else if (tuple_value == "") {
-    tuple_value = abls::StrCat(lnast_to->tuple_begin(), lnast_to->tuple_end());
+    tuple_value = absl::StrCat(lnast_to->tuple_begin(), lnast_to->tuple_end());
   }  // to cater to scenario like: out = () :in ring.prp
 
   // insert to map:
@@ -1107,7 +1109,7 @@ void Code_gen::do_tuple(const lh::Tree_index& tuple_node_index) {
   } else {
     fmt::print("key: {}\n tuple_value:{}\n", key, tuple_value);
     buffer_to_print->append(key, " saved as ", tuple_value, "\n");
-    lnast_to->add_to_buff_vec_for_cpp(abls::StrCat(key, " saved as ", tuple_value, "\n"));
+    lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(key, " saved as ", tuple_value, "\n"));
     // this should never be possible
   }
 }
@@ -1148,8 +1150,8 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
       }
       auto map_it = ref_map.find(ref);
       if (map_it != ref_map.end()) {
-        if (map_it->second.contains(" ")) {
-          ref = abls::StrCat("(", map_it->second, ")");
+        if (str_tools::contains(map_it->second,' ')) {
+          ref = absl::StrCat("(", map_it->second, ")");
         } else {
           ref = map_it->second;
         }
@@ -1163,7 +1165,7 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
       }
       val = val.append(lnast_to->ref_name_str(ref));
       if ((i + 1) != op_str_vect.size() && !op_is_unary) {
-        val = abls::StrCat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
+        val = absl::StrCat(val, " ", lnast_to->debug_name_lang(op_node_data.type), " ");
       }
     }
   }
@@ -1173,13 +1175,13 @@ std::string Code_gen::resolve_tuple_assign(const lh::Tree_index& tuple_assign_in
     assert(false);
     return "ERROR"; // ("\n\nERROR:\n\t----------------UNEXPECTED TUPLE VALUE!--------------------\n\n");
   } else if (is_const) {
-    return abls::StrCat(indent(), val, lnast_to->tuple_stmt_sep());
+    return absl::StrCat(indent(), val, lnast_to->tuple_stmt_sep());
   } else if (key == "__range_begin") {
-    return abls::StrCat(val, ".");
+    return absl::StrCat(val, ".");
   } else if (key == "__range_end") {
-    return abls::StrCat(".", val);
+    return absl::StrCat(".", val);
   } else {
-    return abls::StrCat(indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->tuple_stmt_sep());
+    return absl::StrCat(indent(), key, " ", lnast_to->debug_name_lang(op_node_data.type), " ", val, lnast_to->tuple_stmt_sep());
   }
 }
 
@@ -1199,7 +1201,7 @@ bool Code_gen::has_DblUndrScor(std::string_view test_string) {
 
 //-------------------------------------------------------------------------------------
 bool Code_gen::is_number(std::string_view test_string) {
-  return test_string.is_i();
+  return str_tools::is_i(test_string);
 }
 
 //-------------------------------------------------------------------------------------

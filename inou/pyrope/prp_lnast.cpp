@@ -2034,7 +2034,7 @@ inline Lnast_node Prp_lnast::create_const_node(lh::Tree_index idx) {
     }
     auto token = get_token(node_token_entry);
     if (negative) {
-      auto ln_decimal_view = token.get_text().prepend('-');
+      auto ln_decimal_view = absl::StrCat("-", token.get_text());
       return Lnast_node::create_const(ln_decimal_view, token.line, token.pos1, token.pos2);
     } else {
       return Lnast_node::create_const(token);

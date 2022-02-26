@@ -64,8 +64,10 @@ void Cell::ToJson(const JsonComposer* jcm) const {
     json->Write(model);
   });
 
+  std::string type_name(Ntype::get_name(prototype->get_type()));
+
   JsonElement model[] = {{"hide_name", "1"},
-                         {"type", Ntype::get_name(prototype->get_type()).to_s().c_str()},
+                         {"type", type_name.c_str()},
                          {"parameters", &jparams},
                          {"port_directions", &jport_dirs},
                          {"connections", &jconn},
@@ -73,7 +75,7 @@ void Cell::ToJson(const JsonComposer* jcm) const {
   jcm->Write(model);
 }
 
-Port* Module::add_port(const StrTyp* port_name, enPortDir port_dir, Wire* wire_port) {
+Port* Module::add_port(const StrTyp &port_name, enPortDir port_dir, Wire* wire_port) {
   ports->push_back(new Port(port_name, port_dir, wire_port));
   return ports->back();
 }
@@ -86,7 +88,7 @@ Cell* Module::add_cell(const Prototype* proto) {
 Wire* Module::get_wire(const std::string& driver_pin_name) { return wires.count(driver_pin_name) ? wires[driver_pin_name] : NULL; }
 
 void Module::create_wires(XEdge_iterator out_edges) {
-  for (auto e : out_edges) create_single_wire(e.driver.get_wire_name().to_s(), e.driver.get_bits());
+  for (auto e : out_edges) create_single_wire(e.driver.get_wire_name(), e.driver.get_bits());
 }
 
 Wire* Module::create_single_wire(std::string wire_name, int wire_width) {

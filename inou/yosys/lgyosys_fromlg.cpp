@@ -56,7 +56,7 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     for (argidx = 1; argidx < args.size(); argidx++) {
       if (args[argidx] == "-name") {
         single_graph_mode = true;
-        name              = std::to_string(args[++argidx]);
+        name              = args[++argidx];
         continue;
       }
       if (args[argidx] == "-path") {
@@ -80,18 +80,18 @@ struct LG2Yosys_Pass : public Yosys::Pass {
     if (single_graph_mode) {
       Lgraph *lg = Lgraph::open(path, name);
       if (lg == 0) {
-        log_error("could not open graph %s in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
+        log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
         lgs.push_back(lg);
       }
       if (!hierarchy) {
-        log("converting graph %s in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
+        log("converting graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
-        log("converting graph %s and all its subgraphs in path %s\n.", name.to_s().c_str(), path.to_s().c_str());
+        log("converting graph %s and all its subgraphs in path %s\n.", name.c_str(), path.c_str());
       }
     } else {
       // FIXME: create lgraph::open_all(path);
-      log("converting all graphs in path %s.\n", path.to_s().c_str());
+      log("converting all graphs in path %s.\n", path.c_str());
     }
 
     std::set<Lgraph *> generated;

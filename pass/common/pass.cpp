@@ -1,4 +1,7 @@
+
+#include "absl/strings/str_split.h"
 #include "pass.hpp"
+#include "str_tools.hpp"
 
 #include <sys/stat.h>
 
@@ -9,8 +12,9 @@ std::string Pass::get_files(const Eprp_var &var) const {
   if (var.has_label("files")) {
     _files = var.get("files");
 
-    for (auto f : _files.split(',')) {
-      if (access(f.to_s().c_str(), F_OK) == -1) {
+    for (const auto &f : absl::StrSplit(_files,',')) {
+      std::string fname(f);
+      if (access(fname.c_str(), F_OK) == -1) {
         _files = "/INVALID";
         error("{} could not access file:{}", pass_name, f);
       }
@@ -96,7 +100,7 @@ bool Pass::setup_directory(std::string_view dir) const {
 
   struct stat sb;
 
-  std::string sdir(dir.to_s());
+  std::string sdir(dir);
 
   if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
     return true;

@@ -177,15 +177,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
         return;
       }
       mem_fwd = e.driver.get_type_const().to_i();
-    } else if (pin_name.ends_with("clock")) {
+    } else if (str_tools::ends_with(pin_name,"clock")) {
       port_vector[port_id].clock = e.driver;
-    } else if (pin_name.ends_with("addr")) {
+    } else if (str_tools::ends_with(pin_name,"addr")) {
       port_vector[port_id].addr = e.driver;
-    } else if (pin_name.ends_with("enable")) {
+    } else if (str_tools::ends_with(pin_name,"enable")) {
       port_vector[port_id].enable = e.driver;
-    } else if (pin_name.ends_with("din")) {
+    } else if (str_tools::ends_with(pin_name,"din")) {
       port_vector[port_id].din = e.driver;
-    } else if (pin_name.ends_with("rdport")) {
+    } else if (str_tools::ends_with(pin_name,"rdport")) {
       if (!e.driver.is_type_const()) {
         Pass::error("memory {} should have a constant rdport not {}", node.debug_name(), e.driver.get_node().debug_name());
         return;
@@ -267,12 +267,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
                 ")\n"));
           first_entry = false;
 
-          fout->append("  ,.rd_enable_", n_rd_pos, "(", get_wire_or_const(p.enable), ")\n");
+          fout->append("  ,.rd_enable_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.enable), ")\n");
           if (!single_clock) {
-            fout->append("  ,.rd_clock_", n_rd_pos, "(", get_wire_or_const(p.clock), ")\n");
+            fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.clock), ")\n");
           }
           auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
-          fout->append("  ,.rd_dout_", n_rd_pos, "(", get_wire_or_const(dout_dpin), ")\n");
+          fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", get_wire_or_const(dout_dpin), ")\n");
           ++n_rd_pos;
         } else {
           if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
@@ -280,18 +280,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
             Pass::error("memory {} write port is not correctly configured\n", node.debug_name());
           }
           fout->append(absl::StrCat(first_entry ? "  .wr_addr_" : "  ,.wr_addr_",
-                n_wr_pos,
+                std::to_string(n_wr_pos),
                 "(",
                 get_wire_or_const(p.addr),
                 ")\n"));
 
           first_entry = false;
 
-          fout->append("  ,.wr_enable_", n_wr_pos, "(", get_wire_or_const(p.enable), ")\n");
+          fout->append("  ,.wr_enable_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.enable), ")\n");
           if (!single_clock) {
-            fout->append("  ,.wr_clock_", n_wr_pos, "(", get_wire_or_const(p.clock), ")\n");
+            fout->append("  ,.wr_clock_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.clock), ")\n");
           }
-          fout->append("  ,.wr_din_", n_wr_pos, "(", get_wire_or_const(p.din), ")\n");
+          fout->append("  ,.wr_din_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.din), ")\n");
           ++n_wr_pos;
         }
         ++n_pos;
@@ -311,7 +311,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
 
     fout->append("always_comb begin\n");
 
-    fout->append("for (mem_loop_i=0;mem_loop_i < ", mem_size, ";mem_loop_i = mem_loop_i + 1) begin\n");
+    fout->append("for (mem_loop_i=0;mem_loop_i < ", std::to_string(mem_size), ";mem_loop_i = mem_loop_i + 1) begin\n");
     fout->append(iname, "[mem_loop_i] = 'b0;\n");
     fout->append("end\n");
 
@@ -390,7 +390,7 @@ void Cgen_verilog::process_mux(std::shared_ptr<File_output> fout, Node &node) {
       auto sel_bits = ordered_inp[0].driver.get_bits();
       for (auto i = 1u; i < ordered_inp.size(); ++i) {
         fout->append("     ",
-                     sel_bits,
+                     std::to_string(sel_bits),
                      "'d",
                      std::to_string(i - 1));
         fout->append(" : ",
@@ -730,7 +730,7 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, Lgraph *l
     const auto bits = pin.get_bits();
 
     if (bits > 1) {
-      fout->append("[", bits - 1, ":0] ", name, "\n");
+      fout->append("[", std::to_string(bits - 1), ":0] ", name, "\n");
     } else {
       fout->append(name, "\n");
     }
@@ -911,7 +911,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
     return;  // No point for constants
   }
 
-  auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), name});
+  auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), std::string(name)});
   if (!replaced)
     return;
 
@@ -930,7 +930,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
   if (bits <= 1) {
     fout->append(reg_str, name, ";\n");
   } else {
-    fout->append(reg_str, "[", bits-1, ":0] ", name, ";\n");
+    fout->append(reg_str, "[", std::to_string(bits-1), ":0] ", name, ";\n");
   }
 
   if (dpin.is_type_flop()) {
@@ -939,7 +939,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
     if (bits <= 1) {
       fout->append(reg_str, name_next, ";\n");
     } else {
-      fout->append(reg_str, "[", bits-1, ":0] ", name_next, ";\n");
+      fout->append(reg_str, "[", std::to_string(bits-1), ":0] ", name_next, ";\n");
     }
   }
 }
@@ -982,7 +982,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
       if (node.get_num_inp_edges() > 3 && false) {
         auto name_sel = get_append_to_name(name, "___sel_");
 
-        fout->append("reg signed [", node.get_driver_pin().get_bits() - 1, ":0] ", name_sel, ";\n");
+        fout->append("reg signed [", std::to_string(node.get_driver_pin().get_bits() - 1), ":0] ", name_sel, ";\n");
       }
     } else if (op == Ntype_op::Sext) {
       auto b_dpin = node.get_sink_pin("b").get_driver_pin();

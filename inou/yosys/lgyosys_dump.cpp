@@ -34,10 +34,9 @@ RTLIL::Wire *Lgyosys_dump::get_wire(const Node_pin &pin) {
 RTLIL::Wire *Lgyosys_dump::add_wire(RTLIL::Module *mod, const Node_pin &pin) {
   assert(pin.is_driver());
   if (pin.has_name()) {
-    auto name = pin.get_name();
-    name = name.prepend('\\');
+    auto name = absl::StrCat("\\", pin.get_name());
     // fmt::print("pin{} has name:{}\n", pin.debug_name(), name);
-    return mod->addWire(mod->uniquify(name.to_s()), pin.get_bits());
+    return mod->addWire(mod->uniquify(name), pin.get_bits());
   } else {
     return mod->addWire(next_id(pin.get_class_lgraph()), pin.get_bits());
   }
@@ -104,7 +103,7 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
   (void)pos;
   assert(pin.has_name());  // IO must have name
   // RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
-  RTLIL::IdString name = absl::StrCat("\\", pin.get_name()).to_s();
+  RTLIL::IdString name = absl::StrCat("\\", pin.get_name());
 
   RTLIL::Wire *new_wire = mod->addWire(name, pin.get_bits());
   // WARNING: In yosys, the IOs can be signed or unsigned
@@ -121,10 +120,10 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
 void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) {
   if (created_sub.find(sub.get_name()) != created_sub.end())
     return;
-  created_sub.insert(sub.get_name());
+  created_sub.insert(std::string(sub.get_name()));
 
   auto *mod                     = new RTLIL::Module;
-  mod->name                     = absl::StrCat("\\", sub.get_name()).to_s();
+  mod->name                     = absl::StrCat("\\", sub.get_name());
   mod->attributes["\\blackbox"] = RTLIL::Const(1);
 
   bdesign->add(mod);
@@ -134,7 +133,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
     if (io_pin.is_invalid())
       continue;
     // fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
-    auto  name = absl::StrCat("\\", io_pin.name).to_s();
+    auto  name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
     wire->port_id     = port_id++;
     if (io_pin.is_input()) {
@@ -154,7 +153,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   assert(node.get_type_op() == Ntype_op::Memory);
 
-  RTLIL::Cell *memory = mod->addCell(absl::StrCat("\\", node.create_name()).to_s(), RTLIL::IdString("$mem"));
+  RTLIL::Cell *memory = mod->addCell(absl::StrCat("\\", node.create_name()), RTLIL::IdString("$mem"));
 
   RTLIL::SigSpec wr_addr;
   RTLIL::SigSpec wr_data;
@@ -195,7 +194,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
   I(latency_value < 2); // TODO: 2 is array (no flop)
 
   memory->setParam("\\SIZE", mem_size);
-  memory->setParam("\\MEMID", RTLIL::Const::from_string(node.get_name().to_s()));
+  memory->setParam("\\MEMID", RTLIL::Const::from_string(node.get_name()));
   memory->setParam("\\WIDTH", data_bits);
 
   memory->setParam("\\OFFSET", RTLIL::Const(0));  // mem[addr-OFFSET]. Why????
@@ -307,20 +306,20 @@ void Lgyosys_dump::create_subgraph(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   create_blackbox(sub, mod->design);
 
-  RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.create_name()).to_s(), absl::StrCat("\\", sub.get_name()).to_s());
+  RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.create_name()), absl::StrCat("\\", sub.get_name()));
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for (const auto &e : node.inp_edges_ordered()) {
     auto port_name = e.sink.get_type_sub_pin_name();
     fmt::print("input:{} pin:{}\n", port_name, e.driver.debug_name());
     RTLIL::Wire *input = get_wire(e.driver);
-    new_cell->setPort(absl::StrCat("\\", port_name).to_s(), input);
+    new_cell->setPort(absl::StrCat("\\", port_name), input);
   }
   for (const auto &dpin : node.out_connected_pins()) {
     auto port_name = dpin.get_type_sub_pin_name();
     fmt::print("output:{} pin:{}\n", port_name, dpin.debug_name());
     RTLIL::Wire *output = get_wire(dpin);
-    new_cell->setPort(absl::StrCat("\\", port_name).to_s(), output);
+    new_cell->setPort(absl::StrCat("\\", port_name), output);
   }
 }
 
@@ -388,7 +387,7 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
         mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const(lc.to_i(), new_wire->width)));
       } else {
         // fmt::print("add:{} prp:{}\n",lc.to_binary(), lc.to_pyrope());
-        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_binary().to_s())));
+        mod->connect(new_wire, RTLIL::SigSpec(RTLIL::Const::from_string(lc.to_binary())));
       }
 
       input_map[node.get_driver_pin().get_compact()] = new_wire;
@@ -428,7 +427,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
   }
 #endif
 
-  RTLIL::Module *mod = design->addModule(absl::StrCat("\\", name).to_s());
+  RTLIL::Module *mod = design->addModule(absl::StrCat("\\", name));
 
   created_sub.clear();
   input_map.clear();
@@ -610,7 +609,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           mod->connect(out_wire, w2);
         } else {
           Lconst mask = (Lconst(1) << Lconst(out_wire->width)) - 1;
-          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_binary().to_s()), out_wire);
+          mod->addAnd(next_id(g), in_wire, RTLIL::Const::from_string(mask.to_binary()), out_wire);
         }
       } break;
       case Ntype_op::Sext: {
@@ -643,7 +642,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
-        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_binary().to_s());
+        auto lut_code = RTLIL::Const::from_string(node.get_type_lut().to_binary());
 
         mod->addLut(next_id(g), joined_inp_wires, cell_output_map[node.get_driver_pin().get_compact()], lut_code);
       } break;
@@ -788,7 +787,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         } else {  // reset wire
           RTLIL::Const initial_const(0, node.get_bits());
           if (!initial_dpin.is_invalid()) {
-            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_binary().to_s());
+            initial_const = RTLIL::Const::from_string(initial_dpin.get_node().get_type_const().to_binary());
           }
 
           if (enable_wire == nullptr) {
@@ -939,14 +938,14 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         if (unsigned_wire.contains(lhs)) {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
             mod->addShr(next_id(g), lhs, amount, dpin, false);
           } else {
             mod->addShr(next_id(g), lhs, rhs, dpin, false);
           }
         } else {
           if (b_dpin.get_node().is_type_const()) {  // common optimization
-            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
+            auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
             mod->addSshr(next_id(g), lhs, amount, dpin, true);
           } else {
             mod->addSshr(next_id(g), lhs, rhs, dpin, true);
@@ -962,7 +961,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         auto *result_wire = cell_output_map[node.get_driver_pin().get_compact()];
         if (b_dpin.get_node().is_type_const()) {  // common optimization
-          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary().to_s());
+          auto amount = RTLIL::Const::from_string(b_dpin.get_node().get_type_const().to_binary());
           if (unsigned_wire.contains(lhs)) {
             mod->addShl(next_id(g), lhs, amount, result_wire, false);
             unsigned_wire.insert(result_wire);
@@ -1027,7 +1026,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         create_subgraph(g, mod, node);
       } break;
       default: {
-        auto tname(node.get_type_name().to_s());
+        std::string tname(node.get_type_name());
         log_error("Operation %s not supported, please add to lgyosys_dump.\n", tname.c_str());
       }
     }

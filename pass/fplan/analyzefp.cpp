@@ -33,7 +33,7 @@ std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
   return n.has_name() ? n.get_name() : n.default_instance_name();
 }
 
-void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tidx) const {
+void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const lh::Tree_index& tidx) const {
   const auto& n = nt.get_data(tidx);
   if (!n.has_place()) {
     fmt::print("(no area information)");
@@ -50,7 +50,7 @@ void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const Tree_index& tid
              p.get_width() / p.get_height());
 }
 
-void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const Tree_index& tidx) const {
+void Pass_fplan_analyzefp::print_children(const Node_tree& nt, const lh::Tree_index& tidx) const {
   for (auto child_idx : nt.children(tidx)) {
     auto child = nt.get_data(child_idx);
 
@@ -85,9 +85,9 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
     len++;
 
     if (i == nodestr.size() - 1) {
-      names.push_back(nodestr.substr(starti, len));
+      names.emplace_back(std::string(nodestr.substr(starti, len)));
     } else if (c == ',' || isblank(c)) {
-      names.push_back(nodestr.substr(starti, len - 1));
+      names.emplace_back(nodestr.substr(starti, len - 1));
       starti += len;
       len = 0;
     } else if (isalnum(c) || c == '_') {
@@ -136,13 +136,13 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
         auto hint = var.get("hint");
         if (hint != "") {
-          GeographyHint hint_enum = nameToHint(hint.to_s());
+          GeographyHint hint_enum = nameToHint(hint);
           if (hint_enum == InvalidHint) {
             error("invalid hint type!");
           }
 
           hint_map.insert_or_assign(n.get_compact(), hint_enum);
-          const Tree_index parent_idx = nt.get_parent(index);
+          const lh::Tree_index parent_idx = nt.get_parent(index);
           const Node&      parent     = nt.get_data(parent_idx);
           if (!parent_idx.is_root() && !hint_map.contains(parent.get_compact())) {
             hint_map.insert_or_assign(parent.get_compact(), UnknownHint);
@@ -189,7 +189,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
     if (!found) {
       std::string errstr = "cannot locate module ";
-      errstr += name.to_s();
+      errstr += name;
       errstr += "!";
       error(errstr);
     }

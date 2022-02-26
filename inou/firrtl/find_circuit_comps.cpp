@@ -122,7 +122,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
         pname_to_tup_map.erase(temp_name);
         pname_to_tup_map[port_name] = tup_attr_node;
 
-        mem_to_ports_lists[tup_name].insert(port_name);
+        mem_to_ports_lists[tup_name].insert(std::string(port_name));
       }
     }
 
@@ -160,7 +160,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
     auto type = CreateTypeObject(0);  // leave bw as implicit for now
 
     auto mem_stmt = new firrtl::FirrtlPB_Statement_Memory();
-    //mem_stmt->set_id(mem_name.substr(1).to_s());
+    //mem_stmt->set_id(mem_name.substr(1));
     mem_stmt->set_allocated_type(type);
     mem_stmt->set_uint_depth(size_val);
 
@@ -199,7 +199,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
           // help determine memory statement's read_under_write policy
         } else if (attr_str.substr(0, 2) == "__") {
           auto mem_id_ref = new firrtl::FirrtlPB_Expression_Reference();
-          //mem_id_ref->set_id(mem_name.substr(1).to_s());
+          //mem_id_ref->set_id(mem_name.substr(1));
           auto mem_id_expr = new firrtl::FirrtlPB_Expression();
           mem_id_expr->set_allocated_reference(mem_id_ref);
 
@@ -262,7 +262,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     if (io_map.contains(name.substr(1)))
       return;
     auto port = umod->add_port();
-    port->set_id(name.substr(1).to_s());
+    port->set_id(std::string(name.substr(1)));
     // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
     firrtl::FirrtlPB_Type *type;
     if (ln.is_in_bw_table(name.substr(1))) {
@@ -286,7 +286,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     if (reg_wire_map.contains(name.substr(1)))
       return;
     auto reg = new firrtl::FirrtlPB_Statement_Register();
-    reg->set_id(name.substr(1).to_s());
+    reg->set_id(std::string(name.substr(1)));
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -313,11 +313,11 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else if (name.substr(0, 3) == "_._") {
     // _._ = wire
-    auto new_name = name.substr(3).prepend('_');
+    auto new_name = absl::StrCat("_",name.substr(3));
     if (reg_wire_map.contains(new_name))
       return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
-    wire->set_id(new_name.to_s());
+    wire->set_id(new_name);
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -339,7 +339,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     // if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
     //  return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
-    wire->set_id(name.to_s());  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
+    wire->set_id(std::string(name));  // FIXME: Figure out best way to use renaming map to fix submodule input tuple names
 
     // auto type = CreateTypeObject(ln.get_bitwidth(name));  // FIXME: Just setting bits to implicit right now
     firrtl::FirrtlPB_Type *type;
@@ -385,8 +385,8 @@ void Inou_firrtl::CreateSubmodInst(Lnast &ln, const Lnast_nid &fcall_node, firrt
   // 2. Create submodule instance with this name
   auto inst        = new firrtl::FirrtlPB_Statement_Instance();
   auto submod_name = ConvergeFCallName(ln.get_name(func_out), ln.get_name(func_inp));
-  inst->set_id(submod_name.to_s());
-  inst->set_module_id(ln.get_name(mod_name).to_s());
+  inst->set_id(submod_name);
+  inst->set_module_id(std::string(ln.get_name(mod_name)));
 
   auto fstmt = umod->add_statement();
   fstmt->set_allocated_instance(inst);
@@ -403,11 +403,9 @@ std::string Inou_firrtl::ConvergeFCallName(std::string_view func_out, std::strin
     // some function call like out_foo = submodule(inp_foo) will get its bundle name set to foo
     wire_rename_map[func_inp] = func_inp.substr(4);
     wire_rename_map[func_out] = func_out.substr(4);
-    return func_out.substr(4);
-    ;
-  } else {
-    // Change the map (which alters some wire names)
-    wire_rename_map[func_inp] = func_out;
-    return func_out;
+    return std::string(func_out.substr(4));
   }
+  // Change the map (which alters some wire names)
+  wire_rename_map[func_inp] = func_out;
+  return std::string(func_out);
 }

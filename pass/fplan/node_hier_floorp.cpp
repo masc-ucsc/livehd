@@ -10,7 +10,7 @@
 Node_hier_floorp::Node_hier_floorp(Node_tree&& nt_arg) : Lhd_floorplanner(std::move(nt_arg)) {}
 
 FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg,
-                                             const Tree_index tidx) {
+                                             const lh::Tree_index tidx) {
   /*
     It would be very nice if we could skip floorplanning for nodes that have already been loaded into ArchFP elsewhere.
     However, ArchFP does not support calling addComponent more than once on the same pointer, so we are forced to deep copy repeated
@@ -73,7 +73,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Com
 
       if (!na.has_dim(op)) {
         std::string errstr = "node type ";
-        errstr.append(Ntype::get_name(op).to_s());
+        errstr.append(Ntype::get_name(op));
         errstr.append(" has no area information!");
         throw std::runtime_error(errstr);
       }

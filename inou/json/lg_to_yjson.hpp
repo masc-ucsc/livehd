@@ -19,9 +19,9 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include "lgedgeiter.hpp"
 #include "yosys_json.hpp"
 
-#define INP_DRV_NAME(node, input_index)  node->inp_edges()[input_index].driver.get_wire_name().to_s()
-#define OUT_DRV_NAME(node, output_index) node->out_edges()[output_index].driver.get_wire_name().to_s()
-#define PIN_WIRE(pin_name)               module->get_wire(node->get_sink_pin(pin_name).get_driver_pin().get_wire_name().to_s())
+#define INP_DRV_NAME(node, input_index)  node->inp_edges()[input_index].driver.get_wire_name()
+#define OUT_DRV_NAME(node, output_index) node->out_edges()[output_index].driver.get_wire_name()
+#define PIN_WIRE(pin_name)               module->get_wire(node->get_sink_pin(pin_name).get_driver_pin().get_wire_name())
 
 using namespace std;
 using namespace yjson;
@@ -45,7 +45,7 @@ private:
   void              process_multi_driver_node(Node* node, Ntype_op op);
   void              import_module(Lgraph* lg);
   yjson::Module*    add_new_module(yjson::StrTyp name);
-  yjson::Module*    find_module(string target_name);
+  yjson::Module*    find_module(std::string_view target_name);
   yjson::Prototype* find_node_prototype(Node* node, Ntype_op op);
   Prototype*        find_primitive(Ntype_op op);
 

@@ -35,7 +35,7 @@ void Node_flat_floorp::load() {
 
       if (!(narea.has_dim(op))) {
         std::string errstr = "node type ";
-        errstr.append(Ntype::get_name(op).to_s());
+        errstr.append(Ntype::get_name(op));
         errstr.append(" has no area information!");
         throw std::runtime_error(errstr);
       }

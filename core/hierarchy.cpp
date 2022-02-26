@@ -11,11 +11,10 @@
 Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {}
 
 Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
+  if (hidx <= 0)  // -1 if no hierarchical
+    return top;
 
   I(hidx < up_vector.size()); // invalid hierarchy hidx
-
-  if (hidx == 0)
-    return top;
 
   const auto &h_entry = up_vector[hidx];
 
@@ -45,7 +44,7 @@ Node Hierarchy::get_instance_up_node(const Hierarchy_index hidx) const {
 
 Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) const {
 
-  if (hidx == 0)
+  if (hidx <= 0)
     return -1;
 
   I(hidx < up_vector.size()); // Do not ask for up for root or invalid hidx
@@ -63,7 +62,7 @@ std::tuple<Hierarchy_index, Lgraph *> Hierarchy::get_next(const Hierarchy_index 
   auto h = hidx+1;
 
   if (h >= static_cast<int>(up_vector.size())) {
-    return std::make_tuple(-1,nullptr);
+    return std::make_tuple(-1, top);
   }
 
   return std::make_tuple(h, ref_lgraph(h));

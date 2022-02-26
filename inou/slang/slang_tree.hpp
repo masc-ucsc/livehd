@@ -26,7 +26,7 @@ protected:
 
   enum class Net_attr { Input, Output, Register, Local };
 
-  static bool has_lnast(std::string name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
+  static bool has_lnast(std::string_view name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
   bool          process_top_instance(const slang::InstanceSymbol& symbol);
   bool          process(const slang::AssignmentExpression& expr);

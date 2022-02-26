@@ -57,7 +57,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
       do_read_str = "inou_yosys_write.ys";
 
     for (const auto &e : alt_paths) {
-      auto test = main_path.to_s() + e + do_read_str;
+      auto test = main_path + e + do_read_str;
       if (access(test.c_str(), R_OK) != -1) {
         script_file = test;
         break;
@@ -216,11 +216,11 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   //const auto lib{var.get("liberty")};
 
   mustache::data vars;
-  vars.set("path", path.to_s());
+  vars.set("path", path);
 
   mustache::data filelist{mustache::data::type::list};
-  for (const auto &f : files.split(',')) {
-    filelist << mustache::data{"input", f.to_s()};
+  for (const auto &f : absl::StrSplit(files,',')) {
+    filelist << mustache::data{"input", std::string(f)};
   }
 
   vars.set("filelist", filelist);
@@ -228,9 +228,9 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   if (!top.empty()) {
     vars.set("hierarchy", mustache::data::type::bool_true);
     if (top != "-auto-top") {
-      vars.set("top", "-top " + top.to_s());
+      vars.set("top", absl::StrCat("-top " , top));
     } else {
-      vars.set("top", top.to_s());
+      vars.set("top", std::string(top));
     }
   } else {
     vars.set("hierarchy", mustache::data::type::bool_false);
@@ -290,12 +290,12 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
   for (auto &lg : var.lgs) {
     mustache::data vars;
 
-    vars.set("path", p.path.to_s());
-    vars.set("odir", p.odir.to_s());
+    vars.set("path", p.path);
+    vars.set("odir", p.odir);
 
     auto file = absl::StrCat(p.odir, "/", lg->get_name(), ".v");
-    vars.set("file", file.to_s());
-    vars.set("name", lg->get_name().to_s());
+    vars.set("file", file);
+    vars.set("name", lg->get_name());
 
     auto hier = var.get("hier");
     if (!hier.empty() && (hier == "1" || hier == "true")) {

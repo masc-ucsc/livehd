@@ -393,9 +393,12 @@ void Elab_scanner::unregister_memblock() {
   if (memblock_fd == -1)
     return;
 
-  int ok = munmap((void *)memblock, memblock_size);
-  I(ok == 0);
-  close(memblock_fd);
+// FIXME: memory leak, but this pointer should be "moved" to the LNAST tree not
+// deallocated here
+//
+//  int ok = munmap((void *)memblock, memblock_size);
+//  I(ok == 0);
+//  close(memblock_fd);
 
   memblock      = 0;
   memblock_size = 0;

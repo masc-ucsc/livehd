@@ -87,7 +87,7 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
           module->create_wires(node.out_edges());
           // TODO: get proper const value as int
           int value = node.get_type_const().to_i();
-          module->get_wire(e.driver.get_wire_name().to_s())->set_const_value(value);
+          module->get_wire(e.driver.get_wire_name())->set_const_value(value);
           break;
         }
         // TODO: else for Get_mask const calculation
@@ -98,7 +98,7 @@ void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
   }
   for (auto node : lg->forward()) {  // add aliases for MASK outputs
     if (node.get_type_op() == Ntype_op::Get_mask && node.out_edges().size() > 0) {
-      module->add_wire_alias(OUT_DRV_NAME((&node), 0), node.get_sink_pin("a").get_driver_pin().get_wire_name().to_s());
+      module->add_wire_alias(OUT_DRV_NAME((&node), 0), node.get_sink_pin("a").get_driver_pin().get_wire_name());
     }
   }
 }
@@ -132,8 +132,8 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
     cell->add_connection(PIN_WIRE("B"));
     cell->add_connection(module->get_wire(OUT_DRV_NAME(node, 0)));
   } else if (op == Ntype_op::Not) {
-    cell->add_connection(module->get_wire(node->inp_edges()[0].driver.get_wire_name().to_s()));
-    cell->add_connection(module->get_wire(node->out_edges()[0].driver.get_wire_name().to_s()));
+    cell->add_connection(module->get_wire(node->inp_edges()[0].driver.get_wire_name()));
+    cell->add_connection(module->get_wire(node->out_edges()[0].driver.get_wire_name()));
   } else if (op == Ntype_op::Sub) {
     const auto& sub = node->get_type_sub_node();
     for (auto& io_pin : sub.get_sorted_io_pins()) {
@@ -146,7 +146,7 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
         if (!dpin.is_connected())
           dpin.invalidate();
       }
-      cell->add_connection(module->get_wire(dpin.get_wire_name().to_s()));
+      cell->add_connection(module->get_wire(dpin.get_wire_name()));
       if (!dpin.is_invalid()) {
       }
     }
@@ -157,10 +157,10 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
     cell->add_connection(module->get_wire(OUT_DRV_NAME(node, 0)));
   } else if (op == Ntype_op::Mux) {
     auto ordered_inp = node->inp_edges_ordered();
-    cell->add_connection(module->get_wire(ordered_inp[1].driver.get_wire_name().to_s()));
-    cell->add_connection(module->get_wire(ordered_inp[2].driver.get_wire_name().to_s()));
-    cell->add_connection(module->get_wire(ordered_inp[0].driver.get_wire_name().to_s()));
-    cell->add_connection(module->get_wire(node->get_driver_pin().get_wire_name().to_s()));
+    cell->add_connection(module->get_wire(ordered_inp[1].driver.get_wire_name()));
+    cell->add_connection(module->get_wire(ordered_inp[2].driver.get_wire_name()));
+    cell->add_connection(module->get_wire(ordered_inp[0].driver.get_wire_name()));
+    cell->add_connection(module->get_wire(node->get_driver_pin().get_wire_name()));
   } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
     node->dump();
     Pass::error("Cannot generate JSON unless it is low level Lgraph node:{} is type {}\n", node->debug_name(), Ntype::get_name(op));
@@ -169,7 +169,7 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
 }
 
 yjson::Module* LGtoYJson::add_new_module(yjson::StrTyp name) {
-  _modules.push_back(new yjson::Module(name.to_s()));
+  _modules.push_back(new yjson::Module(name));
   return _modules.back();
 }
 
@@ -185,14 +185,14 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
     unique_inputs[pin_name] = edge.get_bits();
   }
   for (auto& inp : unique_inputs) {
-    auto port_wire = module->create_single_wire(inp.first.to_s(), inp.second);
-    module->add_port(&inp.first, pdInput, port_wire);
+    auto port_wire = module->create_single_wire(inp.first, inp.second);
+    module->add_port(inp.first, pdInput, port_wire);
   }
 
   // add aliases for newly created input wires
   auto internal_inp_edges = lg->get_graph_input_node().out_edges();
   for (auto& inp_edge : internal_inp_edges) {
-    module->add_wire_alias(inp_edge.driver.get_wire_name().to_s(), inp_edge.driver.get_name().to_s());
+    module->add_wire_alias(inp_edge.driver.get_wire_name(), inp_edge.driver.get_name());
   }
 
   // map each unique output to its width
@@ -208,20 +208,20 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
     unique_outputs[pin_name] = edge.get_bits();
   }
   for (auto& outp : unique_outputs) {
-    auto port_wire = module->create_single_wire(outp.first.to_s(), outp.second);
-    module->add_port(&outp.first, pdOutput, port_wire);
+    auto port_wire = module->create_single_wire(outp.first, outp.second);
+    module->add_port(outp.first, pdOutput, port_wire);
   }
 
   // add aliases for newly created output wires
   auto internal_out_edges = lg->get_graph_output_node().inp_edges();
   for (auto& out_edge : internal_out_edges) {
-    module->add_wire_alias(out_edge.driver.get_wire_name().to_s(), out_edge.sink.get_name().to_s());
+    module->add_wire_alias(out_edge.driver.get_wire_name(), out_edge.sink.get_name());
   }
 }
 
-yjson::Module* LGtoYJson::find_module(std::string module_name) {
+yjson::Module* LGtoYJson::find_module(std::string_view module_name) {
   for (auto m : _modules)
-    if (strcmp(m->get_name(), module_name.c_str()) == 0)
+    if (m->get_name() == module_name)
       return m;
   return NULL;
 }
@@ -230,11 +230,12 @@ yjson::Prototype* LGtoYJson::find_node_prototype(Node* node, Ntype_op op) {
   Module* cell_type = NULL;
   if (op == Ntype_op::Sub || op == Ntype_op::Memory) {
     const auto& sub = node->get_type_sub_node();
-    cell_type       = find_module(sub.get_name().to_s());
+    cell_type       = find_module(sub.get_name());
     if (cell_type == NULL) {  // Module not found
-      cell_type = add_new_module(sub.get_name());
+      std::string sub_name(sub.get_name());
+      cell_type = add_new_module(sub_name);
       for (auto& io_pin : sub.get_sorted_io_pins()) {  // add module ports
-        cell_type->add_port(&io_pin.name, io_pin.is_input() ? pdInput : pdOutput, NULL);
+        cell_type->add_port(io_pin.name, io_pin.is_input() ? pdInput : pdOutput, NULL);
       }
     }
   }
@@ -291,7 +292,7 @@ void LGtoYJson::to_json(Eprp_var& var) {
   auto          file_name = absl::StrCat(odir, "/", var.lgs[0]->get_name(), ".json");
 
   ofstream outdata;  // outdata is like cin
-  outdata.open(file_name.to_s());
+  outdata.open(file_name);
   if (!outdata) {  // file couldn't be opened
     cerr << "Error: file could not be opened" << endl;
     exit(1);

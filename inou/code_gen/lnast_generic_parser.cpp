@@ -15,81 +15,81 @@
 #include "lnast_map.hpp"
 
 
-std::string Prp_parser::ref_name_str(std::string_view prp_term, bool) const { return prp_term; }
+std::string Prp_parser::ref_name_str(std::string_view prp_term, bool) const { return std::string(prp_term); }
 
 std::string Cpp_parser::ref_name_str(std::string_view prp_term, bool strct) const {
   if (!Code_gen_all_lang::has_prefix(prp_term)) {
-    return prp_term;
+    return std::string(prp_term);
   }
 
   if (Code_gen_all_lang::is_output(prp_term) && strct == true) {
     return absl::StrCat("outputs.", prp_term.substr(1));
   }
 
-  return prp_term.substr(1);
+  return std::string(prp_term.substr(1));
 }
 
 std::string Ver_parser::ref_name_str(std::string_view prp_term, bool) const {
   if (Code_gen_all_lang::has_prefix(prp_term)) {
-    return prp_term.substr(1);
+    return std::string(prp_term.substr(1));
   }
 
-  return prp_term;
+  return std::string(prp_term);
 }
 
-const std::string Prp_parser::stmt_sep() const { return stmt_separator; }
-const std::string Cpp_parser::stmt_sep() const { return stmt_separator; }
-const std::string Ver_parser::stmt_sep() const { return stmt_separator; }
+std::string Prp_parser::stmt_sep() const { return stmt_separator; }
+std::string Cpp_parser::stmt_sep() const { return stmt_separator; }
+std::string Ver_parser::stmt_sep() const { return stmt_separator; }
 
-const std::string  Prp_parser::get_lang_type() const { return lang_type; }
-const std::string  Cpp_parser::get_lang_type() const { return lang_type; }
-const std::string  Ver_parser::get_lang_type() const { return lang_type; }
+std::string  Prp_parser::get_lang_type() const { return lang_type; }
+std::string  Cpp_parser::get_lang_type() const { return lang_type; }
+std::string  Ver_parser::get_lang_type() const { return lang_type; }
 
-const std::string Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_pyrope(node_type); }
-const std::string Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_cpp(node_type); }
-const std::string Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return Lnast_map::debug_name_verilog(node_type); }
+std::string Prp_parser::debug_name_lang(Lnast_ntype node_type) const { return std::string(Lnast_map::debug_name_pyrope(node_type)); }
+std::string Cpp_parser::debug_name_lang(Lnast_ntype node_type) const { return std::string(Lnast_map::debug_name_cpp(node_type)); }
+std::string Ver_parser::debug_name_lang(Lnast_ntype node_type) const { return std::string(Lnast_map::debug_name_verilog(node_type)); }
 
-const std::string Prp_parser::start_else_if() const { return ("} elif ("); }
-const std::string Cpp_parser::start_else_if() const { return ("} else if ("); }
-const std::string Ver_parser::start_else_if() const { return ("end else if ("); }
+std::string Prp_parser::start_else_if() const { return ("} elif ("); }
+std::string Cpp_parser::start_else_if() const { return ("} else if ("); }
+std::string Ver_parser::start_else_if() const { return ("end else if ("); }
 
-const std::string Ver_parser::end_else_if() const { return ("end"); }
+std::string Ver_parser::end_else_if() const { return ("end"); }
 
-const std::string Ver_parser::start_else() const { return ("end else begin\n"); }
+std::string Ver_parser::start_else() const { return ("end else begin\n"); }
 
-const std::string Ver_parser::end_cond() const { return (") begin\n"); }
+std::string Ver_parser::end_cond() const { return (") begin\n"); }
 
-const std::string Ver_parser::end_if_or_else() const { return ("end\n"); }
+std::string Ver_parser::end_if_or_else() const { return ("end\n"); }
 
-const std::string Ver_parser::for_stmt_beg() const { return "begin\n"; }
-const std::string Ver_parser::for_stmt_end() const { return "end\n"; }
+std::string Ver_parser::for_stmt_beg() const { return "begin\n"; }
+std::string Ver_parser::for_stmt_end() const { return "end\n"; }
 
-const std::string Prp_parser::for_cond_mid() const { return " in "; }
-const std::string Cpp_parser::for_cond_mid() const { return ": "; }
-const std::string Ver_parser::for_cond_mid() const {
+std::string Prp_parser::for_cond_mid() const { return " in "; }
+std::string Cpp_parser::for_cond_mid() const { return ": "; }
+std::string Ver_parser::for_cond_mid() const {
   return ": ";  // TODO
 }
 
-const std::string Prp_parser::for_cond_beg() const { return " "; }
-const std::string Cpp_parser::for_cond_beg() const { return " ( auto "; }
-const std::string Ver_parser::for_cond_beg() const {
+std::string Prp_parser::for_cond_beg() const { return " "; }
+std::string Cpp_parser::for_cond_beg() const { return " ( auto "; }
+std::string Ver_parser::for_cond_beg() const {
   return " ( auto ";  // TODO
 }
 
-const std::string Prp_parser::for_cond_end() const { return " "; }
-const std::string Cpp_parser::for_cond_end() const { return ") "; }
-const std::string Ver_parser::for_cond_end() const {
+std::string Prp_parser::for_cond_end() const { return " "; }
+std::string Cpp_parser::for_cond_end() const { return ") "; }
+std::string Ver_parser::for_cond_end() const {
   return ") ";  // TODO
 }
 
-const std::string Ver_parser::assign_node_strt() const { return "assign "; }
+std::string Ver_parser::assign_node_strt() const { return "assign "; }
 
 std::string Cpp_parser::starter(std::string_view filename) const {
   return absl::StrCat("void ", filename, "::cycle(");
 }
 
 // header related functions:
-const std::string Cpp_parser::supporting_ftype() const {
+std::string Cpp_parser::supporting_ftype() const {
   return supp_ftype; 
 }
 
@@ -132,8 +132,10 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
   auto vcd_params = "  std::string scope_name;\n  vcd::VCDWriter* vcd_writer;\n";
 
   std::string vcd_varptrs;
-  for (auto const &[key, val] : inp_bw) {
-    if (!  (val < 2))
+  for (const auto &[key, val] : inp_bw) {
+    auto i_val = str_tools::to_i(val);
+
+    if (!  (i_val < 2))
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -141,7 +143,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(
-                        std::to_string(val.to_i() - 1),
+                        std::to_string(i_val - 1),
                         ":0]\", vcd::VariableType::wire, ",
                         val,
                         ");\n")
@@ -157,7 +159,8 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       ");\n");
   }
   for (auto const &[key, val] : outp_bw) {
-    if (!(val<2)) //was (val>"1") before std::string 
+    auto i_val = str_tools::to_i(val);
+    if (!(i_val<2)) //was (val>"1") before std::string 
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -165,7 +168,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(
-                        std::to_string(val.to_i() - 1),
+                        std::to_string(i_val - 1),
                         ":0]\", vcd::VariableType::wire, ",
                         val,
                         ");\n")
@@ -181,7 +184,8 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       ");\n");
   }
   for (auto const &[key, val] : reg_bw) {
-    if (!(val<2))
+    auto i_val = str_tools::to_i(val);
+    if (!(i_val<2))
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -189,7 +193,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(
-                        std::to_string(val.to_i() - 1),
+                        std::to_string(i_val - 1),
                         ":0]\", vcd::VariableType::wire, ",
                         val,
                         ");\n")
@@ -478,15 +482,15 @@ std::string Ver_parser::get_lang_fname(std::string_view fname, std::string_view 
 }
 
 void Prp_parser::set_make_unsigned(std::string_view sec_child) {
-  unsigned_vars.insert(sec_child);
+  unsigned_vars.insert(std::string(sec_child));
 }
 
 void Cpp_parser::set_make_unsigned(std::string_view sec_child) {
-  unsigned_vars.insert(sec_child);
+  unsigned_vars.insert(std::string(sec_child));
 }
 
 void Ver_parser::set_make_unsigned(std::string_view sec_child) {
-  unsigned_vars.insert(sec_child);
+  unsigned_vars.insert(std::string(sec_child));
 }
 
 bool Prp_parser::is_unsigned(std::string_view var_name) const {

@@ -24,8 +24,8 @@
 
 using Replxx = replxx::Replxx;
 
-void help(std::string_view  txt) { fmt::print("{:20s} {}\n", cmd, txt); }
-void help_labels(std::string_view  txt, bool required) {
+void help(std::string_view cmd, std::string_view txt) { fmt::print("{:20s} {}\n", cmd, txt); }
+void help_labels(std::string_view cmd, std::string_view txt, bool required) {
   if (required)
     fmt::print("  {:20s} {} (required)\n", cmd, txt);
   else
@@ -123,7 +123,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
 
       library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name) {
         (void)id;
-        name_files.push_back(name.to_s());
+        name_files.emplace_back(name);
       });
       fields   = name_files;
       examples = &fields;
@@ -146,9 +146,9 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
 
             std::string dir_name{path + "/" + dp->d_name};
             if (stat(dir_name.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
-              sort_files.push_back(std::string{dp->d_name} + "/");
+              sort_files.emplace_back(std::string{dp->d_name} + "/");
             } else {
-              sort_files.push_back(dp->d_name);
+              sort_files.emplace_back(dp->d_name);
             }
           }
         }
@@ -167,10 +167,10 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       cmd = cmd.substr(0, pos);
     }
     // fmt::print("cmd[{}]\n", cmd);
-    Main_api::get_labels(cmd, [&fields](std::string_view txt, bool required) {
+    Main_api::get_labels(cmd, [&fields](std::string_view label, std::string_view txt, bool required) {
       (void)required;
       (void)txt;
-      fields.push_back(label.to_s() + ":");
+      fields.emplace_back(absl::StrCat(label , ":"));
     });
     if (!fields.empty())
       examples = &fields;
@@ -379,9 +379,9 @@ int main(int argc, char** argv) {
   };
 
   // init all the livehd libraries used
-  Main_api::get_commands([&examples](std::string_view  help_msg) {
+  Main_api::get_commands([&examples](std::string_view _cmd, std::string_view help_msg) {
     (void)help_msg;
-    examples.push_back(_cmd.to_s());
+    examples.emplace_back(_cmd);
   });
 
   const char* env_home = std::getenv("HOME");

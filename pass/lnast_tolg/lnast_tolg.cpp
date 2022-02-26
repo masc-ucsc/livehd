@@ -423,8 +423,8 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
       }
       Lconst pos_const;
       if (field_name.substr(0, 4) != "null") {
-        // pos_const = Lconst::from_pyrope(abls::StrCat(":", std::string(fp), ":", field_name));
-        pos_const = Lconst::from_pyrope(abls::StrCat(":", fp, ":", field_name));
+        // pos_const = Lconst::from_pyrope(absl::StrCat(":", std::string(fp), ":", field_name));
+        pos_const = Lconst::from_pyrope(absl::StrCat(":", fp, ":", field_name));
       } else {
         pos_const = Lconst(fp);
       }
@@ -667,7 +667,7 @@ void Lnast_tolg::create_inp_ta4runtime_idx(Lgraph *lg, const Node_pin &val_dpin,
 
   // if the last subname is not a number(not a constant), means the tuple is not array-like, it's impossilbe
   // future graph-inp will try to get the array-element from a dynamic-runtime index, so we don't need to construct the inp_ta
-  if (!last_subname.substr(0,1).is_i())
+  if (!str_tools::is_i(last_subname.substr(0,1)))
     return;
 
   auto tup_name  = full_inp_hier_name.substr(0, pos);
@@ -922,13 +922,13 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
 Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view ref_vname, int16_t subs) {
   (void)lg;  // FIXME: remove arg
   if (subs == 0) {
-    auto     ref_name = abls::StrCat(ref_vname, "_", subs);
+    auto     ref_name = absl::StrCat(ref_vname, "_", subs);
     Node_pin invalid_dpin;
     name2dpin[ref_name] = invalid_dpin;
     return invalid_dpin;
   }
 
-  auto chain_tail_name = abls::StrCat(ref_vname, "_", subs - 1);  // try to concatenate after the TA(ssa-1)
+  auto chain_tail_name = absl::StrCat(ref_vname, "_", subs - 1);  // try to concatenate after the TA(ssa-1)
   I(name2dpin.find(chain_tail_name) != name2dpin.end());
   I(name2dpin[chain_tail_name].get_name() == chain_tail_name);
   return name2dpin[chain_tail_name];
@@ -1131,11 +1131,14 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
 #if 0
   return lg->create_node_const(Lconst(const_str)).setup_driver_pin();
 #else
-  if (!const_str.contains("bits")) {
-    if (Lconst::from_pyrope(const_str).is_string())
-      return lg->create_node_const(Lconst::from_string(const_str)).setup_driver_pin();
+  if (!str_tools::contains(const_str,"bits")) {
+    Lconst lc;
+    if (str_tools::is_i(const_str))
+      lc = Lconst::from_pyrope(const_str);
     else
-      return lg->create_node_const(Lconst::from_pyrope(const_str)).setup_driver_pin();
+      lc = Lconst::from_pyrope(const_str);
+
+    return lg->create_node_const(lc).setup_driver_pin();
   }
 
   // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
@@ -1186,7 +1189,7 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
     auto vn_spin = aset_node.setup_sink_pin("parent");  // variable name
 
     auto aset_ancestor_subs = lnast->get_data(name_aset).subs - 1;
-    auto aset_ancestor_name = abls::StrCat(vname, "_", aset_ancestor_subs);
+    auto aset_ancestor_name = absl::StrCat(vname, "_", aset_ancestor_subs);
 
     Node_pin vn_dpin;
     if (is_input(name)) {
@@ -1210,7 +1213,7 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
     if (lnast->get_type(val_aset).is_ref()) {  // setup_ref_node_dpin does not handle SSA for LHS
       auto        value_subs  = lnast->get_data(val_aset).subs - 1;
       auto        value_nossa = lnast->get_vname(val_aset);
-      auto        value_name  = abls::StrCat(value_nossa, "_", value_subs);
+      auto        value_name  = absl::StrCat(value_nossa, "_", value_subs);
       const auto &it          = name2dpin.find(value_name);
       if (it != name2dpin.end()) {
         val_dpin = it->second;
@@ -1350,11 +1353,11 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
   std::string func_name;
   auto cond1 =  module_name.substr(0, 9) == "__firrtl_";
   auto cond2 =  func_name_ori.substr(0, 2) == "__";
-  auto cond3 =  !inlined_func_names.contains(func_name_ori) ;
+  auto cond3 =  !inlined_func_names.contains(func_name_ori);
   if (cond1 || cond2 || cond3) {
     func_name = func_name_ori;
   } else {
-    func_name = abls::StrCat(module_name, ".", func_name_ori);
+    func_name = absl::StrCat(module_name, ".", func_name_ori);
   }
 
   std::string arg_tup_name;
@@ -1367,7 +1370,7 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
 
   auto ret_name = lnast->get_sname(c0_fc);
   auto subg_node = lg->create_node_sub(func_name);
-  subg_node.set_name(abls::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
+  subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
 
   auto subg_spin = subg_node.setup_sink_pin("$");
   auto subg_dpin = subg_node.setup_driver_pin("%");
@@ -1395,8 +1398,8 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto       c0_fdef          = lnast->get_first_child(lnidx);
   auto       c1_fdef          = lnast->get_sibling_next(c0_fdef);
   auto       func_stmts       = lnast->get_sibling_next(c1_fdef);
-  auto       func_vname       = lnast->get_vname(c0_fdef);
-  auto       subg_module_name = abls::StrCat(module_name, ".", func_vname);
+  std::string func_vname(lnast->get_vname(c0_fdef));
+  auto       subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg p(subg_module_name, path);
 
   fmt::print("============================= Sub-module: LNAST->Lgraph Start ({}) ==============================================\n", subg_module_name);
@@ -1737,7 +1740,9 @@ void Lnast_tolg::create_ginp_as_runtime_idx(Lgraph *lg, std::string_view hier_na
   return;
 }
 
-void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, std::string_view hier_name, Node &chain_head) {
+void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, std::string_view hier_name_sv, Node &chain_head) {
+  std::string hier_name(hier_name_sv);
+
   auto cur_node  = cur_node_spin.get_node();
   auto cur_ntype = cur_node.get_type_op();
   bool is_leaf   = false;
@@ -1773,7 +1778,7 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
       if (field_node.is_type_const()) {
         // auto field_name = field_node.get_type_const().to_str();
         auto field_name = field_node.get_type_const().to_field(); //low intuitive api
-        new_hier_name   = abls::StrCat(hier_name, ".", field_name);
+        new_hier_name   = absl::StrCat(hier_name, ".", field_name);
       }
     }
     for (auto &e : cur_node.out_edges()) {

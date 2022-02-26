@@ -55,10 +55,10 @@ public:
 
   // Ways to add components.
   virtual FPObject* addComponentCluster(Ntype_op type, int count, double area, double maxARArg, double minARArg);
-  virtual FPObject* addComponentCluster(std::string name, int count, double area, double maxARArg, double minARArg);
+  virtual FPObject* addComponentCluster(std::string_view name, int count, double area, double maxARArg, double minARArg);
   virtual void      addComponent(FPObject* comp);
   virtual void      addComponent(FPObject* comp, int count);
 
   // Writes current container and all subcontainers to the specified root lgraph
-  virtual unsigned int outputLgraphLayout(Node_tree& tree, Tree_index tidx, double startX = 0.0, double startY = 0.0);
+  virtual unsigned int outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX = 0.0, double startY = 0.0);
 };

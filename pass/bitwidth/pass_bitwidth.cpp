@@ -28,12 +28,12 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   else
     hier = false;
 
-  if (!miters.is_i()) {
+  if (!str_tools::is_i(miters)) {
     error("pass.bitwidth max_iterations:{} should be bigger than zero and less than 100", miters);
     return;
   }
 
-  max_iterations = miters.to_i();
+  max_iterations = str_tools::to_i(miters);
 
   if (max_iterations > 100 || max_iterations <= 0) {
     error("pass.bitwidth max_iterations:{} should be bigger than zero and less than 100", max_iterations);

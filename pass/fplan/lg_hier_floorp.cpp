@@ -64,7 +64,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
 
     unsigned int count = sub_lg_count[sub_lg];
     if (subl->getType() == Ntype_op::Const) {
-      l->addComponentCluster(subl->getName().to_s(),
+      l->addComponentCluster(subl->getName(),
                              count,
                              subl->getArea(),
                              8.0,  // TODO: guessing on valid AR range here

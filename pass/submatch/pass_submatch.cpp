@@ -24,7 +24,7 @@ void pass_submatch::setup() {
 pass_submatch::pass_submatch(const Eprp_var &var) : Pass("pass.submatch", var) {}
 
 void pass_submatch::do_work(Lgraph *g) {
-  Lbench b("pass.submatch." + g->get_name().to_s());
+  Lbench b("pass.submatch." + g->get_name());
   find_mffc_group(g);
   find_subs(g);
 }
@@ -35,7 +35,7 @@ void pass_submatch::work(Eprp_var &var) {
   pass_submatch p(var);
 
   if (var.dict.count("depth")) {
-    submatch_depth = var.dict["depth"].to_i();
+    submatch_depth = str_tools::to_i(var.dict["depth"]);
   }
 
   for (const auto &g : var.lgs) {

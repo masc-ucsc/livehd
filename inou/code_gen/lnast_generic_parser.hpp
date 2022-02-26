@@ -16,13 +16,13 @@ class Prp_parser : public Code_gen_all_lang {
 
 public:
   Prp_parser(){};
-  const std::string stmt_sep() const final;
-  const std::string get_lang_type() const final;
-  const std::string debug_name_lang(Lnast_ntype node_type) const final;
-  const std::string start_else_if() const final;
-  const std::string for_cond_mid() const final;
-  const std::string for_cond_beg() const final;
-  const std::string for_cond_end() const final;
+  std::string stmt_sep() const final;
+  std::string get_lang_type() const final;
+  std::string debug_name_lang(Lnast_ntype node_type) const final;
+  std::string start_else_if() const final;
+  std::string for_cond_mid() const final;
+  std::string for_cond_beg() const final;
+  std::string for_cond_end() const final;
   std::string    ref_name_str(std::string_view prp_term, bool strct = true) const final;
   void             dump_maps() const;
   void             call_dump_maps() const final;
@@ -58,17 +58,17 @@ class Cpp_parser : public Code_gen_all_lang {
 
 public:
   Cpp_parser(){};
-  const std::string stmt_sep() const final;
-  const std::string get_lang_type() const final;
-  const std::string debug_name_lang(Lnast_ntype node_type) const final;
-  const std::string start_else_if() const final;
-  const std::string for_cond_mid() const final;
-  const std::string for_cond_beg() const final;
-  const std::string for_cond_end() const final;
+  std::string stmt_sep() const final;
+  std::string get_lang_type() const final;
+  std::string debug_name_lang(Lnast_ntype node_type) const final;
+  std::string start_else_if() const final;
+  std::string for_cond_mid() const final;
+  std::string for_cond_beg() const final;
+  std::string for_cond_end() const final;
   std::string    ref_name_str(std::string_view prp_term, bool strct = true) const final;
   std::string      starter(std::string_view filename) const final;
   // header related functions:
-  const std::string supporting_ftype() const final;
+  std::string supporting_ftype() const final;
   void      set_supporting_fstart(std::string_view basename_s) final;
 //  std::string      supporting_fend(std::string_view basename_s) const final;
   void     set_supp_buffer_to_print(std::string_view modname) final;
@@ -99,21 +99,21 @@ class Ver_parser : public Code_gen_all_lang {
 
 public:
   Ver_parser(){};
-  const std::string stmt_sep() const final;
-  const std::string get_lang_type() const final;
-  const std::string debug_name_lang(Lnast_ntype node_type) const final;
-  const std::string start_else_if() const final;
-  const std::string end_else_if() const final;
-  const std::string start_else() const final;
-  const std::string end_cond() const final;
-  const std::string end_if_or_else() const final;
-  const std::string for_stmt_beg() const final;
-  const std::string for_stmt_end() const final;
-  const std::string for_cond_mid() const final;
-  const std::string for_cond_beg() const final;
-  const std::string for_cond_end() const final;
+  std::string stmt_sep() const final;
+  std::string get_lang_type() const final;
+  std::string debug_name_lang(Lnast_ntype node_type) const final;
+  std::string start_else_if() const final;
+  std::string end_else_if() const final;
+  std::string start_else() const final;
+  std::string end_cond() const final;
+  std::string end_if_or_else() const final;
+  std::string for_stmt_beg() const final;
+  std::string for_stmt_end() const final;
+  std::string for_cond_mid() const final;
+  std::string for_cond_beg() const final;
+  std::string for_cond_end() const final;
   std::string    ref_name_str(std::string_view prp_term, bool strct = true) const final;
-  const std::string assign_node_strt() const final;
+  std::string assign_node_strt() const final;
   void             dump_maps() const;
   void             call_dump_maps() const final;
 

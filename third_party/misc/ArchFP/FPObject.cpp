@@ -54,7 +54,7 @@ double FPObject::calcY(double startY) const {
     return startY + y;
 }
 
-unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, double cY) {
+unsigned int FPObject::findNode(Node_tree& tree, lh::Tree_index tidx, double cX, double cY) {
   Ntype_op t = getType();
 
   unsigned int sub_count;
@@ -65,7 +65,7 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
 
     bool found = false;
 
-    Tree_index child_idx = tree.get_first_child(tidx);
+    lh::Tree_index child_idx = tree.get_first_child(tidx);
     while (child_idx != tree.invalid_index()) {
       auto child = tree.ref_data(child_idx);
 
@@ -106,11 +106,11 @@ unsigned int FPObject::findNode(Node_tree& tree, Tree_index tidx, double cX, dou
   return sub_count;
 }
 
-unsigned int FPObject::outputLgraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
+unsigned int FPObject::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX, double startY) {
   bool found = false;
 
-  // Tree_index child_idx = tree.get_first_child(tidx);
-  Tree_index child_idx = tree.get_last_free(tidx, getType());
+  // lh::Tree_index child_idx = tree.get_first_child(tidx);
+  lh::Tree_index child_idx = tree.get_last_free(tidx, getType());
   while (child_idx != tree.invalid_index()) {
     Node* child = tree.ref_data(child_idx);
 

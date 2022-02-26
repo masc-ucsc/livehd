@@ -113,10 +113,10 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
 
   for (size_t i = data.size(); i > 0; i--) {
     switch (data[i - 1]) {
-      case RTLIL::S0: val = val.prepend('0'); break;
-      case RTLIL::S1: val = val.prepend('1'); break;
-      case RTLIL::Sz: val = val.prepend('z'); break;
-      default: val = val.prepend('?'); break;
+      case RTLIL::S0: val = absl::StrCat("0", val); break;
+      case RTLIL::S1: val = absl::StrCat("1", val); break;
+      case RTLIL::Sz: val = absl::StrCat("z", val); break;
+      default: val = absl::StrCat("?", val); break;
     }
   }
 
@@ -651,9 +651,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       if (sub_lg) {
         std::string pin_name(&(conn.first.c_str()[1]));
 
-        if (pin_name.is_i()) {
+        if (str_tools::is_i(pin_name)) {
           // hardcoded pin position
-          int pos = pin_name.to_i();
+          int pos = str_tools::to_i(pin_name);
 
           auto *sub = sub_lg->ref_self_sub_node();
 
@@ -687,7 +687,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                         "Warning: impossible to figure out direction in module %s cell type %s pin_name to %s\n",
                         mod->name.c_str(),
                         cell->type.c_str(),
-                        pin_name.to_s().c_str());
+                        pin_name.c_str());
                 continue;
               }
             }
@@ -697,7 +697,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             continue;
 
 #ifndef NDEBUG
-          printf("module %s cell type %s has output pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.to_s().c_str());
+          printf("module %s cell type %s has output pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
 #endif
         } else {
           auto *sub = sub_lg->ref_self_sub_node();
@@ -713,7 +713,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             continue;
 
 #ifndef NDEBUG
-          printf("module %s submodule %s has pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.to_s().c_str());
+          printf("module %s submodule %s has pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
 #endif
         }
 
@@ -2176,7 +2176,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
         if (sub.is_output(name))
           continue;
         if (!sub.is_input(name)) {
-          log_error("sub:%s does not have pin:%s as input\n", sub.get_name().to_s().c_str(), name.to_s().c_str());
+          log_error("sub:%s does not have pin:%s as input\n", std::string(sub.get_name()).c_str(), name.c_str());
         }
 
         Node_pin spin = exit_node.setup_sink_pin(name);
@@ -2292,9 +2292,9 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 #endif
 
         TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) {
-          ctx.event()->set_name("YOSYS_tolg_" + mod_name.to_s());
+          ctx.event()->set_name("YOSYS_tolg_" + mod_name);
         });
-        Lbench b("inou.YOSYS_tolg_" + mod_name.to_s());
+        Lbench b("inou.YOSYS_tolg_" + mod_name);
 
         for (const auto &port : mod->ports) {
           RTLIL::Wire  *wire = mod->wire(port);

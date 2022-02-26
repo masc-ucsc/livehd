@@ -130,6 +130,18 @@ namespace str_tools {
   return str.substr(0,start.size()) == start;
 }
 
+[[nodiscard]] inline bool ends_with(std::string_view str, std::string_view end) {
+  if (end.size() == str.size()) {
+    return str == end;  // faster path
+  }
+  if (end.size() > str.size())
+    return false; // end is larger
+
+  const auto *base_en   = end.data();
+  const auto *base_self = str.data() + str.size() - end.size();
+  return memcmp(base_self, base_en, end.size()) == 0;
+}
+
 [[nodiscard]] inline bool contains(std::string_view str, std::string_view start) {
   return str.find(start) != std::string_view::npos;
 }

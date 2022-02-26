@@ -70,9 +70,9 @@ void Pass_label::label_synth(Eprp_var &var) {
 
 void Pass_label::label_acyclic(Eprp_var &var) {
   Pass_label pp(var);
-  
+
   auto cutoff_str = var.get("cutoff");
-  auto cutoff = static_cast<uint8_t>(std::stoi(cutoff_str.to_s()));
+  auto cutoff = str_tools::to_i(cutoff_str);
 
   auto merge_txt = var.get("merge");
   bool merge_en = false;

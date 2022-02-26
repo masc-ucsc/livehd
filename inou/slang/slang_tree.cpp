@@ -273,12 +273,13 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
       }
     }
 
+    auto bw = std::to_string(op.type->getBitWidth());
     if (op.type->isSigned()) {
-      return lnast_create_obj.create_sext_stmts(var, op.type->getBitWidth());
-    } else {
-      auto mask = lnast_create_obj.create_mask_stmts(op.type->getBitWidth());
-      return lnast_create_obj.create_bit_and_stmts(var, mask);
+      return lnast_create_obj.create_sext_stmts(var, bw);
     }
+
+    auto mask = lnast_create_obj.create_mask_stmts(bw);
+    return lnast_create_obj.create_bit_and_stmts(var, mask);
   }
 
   if (expr.kind == slang::ExpressionKind::UnaryOp) {
@@ -298,7 +299,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
       case slang::UnaryOperator::BitwiseNot: return lnast_create_obj.create_bit_not_stmts(lhs);
       case slang::UnaryOperator::LogicalNot: return lnast_create_obj.create_logical_not_stmts(lhs);
       case slang::UnaryOperator::Plus: return lhs;
-      case slang::UnaryOperator::Minus: return lnast_create_obj.create_minus_stmts(0, lhs);
+      case slang::UnaryOperator::Minus: return lnast_create_obj.create_minus_stmts("0", lhs);
       case slang::UnaryOperator::BitwiseOr: return lnast_create_obj.create_reduce_or_stmts(lhs);
       // do I use bit not or logical not?
       // Also is it ok for it to be two connected references if we have no lnast node?
@@ -325,14 +326,15 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
     if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() >= from_type->getBitWidth())
       return res;  // no need to add mask if expanding
 
-    auto min_bits = std::min(to_type->getBitWidth(), from_type->getBitWidth());
+    auto min_bits = std::to_string(std::min(to_type->getBitWidth(), from_type->getBitWidth()));
 
     if (to_type->isSigned())
       return lnast_create_obj.create_sext_stmts(res, min_bits);
 
     I(!to_type->isSigned());
     // and(and(X,a),b) -> and(X,min(a,b))
-    auto mask = lnast_create_obj.create_mask_stmts(to_type->getBitWidth());
+    auto bw = std::to_string(to_type->getBitWidth());
+    auto mask = lnast_create_obj.create_mask_stmts(bw);
     return lnast_create_obj.create_bit_and_stmts(res, mask);
 #if 0
     if (to_type->isSigned() && !from_type->isSigned()) {
@@ -367,7 +369,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
       auto res_var = process_expression(*e);
 
       if (offset) {
-        res_var = lnast_create_obj.create_shl_stmts(res_var, offset);
+        res_var = lnast_create_obj.create_shl_stmts(res_var, std::to_string(offset));
       }
       adjusted_fields.emplace_back(res_var);
 
@@ -421,7 +423,7 @@ std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
   auto tmp
       = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_reduce_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
   return lnast_create_obj.create_bit_and_stmts(tmp,
-                                               lnast_create_obj.create_sra_stmts(inp, msb_pos));  // No need pick (reduce is 1 bit)
+                                               lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
 }
 
 std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
@@ -429,6 +431,6 @@ std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
 
   auto inp = process_expression(op);
 
-  auto mask = lnast_create_obj.create_mask_stmts(op.type->getBitWidth());
+  auto mask = lnast_create_obj.create_mask_stmts(std::to_string(op.type->getBitWidth()));
   return lnast_create_obj.create_mask_xor_stmts(mask, inp);
 }

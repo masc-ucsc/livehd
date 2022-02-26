@@ -82,9 +82,9 @@ FPObject* FPContainer::addComponentCluster(Ntype_op type, int count, double area
   return wrapComp;
 }
 
-FPObject* FPContainer::addComponentCluster(std::string name, int count, double area, double maxAspectRatio, double minAspectRatio) {
+FPObject* FPContainer::addComponentCluster(std::string_view name, int count, double area, double maxAspectRatio, double minAspectRatio) {
   // First generate a dummy component with the correct information.
-  dummyComponent* comp = new dummyComponent(name);
+  dummyComponent* comp = new dummyComponent(std::string(name));
   // We first need to create a wrapper for the component.
   FPCompWrapper* wrapComp = new FPCompWrapper(comp, minAspectRatio, maxAspectRatio, area, count);
   addComponent(wrapComp);
@@ -126,12 +126,12 @@ double FPContainer::totalArea() {
   return area;
 }
 
-unsigned int FPContainer::outputLgraphLayout(Node_tree& tree, Tree_index tidx, double startX, double startY) {
+unsigned int FPContainer::outputLgraphLayout(Node_tree& tree, lh::Tree_index tidx, double startX, double startY) {
   pushMirrorContext(startX, startY);
 
   unsigned int total = 0;
 
-  for (int i = 0; i < getComponentCount(); i++) {
+  for (auto i = 0u; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
     total += obj->findNode(tree, tidx, x + startX, y + startY);
   }

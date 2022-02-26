@@ -2,6 +2,8 @@
 
 // clang-format off
 
+#include "absl/strings/str_split.h"
+
 #include "slang_tree.hpp"
 #include "inou_slang.hpp"
 
@@ -42,30 +44,30 @@ void Inou_slang::work(Eprp_var &var) {
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
-    for (const auto f : txt.split(',')) {
+    for (const auto f : absl::StrSplit(txt,',')) {
       argv.push_back(strdup("-I"));
-      argv.push_back(strdup(f.to_s().c_str()));
+      argv.push_back(strdup(std::string(f).c_str()));
     }
   }
 
   if (var.has_label("defines")) {
     auto txt = var.get("defines");
-    for (const auto f : txt.split(',')) {
+    for (const auto f : absl::StrSplit(txt,',')) {
       argv.push_back(strdup("-D"));
-      argv.push_back(strdup(f.to_s().c_str()));
+      argv.push_back(strdup(std::string(f).c_str()));
     }
   }
 
   if (var.has_label("undefines")) {
     auto txt = var.get("undefines");
-    for (const auto f : txt.split(',')) {
+    for (const auto f: absl::StrSplit(txt,',')) {
       argv.push_back(strdup("-U"));
-      argv.push_back(strdup(f.to_s().c_str()));
+      argv.push_back(strdup(std::string(f).c_str()));
     }
   }
 
-  for (const auto f : p.files.split(',')) {
-    argv.push_back(strdup(f.to_s().c_str()));
+  for (const auto f : absl::StrSplit(p.files,',')) {
+    argv.push_back(strdup(std::string(f).c_str()));
   }
 
   // --top if top: provided

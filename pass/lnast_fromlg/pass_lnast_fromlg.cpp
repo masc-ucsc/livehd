@@ -79,13 +79,13 @@ void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg) {
       if (!dpin_editable.has_name() && !((ntype == Ntype_op::IO) || (ntype == Ntype_op::Const))) {
         if (ntype == Ntype_op::Mux) {
           // WARNING: Need to use _._ because it allows SSA (needed for if)
-          auto temp_var_name = abls::StrCat("_._L", ++temp_var_count);
+          auto temp_var_name = absl::StrCat("_._L", ++temp_var_count);
           dpin_set_map_name(dpin_editable, temp_var_name);
         } else {
           dpin_set_map_name(dpin_editable, create_temp_var());
         }
         if ((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
-          dpin_set_map_name(dpin_editable, abls::StrCat("#", dpin_get_name(dpin_editable)));
+          dpin_set_map_name(dpin_editable, absl::StrCat("#", dpin_get_name(dpin_editable)));
         }
       } else if (dpin_editable.has_name() && (dpin_editable.get_name()[0] == '#')) {
         if (!((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch))) {
@@ -93,7 +93,7 @@ void Pass_lnast_fromlg::initial_tree_coloring(Lgraph* lg) {
         }
       } else if ((ntype == Ntype_op::Flop) || (ntype == Ntype_op::Fflop) || (ntype == Ntype_op::Latch)) {
         if (dpin_editable.get_name()[0] != '#') {
-          dpin_set_map_name(dpin_editable, abls::StrCat("#", dpin_get_name(dpin_editable)));
+          dpin_set_map_name(dpin_editable, absl::StrCat("#", dpin_get_name(dpin_editable)));
         }
       }
     }
@@ -120,7 +120,7 @@ void Pass_lnast_fromlg::begin_transformation(Lgraph* lg, Lnast& lnast, Lnast_nid
     if (gpio_dpin.get_name()[0] == '%') {
       lnast.add_child(asg_node, Lnast_node::create_ref(gpio_dpin.get_name()));
     } else {
-      lnast.add_child(asg_node, Lnast_node::create_ref(abls::StrCat("%", gpio_dpin.get_name())));
+      lnast.add_child(asg_node, Lnast_node::create_ref(absl::StrCat("%", gpio_dpin.get_name())));
     }
     attach_child(lnast, asg_node, inp.driver);
   }
@@ -179,7 +179,7 @@ void Pass_lnast_fromlg::handle_source_node(Lgraph* lg, Node_pin& pin, Lnast& lna
     lnast.add_child(asg_decl_node, Lnast_node::create_ref(temp_decl_var_name));
 
     // to create #x_q = #x // test case: firrtl_tail3.prp
-    auto  pin_nam_q   = abls::StrCat(pin_name, "_q");
+    auto  pin_nam_q   = absl::StrCat(pin_name, "_q");
     auto  q_decl_node = lnast.add_child(ln_node, Lnast_node::create_assign());
     lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_nam_q));
     lnast.add_child(q_decl_node, Lnast_node::create_ref(pin_name));
@@ -317,7 +317,7 @@ void Pass_lnast_fromlg::handle_io(Lgraph* lg, Lnast_nid& parent_lnast_node, Lnas
           if (edge.sink.get_node().get_type_op() == Ntype_op::Get_mask) {
             is_pos = true;
           }
-          add_bw_in_ln(lnast, parent_lnast_node, is_pos, abls::StrCat("$", pin_name), bits);
+          add_bw_in_ln(lnast, parent_lnast_node, is_pos, absl::StrCat("$", pin_name), bits);
         }
       }
     }
@@ -341,7 +341,7 @@ void Pass_lnast_fromlg::handle_io(Lgraph* lg, Lnast_nid& parent_lnast_node, Lnas
           add_bw_in_ln(lnast,
                        parent_lnast_node,
                        false,
-                       abls::StrCat("%", pin_name),
+                       absl::StrCat("%", pin_name),
                        bits);  // adds str to lnast->string_pool
         }
       }
@@ -896,7 +896,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   auto idx_dot_q = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(tmp_var_q));
   // to have %out=#x_q insteasd of #x. test case: firrtl_tail3.prp
-  auto pin_name_q = abls::StrCat(pin_name, "_q");
+  auto pin_name_q = absl::StrCat(pin_name, "_q");
   lnast.add_child(idx_dot_q, Lnast_node::create_ref(pin_name_q));
   // lnast.add_child(idx_dot_q, Lnast_node::create_const("__q_pin"));
 
@@ -973,7 +973,7 @@ void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_nod
     out_tup_name = dpin_get_name(pin);
   } else {
     fmt::print("\npin.get_node().get_name() is: {} \n",pin.get_node().get_name());
-    out_tup_name = pin.get_node().get_name().get_str_before_first(':');
+    out_tup_name = str_tools::get_str_before_first(pin.get_node().get_name(),':');
   }
   auto inp_tup_name = create_temp_var();
   //fmt::print("instance_name:{}, \n subgraph->get_name():{}\n", pin.get_node().get_name(), sub.get_name());
@@ -1174,12 +1174,12 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
     if (has_prefix(dpin_name)) {
       I(false, "IO in lgraph should not have %/$");
     } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(abls::StrCat("$", dpin_name)));
+      lnast.add_child(op_node, Lnast_node::create_ref(absl::StrCat("$", dpin_name)));
     }
   } else if (dpin.get_node().is_graph_output()) {
     auto name = dpin_get_name(dpin);
     if (name.front() != '%') {
-      name = name.prepend('%');
+      name = absl::StrCat("%", name);
     }
     auto out_driver_name = name;
     lnast.add_child(op_node,
@@ -1187,7 +1187,7 @@ void Pass_lnast_fromlg::attach_child(Lnast& lnast, Lnast_nid& op_node, const Nod
   } else if ((dpin.get_node().get_type_op() == Ntype_op::Flop)) {
     lnast.add_child(op_node, Lnast_node::create_ref(dpin_get_name(dpin)));
   } else if (dpin.get_node().get_type_op() == Ntype_op::Const) {
-    lnast.add_child(op_node, Lnast_node::create_const(dpin.get_node().get_type_const());
+    lnast.add_child(op_node, Lnast_node::create_const(dpin.get_node().get_type_const().to_pyrope()));
   } else {
     auto dpin_name = dpin_get_name(dpin);
     lnast.add_child(op_node, Lnast_node::create_ref(dpin_name));
@@ -1204,14 +1204,14 @@ void Pass_lnast_fromlg::attach_cond_child(Lnast& lnast, Lnast_nid& op_node, cons
     if (has_prefix(dpin_name)) {
       I(false, "IO in lgraph should not have %/$");
     } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(abls::StrCat("$", dpin_name)));
+      lnast.add_child(op_node, Lnast_node::create_ref(absl::StrCat("$", dpin_name)));
     }
   } else if (dpin.get_node().is_graph_output()) {
     auto dpin_name = dpin_get_name(dpin);
     if (has_prefix(dpin_name)) {
       I(false, "IO in lgraph should not have %/$");
     } else {
-      lnast.add_child(op_node, Lnast_node::create_ref(abls::StrCat("%", dpin_name)));
+      lnast.add_child(op_node, Lnast_node::create_ref(absl::StrCat("%", dpin_name)));
     }
   } else if ((dpin.get_node().get_type_op() == Ntype_op::Flop)) {
     lnast.add_child(op_node, Lnast_node::create_ref(dpin.get_name()));
@@ -1259,11 +1259,11 @@ void Pass_lnast_fromlg::dpin_set_map_name(const Node_pin dpin, std::string_view 
 }
 
 std::string Pass_lnast_fromlg::get_new_seq_name() {
-  return abls::StrCat("SEQ", ++seq_count);
+  return absl::StrCat("SEQ", ++seq_count);
 }
 
 std::string Pass_lnast_fromlg::create_temp_var(std::string_view str_prefix) {
-  return abls::StrCat(str_prefix, "L", ++temp_var_count);
+  return absl::StrCat(str_prefix, "L", ++temp_var_count);
 }
 
 bool Pass_lnast_fromlg::has_prefix(std::string_view test_string) {

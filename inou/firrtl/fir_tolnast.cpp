@@ -32,14 +32,16 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
 
   if (var.has_label("files")) {
     auto files = var.get("files");
-    for (const auto& f : files.split(',')) {
+    for (const auto& f_sv : absl::StrSplit(files,',')) {
+      std::string f(f_sv);
+
       fmt::print("FILE: {}\n", f);
       // FIXME: even I make the PB object static, and it does get destructed after the
       // to_lnast() pass. The lbench still last untill the PB object really destroied,
       // is it a bug in lbench?
       // static firrtl::FirrtlPB firrtl_input;
       firrtl::FirrtlPB firrtl_input;
-      std::fstream     input(f.to_s().c_str(), std::ios::in | std::ios::binary);
+      std::fstream     input(f.c_str(), std::ios::in | std::ios::binary);
       if (!firrtl_input.ParseFromIstream(&input)) {
         Pass::error("Failed to parse FIRRTL from protobuf format: {}", f);
         return;
@@ -91,7 +93,7 @@ std::string Inou_firrtl_module::get_full_name(std::string_view term, const bool 
       return absl::StrCat("#", term);
     }
   } else {
-    return term;
+    return std::string(term);
   }
 }
 
@@ -223,7 +225,7 @@ void Inou_firrtl_module::setup_register_bits(Lnast& lnast, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
       auto reg_bits = get_bit_count(type);
       setup_register_bits_scalar(lnast, id, reg_bits, parent_node, false);
-      async_rst_names.insert(id.substr(1));
+      async_rst_names.emplace(id.substr(1));
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {
@@ -429,7 +431,7 @@ void Inou_firrtl_module::handle_mport_declaration(Lnast& lnast, Lnast_nid& paren
   auto dir_case = mport.direction();
   if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
     // only need to initialize mem_res[rd_port] when you are sure it's a read mport
-    init_mem_res(lnast, mem_name, port_cnt_str);
+    init_mem_res(lnast, mem_name, std::to_string(port_cnt_str));
     // FIXME->sh:
     // if you already know it's a read mport,  you should let mport = mem_res[rd_port] here, or the mem_port_cnt might duplicately
     // count one more port_cnt, see the cases from ListBuffer.fir (search push_tail).
@@ -437,15 +439,15 @@ void Inou_firrtl_module::handle_mport_declaration(Lnast& lnast, Lnast_nid& paren
              == firrtl::FirrtlPB_Statement_MemoryPort_Direction::
                  FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // noly need to initialize mem_din[wr_port] when you are sure it's a write mport
-    init_mem_din(lnast, mem_name, port_cnt_str);
+    init_mem_din(lnast, mem_name, std::to_string(port_cnt_str));
     I(mport2mask_bitvec.find(mport.id()) == mport2mask_bitvec.end());
     I(mport2mask_cnt.find(mport.id()) == mport2mask_cnt.end());
     mport2mask_bitvec.insert_or_assign(mport.id(), 1);
     mport2mask_cnt.insert_or_assign(mport.id(), 0);
   } else {
     // need to initialize both mem_din[wr_port] mem_res[res_port] when you are not sure the port type
-    init_mem_res(lnast, mem_name, port_cnt_str);
-    init_mem_din(lnast, mem_name, port_cnt_str);
+    init_mem_res(lnast, mem_name, std::to_string(port_cnt_str));
+    init_mem_din(lnast, mem_name, std::to_string(port_cnt_str));
   }
 }
 
@@ -912,7 +914,7 @@ void Inou_firrtl_module::handle_rd_mport_usage(Lnast& lnast, Lnast_nid& parent_n
 
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
-    mport_usage_visited.insert(mport_name);
+    mport_usage_visited.emplace(mport_name);
 
     auto idx_ta_mrdport = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(absl::StrCat(mem_name, "_rdport")));
@@ -923,7 +925,7 @@ void Inou_firrtl_module::handle_rd_mport_usage(Lnast& lnast, Lnast_nid& parent_n
     if (it2 == mem2rd_mports.end()) {
       mem2rd_mports.insert(std::pair<std::string, std::vector<std::pair<std::string, uint8_t>>>(
           mem_name,
-          {std::make_pair(mport_name, mem2port_cnt[mem_name])}));
+          {std::make_pair(std::string(mport_name), mem2port_cnt[mem_name])}));
     } else {
       mem2rd_mports[mem_name].emplace_back(std::make_pair(mport_name, mem2port_cnt[mem_name]));
     }
@@ -960,7 +962,7 @@ void Inou_firrtl_module::handle_wr_mport_usage(Lnast& lnast, Lnast_nid& parent_n
     auto& idx_initialize_stmts = mem2initial_idx[mem_name];
     mem2one_wr_mport.insert_or_assign(mem_name, port_cnt);
 
-    mport_usage_visited.insert(mport_name);
+    mport_usage_visited.emplace(mport_name);
 
     auto idx_ta_mrdport = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
     lnast.add_child(idx_ta_mrdport, Lnast_node::create_ref(absl::StrCat(mem_name, "_rdport")));
@@ -1074,7 +1076,7 @@ void Inou_firrtl_module::split_hier_name(std::string_view full_name,
 // DOT and SELECT nodes in an LNAST.
 // note: "#" prefix need to be ready if the full_name is a register
 void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name, const Lnast_node& dest_node) {
-  I(full_name.contains('.'));
+  I(str_tools::contains(full_name,'.'));
   I(!dest_node.is_invalid());
 
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
@@ -1105,7 +1107,7 @@ void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_
 }
 
 void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name, const Lnast_node& value_node) {
-  I(full_name.contains('.'));
+  I(str_tools::contains(full_name,'.'));
 
   std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> hier_subnames;
   split_hier_name(full_name, hier_subnames);
@@ -1195,18 +1197,18 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
 void Inou_firrtl_module::record_all_input_hierarchy(std::string_view port_name) {
   std::size_t pos = port_name.size();
   while (pos != std::string::npos) {
-    std::string  port_name2 = port_name.substr(0, pos);
-    input_names.insert(port_name2);
-    pos = port_name2.rfind('.');
+    auto tmp = port_name.substr(0, pos);
+    input_names.emplace(tmp);
+    pos = tmp.rfind('.');
   }
 }
 
 void Inou_firrtl_module::record_all_output_hierarchy(std::string_view port_name) {
   std::size_t pos = port_name.size();
   while (pos != std::string::npos) {
-    auto port_name2 = port_name.substr(0, pos);
-    output_names.insert(port_name2);
-    pos = port_name2.rfind('.');
+    auto tmp = port_name.substr(0, pos);
+    output_names.emplace(tmp);
+    pos = tmp.rfind('.');
   }
 }
 
@@ -1923,23 +1925,23 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
     if (circuit.module(i).has_external_module()) {
       /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
        * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
-      auto     module_i_external_module_id =  std::to_string(circuit.module(i).external_module().id());
+      auto     module_i_external_module_id =  circuit.module(i).external_module().id();
       auto     sub     = add_mod_to_library(var, module_i_external_module_id, file_name);
       uint64_t inp_pos = 0;
       uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
         auto port = circuit.module(i).external_module().port(j);
-        add_port_to_map(module_i_external_module_id, port.type(), port.direction(), std::to_string(port.id()), sub, inp_pos, out_pos);
+        add_port_to_map(module_i_external_module_id, port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
       }
       continue;
     } else if (circuit.module(i).has_user_module()) {
-      auto     module_i_user_module_id =  std::to_string(circuit.module(i).user_module().id());
+      auto     module_i_user_module_id =  circuit.module(i).user_module().id();
       auto     sub     = add_mod_to_library(var, module_i_user_module_id, file_name);
       uint64_t inp_pos = 0;
       uint64_t out_pos = 0;
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
-        add_port_to_map(module_i_user_module_id, port.type(), port.direction(), std::to_string(port.id()), sub, inp_pos, out_pos);
+        add_port_to_map(module_i_user_module_id, port.type(), port.direction(), port.id(), sub, inp_pos, out_pos);
       }
     } else {
       Pass::error("Module not set.");
@@ -1981,13 +1983,13 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Type::kResetType:    // Reset type
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      glob_info.mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
+      glob_info.mod_to_io_dir_map.insert_or_assign(std::make_pair(std::string(mod_id), std::string(port_id)), dir);
       // mod_to_io_map[mod_id].insert({port_id, 1, dir, false});
       break;
     }
     case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset type
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      glob_info.mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
+      glob_info.mod_to_io_dir_map.insert_or_assign(std::make_pair(std::string(mod_id), std::string(port_id)), dir);
       // FIXME: handle it when encountered
       // async_rst_names.insert(port_id);
       break;
@@ -2011,7 +2013,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
-      glob_info.mod_to_io_dir_map[std::make_pair(mod_id, port_id)] = dir;
+      glob_info.mod_to_io_dir_map.insert_or_assign(std::make_pair(std::string(mod_id), std::string(port_id)), dir);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }
@@ -2148,9 +2150,9 @@ std::string Inou_firrtl::convert_bigint_to_str(const firrtl::FirrtlPB_BigInt &bi
     std::string bit_str;
     for (int j = 0; j < 8; j++) {
       if (bigint_char % 2) {
-        bit_str = bit_str.prepend('1');
+        bit_str = absl::StrCat("1", bit_str);
       } else {
-        bit_str = bit_str.prepend('0');
+        bit_str = absl::StrCat("0", bit_str);
       }
       bigint_char >>= 1;
     }

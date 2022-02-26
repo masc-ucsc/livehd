@@ -3,6 +3,9 @@
 
 #include <string>
 #include <string_view>
+#include <memory>
+
+#include "absl/strings/str_cat.h"
 
 #include "file_output.hpp"
 #include "code_gen.hpp"
@@ -14,60 +17,60 @@ public:
 
   virtual ~Code_gen_all_lang(){};
 
-  virtual const std::string stmt_sep() const                             = 0;
-  virtual const std::string get_lang_type() const                        = 0;
-  virtual const std::string debug_name_lang(Lnast_ntype node_type) const = 0;
-  const std::string         dot_type_op() const { return "."; };
-  const std::string         str_qoute(bool is_str) const { return is_str ? "\"" : ""; /*if string then " is added*/ };
-  const std::string         gmask_op() const { return "@"; }
-  virtual const std::string start_else_if() const = 0;
+  virtual std::string stmt_sep() const                             = 0;
+  virtual std::string get_lang_type() const                        = 0;
+  virtual std::string debug_name_lang(Lnast_ntype node_type) const = 0;
+  std::string         dot_type_op() const { return "."; };
+  std::string         str_qoute(bool is_str) const { return is_str ? "\"" : ""; /*if string then " is added*/ };
+  std::string         gmask_op() const { return "@"; }
+  virtual std::string start_else_if() const = 0;
 
-  virtual const std::string end_else_if() const { return ("}"); }
-  virtual const std::string start_else() const { return ("} else {\n"); }
-  virtual const std::string end_cond() const { return ") {\n"; }
-  virtual const std::string end_if_or_else() const { return "}\n"; }
+  virtual std::string end_else_if() const { return ("}"); }
+  virtual std::string start_else() const { return ("} else {\n"); }
+  virtual std::string end_cond() const { return ") {\n"; }
+  virtual std::string end_if_or_else() const { return "}\n"; }
 
-  const std::string start_cond() const { return "if ("; }
-  const std::string tuple_stmt_sep() const { return ", "; }
-  const std::string tuple_begin() const { return "("; }
-  const std::string tuple_end() const { return ")"; }
+  std::string start_cond() const { return "if ("; }
+  std::string tuple_stmt_sep() const { return ", "; }
+  std::string tuple_begin() const { return "("; }
+  std::string tuple_end() const { return ")"; }
 
   // TODO: func def related parameters: need to make language specific! currently as per pyrope:
-  const std::string func_begin() const { return ""; }
-  std::string      func_name(std::string_view func_name) const { return func_name;}
-  const std::string param_start(bool param_exist) const {
+  std::string func_begin() const { return ""; }
+  std::string      func_name(std::string_view func_name) const { return std::string(func_name);}
+  std::string param_start(bool param_exist) const {
     if (param_exist)
       return " = |(";
     else
       return "= |";
   }
-  const std::string func_param_sep() const { return ", "; }
-  const std::string param_end(bool param_exist) const {
+  std::string func_param_sep() const { return ", "; }
+  std::string param_end(bool param_exist) const {
     if (param_exist)
       return ")";
     else
       return "";
   }
-  const std::string print_cond(std::string_view cond_val) const {
+  std::string print_cond(std::string_view cond_val) const {
     if (cond_val != "")
       return absl::StrCat(" when ", cond_val);
-    else
-      return cond_val;
+
+    return std::string(cond_val);
   }
-  const std::string func_stmt_strt() const { return "|{\n"; }
-  const std::string func_stmt_end() const { return "}\n"; }
-  const std::string func_end() const { return ""; }
+  std::string func_stmt_strt() const { return "|{\n"; }
+  std::string func_stmt_end() const { return "}\n"; }
+  std::string func_end() const { return ""; }
 
   // for related parameters:
-  virtual const std::string for_cond_beg() const = 0;
-  virtual const std::string for_cond_mid() const = 0;
-  virtual const std::string for_cond_end() const = 0;
-  virtual const std::string for_stmt_beg() const { return "{\n"; }
-  virtual const std::string for_stmt_end() const { return "}\n"; }
+  virtual std::string for_cond_beg() const = 0;
+  virtual std::string for_cond_mid() const = 0;
+  virtual std::string for_cond_end() const = 0;
+  virtual std::string for_stmt_beg() const { return "{\n"; }
+  virtual std::string for_stmt_end() const { return "}\n"; }
 
   // TODO: while related parameters: need to make language specific! currently as per pyrope:
-  const std::string while_cond_beg() const { return "("; }
-  const std::string while_cond_end() const { return ") "; }
+  std::string while_cond_beg() const { return "("; }
+  std::string while_cond_end() const { return ") "; }
 
   // TODO: select related parameters: need to make language specific! currently as per pyrope:
   std::string select_init(std::string_view select_type) const {
@@ -99,7 +102,7 @@ public:
   virtual std::string ref_name_str(std::string_view prp_term, bool strct = true) const = 0;
 
   // in verilog, assign stmt starts with assign keyword. thus this function.
-  virtual const std::string assign_node_strt() const { return ""; }
+  virtual std::string assign_node_strt() const { return ""; }
 
   virtual std::string starter(std::string_view ) const { return ""; };  // filename goes in here
 
@@ -108,7 +111,7 @@ public:
 
   // Set methods modify the object. Do they really need to return arguments (return a new string is expensive)
   virtual void      set_supporting_fstart(std::string_view) { };  // basename_s goes in here
-  virtual const std::string supporting_ftype() const { return ""; };
+  virtual std::string supporting_ftype() const { return ""; };
   virtual void      set_supp_buffer_to_print(std::string_view) { };  // modname is the argument passed here
 
   // for main file (cpp file)

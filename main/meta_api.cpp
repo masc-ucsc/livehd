@@ -144,7 +144,7 @@ void Meta_api::liberty(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.liberty path:{} ", path);
-  for (const auto &f : files.split(',')) {
+  for (const auto &f : absl::StrSplit(files,',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -155,7 +155,7 @@ void Meta_api::sdc(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.sdc path:{} ", path);
-  for (const auto &f : files.split(',')) {
+  for (const auto &f : absl::StrSplit(files,',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -166,7 +166,7 @@ void Meta_api::spef(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.spef path:{} ", path);
-  for (const auto &f : files.split(',')) {
+  for (const auto &f : absl::StrSplit(files,',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }

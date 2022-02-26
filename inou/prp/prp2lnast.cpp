@@ -17,8 +17,9 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name) {
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
 
   {
+    std::string fname(filename);
     auto ss = std::ostringstream{};
-    std::ifstream file(filename.to_s());
+    std::ifstream file(fname);
     ss << file.rdbuf();
     prp_file = ss.str();
   }
@@ -66,7 +67,7 @@ void Prp2lnast::dump_tree_sitter(TSTreeCursor *tc, int level) const {
   while (go_next) {
     auto node         = ts_tree_cursor_current_node(tc);
     auto num_children = ts_node_child_count(node);
-    auto node_type    = ts_node_type(node);
+    std::string node_type(ts_node_type(node));
 
     fmt::print("{}{} {}\n", indent, node_type, num_children);
 
@@ -115,7 +116,7 @@ void Prp2lnast::process_statement(TSTreeCursor* tc) {
 
 void Prp2lnast::process_node(TSNode node) {
 	if (ts_node_is_null(node)) return;
-  auto node_type=ts_node_type(node);
+  std::string node_type(ts_node_type(node));
 
   fmt::print("-> {}\n", node_type);
 
@@ -142,7 +143,8 @@ void Prp2lnast::process_node(TSNode node) {
 void Prp2lnast::process_scope_statement(TSNode node) {
 	node = get_child(node);
 	while (!ts_node_is_null(node)) {
-		if (ts_node_type(node) == "statement") {
+    std::string node_type(ts_node_type(node));
+		if (node_type == "statement") {
 			process_node(node);
 		}
 		node = get_sibling(node);
@@ -327,7 +329,8 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
   node = get_named_child(node);
   while (!ts_node_is_null(node)) {
     process_node(node);
-    if (ts_node_type(node) != "tuple") {
+    std::string node_type(ts_node_type(node));
+    if (node_type != "tuple") {
       // RHS
       Lnast_node rvalue_node;
       if (has_multiple_items) {

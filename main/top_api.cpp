@@ -11,15 +11,15 @@
 #include <string>
 
 void Top_api::files(Eprp_var &var) {
-  auto src_path = var.get("src_path");
-  auto match    = var.get("match");
-  auto filter   = var.get("filter");
+  std::string src_path(var.get("src_path"));
+  std::string match   (var.get("match"));
+  std::string filter  (var.get("filter"));
 
   try {
-    const std::regex txt_regex(match.to_s());
-    const std::regex filter_regex(filter.to_s());
+    const std::regex txt_regex(match);
+    const std::regex filter_regex(filter);
 
-    DIR *dirp = opendir(src_path.to_s().c_str());
+    DIR *dirp = opendir(src_path.c_str());
     if (dirp == 0) {
       Main_api::error("invalid src_path:{}, is it a valid directory?", src_path);
       return;
@@ -52,7 +52,7 @@ void Top_api::files(Eprp_var &var) {
       if (!files.empty())
         absl::StrAppend(&files, ",", src_path, "/", s);
       else
-        files = abls::StrCat(        src_path, "/", s);
+        files = absl::StrCat(        src_path, "/", s);
     }
 
     var.add("files", files);

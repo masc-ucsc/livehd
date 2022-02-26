@@ -45,7 +45,7 @@ GeographyHint Lhd_floorplanner::randomHint(int count) const {
   return hint_seq[sel];
 }
 
-FPContainer* Lhd_floorplanner::makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx,
+FPContainer* Lhd_floorplanner::makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const lh::Tree_index tidx,
                                         size_t size) {
   FPContainer* l;
   if (!tidx.is_root() && hint_map.contains(nt.get_data(tidx).get_compact())) {

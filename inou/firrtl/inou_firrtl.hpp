@@ -85,8 +85,8 @@ protected:
   void create_connect_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr,
                            firrtl::FirrtlPB_Statement *fstmt);
   void create_node_stmt(Lnast &ln, const Lnast_nid &lhs, firrtl::FirrtlPB_Expression *rhs_expr, firrtl::FirrtlPB_Statement *fstmt);
-  std::string get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx);
-  std::string strip_prefixes(std::string_view str);
+  static std::string_view get_firrtl_name_format(Lnast &ln, const Lnast_nid &lnidx);
+  static std::string_view strip_prefixes(std::string_view str);
   void        add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression *expr);
   void        add_const_as_ilit(Lnast &ln, const Lnast_nid &lnidx, firrtl::FirrtlPB_Expression_IntegerLiteral *ilit);
   firrtl::FirrtlPB_Expression_PrimOp_Op get_firrtl_oper_code(const Lnast_ntype &op_type);

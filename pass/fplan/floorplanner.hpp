@@ -62,7 +62,7 @@ protected:
   GeographyHint randomHint(int count) const;
 
   // create a node with the proper type (geog or ann layout)
-  FPContainer* makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Tree_index tidx, size_t size);
+  FPContainer* makeNode(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const lh::Tree_index tidx, size_t size);
 
   void addSub(FPContainer* c, const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, const Node::Compact& child_c,
               FPObject* comp, int count);
