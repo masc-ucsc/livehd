@@ -79,7 +79,7 @@ constexpr Token_id Token_id_backslash     = 92;   // \ back slash
 constexpr Token_id Token_id_keyword_first = 14;
 constexpr Token_id Token_id_keyword_last  = 254;
 
-class Etoken {
+class Ref_token {
 protected:
   std::string_view text;
 
@@ -110,15 +110,15 @@ public:
     }
   };
 
-  constexpr Etoken() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
-  Etoken(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
+  constexpr Ref_token() : text(""), tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
+  Ref_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
     tok  = _tok;
     pos1 = _pos1;
     pos2 = _pos2;
     line = _line;
     text = _text;
   }
-  Etoken(const Tracker &t, const char *memblock) {
+  Ref_token(const Tracker &t, const char *memblock) {
     tok  = t.tok;
     pos1 = t.pos1;
     pos2 = t.pos2;
@@ -148,9 +148,58 @@ public:
   std::string_view get_text() const { return text; }
 };
 
+class State_token {
+protected:
+  std::string text;
+
+public:
+  struct Tracker {
+    Token_id tok;   // Token (identifier, if, while...)
+    uint64_t pos1;  // start position in original memblock
+    uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
+    uint32_t line;  // line of code
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) { }
+
+    void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
+      tok  = _tok;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+    }
+    void clear(uint64_t _pos1, uint32_t _line) {
+      tok  = Token_id_nop;
+      pos1 = _pos1;
+      pos2 = _pos1;
+      line = _line;
+    }
+
+    void adjust_token_size(uint64_t end_pos) {
+      GI(tok != Token_id_nop, end_pos >= pos2);
+      pos2 = end_pos;
+    }
+  };
+
+  State_token() : tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
+  State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
+    tok  = _tok;
+    pos1 = _pos1;
+    pos2 = _pos2;
+    line = _line;
+    text = _text;
+  }
+  State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line) {}
+
+  Token_id tok;   // Token (identifier, if, while...)
+  uint64_t pos1;  // start position in original memblock for debugging
+  uint64_t pos2;  // end position in original memblock for debugging
+  uint32_t line;  // line of code
+
+  std::string_view get_text() const { return text; }
+};
+
 class Elab_scanner {
 public:
-  typedef std::vector<Etoken> Token_list;
+  typedef std::vector<Ref_token> Token_list;
 
 protected:
   Token_list token_list;
@@ -197,7 +246,7 @@ protected:
 
   void setup_translate();
 
-  void add_token(const Etoken::Tracker &t);
+  void add_token(const Ref_token::Tracker &t);
 
   void scan_raw_msg(std::string_view cat, std::string_view text, bool third) const;
 
@@ -369,7 +418,7 @@ public:
 
   bool has_errors() const { return n_errors > 0; }
 
-  Etoken scan_get_token(int offset = 0) const {
+  Ref_token scan_get_token(int offset = 0) const {
     size_t p = scanner_pos + offset;
     if (p >= token_list.size())
       p = token_list.size() - 1;
@@ -380,5 +429,5 @@ public:
     return token_list[p];
   }
 
-  const Etoken &get_token(Token_entry entry) { return token_list[entry]; }
+  const Ref_token &get_token(Token_entry entry) { return token_list[entry]; }
 };

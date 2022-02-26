@@ -30,7 +30,7 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   std::string tmp_str("0b?");
   std::string err_var("err_var");
-  auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(Etoken()));
+  auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(State_token()));
   add_child(asg_nid, Lnast_node::create_ref(err_var));
   undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(tmp_str));
 
@@ -315,7 +315,7 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
     if (type.is_const()) {
       add_child(shifted_tup_nid, get_data(child));
     } else if (type.is_assign()) {
-      auto new_asg    = add_child(shifted_tup_nid, Lnast_node(Lnast_ntype::create_assign(), Etoken()));
+      auto new_asg    = add_child(shifted_tup_nid, Lnast_node(Lnast_ntype::create_assign(), State_token()));
       auto c0_old_asg = get_first_child(child);
       auto c1_old_asg = get_sibling_next(c0_old_asg);
       add_child(new_asg, get_data(c0_old_asg));
@@ -337,7 +337,7 @@ void Lnast::rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid
   //       is first defined only in the local scope
   // if (is_1st_scope_ssa_tuple_var
   //     && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, c0_paired_assign_name, get_parent(psts_nid))) {
-  //   auto tup_asg_nid = insert_next_sibling(old_tup_nid, Lnast_node(Lnast_ntype::create_assign(), Etoken()));
+  //   auto tup_asg_nid = insert_next_sibling(old_tup_nid, Lnast_node(Lnast_ntype::create_assign(), State_token()));
   //   add_child(tup_asg_nid, get_data(c0_paired_assign));
   //   add_child(tup_asg_nid, get_data(c0_paired_assign));
   // }
@@ -408,7 +408,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     //   auto c2_asg              = get_sibling_next(c1_asg);
     //   set_data(c0_asg, get_data(c1_asg));
 
-    //   ref_data(c2_asg)->token = Etoken();
+    //   ref_data(c2_asg)->token = State_token();
     //   ref_data(c2_asg)->type  = Lnast_ntype::create_invalid();
     // }
 
@@ -452,13 +452,13 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     //     && check_tuple_var_1st_scope_ssa_table_parents_chain(psts_nid, ta_lhs_name, get_parent(psts_nid))) {
     //   ref_data(selc_nid)->type = Lnast_ntype::create_assign();
     //   auto asg_nid             = selc_nid;  // better code reading
-    //   ref_data(asg_nid)->token = Etoken(0, 0, 0, 0, ta_asg_str);
+    //   ref_data(asg_nid)->token = State_token(0, 0, 0, 0, ta_asg_str);
     //   auto c0_asg              = get_first_child(asg_nid);
     //   auto c1_asg              = get_sibling_next(c0_asg);
     //   auto c2_asg              = get_sibling_next(c1_asg);
     //   set_data(c0_asg, get_data(c1_asg));
 
-    //   ref_data(c2_asg)->token = Etoken();
+    //   ref_data(c2_asg)->token = State_token();
     //   ref_data(c2_asg)->type  = Lnast_ntype::create_invalid();
     // }
     return;
@@ -472,7 +472,7 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto dp_asg_nid  = paired_nid;  // for code reading
 
     // insert new TA on the right hand side of the dp
-    auto new_ta = insert_next_sibling(dp_asg_nid, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
+    auto new_ta = insert_next_sibling(dp_asg_nid, Lnast_node(Lnast_ntype::create_tuple_add(), State_token()));
     for (auto old_child : children(selc_nid)) {
       if (old_child == get_first_child(selc_nid))
         continue;
@@ -549,14 +549,14 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   //   }
 
   //   ref_data(old_tg)->type  = Lnast_ntype::create_assign();
-  //   ref_data(old_tg)->token = Etoken(0, 0, 0, 0, ta_asg_str);
+  //   ref_data(old_tg)->token = State_token(0, 0, 0, 0, ta_asg_str);
   //   /* auto idx_select = lnast.add_child(parent_node, Lnast_node::create_select("selectSI")); */
   //   auto asg_nid = selc_nid;  // better code reading
   //   auto c0_asg  = get_first_child(asg_nid);
   //   auto c1_asg  = get_sibling_next(c0_asg);
   //   auto c2_asg  = get_sibling_next(c1_asg);
   //   set_data(c0_asg, get_data(c1_asg));
-  //   ref_data(c2_asg)->token = Etoken();
+  //   ref_data(c2_asg)->token = State_token();
   //   ref_data(c2_asg)->type  = Lnast_ntype::create_invalid();
   // }
 }
@@ -570,7 +570,7 @@ bool Lnast::check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &p
     if (it == tuple_var_1st_scope_ssa_table.end()) {
       if (is_output(ref_name)) {
         auto prev_sib_if     = get_sibling_prev(src_if_nid);
-        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple_add(), Etoken()));
+        auto tup_pre_declare = insert_next_sibling(prev_sib_if, Lnast_node(Lnast_ntype::create_tuple_add(), State_token()));
         add_child(tup_pre_declare, Lnast_node::create_ref(ref_name));
         add_child(tup_pre_declare, get_data(undefined_var_nid));
         return true;
@@ -1053,7 +1053,7 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
   auto        if_nid                   = get_parent(cond_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
-  auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), Etoken()));
+  auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), State_token()));
   Lnast_nid   lhs_phi_nid;
 
   lhs_phi_nid

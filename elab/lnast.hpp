@@ -14,39 +14,39 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid
 
 // tricky old C macro to avoid redundant code from function overloadings
 #define CREATE_LNAST_NODE(type)                                                                                \
-  static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, "")); } \
+  static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, "")); } \
   static Lnast_node create##type(std::string_view str) {                                                 \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, str));                                 \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, str));                                 \
   }                                                                                                            \
   static Lnast_node create##type(std::string_view str, uint32_t line_num) {                                  \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, str));                          \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, str));                          \
   }                                                                                                            \
   static Lnast_node create##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {    \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, str));                    \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, str));                    \
   }                                                                                                            \
-  static Lnast_node create##type(const Etoken &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
+  static Lnast_node create##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
 
 #define CREATE_LNAST_NODE_sv(type)                                                                          \
   static Lnast_node create##type(std::string_view sview) {                                                  \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, 0, sview));               \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, sview));               \
   }                                                                                                         \
   static Lnast_node create##type(std::string_view sview, uint32_t line_num) {                               \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, 0, 0, line_num, sview));        \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, sview));        \
   }                                                                                                         \
   static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
-    return Lnast_node(Lnast_ntype::create##type(), Etoken(0, pos1, pos2, line_num, sview));  \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, sview));  \
   }                                                                                                         \
 
 struct Lnast_node {
   Lnast_ntype type;
-  Etoken      token;
+  State_token      token;
   int16_t     subs;  // ssa subscript
 
-  constexpr Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
-  constexpr Lnast_node(Lnast_ntype _type) : type(_type), subs(0) {}
-  constexpr Lnast_node(Lnast_ntype _type, const Etoken &_token) : type(_type), token(_token), subs(0) {}
+  Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
+  Lnast_node(Lnast_ntype _type) : type(_type), subs(0) {}
+  Lnast_node(Lnast_ntype _type, const State_token &_token) : type(_type), token(_token), subs(0) {}
 
-  Lnast_node(Lnast_ntype _type, const Etoken &_token, int16_t _subs) : type(_type), token(_token), subs(_subs) {
+  Lnast_node(Lnast_ntype _type, const State_token &_token, int16_t _subs) : type(_type), token(_token), subs(_subs) {
     I(!type.is_invalid());
   }
 
@@ -107,7 +107,7 @@ struct Lnast_node {
   CREATE_LNAST_NODE(_ref)
   CREATE_LNAST_NODE(_const)
   static Lnast_node create_const(int64_t v) {
-    return Lnast_node(Lnast_ntype::create_const(), Etoken(0, 0, 0, 0, std::to_string(v)));
+    return Lnast_node(Lnast_ntype::create_const(), State_token(0, 0, 0, 0, std::to_string(v)));
   }
 
   CREATE_LNAST_NODE(_range)
@@ -222,7 +222,7 @@ public:
 
   Lnast_ntype get_type(const Lnast_nid &nid) const { return get_data(nid).type; }
   int16_t     get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
-  Etoken      get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
+  const State_token &get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
   std::string get_sname(const Lnast_nid &nid) const {  // sname = ssa name
     if (get_type(nid).is_const())
       return std::string(get_name(nid));

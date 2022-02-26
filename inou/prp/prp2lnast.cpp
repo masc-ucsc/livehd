@@ -388,12 +388,12 @@ void Prp2lnast::process_rvalue_list(TSNode node) {
     auto tuple_name = get_tmp_name();
     auto tuple_add_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_add());
     lnast->add_child(tuple_add_index, Lnast_node::create_ref(tuple_name));
-    for (const auto rvalue : tuple_rvalue_stack.top()) {
+    for (const auto &rvalue : tuple_rvalue_stack.top()) {
       lnast->add_child(tuple_add_index, rvalue);
     }
     
     fmt::print("Tuple: {} = ( ", tuple_name);
-    for (auto n : tuple_rvalue_stack.top()) {
+    for (const auto &n : tuple_rvalue_stack.top()) {
       fmt::print("{} ", n.token.get_text());
     }
     fmt::print(")\n");

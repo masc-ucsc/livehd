@@ -29,6 +29,8 @@ cc_test(
     deps = [
         ":lemu",
         "//simlib:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -38,6 +40,8 @@ cc_test(
     srcs = ["tests/lconst_bench.cpp"],
     deps = [
         ":lemu",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_benchmark//:benchmark",
     ],
 )

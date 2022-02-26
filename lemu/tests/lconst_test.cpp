@@ -1,6 +1,8 @@
 
 #include "lconst.hpp"
 
+#include "absl/container/flat_hash_map.h"
+
 #include <cassert>
 #include <functional>
 #include <iomanip>
@@ -14,6 +16,7 @@
 #include "lrand.hpp"
 #include "sint.hpp"
 #include "uint.hpp"
+#include "str_tools.hpp"
 
 /*
 
@@ -902,10 +905,11 @@ TEST_F(Lconst_test, Storage) {
 
   absl::flat_hash_map<uint32_t, std::string> map;
 
-  map.set(12345, (0x12345_uint).to_string());
-  EXPECT_TRUE(map.has(12345));
-  auto v = map.get(12345);
-  EXPECT_EQ(v, "0x12345");
+  map.insert_or_assign(12345, (0x12345_uint).to_string());
+  EXPECT_TRUE(map.contains(12345));
+  auto it = map.find(12345);
+  EXPECT_TRUE(it != map.end());
+  EXPECT_EQ(it->second, "0x12345");
 }
 
 TEST_F(Lconst_test, used_bits) {
@@ -998,9 +1002,7 @@ TEST_F(Lconst_test, hexa_check) {
 TEST_F(Lconst_test, hexa_check_long) {
   Lbench b("lemu.LCONST_const_attr");
 
-  unlink("lgdb_attr/c_map");
-
-  absl::flat_hash_map<uint32_t, std::string> c_map("lgdb_attr","c_map");
+  absl::flat_hash_map<uint32_t, std::string> c_map;
 
   Lrand<size_t> rnd;
   const size_t  n_const = rnd.between(200, 3000);
@@ -1017,13 +1019,13 @@ TEST_F(Lconst_test, hexa_check_long) {
     rnd_list[i] = "0x";
     for (auto j = num_digits.any(); j > 0; --j) {
       if (flip.any())
-        rnd_list[i] = rnd_list[i].append(hex1_digits.any());
+        rnd_list[i] = absl::StrCat(rnd_list[i], std::string(1, hex1_digits.any()));
       else if (flip.any())
-        rnd_list[i] = rnd_list[i].append(hex2_digits.any());
+        rnd_list[i] = absl::StrCat(rnd_list[i], std::string(1, hex2_digits.any()));
       else
-        rnd_list[i] = rnd_list[i].append(hex3_digits.any());
+        rnd_list[i] = absl::StrCat(rnd_list[i], std::string(1, hex3_digits.any()));
     }
-    c_map.set(i, Lconst::from_pyrope(rnd_list[i]).serialize());
+    c_map.insert_or_assign(i, Lconst::from_pyrope(rnd_list[i]).serialize());
 
     auto v1 = Lconst::from_pyrope(rnd_list[i]);
     auto v2 = Lconst::unserialize(v1.serialize());
@@ -1038,7 +1040,10 @@ TEST_F(Lconst_test, hexa_check_long) {
   for (auto i = 0u; i < n_const; ++i) {
 
     { // CHECK that mmap works
-      auto v1 = Lconst::unserialize(c_map.get(i));
+      auto it = c_map.find(i);
+      EXPECT_TRUE(it != c_map.end());
+
+      auto v1 = Lconst::unserialize(it->second);
       auto v2 = Lconst::from_pyrope(rnd_list[i]);
       //fmt::print("raw:{}\n",rnd_list[i]);
       //fmt::print("   :{}\n",v1.to_pyrope());
@@ -1046,7 +1051,7 @@ TEST_F(Lconst_test, hexa_check_long) {
       EXPECT_EQ(v1, v2);
     }
 
-    boost::multiprecision::cpp_int c(rnd_list[i].to_s());  // read hexa
+    boost::multiprecision::cpp_int c(rnd_list[i]);  // read hexa
     std::stringstream ss;
     ss << std::hex << c;
 
@@ -1055,7 +1060,7 @@ TEST_F(Lconst_test, hexa_check_long) {
       auto v2 = Lconst::from_pyrope(v1.to_pyrope());
       EXPECT_EQ(v1,v2);
       if (c>63 && rnd_list[i][2] != '0') { // no short pyrope syntax, no 0x0... which will be shorter
-        EXPECT_EQ(v1.to_pyrope(), rnd_list[i].to_lower());
+        EXPECT_EQ(v1.to_pyrope(), str_tools::to_lower(rnd_list[i]));
       }
     }
 
@@ -1103,8 +1108,8 @@ TEST_F(Lconst_test, dec_check) {
     bool digit_found=false;
     for (const auto ch : rnd_list[i]) {
       if (flip.any() && digit_found)
-        padded = padded.append('_');
-      padded = padded.append(ch);
+        padded = absl::StrCat(padded,"_");
+      padded = absl::StrCat(padded, std::string(1, ch));
       if (std::isdigit(ch))
         digit_found = true;
     }
@@ -1303,13 +1308,21 @@ TEST_F(Lconst_test, serialize) {
   Lconst b = Lconst::from_pyrope("0xFF");
   Lconst c = Lconst::from_pyrope("0x1234567890abcdef1234567890abcdef");
 
-  map.set(1, a.serialize());
-  map.set(2, b.serialize());
-  map.set(3, c.serialize());
+  map.insert_or_assign(1, a.serialize());
+  map.insert_or_assign(2, b.serialize());
+  map.insert_or_assign(3, c.serialize());
 
-  auto s_a = Lconst::unserialize(map.get(1));
-  auto s_b = Lconst::unserialize(map.get(2));
-  auto s_c = Lconst::unserialize(map.get(3));
+  auto it = map.find(1);
+  EXPECT_TRUE(it!=map.end());
+  auto s_a = Lconst::unserialize(it->second);
+
+  it = map.find(2);
+  EXPECT_TRUE(it!=map.end());
+  auto s_b = Lconst::unserialize(it->second);
+
+  it = map.find(3);
+  EXPECT_TRUE(it!=map.end());
+  auto s_c = Lconst::unserialize(it->second);
 
   b.dump();
   s_b.dump();
@@ -1323,45 +1336,6 @@ TEST_F(Lconst_test, serialize) {
   EXPECT_EQ(a, s_a);
   EXPECT_EQ(b, s_b);
   EXPECT_EQ(c, s_c);
-}
-
-TEST_F(Lconst_test, serialize2a) {
-  {
-    unlink("tmp_lemu/const");
-    absl::flat_hash_map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
-
-    Lconst a(255);
-    Lconst b = Lconst::from_pyrope("0xFF");
-    Lconst c = Lconst::from_pyrope("0x1234567890abcdef1234567890abcdef");
-
-    map.set(1, a.serialize());
-    map.set(2, b.serialize());
-    map.set(3, c.serialize());
-  }
-  {
-    absl::flat_hash_map<uint32_t, Lconst::Container> map("tmp_lemu", "const");
-
-    auto s_a = Lconst::unserialize(map.get(1));
-    auto s_b = Lconst::unserialize(map.get(2));
-    auto s_c = Lconst::unserialize(map.get(3));
-
-    Lconst a(255);
-    Lconst b = Lconst::from_pyrope("0xFF");
-    Lconst c = Lconst::from_pyrope("0x1234567890abcdef1234567890abcdef");
-
-    b.dump();
-    s_b.dump();
-    fmt::print("  a:{}\n", a.to_pyrope());
-    fmt::print("s_a:{}\n", s_a.to_pyrope());
-    fmt::print("  b:{}\n", b.to_pyrope());
-    fmt::print("s_b:{}\n", s_b.to_pyrope());
-    fmt::print("  c:{}\n", c.to_pyrope());
-    fmt::print("s_c:{}\n", s_c.to_pyrope());
-
-    EXPECT_EQ(a, s_a);
-    EXPECT_EQ(b, s_b);
-    EXPECT_EQ(c, s_c);
-  }
 }
 
 TEST_F(Lconst_test, zerocase) {
@@ -1623,7 +1597,7 @@ TEST_F(Lconst_test, lconst_sign) {
   }
 
   {
-    EXPECT_EQ(Lconst::from_pyrope(-123), Lconst::from_pyrope("0sb1111110000101"));
+    EXPECT_EQ(Lconst::from_pyrope("-123"), Lconst::from_pyrope("0sb1111110000101"));
     //"0sb1111110000101"
     //"0sb00000000??0??"
     auto pos1 = Lconst(-123).and_op(Lconst::from_pyrope("0b??0??"));

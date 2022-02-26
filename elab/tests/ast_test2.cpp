@@ -46,7 +46,7 @@ public:
         case test_rule_statement: rule_name.assign("test_rule_statement"); break;
       }
       auto token_text = scan_text(node.token_entry);
-      fmt::print("Rule name: {}, Etoken text: {}\n", rule_name, token_text);
+      fmt::print("Rule name: {}, token text: {}\n", rule_name, token_text);
     }
   }
 };
