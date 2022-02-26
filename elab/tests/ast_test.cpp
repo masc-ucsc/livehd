@@ -1,5 +1,6 @@
 
 #include "ast.hpp"
+#include "str_tools.hpp"
 
 #include "fmt/format.h"
 #include "gmock/gmock.h"
@@ -37,11 +38,11 @@ public:
 
       if (cmd == "up") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        const auto &val = scan_text();
+        auto val = scan_text();
         scan_next();
 
-        EXPECT_TRUE(val.is_i());
-        auto    rid_int = val.to_i();
+        EXPECT_TRUE(str_tools::is_i(val));
+        auto    rid_int = str_tools::to_i(val);
         Rule_id rid     = static_cast<Rule_id>(rid_int);
 
         ast->up(rid);
@@ -52,7 +53,7 @@ public:
         auto val = scan_text(); // const auto & better but KEPT on purpose to test copy too
         scan_next();
 
-        auto    rid_int = val.to_i();
+        auto    rid_int = str_tools::to_i(val);
         Rule_id rid     = static_cast<Rule_id>(rid_int);
 
         ast->add(rid, scan_token_entry());

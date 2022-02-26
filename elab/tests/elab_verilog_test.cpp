@@ -13,6 +13,7 @@
 #include <string>
 
 #include "elab_scanner.hpp"
+#include "str_tools.hpp"
 
 class Verilog_scanner : public Elab_scanner {
   std::set<std::string> verilog_keyword;
@@ -133,7 +134,7 @@ public:
     std::string_view module_name;
     while (!scan_is_end()) {
       if (scan_is_token(Token_id_alnum)) {
-        auto token = scan_text().to_lower();
+        auto token = str_tools::to_lower(scan_text());
 
         if (token == "module") {
           if (!module_name.empty()) {

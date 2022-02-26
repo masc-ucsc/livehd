@@ -1,4 +1,6 @@
 
+#include "absl/strings/str_split.h"
+
 #include "absl/base/dynamic_annotations.h"
 #include "absl/base/macros.h"
 #include "absl/strings/numbers.h"
@@ -27,12 +29,15 @@ public:
   static void files2(Eprp_var &var) {
     auto files = var.get("nofiles");
 
-    for (const auto &v : files.split(',')) {
+    for (const auto &v : absl::StrSplit(files,',')) {
       fmt::print(" {}", v);
     }
     fmt::print("\n");
 
-    const auto svector = files.split(',');
+    std::vector<std::string> svector;
+    for (const auto s:absl::StrSplit(files,',') ) {
+      svector.emplace_back(s);
+    }
     EXPECT_EQ(svector.size(), 4);
 
     EXPECT_EQ(svector[0], "g3xx");
