@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "bundle.hpp"
+
 #include <algorithm>
 
-#include "bundle.hpp"
 #include "likely.hpp"
 #include "lnast.hpp"
 #include "str_tools.hpp"
@@ -15,8 +16,8 @@ static bool inline compare_less(char c1, char c2) {
   return (c1 == '_' || c1 < c2) && c2 != '_';
 }
 
-static bool bundle_sort(const std::pair<const std::string &, Bundle::Entry> &lhs, const std::pair<const std::string &, Bundle::Entry> &rhs) {
-
+static bool bundle_sort(const std::pair<const std::string &, Bundle::Entry> &lhs,
+                        const std::pair<const std::string &, Bundle::Entry> &rhs) {
   auto l     = 0u;
   auto l_end = lhs.first.size();
   auto r     = 0u;
@@ -167,9 +168,9 @@ std::tuple<bool, bool, size_t> Bundle::match_int(std::string_view a, std::string
   bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
   bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
 
-  if (b.size()>b_pos && b[b_pos] == '.')
+  if (b.size() > b_pos && b[b_pos] == '.')
     ++b_pos;
-  if (a.size()>a_pos && a[a_pos] == '.')
+  if (a.size() > a_pos && a[a_pos] == '.')
     ++a_pos;
 
   return std::make_tuple(a_match, b_match, b_pos);
@@ -248,7 +249,7 @@ std::tuple<std::string, std::string> Bundle::learn_fix_int(std::string_view a, s
         ++b_pos;
         a_last_section = a_pos;
         b_last_section = b_pos;
-        new_b = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
+        new_b          = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
       } else {
         I(a[a_pos] == ':');
         ++a_pos;  // skip first
@@ -418,7 +419,7 @@ int Bundle::get_first_level_pos(std::string_view key) {
   if (key.empty())
     return -1;
 
-  auto skip=0u;
+  auto skip = 0u;
 
   if (key[skip] == ':') {
     ++skip;
@@ -454,7 +455,6 @@ std::string_view Bundle::get_first_level_name(std::string_view key) {
 }
 
 std::string_view Bundle::get_canonical_name(std::string_view key) {
-
   std::string_view key2{key};
 
   // Remove xxx.0.0.0
@@ -492,7 +492,7 @@ std::string_view Bundle::get_all_but_last_level(std::string_view key) {
 }
 
 std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key) {
-  size_t skip=0;
+  size_t skip = 0;
 
   if (key[skip] == '$' || key[skip] == '%') {
     ++skip;
@@ -504,7 +504,7 @@ std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key)
     return std::pair(-1, key.substr(skip));
   }
 
-  auto key2 = key.substr(skip+1);
+  auto key2 = key.substr(skip + 1);
 
   if (!std::isdigit(key2.front())) {
     throw Lnast::error("name should have digit after position specified :digits: not {}\n", key2);
@@ -516,7 +516,7 @@ std::pair<int, std::string_view> Bundle::convert_key_to_io(std::string_view key)
   }
 
   auto x = str_tools::to_i(key2);
-  I(x == str_tools::to_i(key2.substr(0,n)));
+  I(x == str_tools::to_i(key2.substr(0, n)));
 
   return std::pair(x, key2.substr(n + 1));
 }
@@ -527,14 +527,13 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-	if (key.front() == '$' || key.front() == '%' || key.front() == '#')
-		return key.substr(1);
+  if (key.front() == '$' || key.front() == '%' || key.front() == '#')
+    return key.substr(1);
 
   return std::string_view("");  // empty if no dot left
 }
 
 std::string Bundle::learn_fix(std::string_view key) {
-
   for (auto &e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
@@ -582,7 +581,7 @@ bool Bundle::has_bundle(std::string_view key) const {
   I(!key.empty());  // do not call without sub-fields
 
   for (auto &e : key_map) {
-    auto             e_pos = match_first_partial(key, e.first);
+    auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0)
       continue;
 
@@ -602,16 +601,16 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   std::shared_ptr<Bundle> tup;
 
   for (const auto &e : key_map) {
-    auto             e_pos = match_first_partial(key, e.first);
+    auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0)
       continue;
-    GI(e_pos<e.first.size(), e.first[e_pos] != '.');  // . not included
+    GI(e_pos < e.first.size(), e.first[e_pos] != '.');  // . not included
 
     if (!tup) {
       std::string key_with_pos{key};
       std::string expanded{e.first};
       std::tie(key_with_pos, expanded) = learn_fix_int(key_with_pos, expanded);
-      tup = std::make_shared<Bundle>(absl::StrCat(name, ".", key_with_pos));
+      tup                              = std::make_shared<Bundle>(absl::StrCat(name, ".", key_with_pos));
     }
 
     if (e_pos >= e.first.size()) {
@@ -633,7 +632,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& tup) const {
+std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const> &tup) const {
   // create a trivial or sub-bundle with the selected fields
   std::shared_ptr<Bundle> ret_tup;
 
@@ -659,8 +658,7 @@ std::shared_ptr<Bundle> Bundle::get_bundle(const std::shared_ptr<Bundle const>& 
   return ret_tup;
 }
 
-
-void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const>& tup) {
+void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup) {
   I(!key.empty());
 
   if (tup == nullptr) {
@@ -784,7 +782,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
 #endif
 }
 
-bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
+bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Lconst>> delayed_numbers;
@@ -823,7 +821,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const>& tup) {
         max_pos = x;
     }
     for (const auto &e : delayed_numbers) {
-      auto x = str_tools::to_i(e.first);
+      auto        x = str_tools::to_i(e.first);
       std::string new_key(std::to_string(x + max_pos + 1));
 
       key_map.emplace_back(new_key, Entry(false, e.second));
@@ -856,7 +854,7 @@ Lconst Bundle::flatten() const {
   return result;
 }
 
-std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const>& rhs_tup) const {
+std::shared_ptr<Bundle> Bundle::create_assign(const std::shared_ptr<Bundle const> &rhs_tup) const {
   (void)rhs_tup;
 
   I(false);  // FIXME: implement it
@@ -1002,20 +1000,20 @@ bool Bundle::is_scalar() const {
 
 bool Bundle::is_ordered(std::string_view key) const {
   for (const auto &e : key_map) {
-    auto e_pos = 0u;
+    auto             e_pos = 0u;
     std::string_view field;
     if (key.empty()) {
       if (is_root_attribute(e.first))
         continue;  // attributes do not affect order
 
       field = e.first;
-    }else{
+    } else {
       e_pos = match_first_partial(key, e.first);
       if (e_pos == 0)
         continue;
 
       if (e_pos >= e.first.size())
-        continue; // there was no match, so still ordered
+        continue;  // there was no match, so still ordered
 
       if (is_attribute(e.first))
         continue;  // attributes do not affect order
@@ -1025,7 +1023,7 @@ bool Bundle::is_ordered(std::string_view key) const {
 
     auto pos = get_first_level_pos(field);
     if (pos < 0)
-      return false; // OOPS, not ordered entry. This is not OK
+      return false;  // OOPS, not ordered entry. This is not OK
   }
 
   return true;
@@ -1086,10 +1084,6 @@ void Bundle::dump() const {
   fmt::print("bundle_name: {}{}\n", name, correct ? "" : " ISSUES");
 
   for (const auto &it : key_map) {
-    fmt::print("  key:{} trivial:{} {}\n"
-      ,it.first
-      ,it.second.trivial
-      ,it.second.immutable?"let":"mut"
-    );
+    fmt::print("  key:{} trivial:{} {}\n", it.first, it.second.trivial, it.second.immutable ? "let" : "mut");
   }
 }

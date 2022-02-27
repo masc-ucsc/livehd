@@ -106,7 +106,7 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
 
   } else if (tup_node_name == "memory2") {
     // memory2 tuple helps map memory1 temp names to port names
-    auto             first = true;
+    auto        first = true;
     std::string tup_name;
     for (const auto &child : ln.children(tup_node)) {
       if (first) {
@@ -128,9 +128,9 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
 
   } else {  // should be memory3
     // memory3 tuple is the actual memory + attrs (.__port, .__size, ...)
-    //std::string_view mem_name;
-    Lnast_nid        ports_rhs, size_rhs;
-    auto             first = true;
+    // std::string_view mem_name;
+    Lnast_nid ports_rhs, size_rhs;
+    auto      first = true;
     for (const auto &child : ln.children(tup_node)) {
       if (first) {
         first = false;
@@ -149,18 +149,17 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
         }
       }
     }
-    //auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl();
-    //uint32_t size_val = std::stoul(size_str);  // FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for this)
-    //auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl();
-    //uint32_t size_val = size_str.to_i();
+    // auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl();
+    // uint32_t size_val = std::stoul(size_str);  // FIXME: Could cause problems for sizes >= 2^32 (can use BigInt in proto for
+    // this) auto     size_str = Lconst::from_pyrope(ln.get_name(size_rhs)).to_firrtl(); uint32_t size_val = size_str.to_i();
 
-    auto     size_val = Lconst::from_pyrope(ln.get_name(size_rhs)).to_i();
+    auto size_val = Lconst::from_pyrope(ln.get_name(size_rhs)).to_i();
 
     // Actually create Memory statement + subexpressions
     auto type = CreateTypeObject(0);  // leave bw as implicit for now
 
     auto mem_stmt = new firrtl::FirrtlPB_Statement_Memory();
-    //mem_stmt->set_id(mem_name.substr(1));
+    // mem_stmt->set_id(mem_name.substr(1));
     mem_stmt->set_allocated_type(type);
     mem_stmt->set_uint_depth(size_val);
 
@@ -193,13 +192,13 @@ void Inou_firrtl::HandleMemTup(Lnast &ln, const Lnast_nid &tup_node, firrtl::Fir
         auto attr_str = ln.get_name(lhs_asg);
         if (attr_str == "__posedge") {
           Pass::warn("attribute __posedge used for a memory port tuple, but only posedge=true is supported in FIRRTL");
-        } else if (attr_str == "__type") { // 0: async, 1:sync, 2:array
+        } else if (attr_str == "__type") {  // 0: async, 1:sync, 2:array
           // based on port_type, help determine read_lat and write_lat
         } else if (attr_str == "__fwd") {
           // help determine memory statement's read_under_write policy
         } else if (attr_str.substr(0, 2) == "__") {
           auto mem_id_ref = new firrtl::FirrtlPB_Expression_Reference();
-          //mem_id_ref->set_id(mem_name.substr(1));
+          // mem_id_ref->set_id(mem_name.substr(1));
           auto mem_id_expr = new firrtl::FirrtlPB_Expression();
           mem_id_expr->set_allocated_reference(mem_id_ref);
 
@@ -313,7 +312,7 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else if (name.substr(0, 3) == "_._") {
     // _._ = wire
-    auto new_name = absl::StrCat("_",name.substr(3));
+    auto new_name = absl::StrCat("_", name.substr(3));
     if (reg_wire_map.contains(new_name))
       return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();

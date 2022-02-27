@@ -22,7 +22,7 @@ struct Compare {
 
 class Live_structural {
 private:
-  const Lgraph *              original;
+  const Lgraph               *original;
   const Invariant_boundaries *boundaries;
 
   Index_id get_candidate(Index_id newid, Lgraph *nsynth) {

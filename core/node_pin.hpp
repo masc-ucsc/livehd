@@ -25,8 +25,8 @@ protected:
   friend class Bwd_edge_iterator;
   friend class Edge_raw;
 
-  Lgraph *        top_g;
-  Lgraph *        current_g;
+  Lgraph         *top_g;
+  Lgraph         *current_g;
   Hierarchy_index hidx;
   Index_id        idx;
   Port_ID         pid;
@@ -84,7 +84,8 @@ public:
     [[nodiscard]] constexpr bool is_invalid() const { return idx == 0u; }
 
     [[nodiscard]] constexpr bool operator==(const Compact &other) const {
-      return idx == other.idx && sink == other.sink && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
+      return idx == other.idx && sink == other.sink
+             && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
     }
     [[nodiscard]] constexpr bool operator!=(const Compact &other) const { return !(*this == other); }
 
@@ -292,9 +293,9 @@ public:
     return Compact_class_driver(get_root_idx());
   }
 
-  [[nodiscard]] Lgraph *        get_top_lgraph() const { return top_g; };
-  [[nodiscard]] Lgraph *        get_class_lgraph() const { return current_g; };
-  [[nodiscard]] Lgraph *        get_lg() const { return current_g; };
+  [[nodiscard]] Lgraph         *get_top_lgraph() const { return top_g; };
+  [[nodiscard]] Lgraph         *get_class_lgraph() const { return current_g; };
+  [[nodiscard]] Lgraph         *get_lg() const { return current_g; };
   [[nodiscard]] Hierarchy_index get_hidx() const { return hidx; };
 
   [[nodiscard]] constexpr Port_ID get_pid() const { return pid; }
@@ -372,7 +373,7 @@ public:
 
   // NOTE: No operator<() needed for std::set std::map to avoid their use. Use flat_map_set for speed
 
-  void           invalidate() { idx = 0; }
+  void                         invalidate() { idx = 0; }
   [[nodiscard]] constexpr bool is_invalid() const { return idx == 0; }
   [[nodiscard]] constexpr bool is_down_node() const { return top_g != current_g; }
   [[nodiscard]] constexpr bool is_hierarchical() const { return !Hierarchy::is_invalid(hidx); }
@@ -394,35 +395,35 @@ public:
   [[nodiscard]] std::string debug_name() const;
   [[nodiscard]] std::string get_wire_name() const;
 
-  void             set_name(std::string_view wname);
-  void             reset_name(std::string_view wname);
-  void             del_name();
-  [[nodiscard]] std::string get_name() const;
-  [[nodiscard]] bool             has_name() const;
-  [[nodiscard]] static Node_pin  find_driver_pin(Lgraph *top, std::string_view wname);
-  [[nodiscard]] std::string get_pin_name() const;
+  void                          set_name(std::string_view wname);
+  void                          reset_name(std::string_view wname);
+  void                          del_name();
+  [[nodiscard]] std::string     get_name() const;
+  [[nodiscard]] bool            has_name() const;
+  [[nodiscard]] static Node_pin find_driver_pin(Lgraph *top, std::string_view wname);
+  [[nodiscard]] std::string     get_pin_name() const;
 
-  void  set_delay(float val);
-  void  del_delay();
+  void                set_delay(float val);
+  void                del_delay();
   [[nodiscard]] float get_delay() const;
   [[nodiscard]] bool  has_delay() const;
 
   void set_size(const Node_pin &dpin);  // set size and sign
 
   [[nodiscard]] Bits_t get_bits() const;
-  void   set_bits(Bits_t bits);
+  void                 set_bits(Bits_t bits);
 
-  void set_unsign();
-  void set_sign();
+  void               set_unsign();
+  void               set_sign();
   [[nodiscard]] bool is_unsign() const;
 
   [[nodiscard]] std::string_view get_type_sub_pin_name() const;
 
-  void   set_offset(Bits_t offset);
+  void                 set_offset(Bits_t offset);
   [[nodiscard]] Bits_t get_offset() const;
 
-  [[nodiscard]] bool           is_connected() const;
-  [[nodiscard]] bool           is_connected(const Node_pin &pin) const;
+  [[nodiscard]] bool is_connected() const;
+  [[nodiscard]] bool is_connected(const Node_pin &pin) const;
 
   // END ATTRIBUTE ACCESSORS
   [[nodiscard]] XEdge_iterator out_edges() const;
@@ -431,4 +432,3 @@ public:
   [[nodiscard]] Node_pin get_down_pin() const;
   [[nodiscard]] Node_pin get_up_pin() const;
 };
-

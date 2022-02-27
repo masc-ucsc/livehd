@@ -75,7 +75,7 @@ void Cell::ToJson(const JsonComposer* jcm) const {
   jcm->Write(model);
 }
 
-Port* Module::add_port(const StrTyp &port_name, enPortDir port_dir, Wire* wire_port) {
+Port* Module::add_port(const StrTyp& port_name, enPortDir port_dir, Wire* wire_port) {
   ports->push_back(new Port(port_name, port_dir, wire_port));
   return ports->back();
 }

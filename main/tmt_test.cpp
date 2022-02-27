@@ -46,9 +46,9 @@
 
 #define COMMON_VARS           \
   TMTSCREEN *s = &vt->screen; \
-  TMTPOINT * c = &vt->curs;   \
-  TMTLINE *  l = CLINE(vt);   \
-  TMTCHAR *  t = vt->tabs->chars
+  TMTPOINT  *c = &vt->curs;   \
+  TMTLINE   *l = CLINE(vt);   \
+  TMTCHAR   *t = vt->tabs->chars
 
 #define HANDLER(name)         \
   static void name(TMT *vt) { \
@@ -62,10 +62,10 @@ struct TMT {
 
   bool      dirty, acs, ignored;
   TMTSCREEN screen;
-  TMTLINE * tabs;
+  TMTLINE  *tabs;
 
   TMTCALLBACK    cb;
-  void *         p;
+  void          *p;
   const wchar_t *acschars;
 
   mbstate_t ms;

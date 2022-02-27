@@ -512,7 +512,6 @@ void Graph_library::reload_int() {
 }
 
 Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
-
   Lg_type_id     lgid;
   Graph_library *lib;
   {
@@ -528,7 +527,7 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
   }
   // ::Lgraph constructor can get the lock again. So release lock in graph_library
 
-  auto *lg = new Lgraph(path, name, lgid, lib);
+  auto                       *lg = new Lgraph(path, name, lgid, lib);
   std::lock_guard<std::mutex> guard(lgs_mutex);
 
   global_name2lgraph[path][name] = lg;
@@ -543,7 +542,7 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
   return lg;
 }
 
-Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(absl::StrCat(path , "/" , "graph_library.json")) {
+Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(absl::StrCat(path, "/", "graph_library.json")) {
   graph_library_clean = true;
   reload_int();
 }
@@ -610,7 +609,7 @@ void Graph_library::clear_int(Lg_type_id lgid) {
 Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_view new_name) {
   I(false);
   graph_library_clean = false;
-  const auto &it = name2id.find(name);
+  const auto &it      = name2id.find(name);
   I(it != name2id.end());
   auto id_orig = it->second;
   I(sub_nodes[id_orig]->get_name() == name);
@@ -712,7 +711,8 @@ void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::s
   }
 }
 
-void Graph_library::each_lgraph(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+void Graph_library::each_lgraph(std::string_view                                                  match,
+                                const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 

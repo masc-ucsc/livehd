@@ -33,7 +33,7 @@ void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   }
 }
 
-void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view  module_name) {
+void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, std::string_view module_name) {
   std::shared_ptr<Lnast> lnastfmted = std::make_shared<Lnast>(module_name);
 
   observe_lnast(ln.get());  // 1st traversal through the original LN to record assign subtrees.
@@ -41,7 +41,7 @@ void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, st
   // now we will make the formatted LNAST:
   lnastfmted->set_root(
       Lnast_node(Lnast_ntype::create_top(), State_token(0, 0, 0, 0, ln->get_top_module_name())));  // root node of lnfmted
-  const auto& stmt_index = ln->get_child(lh::Tree_index::root());                       // stmt node of ln
+  const auto& stmt_index = ln->get_child(lh::Tree_index::root());                                  // stmt node of ln
   const auto& stmt_index_fmt
       = lnastfmted->add_child(lh::Tree_index::root(),
                               duplicate_node(lnastfmted, ln, stmt_index));  // stmt node of lnfmted (copied from ln)
@@ -130,8 +130,7 @@ void Pass_lnastfmt::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var, st
           curr_pos = new_pos;
         } else if (new_lev + 1 == curr_lev) {
           if (is != ref_hash_map.end() && is_ssa(ln->get_name(it))) {
-            curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt),
-                                                        Lnast_node::create_ref(is->second));
+            curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), Lnast_node::create_ref(is->second));
           } else {
             curr_index_fmt = lnastfmted->append_sibling(lnastfmted->get_parent(curr_index_fmt), duplicate_node(lnastfmted, ln, it));
           }
@@ -201,17 +200,15 @@ void Pass_lnastfmt::process_node(Lnast* ln, const lh::Tree_index& it) {
   }
 }
 
-bool Pass_lnastfmt::is_temp_var(std::string_view  test_string) {
+bool Pass_lnastfmt::is_temp_var(std::string_view test_string) {
   return str_tools::starts_with(test_string, "___") || str_tools::starts_with(test_string, "_._");
 }
 
-bool Pass_lnastfmt::is_ssa(std::string_view test_string) {
-  return test_string.substr(0,2) != "__";
-}
+bool Pass_lnastfmt::is_ssa(std::string_view test_string) { return test_string.substr(0, 2) != "__"; }
 
 Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, const std::shared_ptr<Lnast>& ln,
                                          const lh::Tree_index& it) {
-  (void) lnastfmted;
+  (void)lnastfmted;
   // auto orig_node_token = ln->get_token(it);
   // auto orig_node_subs = ln->get_subs(it);
   auto       orig_node_name = ln->get_name(it);

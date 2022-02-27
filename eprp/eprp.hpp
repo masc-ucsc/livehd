@@ -64,7 +64,6 @@ public:
 
   std::string_view get_command_help(std::string_view cmd) const;
 
-  void get_commands(const std::function<void(std::string_view , std::string_view )> &fn) const;
-  void get_labels(std::string_view cmd,
-                  const std::function<void(std::string_view , std::string_view , bool required)> &fn) const;
+  void get_commands(const std::function<void(std::string_view, std::string_view)> &fn) const;
+  void get_labels(std::string_view cmd, const std::function<void(std::string_view, std::string_view, bool required)> &fn) const;
 };

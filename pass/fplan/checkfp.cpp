@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "checkfp.hpp"
-#include "lgedgeiter.hpp"
 
 #include <vector>
 
 #include "ann_place.hpp"
+#include "lgedgeiter.hpp"
 
 void Pass_fplan_checkfp::setup() {
   auto c = Eprp_method("pass.fplan.checkfp", "checks floorplan information stored in LiveHD hierarchy", &Pass_fplan_checkfp::pass);
@@ -29,7 +29,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
 
   std::vector<Node> nodes;
 
-  for(const auto n:var.lgs[0]->fast(true)) {
+  for (const auto n : var.lgs[0]->fast(true)) {
     if (!n.is_type_synth()) {
       continue;
     }
@@ -44,7 +44,7 @@ void Pass_fplan_checkfp::pass(Eprp_var& var) {
   }
 
   for (auto n : nodes) {
-    for(const auto nt:var.lgs[0]->fast(true)) {
+    for (const auto nt : var.lgs[0]->fast(true)) {
       if (!nt.is_type_synth()) {
         continue;
       }

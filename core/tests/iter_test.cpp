@@ -69,9 +69,7 @@ void check_test_order(Lgraph *top) {
 // performs Topological Sort on a given DAG
 void do_fwd_traversal(Lgraph *lg, const std::string &name) {
   {
-    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) {
-      ctx.event()->set_name("ITER_" + name + "_fast");
-    });
+    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) { ctx.event()->set_name("ITER_" + name + "_fast"); });
     Lbench b("core.ITER_" + name + "_fast");
 
     setup_test_order();
@@ -84,9 +82,7 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
     }
   }
   {
-    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) {
-      ctx.event()->set_name("ITER_" + name + "_fwd");
-    });
+    TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) { ctx.event()->set_name("ITER_" + name + "_fwd"); });
     Lbench b("core.ITER_" + name + "_fwd");
 
     setup_test_order();
@@ -106,7 +102,7 @@ void generate_graphs(int n) {
 
   for (int i = 0; i < n; i++) {
     std::string                    gname = "test_" + std::to_string(i);
-    Lgraph *                       g     = Lgraph::create("lgdb_iter_test", gname, "test");
+    Lgraph                        *g     = Lgraph::create("lgdb_iter_test", gname, "test");
     std::vector<Node_pin::Compact> spins;
     std::vector<Node_pin::Compact> dpins;
 
@@ -213,7 +209,7 @@ void generate_graphs(int n) {
 bool fwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph *    g     = Lgraph::open("lgdb_iter_test", gname);
+    Lgraph     *g     = Lgraph::open("lgdb_iter_test", gname);
     if (g == nullptr)
       return false;
 
@@ -231,7 +227,7 @@ bool fwd(int n) {
 bool bwd(int n) {
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph *    g     = Lgraph::open("lgdb_iter_test", gname);
+    Lgraph     *g     = Lgraph::open("lgdb_iter_test", gname);
     if (g == 0)
       return false;
 
@@ -281,8 +277,8 @@ bool bwd(int n) {
 
 void simple_line() {
   std::string gname   = "top_0";
-  Lgraph *    g0      = Lgraph::create("lgdb_iter_test", "g0", "test");
-  auto &      sfuture = g0->ref_library()->setup_sub("future", "test");
+  Lgraph     *g0      = Lgraph::create("lgdb_iter_test", "g0", "test");
+  auto       &sfuture = g0->ref_library()->setup_sub("future", "test");
   if (!sfuture.has_pin("fut_i"))
     sfuture.add_input_pin("fut_i", 10);
   if (!sfuture.has_pin("fut_o"))
@@ -356,8 +352,8 @@ void simple_line() {
 
 void simple(int num) {
   std::string gname = "simple_iter";
-  Lgraph *    g     = Lgraph::create("lgdb_iter_test", gname, "test");
-  Lgraph *    sub_g = Lgraph::create("lgdb_iter_test", "sub", "test");
+  Lgraph     *g     = Lgraph::create("lgdb_iter_test", gname, "test");
+  Lgraph     *sub_g = Lgraph::create("lgdb_iter_test", "sub", "test");
 
   for (int i = 0; i < 256; i++) {
     // Disconnected IOs from 1000-1512
@@ -686,7 +682,7 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_REBUILD
-    auto *                                                        tlg = Lgraph::create(argv[1], "topo_sorted", "-");
+    auto                                                         *tlg = Lgraph::create(argv[1], "topo_sorted", "-");
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> lg2tlg;
     for (auto node : lg->forward()) {
       auto tnode = tlg->create_node(node);
@@ -711,7 +707,7 @@ int main(int argc, char **argv) {
 #endif
 #ifdef ITER_TREE
     lh::tree<Node::Compact_class> fwd_order;
-    Node                                invalid;
+    Node                          invalid;
     fwd_order.set_root(invalid.get_compact_class());
 
     const auto root = fwd_order.get_root();
@@ -721,9 +717,9 @@ int main(int argc, char **argv) {
 #endif
 #ifdef ITER_MMAP
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> fwd_order;
-    Node                                                    invalid;
-    Node::Compact_class                                     first_cnode = invalid.get_compact_class();
-    Node::Compact_class                                     last_cnode  = invalid.get_compact_class();
+    Node                                                          invalid;
+    Node::Compact_class                                           first_cnode = invalid.get_compact_class();
+    Node::Compact_class                                           last_cnode  = invalid.get_compact_class();
     for (auto node : lg->forward()) {
       if (last_cnode.is_invalid()) {
         first_cnode = node.get_compact_class();

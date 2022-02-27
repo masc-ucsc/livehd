@@ -14,9 +14,7 @@
 #include "str_tools.hpp"
 
 struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
-  bool operator()(std::string_view lhs, std::string_view rhs) const {
-    return str_tools::to_lower(lhs) < str_tools::to_lower(rhs);
-  }
+  bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
 };
 
 class Lgraph;
@@ -53,9 +51,7 @@ public:
 
   void delete_label(std::string_view name);
 
-  [[nodiscard]] bool has_label(std::string_view name) const {
-    return dict.find(name) != dict.end();
-  };
+  [[nodiscard]] bool has_label(std::string_view name) const { return dict.find(name) != dict.end(); };
 
   [[nodiscard]] std::string_view get(std::string_view name) const;
 

@@ -26,16 +26,16 @@ class Wire : public jsn::Object {
   vector<int> bits;
 
 public:
-  Wire(int width, int &starting_wire_id) {
+  Wire(int width, int& starting_wire_id) {
     for (auto i = 0; i < width; i++) {
       bits.push_back(starting_wire_id++);
     }
   }
 
   [[nodiscard]] const vector<int>* get_bits() const { return &bits; }
-  void               set_const_value(int const_val);
+  void                             set_const_value(int const_val);
   [[nodiscard]] size_t             get_width() const { return bits.size(); }
-  void               ToJson(const JsonComposer* jcm) const override;
+  void                             ToJson(const JsonComposer* jcm) const override;
 };
 
 enum enPortDir { pdInput, pdOutput };
@@ -61,7 +61,7 @@ public:
   [[nodiscard]] const Wire*        get_wire() const { return wire; }
   [[nodiscard]] enPortDir          get_dir() const { return direction; }
   [[nodiscard]] const char*        dir_str() const { return direction == enPortDir::pdInput ? "input" : "output"; }
-  void               ToJson(const JsonComposer* jcm) const override {
+  void                             ToJson(const JsonComposer* jcm) const override {
     JsonElement model[] = {{"direction", dir_str()}, {"bits", wire ? wire->get_bits() : 0}, {}};
     jcm->Write(model);
   }
@@ -126,7 +126,7 @@ public:
   const char* get_name() const { return name.c_str(); }
   Wire*       get_wire(const std::string& pin_name);
   Cell*       add_cell(const Prototype* proto);
-  Port*       add_port(const StrTyp &port_name, enPortDir port_dir, Wire* port_wire);
+  Port*       add_port(const StrTyp& port_name, enPortDir port_dir, Wire* port_wire);
   void        add_wire_alias(std::string mask_driver, std::string prev_node_diver);
   void        create_wires(XEdge_iterator out_edges);
   Wire*       create_single_wire(std::string wire_name, int wire_width);

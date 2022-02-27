@@ -1,10 +1,8 @@
 
 #include "benchmark/benchmark.h"
-
 #include "lnast_create.hpp"
 
 static void BM_assign_const(benchmark::State& state) {
-
   for (auto _ : state) {
     Lnast_create ln;
     ln.new_lnast(absl::StrCat("t", state.range(0)));
@@ -25,7 +23,6 @@ static void BM_assign_const(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 static void BM_assign_pyrope_const(benchmark::State& state) {
-
   for (auto _ : state) {
     Lnast_create ln;
     ln.new_lnast(absl::StrCat("t", state.range(0)));
@@ -47,11 +44,11 @@ static void BM_assign_pyrope_const(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 #ifndef NDEBUG
-BENCHMARK(BM_assign_const)->Range(16,1<<10)->Threads(2);
-BENCHMARK(BM_assign_pyrope_const)->Range(8,1<<10)->Threads(2);
+BENCHMARK(BM_assign_const)->Range(16, 1 << 10)->Threads(2);
+BENCHMARK(BM_assign_pyrope_const)->Range(8, 1 << 10)->Threads(2);
 #else
-BENCHMARK(BM_assign_const)->Range(16,1<<18)->ThreadRange(1,2);
-BENCHMARK(BM_assign_pyrope_const)->Range(8,1<<18)->ThreadRange(1,2);
+BENCHMARK(BM_assign_const)->Range(16, 1 << 18)->ThreadRange(1, 2);
+BENCHMARK(BM_assign_pyrope_const)->Range(8, 1 << 18)->ThreadRange(1, 2);
 #endif
 
 #if 0
@@ -71,4 +68,3 @@ int main(int argc, char* argv[]) {
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
 }
-

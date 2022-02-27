@@ -8,8 +8,8 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
-#include "struct_firbits.hpp"
 #include "str_tools.hpp"
+#include "struct_firbits.hpp"
 
 void Firmap::dump() const {
   for (const auto &maps_it : fbmaps) {
@@ -331,25 +331,25 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
   if (sz < 5)
     return Attr::Set_other;
 
-  if (str_tools::ends_with(key,"__max"))
+  if (str_tools::ends_with(key, "__max"))
     return Attr::Set_max;
 
-  if (str_tools::ends_with(key,"__min"))
+  if (str_tools::ends_with(key, "__min"))
     return Attr::Set_min;
 
   if (sz < 7)
     return Attr::Set_other;
 
-  if (str_tools::ends_with(key,"__ubits"))
+  if (str_tools::ends_with(key, "__ubits"))
     return Attr::Set_ubits;
 
-  if (str_tools::ends_with(key,"__sbits"))
+  if (str_tools::ends_with(key, "__sbits"))
     return Attr::Set_sbits;
 
   if (sz < 11)
     return Attr::Set_other;
 
-  if (str_tools::ends_with(key,"__dp_assign"))
+  if (str_tools::ends_with(key, "__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
@@ -420,7 +420,7 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   auto h_dpin = driver_list[0];
 
   I(!h_dpin.is_invalid());  // connected
-  //I(h_dpin != e.driver);
+  // I(h_dpin != e.driver);
   auto *hier_lg = h_dpin.get_node().get_class_lgraph();
   I(fbmaps.find(hier_lg) != fbmaps.end());
   auto &hier_fbmap = fbmaps[hier_lg];
@@ -1018,11 +1018,11 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
 }
 
 void Firmap::analysis_fir_const(Node &node, FBMap &fbmap) {
-  Bits_t      bits;
-  bool        sign;
-  auto        const_str = node.setup_driver_pin("Y").get_name();
-  auto        pos1      = const_str.find("ubits");  // ex: 0ubits8
-  auto        pos2      = const_str.find("sbits");
+  Bits_t bits;
+  bool   sign;
+  auto   const_str = node.setup_driver_pin("Y").get_name();
+  auto   pos1      = const_str.find("ubits");  // ex: 0ubits8
+  auto   pos2      = const_str.find("sbits");
   I(pos1 != std::string_view::npos || pos2 != std::string_view::npos);
   if (pos1 != std::string_view::npos) {
     sign = false;

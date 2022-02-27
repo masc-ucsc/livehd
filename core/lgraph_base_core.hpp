@@ -1,19 +1,18 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "absl/strings/str_cat.h"
-
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <string_view>
 
+#include "absl/strings/str_cat.h"
 #include "explicit_type.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
 #include "lconst.hpp"
-#include "likely.hpp"
 #include "lhtree.hpp"
+#include "likely.hpp"
 
 using Lg_id_t = uint32_t;
 
@@ -32,7 +31,7 @@ public:
   bool is_invalid() const { return lgid == 0; }
 };
 
-using Hierarchy_index = int32_t; // -1 is invalid, 0 is root
+using Hierarchy_index = int32_t;  // -1 is invalid, 0 is root
 
 struct Lg_type_id_hash {
   size_t operator()(const Lg_type_id& obj) const { return obj.value; }
@@ -66,9 +65,9 @@ protected:
     Setup_path(std::string_view path);
   };
 
-  Setup_path        _p;  // Must be first in base object
+  Setup_path _p;  // Must be first in base object
 
-  const char *version="0.1.0"; // LGraph semantic version (increase when store format becomes incompatible)
+  const char* version = "0.1.0";  // LGraph semantic version (increase when store format becomes incompatible)
 
   std::string       path;
   std::string       name;

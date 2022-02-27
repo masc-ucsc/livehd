@@ -1,5 +1,7 @@
 
 
+#include "blop.hpp"
+
 #include <cassert>
 #include <functional>
 #include <iomanip>
@@ -7,32 +9,26 @@
 #include <iterator>
 #include <vector>
 
+#include "dlop.hpp"
 #include "fmt/format.h"
 #include "gtest/gtest.h"
-
-#include "blop.hpp"
-#include "dlop.hpp"
 #include "lbench.hpp"
 #include "lconst.hpp"
 #include "lrand.hpp"
 
-
 class Blop_test : public ::testing::Test {
 protected:
-
 public:
-  void TearDown() override {
-  }
+  void TearDown() override {}
 
-  void SetUp() override {
+  void SetUp() override{
 
   };
 };
 
 TEST_F(Blop_test, addition) {
-
-  int64_t src1[3] = { -1, -1,1};
-  int64_t src2[3] = { -1, -1,1};
+  int64_t src1[3] = {-1, -1, 1};
+  int64_t src2[3] = {-1, -1, 1};
 
   int64_t dst1[3];
   Blop::addn(dst1, 3, src1, src2);
@@ -45,10 +41,9 @@ TEST_F(Blop_test, addition) {
 }
 
 TEST_F(Blop_test, shift) {
+  int64_t src1[3] = {-1, 2, -1};
 
-  int64_t src1[3] = { -1, 2,-1};
-
-  for(int64_t i=0;i<3;++i) {
+  for (int64_t i = 0; i < 3; ++i) {
     int64_t dst1[3];
     Blop::shln(dst1, 3, src1, i);
 
@@ -65,7 +60,6 @@ TEST_F(Blop_test, shift) {
 }
 
 TEST_F(Blop_test, dlop_from_pyrope) {
-
   auto dlop = Dlop::from_pyrope("0xdeadbeef");
   dlop->dump();
 

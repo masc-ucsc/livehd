@@ -17,7 +17,7 @@ using Node_iterator = std::vector<Node>;
 
 class Node {
 protected:
-  Lgraph *        top_g;
+  Lgraph         *top_g;
   mutable Lgraph *current_g;
   Hierarchy_index hidx;
   Index_id        nid;
@@ -47,8 +47,8 @@ protected:
 public:
   class __attribute__((packed)) Compact {
   protected:
-    Hierarchy_index hidx;                 // 4 bytes
-    uint64_t        nid : Index_bits;     // 4 bytes
+    Hierarchy_index hidx;              // 4 bytes
+    uint64_t        nid : Index_bits;  // 4 bytes
 
     friend class Lgraph;
     friend class Lgraph_attributes;
@@ -203,9 +203,9 @@ public:
     return Compact_class(nid);
   }
 
-  Lgraph *       get_top_lgraph() const { return top_g; }
-  Lgraph *       get_class_lgraph() const { return current_g; }
-  Lgraph *       get_lg() const { return current_g; }  // To handle hierarchical API
+  Lgraph        *get_top_lgraph() const { return top_g; }
+  Lgraph        *get_class_lgraph() const { return current_g; }
+  Lgraph        *get_lg() const { return current_g; }  // To handle hierarchical API
   Graph_library *ref_library() const;
 
   Index_id        get_nid() const { return nid; }
@@ -313,8 +313,8 @@ public:
   void            set_type_const(const Lconst &val);
   Lg_type_id      get_type_sub() const;
   const Sub_node &get_type_sub_node() const;
-  Sub_node *      ref_type_sub_node() const;
-  Lgraph *        ref_type_sub_lgraph() const;  // Slower than other get_type_sub
+  Sub_node       *ref_type_sub_node() const;
+  Lgraph         *ref_type_sub_lgraph() const;  // Slower than other get_type_sub
   bool            is_type_sub_present() const;
 
   Lconst get_type_const() const;
@@ -359,14 +359,14 @@ public:
   std::string default_instance_name() const;
 
   // non-hierarchical node name (1 for all nodes)
-  void             set_name(std::string_view iname);
-  std::string      get_name() const;
-  std::string      create_name() const;
-  bool             has_name() const;
+  void        set_name(std::string_view iname);
+  std::string get_name() const;
+  std::string create_name() const;
+  bool        has_name() const;
 
-  void             set_place(const Ann_place &p);
-  const Ann_place  get_place() const;
-  bool             has_place() const;
+  void            set_place(const Ann_place &p);
+  const Ann_place get_place() const;
+  bool            has_place() const;
 
   Bits_t get_bits() const;
 
@@ -377,4 +377,3 @@ public:
 
   void dump() const;
 };
-

@@ -24,13 +24,13 @@ USING_YOSYS_NAMESPACE
 class Lgyosys_dump : public Inou {
 private:
   RTLIL::Design *design;
-  RTLIL::Wire *  get_wire(const Node_pin &pin);
-  RTLIL::Wire *  add_wire(RTLIL::Module *module, const Node_pin &pin);
+  RTLIL::Wire   *get_wire(const Node_pin &pin);
+  RTLIL::Wire   *add_wire(RTLIL::Module *module, const Node_pin &pin);
 
   void to_yosys(Lgraph *g);
 
   // absl::flat_hash_set<std::string_view>                            created_sub;
-  absl::flat_hash_set<std::string>                               created_sub;
+  absl::flat_hash_set<std::string>                                 created_sub;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            input_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            output_map;
   absl::flat_hash_map<Node_pin::Compact, RTLIL::Wire *>            cell_output_map;

@@ -42,9 +42,7 @@ protected:
 
   std::string_view skip_underscores(std::string_view txt) const;
 
-  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) {
-    assert(d<Bits_max);
-  }
+  Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) { assert(d < Bits_max); }
 
   static Bits_t calc_num_bits(const Number &num) {
     if (num == 0 || num == -1)
@@ -53,7 +51,7 @@ protected:
       return msb(num) + 2;  // +2 because values are signed (msb==0 is 1 bit)
     return msb(-num - 1) + 2;
   }
-  Bits_t             calc_num_bits() const { return calc_num_bits(num); }
+  Bits_t calc_num_bits() const { return calc_num_bits(num); }
 
   const Number &get_num() const { return num; }
   void          adjust(const Lconst &o);
@@ -61,7 +59,7 @@ protected:
   static std::pair<std::string, std::string> match_binary(const Lconst &l, const Lconst &r);
 
   [[nodiscard]] static std::string to_string(Number num);
-  [[nodiscard]] std::string to_string() const { // use to_pyrope, to_verilog not the to_str directly
+  [[nodiscard]] std::string        to_string() const {  // use to_pyrope, to_verilog not the to_str directly
     I(explicit_str);
     return to_string(num);
   }
@@ -71,7 +69,7 @@ public:
 
   explicit Lconst(absl::Span<unsigned char> v);
   explicit Lconst(Number v);
-  Lconst(int64_t v); // not explicit to allow easy Lconst(x) < 0 operations
+  Lconst(int64_t v);  // not explicit to allow easy Lconst(x) < 0 operations
 
   Lconst();
 
@@ -91,12 +89,12 @@ public:
   static Lconst unknown_positive(Bits_t nbits);
   static Lconst unknown_negative(Bits_t nbits);
 
-  static Lconst unserialize(std::string_view v);
+  static Lconst             unserialize(std::string_view v);
   [[nodiscard]] std::string serialize() const;
 
   bool is_invalid() const { return explicit_str && bits == 0; }
 
-  uint64_t  hash() const;
+  uint64_t hash() const;
 
   void                 dump() const;
   [[nodiscard]] size_t get_trailing_zeroes() const;
@@ -149,12 +147,8 @@ public:
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '0');
   }
-  bool has_unknown_sign() const {
-    return has_unknowns() && static_cast<uint8_t>(num) == '?';
-  }
-  bool is_fully_unkown() const {
-    return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?';
-  }
+  bool has_unknown_sign() const { return has_unknowns() && static_cast<uint8_t>(num) == '?'; }
+  bool is_fully_unkown() const { return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?'; }
 
   bool is_known_false() const { return num == 0; }
   bool is_known_true() const;
@@ -162,7 +156,7 @@ public:
   bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
   bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
 
-  std::pair<int,int> get_mask_range() const;
+  std::pair<int, int> get_mask_range() const;
 
   Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
   size_t popcount() const;

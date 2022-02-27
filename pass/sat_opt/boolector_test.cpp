@@ -19,7 +19,7 @@
  */
 
 int main(void) {
-  Btor *         btor;
+  Btor          *btor;
   BoolectorNode *x, *y, *temp, *old_x, *old_y, *eq1, *eq2, *and_op, *formula;
   BoolectorSort  s;
   int            result;

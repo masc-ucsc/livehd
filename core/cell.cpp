@@ -8,7 +8,6 @@
 Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
-
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
       e[op] = Port_invalid;
@@ -269,4 +268,3 @@ bool Ntype::has_sink(Ntype_op op, std::string_view str) {
 
   return sink_pid2name[it->second][static_cast<int>(op)] == str;
 }
-

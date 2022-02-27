@@ -170,7 +170,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     Main_api::get_labels(cmd, [&fields](std::string_view label, std::string_view txt, bool required) {
       (void)required;
       (void)txt;
-      fields.emplace_back(absl::StrCat(label , ":"));
+      fields.emplace_back(absl::StrCat(label, ":"));
     });
     if (!fields.empty())
       examples = &fields;
@@ -285,9 +285,7 @@ void hook_color(std::string const& context, Replxx::colors_t& colors,
 constexpr unsigned long major_version = 0;
 constexpr unsigned long minor_version = 0;
 
-void dummy_call_to_preserve_methods_useful_for_debugging() {
-  std::cout << "dummy_called\n";
-}
+void dummy_call_to_preserve_methods_useful_for_debugging() { std::cout << "dummy_called\n"; }
 
 int main(int argc, char** argv) {
   I_setup();

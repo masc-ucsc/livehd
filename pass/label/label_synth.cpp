@@ -149,16 +149,14 @@ void Label_synth::dump() const {
   }
 }
 
-void Label_synth::label(Lgraph *g) {  
+void Label_synth::label(Lgraph *g) {
   last_free_id = 1;
 
   mark_ids(g);
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
-      lg->ref_node_color_map()->clear();
-    });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 
@@ -167,7 +165,6 @@ void Label_synth::label(Lgraph *g) {
     node.set_color(it.second);
 
     fmt::print("Node: {}, Color: {}\n", node.debug_name(), node.get_color());
-
   }
 
   if (verbose) {

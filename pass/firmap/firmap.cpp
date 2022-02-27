@@ -15,9 +15,7 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
     : fbmaps(_fbmaps), pinmaps(_pinmaps), spinmaps_xorr(_spinmaps_xorr) {}
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
-    ctx.event()->set_name("firmap." + lg->get_name());
-  });
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firmap." + lg->get_name()); });
   Lbench b("pass.firmap." + lg->get_name());
 
   auto    lg_name   = lg->get_name();
@@ -199,7 +197,7 @@ void Firmap::map_node_fir_tail(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
     }
   }
 
-  auto mask_bits  = e1_bits - n;
+  auto mask_bits = e1_bits - n;
   // auto mask_const = std::pow(2, mask_bits.to_i()) - 1;
   Lconst mask_const = ((Lconst(1UL) << Lconst(mask_bits))) - Lconst(1);
 
@@ -396,7 +394,7 @@ void Firmap::map_node_fir_andr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
   }
 }
 
-void Firmap::map_node_fir_and_or_xor(Node &old_node, Lgraph *new_lg, std::string_view  op, PinMap &pinmap) {
+void Firmap::map_node_fir_and_or_xor(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
   Node new_node_logic;
   if (op == "__fir_and") {
     new_node_logic = new_lg->create_node(Ntype_op::And);
@@ -625,7 +623,7 @@ void Firmap::map_node_fir_eq(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 }
 
 // A geq B == ~(A lt B) ; A leq B == ~(A gt B)
-void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, std::string_view  op, PinMap &pinmap) {
+void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
   Node new_node_not = new_lg->create_node(Ntype_op::Not);
   Node new_node_cmp;
   if (op == "__fir_leq")
@@ -648,7 +646,7 @@ void Firmap::map_node_fir_leq_geq(Node &old_node, Lgraph *new_lg, std::string_vi
   }
 }
 
-void Firmap::map_node_fir_lt_gt(Node &old_node, Lgraph *new_lg, std::string_view  op, PinMap &pinmap) {
+void Firmap::map_node_fir_lt_gt(Node &old_node, Lgraph *new_lg, std::string_view op, PinMap &pinmap) {
   Node new_node;
   if (op == "__fir_lt")
     new_node = new_lg->create_node(Ntype_op::LT);
@@ -739,7 +737,7 @@ void Firmap::clone_lg_ops_node(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 }
 
 void Firmap::clone_subgraph_node(Node &old_node_subg, Lgraph *new_lg, PinMap &pinmap) {
-  auto *    library = Graph_library::instance(new_lg->get_path());
+  auto     *library = Graph_library::instance(new_lg->get_path());
   Node      new_node_subg;
   Sub_node *new_sub;
   Sub_node *old_sub;

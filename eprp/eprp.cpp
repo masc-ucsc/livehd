@@ -1,18 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "eprp.hpp"
-#include "lbench.hpp"
 
 #include <ctype.h>
 
 #include <algorithm>
+
+#include "lbench.hpp"
 
 void Eprp::eat_comments() {
   while (scan_is_token(Token_id_comment) && !scan_is_end()) scan_next();
 }
 
 // rule_path = (\. | alnum | / | "asdad.." | \,)+
-std::pair<bool,std::string> Eprp::rule_path() {
+std::pair<bool, std::string> Eprp::rule_path() {
   assert(!scan_is_end());
 
   if (!(scan_is_token(Token_id_dot) || scan_is_token(Token_id_alnum) || scan_is_token(Token_id_string)
@@ -117,7 +118,6 @@ std::pair<bool, std::string> Eprp::rule_cmd_line() {
 
 // rule_cmd_full =rule_cmd_line rule_label_path*
 bool Eprp::rule_cmd_full() {
-
   ast->down();
   auto [cmd_found, cmd_line] = rule_cmd_line();
   ast->up(Eprp_rule_cmd_full);
@@ -281,14 +281,14 @@ std::string_view Eprp::get_command_help(std::string_view cmd) const {
   return it->second.help;
 }
 
-void Eprp::get_commands(const std::function<void(std::string_view , std::string_view )> &fn) const {
+void Eprp::get_commands(const std::function<void(std::string_view, std::string_view)> &fn) const {
   for (const auto &v : methods) {
     fn(v.first, v.second.help);
   }
 }
 
-void Eprp::get_labels(std::string_view cmd,
-                      const std::function<void(std::string_view , std::string_view , bool required)> &fn) const {
+void Eprp::get_labels(std::string_view                                                              cmd,
+                      const std::function<void(std::string_view, std::string_view, bool required)> &fn) const {
   const auto &it = methods.find(std::string(cmd));
   if (it == methods.end())
     return;

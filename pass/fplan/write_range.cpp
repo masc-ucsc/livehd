@@ -27,7 +27,6 @@ void Pass_fplan_write_range::setup() {
 }
 
 Pass_fplan_write_range::Pass_fplan_write_range(const Eprp_var& var) : Pass("pass.fplan", var) {
-
 #if 0
   std::default_random_engine            g;
   std::uniform_real_distribution<float> rd(min_area, max_area);

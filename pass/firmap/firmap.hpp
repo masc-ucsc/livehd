@@ -18,8 +18,8 @@ protected:
   bool firmap_issues     = false;
   bool firbits_wait_flop = false;
 
-  absl::node_hash_map<Lgraph *, FBMap> &  fbmaps;   // firbits maps center
-  absl::node_hash_map<Lgraph *, PinMap> & pinmaps;  // pin maps center
+  absl::node_hash_map<Lgraph *, FBMap>   &fbmaps;   // firbits maps center
+  absl::node_hash_map<Lgraph *, PinMap>  &pinmaps;  // pin maps center
   absl::node_hash_map<Lgraph *, XorrMap> &spinmaps_xorr;
   // absl::flat_hash_map<Node_pin, Node_pin>                  pinmap;       // old_pin to new_pin for both dpin and spin
   // absl::flat_hash_map<Node_pin, std::vector<Node_pin>>     spinmap_xorr;

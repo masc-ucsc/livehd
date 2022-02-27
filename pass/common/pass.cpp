@@ -1,9 +1,10 @@
 
-#include "absl/strings/str_split.h"
 #include "pass.hpp"
-#include "str_tools.hpp"
 
 #include <sys/stat.h>
+
+#include "absl/strings/str_split.h"
+#include "str_tools.hpp"
 
 // Eprp Pass::eprp;
 
@@ -12,7 +13,7 @@ std::string Pass::get_files(const Eprp_var &var) const {
   if (var.has_label("files")) {
     _files = var.get("files");
 
-    for (const auto &f : absl::StrSplit(_files,',')) {
+    for (const auto &f : absl::StrSplit(_files, ',')) {
       std::string fname(f);
       if (access(fname.c_str(), F_OK) == -1) {
         _files = "/INVALID";

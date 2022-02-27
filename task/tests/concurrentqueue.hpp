@@ -254,7 +254,7 @@ inline thread_id_t thread_id() {
     && (!defined(__APPLE__) || !TARGET_OS_IPHONE) && !defined(__arm__) && !defined(_M_ARM) && !defined(__aarch64__)
 // Assume `thread_local` is fully supported in all other C++11 compilers/platforms
 //#define MOODYCAMEL_CPP11_THREAD_LOCAL_SUPPORTED    // always disabled for now since several users report having problems with it
-//on
+// on
 #endif
 #endif
 #endif

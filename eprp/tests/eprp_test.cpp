@@ -1,6 +1,4 @@
 
-#include "absl/strings/str_split.h"
-
 #include "absl/base/dynamic_annotations.h"
 #include "absl/base/macros.h"
 #include "absl/strings/numbers.h"
@@ -29,13 +27,13 @@ public:
   static void files2(Eprp_var &var) {
     auto files = var.get("nofiles");
 
-    for (const auto &v : absl::StrSplit(files,',')) {
+    for (const auto &v : absl::StrSplit(files, ',')) {
       fmt::print(" {}", v);
     }
     fmt::print("\n");
 
     std::vector<std::string> svector;
-    for (const auto s:absl::StrSplit(files,',') ) {
+    for (const auto s : absl::StrSplit(files, ',')) {
       svector.emplace_back(s);
     }
     EXPECT_EQ(svector.size(), 4);
@@ -107,7 +105,7 @@ protected:
     EXPECT_TRUE(m1.has_label("graph_name"));
     EXPECT_FALSE(m1.has_label("graph_name_not_there"));
 
-    Eprp_var    var;
+    Eprp_var var;
 
     auto [ok1, txt1] = m1.check_labels(var);
     EXPECT_TRUE(ok1);
@@ -119,7 +117,7 @@ protected:
     EXPECT_FALSE(ok2);
     EXPECT_TRUE(txt2.empty());
 
-    Eprp_method m2("test1.fff.test","fff::is_equal call", &test1::is_equal);
+    Eprp_method m2("test1.fff.test", "fff::is_equal call", &test1::is_equal);
     m2.add_label_optional("lgdb", "lgraph directory", "lgdb");
     m2.add_label_optional("check1", "check1 super duper attribute", "lgdb");
     m2.add_label_required("check2", "check2 super duper attribute");
@@ -139,7 +137,6 @@ public:
 protected:
   Eprp eprp;
   void SetUp() override {
-
     Eprp_method m1("test1.files2", "Generate a random test/method call to foo", &test1::files2);
     m1.add_label_required("nofiles", "list of files");
 

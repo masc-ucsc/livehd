@@ -10,14 +10,14 @@
 void Node::invalidate(Lgraph *_g) {
   top_g     = _g;
   current_g = _g;
-  hidx = -1;
-  nid = 0;
+  hidx      = -1;
+  nid       = 0;
 }
 
 void Node::invalidate() {
   current_g = top_g;
-  hidx = -1;
-  nid = 0;
+  hidx      = -1;
+  nid       = 0;
 }
 
 void Node::update(Hierarchy_index _hidx, Index_id _nid) {
@@ -59,8 +59,8 @@ void Node::update(Lgraph *_g, const Node::Compact &comp) {
     return;
   }
 
-  top_g = _g;
-  hidx  = comp.hidx;
+  top_g     = _g;
+  hidx      = comp.hidx;
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
@@ -80,11 +80,10 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp)
-    : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
+Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
-	current_g = top_g->ref_htree()->ref_lgraph(hidx);
+  current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
   I(current_g->is_valid_node(nid));
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
@@ -139,7 +138,7 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
 Node_pin Node::setup_driver_pin(std::string_view pname) const {
   assert(pname.size());
   if (std::isdigit(pname.front())) {
-    Port_ID pid = str_tools::to_i(pname);
+    Port_ID  pid = str_tools::to_i(pname);
     Index_id idx = current_g->setup_idx_from_pid(nid, pid);
     return Node_pin(top_g, current_g, hidx, idx, pid, false);
   }
@@ -515,7 +514,7 @@ std::string Node::default_instance_name() const {
     return absl::StrCat(name, get_name());
   }
 
-  return absl::StrCat(name, "_nid" , std::to_string(nid.value));
+  return absl::StrCat(name, "_nid", std::to_string(nid.value));
 }
 
 std::string Node::create_name() const {
@@ -531,9 +530,8 @@ std::string Node::create_name() const {
 }
 
 std::string Node::get_name() const {
-
   const auto &ptr = current_g->get_node_name_map();
-  auto it = ptr.find(get_compact_class());
+  auto        it  = ptr.find(get_compact_class());
   I(it != ptr.end());
 
   return it->second;
@@ -551,7 +549,7 @@ std::string Node::debug_name() const {
   }
   I(current_g);
 
-  auto *      ref = current_g->ref_node_name_map();
+  auto       *ref = current_g->ref_node_name_map();
   std::string name;
   const auto  it = ref->find(get_compact_class());
   if (it != ref->end()) {
@@ -577,7 +575,7 @@ void Node::set_place(const Ann_place &p) { top_g->ref_node_place_map()->insert_o
 
 const Ann_place Node::get_place() const {
   const auto &ptr = top_g->get_node_place_map();
-  const auto it = ptr.find(get_compact());
+  const auto  it  = ptr.find(get_compact());
   I(it != ptr.end());
   return it->second;
 }
@@ -594,14 +592,14 @@ void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or
 
 int Node::get_color() const {
   const auto &ptr = current_g->get_node_color_map();
-  const auto it = ptr.find(get_compact());
+  const auto  it  = ptr.find(get_compact());
   I(it != ptr.end());
   return it->second;
 }
 
 bool Node::has_color() const {
   const auto &ptr = current_g->get_node_color_map();
-  const auto it = ptr.find(get_compact());
+  const auto  it  = ptr.find(get_compact());
   return it != ptr.end();
 }
 

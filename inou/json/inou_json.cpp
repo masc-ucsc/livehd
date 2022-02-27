@@ -31,7 +31,7 @@ void Inou_json::fromlg(Eprp_var &var) {
   Inou_json p(var);
 
   auto odir = var.get("odir");
-  bool   ok = p.setup_directory(odir);
+  bool ok   = p.setup_directory(odir);
   if (!ok) {
     error("inou.json.fromlg: could not create/access the odir:{} path", odir);
     return;
@@ -57,9 +57,9 @@ void Inou_json::tolg(Eprp_var &var) {
   }
 
   std::vector<Lgraph *> lgs;
-  for (const auto &f : absl::StrSplit(files,',')) {
+  for (const auto &f : absl::StrSplit(files, ',')) {
     auto name = str_tools::get_str_after_last_if_exists(f, '/');
-    if (str_tools::ends_with(name,".json")) {
+    if (str_tools::ends_with(name, ".json")) {
       name = name.substr(0, name.size() - 5);  // remove .json
     } else {
       error(fmt::format("inou.json.tolg unknown file extension {}, expected .json", name));

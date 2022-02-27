@@ -16,13 +16,9 @@
 
 using FlatHashMap = absl::flat_hash_map<std::string, std::string>;
 
-bool Semantic_check::is_temp_var(std::string_view node_name) {
-  return node_name.front()=='_';
-}
+bool Semantic_check::is_temp_var(std::string_view node_name) { return node_name.front() == '_'; }
 
-bool Semantic_check::is_a_number(std::string_view node_name) {
-  return str_tools::is_i(node_name);
-}
+bool Semantic_check::is_a_number(std::string_view node_name) { return str_tools::is_i(node_name); }
 
 bool Semantic_check::in_map(const FlatHashMap &dict, std::string_view node_name) {
   auto it = dict.find(node_name);
@@ -148,9 +144,9 @@ void Semantic_check::error_print_lnast_by_name(Lnast *lnast, std::string_view er
   fmt::print("\n");
 
   for (const auto &it : lnast->depth_preorder()) {
-    auto        node = lnast->get_data(it);
+    auto node = lnast->get_data(it);
 
-    std::string indent(2*(it.level+1),' ');
+    std::string indent(2 * (it.level + 1), ' ');
 
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
@@ -173,7 +169,7 @@ void Semantic_check::error_print_lnast_by_type(Lnast *lnast, std::string_view er
   for (const auto &it : lnast->depth_preorder()) {
     const auto &node = lnast->get_data(it);
 
-    std::string indent(2*(it.level+1),' ');
+    std::string indent(2 * (it.level + 1), ' ');
 
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
@@ -195,9 +191,9 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
   fmt::print("\n");
 
   for (const auto &it : lnast->depth_preorder()) {
-    auto        node = lnast->get_data(it);
+    auto node = lnast->get_data(it);
 
-    std::string indent(2*(it.level+1),' ');
+    std::string indent(2 * (it.level + 1), ' ');
 
     fmt::print("{} {} {:>20} : {}", it.level, indent, node.type.to_sv(), node.token.get_text());
 
@@ -222,7 +218,6 @@ void Semantic_check::error_print_lnast_var_warn(Lnast *lnast, std::vector<std::s
 }
 
 void Semantic_check::resolve_read_write_lists(Lnast *lnast) {
-
   int rhs_index = 0;
   for (const auto &group : rhs_list) {
     for (auto node_name : group) {

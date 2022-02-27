@@ -181,8 +181,8 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 }
 
 void Pass_sample::create_sample_graph(Lgraph *g) {
-  auto  lg_path = g->get_path();
-  auto  lg_source{g->get_library().get_source(g->get_lgid())};
+  auto lg_path = g->get_path();
+  auto lg_source{g->get_library().get_source(g->get_lgid())};
 
   Lgraph *lg = Lgraph::create(lg_path, "pass_sample", lg_source);
   fmt::print("Creating new sample Lgraph...\n");

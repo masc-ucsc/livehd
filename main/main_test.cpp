@@ -98,7 +98,7 @@ protected:
 
     {
       std::string line2;
-      TMT *       vt = tmt_open(24, 80, nullptr, NULL, NULL);
+      TMT        *vt = tmt_open(24, 80, nullptr, NULL, NULL);
       tmt_write(vt, line.c_str(), line.size());
 
       const TMTSCREEN *s = tmt_screen(vt);

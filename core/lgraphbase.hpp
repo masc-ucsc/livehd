@@ -7,12 +7,11 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "aligned_vector.hpp"
 #include "edge.hpp"
 #include "iassert.hpp"
 #include "lgedge.hpp"
 #include "lgraph_base_core.hpp"
-
-#include "aligned_vector.hpp"
 
 class Fwd_edge_iterator;
 class Bwd_edge_iterator;
@@ -24,7 +23,7 @@ private:
 protected:
   is::aligned_vector<Node_internal, 4096> node_internal;
 
-  Graph_library *                          library;
+  Graph_library *library;
 
   absl::flat_hash_map<uint32_t, uint32_t> idx_insert_cache;
 
@@ -57,9 +56,9 @@ protected:
 
   void set_bits(Index_id idx, uint32_t bits) {
     I(idx < node_internal.size());
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     node_internal[idx].set_bits(bits);
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
   }
 
 public:
@@ -88,10 +87,10 @@ public:
     if (nid >= node_internal.size())
       return false;
 
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     const auto *ref = &node_internal[nid];
-    auto ret        = ref->is_valid() && ref->is_master_root();
-    //node_internal.ref_unlock();
+    auto        ret = ref->is_valid() && ref->is_master_root();
+    // node_internal.ref_unlock();
 
     return ret;
   }
@@ -100,10 +99,10 @@ public:
     if (idx >= node_internal.size())
       return false;
 
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     const auto *ref = &node_internal[idx];
-    auto ret        = ref->is_valid() && ref->is_root();
-    //node_internal.ref_unlock();
+    auto        ret = ref->is_valid() && ref->is_root();
+    // node_internal.ref_unlock();
 
     return ret;
   }
@@ -116,10 +115,10 @@ public:
   bool is_root(Index_id idx) const {
     I(static_cast<Index_id>(node_internal.size()) > idx);
 
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     const auto *ref = &node_internal[idx];
-    auto ret        = ref->is_root();
-    //node_internal.ref_unlock();
+    auto        ret = ref->is_root();
+    // node_internal.ref_unlock();
 
     return ret;
   }
@@ -133,7 +132,7 @@ public:
   } _static_initializer;
 
   const Graph_library &get_library() const { return *library; }
-  Graph_library *      ref_library() const { return library; }
+  Graph_library       *ref_library() const { return library; }
 
   static void error_int(std::string_view text);
   static void warn_int(std::string_view text);

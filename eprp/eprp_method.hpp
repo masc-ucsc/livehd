@@ -15,7 +15,7 @@ protected:
     const std::string default_value;
     const bool        required;
   };
-  void add_label(std::string_view attr, std::string_view help, bool required, std::string_view default_value = "");
+  void              add_label(std::string_view attr, std::string_view help, bool required, std::string_view default_value = "");
   const std::string name;
 
 public:
@@ -31,9 +31,9 @@ public:
   [[nodiscard]] std::pair<bool, std::string> check_labels(const Eprp_var &var) const;
 
   [[nodiscard]] bool has_label(std::string_view label) const;
-  void add_label_optional(std::string_view attr, std::string_view help_txt, std::string_view default_value = "") {
+  void               add_label_optional(std::string_view attr, std::string_view help_txt, std::string_view default_value = "") {
     add_label(attr, help_txt, false, default_value);
   };
-  void               add_label_required(std::string_view attr, std::string_view help_txt) { add_label(attr, help_txt, true); };
+  void add_label_required(std::string_view attr, std::string_view help_txt) { add_label(attr, help_txt, true); };
   [[nodiscard]] std::string_view get_label_help(std::string_view label) const;
 };

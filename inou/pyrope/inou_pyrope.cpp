@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "absl/strings/str_split.h"
 #include "inou_pyrope.hpp"
 
+#include "absl/strings/str_split.h"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -25,7 +25,7 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
   Lbench      b("inou.PYROPE_parse_to_lnast");
   Inou_pyrope p(var);
 
-  for (auto f : absl::StrSplit(p.files,',')) {
+  for (auto f : absl::StrSplit(p.files, ',')) {
     Prp_lnast converter;
     converter.parse_file(f);
 

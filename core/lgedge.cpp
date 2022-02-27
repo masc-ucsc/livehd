@@ -63,7 +63,7 @@ const Node_internal &Node_internal::get_root() const {
   if (is_root())
     return *this;
 
-  const auto &         root_page = Node_internal_Page::get(this);
+  const auto          &root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr  = (const Node_internal *)&root_page;
 
   SIndex_id delta = static_cast<SIndex_id>(nid) - root_page.get_idx();  // Signed and bigger than Index_id
@@ -79,7 +79,7 @@ const Node_internal &Node_internal::get_master_root() const {
   if (is_master_root())
     return *this;
 
-  const auto &         root_page = Node_internal_Page::get(this);
+  const auto          &root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr;
 
   SIndex_id delta = static_cast<SIndex_id>(nid) - root_page.get_idx();  // Signed and bigger than Index_id

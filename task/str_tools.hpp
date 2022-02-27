@@ -3,11 +3,11 @@
 #pragma once
 
 #include <algorithm>
-#include <cctype>
-#include <string_view>
-#include <string>
-#include <charconv>
 #include <array>
+#include <cctype>
+#include <charconv>
+#include <string>
+#include <string_view>
 
 namespace str_tools {
 
@@ -60,7 +60,7 @@ namespace str_tools {
   if (str.size() == 0 || !(std::isdigit(str.front()) || str.front() == '-'))
     return false;
 
-  int         result{};
+  int result{};
   auto [p, ec] = std::from_chars(str.data(), str.data() + str.size(), result);
   (void)p;
   if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range)
@@ -127,7 +127,7 @@ namespace str_tools {
   if (str.size() < start.size())
     return false;
 
-  return str.substr(0,start.size()) == start;
+  return str.substr(0, start.size()) == start;
 }
 
 [[nodiscard]] inline bool ends_with(std::string_view str, std::string_view end) {
@@ -135,7 +135,7 @@ namespace str_tools {
     return str == end;  // faster path
   }
   if (end.size() > str.size())
-    return false; // end is larger
+    return false;  // end is larger
 
   const auto *base_en   = end.data();
   const auto *base_self = str.data() + str.size() - end.size();
@@ -146,9 +146,6 @@ namespace str_tools {
   return str.find(start) != std::string_view::npos;
 }
 
-[[nodiscard]] inline bool contains(std::string_view str, char start) {
-  return str.find(start) != std::string_view::npos;
-}
+[[nodiscard]] inline bool contains(std::string_view str, char start) { return str.find(start) != std::string_view::npos; }
 
-}
-
+}  // namespace str_tools

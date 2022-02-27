@@ -2,37 +2,37 @@
 
 #pragma once
 
-#include <mutex>
 #include <atomic>
+#include <mutex>
 #include <string>
 
-#include "lgraph.hpp"
 #include "file_output.hpp"
+#include "lgraph.hpp"
 
 class Cgen_verilog {
 private:
-  const bool          verbose;
+  const bool       verbose;
   std::string_view odir;
 
   using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, std::string>;
 
   struct Expr {
-    Expr(std::string_view v, bool n) : var(v), needs_parenthesis(n) { }
+    Expr(std::string_view v, bool n) : var(v), needs_parenthesis(n) {}
     std::string var;
-    bool needs_parenthesis;
+    bool        needs_parenthesis;
   };
 
-  absl::flat_hash_map<Node_pin::Compact_class, Expr>           pin2expr;
-  absl::flat_hash_map<Node_pin::Compact_class, std::string>  pin2var;
-  absl::flat_hash_map<Node    ::Compact_class, std::string>  mux2vector;
+  absl::flat_hash_map<Node_pin::Compact_class, Expr>        pin2expr;
+  absl::flat_hash_map<Node_pin::Compact_class, std::string> pin2var;
+  absl::flat_hash_map<Node ::Compact_class, std::string>    mux2vector;
 
   bool first_array_block;
 
-  std::atomic<int> nrunning;
-  inline static std::mutex lgs_mutex; // just needed for the once at a time setup of static reserved_keyword
+  std::atomic<int>                               nrunning;
+  inline static std::mutex                       lgs_mutex;  // just needed for the once at a time setup of static reserved_keyword
   inline static absl::flat_hash_set<std::string> reserved_keyword;
 
-  std::string get_wire_or_const(const Node_pin &dpin) const;
+  std::string        get_wire_or_const(const Node_pin &dpin) const;
   static std::string get_scaped_name(std::string_view name);
 
   std::string get_append_to_name(std::string_view name, std::string_view ext) const;
@@ -54,6 +54,7 @@ private:
 
   void add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &dpin, std::string_view name, bool out_unsigned);
   void create_locals(std::shared_ptr<File_output> fout, Lgraph *lg);
+
 public:
   void do_from_lgraph(Lgraph *lg_parent);
 

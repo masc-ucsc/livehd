@@ -20,8 +20,8 @@ public:
 
   absl::flat_hash_map<std::string, std::string> vname2lname;
 
-  std::string create_lnast_tmp();
-  std::string get_lnast_name(std::string_view val);
+  std::string      create_lnast_tmp();
+  std::string      get_lnast_name(std::string_view val);
   std::string_view get_lnast_lhs_name(std::string_view val);
 
   void new_lnast(std::string_view name);
@@ -42,9 +42,9 @@ public:
   std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_mask_xor_stmts(std::string_view a_var, std::string_view b_var);
-  void          create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
-  void          create_assign_stmts(std::string_view a_var, std::string_view b_var);
-  void          create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
+  void        create_dp_assign_stmts(std::string_view a_var, std::string_view b_var);
+  void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
+  void        create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
   std::string create_minus_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_plus_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_mult_stmts(std::string_view a_var, std::string_view b_var);
@@ -52,5 +52,5 @@ public:
   std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
   // std::string create_select_stmts(std::string_view sel_var, std::string_view sel_field);
   std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
-  void          create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
+  void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
 };

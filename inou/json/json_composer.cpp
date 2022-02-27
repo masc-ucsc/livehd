@@ -19,7 +19,7 @@ void JsonComposer::Write(const JsonElement* property) const {
   while (true) {
     auto last_written_key = property->key;
     if (property->key)
-      target << indent <<'"' << property->key << "\":\t";
+      target << indent << '"' << property->key << "\":\t";
     auto val = &property->value;
     switch (property->type) {
       case etEndOfList: break;
@@ -48,11 +48,11 @@ void JsonComposer::Write(const JsonElement* property) const {
     current_key = last_written_key;
     if (property->type == etEndOfList)
       break;
-    WriteDelimiter(); // writes ",\n"
+    WriteDelimiter();  // writes ",\n"
   }
 
   if (indent.size() > 0)
-    indent = indent.substr(0, indent.size()-1); // before leaving reduce indentation one level
+    indent = indent.substr(0, indent.size() - 1);  // before leaving reduce indentation one level
 }
 
 }  // namespace jsn

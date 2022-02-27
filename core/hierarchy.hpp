@@ -2,11 +2,10 @@
 
 #pragma once
 
-#include "absl/container/flat_hash_map.h"
-
 #include <tuple>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "lgraph_base_core.hpp"
 #include "lhtree.hpp"
 
@@ -22,14 +21,14 @@ protected:
   Lgraph *top;
 
   struct up_entry_t {
-    Lgraph          *parent_lg;
-    Index_id         parent_nid;
-    Hierarchy_index  parent_hidx;
+    Lgraph         *parent_lg;
+    Index_id        parent_nid;
+    Hierarchy_index parent_hidx;
   };
 
   struct key_entry_t {
-    Index_id         parent_nid;
-    Hierarchy_index  parent_hidx;
+    Index_id        parent_nid;
+    Hierarchy_index parent_hidx;
 
     key_entry_t(Index_id a, Hierarchy_index b) : parent_nid(a), parent_hidx(b) {}
 
@@ -45,7 +44,7 @@ protected:
   std::vector<up_entry_t>                           up_vector;
   absl::flat_hash_map<key_entry_t, Hierarchy_index> down_map;
 
-  Hierarchy_index go_down(Hierarchy_index, Lg_type_id lgid, Index_id nid);
+  Hierarchy_index                                 go_down(Hierarchy_index, Lg_type_id lgid, Index_id nid);
   std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
 
 public:
@@ -61,10 +60,10 @@ public:
 
   std::tuple<Hierarchy_index, Lgraph *> get_next(const Hierarchy_index hidx) const;
 
-  static constexpr Hierarchy_index hierarchical_root() { return 0;  }
-  static constexpr Hierarchy_index non_hierarchical()  { return -1; }
+  static constexpr Hierarchy_index hierarchical_root() { return 0; }
+  static constexpr Hierarchy_index non_hierarchical() { return -1; }
 
-  static bool is_root(const Node &node);
+  static bool           is_root(const Node &node);
   static constexpr bool is_root(const Hierarchy_index hidx) { return hidx == 0; }
   static constexpr bool is_invalid(const Hierarchy_index hidx) { return hidx == -1; }
 

@@ -2,27 +2,27 @@
 #pragma once
 
 #include <memory>
+
 #include "spsc.hpp"
 
 class raw_ptr_pool {
- public:
+public:
   const size_t size;
-  explicit raw_ptr_pool(size_t sz) : size(sz) {
-  }
+  explicit raw_ptr_pool(size_t sz) : size(sz) {}
 
   ~raw_ptr_pool() {
-    while(!_pointer_queue.empty()) {
+    while (!_pointer_queue.empty()) {
       void *raw_ptr;
-      bool something = _pointer_queue.dequeue(raw_ptr);
+      bool  something = _pointer_queue.dequeue(raw_ptr);
       assert(something);
       free(raw_ptr);
     }
   }
 
   void *get_ptr() {
-    void* raw_retval;
-    bool recycle_success = _pointer_queue.dequeue(raw_retval);
-    if(!recycle_success) {
+    void *raw_retval;
+    bool  recycle_success = _pointer_queue.dequeue(raw_retval);
+    if (!recycle_success) {
       raw_retval = malloc(size);
     }
     return raw_retval;
@@ -35,6 +35,6 @@ class raw_ptr_pool {
     free(to_release);
   }
 
- private:
+private:
   spsc256<void *> _pointer_queue;
 };

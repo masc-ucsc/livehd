@@ -2,19 +2,19 @@
 #pragma once
 #if 0
 
-#include <sys/mman.h>
 #include <asm/unistd.h>        // for __NR_perf_event_open
 #include <linux/perf_event.h>  // for perf event constants
 #include <sys/ioctl.h>         // for ioctl
-#include <unistd.h>            // for syscall
+#include <sys/mman.h>
+#include <unistd.h>  // for syscall
 
+#include <cassert>
 #include <cerrno>   // for errno
 #include <cstring>  // for memset
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
-#include <cassert>
 
 template <int TYPE = PERF_TYPE_HARDWARE>
 class LinuxEvents {

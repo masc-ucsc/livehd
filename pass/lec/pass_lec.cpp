@@ -64,50 +64,48 @@ void Pass_lec::work(Eprp_var &var) {
 void Pass_lec::check_lec(Lgraph *g) {
   fmt::print("\n---Test CHECK LEC \nLGraph name: {}\n", g->get_name());
 
-  int i_num  = 0;   //counts inputs
+  int i_num = 0;  // counts inputs
 
   g->each_graph_input([&](const Node_pin &input_pin) {
     //(void)input_pin;
 
     i_num++;
 
-    fmt::print("Lgraph input: {} {}\n", input_pin.get_name(), input_pin.get_pid() );
-
+    fmt::print("Lgraph input: {} {}\n", input_pin.get_name(), input_pin.get_pid());
   });
 
-
   // still need: Sum, Div, LT, GT,  SHL,  Mux
-  Btor *btor;
-  BoolectorNode *x1, *x2, *inZero1,  *eq1, *eq2,  *formula;
-  //BoolectorNode *inOne;
+  Btor          *btor;
+  BoolectorNode *x1, *x2, *inZero1, *eq1, *eq2, *formula;
+  // BoolectorNode *inOne;
 
   BoolectorSort s;
 
   btor = boolector_new();
-  s = boolector_bitvec_sort(btor, 8);
-  x1 = boolector_var(btor, s, "x1");
-  x2 = boolector_var(btor, s, "x2");
+  s    = boolector_bitvec_sort(btor, 8);
+  x1   = boolector_var(btor, s, "x1");
+  x2   = boolector_var(btor, s, "x2");
 
   inZero1 = boolector_zero(btor, s);
-  //inOne = boolector_one(btor, s);
+  // inOne = boolector_one(btor, s);
 
   for (const auto &node : g->forward()) {
     fmt::print("Node type: {}, place: {}\n", node.get_type_name(), node.get_nid());
 
     if (node.get_type_op() == Ntype_op::And) {
-       fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
-       boolector_and(btor,x1,x2);
+      fmt::print(" {} found at {} \n", node.get_type_name(), node.get_nid());
+      boolector_and(btor, x1, x2);
     }
-    
+
     else if (node.get_type_op() == Ntype_op::Or) {
-       fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
-       boolector_or(btor,x1,x2);
+      fmt::print(" {} found at {} \n", node.get_type_name(), node.get_nid());
+      boolector_or(btor, x1, x2);
     }
 
     else if (node.get_type_op() == Ntype_op::Xor) {
-       fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
-       boolector_xor(btor,x1,x2);
-       //boolector_assert(btor, bool_xor_node);
+      fmt::print(" {} found at {} \n", node.get_type_name(), node.get_nid());
+      boolector_xor(btor, x1, x2);
+      // boolector_assert(btor, bool_xor_node);
     }
 
     else if (node.get_type_op() == Ntype_op::EQ) {
@@ -115,8 +113,8 @@ void Pass_lec::check_lec(Lgraph *g) {
     }
 
     else if (node.get_type_op() == Ntype_op::Not) {
-       fmt::print(" {} found at {} \n", node.get_type_name(),node.get_nid() );
-       boolector_not(btor,x1);
+      fmt::print(" {} found at {} \n", node.get_type_name(), node.get_nid());
+      boolector_not(btor, x1);
     }
 
     else if (node.get_type_op() == Ntype_op::Ror) {
@@ -135,11 +133,8 @@ void Pass_lec::check_lec(Lgraph *g) {
       boolector_add(btor, x1, x2);
     };
 
-
-    //boolector_assert(btor, lg_temp_node);
-
+    // boolector_assert(btor, lg_temp_node);
   };
-
 
   eq1 = boolector_eq(btor, x1, inZero1);
   boolector_assert(btor, eq1);
@@ -151,17 +146,15 @@ void Pass_lec::check_lec(Lgraph *g) {
 
   int result = boolector_sat(btor);
 
+  // fmt::print("Expect: unsat, Result: {}\n", result);
+  fmt::print("Boolector: {}\n", result == BOOLECTOR_SAT ? "sat" : (result == BOOLECTOR_UNSAT ? "unsat" : "unknown"));
 
-  //fmt::print("Expect: unsat, Result: {}\n", result);
-  fmt::print("Boolector: {}\n",result == BOOLECTOR_SAT ? "sat" : (result == BOOLECTOR_UNSAT ? "unsat":"unknown"));
+  // fmt::print("test");
 
-  //fmt::print("test");
-  
-/*if(result != BOOLECTOR_UNSAT)
-  {
-    abort();
-  };*/
-
+  /*if(result != BOOLECTOR_UNSAT)
+    {
+      abort();
+    };*/
 
   /*fmt::print("Boolector model:\n");
   std::string type = "btor";
@@ -190,7 +183,4 @@ void Pass_lec::check_lec(Lgraph *g) {
 
   assert (boolector_get_refs (btor) == 0);
   boolector_delete(btor);*/
-
-  
-
 }

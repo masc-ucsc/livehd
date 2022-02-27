@@ -125,7 +125,7 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
 
   if (size > 63) {
     overflow = true;
-    max      = size - 1;     // Use bits in overflow mode
+    max      = size - 1;  // Use bits in overflow mode
     // min      =(size - 1);  // Use bits
   } else {
     overflow = false;
@@ -168,7 +168,6 @@ Bits_t Bitwidth_range::get_sbits() const {
       return 0;  // To indicate overflow (unable to compute)
     return bits;
   }
-   
 
   auto a    = Lconst(max).get_bits();  // 15 -> 5sbits
   auto b    = Lconst(min).get_bits();

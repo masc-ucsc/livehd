@@ -7,15 +7,15 @@
 
 class Fast_edge_iterator {
 protected:
-  Lgraph *   top_g;
+  Lgraph    *top_g;
   const bool visit_sub;
 
 public:
   class Fast_iter {
   private:
     // TODO: It may be clear to have Node, not all the Node fileds here (historical reasons before Node existed)
-    Lgraph *        top_g;
-    Lgraph *        current_g;
+    Lgraph         *top_g;
+    Lgraph         *current_g;
     Hierarchy_index hidx;
     Index_id        nid;
     const bool      visit_sub;
@@ -134,7 +134,7 @@ public:
   };
 
 protected:
-  Lgraph *   top_g;
+  Lgraph    *top_g;
   const bool visit_sub;
 
 public:
@@ -175,7 +175,7 @@ public:
   };
 
 protected:
-  Lgraph *   top_g;
+  Lgraph    *top_g;
   const bool visit_sub;
 
 public:

@@ -270,7 +270,7 @@ void  Node_pin::set_delay(float val) { top_g->ref_node_pin_delay_map()->insert_o
 bool  Node_pin::has_delay() const { return top_g->get_node_pin_delay_map().contains(get_compact_driver()); }
 float Node_pin::get_delay() const {
   const auto &ptr = top_g->get_node_pin_delay_map();
-  const auto it = ptr.find(get_compact_driver());
+  const auto  it  = ptr.find(get_compact_driver());
   I(it != ptr.end());
   return it->second;
 }
@@ -286,11 +286,11 @@ void Node_pin::set_name(std::string_view wname) {
   auto *rref = current_g->ref_node_pin_name_rmap();
   rref->insert_or_assign(wname, get_compact_class_driver());
   // auto [rref_it, rref_inserted] = rref->insert_or_assign(wname, get_compact_class_driver());
-  //I(rref_inserted); // name was not previously bound to something (erase or move API to cache errors)
+  // I(rref_inserted); // name was not previously bound to something (erase or move API to cache errors)
 }
 
 void Node_pin::reset_name(std::string_view wname) {
-  auto *ref  = current_g->ref_node_pin_name_map();
+  auto *ref = current_g->ref_node_pin_name_map();
 
   auto it = ref->find(get_compact_class_driver());
   if (it != ref->end()) {
@@ -298,7 +298,7 @@ void Node_pin::reset_name(std::string_view wname) {
       return;
 
     it->second = wname;
-  }else{
+  } else {
     ref->insert_or_assign(get_compact_class_driver(), wname);
   }
 
@@ -357,7 +357,7 @@ std::string Node_pin::debug_name() const {
   std::string name;
   if (!sink) {
     const auto &ptr = current_g->get_node_pin_name_map();
-    const auto it = ptr.find(get_compact_class_driver());
+    const auto  it  = ptr.find(get_compact_class_driver());
     if (it != ptr.end())
       name = it->second;
   }
@@ -421,7 +421,7 @@ std::string Node_pin::get_name() const {
 #endif
   // NOTE: Not the usual get_compact_class_driver() to handle IO change from driver/sink
   const auto &ptr = current_g->get_node_pin_name_map();
-  const auto   it = ptr.find(get_compact_class_driver());
+  const auto  it  = ptr.find(get_compact_class_driver());
   I(it != ptr.end());
   return it->second;
 }
@@ -429,16 +429,16 @@ std::string Node_pin::get_name() const {
 bool Node_pin::has_name() const { return current_g->get_node_pin_name_map().contains(get_compact_class_driver()); }
 
 Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
-  auto       *ref = top->ref_node_pin_name_map();
-  auto      *rref = top->ref_node_pin_name_rmap();
+  auto *ref  = top->ref_node_pin_name_map();
+  auto *rref = top->ref_node_pin_name_rmap();
   {
-    const auto it  = rref->find(wname);
+    const auto it = rref->find(wname);
     if (it != rref->end()) {
       if (top->is_valid_node_pin(it->second.idx)) {
         return {top, it->second};
       }
       ref->erase(it->second);
-      rref->erase(it); // pending/lazy delete
+      rref->erase(it);  // pending/lazy delete
     }
   }
 
@@ -450,7 +450,7 @@ Node_pin Node_pin::find_driver_pin(Lgraph *top, std::string_view wname) {
         return {top, it2->second};
       }
       ref->erase(it2->second);
-      rref->erase(it2); // pending/lazy delete
+      rref->erase(it2);  // pending/lazy delete
     }
   }
 
@@ -477,7 +477,7 @@ std::string Node_pin::get_pin_name() const {
 
   if (is_driver()) {
     if (Ntype::is_multi_driver(op))
-      return std::to_string(pid); // this is the reason for std::string return
+      return std::to_string(pid);  // this is the reason for std::string return
 
     return std::string(Ntype::get_driver_name(op));
   }
@@ -489,14 +489,14 @@ void Node_pin::set_offset(Bits_t offset) {
   auto *ref = current_g->ref_node_pin_offset_map();
   if (offset == 0) {
     ref->erase(get_compact_class_driver());
-  }else{
+  } else {
     ref->insert_or_assign(get_compact_class_driver(), offset);
   }
 }
 
 Bits_t Node_pin::get_offset() const {
   const auto &ptr = current_g->get_node_pin_offset_map();
-  const auto it = ptr.find(get_compact_class_driver());
+  const auto  it  = ptr.find(get_compact_class_driver());
   if (it == ptr.end())
     return 0;
 
@@ -536,7 +536,7 @@ Node_pin Node_pin::get_down_pin() const {
   I(node.is_type_sub_present());
 
   // 1st: Get down_hidx
-	auto down_hidx = top_g->ref_htree()->go_down(node);
+  auto down_hidx = top_g->ref_htree()->go_down(node);
 
   // 2nd: get down_pid
   I(pid != Port_invalid);

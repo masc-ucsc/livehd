@@ -24,20 +24,20 @@ protected:
 
   void attach_to_lnast(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
-  void        attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
-  void        attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
-  void        attach_memory_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_sum_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pid1_pin);
+  void attach_binary_reduc(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_not_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_join_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_pick_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_compar_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_simple_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_mux_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
+  void attach_memory_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin);
 
   void attach_children_to_node(Lnast& lnast, Lnast_nid& op_node, const Node_pin& pin);
   void attach_child(Lnast& lnast, Lnast_nid& op_node, const Node_pin& dpin);
@@ -46,12 +46,12 @@ protected:
   void handle_io(Lgraph* g, Lnast_nid& parent_lnast_node, Lnast& lnast);
   void add_bw_in_ln(Lnast& lnast, Lnast_nid& parent_node, bool is_pos, std::string_view pin_name, const uint32_t& bits);
 
-  std::string    create_temp_var(std::string_view str_prefix = "___");
-  bool             has_prefix(std::string_view test_string);
+  std::string create_temp_var(std::string_view str_prefix = "___");
+  bool        has_prefix(std::string_view test_string);
 
-  std::string      dpin_get_name(const Node_pin dpin);
-  void             dpin_set_map_name(const Node_pin dpin, std::string_view name_part);
-  std::string    get_new_seq_name();
+  std::string dpin_get_name(const Node_pin dpin);
+  void        dpin_set_map_name(const Node_pin dpin, std::string_view name_part);
+  std::string get_new_seq_name();
 
 public:
   static void trans(Eprp_var& var);

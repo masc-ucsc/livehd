@@ -308,8 +308,7 @@ void Prp_lnast::eval_for_index(lh::Tree_index idx_start_ast, lh::Tree_index idx_
 }
 
 // WARNING: can we always pass an assignment expression to this? nope!
-Lnast_node Prp_lnast::eval_scope_declaration(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln,
-                                             Lnast_node name_node) {
+Lnast_node Prp_lnast::eval_scope_declaration(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln, Lnast_node name_node) {
   lh::Tree_index idx_nxt_ln = idx_start_ln;
 
   // check if the root is an assignment expression
@@ -328,7 +327,7 @@ Lnast_node Prp_lnast::eval_scope_declaration(lh::Tree_index idx_start_ast, lh::T
   const auto &fcall_node = ast->get_data(idx_fcall);                 // it's called fcall, but it could be any of those three
 
   lh::Tree_index idx_cond_ast;
-  Lnast_node           cond_lhs;
+  Lnast_node     cond_lhs;
   if (fcall_node.token_entry == 0) {
     idx_cond_ast = ast->get_last_child(idx_fcall);  // expression for fcall truth
     if (is_expr(idx_cond_ast)) {
@@ -763,8 +762,7 @@ void Prp_lnast::add_tuple_nodes(lh::Tree_index idx_start_ln, std::vector<std::ar
   }
 }
 
-Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index &idx_start_ast,
-                                               const lh::Tree_index &idx_start_ln) {
+Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index &idx_start_ast, const lh::Tree_index &idx_start_ln) {
   I(!idx_start_ast.is_invalid());
 
   std::vector<std::array<Lnast_node, 3>> tuple_nodes;
@@ -899,7 +897,7 @@ Lnast_node Prp_lnast::evaluate_all_tuple_nodes(const lh::Tree_index &idx_start_a
 Lnast_node Prp_lnast::eval_expression(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln) {
   (void)idx_start_ln;
   lh::Tree_index idx_nxt_ln  = cur_stmts;
-  auto                 idx_nxt_ast = idx_start_ast;
+  auto           idx_nxt_ast = idx_start_ast;
 
   std::list<Lnast_node> operand_stack;
   std::list<Lnast_node> operator_stack;
@@ -1132,14 +1130,14 @@ Lnast_node Prp_lnast::eval_sub_expression(lh::Tree_index idx_start_ast, Lnast_no
   // evaluate a single binary expression op0 op op1. Assume that if op0 is an expression, it has already
   // been added to the lnast
 
-  auto                 idx_nxt_ast = idx_start_ast;  // this points to the first operand
+  auto           idx_nxt_ast = idx_start_ast;  // this points to the first operand
   lh::Tree_index idx_nxt_ln  = cur_stmts;
 
   auto op0_idx      = idx_nxt_ast;
   auto operator_idx = ast->get_sibling_next(op0_idx);  // can only be + or -
   auto op1_idx      = ast->get_sibling_next(operator_idx);
 
-  auto op0         = Lnast_node::create_ref(last_temp_var);
+  auto op0 = Lnast_node::create_ref(last_temp_var);
 
   auto op1 = eval_rule(op1_idx, idx_nxt_ln);
 
@@ -1220,8 +1218,8 @@ Lnast_node Prp_lnast::eval_tuple_array_notation(lh::Tree_index idx_start_ast, lh
   return retnode;
 }
 
-Lnast_node Prp_lnast::eval_fcall_explicit(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln,
-                                          lh::Tree_index idx_piped_val, Lnast_node piped_node, Lnast_node name_node) {
+Lnast_node Prp_lnast::eval_fcall_explicit(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln, lh::Tree_index idx_piped_val,
+                                          Lnast_node piped_node, Lnast_node name_node) {
   // check if the root is an assignment expression
   const auto &root_rid    = ast->get_data(idx_start_ast).rule_id;
   auto        idx_nxt_ast = idx_start_ast;
@@ -1388,8 +1386,8 @@ Lnast_node Prp_lnast::eval_fcall_explicit(lh::Tree_index idx_start_ast, lh::Tree
   return lhs_node;
 }
 
-Lnast_node Prp_lnast::eval_fcall_implicit(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln,
-                                          lh::Tree_index idx_piped_val, Lnast_node piped_node, Lnast_node name_node) {
+Lnast_node Prp_lnast::eval_fcall_implicit(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln, lh::Tree_index idx_piped_val,
+                                          Lnast_node piped_node, Lnast_node name_node) {
   PRINT_DBG_LN("Evaluating an implicit function call.\n");
   auto        idx_root    = idx_start_ast;
   const auto &root_rid    = ast->get_data(idx_start_ast).rule_id;
@@ -1673,7 +1671,7 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(lh::Tree_index idx_start_ast, 
     auto data_var = ast->get_data(lhs_var_idx);
     if (data_var.rule_id == Prp_rule_reference) {
       src_var = Lnast_node::create_ref(get_token(data_var.token_entry));
-    }else{
+    } else {
       // There was a foo.bar.xxx@(...) sequence
       src_var = eval_tuple(lhs_var_idx, idx_nxt_ln);
     }
@@ -1705,7 +1703,7 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(lh::Tree_index idx_start_ast, 
 
   // create bit select node
   lh::Tree_index idx_sel_root;
-  Lnast_node           lr_bits_node;
+  Lnast_node     lr_bits_node;
   if (in_lhs) {
     if (!in_lhs_sel_root.is_invalid()) {
       // FIXME: current pyrope parser does not translate well BUT it is valid
@@ -1714,7 +1712,7 @@ Lnast_node Prp_lnast::eval_bit_selection_notation(lh::Tree_index idx_start_ast, 
     }
 
     lh::Tree_index idx_shl_root;
-    Lnast_node           shl_node;
+    Lnast_node     shl_node;
     if (sel_exists) {
       idx_shl_root = lnast->add_child(idx_nxt_ln, Lnast_node::create_shl());
       shl_node     = get_lnast_temp_ref();
@@ -1795,7 +1793,7 @@ Lnast_node Prp_lnast::eval_fluid_ref(lh::Tree_index idx_start_ast, lh::Tree_inde
     }
   }
 #else
-  auto retnode = get_lnast_temp_ref();
+  auto retnode      = get_lnast_temp_ref();
 #endif
 
   return retnode;
@@ -1844,7 +1842,7 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
           return Lnast_node::create_ge();
         else {
           if (scan_text(ast->get_data(ast->get_sibling_next(idx)).token_entry) == ">") {
-            idx = ast->get_sibling_next(idx);
+            idx        = ast->get_sibling_next(idx);
             *skip_sibs = 1;
             return Lnast_node::create_sra();
           }
@@ -1875,8 +1873,7 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
           return Lnast_node::create_tuple_concat();
         }
         return Lnast_node::create_plus();
-      case '-':
-        return Lnast_node::create_minus();
+      case '-': return Lnast_node::create_minus();
       default:  // unimplemented operator
         Pass::error("Operator {} is not yet supported.", tid);
         return Lnast_node::create_phi();  // not sure what phi is
@@ -1981,8 +1978,7 @@ inline uint8_t Prp_lnast::maybe_child_expr(lh::Tree_index idx) {
   return false;
 }
 
-inline void Prp_lnast::create_simple_lhs_expr(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln,
-                                              Lnast_node rhs_node) {
+inline void Prp_lnast::create_simple_lhs_expr(lh::Tree_index idx_start_ast, lh::Tree_index idx_start_ln, Lnast_node rhs_node) {
   const auto &base_rule_node = ast->get_data(idx_start_ast);
   if (base_rule_node.rule_id == Prp_rule_assignment_expression) {
     auto expr_root_idx = lnast->add_child(idx_start_ln, Lnast_node::create_assign());
@@ -2009,12 +2005,12 @@ inline Lnast_node Prp_lnast::create_const_node(lh::Tree_index idx) {
       auto        cur_token_entry = ast->get_data(idx_cur_string).token_entry;
       auto        cur_token       = get_token(cur_token_entry);
       std::string new_token_text;
-      auto        string_start    = cur_token.pos1;
+      auto        string_start = cur_token.pos1;
       while (scan_text(cur_token_entry) != "\'") {
         if (string_length != 0) {
           // insert space(s)
           auto spaces_needed = cur_token.pos1 - (string_start + string_length);
-          new_token_text = new_token_text.append(spaces_needed, ' ');
+          new_token_text     = new_token_text.append(spaces_needed, ' ');
         }
         string_length += cur_token.get_text().size();
         absl::StrAppend(&new_token_text, cur_token.get_text());

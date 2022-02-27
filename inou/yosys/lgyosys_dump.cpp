@@ -133,7 +133,7 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
     if (io_pin.is_invalid())
       continue;
     // fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
-    auto  name = absl::StrCat("\\", io_pin.name);
+    auto         name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
     wire->port_id     = port_id++;
     if (io_pin.is_input()) {
@@ -191,7 +191,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
   assert(do_fwd == 0 || do_fwd == 1);
 
   auto latency_value = node.get_sink_pin("type").get_driver_node().get_type_const().to_i();
-  I(latency_value < 2); // TODO: 2 is array (no flop)
+  I(latency_value < 2);  // TODO: 2 is array (no flop)
 
   memory->setParam("\\SIZE", mem_size);
   memory->setParam("\\MEMID", RTLIL::Const::from_string(node.get_name()));
@@ -380,7 +380,7 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
         do_unsign = true;
       }
 #else
-      new_wire  = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
+      new_wire = mod->addWire(next_id(node.get_class_lgraph()), lc.get_bits());
 #endif
 
       if (lc.get_bits() < 31 && lc.is_i()) {  // 32bit in yosys const
@@ -777,12 +777,12 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
             mod->addDff(next_id(g), clock_wire, din_wire, cell_output_map[node.get_driver_pin().get_compact()], posclk);
           } else {
             mod->addDffe(next_id(g),
-                            clock_wire,
-                            enable_wire,
-                            din_wire,
-                            cell_output_map[node.get_driver_pin().get_compact()],
-                            posclk,
-                            true);  // enable is always active high in LiveHD
+                         clock_wire,
+                         enable_wire,
+                         din_wire,
+                         cell_output_map[node.get_driver_pin().get_compact()],
+                         posclk,
+                         true);  // enable is always active high in LiveHD
           }
         } else {  // reset wire
           RTLIL::Const initial_const(0, node.get_bits());
@@ -793,53 +793,53 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           if (enable_wire == nullptr) {
             if (async) {
               mod->addAdff(next_id(g),
-                              clock_wire,
-                              reset_wire,
-                              din_wire,
-                              cell_output_map[node.get_driver_pin().get_compact()],
-                              initial_const,
-                              posclk,
-                              !negreset);  // reset_polarity
+                           clock_wire,
+                           reset_wire,
+                           din_wire,
+                           cell_output_map[node.get_driver_pin().get_compact()],
+                           initial_const,
+                           posclk,
+                           !negreset);  // reset_polarity
             } else {
               mod->addSdff(next_id(g),
-                              clock_wire,
-                              reset_wire,
-                              din_wire,
-                              cell_output_map[node.get_driver_pin().get_compact()],
-                              initial_const,
-                              posclk,
-                              !negreset);  // reset_polarity
+                           clock_wire,
+                           reset_wire,
+                           din_wire,
+                           cell_output_map[node.get_driver_pin().get_compact()],
+                           initial_const,
+                           posclk,
+                           !negreset);  // reset_polarity
             }
           } else {
             if (async) {
               mod->addAdffe(next_id(g),
-                               clock_wire,
-                               enable_wire,
-                               reset_wire,
-                               din_wire,
-                               cell_output_map[node.get_driver_pin().get_compact()],
-                               initial_const,
-                               posclk,
-                               true,        // only posedge enable polarity supported in LiveHD
-                               !negreset);  // reset_polarity
+                            clock_wire,
+                            enable_wire,
+                            reset_wire,
+                            din_wire,
+                            cell_output_map[node.get_driver_pin().get_compact()],
+                            initial_const,
+                            posclk,
+                            true,        // only posedge enable polarity supported in LiveHD
+                            !negreset);  // reset_polarity
             } else {
               mod->addSdffe(next_id(g),
-                               clock_wire,
-                               enable_wire,
-                               reset_wire,
-                               din_wire,
-                               cell_output_map[node.get_driver_pin().get_compact()],
-                               initial_const,
-                               posclk,
-                               true,        // only posedge enable polarity supported in LiveHD
-                               !negreset);  // reset_polarity
+                            clock_wire,
+                            enable_wire,
+                            reset_wire,
+                            din_wire,
+                            cell_output_map[node.get_driver_pin().get_compact()],
+                            initial_const,
+                            posclk,
+                            true,        // only posedge enable polarity supported in LiveHD
+                            !negreset);  // reset_polarity
             }
           }
         }
       } break;
       case Ntype_op::EQ: {
         std::vector<RTLIL::Wire *> rest;
-        RTLIL::Wire *              first = nullptr;
+        RTLIL::Wire               *first = nullptr;
         for (const auto &e : node.inp_edges()) {
           auto *w = get_wire(e.driver);
           if (!all_inp_unsigned && unsigned_wire.contains(w)) {
@@ -979,7 +979,7 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
       } break;
       case Ntype_op::Mux: {
         std::vector<RTLIL::Wire *> port;
-        RTLIL::Wire *              sel = nullptr;
+        RTLIL::Wire               *sel = nullptr;
 
         auto out_width = cell_output_map[node.get_driver_pin().get_compact()]->width;
 

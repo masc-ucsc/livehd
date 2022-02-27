@@ -7,8 +7,8 @@
 #include "gtest/gtest.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lrand.hpp"
 #include "lhtree.hpp"
+#include "lrand.hpp"
 #include "perf_tracing.hpp"
 
 using testing::HasSubstr;
@@ -18,7 +18,7 @@ protected:
   struct Node_data {
     Node_data() : cnode(0) {}
     int                 create_pos;
-    Lgraph *            lg;
+    Lgraph             *lg;
     Hierarchy_index     hidx;
     Node::Compact_class cnode;
     int                 fwd_pos;
@@ -28,8 +28,8 @@ protected:
   };
 
   lh::tree<Node_data> tree;
-  std::vector<Node>         node_order;
-  Lgraph *                  lg_root;
+  std::vector<Node>   node_order;
+  Lgraph             *lg_root;
 
   absl::flat_hash_map<Node::Compact, uint64_t> absl_fwd_pos;
   absl::flat_hash_map<Node::Compact, uint64_t> absl_bwd_pos;
@@ -125,7 +125,7 @@ protected:
       }
 
       const auto parent_index = tree.get_parent(index);
-      auto &     parent_data  = tree.get_data(parent_index);
+      auto      &parent_data  = tree.get_data(parent_index);
 
       Node parent_node(lg_root, parent_data.hidx, parent_data.cnode);
       data->hidx = parent_node.hierarchy_go_down();

@@ -12,8 +12,8 @@
 
 void Top_api::files(Eprp_var &var) {
   std::string src_path(var.get("src_path"));
-  std::string match   (var.get("match"));
-  std::string filter  (var.get("filter"));
+  std::string match(var.get("match"));
+  std::string filter(var.get("filter"));
 
   try {
     const std::regex txt_regex(match);
@@ -25,11 +25,11 @@ void Top_api::files(Eprp_var &var) {
       return;
     }
     std::vector<std::string> sort_files;
-    struct dirent *          dp;
+    struct dirent           *dp;
     while ((dp = readdir(dirp)) != NULL) {
       if (dp->d_type == DT_DIR)
         continue;
-      std::string filename(dp->d_name); // string looks for 0 sequence
+      std::string filename(dp->d_name);  // string looks for 0 sequence
       if (match.empty()) {
         if (filter.empty()) {
           sort_files.push_back(filename);
@@ -52,7 +52,7 @@ void Top_api::files(Eprp_var &var) {
       if (!files.empty())
         absl::StrAppend(&files, ",", src_path, "/", s);
       else
-        files = absl::StrCat(        src_path, "/", s);
+        files = absl::StrCat(src_path, "/", s);
     }
 
     var.add("files", files);

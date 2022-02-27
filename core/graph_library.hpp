@@ -27,7 +27,7 @@ protected:
   inline static std::mutex lgs_mutex;
 
   struct Graph_attributes {
-    Lgraph *    lg;
+    Lgraph     *lg;
     std::string source;  // File were this module came from. If file updated (all the associated Lgraphs must be deleted). If empty,
                          // it ies not present (blackbox)
     Lg_type_id version;  // In which sequence order were the graphs last modified
@@ -71,7 +71,7 @@ protected:
 
   Graph_library() { max_next_version = 1; }
 
-  explicit Graph_library(std::string_view  _path);
+  explicit Graph_library(std::string_view _path);
 
   void clean_library_int();
 
@@ -82,18 +82,18 @@ protected:
   Lg_type_id try_get_recycled_id_int();
   void       recycle_id_int(Lg_type_id lgid);
 
-  static bool exists_int(std::string_view  path, std::string_view name);
+  static bool exists_int(std::string_view path, std::string_view name);
   bool        exists_int(Lg_type_id lgid) const;
 
-  static Lgraph *try_find_lgraph_int(std::string_view  path, std::string_view name);
-  static Lgraph *try_find_lgraph_int(std::string_view  path, Lg_type_id lgid);
-  Lgraph *       try_find_lgraph_int(std::string_view name) const;
-  Lgraph *       try_find_lgraph_int(const Lg_type_id lgid) const;
+  static Lgraph *try_find_lgraph_int(std::string_view path, std::string_view name);
+  static Lgraph *try_find_lgraph_int(std::string_view path, Lg_type_id lgid);
+  Lgraph        *try_find_lgraph_int(std::string_view name) const;
+  Lgraph        *try_find_lgraph_int(const Lg_type_id lgid) const;
 
-  Sub_node &      reset_sub_int(std::string_view name, std::string_view source);
-  Sub_node &      ref_or_create_sub_int(std::string_view name, std::string_view source);
-  Sub_node &      ref_or_create_sub_int(std::string_view name);
-  Sub_node *      ref_sub_int(Lg_type_id lgid);
+  Sub_node       &reset_sub_int(std::string_view name, std::string_view source);
+  Sub_node       &ref_or_create_sub_int(std::string_view name, std::string_view source);
+  Sub_node       &ref_or_create_sub_int(std::string_view name);
+  Sub_node       *ref_sub_int(Lg_type_id lgid);
   const Sub_node &get_sub_int(Lg_type_id lgid) const;
 
   Lg_type_id add_name_int(std::string_view name, std::string_view source);
@@ -132,7 +132,7 @@ protected:
 
   bool has_name_int(std::string_view name) const { return name2id.find(name) != name2id.end(); }
 
-  static Graph_library *instance_int(std::string_view  path);
+  static Graph_library *instance_int(std::string_view path);
 
   Lg_type_id  copy_lgraph_int(std::string_view name, std::string_view new_name);
   Lg_type_id  register_lgraph_int(std::string_view name, std::string_view source, Lgraph *lg);
@@ -148,7 +148,7 @@ public:
   Graph_library(const Graph_library &s) = delete;
   Graph_library &operator=(const Graph_library &) = delete;
 
-  static bool exists(std::string_view  path, std::string_view name) {
+  static bool exists(std::string_view path, std::string_view name) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return exists_int(path, name);
   }
@@ -158,12 +158,12 @@ public:
     return exists_int(lgid);
   }
 
-  static Lgraph *try_find_lgraph(std::string_view  path, std::string_view name) {
+  static Lgraph *try_find_lgraph(std::string_view path, std::string_view name) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(path, name);
   }
 
-  static Lgraph *try_find_lgraph(std::string_view  path, Lg_type_id lgid) {
+  static Lgraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(path, lgid);
   }
@@ -264,7 +264,7 @@ public:
   }
 
   // TODO: Change to Graph_library &instance...
-  static Graph_library *instance(std::string_view  path) {
+  static Graph_library *instance(std::string_view path) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return instance_int(path);
   }

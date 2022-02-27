@@ -1,10 +1,10 @@
 
 #include "ast.hpp"
-#include "str_tools.hpp"
 
 #include "fmt/format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "str_tools.hpp"
 
 class Ast_test_setup : public ::testing::Test {
 protected:
@@ -50,7 +50,7 @@ public:
         ast->down();
       } else if (cmd == "add") {
         EXPECT_TRUE(scan_is_token(Token_id_num));
-        auto val = scan_text(); // const auto & better but KEPT on purpose to test copy too
+        auto val = scan_text();  // const auto & better but KEPT on purpose to test copy too
         scan_next();
 
         auto    rid_int = str_tools::to_i(val);

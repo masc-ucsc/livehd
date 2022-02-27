@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgedgeiter.hpp"
@@ -103,7 +102,6 @@ protected:
     top->add_edge(mux_y, top_y, 10);
     top->add_edge(s2_sss, top_s2_out, 1);
   }
-
 };
 
 TEST_F(Setup_graphs_test, iterate_sub_graph) {
@@ -121,7 +119,7 @@ TEST_F(Setup_graphs_test, iterate_sub_graph) {
 TEST_F(Setup_graphs_test, annotate1a) {
   for (const auto &node : top->forward()) {
     EXPECT_FALSE(node.has_place());
-    //EXPECT_DEATH({ node.get_place().get_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
+    // EXPECT_DEATH({ node.get_place().get_x(); }, "Assertion.*failed");  // get_place for something not set, triggers failure
   }
 }
 
@@ -139,7 +137,6 @@ TEST_F(Setup_graphs_test, annotate1b) {
 }
 
 TEST_F(Setup_graphs_test, annotated) {
-
   for (const auto &node : top->forward()) {
     for (const auto &out_edge : node.out_edges()) {
       auto dpin = out_edge.driver;
@@ -234,7 +231,6 @@ TEST_F(Setup_graphs_test, annotate2_hier) {
 }
 
 TEST_F(Setup_graphs_test, cell_trivials) {
-
 #ifdef NDEBUG
   // costexpr propagates only when OPT is enabled
   constexpr auto pid = Ntype::get_sink_pid(Ntype_op::Sum, "B");

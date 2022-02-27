@@ -13,8 +13,7 @@
 #include "profile_time.hpp"
 
 void Pass_fplan_makefp::setup() {
-  auto m = Eprp_method("pass.fplan.makefp"
-      ,"generate a floorplan from an Lgraph", &Pass_fplan_makefp::pass);
+  auto m = Eprp_method("pass.fplan.makefp", "generate a floorplan from an Lgraph", &Pass_fplan_makefp::pass);
 
   m.add_label_optional("traversal",
                        "Lgraph traversal method to use. Valid options are \"hier_lg\", \"flat_node\", and \"hier_node\"",
@@ -81,7 +80,7 @@ Pass_fplan_makefp::Pass_fplan_makefp(const Eprp_var& var) : Pass("pass.fplan", v
 
   return;
 
-  auto t_str = var.get("traversal");
+  auto t_str   = var.get("traversal");
   auto whole_t = profile_time::Timer();
 
   fmt::print("generating floorplan...\n");

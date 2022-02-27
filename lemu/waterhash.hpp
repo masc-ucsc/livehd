@@ -81,4 +81,4 @@ static inline constexpr uint32_t waterhash(const void *key, uint32_t len, uint64
   seed = (seed ^ seed << 16) * (len ^ _waterp0);
   return (uint32_t)(seed - (seed >> 32));
 }
-}
+}  // namespace lh

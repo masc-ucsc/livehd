@@ -71,12 +71,12 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
   if (likely(!trying_merge || token_list_spaced)) {
     trying_merge      = false;
     token_list_spaced = false;
-    assert(memblock_size>=t.pos2);
+    assert(memblock_size >= t.pos2);
     token_list.emplace_back(t, memblock);
     return;
   }
 
-  trying_merge     = false;
+  trying_merge        = false;
   Ref_token &last_tok = token_list.back();
 
   if (last_tok.tok == Token_id_or && t.tok == Token_id_gt) {
@@ -110,29 +110,28 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
       }
     }
   } else if (t.tok == Token_id_alnum) {
-
     if (last_tok.tok == Token_id_pound) {  // #foo
       const char extra_char = memblock[t.pos1];
-      assert(t.pos2 == t.pos1+1);
+      assert(t.pos2 == t.pos1 + 1);
 
       token_list.back().fuse_token(Token_id_register, extra_char);
       return;
     } else if (last_tok.tok == Token_id_percent) {  // %foo
       const char extra_char = memblock[t.pos1];
-      assert(t.pos2 == t.pos1+1);
+      assert(t.pos2 == t.pos1 + 1);
 
       token_list.back().fuse_token(Token_id_output, extra_char);
       return;
     } else if (last_tok.tok == Token_id_dollar) {  // $foo
       const char extra_char = memblock[t.pos1];
-      assert(t.pos2 == t.pos1+1);
+      assert(t.pos2 == t.pos1 + 1);
 
       token_list.back().fuse_token(Token_id_input, extra_char);
       return;
     } else if (last_tok.tok == Token_id_alnum || last_tok.tok == Token_id_register || last_tok.tok == Token_id_output
                || last_tok.tok == Token_id_input) {  // foo
 
-      std::string_view extra_txt(memblock+t.pos1, t.pos2-t.pos1);
+      std::string_view extra_txt(memblock + t.pos1, t.pos2 - t.pos1);
       I(token_list.back().pos2 == t.pos1);
 
       token_list.back().append_token(extra_txt);
@@ -141,7 +140,7 @@ void Elab_scanner::add_token(const Ref_token::Tracker &t) {
   }
 
   token_list_spaced = false;
-  assert(memblock_size>=t.pos2);
+  assert(memblock_size >= t.pos2);
   token_list.emplace_back(t, memblock);
 }
 
@@ -296,8 +295,8 @@ void Elab_scanner::parse_step() {
       assert(!finishing_comment);
     } else if (unlikely(!finishing_comment
                         && ((last_c == '/' && c == '*')
-                            || (last_c == '(' && c == '*' && (memblock_size > pos) && memblock[pos + 1] != ')'
-                                && token_list.size() && token_list.back().tok != Token_id_at)))) {
+                            || (last_c == '(' && c == '*' && (memblock_size > pos) && memblock[pos + 1] != ')' && token_list.size()
+                                && token_list.back().tok != Token_id_at)))) {
       t.tok        = Token_id_comment;
       trying_merge = false;
 
@@ -386,19 +385,19 @@ Elab_scanner::Elab_scanner() {
 
   memblock      = 0;
   memblock_size = 0;
-  memblock_fd = -1;
+  memblock_fd   = -1;
 }
 
 void Elab_scanner::unregister_memblock() {
   if (memblock_fd == -1)
     return;
 
-// FIXME: memory leak, but this pointer should be "moved" to the LNAST tree not
-// deallocated here
-//
-//  int ok = munmap((void *)memblock, memblock_size);
-//  I(ok == 0);
-//  close(memblock_fd);
+  // FIXME: memory leak, but this pointer should be "moved" to the LNAST tree not
+  // deallocated here
+  //
+  //  int ok = munmap((void *)memblock, memblock_size);
+  //  I(ok == 0);
+  //  close(memblock_fd);
 
   memblock      = 0;
   memblock_size = 0;

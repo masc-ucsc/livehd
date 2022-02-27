@@ -46,8 +46,8 @@ char defaultName[64];
 char defaultOut[64];
 
 // Global variables
-FILE *        fout;
-void *        userData;
+FILE         *fout;
+void         *userData;
 int           numObjs;
 int           isSumSet;    // to keep track if within SUM
 int           isProp = 0;  // for PROPERTYDEFINITIONS
@@ -263,10 +263,10 @@ int nondefRulef(defrCallbackType_e c, const char *ruleName, defiUserData ud) {
 int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   // For net and special net.
   int         i, j, k, w, x, y, z, count, newLayer;
-  defiPath *  p;
+  defiPath   *p;
   defiSubnet *s;
   int         path;
-  defiVpin *  vpin;
+  defiVpin   *vpin;
   // defiShield *noShield;
   defiWire *wire;
 
@@ -538,13 +538,13 @@ int netf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
 
 int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   int         i, j, x, y, z, count, newLayer;
-  char *      layerName;
+  char       *layerName;
   double      dist, left, right;
-  defiPath *  p;
+  defiPath   *p;
   defiSubnet *s;
   int         path;
   defiShield *shield;
-  defiWire *  wire;
+  defiWire   *wire;
   int         numX, numY, stepX, stepY;
 
   if (c != defrSNetPartialPathCbkType)
@@ -788,9 +788,9 @@ int snetpath(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
 
 int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
   int         i, j, x, y, z, count = 0, newLayer;
-  defiPath *  p;
+  defiPath   *p;
   int         path;
-  defiWire *  wire;
+  defiWire   *wire;
   defiShield *shield;
   int         numX, numY, stepX, stepY;
 
@@ -945,13 +945,13 @@ int snetwire(defrCallbackType_e c, defiNet *ppath, defiUserData ud) {
 int snetf(defrCallbackType_e c, defiNet *net, defiUserData ud) {
   // For net and special net.
   int         i, j, x, y, z, count, newLayer;
-  char *      layerName;
+  char       *layerName;
   double      dist, left, right;
-  defiPath *  p;
+  defiPath   *p;
   defiSubnet *s;
   int         path;
   defiShield *shield;
-  defiWire *  wire;
+  defiWire   *wire;
   int         numX, numY, stepX, stepY;
 
   checkType(c);
@@ -1590,37 +1590,37 @@ int casesens(defrCallbackType_e c, int d, defiUserData ud) {
 }
 
 int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
-  defiSite *                   site;  // Site and Canplace and CannotOccupy
-  defiBox *                    box;   // DieArea and
-  defiPinCap *                 pc;
-  defiPin *                    pin;
+  defiSite                    *site;  // Site and Canplace and CannotOccupy
+  defiBox                     *box;   // DieArea and
+  defiPinCap                  *pc;
+  defiPin                     *pin;
   int                          i, j, k;
-  defiRow *                    row;
-  defiTrack *                  track;
-  defiGcellGrid *              gcg;
-  defiVia *                    via;
-  defiRegion *                 re;
-  defiGroup *                  group;
+  defiRow                     *row;
+  defiTrack                   *track;
+  defiGcellGrid               *gcg;
+  defiVia                     *via;
+  defiRegion                  *re;
+  defiGroup                   *group;
   defiComponentMaskShiftLayer *maskShiftLayer = NULL;
-  defiScanchain *              sc;
-  defiIOTiming *               iot;
-  defiFPC *                    fpc;
-  defiTimingDisable *          td;
-  defiPartition *              part;
-  defiPinProp *                pprop;
-  defiBlockage *               block;
-  defiSlot *                   slots;
-  defiFill *                   fills;
-  defiStyles *                 styles;
+  defiScanchain               *sc;
+  defiIOTiming                *iot;
+  defiFPC                     *fpc;
+  defiTimingDisable           *td;
+  defiPartition               *part;
+  defiPinProp                 *pprop;
+  defiBlockage                *block;
+  defiSlot                    *slots;
+  defiFill                    *fills;
+  defiStyles                  *styles;
   int                          xl, yl, xh, yh;
-  char *                       name, *a1, *b1;
-  char **                      inst, **inPin, **outPin;
-  int *                        bits;
+  char                        *name, *a1, *b1;
+  char                       **inst, **inPin, **outPin;
+  int                         *bits;
   int                          size;
   int                          corner, typ;
-  const char *                 itemT;
+  const char                  *itemT;
   char                         dir;
-  defiPinAntennaModel *        aModel;
+  defiPinAntennaModel         *aModel;
   struct defiPoints            points;
 
   checkType(c);
@@ -1720,7 +1720,7 @@ int cls(defrCallbackType_e c, void *cl, defiUserData ud) {
         }
         if (pin->hasPort()) {
           struct defiPoints points;
-          defiPinPort *     port;
+          defiPinPort      *port;
           for (j = 0; j < pin->numPorts(); j++) {
             port = pin->pinPort(j);
             fprintf(fout, "\n  + PORT");
@@ -2861,7 +2861,7 @@ int main(int argc, char **argv) {
       defrAddAlias("alias1", "aliasValue1", 1);
 
       defiAlias_itr aliasStore;
-      const char *  alias1Value = NULL;
+      const char   *alias1Value = NULL;
 
       while (aliasStore.Next()) {
         if (strcmp(aliasStore.Key(), "alias1") == 0) {

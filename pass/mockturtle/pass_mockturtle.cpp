@@ -156,7 +156,7 @@ void Pass_mockturtle::setup_output_signals(const unsigned int &group_id, const X
 
 // split the input signal by bits
 template <typename signal>
-void Pass_mockturtle::split_input_signal(const std::vector<signal> &       input_signal,
+void Pass_mockturtle::split_input_signal(const std::vector<signal>        &input_signal,
                                          std::vector<std::vector<signal>> &splitted_input_signal) {
   for (long unsigned int i = 0; i < input_signal.size(); i++) {
     if (splitted_input_signal.size() <= i)
@@ -170,7 +170,7 @@ void Pass_mockturtle::split_input_signal(const std::vector<signal> &       input
 template <typename sig_type, typename ntk_type>
 void Pass_mockturtle::match_bit_width_by_sign_extension(const Comparator_input_signal<sig_type> &sig1,
                                                         const Comparator_input_signal<sig_type> &sig2,
-                                                        Comparator_input_signal<sig_type> &      new_sig1,
+                                                        Comparator_input_signal<sig_type>       &new_sig1,
                                                         Comparator_input_signal<sig_type> &new_sig2, ntk_type &net) {
   const auto &sig1_bit_width = sig1.signals.size();
   const auto &sig2_bit_width = sig2.signals.size();
@@ -1135,7 +1135,7 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph *old_lg) {
 
 // solve complemented signal
 void Pass_mockturtle::connect_complemented_signal(Lgraph *g, Node_pin &driver_pin, Node_pin &sink_pin,
-                                                  const mockturtle::klut_network &        klut,
+                                                  const mockturtle::klut_network         &klut,
                                                   const mockturtle::klut_network::signal &signal) {
   if (klut.is_complemented(signal)) {
     auto not_gate            = g->create_node(Ntype_op::Not);

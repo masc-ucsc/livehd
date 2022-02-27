@@ -38,9 +38,9 @@ void Inou_firrtl::do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB
   name_to_range_map.clear();
   dot_map.clear();
 
-  constexpr auto top      = lh::Tree_index::root();
-  const auto     stmts    = ln->get_first_child(top);
-  std::string top_name(ln->get_name(top));
+  constexpr auto top   = lh::Tree_index::root();
+  const auto     stmts = ln->get_first_child(top);
+  std::string    top_name(ln->get_name(top));
 
   auto *mod  = circuit->add_module();
   auto *umod = new firrtl::FirrtlPB_Module_UserModule();
@@ -74,11 +74,11 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_bit_not_op(ln, lnidx, fstmt);
   } else if (ntype.is_mask_and()) {
-    I(false); // FIXME: this is similar to a reduce and, but not the same because it has a mask
+    I(false);  // FIXME: this is similar to a reduce and, but not the same because it has a mask
   } else if (ntype.is_mask_popcount()) {
-    I(false); // FIXME: this is similar to a popcount op with a mask
+    I(false);  // FIXME: this is similar to a popcount op with a mask
   } else if (ntype.is_mask_xor()) {
-    I(false); // FIXME: this is similar to a reduce xor, but not the same because it has a mask
+    I(false);  // FIXME: this is similar to a reduce xor, but not the same because it has a mask
 #if 0
     auto fstmt = pos_to_add_to == 0 ? when->add_consequent() : when->add_otherwise();
     process_ln_reduce_xor_op(ln, lnidx, fstmt);
@@ -152,11 +152,11 @@ void Inou_firrtl::process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx, firrtl::Fir
     auto fstmt = umod->add_statement();
     process_ln_bit_not_op(ln, lnidx, fstmt);
   } else if (ntype.is_mask_and()) {
-    I(false); // FIXME: similar to reduce and with mask
+    I(false);  // FIXME: similar to reduce and with mask
   } else if (ntype.is_mask_popcount()) {
-    I(false); // FIXME: similar to reduce popcount with mask
+    I(false);  // FIXME: similar to reduce popcount with mask
   } else if (ntype.is_mask_xor()) {
-    I(false); // FIXME: similar to reduce xor with mask
+    I(false);  // FIXME: similar to reduce xor with mask
 #if 0
     auto fstmt = umod->add_statement();
     process_ln_reduce_xor_op(ln, lnidx, fstmt);
@@ -235,8 +235,7 @@ bool Inou_firrtl::process_ln_assign_op(Lnast &ln, const Lnast_nid &lnidx_assign,
 /* When a tuple node is encountered, get the name (lhs).
  * Then look at each assign node and their LHS (L) and RHS (R).
  * Form a bunch of connect statements that do lhs.L <= R */
-void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, std::string_view lhs,
-                                  firrtl::FirrtlPB_Statement *fstmt) {
+void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, std::string_view lhs, firrtl::FirrtlPB_Statement *fstmt) {
   auto c0       = ln.get_first_child(lnidx_asg);
   auto c1       = ln.get_sibling_next(c0);
   auto ntype_c0 = ln.get_type(c0);
@@ -268,9 +267,8 @@ void Inou_firrtl::process_tup_asg(Lnast &ln, const Lnast_nid &lnidx_asg, std::st
  * then create subfield expression out of it. */
 // FIXME: See if I can't make this more general (SubInd, SubAcc, SubF)
 firrtl::FirrtlPB_Expression_SubField *Inou_firrtl::make_subfield_expr(std::string_view name) {
-
   std::vector<std::string> subnames;
-  for(const auto &e:absl::StrSplit(name,'.')) {
+  for (const auto &e : absl::StrSplit(name, '.')) {
     subnames.emplace_back(e);
   }
   I(subnames.size() >= 2);
@@ -332,9 +330,9 @@ void Inou_firrtl::process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_par
 }
 
 void Inou_firrtl::process_ln_nary_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt) {
-  bool        first     = true;
-  bool        first_arg = true;
-  uint8_t     child_count = 0;
+  bool    first       = true;
+  bool    first_arg   = true;
+  uint8_t child_count = 0;
 
   auto firrtl_oper_code = get_firrtl_oper_code(ln.get_data(lnidx_op).type);
 
@@ -749,14 +747,13 @@ std::string_view Inou_firrtl::get_firrtl_name_format(Lnast &ln, const Lnast_nid 
 }
 
 std::string_view Inou_firrtl::strip_prefixes(std::string_view str) {
-
-  auto skip=0u;
+  auto skip = 0u;
 
   auto ch = str.front();
   if (ch == '$' || ch == '%' || ch == '#')
-    skip=1;
-  else if (ch=='_' && str.substr(0,3) == "_._")
-    skip=3;
+    skip = 1;
+  else if (ch == '_' && str.substr(0, 3) == "_._")
+    skip = 3;
 
   if (skip)
     return str.substr(skip);
@@ -838,13 +835,13 @@ void Inou_firrtl::add_refcon_as_expr(Lnast &ln, const Lnast_nid &lnidx, firrtl::
   if (ln.get_data(lnidx).type.is_ref()) {
     // Lnidx is a variable, so I need to make a Reference argument.
     std::string str(get_firrtl_name_format(ln, lnidx));
-    auto *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
+    auto       *rhs_ref = new firrtl::FirrtlPB_Expression_Reference();
     rhs_ref->set_id(str);
     expr->set_allocated_reference(rhs_ref);
 
   } else if (ln.get_data(lnidx).type.is_const()) {
     // Lnidx is a number, so I need to make a [U/S]IntLiteral argument.
-    auto lconst_holder = Lconst::from_string(ln.get_name(lnidx));
+    auto        lconst_holder = Lconst::from_string(ln.get_name(lnidx));
     std::string lconst_str(ln.get_name(lnidx));
 
     auto *num = new firrtl::FirrtlPB_Expression_IntegerLiteral();

@@ -7,8 +7,8 @@
 #include "gtest/gtest.h"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lrand.hpp"
 #include "lhtree.hpp"
+#include "lrand.hpp"
 
 class Tree_lgdb_setup : public ::testing::Test {
 protected:
@@ -18,12 +18,12 @@ protected:
     int           fwd_pos;
     int           bwd_pos;
     bool          leaf;
-    std::string name;
+    std::string   name;
   };
 
   lh::tree<Node_data> tree;
-  std::vector<Node>         node_order;
-  Lgraph *                  lg_root;
+  std::vector<Node>   node_order;
+  Lgraph             *lg_root;
 
   absl::flat_hash_map<Node::Compact, uint64_t> absl_fwd_pos;
   absl::flat_hash_map<Node::Compact, uint64_t> absl_bwd_pos;
@@ -80,14 +80,14 @@ protected:
         int max_pos   = 0;
         for (int i = 0; i < n_inputs; ++i) {
           std::string name(std::string("i") + std::to_string(i));
-          int         pos  = max_pos + rint.between(1, 5);
-          max_pos          = pos;
+          int         pos = max_pos + rint.between(1, 5);
+          max_pos         = pos;
           sub_lg->add_graph_input(name, pos, rint.max(60));
         }
         for (int i = 0; i < n_outputs; ++i) {
           std::string name(std::string("o") + std::to_string(i));
-          int         pos  = max_pos + rint.between(1, 5);
-          max_pos          = pos;
+          int         pos = max_pos + rint.between(1, 5);
+          max_pos         = pos;
           sub_lg->add_graph_output(name, pos, rint.max(60));
         }
       }

@@ -3,43 +3,43 @@
 #include <stack>
 
 #include "elab_scanner.hpp"
-#include "lnast_ntype.hpp"
 #include "lhtree.hpp"
+#include "lnast_ntype.hpp"
 
 using Lnast_nid                     = lh::Tree_index;
 using Phi_rtable                    = absl::flat_hash_map<std::string, Lnast_nid>;  // rtable = resolve_table
 using Cnt_rtable                    = absl::flat_hash_map<std::string, int16_t>;
 using Selc_lrhs_table               = absl::flat_hash_map<Lnast_nid, std::pair<bool, Lnast_nid>>;  // sel -> (lrhs, paired opr node)
-using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid>;            // rtable = resolve_table
+using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid>;                 // rtable = resolve_table
 
 // tricky old C macro to avoid redundant code from function overloadings
-#define CREATE_LNAST_NODE(type)                                                                                \
+#define CREATE_LNAST_NODE(type)                                                                                     \
   static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, "")); } \
-  static Lnast_node create##type(std::string_view str) {                                                 \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, str));                                 \
-  }                                                                                                            \
-  static Lnast_node create##type(std::string_view str, uint32_t line_num) {                                  \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, str));                          \
-  }                                                                                                            \
-  static Lnast_node create##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {    \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, str));                    \
-  }                                                                                                            \
+  static Lnast_node create##type(std::string_view str) {                                                            \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, str));                                   \
+  }                                                                                                                 \
+  static Lnast_node create##type(std::string_view str, uint32_t line_num) {                                         \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, str));                            \
+  }                                                                                                                 \
+  static Lnast_node create##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {           \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, str));                      \
+  }                                                                                                                 \
   static Lnast_node create##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
 
 #define CREATE_LNAST_NODE_sv(type)                                                                          \
   static Lnast_node create##type(std::string_view sview) {                                                  \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, sview));               \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, sview));                         \
   }                                                                                                         \
   static Lnast_node create##type(std::string_view sview, uint32_t line_num) {                               \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, sview));        \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, sview));                  \
   }                                                                                                         \
   static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, sview));  \
-  }                                                                                                         \
+    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, sview));            \
+  }
 
 struct Lnast_node {
   Lnast_ntype type;
-  State_token      token;
+  State_token token;
   int16_t     subs;  // ssa subscript
 
   Lnast_node() : type(Lnast_ntype::create_invalid()), subs(0) {}
@@ -127,10 +127,10 @@ struct Lnast_node {
 
 class Lnast : public lh::tree<Lnast_node> {
 private:
-  std::string      top_module_name;
-  std::string      source_filename;
-  Lnast_nid        undefined_var_nid;
-  uint32_t         tmp_var_cnt = 0;
+  std::string top_module_name;
+  std::string source_filename;
+  Lnast_nid   undefined_var_nid;
+  uint32_t    tmp_var_cnt = 0;
 
   void      do_ssa_trans(const Lnast_nid &top_nid);
   void      ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
@@ -163,34 +163,34 @@ private:
   void ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid);
 
   // tuple operator process
-  void             trans_tuple_opr(const Lnast_nid &pats_nid);  // from sel to tuple_add/get
-  void             trans_tuple_opr_if_subtree(const Lnast_nid &if_nid);
-  void             trans_tuple_opr_handle_a_statement(const Lnast_nid &pats_nid, const Lnast_nid &opr_nid);
-  bool             check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name);
-  void             sel2local_tuple_chain(const Lnast_nid &pats_nid, Lnast_nid &sel_nid);
-  void             merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
-  void             rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid);
-  bool             is_scalar_attribute_related(const Lnast_nid &opr_nid);
-  void             selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
-  void             update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
-  bool             update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid);
-  bool             check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name,
-                                                                     const Lnast_nid &src_if_nid);
-  void             merge_hierarchical_attr_set(Lnast_nid &opr_nid);
-  void             collect_hier_tuple_nids(Lnast_nid &opr_nid, std::stack<Lnast_nid> &stk_tuple_fields);
-  std::string    create_tmp_var();
+  void        trans_tuple_opr(const Lnast_nid &pats_nid);  // from sel to tuple_add/get
+  void        trans_tuple_opr_if_subtree(const Lnast_nid &if_nid);
+  void        trans_tuple_opr_handle_a_statement(const Lnast_nid &pats_nid, const Lnast_nid &opr_nid);
+  bool        check_tuple_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name);
+  void        sel2local_tuple_chain(const Lnast_nid &pats_nid, Lnast_nid &sel_nid);
+  void        merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid);
+  void        rename_to_real_tuple_name(const Lnast_nid &psts_nid, const Lnast_nid &tup_nid);
+  bool        is_scalar_attribute_related(const Lnast_nid &opr_nid);
+  void        selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &opr_nid);
+  void        update_tuple_var_table(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
+  bool        update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid);
+  bool        check_tuple_var_1st_scope_ssa_table_parents_chain(const Lnast_nid &psts_nid, std::string_view ref_name,
+                                                                const Lnast_nid &src_if_nid);
+  void        merge_hierarchical_attr_set(Lnast_nid &opr_nid);
+  void        collect_hier_tuple_nids(Lnast_nid &opr_nid, std::stack<Lnast_nid> &stk_tuple_fields);
+  std::string create_tmp_var();
 
   // hierarchical statements node -> symbol table
-  absl::flat_hash_map<Lnast_nid, Phi_rtable>       phi_resolve_tables;
-  absl::flat_hash_map<Lnast_nid, Cnt_rtable>       ssa_rhs_cnt_tables;
-  absl::flat_hash_map<Lnast_nid, Selc_lrhs_table>  selc_lrhs_tables;
-  absl::flat_hash_map<Lnast_nid, Phi_rtable>       new_added_phi_node_tables;  // for each if-subtree scope
-  absl::flat_hash_set<std::string>               tuplized_table;
-  absl::flat_hash_map<std::string, Lnast_nid>    candidates_update_phi_resolve_table;
-  absl::flat_hash_map<std::string, int16_t>      global_ssa_lhs_cnt_table;
+  absl::flat_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
+  absl::flat_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
+  absl::flat_hash_map<Lnast_nid, Selc_lrhs_table> selc_lrhs_tables;
+  absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables;  // for each if-subtree scope
+  absl::flat_hash_set<std::string>                tuplized_table;
+  absl::flat_hash_map<std::string, Lnast_nid>     candidates_update_phi_resolve_table;
+  absl::flat_hash_map<std::string, int16_t>       global_ssa_lhs_cnt_table;
 
   // for chaining parent tuple-chain and local tuple chain, only record the first tuple variable appeared in each local scope
-  absl::flat_hash_map<Lnast_nid, Phi_rtable>       tuple_var_1st_scope_ssa_tables;
+  absl::flat_hash_map<Lnast_nid, Phi_rtable> tuple_var_1st_scope_ssa_tables;
 
   absl::flat_hash_set<std::string> collected_hier_tuple_reg_name;
 
@@ -216,14 +216,12 @@ public:
   static bool      is_output(std::string_view name) { return name.front() == '%'; }
   static bool      is_input(std::string_view name) { return name.front() == '$'; }
   std::string_view get_name(const Lnast_nid &nid) const { return get_data(nid).token.get_text(); }
-  std::string_view get_vname(const Lnast_nid &nid) const {
-    return get_data(nid).token.get_text();
-  }
+  std::string_view get_vname(const Lnast_nid &nid) const { return get_data(nid).token.get_text(); }
 
-  Lnast_ntype get_type(const Lnast_nid &nid) const { return get_data(nid).type; }
-  int16_t     get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
+  Lnast_ntype        get_type(const Lnast_nid &nid) const { return get_data(nid).type; }
+  int16_t            get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
   const State_token &get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
-  std::string get_sname(const Lnast_nid &nid) const {  // sname = ssa name
+  std::string        get_sname(const Lnast_nid &nid) const {  // sname = ssa name
     if (get_type(nid).is_const())
       return std::string(get_name(nid));
     return absl::StrCat(get_name(nid), "_", get_subs(nid));
@@ -235,9 +233,7 @@ public:
   void     set_bitwidth(std::string_view name, const uint32_t bitwidth);
 
   void dump(const Lnast_nid &root) const;
-  void dump() const {
-    dump(Lnast_nid::root());
-  }
+  void dump() const { dump(Lnast_nid::root()); }
 
   template <typename S, typename... Args>
   static void info(const S &format, Args &&...args) {
@@ -253,5 +249,4 @@ public:
       throw std::runtime_error(std::string(what()));
     };
   };
-
 };

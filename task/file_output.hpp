@@ -47,7 +47,8 @@ public:
     sequence.emplace_back(s5);
     sz += s1.size() + s2.size() + s3.size() + s4.size() + s5.size();
   }
-  void append(std::string_view s1, std::string_view s2, std::string_view s3, std::string_view s4, std::string_view s5, std::string_view s6) {
+  void append(std::string_view s1, std::string_view s2, std::string_view s3, std::string_view s4, std::string_view s5,
+              std::string_view s6) {
     sequence.emplace_back(s1);
     sequence.emplace_back(s2);
     sequence.emplace_back(s3);
@@ -57,6 +58,5 @@ public:
     sz += s1.size() + s2.size() + s3.size() + s4.size() + s5.size() + s6.size();
   }
 
-  void abort() { aborted = true; } // abort/cancel (the destructor will do nothing)
+  void abort() { aborted = true; }  // abort/cancel (the destructor will do nothing)
 };
-

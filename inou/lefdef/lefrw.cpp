@@ -249,14 +249,14 @@ void lefViaRuleLayer(lefiViaRuleLayer *vLayer) {
 void prtGeometry(lefiGeometries *geometry) {
   int                  numItems = geometry->lefiGeometries::numItems();
   int                  i, j;
-  lefiGeomPath *       path;
-  lefiGeomPathIter *   pathIter;
-  lefiGeomRect *       rect;
-  lefiGeomRectIter *   rectIter;
-  lefiGeomPolygon *    polygon;
+  lefiGeomPath        *path;
+  lefiGeomPathIter    *pathIter;
+  lefiGeomRect        *rect;
+  lefiGeomRectIter    *rectIter;
+  lefiGeomPolygon     *polygon;
   lefiGeomPolygonIter *polygonIter;
-  lefiGeomVia *        via;
-  lefiGeomViaIter *    viaIter;
+  lefiGeomVia         *via;
+  lefiGeomViaIter     *viaIter;
 
   for (i = 0; i < numItems; i++) {
     switch (geometry->lefiGeometries::itemType(i)) {
@@ -411,7 +411,7 @@ int arrayBeginCB(lefrCallbackType_e c, const char *name, lefiUserData) {
 
 int arrayCB(lefrCallbackType_e c, lefiArray *a, lefiUserData) {
   int               status, i, j, defCaps;
-  lefiSitePattern * pattern;
+  lefiSitePattern  *pattern;
   lefiTrackPattern *track;
   lefiGcellPattern *gcell;
 
@@ -682,17 +682,17 @@ int irdropEndCB(lefrCallbackType_e c, void *, lefiUserData) {
 int layerCB(lefrCallbackType_e c, lefiLayer *layer, lefiUserData) {
   int               i, j, k;
   int               numPoints, propNum;
-  double *          widths, *current;
+  double           *widths, *current;
   lefiLayerDensity *density;
-  lefiAntennaPWL *  pwl;
+  lefiAntennaPWL   *pwl;
   lefiSpacingTable *spTable;
-  lefiInfluence *   influence;
-  lefiParallel *    parallel;
-  lefiTwoWidths *   twoWidths;
+  lefiInfluence    *influence;
+  lefiParallel     *parallel;
+  lefiTwoWidths    *twoWidths;
   char              pType;
   int               numMinCut, numMinenclosed;
   lefiAntennaModel *aModel;
-  lefiOrthogonal *  ortho;
+  lefiOrthogonal   *ortho;
 
   checkType(c);
   // if ((long)ud != userData) dataError();
@@ -1360,7 +1360,7 @@ int minFeatureCB(lefrCallbackType_e c, lefiMinFeature *min, lefiUserData) {
 
 int nonDefaultCB(lefrCallbackType_e c, lefiNonDefault *def, lefiUserData) {
   int          i;
-  lefiVia *    via;
+  lefiVia     *via;
   lefiSpacing *spacing;
 
   checkType(c);
@@ -1449,7 +1449,7 @@ int obstructionCB(lefrCallbackType_e c, lefiObstruction *obs, lefiUserData) {
 
 int pinCB(lefrCallbackType_e c, lefiPin *pin, lefiUserData) {
   int                  numPorts, i, j;
-  lefiGeometries *     geometry;
+  lefiGeometries      *geometry;
   lefiPinAntennaModel *aModel;
 
   checkType(c);
@@ -2010,7 +2010,7 @@ int main(int argc, char **argv) {
   int         relax     = 0;
   const char *version   = "N/A";
   int         setVer    = 0;
-  char *      userData;
+  char       *userData;
   int         msgCb      = 0;
   int         test1      = 0;
   int         test2      = 0;

@@ -1,14 +1,12 @@
 
 #include "benchmark/benchmark.h"
-
-#include "lconst.hpp"
 #include "blop.hpp"
 #include "dlop.hpp"
+#include "lconst.hpp"
 
 static void BM_uint64_add(benchmark::State& state) {
-
   for (auto _ : state) {
-    uint64_t total=0;
+    uint64_t total = 0;
 
 #if 0
     state.PauseTiming();
@@ -28,7 +26,6 @@ static void BM_uint64_add(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 static void BM_lconst_add(benchmark::State& state) {
-
   for (auto _ : state) {
     Lconst total;
 
@@ -50,11 +47,9 @@ static void BM_lconst_add(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 static void BM_blop_add1(benchmark::State& state) {
-
   for (auto _ : state) {
-
-    int64_t total[1]={0};
-    int64_t one[1]={1};
+    int64_t total[1] = {0};
+    int64_t one[1]   = {1};
 
     for (int j = 0; j < state.range(0); ++j) {
       one[0] = j;
@@ -69,11 +64,9 @@ static void BM_blop_add1(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 static void BM_blop_add2(benchmark::State& state) {
-
   for (auto _ : state) {
-
-    int64_t total[2]={0,0};
-    int64_t one[2]={1,0};
+    int64_t total[2] = {0, 0};
+    int64_t one[2]   = {1, 0};
 
     for (int j = 0; j < state.range(0); ++j) {
       Blop::extend(one, 2, j);
@@ -88,26 +81,21 @@ static void BM_blop_add2(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 static void BM_dlop_create(benchmark::State& state) {
-
   for (auto _ : state) {
-
     for (int j = 0; j < state.range(0); ++j) {
       benchmark::DoNotOptimize(Dlop::create_integer(j));
     }
-
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
 }
 
 static void BM_dlop_add(benchmark::State& state) {
-
   for (auto _ : state) {
-
     auto total = Dlop::create_integer(0);
 
     for (int j = 0; j < state.range(0); ++j) {
       auto v = Dlop::create_integer(j);
-      total = total->add_op(v);
+      total  = total->add_op(v);
     }
 
     benchmark::DoNotOptimize(total);
@@ -116,9 +104,7 @@ static void BM_dlop_add(benchmark::State& state) {
 }
 
 static void BM_dlop_mut_add(benchmark::State& state) {
-
   for (auto _ : state) {
-
     auto total = Dlop::create_integer(0);
 
     for (int j = 0; j < state.range(0); ++j) {
@@ -132,22 +118,17 @@ static void BM_dlop_mut_add(benchmark::State& state) {
 }
 
 static void BM_test(benchmark::State& state) {
-
   for (auto _ : state) {
-
     for (int j = 0; j < state.range(0); ++j) {
       auto ptr = Dlop::alloc(16);
       Dlop::free(16, ptr);
     }
-
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
 }
 
 static void BM_dlop_mut_addi(benchmark::State& state) {
-
   for (auto _ : state) {
-
     auto total = Dlop::create_integer(0);
 
     for (int j = 0; j < state.range(0); ++j) {
@@ -188,4 +169,3 @@ int main(int argc, char* argv[]) {
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
 }
-

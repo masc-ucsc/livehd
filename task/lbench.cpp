@@ -1,12 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fmt/format.h>
 #include "lbench.hpp"
+
+#include <fmt/format.h>
+
 #include "thread_pool.hpp"
 
 int Lbench::getValue() const {  // Note: this value is in KB!
 #if 1
-  return 0; // disable memory stats
+  return 0;  // disable memory stats
 #else
 #ifdef __linux__
   FILE *file   = fopen("/proc/self/status", "r");
@@ -77,7 +79,6 @@ void Lbench::perf_stop() {
   waitpid(perf_pid, nullptr, 0);
 }
 
-
 void Lbench::start() {
   start_time = get_cycles();
   linux.start();
@@ -85,7 +86,7 @@ void Lbench::start() {
   static bool first = true;
   if (first) {
     global_start_time = start_time;
-    first = false;
+    first             = false;
   }
 }
 
@@ -104,11 +105,11 @@ void Lbench::sample(const std::string &name) {
   linux.sample(stats);
 
   Time_Sample s;
-  s.tp          = get_cycles();
-  s.ncycles     = stats[0];
-  s.ninst       = stats[1];
-  s.nbr_misses  = stats[2];
-  s.name        = name;
+  s.tp         = get_cycles();
+  s.ncycles    = stats[0];
+  s.ninst      = stats[1];
+  s.nbr_misses = stats[2];
+  s.name       = name;
 
   record.push_back(s);
 }
@@ -136,31 +137,30 @@ void Lbench::end() {
   linux.stop(stats);
 
 #ifdef __x86_64__
-  auto t = (tp - start_time);
+  auto t        = (tp - start_time);
   auto from_sec = (start_time - global_start_time);
-  auto to_sec   = (tp         - global_start_time);
+  auto to_sec   = (tp - global_start_time);
 #else
-  auto t = (tp - start_time).count();
+  auto t        = (tp - start_time).count();
   auto from_sec = (start_time - global_start_time).count();
-  auto to_sec   = (tp         - global_start_time).count();
+  auto to_sec   = (tp - global_start_time).count();
 #endif
 
-  auto res = fmt::format("{:<36} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n"
-      ,sample_name
-      ,Thread_pool::get_task_id()
-      ,t
-      ,((double)stats[1]) / (stats[0] + 1)
-      ,((double)stats[2] * 1000) / (stats[1] + 1)
-      ,((double)stats[3] * 1000) / (stats[1] + 1)
-      ,from_sec
-      ,to_sec
-      );
+  auto res = fmt::format("{:<36} tid={:<4} secs={:<15} IPC={:<10} BR_MPKI={:<10} L2_MPKI={:<10} from={} to={}\n",
+                         sample_name,
+                         Thread_pool::get_task_id(),
+                         t,
+                         ((double)stats[1]) / (stats[0] + 1),
+                         ((double)stats[2] * 1000) / (stats[1] + 1),
+                         ((double)stats[3] * 1000) / (stats[1] + 1),
+                         from_sec,
+                         to_sec);
 
   // int tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
 
   if (tfd < 0) {
     tfd = ::open("lbench.trace", O_CREAT | O_RDWR | O_APPEND, 0644);
-    if (tfd<0) {
+    if (tfd < 0) {
       fmt::print("ERROR: could not create lbench.trace\n");
       exit(-3);
     }

@@ -6,11 +6,11 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-static_assert(sizeof(   XEdge::Compact      ) == 16, "XEdge::Compact invalid asize"         );
-static_assert(sizeof(Node_pin::Compact      ) ==  8, "Node::Compact invalid asize"          );
-static_assert(sizeof(Node_pin::Compact_class) ==  4, "Node_pin::Compact_class invalid asize");
-static_assert(sizeof(    Node::Compact      ) ==  8, "Node::Compact invalid asize"          );
-static_assert(sizeof(    Node::Compact_class) ==  4, "Node::Compact_class invalid asize"    );
+static_assert(sizeof(XEdge::Compact) == 16, "XEdge::Compact invalid asize");
+static_assert(sizeof(Node_pin::Compact) == 8, "Node::Compact invalid asize");
+static_assert(sizeof(Node_pin::Compact_class) == 4, "Node_pin::Compact_class invalid asize");
+static_assert(sizeof(Node::Compact) == 8, "Node::Compact invalid asize");
+static_assert(sizeof(Node::Compact_class) == 4, "Node::Compact_class invalid asize");
 
 XEdge::XEdge(Lgraph *g, const Compact &c)
     : driver(g, Node_pin::Compact_class(c.driver_idx, false)), sink(g, Node_pin::Compact_class(c.sink_idx, true)) {

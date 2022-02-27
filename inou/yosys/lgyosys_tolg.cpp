@@ -29,8 +29,8 @@
 USING_YOSYS_NAMESPACE
 PRIVATE_NAMESPACE_BEGIN
 
-static CellTypes                          ct_all;
-static absl::flat_hash_set<size_t>        driven_signals;
+static CellTypes                        ct_all;
+static absl::flat_hash_set<size_t>      driven_signals;
 static absl::flat_hash_set<std::string> cell_port_inputs;
 static absl::flat_hash_set<std::string> cell_port_outputs;
 
@@ -52,7 +52,7 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     // log("input %s\n",wire->name.c_str());
     I(!wire->port_output);  // any bidirectional port?
     I(wire->name.c_str()[0] == '\\');
-    Node_pin      pin;
+    Node_pin    pin;
     std::string wname(&wire->name.c_str()[1]);
     if (g->has_graph_input(wname)) {
       pin = g->get_graph_input(wname);
@@ -1054,7 +1054,7 @@ static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, u
 
     auto n_z = current_dpin.get_bits();
 
-    auto          local_or_node = g->create_node(Ntype_op::Or, nbits);
+    auto        local_or_node = g->create_node(Ntype_op::Or, nbits);
     std::string mask("0b");
     mask = mask.append(n_x, '?');
     mask = mask.append(n_z, '0');
@@ -2227,7 +2227,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     log_header(design, "Executing yosys2lg pass (convert from yosys to lgraph).\n");
 
     // parse options
-    size_t        argidx;
+    size_t      argidx;
     std::string path("lgdb");
 
     for (argidx = 1; argidx < args.size(); argidx++) {
@@ -2250,7 +2250,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     for (auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
-      std::string  mod_name(&mod->name.c_str()[1]);
+      std::string    mod_name(&mod->name.c_str()[1]);
 
       auto *g = library->try_find_lgraph(mod_name);
       if (g == nullptr) {
@@ -2259,8 +2259,8 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {
-        RTLIL::Wire  *wire = mod->wire(port);
-        std::string wire_name(&wire->name.c_str()[1]);
+        RTLIL::Wire *wire = mod->wire(port);
+        std::string  wire_name(&wire->name.c_str()[1]);
 
         auto cell_port = absl::StrCat(mod->name.str(), "_:_", wire->name.str());
         if (wire->port_input && !wire->port_output) {
@@ -2291,14 +2291,12 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
 
-        TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) {
-          ctx.event()->set_name("YOSYS_tolg_" + mod_name);
-        });
+        TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) { ctx.event()->set_name("YOSYS_tolg_" + mod_name); });
         Lbench b("inou.YOSYS_tolg_" + mod_name);
 
         for (const auto &port : mod->ports) {
-          RTLIL::Wire  *wire = mod->wire(port);
-          std::string wire_name(&wire->name.c_str()[1]);
+          RTLIL::Wire *wire = mod->wire(port);
+          std::string  wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {
             pending_outputs.emplace_back(wire);
           }

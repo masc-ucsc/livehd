@@ -1,5 +1,6 @@
 
 #include "lnast_create.hpp"
+
 #include "iassert.hpp"
 #include "str_tools.hpp"
 
@@ -218,7 +219,7 @@ std::string Lnast_create::create_bit_and_stmts(std::string_view a_var, std::stri
 
 std::string Lnast_create::create_bit_or_stmts(const std::vector<std::string> &var) {
   std::string res_var;
-  Lnast_nid     lid;
+  Lnast_nid   lid;
 
   for (auto v : var) {
     if (v.empty())

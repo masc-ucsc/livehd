@@ -49,19 +49,19 @@ void Lgraph_Base::emplace_back() {
   Node_internal xx;
   node_internal.emplace_back(xx);
 
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   Index_id nid = node_internal.size() - 1;
-  auto *   ptr = &node_internal[nid];
+  auto    *ptr = &node_internal[nid];
 
   if (ptr->is_page_align()) {
     auto *page = (Node_internal_Page *)ptr;
 
     page->set_page(nid);
 
-    //node_internal.ref_unlock(); // emplace_back can not work when ref_lock is set
+    // node_internal.ref_unlock(); // emplace_back can not work when ref_lock is set
     node_internal.emplace_back(xx);
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
 
     nid.value++;
 
@@ -72,7 +72,7 @@ void Lgraph_Base::emplace_back() {
   new (ptr) Node_internal();  // call constructor
   ptr->set_nid(nid);          // self by default
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
 }
 
 Index_id Lgraph_Base::create_node_int() {
@@ -85,12 +85,11 @@ Index_id Lgraph_Base::create_node_int() {
 
 Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID dst_pid, const Index_id master_nid,
                                         const Index_id root_idx) {
-
   Index_id idx2 = create_node_int();
 
   I(dst_pid < (1 << Port_bits));
 
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   I(node_internal[master_nid].is_master_root());
   I(node_internal[last_idx].get_master_root_nid() == master_nid);
@@ -111,7 +110,7 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
       nidx2->clear_root();
       nidx2->set_nid(root_idx);
 
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return idx2;
     }
   }
@@ -129,7 +128,7 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
   if (node_internal[last_idx].has_next_space()) {
     node_internal[last_idx].push_next_state(idx2);
     I(node_internal[idx2].has_space_long());
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return idx2;
   }
 
@@ -147,22 +146,22 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
 
     if (!node_internal[last_idx].has_space_long()) {
       if (node_internal[idx2].has_space_long()) {
-        //node_internal.ref_unlock();
+        // node_internal.ref_unlock();
         return idx2;
       }
-      //node_internal.ref_unlock();
-      // This can happen if 3 sedges transfered to 3 ledges in dest
+      // node_internal.ref_unlock();
+      //  This can happen if 3 sedges transfered to 3 ledges in dest
       return create_node_space(idx2, dst_pid, master_nid, root_idx);
     }
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return last_idx;
   }
 
   // last_idx (pid1) -> idx2 (dst_pid) -> idx3 (pid1)
 
-  //node_internal.ref_unlock();
-  Index_id idx3 = create_node_int(); // THIS needs the lock
-  //node_internal.ref_lock();
+  // node_internal.ref_unlock();
+  Index_id idx3 = create_node_int();  // THIS needs the lock
+  // node_internal.ref_lock();
 
   // make space in idx so that we can push_next_state
   node_internal[idx3].set_dst_pid(node_internal[last_idx].get_dst_pid());
@@ -192,7 +191,7 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
 
   I(node_internal[idx2].has_space_long());
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
   return idx2;
 }
 
@@ -207,7 +206,7 @@ void Lgraph_Base::print_stats() const {
   size_t n_long_edges  = 1;
   size_t n_short_edges = 1;
 
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   for (size_t i = 0; i < node_internal.size(); i++) {
     if (node_internal[i].is_node_state()) {
@@ -225,7 +224,7 @@ void Lgraph_Base::print_stats() const {
       n_extra++;
     }
   }
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
 
   bytes += node_internal.size() * sizeof(Node_internal);
   auto n_edges = n_short_edges + n_long_edges;
@@ -292,7 +291,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
   I(node_internal[start_nid].is_node_state());
 #endif
 
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   const auto *ptr = &node_internal[start_nid];
   if (ptr->get_dst_pid() == dst_pid && ptr->has_space_long()) {
@@ -315,7 +314,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
       conta = 0;
     }
 #endif
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return start_nid;
   }
 
@@ -329,7 +328,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
 #ifdef PERF_OUTPUT_PIN
     total_4++;
 #endif
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return create_node_space(idx, dst_pid, master_nid, root_idx);
   }
 #ifdef PERF_OUTPUT_PIN
@@ -344,7 +343,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
       total_2++;
 #endif
       node_internal[root_idx].set_full_hint();
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return create_node_space(idx, dst_pid, master_nid, root_idx);
     }
 
@@ -362,7 +361,7 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
       total_cycles_3 += (end - start);
       total_3++;
 #endif
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return idx;
     }
 #ifdef PERF_OUTPUT_PIN
@@ -372,13 +371,12 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id master_nid, const Inde
 
   I(false);
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
   return 0;
 }
 
 Index_id Lgraph_Base::find_idx_from_pid_int(const Index_id nid, const Port_ID pid) const {
-
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   I(node_internal[nid].get_dst_pid() != pid);  // short-cut for common case
   I(node_internal[nid].is_master_root());
@@ -387,12 +385,12 @@ Index_id Lgraph_Base::find_idx_from_pid_int(const Index_id nid, const Port_ID pi
   Index_id idx2 = nid;
   while (true) {
     if (node_internal[idx2].get_dst_pid() == pid && node_internal[idx2].is_root()) {
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return idx2;
     }
 
     if (node_internal[idx2].is_last_state()) {
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return 0;
     }
 
@@ -400,7 +398,7 @@ Index_id Lgraph_Base::find_idx_from_pid_int(const Index_id nid, const Port_ID pi
     I(node_internal[idx2].is_valid());
   }
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
   I(false);
   return 0;
 }
@@ -420,14 +418,13 @@ Index_id Lgraph_Base::setup_idx_from_pid(const Index_id nid, const Port_ID pid) 
 }
 
 Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_ID dst_pid, Index_id &root_idx) {
-
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   I(node_internal[start_nid].is_root());
   I(node_internal[start_nid].is_node_state());
   if (node_internal[start_nid].has_space_short() && node_internal[start_nid].get_dst_pid() == dst_pid) {
     root_idx = start_nid;
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return start_nid;
   }
 
@@ -442,37 +439,37 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_
         GI(root_idx != start_nid, node_internal[start_nid].get_dst_pid() != node_internal[root_idx].get_dst_pid());
         I(node_internal[root_idx].is_root());
 
-        //node_internal.ref_unlock();
+        // node_internal.ref_unlock();
         return idx;
       }
     }
 
     if (node_internal[idx].is_last_state()) {
       Index_id idx_new;
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       idx_new = create_node_space(idx, dst_pid, start_nid, root_idx);
-      //node_internal.ref_lock();
+      // node_internal.ref_lock();
       if (root_idx == 0)
         root_idx = idx_new;
       I(node_internal[root_idx].is_root());
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return idx_new;
     }
 
     Index_id idx2 = node_internal[idx].get_next();
-    idx = idx2;
+    idx           = idx2;
   }
 
   I(false);
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
   return 0;
 }
 
 void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, Index_id src_idx, Port_ID dst_pid) {
   // Do not point to intermediate nodes which can be remapped, just root nodes
 
-  //node_internal.ref_lock();
+  // node_internal.ref_lock();
 
   I(node_internal[dst_idx].is_root());
   I(node_internal[src_idx].is_root());
@@ -517,9 +514,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
 
     //-----------------------
     // ADD output edge in source (src_nid) with dst_pid to the destination (dst_idx) with inp_pid
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     auto idx = get_space_output_pin(src_nid, src_idx, dst_pid, root_idx);
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     I(root_idx != 0);
     I(node_internal[root_idx].is_root());
 
@@ -579,9 +576,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
   if (!inp_done) {
     Index_id dst_nid      = node_internal[dst_idx].get_master_root_nid();
     Index_id inp_root_nid = dst_idx;
-    //node_internal.ref_unlock();
-    Index_id idx          = get_space_output_pin(dst_nid, dst_idx, inp_pid, inp_root_nid);
-    //node_internal.ref_lock();
+    // node_internal.ref_unlock();
+    Index_id idx = get_space_output_pin(dst_nid, dst_idx, inp_pid, inp_root_nid);
+    // node_internal.ref_lock();
     I(inp_root_nid != 0);
     int i = node_internal[idx].next_free_input_pos();
 
@@ -606,7 +603,7 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
 
   I(node_internal[root_idx].is_root());
 
-  //node_internal.ref_unlock();
+  // node_internal.ref_unlock();
 }
 
 void Lgraph_Base::warn_int(std::string_view text) { fmt::print("warning:{}\n", text); }
@@ -619,4 +616,3 @@ void Lgraph_Base::error_int(std::string_view text) {
 void Lgraph_Base::info_int(std::string_view text) {
   fmt::print("info:{}\n", text);  // to be used by future warning/error reporting system
 }
-

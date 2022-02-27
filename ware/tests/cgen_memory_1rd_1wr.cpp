@@ -15,15 +15,14 @@
 vluint64_t     global_time = 0;
 VerilatedVcdC *tfp         = 0;
 
-//inputs
+// inputs
 uint16_t top_rd_addr;
 uint16_t top_rd_enable;
 uint16_t top_wr_addr;
 uint16_t top_wr_enable;
 uint16_t top_wr_din;
-//outputs
+// outputs
 uint16_t top_rd_dout;
-
 
 void do_terminate() {
 #ifdef TRACE
@@ -69,11 +68,12 @@ int main(int argc, char **argv, char **env) {
   // init top verilog instance
   Vcgen_driver *top = new Vcgen_driver;
 
-  uint16_t val_rd_addr[NUM_TESTS] = {0,0,0,0};
-  uint16_t val_rd_enable[NUM_TESTS] = {1,1,1,1};
-  uint16_t val_wr_addr[NUM_TESTS] = {0,0,0,0};
-  uint16_t val_wr_enable[NUM_TESTS] = {1,1,1,1};
-  uint16_t val_wr_din[NUM_TESTS+2] = {0xaaaa, 0xaaab, 0xaaaf, 0x5555, 0x0000, 0x0000};  //extra two values for longer latency param settings
+  uint16_t val_rd_addr[NUM_TESTS]   = {0, 0, 0, 0};
+  uint16_t val_rd_enable[NUM_TESTS] = {1, 1, 1, 1};
+  uint16_t val_wr_addr[NUM_TESTS]   = {0, 0, 0, 0};
+  uint16_t val_wr_enable[NUM_TESTS] = {1, 1, 1, 1};
+  uint16_t val_wr_din[NUM_TESTS + 2]
+      = {0xaaaa, 0xaaab, 0xaaaf, 0x5555, 0x0000, 0x0000};  // extra two values for longer latency param settings
 
 #ifdef TRACE
   // init trace dump
@@ -102,7 +102,7 @@ int main(int argc, char **argv, char **env) {
     top_rd_enable = top->rd_enable_0 = val_rd_enable[i];
     top_wr_addr = top->wr_addr_0 = val_wr_addr[i];
     top_wr_enable = top->wr_enable_0 = val_wr_enable[i];
-    top_wr_din = top->wr_din_0 = val_wr_din[i+1];
+    top_wr_din = top->wr_din_0 = val_wr_din[i + 1];
 
     advance_clock(top, 1);
 
@@ -110,7 +110,7 @@ int main(int argc, char **argv, char **env) {
 
     // evaluate correctness
     printf("Test %d: ", i);
-    if(top_rd_dout == val_wr_din[i]) {
+    if (top_rd_dout == val_wr_din[i]) {
       printf("PASSED\n");
     } else {
       printf("FAILED \n");
@@ -119,11 +119,10 @@ int main(int argc, char **argv, char **env) {
     printf("rd_addr = 0x%X, wr_addr = 0x%X, wr_din = 0x%X, rd_dout = 0x%X\n", top_rd_addr, top_wr_addr, top_wr_din, top_rd_dout);
   }
 
-
   // FWD = 0 LATENCY = 1 WRENSIZE = 1
   printf("\nNow testing FWD=0 LATENCY=1 WRENSIZE=1\n");
   // Pipe in first 2 values
-  for (int j = 0; j < NUM_TESTS-2; j++) {
+  for (int j = 0; j < NUM_TESTS - 2; j++) {
     top_rd_addr = top->rd_addr_1 = val_rd_addr[j];
     top_rd_enable = top->rd_enable_1 = val_rd_enable[j];
     top_wr_addr = top->wr_addr_1 = val_wr_addr[j];
@@ -138,7 +137,7 @@ int main(int argc, char **argv, char **env) {
     top_rd_enable = top->rd_enable_1 = val_rd_enable[i];
     top_wr_addr = top->wr_addr_1 = val_wr_addr[i];
     top_wr_enable = top->wr_enable_1 = val_wr_enable[i];
-    top_wr_din = top->wr_din_1 = val_wr_din[i+2];
+    top_wr_din = top->wr_din_1 = val_wr_din[i + 2];
 
     advance_clock(top, 1);
 
@@ -146,7 +145,7 @@ int main(int argc, char **argv, char **env) {
 
     // evaluate correctness
     printf("Test %d: ", i);
-    if(top_rd_dout == val_wr_din[i]) {
+    if (top_rd_dout == val_wr_din[i]) {
       printf("PASSED\n");
     } else {
       printf("FAILED \n");
@@ -170,7 +169,7 @@ int main(int argc, char **argv, char **env) {
 
     // evaluate correctness
     printf("Test %d: ", i);
-    if(top_rd_dout == val_wr_din[i]) {
+    if (top_rd_dout == val_wr_din[i]) {
       printf("PASSED\n");
     } else {
       printf("FAILED \n");
@@ -194,7 +193,7 @@ int main(int argc, char **argv, char **env) {
 
     // evaluate correctness
     printf("Test %d: ", i);
-    if(top_rd_dout == val_wr_din[i]) {
+    if (top_rd_dout == val_wr_din[i]) {
       printf("PASSED\n");
     } else {
       printf("FAILED \n");
@@ -218,7 +217,7 @@ int main(int argc, char **argv, char **env) {
 
     // evaluate correctness
     printf("Test %d: ", i);
-    if(top_rd_dout == (val_wr_din[i] & 0xff)) {
+    if (top_rd_dout == (val_wr_din[i] & 0xff)) {
       printf("PASSED\n");
     } else {
       printf("FAILED \n");

@@ -3,7 +3,6 @@
 #include <random>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
@@ -14,7 +13,7 @@
 
 class Edge_test : public ::testing::Test {
 protected:
-  Lgraph *  g;
+  Lgraph   *g;
   Node      n1;
   Node      n2;
   Sub_node *n1_sub;
@@ -109,8 +108,7 @@ protected:
 #endif
   }
 
-  Node_pin add_n1_setup_driver_pin(const std::string& pname) {
-
+  Node_pin add_n1_setup_driver_pin(const std::string &pname) {
     const auto &it = track_n1_out_connected_pins.find(pname);
     if (it == track_n1_out_connected_pins.end()) {
       EXPECT_FALSE(n1_sub->has_pin(pname));
@@ -139,8 +137,7 @@ protected:
     return dpin;
   }
 
-  Node_pin add_n2_setup_sink_pin(const std::string& pname) {
-
+  Node_pin add_n2_setup_sink_pin(const std::string &pname) {
     const auto &it = track_n2_inp_connected_pins.find(pname);
     if (it == track_n2_inp_connected_pins.end()) {
       EXPECT_FALSE(n2_sub->has_pin(pname));

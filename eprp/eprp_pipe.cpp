@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "eprp.hpp"
 #include "eprp_pipe.hpp"
+
+#include "eprp.hpp"
 #include "lbench.hpp"
 
-void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) {
-  steps.emplace_back(method, var);
-}
+void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) { steps.emplace_back(method, var); }
 
 void Pipe_step::run(Eprp_var &last_cmd_var) {
   last_cmd_var.add(var_fields);
@@ -24,19 +23,18 @@ void Pipe_step::run(Eprp_var &last_cmd_var) {
   }
 
   m.method(last_cmd_var);
-  if (next_step) { // FIXME: instead of calling here. Call inside the method, then we can parallize
+  if (next_step) {  // FIXME: instead of calling here. Call inside the method, then we can parallize
     next_step->run(last_cmd_var);
   }
 }
 
 void Eprp_pipe::run() {
-
   if (steps.empty())
     return;
 
-  for(auto i=0u;i<steps.size();++i) {
-    if ((i+1)<steps.size())
-      steps[i].next_step = &steps[i+1];
+  for (auto i = 0u; i < steps.size(); ++i) {
+    if ((i + 1) < steps.size())
+      steps[i].next_step = &steps[i + 1];
     else
       assert(steps[i].next_step == nullptr);
   }

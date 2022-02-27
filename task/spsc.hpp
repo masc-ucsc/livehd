@@ -33,12 +33,11 @@
 
 #pragma once
 
-#include <iostream>
-
-#include <climits>  // for CHAR_BIT
-#include <cstdlib>
 #include <atomic>
 #include <cassert>
+#include <climits>  // for CHAR_BIT
+#include <cstdlib>
+#include <iostream>
 
 #if 0
 template <typename T>
@@ -117,7 +116,7 @@ protected:
     void*  raw       = std::malloc(size + alignment - 1 + sizeof(void*));
     if (!raw)
       return nullptr;
-    char* ptr                            = align_for(reinterpret_cast<char*>(raw) + sizeof(void*));
+    char* ptr = align_for(reinterpret_cast<char*>(raw) + sizeof(void*));
     assert(ptr > raw);
     *(reinterpret_cast<void**>(ptr) - 1) = raw;
     return ptr;
@@ -134,17 +133,13 @@ protected:
   }
 
 public:
-  spsc256()
-      : _buffer(reinterpret_cast<T *>(aligned_malloc(sizeof(void *)*(256 + 1))))
-      , _head(0)
-      , _tail(0) {
-  }
+  spsc256() : _buffer(reinterpret_cast<T*>(aligned_malloc(sizeof(void*) * (256 + 1)))), _head(0), _tail(0) {}
 
   ~spsc256() { aligned_free(_buffer); }
 
   bool empty() const { return _head == _tail; }
 
-  bool enqueue(T &input) {
+  bool enqueue(T& input) {
     const size_t head = _head.load(std::memory_order_relaxed);
 
     if (((_tail.load(std::memory_order_acquire) - (head + 1)) & 255) >= 1) {
@@ -155,7 +150,7 @@ public:
     return false;
   }
 
-  bool dequeue(T &output) {
+  bool dequeue(T& output) {
     const size_t tail = _tail.load(std::memory_order_relaxed);
 
     if (((_head.load(std::memory_order_acquire) - tail) & 255) >= 1) {
@@ -170,7 +165,7 @@ private:
   typedef char cache_line_pad_t[64];
 
   cache_line_pad_t _pad0;
-  T *              _buffer;
+  T*               _buffer;
 
   cache_line_pad_t    _pad1;
   std::atomic<size_t> _head;
@@ -178,7 +173,6 @@ private:
   cache_line_pad_t    _pad2;
   std::atomic<size_t> _tail;
 
-  spsc256(const spsc256 &) {}
-  void operator=(const spsc256 &) {}
+  spsc256(const spsc256&) {}
+  void operator=(const spsc256&) {}
 };
-

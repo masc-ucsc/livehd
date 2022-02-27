@@ -9,7 +9,7 @@ namespace Live {
 
 class Graph_Node {  // FIXME: remove an use Node_pin (same info)
 public:
-  Lgraph *    module;
+  Lgraph     *module;
   Index_id    idx;
   uint32_t    bit;
   std::string instance;

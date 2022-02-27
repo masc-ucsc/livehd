@@ -12,8 +12,7 @@ void Lnast_node::dump() const {
   fmt::print("{}, {}, {}\n", type.debug_name(), token.get_text(), subs);  // TODO: cleaner API to also dump token
 }
 
-Lnast::~Lnast() {
-}
+Lnast::~Lnast() {}
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   TRACE_EVENT("pass", "lnast_ssa");
@@ -111,7 +110,8 @@ void Lnast::trans_tuple_opr_if_subtree(const Lnast_nid &if_nid) {
 
 bool Lnast::update_tuple_var_1st_scope_ssa_table(const Lnast_nid &psts_nid, const Lnast_nid &target_nid) {
   auto &tuple_var_1st_scope_ssa_table = tuple_var_1st_scope_ssa_tables[psts_nid];
-  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_set() || get_type(get_parent(target_nid)).is_tuple_get());
+  I(get_type(get_parent(target_nid)).is_tuple_add() || get_type(get_parent(target_nid)).is_tuple_set()
+    || get_type(get_parent(target_nid)).is_tuple_get());
 
   auto target_name = get_name(target_nid);
   // only record the first tuple_var that appears at this scope
@@ -250,7 +250,7 @@ void Lnast::merge_hierarchical_attr_set(Lnast_nid &selc_nid) {
 void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_selc_nid, std::stack<Lnast_nid> &stk_tuple_fields) {
   auto type = get_type(prev_selc_nid);
   // note: the sel might be transform to tuple_get, but it's fine in this case, handle it as normal sel
-  // if (!type.is_select() && !type.is_tuple_get()) 
+  // if (!type.is_select() && !type.is_tuple_get())
   if (!type.is_tuple_get()) {
     get_data(prev_selc_nid).dump();
     return;
@@ -355,7 +355,7 @@ void Lnast::trans_tuple_opr_handle_a_statement(const Lnast_nid &psts_nid, const 
 }
 
 void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
-  auto &      selc_lrhs_table = selc_lrhs_tables[psts_nid];
+  auto       &selc_lrhs_table = selc_lrhs_tables[psts_nid];
   auto        paired_nid      = selc_lrhs_table[selc_nid].second;
   Lnast_ntype paired_type;
   if (!paired_nid.is_invalid())
@@ -870,7 +870,7 @@ bool Lnast::is_special_case_of_sel_rhs(const Lnast_nid &psts_nid, const Lnast_ni
 void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
   // note: immediate struct self assignment: A.foo = A[2], which will leads to consecutive sel and sel,
   //       the sel should follow the subscript before the sel increments it.
-  auto &     ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
+  auto      &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name          = get_name(opd_nid);
   const auto opd_type          = get_type(opd_nid);
   auto       ori_token         = get_token(opd_nid);
@@ -882,7 +882,7 @@ void Lnast::ssa_rhs_handle_a_operand_special(const Lnast_nid &gpsts_nid, const L
 }
 
 void Lnast::ssa_rhs_handle_a_operand(const Lnast_nid &gpsts_nid, const Lnast_nid &opd_nid) {
-  auto &     ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
+  auto      &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[gpsts_nid];
   auto       opd_name          = get_name(opd_nid);
   const auto opd_type          = get_type(opd_nid);
   if (opd_type.is_invalid())
@@ -960,9 +960,7 @@ void Lnast::ssa_handle_phi_nodes(const Lnast_nid &if_nid) {
   candidates_update_phi_resolve_table.clear();
 }
 
-std::string Lnast::create_tmp_var() {
-  return absl::StrCat("___T", tmp_var_cnt++);
-}
+std::string Lnast::create_tmp_var() { return absl::StrCat("___T", tmp_var_cnt++); }
 
 void Lnast::resolve_phi_nodes(const Lnast_nid &cond_nid, Phi_rtable &true_table, Phi_rtable &false_table) {
   auto if_nid   = get_parent(cond_nid);
@@ -1138,13 +1136,13 @@ void Lnast::update_global_lhs_ssa_cnt_table(const Lnast_nid &lhs_nid) {
 // note: the subs of the lhs of the operator has already handled clearly in first round ssa process, just copy into the
 // rhs_ssa_cnt_table fine.
 void Lnast::update_rhs_ssa_cnt_table(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  auto &     ssa_rhs_cnt_table   = ssa_rhs_cnt_tables[psts_nid];
+  auto      &ssa_rhs_cnt_table   = ssa_rhs_cnt_tables[psts_nid];
   const auto target_name         = get_name(target_key);
   ssa_rhs_cnt_table[target_name] = ref_data(target_key)->subs;
 }
 
 int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const Lnast_nid &target_key) {
-  auto &     ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
+  auto      &ssa_rhs_cnt_table = ssa_rhs_cnt_tables[psts_nid];
   const auto target_name       = get_name(target_key);
   auto       itr               = ssa_rhs_cnt_table.find(target_name);
 
@@ -1162,7 +1160,7 @@ int8_t Lnast::check_rhs_cnt_table_parents_chain(const Lnast_nid &psts_nid, const
 }
 
 void Lnast::update_phi_resolve_table(const Lnast_nid &psts_nid, const Lnast_nid &lhs_nid) {
-  auto &      phi_resolve_table = phi_resolve_tables[psts_nid];
+  auto       &phi_resolve_table = phi_resolve_tables[psts_nid];
   const auto &lhs_name          = get_name(lhs_nid);
   phi_resolve_table[lhs_name]   = lhs_nid;  // for a variable string, always update to latest Lnast_nid
 }
@@ -1185,7 +1183,7 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
   for (const auto &it : depth_preorder(root_nid)) {
     const auto &node = get_data(it);
     std::string indent;
-    indent = indent.append(it.level*4+4,' ');
+    indent = indent.append(it.level * 4 + 4, ' ');
 
     if (node.type.is_ref()
         && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case
@@ -1197,16 +1195,10 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
                  node.token.get_text(),
                  node.subs);
     } else {
-      fmt::print("({:<1},{:<6}) {} {:<8}: {}    \n",
-                 it.level,
-                 it.pos,
-                 indent,
-                 node.type.to_sv(),
-                 node.token.get_text());
+      fmt::print("({:<1},{:<6}) {} {:<8}: {}    \n", it.level, it.pos, indent, node.type.to_sv(), node.token.get_text());
     }
   }
 }
-
 
 /*
 Note I: if not handle ssa cnt on lhs and rhs separately, there will be a race condition in the

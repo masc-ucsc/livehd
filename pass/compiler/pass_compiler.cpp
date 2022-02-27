@@ -1,10 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_compiler.hpp"
+
 #include <cstddef>
 
 #include "absl/strings/str_split.h"
-
-#include "pass_compiler.hpp"
 #include "lcompiler.hpp"
 #include "str_tools.hpp"
 
@@ -28,11 +28,11 @@ void Pass_compiler::compile(Eprp_var &var) {
   TRACE_EVENT("pass", "compile.front");
   // Lbench b("pass.compile.front");
   Pass_compiler pc(var);
-  auto path       = pc.get_path(var);
-  auto odir       = pc.get_odir(var);
-  auto top        = pc.check_option_top(var);
-  auto gviz       = pc.check_option_gviz(var);
-  auto get_firrtl = pc.check_option_firrtl(var);
+  auto          path       = pc.get_path(var);
+  auto          odir       = pc.get_odir(var);
+  auto          top        = pc.check_option_top(var);
+  auto          gviz       = pc.check_option_gviz(var);
+  auto          get_firrtl = pc.check_option_firrtl(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -52,7 +52,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   if (!get_firrtl.empty()) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     Lgraph *seed_lg;
-    auto *  library = Graph_library::instance(path);
+    auto   *library = Graph_library::instance(path);
     if (!library->exists(path, "__firop_seed")) {
       seed_lg = Lgraph::create(path, "__firop_seed", "-");
       setup_firmap_library(seed_lg);
@@ -82,161 +82,161 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
 }
 
 void Pass_compiler::setup_firmap_library(Lgraph *lg) {
-  auto *lg_fir_const = Lgraph::create(lg->get_path(),"__fir_const", "-");
-  lg_fir_const->add_graph_output("Y",0,0);
+  auto *lg_fir_const = Lgraph::create(lg->get_path(), "__fir_const", "-");
+  lg_fir_const->add_graph_output("Y", 0, 0);
 
-  auto *lg_fir_add = Lgraph::create(lg->get_path(),"__fir_add", "-");
-  lg_fir_add->add_graph_input("e1",0,0);
-  lg_fir_add->add_graph_input("e2",1,0);
-  lg_fir_add->add_graph_output("Y",2,0);
+  auto *lg_fir_add = Lgraph::create(lg->get_path(), "__fir_add", "-");
+  lg_fir_add->add_graph_input("e1", 0, 0);
+  lg_fir_add->add_graph_input("e2", 1, 0);
+  lg_fir_add->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_sub = Lgraph::create(lg->get_path(),"__fir_sub", "-");
+  auto *lg_fir_sub = Lgraph::create(lg->get_path(), "__fir_sub", "-");
   lg_fir_sub->add_graph_input("e1", 0, 0);
   lg_fir_sub->add_graph_input("e2", 1, 0);
   lg_fir_sub->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_mul = Lgraph::create(lg->get_path(),"__fir_mul", "-");
+  auto *lg_fir_mul = Lgraph::create(lg->get_path(), "__fir_mul", "-");
   lg_fir_mul->add_graph_input("e1", 0, 0);
   lg_fir_mul->add_graph_input("e2", 1, 0);
   lg_fir_mul->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_div = Lgraph::create(lg->get_path(),"__fir_div", "-");
+  auto *lg_fir_div = Lgraph::create(lg->get_path(), "__fir_div", "-");
   lg_fir_div->add_graph_input("e1", 0, 0);
   lg_fir_div->add_graph_input("e2", 1, 0);
   lg_fir_div->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_rem = Lgraph::create(lg->get_path(),"__fir_rem", "-");
+  auto *lg_fir_rem = Lgraph::create(lg->get_path(), "__fir_rem", "-");
   lg_fir_rem->add_graph_input("e1", 0, 0);
   lg_fir_rem->add_graph_input("e2", 1, 0);
   lg_fir_rem->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_lt = Lgraph::create(lg->get_path(),"__fir_lt", "-");
+  auto *lg_fir_lt = Lgraph::create(lg->get_path(), "__fir_lt", "-");
   lg_fir_lt->add_graph_input("e1", 0, 0);
   lg_fir_lt->add_graph_input("e2", 1, 0);
   lg_fir_lt->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_leq = Lgraph::create(lg->get_path(),"__fir_leq", "-");
+  auto *lg_fir_leq = Lgraph::create(lg->get_path(), "__fir_leq", "-");
   lg_fir_leq->add_graph_input("e1", 0, 0);
   lg_fir_leq->add_graph_input("e2", 1, 0);
   lg_fir_leq->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_gt = Lgraph::create(lg->get_path(),"__fir_gt", "-");
+  auto *lg_fir_gt = Lgraph::create(lg->get_path(), "__fir_gt", "-");
   lg_fir_gt->add_graph_input("e1", 0, 0);
   lg_fir_gt->add_graph_input("e2", 1, 0);
   lg_fir_gt->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_geq = Lgraph::create(lg->get_path(),"__fir_geq", "-");
+  auto *lg_fir_geq = Lgraph::create(lg->get_path(), "__fir_geq", "-");
   lg_fir_geq->add_graph_input("e1", 0, 0);
   lg_fir_geq->add_graph_input("e2", 1, 0);
   lg_fir_geq->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_eq = Lgraph::create(lg->get_path(),"__fir_eq", "-");
+  auto *lg_fir_eq = Lgraph::create(lg->get_path(), "__fir_eq", "-");
   lg_fir_eq->add_graph_input("e1", 0, 0);
   lg_fir_eq->add_graph_input("e2", 1, 0);
   lg_fir_eq->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_neq = Lgraph::create(lg->get_path(),"__fir_neq", "-");
+  auto *lg_fir_neq = Lgraph::create(lg->get_path(), "__fir_neq", "-");
   lg_fir_neq->add_graph_input("e1", 0, 0);
   lg_fir_neq->add_graph_input("e2", 1, 0);
   lg_fir_neq->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_pad = Lgraph::create(lg->get_path(),"__fir_pad", "-");
+  auto *lg_fir_pad = Lgraph::create(lg->get_path(), "__fir_pad", "-");
   lg_fir_pad->add_graph_input("e1", 0, 0);
   lg_fir_pad->add_graph_input("e2", 1, 0);
   lg_fir_pad->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_as_uint = Lgraph::create(lg->get_path(),"__fir_as_uint", "-");
+  auto *lg_fir_as_uint = Lgraph::create(lg->get_path(), "__fir_as_uint", "-");
   lg_fir_as_uint->add_graph_input("e1", 0, 0);
   lg_fir_as_uint->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_as_sint = Lgraph::create(lg->get_path(),"__fir_as_sint", "-");
+  auto *lg_fir_as_sint = Lgraph::create(lg->get_path(), "__fir_as_sint", "-");
   lg_fir_as_sint->add_graph_input("e1", 0, 0);
   lg_fir_as_sint->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_as_clock = Lgraph::create(lg->get_path(),"__fir_as_clock", "-");
+  auto *lg_fir_as_clock = Lgraph::create(lg->get_path(), "__fir_as_clock", "-");
   lg_fir_as_clock->add_graph_input("e1", 0, 0);
   lg_fir_as_clock->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_as_async = Lgraph::create(lg->get_path(),"__fir_as_async", "-");
+  auto *lg_fir_as_async = Lgraph::create(lg->get_path(), "__fir_as_async", "-");
   lg_fir_as_async->add_graph_input("e1", 0, 0);
   lg_fir_as_async->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_shl = Lgraph::create(lg->get_path(),"__fir_shl", "-");
+  auto *lg_fir_shl = Lgraph::create(lg->get_path(), "__fir_shl", "-");
   lg_fir_shl->add_graph_input("e1", 0, 0);
   lg_fir_shl->add_graph_input("e2", 1, 0);
   lg_fir_shl->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_shr = Lgraph::create(lg->get_path(),"__fir_shr", "-");
+  auto *lg_fir_shr = Lgraph::create(lg->get_path(), "__fir_shr", "-");
   lg_fir_shr->add_graph_input("e1", 0, 0);
   lg_fir_shr->add_graph_input("e2", 1, 0);
   lg_fir_shr->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_dshl = Lgraph::create(lg->get_path(),"__fir_dshl", "-");
+  auto *lg_fir_dshl = Lgraph::create(lg->get_path(), "__fir_dshl", "-");
   lg_fir_dshl->add_graph_input("e1", 0, 0);
   lg_fir_dshl->add_graph_input("e2", 1, 0);
   lg_fir_dshl->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_dshr = Lgraph::create(lg->get_path(),"__fir_dshr", "-");
+  auto *lg_fir_dshr = Lgraph::create(lg->get_path(), "__fir_dshr", "-");
   lg_fir_dshr->add_graph_input("e1", 0, 0);
   lg_fir_dshr->add_graph_input("e2", 1, 0);
   lg_fir_dshr->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_cvt = Lgraph::create(lg->get_path(),"__fir_cvt", "-");
+  auto *lg_fir_cvt = Lgraph::create(lg->get_path(), "__fir_cvt", "-");
   lg_fir_cvt->add_graph_input("e1", 0, 0);
   lg_fir_cvt->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_neg = Lgraph::create(lg->get_path(),"__fir_neg", "-");
+  auto *lg_fir_neg = Lgraph::create(lg->get_path(), "__fir_neg", "-");
   lg_fir_neg->add_graph_input("e1", 0, 0);
   lg_fir_neg->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_not = Lgraph::create(lg->get_path(),"__fir_not", "-");
+  auto *lg_fir_not = Lgraph::create(lg->get_path(), "__fir_not", "-");
   lg_fir_not->add_graph_input("e1", 0, 0);
   lg_fir_not->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_and = Lgraph::create(lg->get_path(),"__fir_and", "-");
+  auto *lg_fir_and = Lgraph::create(lg->get_path(), "__fir_and", "-");
   lg_fir_and->add_graph_input("e1", 0, 0);
   lg_fir_and->add_graph_input("e2", 1, 0);
   lg_fir_and->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_or = Lgraph::create(lg->get_path(),"__fir_or", "-");
+  auto *lg_fir_or = Lgraph::create(lg->get_path(), "__fir_or", "-");
   lg_fir_or->add_graph_input("e1", 0, 0);
   lg_fir_or->add_graph_input("e2", 1, 0);
   lg_fir_or->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_xor = Lgraph::create(lg->get_path(),"__fir_xor", "-");
+  auto *lg_fir_xor = Lgraph::create(lg->get_path(), "__fir_xor", "-");
   lg_fir_xor->add_graph_input("e1", 0, 0);
   lg_fir_xor->add_graph_input("e2", 1, 0);
   lg_fir_xor->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_andr = Lgraph::create(lg->get_path(),"__fir_andr", "-");
+  auto *lg_fir_andr = Lgraph::create(lg->get_path(), "__fir_andr", "-");
   lg_fir_andr->add_graph_input("e1", 0, 0);
   lg_fir_andr->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_orr = Lgraph::create(lg->get_path(),"__fir_orr", "-");
+  auto *lg_fir_orr = Lgraph::create(lg->get_path(), "__fir_orr", "-");
   lg_fir_orr->add_graph_input("e1", 0, 0);
   lg_fir_orr->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_xorr = Lgraph::create(lg->get_path(),"__fir_xorr", "-");
+  auto *lg_fir_xorr = Lgraph::create(lg->get_path(), "__fir_xorr", "-");
   lg_fir_xorr->add_graph_input("e1", 0, 0);
   lg_fir_xorr->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_cat = Lgraph::create(lg->get_path(),"__fir_cat", "-");
+  auto *lg_fir_cat = Lgraph::create(lg->get_path(), "__fir_cat", "-");
   lg_fir_cat->add_graph_input("e1", 0, 0);
   lg_fir_cat->add_graph_input("e2", 1, 0);
   lg_fir_cat->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_bits = Lgraph::create(lg->get_path(),"__fir_bits", "-");
+  auto *lg_fir_bits = Lgraph::create(lg->get_path(), "__fir_bits", "-");
   lg_fir_bits->add_graph_input("e1", 0, 0);
   lg_fir_bits->add_graph_input("e2", 1, 0);  // hi
   lg_fir_bits->add_graph_input("e3", 2, 0);  // lo
   lg_fir_bits->add_graph_output("Y", 3, 0);
 
-  auto *lg_fir_head = Lgraph::create(lg->get_path(),"__fir_head", "-");
+  auto *lg_fir_head = Lgraph::create(lg->get_path(), "__fir_head", "-");
   lg_fir_head->add_graph_input("e1", 0, 0);
   lg_fir_head->add_graph_input("e2", 1, 0);
   lg_fir_head->add_graph_output("Y", 2, 0);
 
-  auto *lg_fir_tail = Lgraph::create(lg->get_path(),"__fir_tail", "-");
+  auto *lg_fir_tail = Lgraph::create(lg->get_path(), "__fir_tail", "-");
   lg_fir_tail->add_graph_input("e1", 0, 0);
   lg_fir_tail->add_graph_input("e2", 1, 0);
   lg_fir_tail->add_graph_output("Y", 2, 0);
@@ -277,4 +277,3 @@ std::string_view Pass_compiler::check_option_firrtl(Eprp_var &var) {
 
   return get_firrtl;
 }
-

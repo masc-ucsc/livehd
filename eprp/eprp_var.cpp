@@ -42,9 +42,8 @@ void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move
 void Eprp_var::add(const std::shared_ptr<Lnast> &lnast) { lnasts.emplace_back(lnast); }
 
 void Eprp_var::add(std::string_view name, std::string_view value) {
-
   if (name == "files") {
-    for (const auto &v : absl::StrSplit(value,',')) {
+    for (const auto &v : absl::StrSplit(value, ',')) {
       std::string v_str(v);
       if (access(v_str.c_str(), R_OK) == -1) {
         fmt::print("ERROR: file '{}' is not accessible (skipping)\n", v);

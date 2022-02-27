@@ -659,8 +659,8 @@ void Cprop::tuple_mux_mut(Node &node) {
   std::vector<std::shared_ptr<Lgtuple const>> tup_list;
   tup_list.resize(inp_edges_ordered.size() - 1);
 
-  bool          some_tuple_found = false;
-  bool          some_pending     = false;
+  bool        some_tuple_found = false;
+  bool        some_pending     = false;
   std::string scalar_field;
   for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
     auto tup        = find_lgtuple(inp_edges_ordered[i].driver);
@@ -701,9 +701,8 @@ void Cprop::tuple_mux_mut(Node &node) {
   Node_pin &sel_dpin = inp_edges_ordered[0].driver;
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
-  if (tup) 
+  if (tup)
     node2tuple[node.get_compact()] = tup;
-  
 
   if (tup == nullptr && tuple_issues)
     return;
@@ -1186,8 +1185,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
           pin_name = pin_name.substr(2);
         }
         if (it.first->has_io_pos()) {
-          auto io_name
-              = absl::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
+          auto io_name = absl::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
           node_tup->add(io_name, sub_dpin);
         } else {
           node_tup->add(pin_name, sub_dpin);
@@ -1213,21 +1211,20 @@ void Cprop::tuple_tuple_add(const Node &node) {
 }
 
 bool Cprop::is_runtime_index_case(const std::shared_ptr<Lgtuple const> &node_tup) {
-	for (const auto &itr : node_tup->get_map()) {
-		if (Lgtuple::is_attribute(itr.first)) {
-			continue;
-		}
+  for (const auto &itr : node_tup->get_map()) {
+    if (Lgtuple::is_attribute(itr.first)) {
+      continue;
+    }
 
-		if (str_tools::is_string(itr.first)) 
-			return false;
-	}
-	return true;
+    if (str_tools::is_string(itr.first))
+      return false;
+  }
+  return true;
 }
-
 
 bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std::shared_ptr<Lgtuple const> &parent_tup) {
 #ifndef NDEBUG
-	Pass::info("handle runtime index node:{}\n", ori_tg.debug_name());
+  Pass::info("handle runtime index node:{}\n", ori_tg.debug_name());
 #endif
   auto mux_node = ori_tg.create(Ntype_op::Mux);
 
@@ -1252,8 +1249,8 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 
     // 1. create new tuple_gets to fetch the value from the tuple_add
     //    and then connect the tg output to the corresponding mux input port
-    auto new_tg = ori_tg.create(Ntype_op::TupGet);
-    auto mux_spin = mux_node.setup_sink_pin(std::to_string(str_tools::to_i(itr.first)+1));
+    auto new_tg   = ori_tg.create(Ntype_op::TupGet);
+    auto mux_spin = mux_node.setup_sink_pin(std::to_string(str_tools::to_i(itr.first) + 1));
     new_tg.setup_driver_pin().connect_sink(mux_spin);
 
     auto new_tg_field_spin = new_tg.setup_sink_pin("field");
@@ -1264,14 +1261,14 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
     new_tg_parent_spin.connect_driver(new_tg_parent_dpin);
 
     // 2. fetch sub_tuple for the new TGs
-    auto sub_tuple = parent_tup->get_sub_tuple(itr.first);
+    auto sub_tuple                   = parent_tup->get_sub_tuple(itr.first);
     node2tuple[new_tg.get_compact()] = sub_tuple;
   }
 
   // node2tuple[mux_node.get_compact()] = parent_tup;
   tuple_mux_mut(mux_node);
   ori_tg.del_node();
-	return true;
+  return true;
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
@@ -1300,12 +1297,12 @@ bool Cprop::tuple_tuple_get(Node &node) {
           node2tuple[node.get_compact()] = sub_tup;
           return true;
         }
-				// return handle_runtime_index(node, field_node, node_tup);
-      } 
-			// Note: if any of the index is not constant integer -> it's not a suit for runtime index
-			if (is_runtime_index_case(node_tup)) {
-				return handle_runtime_index(node, field_node, node_tup);
-			}
+        // return handle_runtime_index(node, field_node, node_tup);
+      }
+      // Note: if any of the index is not constant integer -> it's not a suit for runtime index
+      if (is_runtime_index_case(node_tup)) {
+        return handle_runtime_index(node, field_node, node_tup);
+      }
     }
 
     if (!tuple_issues) {
@@ -1336,7 +1333,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
 
   I(node_tup->is_correct());
 
-  bool          is_attr_get = false;
+  bool        is_attr_get = false;
   std::string main_field{key_name};
   if (Lgtuple::is_attribute(key_name)) {
     main_field  = Lgtuple::get_all_but_last_level(key_name);
@@ -1632,7 +1629,7 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
       }
 
       std::string pin_name;
-      int           pin_pid = 0;
+      int         pin_pid = 0;
       if (Ntype::is_single_sink(cell_ntype)) {
         pin_pid  = 0;
         pin_name = Ntype::get_sink_name(cell_ntype, 0);

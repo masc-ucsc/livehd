@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "symbol_table.hpp"
+
 #include "likely.hpp"
 #include "lnast.hpp"
-#include "symbol_table.hpp"
 
 bool Symbol_table::var(std::string_view key) {
   auto [var_sv, field] = get_var_field(key);
@@ -16,7 +17,7 @@ bool Symbol_table::var(std::string_view key) {
 
   auto bundle = std::make_shared<Bundle>(var);
   bundle->var(field, Lconst::invalid());
-  varmap.insert({std::pair(stack.back().scope,var), bundle});
+  varmap.insert({std::pair(stack.back().scope, var), bundle});
   return true;
 }
 
@@ -30,12 +31,12 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
   if (unlikely(it == varmap.end())) {
     stack.back().declared.emplace_back(var);
     if (var == key) {
-      varmap.insert({std::pair(stack.back().scope,var), bundle});
+      varmap.insert({std::pair(stack.back().scope, var), bundle});
       return true;
     }
     var_bundle = std::make_shared<Bundle>(var);
-    varmap.insert({std::pair(stack.back().scope,var), var_bundle});
-  }else{
+    varmap.insert({std::pair(stack.back().scope, var), var_bundle});
+  } else {
     if (var == key) {
       it->second = bundle;
       return true;
@@ -58,8 +59,8 @@ bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
   if (unlikely(it == varmap.end())) {
     stack.back().declared.emplace_back(var);
     bundle = std::make_shared<Bundle>(var);
-    varmap.insert({std::pair(stack.back().scope,var), bundle});
-  }else{
+    varmap.insert({std::pair(stack.back().scope, var), bundle});
+  } else {
     bundle = it->second;
   }
 
@@ -99,7 +100,7 @@ bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
   }
 
   bundle->set_immutable();
-  varmap.insert({std::pair(stack.back().scope,var), bundle});
+  varmap.insert({std::pair(stack.back().scope, var), bundle});
   return true;
 }
 
@@ -111,14 +112,13 @@ void Symbol_table::always_scope() {
 }
 
 void Symbol_table::funcion_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
-
   std::string_view scope = func_id;
-  for(int i=stack.size()-1;i>=0;--i) {
-    const auto &s=stack[i];
+  for (int i = stack.size() - 1; i >= 0; --i) {
+    const auto &s = stack[i];
     if (s.func_id != func_id)
       continue;
     I(s.scope.back() != '/');
-    scope   = absl::StrCat(s.scope, "/", func_id);
+    scope = absl::StrCat(s.scope, "/", func_id);
     break;
   }
 
@@ -146,7 +146,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 
   dump();
 
-  if (stack.size()==1) { // Just clear everything and be done
+  if (stack.size() == 1) {  // Just clear everything and be done
     I(stack.back().type == Scope_type::Function);
 
     varmap.clear();
@@ -154,8 +154,7 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
     return outputs;
   }
 
-
-  for(auto var:stack.back().declared) {
+  for (auto var : stack.back().declared) {
     varmap.erase(std::pair(scope, var));
   }
 
@@ -216,7 +215,7 @@ void Symbol_table::dump() const {
   if (stack.empty())
     return;
 
-  for(auto var:stack.back().declared) {
+  for (auto var : stack.back().declared) {
     fmt::print("var:{}\n", var);
     auto it = varmap.find(std::pair(stack.back().scope, var));
     if (it != varmap.end()) {
@@ -227,4 +226,3 @@ void Symbol_table::dump() const {
     }
   }
 }
-

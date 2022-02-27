@@ -89,7 +89,7 @@ public:
     uint64_t pos1;  // start position in original memblock
     uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
     uint32_t line;  // line of code
-    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) { }
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
 
     void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
       tok  = _tok;
@@ -123,21 +123,21 @@ public:
     pos1 = t.pos1;
     pos2 = t.pos2;
     line = t.line;
-    assert(pos2>pos1); // empty token otherwise
-    text = std::string_view(memblock+pos1 , pos2-pos1);
+    assert(pos2 > pos1);  // empty token otherwise
+    text = std::string_view(memblock + pos1, pos2 - pos1);
   }
 
   void fuse_token(Token_id new_tok, const char extra_char) {
     (void)extra_char;
     tok = new_tok;
 
-    pos2         = pos2 + 1;
-    text         = std::string_view(text.data(), text.size()+1);
+    pos2 = pos2 + 1;
+    text = std::string_view(text.data(), text.size() + 1);
   }
 
   void append_token(std::string_view t2) {
-    pos2         = pos2 + t2.size();
-    text         = std::string_view(text.data(), text.size() + t2.size());
+    pos2 = pos2 + t2.size();
+    text = std::string_view(text.data(), text.size() + t2.size());
   }
 
   Token_id tok;   // Token (identifier, if, while...)
@@ -158,7 +158,7 @@ public:
     uint64_t pos1;  // start position in original memblock
     uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
     uint32_t line;  // line of code
-    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) { }
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
 
     void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
       tok  = _tok;
@@ -204,12 +204,12 @@ public:
 protected:
   Token_list token_list;
 
-  std::string      buffer_name;
+  std::string buffer_name;
 
-  const char      *memblock;
-  size_t           memblock_size;
-  int              memblock_fd;
-  void             unregister_memblock();
+  const char *memblock;
+  size_t      memblock_size;
+  int         memblock_fd;
+  void        unregister_memblock();
 
   struct Translate_item {
     Translate_item() : tok(Token_id_nop), try_merge(false) {}
@@ -255,7 +255,10 @@ protected:
   void parse_step();
 
 protected:
-  std::string_view get_memblock() const { assert(memblock); return std::string_view(memblock, memblock_size); }
+  std::string_view get_memblock() const {
+    assert(memblock);
+    return std::string_view(memblock, memblock_size);
+  }
   std::string_view get_filename() const {
     I(memblock_fd != -1);
     return buffer_name;

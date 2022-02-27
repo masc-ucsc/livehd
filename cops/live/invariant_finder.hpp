@@ -9,8 +9,8 @@
 
 class Invariant_finder {
 private:
-  Lgraph *             elab_graph;
-  Lgraph *             synth_graph;
+  Lgraph              *elab_graph;
+  Lgraph              *synth_graph;
   Invariant_boundaries boundaries;
 
   bool          processed;

@@ -1,34 +1,35 @@
 #pragma once
 
 #include <memory>
+
 #include "spsc.hpp"
 
-template<class T>
+template <class T>
 class spool_ptr_pool {
 private:
   spsc256<T*> _pointer_queue;
 
 public:
   explicit spool_ptr_pool() {
-    T* raw_ptr = new T();
+    T* raw_ptr            = new T();
     raw_ptr->shared_count = 1;
-    bool something = _pointer_queue.enqueue(raw_ptr);
+    bool something        = _pointer_queue.enqueue(raw_ptr);
     assert(something);
   }
 
   ~spool_ptr_pool() {
-    while(!_pointer_queue.empty()) {
-      T* raw_ptr=nullptr;
+    while (!_pointer_queue.empty()) {
+      T*   raw_ptr   = nullptr;
       bool something = _pointer_queue.dequeue(raw_ptr);
       assert(something);
       delete raw_ptr;
     }
   }
 
-  T *get_ptr() {
-    T* raw_retval=nullptr;
+  T* get_ptr() {
+    T*   raw_retval      = nullptr;
     bool recycle_success = _pointer_queue.dequeue(raw_retval);
-    if(raw_retval == nullptr) {
+    if (raw_retval == nullptr) {
       raw_retval = new T();
     }
     assert(raw_retval);
@@ -37,22 +38,20 @@ public:
   }
 
   void release_ptr(T* to_release) {
-    assert(to_release->shared_count==1);
+    assert(to_release->shared_count == 1);
     bool fits = _pointer_queue.enqueue(to_release);
     if (fits)
       return;
     delete to_release;
   }
-
 };
-
 
 template <class T>
 class spool_ptr {
 public:
   spool_ptr() noexcept = default;
 
-  template<class... Args>
+  template <class... Args>
   static spool_ptr<T> make(Args&&... args) {
     auto retval = pool.get_ptr();
     retval->reconstruct(std::forward<Args>(args)...);
@@ -66,18 +65,16 @@ public:
     return spool_ptr<T>(retval);
   }
 
-  spool_ptr(const spool_ptr& sp) noexcept
-    : data_(sp.data_) {
+  spool_ptr(const spool_ptr& sp) noexcept : data_(sp.data_) {
     assert(data_);
-      ++data_->shared_count;
-    }
+    ++data_->shared_count;
+  }
 
   template <class D>
-    spool_ptr(const spool_ptr<D>& sp) noexcept
-    : data_(sp.data_) {
+  spool_ptr(const spool_ptr<D>& sp) noexcept : data_(sp.data_) {
     assert(data_);
-      ++data_->shared_count;
-    }
+    ++data_->shared_count;
+  }
 
   spool_ptr(spool_ptr&& sp) noexcept {
     swap(sp);
@@ -101,38 +98,28 @@ public:
     return *this;
   }
 
-  T* get() const noexcept {
-    return data_;
-  }
+  T* get() const noexcept { return data_; }
 
-  T* operator->() const noexcept {
-    return data_;
-  }
+  T* operator->() const noexcept { return data_; }
 
   T& operator*() const noexcept {
     assert(*this);
     return *data_;
   }
 
-  explicit operator bool() const noexcept {
-    return data_ != nullptr;
-  }
+  explicit operator bool() const noexcept { return data_ != nullptr; }
 
   void reset() noexcept {
-    if (data_==nullptr)
+    if (data_ == nullptr)
       return;
     dec_shared_count();
     data_ = nullptr;
   }
 
 private:
-  spool_ptr(T *data) noexcept : data_(data) {
-    assert(data_);
-  }
+  spool_ptr(T* data) noexcept : data_(data) { assert(data_); }
 
-  void swap(spool_ptr& sp) noexcept {
-    std::swap(data_, sp.data_);
-  }
+  void swap(spool_ptr& sp) noexcept { std::swap(data_, sp.data_); }
 
   void dec_shared_count() {
     assert(data_);
@@ -140,7 +127,7 @@ private:
     if (data_->shared_count <= 1) {
       pool.release_ptr(data_);
       data_ = nullptr;
-    }else{
+    } else {
       --data_->shared_count;
     }
   }
@@ -149,5 +136,3 @@ private:
 
   static inline thread_local spool_ptr_pool<T> pool;
 };
-
-

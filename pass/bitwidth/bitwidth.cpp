@@ -9,15 +9,13 @@
 #include "bitwidth_range.hpp"
 #include "lbench.hpp"
 #include "lgraph.hpp"
-#include "perf_tracing.hpp"
 #include "pass_bitwidth.hpp"
+#include "perf_tracing.hpp"
 
 Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterations), hier(_hier) {}
 
 void Bitwidth::do_trans(Lgraph *lg) {
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
-    ctx.event()->set_name("bitwidth." + lg->get_name());
-  });
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("bitwidth." + lg->get_name()); });
   Lbench b("pass.bitwidth." + lg->get_name());
   bw_pass(lg);
 }
@@ -307,7 +305,7 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
-      //GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n"); // e.driver.debug_name());
+      // GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n"); // e.driver.debug_name());
 
       not_finished = true;
       return;
@@ -329,7 +327,7 @@ void Bitwidth::process_memory(Node &node) {
   {
     for (auto &e : node.inp_edges_ordered()) {
       auto n = e.sink.get_pin_name();
-      if (str_tools::ends_with(n,"clock")) {
+      if (str_tools::ends_with(n, "clock")) {
         auto it = bwmap.find(e.driver.get_compact_class());
         if (it == bwmap.end()) {
           set_bw_1bit(e.driver);
@@ -356,8 +354,8 @@ void Bitwidth::process_memory(Node &node) {
           mem_size = v;
         }
       } else {
-        auto n_din = str_tools::ends_with(n,"din");
-        auto n_addr = str_tools::ends_with(n,"addr");
+        auto n_din  = str_tools::ends_with(n, "din");
+        auto n_addr = str_tools::ends_with(n, "addr");
         if (n_din || n_addr) {
           auto   it    = bwmap.find(e.driver.get_compact_class());
           Bits_t dbits = 0;
@@ -525,7 +523,7 @@ void Bitwidth::process_mult(Node &node, XEdge_iterator &inp_edges) {
       }
     } else {
       debug_unconstrained_msg(node, e.driver);
-      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n"); // e.driver.debug_name());
+      GI(hier, false, "Assert! bwmap entry should be ready at final bitwidth pass, entry\n");  // e.driver.debug_name());
 
       not_finished = true;
       return;
@@ -669,9 +667,9 @@ void Bitwidth::process_get_mask(Node &node) {
 
   const Lconst val     = it->second.get_max().get_mask_op(mask_min);
   Lconst       min_val = val;
-  if (it->second.get_max()>0 && it->second.get_min()<0)
+  if (it->second.get_max() > 0 && it->second.get_min() < 0)
     min_val = 0;
-  Lconst       max_val = val;
+  Lconst max_val = val;
 
   Lconst val2 = it->second.get_max().get_mask_op(mask_max);
   Lconst val3 = it->second.get_min().get_mask_op(mask_min);
@@ -773,9 +771,7 @@ void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {
   }
 }
 
-void Bitwidth::process_comparator(Node &node) {
-  set_bw_1bit(node.get_driver_pin());
-}
+void Bitwidth::process_comparator(Node &node) { set_bw_1bit(node.get_driver_pin()); }
 
 void Bitwidth::process_assignment_or(Node &node, XEdge_iterator &inp_edges) {
   I(inp_edges.size() == 1);
@@ -959,19 +955,19 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
 Bitwidth::Attr Bitwidth::get_key_attr(std::string_view key) {
   // FIXME: code duplicated in Firmap. Create a separate class for Attr
 
-  if (str_tools::ends_with(key,"__max"))
+  if (str_tools::ends_with(key, "__max"))
     return Attr::Set_max;
 
-  if (str_tools::ends_with(key,"__min"))
+  if (str_tools::ends_with(key, "__min"))
     return Attr::Set_min;
 
-  if (str_tools::ends_with(key,"__ubits"))
+  if (str_tools::ends_with(key, "__ubits"))
     return Attr::Set_ubits;
 
-  if (str_tools::ends_with(key,"__sbits"))
+  if (str_tools::ends_with(key, "__sbits"))
     return Attr::Set_sbits;
 
-  if (str_tools::ends_with(key,"__dp_assign"))
+  if (str_tools::ends_with(key, "__dp_assign"))
     return Attr::Set_dp_assign;
 
   return Attr::Set_other;
@@ -1203,8 +1199,8 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   if (node_attr.out_connected_pins().size() == 0)
     return;
 
-  auto             attr_dpin = node_attr.get_driver_pin("Y");
-  std::string  dpin_name;
+  auto        attr_dpin = node_attr.get_driver_pin("Y");
+  std::string dpin_name;
   if (attr_dpin.has_name())
     dpin_name = attr_dpin.get_name();
 
@@ -1306,7 +1302,7 @@ void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
 void Bitwidth::bw_pass(Lgraph *lg) {
   discovered_some_backward_nodes_try_again = true;
   // not_finished                             = true;
-  not_finished                             = false;
+  not_finished = false;
 
   int n_iterations = 0;
 
@@ -1587,11 +1583,13 @@ void Bitwidth::set_subgraph_boundary_bw(Node &node) {
 
   sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
     auto top_dpin = node.setup_driver_pin(dpin_gout.get_name());
-    
+
     Bitwidth_range bw;
     if (dpin_gout.is_unsign()) {
       if (dpin_gout.get_bits() == 1) {
-        bw.set_range(0, 1); // FIXME-sh: it's for sure not an overflow case. But if use set_ubits_range(), 1-ubit will be judged as overflow
+        bw.set_range(
+            0,
+            1);  // FIXME-sh: it's for sure not an overflow case. But if use set_ubits_range(), 1-ubit will be judged as overflow
       } else {
         bw.set_ubits_range(dpin_gout.get_bits() - 1);
       }

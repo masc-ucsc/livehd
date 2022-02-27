@@ -262,5 +262,4 @@ static inline constexpr uint32_t woothash32(const void *key, uint64_t len, uint6
   return (uint32_t)(seed - (seed >> 32));
 }
 
-}; // lh namespace
-
+};  // namespace lh

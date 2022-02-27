@@ -6,11 +6,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "str_tools.hpp"
 #include "graph_library.hpp"
 #include "lgedgeiter.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
+#include "str_tools.hpp"
 #include "tech_library.hpp"
 
 // static_assert(sizeof(Hierarchy_index) == 16);
@@ -49,4 +49,3 @@ void Lgraph_base_core::clear() {
   auto lock = absl::StrCat(path, "/", std::to_string(lgid), ".lock");
   unlink(lock.c_str());
 }
-

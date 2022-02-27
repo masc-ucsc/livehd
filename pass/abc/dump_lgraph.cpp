@@ -72,15 +72,15 @@ void Pass_abc::gen_primary_io_from_abc(Lgraph *new_graph, const Lgraph *old_grap
 void Pass_abc::gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t *pNtk) {
   assert(old_graph);
   const Tech_library &tlib  = new_graph->get_tlibrary();
-  const Tech_cell *   tcell = nullptr;
-  Abc_Obj_t *         pObj  = nullptr;
+  const Tech_cell    *tcell = nullptr;
+  Abc_Obj_t          *pObj  = nullptr;
   int                 i, k = 0;
   Index_ID            cell_idx = 0;
 
   if (Abc_NtkHasMapping(pNtk)) {
     Abc_NtkForEachNode(pNtk, pObj, k) {
       bool       constnode = false;
-      auto *     pGate     = (Mio_Gate_t *)pObj->pData;
+      auto      *pGate     = (Mio_Gate_t *)pObj->pData;
       Mio_Pin_t *pGatePin;
 
       std::string gate_name(Mio_GateReadName(pGate));
@@ -154,7 +154,7 @@ void Pass_abc::gen_latch_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Ab
   Abc_Obj_t *pLatch = nullptr;
   int        i      = 0;
   Abc_NtkForEachLatch(pNtk, pLatch, i) {
-    Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    Abc_Obj_t  *pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
     Index_ID    cell_idx = new_graph->create_node().get_nid();
     new_graph->set_bits(cell_idx, 1);
@@ -263,7 +263,7 @@ void Pass_abc::gen_memory_from_abc(Lgraph *new_graph, const Lgraph *old_graph, A
 
         for (size_t offset = 0; offset < inp_info.size(); ++offset) {
           index_offset info = {new_memory_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-          auto *       pObj = memory_input_map[info];
+          auto        *pObj = memory_input_map[info];
 
           auto dpin = new_graph->get_node(graph_info->cell2id[pObj])
                           .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
@@ -358,7 +358,7 @@ void Pass_abc::gen_sub_from_abc(Lgraph *new_graph, const Lgraph *old_graph, Abc_
 
       for (size_t offset = 0; offset < inp_info.size(); ++offset) {
         index_offset info = {new_sub_idx, old_inp_pid, {static_cast<int>(offset), static_cast<int>(offset)}};
-        auto *       pObj = subgraph_input_map[info];
+        auto        *pObj = subgraph_input_map[info];
 
         auto dpin = new_graph->get_node(graph_info->cell2id[pObj])
                         .setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pObj]]++);
@@ -388,14 +388,14 @@ void Pass_abc::conn_latch(Lgraph *new_graph, const Lgraph *old_graph, Abc_Ntk_t 
     Index_ID         latch_new_idx = graph_info->cell2id[Abc_ObjFanout0(Abc_ObjFanout0(pLatch))];
     const Tech_cell *tcell         = new_graph->get_tlibrary().get_const_cell(new_graph->tmap_id_get(latch_new_idx));
     std::string      trig_pin      = tcell->pin_name_exist("C") ? "C" : "E";
-    Abc_Obj_t *      pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
+    Abc_Obj_t       *pNode         = Abc_ObjFanin0(Abc_ObjFanin0(pLatch));
 
     auto dpin
         = new_graph->get_node(graph_info->cell2id[pNode]).setup_driver_pin(graph_info->cell_out_pid[graph_info->cell2id[pNode]]++);
     auto spin = new_graph->get_node(latch_new_idx).setup_sink_pin(tcell->get_pin_id("D"));
     new_graph->add_edge(dpin, spin);
 
-    Abc_Obj_t * pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
+    Abc_Obj_t  *pNet = Abc_ObjFanout0(Abc_ObjFanout0(pLatch));
     std::string latch_name(Abc_ObjName(pNet));
     std::string flop_name(latch_name);
     Index_ID    latch_old_idx = graph_info->latchname2id[flop_name];
@@ -441,7 +441,7 @@ void Pass_abc::conn_primary_output(Lgraph *new_graph, const Lgraph *old_graph, A
   Abc_Obj_t *pTerm = nullptr;
   int        i     = 0;
   Abc_NtkForEachPo(pNtk, pTerm, i) {
-    Abc_Obj_t * pNet = Abc_ObjFanin0(pTerm);
+    Abc_Obj_t  *pNet = Abc_ObjFanin0(pTerm);
     std::string output_name(Abc_ObjName(pNet));
 
     if (output_name[0] == '%' && output_name[output_name.size() - 1] == '%') {
@@ -465,7 +465,7 @@ void Pass_abc::conn_combinational_cell(Lgraph *new_graph, const Lgraph *old_grap
   Abc_NtkForEachNode(pNtk, pObj, k) {
     int         i;
     Mio_Gate_t *pGate = (Mio_Gate_t *)pObj->pData;
-    Mio_Pin_t * pGatePin;
+    Mio_Pin_t  *pGatePin;
     Port_ID     inpid = 0;
     for (pGatePin = Mio_GateReadPins(pGate), i = 0; pGatePin; pGatePin = Mio_PinReadNext(pGatePin), i++) {
       // std::string fanin_pin_name((Mio_PinReadName(pGatePin)));

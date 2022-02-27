@@ -91,7 +91,7 @@ void Opt_lnast::hierarchy_info_int(const std::string &msg) {
 
 void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
@@ -118,7 +118,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
 
 void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
@@ -155,7 +155,7 @@ void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
 
 void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
@@ -192,7 +192,7 @@ void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
 
 void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
@@ -269,7 +269,7 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 
 void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child   = true;
   bool first_operand = true;
@@ -306,7 +306,7 @@ void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
 
 void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
@@ -332,7 +332,7 @@ void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
 
 void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
+  Lconst      result_trivial;
 
   bool first_child = true;
   for (auto child : ln->children(lnid)) {
@@ -358,7 +358,7 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
 
 void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst val;
+  Lconst      val;
 
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
@@ -371,16 +371,13 @@ void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
       if (val == 1) {
         process_stmts(ln, ln->get_sibling_next(child));  // process the statements of the conditional that passed
         return;
-      }
-      else {
+      } else {
         continue;
       }
-    }
-    else if (child == ln->get_last_child(lnid)) {  // statements of the final else, process if reached
+    } else if (child == ln->get_last_child(lnid)) {  // statements of the final else, process if reached
       process_stmts(ln, child);
       return;
-    }
-    else {  // contents of a reference that failed the conditional
+    } else {  // contents of a reference that failed the conditional
       continue;
     }
   }
@@ -388,9 +385,9 @@ void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
 
 void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
-  Lconst        result_trivial;
-  Lconst        arg1;
-  Lconst        arg2;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
 
   bool first_child   = true;
   bool first_operand = true;
@@ -424,8 +421,7 @@ void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
 
   if (arg1 == arg2) {
     result_trivial = 1;
-  }
-  else {
+  } else {
     result_trivial = 0;
   }
 
@@ -438,7 +434,7 @@ void Opt_lnast::process_tuple_set(const std::shared_ptr<Lnast> &ln, const Lnast_
   const auto &first_child_data = ln->get_data(idx);
   I(first_child_data.type.is_ref());
 
-  auto          var_root = first_child_data.token.get_text();
+  auto        var_root = first_child_data.token.get_text();
   std::string var_field;
 
   //-------------------------------
@@ -500,7 +496,7 @@ void Opt_lnast::process_tuple_get(const std::shared_ptr<Lnast> &ln, const Lnast_
   const auto &second_child_data = ln->get_data(idx);
   I(second_child_data.type.is_ref());
 
-  auto          var_root = second_child_data.token.get_text();
+  auto        var_root = second_child_data.token.get_text();
   std::string var_field;
 
   //-------------------------------
@@ -735,7 +731,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
   auto idx = ln->get_first_child(lnid);
 
   bool nested_flag = false;  // flag to indicate whether the loop is currently checking grandchildren
-  auto return_node = idx;  //  node to return to after a node's grandchildren are done being checked
+  auto return_node = idx;    //  node to return to after a node's grandchildren are done being checked
   while (!idx.is_invalid()) {
     const auto &data = ln->get_data(idx);
 
@@ -783,16 +779,13 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
             if (st.get_trivial(lhs_txt).is_known_true()) {
               idx = ln->get_first_child(ln->get_sibling_next(child));
               break;
-            }
-            else {
+            } else {
               continue;
             }
-          }
-          else if (child == ln->get_last_child(idx)) {  // contents of the final else
+          } else if (child == ln->get_last_child(idx)) {  // contents of the final else
             idx = ln->get_first_child(child);
             break;
-          }
-          else {  // contents of a reference that failed the conditional
+          } else {  // contents of a reference that failed the conditional
             continue;
           }
         }
@@ -819,7 +812,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 
     if (nested_flag) {  // done traversing grandchildren, return to the node it was at before
       nested_flag = false;
-      idx = return_node;
+      idx         = return_node;
     }
 
     idx = ln->get_sibling_next(idx);

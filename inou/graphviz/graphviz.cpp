@@ -20,7 +20,7 @@ void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, c
   if (dot_postfix == "")
     absl::StrAppend(&file, ".dot");
   else
-    absl::StrAppend(&file, "." , dot_postfix , ".dot");
+    absl::StrAppend(&file, ".", dot_postfix, ".dot");
 
   int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
@@ -109,14 +109,11 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   absl::flat_hash_set<std::pair<std::string, std::string>> added;
 
   lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
-
     fmt::print("visiting node:{}\n", g->get_name());
 
     Node h_inp(g, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
     for (auto e : h_inp.inp_edges()) {
-      fmt::print("edge from:{} to:{}\n"
-                 ,e.driver.get_class_lgraph()->get_name()
-                 ,e.sink.get_class_lgraph()->get_name());
+      fmt::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second)
@@ -132,9 +129,7 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
 
     Node h_out(g, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
     for (auto e : h_out.out_edges()) {
-      fmt::print("edge from:{} to:{}\n",
-                 e.driver.get_class_lgraph()->get_name(),
-                 e.sink.get_class_lgraph()->get_name());
+      fmt::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
       if (p.first == p.second)
@@ -172,7 +167,7 @@ void Graphviz::create_color_map(Lgraph *lg) {
 
   color2rgb.clear();
   for (auto e : color2id) {
-    RGB  color(static_cast<double>(e.second) / color2id.size());
+    RGB color(static_cast<double>(e.second) / color2id.size());
     color2rgb[e.first] = color.to_s();
     data += fmt::format(" c{} [label=<{}>,style=\"filled\",fillcolor=\"{}\"];\n", e.second, e.first, color.to_s());
   }
@@ -311,7 +306,7 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
       continue;
 
     // get parent data for link
-    auto  p     = lnast->get_parent(itr);
+    auto p = lnast->get_parent(itr);
 
     auto parent_id = std::to_string(p.level) + std::to_string(p.pos);
     data += fmt::format(" {}->{};\n", parent_id, id);

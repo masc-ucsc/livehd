@@ -27,7 +27,7 @@ public:
   Lgraph *get_root_lg() const { return root; }
 
   lh::Tree_index get_last_free(lh::Tree_index tidx, Ntype_op op) { return last_free[tidx][size_t(op) - 1]; }
-  void       set_last_free(lh::Tree_index tidx, Ntype_op op, lh::Tree_index new_tidx) { last_free[tidx][size_t(op) - 1] = new_tidx; }
+  void set_last_free(lh::Tree_index tidx, Ntype_op op, lh::Tree_index new_tidx) { last_free[tidx][size_t(op) - 1] = new_tidx; }
 
   void dump() const;
 };

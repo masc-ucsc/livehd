@@ -12,7 +12,7 @@ static int                                       tracing_fd;
 
 void start_tracing() {
   perfetto::TracingInitArgs args;
-  perfetto::TraceConfig cfg;
+  perfetto::TraceConfig     cfg;
 
   args.backends = perfetto::kInProcessBackend;
 

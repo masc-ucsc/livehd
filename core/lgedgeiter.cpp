@@ -32,17 +32,17 @@ void Fast_edge_iterator::Fast_iter::go_next() {
   if (!nid.is_invalid())
     return;
 
-  std::tie(hidx, current_g) =  top_g->get_htree().get_next(hidx);
+  std::tie(hidx, current_g) = top_g->get_htree().get_next(hidx);
   while (current_g != top_g) {
     nid = current_g->fast_first();
     if (!nid.is_invalid()) {
       return;
     }
-    std::tie(hidx, current_g) =  top_g->get_htree().get_next(hidx);
+    std::tie(hidx, current_g) = top_g->get_htree().get_next(hidx);
   }
   I(current_g == top_g);
-  nid = 0;
-  hidx = Hierarchy::non_hierarchical(); // invalidate hidx
+  nid  = 0;
+  hidx = Hierarchy::non_hierarchical();  // invalidate hidx
 }
 
 Fast_edge_iterator::Fast_iter &Fast_edge_iterator::Fast_iter::operator++() {

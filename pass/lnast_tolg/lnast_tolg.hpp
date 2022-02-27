@@ -15,32 +15,33 @@
 
 class Lnast_tolg {
 public:
-  explicit Lnast_tolg(std::string_view _module_name, std::string_view  _path);
+  explicit Lnast_tolg(std::string_view _module_name, std::string_view _path);
   std::vector<Lgraph *> do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts);
 
 private:
-  std::shared_ptr<Lnast>   lnast;
+  std::shared_ptr<Lnast> lnast;
   std::string            module_name;
   std::string            path;
   std::string            tuple_assign_str;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
-  absl::flat_hash_map<std::string, Node_pin>                name2dpin;  // for scalar variable
-  absl::flat_hash_set<std::string>                          inlined_func_names;
-  absl::flat_hash_map<std::string, Node_pin>                field2dpin;
-  absl::flat_hash_map<std::string, std::vector<Node>>       driver_var2wire_nodes;  // for __last_value temporarily wire nodes
+  absl::flat_hash_map<std::string, Node_pin>                  name2dpin;  // for scalar variable
+  absl::flat_hash_set<std::string>                            inlined_func_names;
+  absl::flat_hash_map<std::string, Node_pin>                  field2dpin;
+  absl::flat_hash_map<std::string, std::vector<Node>>         driver_var2wire_nodes;  // for __last_value temporarily wire nodes
   absl::flat_hash_map<Node_pin, std::vector<Node_pin>>        inp2leaf_tg_spins;
-  absl::flat_hash_map<std::string, Node>                    vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
+  absl::flat_hash_map<std::string, Node>
+      vname2tuple_head;  // record the tuple_chain head, which will be driven by the #register variable with the largest_ssa
   absl::flat_hash_map<Node::Compact, absl::flat_hash_set<Node>> inp_artifacts;
 
   struct Ssa_info {
-    Ssa_info(std::string_view _var_name, uint16_t _subs) : var_name(_var_name), subs(_subs) { }
+    Ssa_info(std::string_view _var_name, uint16_t _subs) : var_name(_var_name), subs(_subs) {}
 
     std::string var_name;
-    uint16_t      subs;
+    uint16_t    subs;
   };
 
-  absl::flat_hash_map<Node_pin::Compact_class_driver, Ssa_info>  ssa_info_map;
+  absl::flat_hash_map<Node_pin::Compact_class_driver, Ssa_info> ssa_info_map;
 
 protected:
   void top_stmts2lgraph(Lgraph *lg, const Lnast_nid &lnidx_stmts);
@@ -84,18 +85,18 @@ protected:
     return name.substr(0, 3) == "___";
   }  // FIXME->sh: any other way to avoic create tmp string every time?
   static bool is_register(std::string_view name) { return name.front() == '#'; }
-  static bool is_input(std::string_view  name) { return name.front() == '$'; }
-  static bool is_output(std::string_view  name) { return name.front() == '%'; }
-  static bool is_bool_true(std::string_view  name) { return str_tools::starts_with(name, "true"); }
-  static bool is_bool_false(std::string_view  name) { return str_tools::starts_with(name, "false"); }
+  static bool is_input(std::string_view name) { return name.front() == '$'; }
+  static bool is_output(std::string_view name) { return name.front() == '%'; }
+  static bool is_bool_true(std::string_view name) { return str_tools::starts_with(name, "true"); }
+  static bool is_bool_false(std::string_view name) { return str_tools::starts_with(name, "false"); }
   static bool is_scalar(Node_pin dpin) { return dpin.get_node().get_type_op() != Ntype_op::TupAdd; }
 
   // FIXME: this are always constant (REMOVE and side effects too)
-  static bool is_const_num(std::string_view  name) {
+  static bool is_const_num(std::string_view name) {
     (void)name;
     return true;
   }  // (std::isdigit(name.at(0)) || name.at(0) == '-'); }
-  static bool is_err_var_undefined(std::string_view  name) {
+  static bool is_err_var_undefined(std::string_view name) {
     I(name.substr(0, 17) != "err_var_undefined");
     return false;
   }
@@ -103,24 +104,24 @@ protected:
   bool subgraph_outp_is_tuple(Sub_node *sub);
 
   // tuple related
-  Node_pin    setup_tuple_ref(Lgraph *lg, std::string_view  tup_name);
-  Node_pin    setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view  tup_name, int16_t);
-  Node_pin    setup_field_dpin(Lgraph *lg, std::string_view  key_name);
+  Node_pin    setup_tuple_ref(Lgraph *lg, std::string_view tup_name);
+  Node_pin    setup_ta_ref_previous_ssa(Lgraph *lg, std::string_view tup_name, int16_t);
+  Node_pin    setup_field_dpin(Lgraph *lg, std::string_view key_name);
   void        reconnect_to_ff_qpin(Lgraph *lg, const Node &tg_node);
   static bool tuple_get_has_key_name(const Node &tup_get);
   static bool tuple_get_has_key_pos(const Node &tup_get);
-  static bool is_tup_get_target(const Node &tup_add, std::string_view  tup_get_target);
+  static bool is_tup_get_target(const Node &tup_add, std::string_view tup_get_target);
   static bool is_tup_get_target(const Node &tup_add, uint32_t tup_get_target);
-  Node_pin    create_inp_tg(Lgraph *lg, std::string_view  input_field);
-  void        create_out_ta(Lgraph *lg, std::string_view  key_name, Node_pin &val_dpin);
-  void        create_inp_ta4runtime_idx(Lgraph *lg, const Node_pin &inp_dpin, std::string_view  full_inp_hier_name);
-  void        handle_inp_tg_runtime_idx(std::string_view  hier_name, Node &chain_head, Node &cur_node);
-  void        create_ginp_as_runtime_idx(Lgraph *lg, std::string_view  hier_name, Node &chain_head, Node &cur_node);
+  Node_pin    create_inp_tg(Lgraph *lg, std::string_view input_field);
+  void        create_out_ta(Lgraph *lg, std::string_view key_name, Node_pin &val_dpin);
+  void        create_inp_ta4runtime_idx(Lgraph *lg, const Node_pin &inp_dpin, std::string_view full_inp_hier_name);
+  void        handle_inp_tg_runtime_idx(std::string_view hier_name, Node &chain_head, Node &cur_node);
+  void        create_ginp_as_runtime_idx(Lgraph *lg, std::string_view hier_name, Node &chain_head, Node &cur_node);
 
   void     try_create_flattened_inp(Lgraph *lg);
   void     post_process_ginp_attr_connections(Lgraph *lg);
   void     dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spin, std::string_view hier_name, Node &chain_head);
-  Node_pin create_const(Lgraph *lg, std::string_view  const_str);
+  Node_pin create_const(Lgraph *lg, std::string_view const_str);
 
   // attribute related
   // bool is_new_var_chain(const Lnast_nid &lnidx_opr);

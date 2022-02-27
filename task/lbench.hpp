@@ -45,7 +45,7 @@ private:
 
 protected:
 #ifdef __x86_64__
-  using Time_Point=uint64_t;
+  using Time_Point = uint64_t;
 #else
   typedef std::chrono::time_point<std::chrono::system_clock> Time_Point;
 #endif
@@ -70,13 +70,11 @@ protected:
   uint64_t get_cycles() const {
     unsigned int lo;
     unsigned int hi;
-    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
-    return (((uint64_t)hi << 32) | lo)>>10; // >>10 to decrease size /1K
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return (((uint64_t)hi << 32) | lo) >> 10;  // >>10 to decrease size /1K
   }
 #else
-  Time_Point get_cycles() const {
-    return std::chrono::system_clock::now();
-  }
+  Time_Point                                                 get_cycles() const { return std::chrono::system_clock::now(); }
 #endif
 
 public:
@@ -84,7 +82,7 @@ public:
     end_called = false;
     perf_start(name);
 
-    const std::vector<int> evts{
+    const std::vector<int> evts {
 #if 0
         PERF_COUNT_HW_CPU_CYCLES,
         PERF_COUNT_HW_INSTRUCTIONS,
@@ -105,11 +103,10 @@ public:
     linux.close();
   }
 
-  void start();
-  void sample(const std::string &name);
+  void   start();
+  void   sample(const std::string &name);
   double get_secs() const;
 
-  void end();
+  void              end();
   static inline int tfd = -1;
 };
-

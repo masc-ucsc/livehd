@@ -8,8 +8,7 @@
 static_assert(static_cast<int>(Ntype_op::Last_invalid) < 127, "lgedge has 8 bits for type");
 
 Lgraph_attributes::Lgraph_attributes(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib) noexcept
-    : Lgraph_Base(_path, _name, _lgid, _lib) {
-}
+    : Lgraph_Base(_path, _name, _lgid, _lib) {}
 
 void Lgraph_attributes::clear() {
   const_map.clear();
@@ -28,11 +27,10 @@ void Lgraph_attributes::clear() {
   node_color_map.clear();
   node_place_map.clear();
 
-  Lgraph_Base::clear(); // last. Removes lock at the end
+  Lgraph_Base::clear();  // last. Removes lock at the end
 }
 
 void Lgraph_attributes::set_type(Index_id nid, const Ntype_op op) {
-
   I(node_internal[nid].is_master_root());
 
   auto type = node_internal[nid].get_type();
@@ -42,11 +40,11 @@ void Lgraph_attributes::set_type(Index_id nid, const Ntype_op op) {
     auto it2 = down_class_map.find(it->second);
     I(it2 != down_class_map.end());
     it2->second--;
-    if (it2->second==0) {
+    if (it2->second == 0) {
       down_class_map.erase(it2);
     }
     subid_map.erase(it);
-  }else if (type == Ntype_op::LUT)
+  } else if (type == Ntype_op::LUT)
     lut_map.erase(Node::Compact_class(nid));
 
   node_internal[nid].set_type(op);
@@ -59,13 +57,12 @@ bool Lgraph_attributes::is_type_const(Index_id nid) const {
 }
 
 void Lgraph_attributes::set_type_sub(Index_id nid, Lg_type_id subgraphid) {
-
   subid_map.insert_or_assign(Node::Compact_class(nid), subgraphid.value);
 
   auto it = down_class_map.find(subgraphid);
   if (it == down_class_map.end()) {
     down_class_map.insert_or_assign(subgraphid.value, 1);
-  }else{
+  } else {
     it->second += 1;
   }
 
@@ -82,9 +79,8 @@ Lg_type_id Lgraph_attributes::get_type_sub(Index_id nid) const {
 }
 
 std::tuple<Lg_type_id, Index_id> Lgraph_attributes::go_next_down(Index_id nid) const {
-
-  Index_id   n_nid=0;
-  Lg_type_id n_lgid=0;
+  Index_id   n_nid  = 0;
+  Lg_type_id n_lgid = 0;
 
   auto it = subid_map.find(nid);
   if (it != subid_map.end()) {
@@ -136,7 +132,6 @@ Lconst Lgraph_attributes::get_type_lut(Index_id nid) const {
 }
 
 Lconst Lgraph_attributes::get_type_const(Index_id nid) const {
-
   auto it = const_map.find(Node::Compact_class(nid));
   I(it != const_map.end());
 

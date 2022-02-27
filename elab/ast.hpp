@@ -17,8 +17,8 @@ public:
 class Ast_parser : public lh::tree<Ast_parser_node> {
 private:
 protected:
-  lh::Tree_level   level;
-  lh::Tree_level   down_added;
+  lh::Tree_level         level;
+  lh::Tree_level         down_added;
   const std::string_view buffer;  // const because it can not change at runtime
 
   std::vector<lh::Tree_index> last_added;

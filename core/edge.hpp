@@ -82,4 +82,3 @@ public:
 
   // END ATTRIBUTE ACCESSORS
 };
-

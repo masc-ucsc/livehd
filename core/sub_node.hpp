@@ -30,11 +30,11 @@ public:
     IO_pin() = default;
 
     IO_pin(std::string_view _name, Port_ID ipid, Direction _dir, Port_ID _graph_io_pos)
-      : name(_name), dir(_dir), graph_io_pos(_graph_io_pos), instance_pid(ipid) {}
-    std::string           name;
-    Direction             dir = Direction::Invalid;
-    Port_ID               graph_io_pos = Port_invalid;
-    Port_ID               instance_pid = 0;
+        : name(_name), dir(_dir), graph_io_pos(_graph_io_pos), instance_pid(ipid) {}
+    std::string name;
+    Direction   dir          = Direction::Invalid;
+    Port_ID     graph_io_pos = Port_invalid;
+    Port_ID     instance_pid = 0;
 
     [[nodiscard]] bool    is_mapped() const { return graph_io_pos != Port_invalid; }
     [[nodiscard]] bool    is_input() const { return dir == Direction::Input; }
@@ -53,8 +53,8 @@ public:
   };
 
 private:
-  std::string     name;
-  Lg_type_id      lgid;
+  std::string name;
+  Lg_type_id  lgid;
 
   std::vector<IO_pin> io_pins;
 
@@ -77,9 +77,7 @@ private:
   }
 
 public:
-  Sub_node() {
-    expunge();
-  }
+  Sub_node() { expunge(); }
 
   Sub_node(const Sub_node &s) = default;
   Sub_node &operator=(const Sub_node &) = delete;

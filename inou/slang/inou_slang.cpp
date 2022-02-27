@@ -35,7 +35,7 @@ void Inou_slang::work(Eprp_var &var) {
   Lbench     b("inou.SLANG_verilog");
   Inou_slang p(var);
 
-  std::vector<char *>      argv;
+  std::vector<char *> argv;
 
   argv.push_back(strdup("lgshell"));
 
@@ -44,7 +44,7 @@ void Inou_slang::work(Eprp_var &var) {
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
-    for (const auto f : absl::StrSplit(txt,',')) {
+    for (const auto f : absl::StrSplit(txt, ',')) {
       argv.push_back(strdup("-I"));
       argv.push_back(strdup(std::string(f).c_str()));
     }
@@ -52,7 +52,7 @@ void Inou_slang::work(Eprp_var &var) {
 
   if (var.has_label("defines")) {
     auto txt = var.get("defines");
-    for (const auto f : absl::StrSplit(txt,',')) {
+    for (const auto f : absl::StrSplit(txt, ',')) {
       argv.push_back(strdup("-D"));
       argv.push_back(strdup(std::string(f).c_str()));
     }
@@ -60,13 +60,13 @@ void Inou_slang::work(Eprp_var &var) {
 
   if (var.has_label("undefines")) {
     auto txt = var.get("undefines");
-    for (const auto f: absl::StrSplit(txt,',')) {
+    for (const auto f : absl::StrSplit(txt, ',')) {
       argv.push_back(strdup("-U"));
       argv.push_back(strdup(std::string(f).c_str()));
     }
   }
 
-  for (const auto f : absl::StrSplit(p.files,',')) {
+  for (const auto f : absl::StrSplit(p.files, ',')) {
     argv.push_back(strdup(std::string(f).c_str()));
   }
 

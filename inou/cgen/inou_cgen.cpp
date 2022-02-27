@@ -35,4 +35,3 @@ void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
 
   // no need to sync for cgen. It will sync before exit lgshell if needed
 }
-

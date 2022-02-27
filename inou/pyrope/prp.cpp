@@ -2054,10 +2054,7 @@ bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::lis
   if (ws_map.find(tok) != ws_map.end()) {
     allowed_ws_after  = ws_map[tok];
     allowed_ws_before = (ws_map[tok] >> 8);
-    PRINT_DBG_AST("token {}: ws before = {}, ws after = {}.\n",
-                  scan_text(scan_token_entry()),
-                  allowed_ws_before,
-                  allowed_ws_after);
+    PRINT_DBG_AST("token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {
@@ -2153,10 +2150,7 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
   if (ws_map.find(toks[i]) != ws_map.end()) {
     allowed_ws_after  = ws_map[toks[i]];
     allowed_ws_before = (ws_map[toks[i]] >> 8);
-    PRINT_DBG_AST("token {}: ws before = {}, ws after = {}.\n",
-                  scan_text(scan_token_entry()),
-                  allowed_ws_before,
-                  allowed_ws_after);
+    PRINT_DBG_AST("token {}: ws before = {}, ws after = {}.\n", scan_text(scan_token_entry()), allowed_ws_before, allowed_ws_after);
   }
 
   if (allowed_ws_before) {

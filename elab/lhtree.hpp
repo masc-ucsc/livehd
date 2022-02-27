@@ -4,12 +4,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <string>
-#include <string_view>
 #include <cstdint>
 #include <functional>
-#include <vector>
 #include <iostream>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "iassert.hpp"
 
@@ -24,11 +24,9 @@ public:
 
   constexpr Tree_index() : level(-1), pos(-1){};
   constexpr Tree_index(Tree_level l, Tree_pos i) : level(l), pos(i) {}
-  constexpr Tree_index(const Tree_index &ti) : level(ti.level), pos(ti.pos) { }
+  constexpr Tree_index(const Tree_index &ti) : level(ti.level), pos(ti.pos) {}
 
-  static constexpr Tree_index root() {
-    return Tree_index(0, 0);
-  }
+  static constexpr Tree_index root() { return Tree_index(0, 0); }
 
   constexpr Tree_index &operator=(const Tree_index &o) {
     level = o.level;
@@ -266,13 +264,9 @@ public:
     return child_index;
   }
 
-  bool is_last_child(const Tree_index &self_index) const {
-    return get_sibling_next(self_index) == invalid_index();
-  }
+  bool is_last_child(const Tree_index &self_index) const { return get_sibling_next(self_index) == invalid_index(); }
 
-  bool is_first_child(const Tree_index &self_index) const {
-    return get_first_child(get_parent(self_index)) == self_index;
-  }
+  bool is_first_child(const Tree_index &self_index) const { return get_first_child(get_parent(self_index)) == self_index; }
 
   Tree_index get_first_child(const Tree_index &parent_index) const {
     Tree_index child_index(parent_index.level + 1, get_first_child_pos(parent_index));

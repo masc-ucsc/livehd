@@ -83,7 +83,7 @@ Lgraph *Pass_abc::regen(const Lgraph *lg) {
 
   find_cell_conn(lg);
   std::string source{lg->get_library().get_source(lg->get_lgid())};
-  Lgraph *    mapped = Lgraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
+  Lgraph     *mapped = Lgraph::create(lg->get_path(), absl::StrCat(lg->get_name(), "_mapped"), source);
   from_abc(mapped, lg, to_abc(lg));
   mapped->sync();
   if (opack.verbose)
@@ -127,7 +127,7 @@ static std::string get_clock_name(const Lgraph *g, Index_ID clk_idx) {
 void Pass_abc::find_latch_conn(const Lgraph *g) {
   for (const auto &idx : graph_info->latch_id) {
     graph_topology::topology_info topo;
-    const Tech_cell *             tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
+    const Tech_cell              *tcell = g->get_tlibrary().get_const_cell(g->tmap_id_get(idx));
     if (opack.verbose)
       fmt::print("\nLatch_Op_ID NodeID:{} has direct input from Node: \n", idx);
     std::string trig_pin = tcell->pin_name_exist("C") ? "C" : "E";
@@ -720,7 +720,7 @@ void Pass_abc::conn_memory(const Lgraph *g, Abc_Ntk_t *pAig) {
     for (const auto &src : inp_info) {
       Port_ID offset = 0;
       for (const auto &inp : src.second) {
-        Abc_Obj_t *  pseduo_memory_output = nullptr;
+        Abc_Obj_t   *pseduo_memory_output = nullptr;
         Index_ID     src_idx              = inp.idx;
         int          src_bits             = inp.offset[0];
         index_offset rhs                  = {src_idx, 0, {src_bits, src_bits}};
@@ -791,7 +791,7 @@ void Pass_abc::conn_sub(const Lgraph *g, Abc_Ntk_t *pAig) {
     for (const auto &src : inp_info) {
       Port_ID offset = 0;
       for (const auto &inp : src.second) {
-        Abc_Obj_t *  pseduo_sub_output = nullptr;
+        Abc_Obj_t   *pseduo_sub_output = nullptr;
         Index_ID     src_idx           = inp.idx;
         int          src_bits          = inp.offset[0];
         index_offset rhs               = {src_idx, 0, {src_bits, src_bits}};

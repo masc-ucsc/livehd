@@ -1,8 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "absl/strings/str_split.h"
 #include "inou_prp.hpp"
 
+#include "absl/strings/str_split.h"
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -25,8 +25,8 @@ void Inou_prp::parse_to_lnast(Eprp_var &var) {
   Lbench   b("inou.PRP_parse_to_lnast");
   Inou_prp p(var);
 
-  for (const auto &f : absl::StrSplit(p.files,',')) {
-    auto basename       = str_tools::get_str_after_last_if_exists(f,'/');
+  for (const auto &f : absl::StrSplit(p.files, ',')) {
+    auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
     auto basename_noext = str_tools::get_str_before_first(basename, '.');
 
     Prp2lnast converter(f, basename_noext);

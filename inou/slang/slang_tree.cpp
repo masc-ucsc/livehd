@@ -106,7 +106,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       // already done
     } else if (member.kind == slang::SymbolKind::Net) {
       const auto &ns   = member.as<slang::NetSymbol>();
-      auto *      expr = ns.getInitializer();
+      auto       *expr = ns.getInitializer();
       if (expr) {
         // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
         lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr));
@@ -170,8 +170,8 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
   const auto &lhs = expr.left();
 
   std::string var_name;
-  bool          dest_var_sign;
-  int           dest_var_bits;
+  bool        dest_var_sign;
+  int         dest_var_bits;
 
   std::string dest_max_bit;
   std::string dest_min_bit;
@@ -237,7 +237,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
   }
 
   if (expr.kind == slang::ExpressionKind::IntegerLiteral) {
-    const auto &                      il    = expr.as<slang::IntegerLiteral>();
+    const auto                       &il    = expr.as<slang::IntegerLiteral>();
     auto                              svint = il.getValue();
     slang::SmallVectorSized<char, 32> buffer;
     if (!svint.hasUnknown() && svint.getMinRepresentedBits() < 8) {
@@ -316,7 +316,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
   }
 
   if (expr.kind == slang::ExpressionKind::Conversion) {
-    const auto &       conv    = expr.as<slang::ConversionExpression>();
+    const auto        &conv    = expr.as<slang::ConversionExpression>();
     const slang::Type *to_type = conv.type;
 
     auto res = process_expression(conv.operand());  // NOTHING TO DO? (the dp_assign handles it?)
@@ -333,7 +333,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
 
     I(!to_type->isSigned());
     // and(and(X,a),b) -> and(X,min(a,b))
-    auto bw = std::to_string(to_type->getBitWidth());
+    auto bw   = std::to_string(to_type->getBitWidth());
     auto mask = lnast_create_obj.create_mask_stmts(bw);
     return lnast_create_obj.create_bit_and_stmts(res, mask);
 #if 0
@@ -422,8 +422,9 @@ std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
 
   auto tmp
       = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_reduce_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
-  return lnast_create_obj.create_bit_and_stmts(tmp,
-                                               lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
+  return lnast_create_obj.create_bit_and_stmts(
+      tmp,
+      lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
 }
 
 std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {

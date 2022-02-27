@@ -21,9 +21,9 @@
 class Lcompiler {
 private:
   std::string path;
-  std::string odir;  
+  std::string odir;
   std::string top;
-  const bool             gviz;
+  const bool  gviz;
 
   // firrtl only tables
   absl::node_hash_map<Lgraph *, FBMap>   fbmaps;         // Lg_type_id -> fbmap
@@ -53,7 +53,7 @@ public:
   void fir_thread_cprop(Lgraph *lg);
   void fir_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
-  std::string_view    get_top() const { return top; };
+  std::string_view             get_top() const { return top; };
   const std::vector<Lgraph *> &get_lgraphs() const { return lgs; }
 
   std::vector<Lgraph *> wait_all() {

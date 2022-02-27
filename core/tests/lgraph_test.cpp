@@ -17,7 +17,7 @@ class Setup_lgraph : public ::testing::Test {
 protected:
   std::map<std::string, int> name2pos;
   std::map<std::string, int> name2bits;
-  std::set<int>                posinput;
+  std::set<int>              posinput;
 
   std::set<int> posused;
 

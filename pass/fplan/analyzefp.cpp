@@ -1,12 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "analyzefp.hpp"
+
 #include <limits>
 
 #include "absl/container/flat_hash_set.h"
-
 #include "ann_place.hpp"
 #include "floorplan.hpp"
-#include "analyzefp.hpp"
 
 void Pass_fplan_analyzefp::setup() {
   auto a = Eprp_method("pass.fplan.analyzefp",
@@ -29,9 +29,7 @@ void Pass_fplan_analyzefp::setup() {
   register_pass(a);
 }
 
-std::string Pass_fplan_analyzefp::safe_name(const Node& n) const {
-  return n.has_name() ? n.get_name() : n.default_instance_name();
-}
+std::string Pass_fplan_analyzefp::safe_name(const Node& n) const { return n.has_name() ? n.get_name() : n.default_instance_name(); }
 
 void Pass_fplan_analyzefp::print_area(const Node_tree& nt, const lh::Tree_index& tidx) const {
   const auto& n = nt.get_data(tidx);
@@ -143,7 +141,7 @@ Pass_fplan_analyzefp::Pass_fplan_analyzefp(const Eprp_var& var) : Pass("pass.fpl
 
           hint_map.insert_or_assign(n.get_compact(), hint_enum);
           const lh::Tree_index parent_idx = nt.get_parent(index);
-          const Node&      parent     = nt.get_data(parent_idx);
+          const Node&          parent     = nt.get_data(parent_idx);
           if (!parent_idx.is_root() && !hint_map.contains(parent.get_compact())) {
             hint_map.insert_or_assign(parent.get_compact(), UnknownHint);
             fmt::print("setting UnknownHint for parent {} due to child having hint\n", safe_name(parent));

@@ -10,35 +10,34 @@ class Lnast_map {
 protected:
   constexpr static std::array namemap_pyrope{"invalid",
 
-                                             "top",       "sts",        "if",       "uif",     "for", "while",
-                                             "func_call",  "func_def",
+                                             "top",        "sts",       "if",        "uif",       "for",
+                                             "while",      "func_call", "func_def",
 
-                                             "=",         ":=",         "mut",
+                                             "=",          ":=",        "mut",
 
-                                             "&",         "|",          "~",        "^",
+                                             "&",          "|",         "~",         "^",
 
                                              "ror",
 
-                                             "and",       "or",         "!",
+                                             "and",        "or",        "!",
 
-                                             "+",         "-",          "*",        "/",       "mod",
+                                             "+",          "-",         "*",         "/",         "mod",
 
-                                             "<<",        ">>",
+                                             "<<",         ">>",
 
-                                             "sext",      "set_mask",   "get_mask", "mask_and", "mask_popcount", "mask_xor",
+                                             "sext",       "set_mask",  "get_mask",  "mask_and",  "mask_popcount",
+                                             "mask_xor",
 
-                                             "is",        "!=",         "==",       "<",       "<=",  ">",     ">=",
+                                             "is",         "!=",        "==",        "<",         "<=",
+                                             ">",          ">=",
 
+                                             "ref",        "const",
 
-                                             "ref",       "const",
+                                             "++",         "++",        "tuple_get", "tuple_set",
 
+                                             "attr_set",   "attr_get",
 
-                                             "++",        "++", "tuple_get", "tuple_set",
-
-                                             "attr_set", "attr_get",
-
-                                             "error_flag", "phi", "hot_phi"
-  };
+                                             "error_flag", "phi",       "hot_phi"};
 
   constexpr static std::array namemap_verilog{
       "invalid",

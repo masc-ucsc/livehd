@@ -163,8 +163,8 @@ protected:
       }
 
       for (int j = 0; j < 2; ++j) {
-        std::string  i_name(lg_name + "_" + std::to_string(j));
-        auto *parent_lg = lgs[rnd.any()];
+        std::string i_name(lg_name + "_" + std::to_string(j));
+        auto       *parent_lg = lgs[rnd.any()];
         add_child(parent_lg, lg, i_name, randomize);
       }
     }
@@ -208,13 +208,13 @@ TEST_F(Setup_graphs_test, each_local_sub) {
   }
 
   for (const auto &c : children) {
-    if (str_tools::contains(c.first,"cell"))
+    if (str_tools::contains(c.first, "cell"))
       EXPECT_NE(c.second, children2[c.first]);
     else
       EXPECT_EQ(c.second, children2[c.first]);
   }
   for (const auto &c : children2) {
-    if (str_tools::contains(c.first,"cell"))
+    if (str_tools::contains(c.first, "cell"))
       EXPECT_NE(c.second, children[c.first]);
     else
       EXPECT_EQ(c.second, children[c.first]);
@@ -249,13 +249,13 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
   }
 
   for (auto &c : children) {
-    if (str_tools::contains(c.first,"cell"))
+    if (str_tools::contains(c.first, "cell"))
       EXPECT_NE(c.second, children2[c.first]);
     else
       EXPECT_EQ(c.second, children2[c.first]);
   }
   for (auto &c : children2) {
-    if (str_tools::contains(c.first,"cell"))
+    if (str_tools::contains(c.first, "cell"))
       EXPECT_NE(c.second, children[c.first]);
     else
       EXPECT_EQ(c.second, children[c.first]);

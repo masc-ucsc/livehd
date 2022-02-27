@@ -16,16 +16,12 @@ struct Pipe_step {
 
 class Eprp_pipe {
 protected:
-
   std::vector<Pipe_step> steps;
-public:
 
-  void clear() {
-    steps.clear();
-  }
+public:
+  void clear() { steps.clear(); }
 
   void add_command(const Eprp_method &m, const Eprp_var &field_var);
 
   void run();
 };
-

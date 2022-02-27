@@ -8,8 +8,8 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "lrand.hpp"
 #include "lhtree.hpp"
+#include "lrand.hpp"
 #include "perf_tracing.hpp"
 #include "tree_lgdb_setup.hpp"
 

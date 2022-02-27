@@ -4,10 +4,11 @@
  * Verilog memory module with forwarding/latency/masking parameters.
  */
 
-#include <fstream>
-#include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -25,38 +26,34 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  if ((args[1] == "read") && ((read_ports = std::stoi(args[2])) > 0) &&
-      (args[3] == "write") && ((write_ports = std::stoi(args[4])) > 0)) {
-
+  if ((args[1] == "read") && ((read_ports = std::stoi(args[2])) > 0) && (args[3] == "write")
+      && ((write_ports = std::stoi(args[4])) > 0)) {
     // Generate Verilog memory module
-    std::string filename = "cgen_memory_" + std::to_string(read_ports) + "rd_" +
-                           std::to_string(write_ports) + "wr";
+    std::string   filename = "cgen_memory_" + std::to_string(read_ports) + "rd_" + std::to_string(write_ports) + "wr";
     std::ofstream outfile(filename + ".v");
-    outfile
-        << "`define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\\\n"
-        << "                   (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\\\n"
-        << "                   (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\\\n"
-        << "                   (n) <= (1<<6) ? 6 : (n) <= (1<<7) ? 7 :\\\n"
-        << "                   (n) <= (1<<8) ? 8 : (n) <= (1<<9) ? 9 :\\\n"
-        << "                   (n) <= (1<<10) ? 10 : (n) <= (1<<11) ? 11 :\\\n"
-        << "                   (n) <= (1<<12) ? 12 : (n) <= (1<<13) ? 13 :\\\n"
-        << "                   (n) <= (1<<14) ? 14 : (n) <= (1<<15) ? 15 :\\\n"
-        << "                   (n) <= (1<<16) ? 16 : (n) <= (1<<17) ? 17 :\\\n"
-        << "                   (n) <= (1<<18) ? 18 : (n) <= (1<<19) ? 19 :\\\n"
-        << "                   (n) <= (1<<20) ? 20 : (n) <= (1<<21) ? 21 :\\\n"
-        << "                   (n) <= (1<<22) ? 22 : (n) <= (1<<23) ? 23 :\\\n"
-        << "                   (n) <= (1<<24) ? 24 : (n) <= (1<<25) ? 25 :\\\n"
-        << "                   (n) <= (1<<26) ? 26 : (n) <= (1<<27) ? 27 :\\\n"
-        << "                   (n) <= (1<<28) ? 28 : (n) <= (1<<29) ? 29 :\\\n"
-        << "                   (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : "
-           "32)\n"
-        << std::endl;
+    outfile << "`define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\\\n"
+            << "                   (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\\\n"
+            << "                   (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\\\n"
+            << "                   (n) <= (1<<6) ? 6 : (n) <= (1<<7) ? 7 :\\\n"
+            << "                   (n) <= (1<<8) ? 8 : (n) <= (1<<9) ? 9 :\\\n"
+            << "                   (n) <= (1<<10) ? 10 : (n) <= (1<<11) ? 11 :\\\n"
+            << "                   (n) <= (1<<12) ? 12 : (n) <= (1<<13) ? 13 :\\\n"
+            << "                   (n) <= (1<<14) ? 14 : (n) <= (1<<15) ? 15 :\\\n"
+            << "                   (n) <= (1<<16) ? 16 : (n) <= (1<<17) ? 17 :\\\n"
+            << "                   (n) <= (1<<18) ? 18 : (n) <= (1<<19) ? 19 :\\\n"
+            << "                   (n) <= (1<<20) ? 20 : (n) <= (1<<21) ? 21 :\\\n"
+            << "                   (n) <= (1<<22) ? 22 : (n) <= (1<<23) ? 23 :\\\n"
+            << "                   (n) <= (1<<24) ? 24 : (n) <= (1<<25) ? 25 :\\\n"
+            << "                   (n) <= (1<<26) ? 26 : (n) <= (1<<27) ? 27 :\\\n"
+            << "                   (n) <= (1<<28) ? 28 : (n) <= (1<<29) ? 29 :\\\n"
+            << "                   (n) <= (1<<30) ? 30 : (n) <= (1<<31) ? 31 : "
+               "32)\n"
+            << std::endl;
 
-    outfile
-        << "module " + filename + "\n"
-        << "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)\n"
-        << "    (input clock\n"
-        << std::endl;
+    outfile << "module " + filename + "\n"
+            << "  #(parameter BITS = 4, SIZE=128, FWD=1, LATENCY_0=1, WENSIZE=1)\n"
+            << "    (input clock\n"
+            << std::endl;
 
     for (i = 0; i < read_ports; i++) {
       outfile << "     ,input [`log2(SIZE)-1:0]  rd_addr_" << i << "\n"
@@ -88,8 +85,7 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < write_ports; i++) {
       outfile << "        if(wr_enable_" << i << "[i]) begin\n"
-              << "            data[wr_addr_" << i
-              << "][i*MASKSIZE +: MASKSIZE] <=\n"
+              << "            data[wr_addr_" << i << "][i*MASKSIZE +: MASKSIZE] <=\n"
               << "              wr_din_" << i << "[i*MASKSIZE +: MASKSIZE];\n"
               << "        end" << std::endl;
     }
@@ -120,8 +116,7 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < read_ports; i++) {
       for (j = 0; j < write_ports; j++) {
-        outfile << "    reg [WENSIZE-1:0] fwd_decision_cmp_" << i << "rd_" << j
-                << "wr;" << std::endl;
+        outfile << "    reg [WENSIZE-1:0] fwd_decision_cmp_" << i << "rd_" << j << "wr;" << std::endl;
       }
     }
 
@@ -131,23 +126,18 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < read_ports; i++) {
       for (j = 0; j < write_ports; j++) {
-        outfile << "      fwd_decision_cmp_" << i << "rd_" << j
-                << "wr[j] = rd_addr_" << i << " == wr_addr_" << j << ";"
+        outfile << "      fwd_decision_cmp_" << i << "rd_" << j << "wr[j] = rd_addr_" << i << " == wr_addr_" << j << ";"
                 << std::endl;
       }
     }
 
     for (i = 0; i < read_ports; i++) {
-      outfile << "      d" << i
-              << "_fwd[j*MASKSIZE +: MASKSIZE] = " << std::endl;
+      outfile << "      d" << i << "_fwd[j*MASKSIZE +: MASKSIZE] = " << std::endl;
       for (j = 0; j < write_ports; j++) {
-        outfile << "      wr_enable_" << j << "[j] && fwd_decision_cmp_" << i
-                << "rd_" << j << "wr[j]?\n"
-                << "      wr_din_" << j
-                << "[j*MASKSIZE +: MASKSIZE]:" << std::endl;
+        outfile << "      wr_enable_" << j << "[j] && fwd_decision_cmp_" << i << "rd_" << j << "wr[j]?\n"
+                << "      wr_din_" << j << "[j*MASKSIZE +: MASKSIZE]:" << std::endl;
       }
-      outfile << "      d" << i << "_mem[j*MASKSIZE +: MASKSIZE];\n"
-              << std::endl;
+      outfile << "      d" << i << "_mem[j*MASKSIZE +: MASKSIZE];\n" << std::endl;
     }
 
     outfile << "      end\n"
@@ -176,8 +166,7 @@ int main(int argc, char *argv[]) {
             << "  end else begin:BLOCK2" << std::endl;
 
     for (i = 0; i < read_ports; i++) {
-      outfile << "    assign rd_dout_" << i << " = d" << i << "_fwd;"
-              << std::endl;
+      outfile << "    assign rd_dout_" << i << " = d" << i << "_fwd;" << std::endl;
     }
 
     outfile << "  end\n"

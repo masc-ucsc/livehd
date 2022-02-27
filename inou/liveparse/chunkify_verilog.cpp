@@ -37,7 +37,7 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
   if (elab_path.empty())
     return false;
 
-  const std::string elab_filename = absl::StrCat(elab_chunk_dir , "/" , module_name , ".v");
+  const std::string elab_filename = absl::StrCat(elab_chunk_dir, "/", module_name, ".v");
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
@@ -112,10 +112,10 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-  auto parse_path = absl::StrCat(path , "/parse/");  // Keep trailing /
+  auto parse_path = absl::StrCat(path, "/parse/");  // Keep trailing /
   if (access(parse_path.c_str(), F_OK) != 0) {
     std::string spath(path);
-    int  err   = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
       throw scan_error(*this, "could not create {} directory", path);
     }
@@ -143,11 +143,11 @@ void Chunkify_verilog::elaborate() {
   TRACE_EVENT("inou", nullptr, [&bench_name](perfetto::EventContext ctx) { ctx.event()->set_name(bench_name); });
   Lbench bench("inou." + bench_name);
 
-  auto source = absl::StrCat(parse_path , "file_" , format_name);
+  auto source = absl::StrCat(parse_path, "file_", format_name);
 
   write_file(source, get_memblock());
 
-  chunk_dir = absl::StrCat(parse_path , "chunk_" , format_name);
+  chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
   Eprp_utils::clean_dir(chunk_dir);
 
   elab_chunk_dir = "";
@@ -159,8 +159,8 @@ void Chunkify_verilog::elaborate() {
   bool last_input  = false;
   bool last_output = false;
 
-  std::string   module_name;
-  Port_ID       module_io_pos = 1;
+  std::string module_name;
+  Port_ID     module_io_pos = 1;
 
   // This has to be cut&pasted to each file
   std::string not_in_module_text;
@@ -244,7 +244,7 @@ void Chunkify_verilog::elaborate() {
       if (endmodule_found) {
         bool same = is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
-          auto outfile = absl::StrCat(chunk_dir , "/" , module_name , ".v");
+          auto outfile = absl::StrCat(chunk_dir, "/", module_name, ".v");
           write_file(outfile, not_in_module_text, in_module_text);
         }
         module_name = "";

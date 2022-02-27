@@ -16,5 +16,6 @@ public:
 
 private:
   // load all the nodes in a given lgraph into an ArchFP geogLayout instance and return that instance
-  FPContainer* load_lg_nodes(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg, const lh::Tree_index tidx);
+  FPContainer* load_lg_nodes(const absl::flat_hash_map<Node::Compact, GeographyHint>& hint_map, Lgraph* lg,
+                             const lh::Tree_index tidx);
 };

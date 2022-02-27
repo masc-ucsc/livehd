@@ -8,10 +8,10 @@
 #include "graph_library.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
+#include "lgraph_attributes.hpp"
 #include "lgraphbase.hpp"
 #include "node.hpp"
 #include "node_pin.hpp"
-#include "lgraph_attributes.hpp"
 
 class Lgraph : public Lgraph_attributes {
 protected:
@@ -33,27 +33,26 @@ protected:
   explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
 
   Index_id get_root_idx(Index_id idx) const {
-
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
     const auto *ref = &node_internal[idx];
     if (ref->is_root()) {
-      //node_internal.ref_unlock();
+      // node_internal.ref_unlock();
       return idx;
     }
     auto ret = ref->get_nid();
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
 
     return ret;
   }
 
   Index_id get_node_nid(Index_id idx) const {
-    //node_internal.ref_lock();
+    // node_internal.ref_lock();
 
     while (!node_internal[idx].is_master_root()) {
       idx = node_internal[idx].get_nid();
     }
 
-    //node_internal.ref_unlock();
+    // node_internal.ref_unlock();
     return idx;
   }
 
@@ -122,18 +121,17 @@ protected:
   }
 
   Index_id fast_next(Index_id nid) const {
-
     while (true) {
       nid.value++;
       if (nid >= static_cast<Index_id>(node_internal.size())) {
         return 0;
       }
 
-      //node_internal.ref_lock();
-      const auto *ref = &node_internal[nid];
-      bool valid = ref->is_valid();
-      auto mroot = valid?ref->is_master_root():false;
-      //node_internal.ref_unlock();
+      // node_internal.ref_lock();
+      const auto *ref   = &node_internal[nid];
+      bool        valid = ref->is_valid();
+      auto        mroot = valid ? ref->is_master_root() : false;
+      // node_internal.ref_unlock();
 
       if (!valid) {
         continue;
@@ -161,19 +159,17 @@ protected:
   static void trace_back2driver(Node_pin_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
   static void trace_forward2sink(XEdge_iterator &xiter, const Node_pin &dpin, const Node_pin &spin);
 
-  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)>& fn);
+  void each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> &fn);
 
   using Parent_map_type = absl::node_hash_map<Lgraph *, std::vector<Lgraph *>>;
   using Pending_map     = absl::flat_hash_map<Lgraph *, int>;
 
-  void bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn
-                           ,      Pending_map                         *pending_map
-                           ,const Parent_map_type                     *parent_map);
+  void bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn, Pending_map *pending_map,
+                            const Parent_map_type *parent_map);
 
-  void bottom_up_visit_step(Pending_map                   &pending_map
-                           ,Parent_map_type               &parent_map
-                           ,absl::flat_hash_set<Lgraph *> &leafs_set
-                           ,std::vector<Lgraph *>         &leafs);
+  void bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &parent_map, absl::flat_hash_set<Lgraph *> &leafs_set,
+                            std::vector<Lgraph *> &leafs);
+
 public:
   Lgraph()               = delete;
   Lgraph(const Lgraph &) = delete;
@@ -182,7 +178,7 @@ public:
 
   bool is_empty() const { return fast_first() == 0; }
 
-  Hierarchy *ref_htree() { return &htree; }
+  Hierarchy       *ref_htree() { return &htree; }
   const Hierarchy &get_htree() { return htree; }
 
   void add_edge(const Node_pin &dpin, const Node_pin &spin);
@@ -216,8 +212,8 @@ public:
   Node create_node(const Ntype_op op);
   Node create_node(const Ntype_op op, Bits_t bits);
 
-	// Lconst may contains a pure number or a pure string or a unkown number like '0bxx101',
-	// the developer has the responsibility to translate to proper Lconst before calling this function
+  // Lconst may contains a pure number or a pure string or a unkown number like '0bxx101',
+  // the developer has the responsibility to translate to proper Lconst before calling this function
   Node create_node_const(const Lconst &value);
 
   Node create_node_const(int64_t val) { return create_node_const(Lconst(val)); }
@@ -227,7 +223,7 @@ public:
   Node create_node_sub(std::string_view sub_name);
 
   const Sub_node &get_self_sub_node() const;  // Access all input/outputs
-  Sub_node *      ref_self_sub_node();        // Access all input/outputs
+  Sub_node       *ref_self_sub_node();        // Access all input/outputs
 
   void load();
   void save();
@@ -246,19 +242,19 @@ public:
 
   // Iterators defined in the lgraph_each.cpp
 
-  void each_pin(const Node_pin &dpin, const std::function<bool(Index_id idx)>& f1) const;
-  void each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_ID pos)>& f1, bool hierarchical = false);
-  void each_graph_input(const std::function<void(Node_pin &pin)>& f1, bool hierarchical = false);
-  void each_graph_output(const std::function<void(Node_pin &pin)>& f1, bool hierarchical = false);
+  void each_pin(const Node_pin &dpin, const std::function<bool(Index_id idx)> &f1) const;
+  void each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_ID pos)> &f1, bool hierarchical = false);
+  void each_graph_input(const std::function<void(Node_pin &pin)> &f1, bool hierarchical = false);
+  void each_graph_output(const std::function<void(Node_pin &pin)> &f1, bool hierarchical = false);
 
-  //void each_hier_fast(const std::function<bool(Node &)>&);
+  // void each_hier_fast(const std::function<bool(Node &)>&);
 
-  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)>&);
+  void each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> &);
 
-  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)>& fn);
-  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)>& fn);
+  void each_local_unique_sub_fast(const std::function<bool(Lgraph *lg_sub)> &fn);
+  void each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> &fn);
 
-  void each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph *lg_sub)>& fn);
+  void each_hier_unique_sub_bottom_up_parallel2(const std::function<void(Lgraph *lg_sub)> &fn);
 
   template <typename FN>
   void each_local_sub_fast(const FN f1) {

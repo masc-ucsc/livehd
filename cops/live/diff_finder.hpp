@@ -10,8 +10,8 @@ using namespace Live;
 
 class Diff_finder {
 private:
-  const Lgraph *        original;
-  const Lgraph *        synth;
+  const Lgraph         *original;
+  const Lgraph         *synth;
   Invariant_boundaries *boundaries;
 
   std::string hier_sep;

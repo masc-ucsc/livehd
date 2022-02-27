@@ -51,7 +51,7 @@ public:
       _mask(size - 1)
       , _head_seq(0)
       , _tail_seq(0) {
-    bzero(_buffer,sizeof(node_t)*(_size));
+    bzero(_buffer, sizeof(node_t) * (_size));
 
     // make sure it's a power of 2
     assert((_size != 0) && ((_size & (~_size + 1)) == _size));
@@ -69,7 +69,7 @@ public:
     size_t head_seq = _head_seq.load(std::memory_order_relaxed);
 
     for (;;) {
-      node_t * node     = &_buffer[head_seq & _mask];
+      node_t  *node     = &_buffer[head_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)head_seq;
 
@@ -95,7 +95,7 @@ public:
     size_t tail_seq = _tail_seq.load(std::memory_order_relaxed);
 
     for (;;) {
-      node_t * node     = &_buffer[tail_seq & _mask];
+      node_t  *node     = &_buffer[tail_seq & _mask];
       size_t   node_seq = node->seq.load(std::memory_order_acquire);
       intptr_t dif      = (intptr_t)node_seq - (intptr_t)(tail_seq + 1);
 

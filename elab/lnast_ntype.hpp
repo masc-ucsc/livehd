@@ -13,7 +13,7 @@ public:
     Lnast_ntype_top,
     Lnast_ntype_stmts,  // stmts
     Lnast_ntype_if,
-    Lnast_ntype_uif,    // unique IF
+    Lnast_ntype_uif,  // unique IF
     Lnast_ntype_for,
     Lnast_ntype_while,
     Lnast_ntype_func_call,  // .()
@@ -96,78 +96,77 @@ public:
   };
 
 protected:
-  constexpr static std::array namemap{
-      "invalid",
-      // group: tree structure
-      "top",
-      "stmts",
-      "if",
-      "uif",
-      "for",
-      "while",
-      "fcall",
-      "fdef",
+  constexpr static std::array namemap{"invalid",
+                                      // group: tree structure
+                                      "top",
+                                      "stmts",
+                                      "if",
+                                      "uif",
+                                      "for",
+                                      "while",
+                                      "fcall",
+                                      "fdef",
 
-      "assign",
-      "dp_assign",
-      "mut",
+                                      "assign",
+                                      "dp_assign",
+                                      "mut",
 
-      "and",
-      "or",
-      "not",
-      "xor",
+                                      "and",
+                                      "or",
+                                      "not",
+                                      "xor",
 
-      "ror",
+                                      "ror",
 
-      "land",
-      "lor",
-      "lnot",
+                                      "land",
+                                      "lor",
+                                      "lnot",
 
-      "plus",
-      "minus",
-      "mult",
-      "div",
-      "mod",
+                                      "plus",
+                                      "minus",
+                                      "mult",
+                                      "div",
+                                      "mod",
 
-      "shl",
-      "sra",
+                                      "shl",
+                                      "sra",
 
-      "sext",
-      "set_mask",
+                                      "sext",
+                                      "set_mask",
 
-      "get_mask",
-      "mask_and",
-      "mask_popcount",
-      "mask_xor",
+                                      "get_mask",
+                                      "mask_and",
+                                      "mask_popcount",
+                                      "mask_xor",
 
-      "is",
-      "ne",
-      "eq",
-      "lt",
-      "le",
-      "gt",
-      "ge",
+                                      "is",
+                                      "ne",
+                                      "eq",
+                                      "lt",
+                                      "le",
+                                      "gt",
+                                      "ge",
 
-      "ref",
-      "const",
+                                      "ref",
+                                      "const",
 
-      "range",
+                                      "range",
 
-      "tuple_concat",
-      "tuple_add",
-      "tuple_get",
-      "tuple_set",
+                                      "tuple_concat",
+                                      "tuple_add",
+                                      "tuple_get",
+                                      "tuple_set",
 
-      "attr_set",
-      "attr_get",
+                                      "attr_set",
+                                      "attr_get",
 
-      "error_flag",
-      "phi",
-      "hot_phi"
-  };
+                                      "error_flag",
+                                      "phi",
+                                      "hot_phi"};
 
   Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
   constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
+
 public:
   constexpr explicit Lnast_ntype() = default;
 
@@ -294,7 +293,6 @@ public:
   bool constexpr is_gt() const { return val == Lnast_ntype_gt; }
   bool constexpr is_ge() const { return val == Lnast_ntype_ge; }
 
-
   bool constexpr is_ref() const { return val == Lnast_ntype_ref; }
   bool constexpr is_const() const { return val == Lnast_ntype_const; }
 
@@ -304,8 +302,8 @@ public:
   bool constexpr is_tuple_set() const { return val == Lnast_ntype_tuple_set; }
 
   bool constexpr is_tuple_attr() const {
-    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_tuple_set || val == Lnast_ntype_attr_set
-           || val == Lnast_ntype_attr_get || val == Lnast_ntype_tuple_set;
+    return val == Lnast_ntype_tuple_add || val == Lnast_ntype_tuple_get || val == Lnast_ntype_tuple_set
+           || val == Lnast_ntype_attr_set || val == Lnast_ntype_attr_get || val == Lnast_ntype_tuple_set;
   }
 
   bool constexpr is_attr_set() const { return val == Lnast_ntype_attr_set; }
@@ -335,16 +333,15 @@ public:
   bool constexpr is_nary_op() const {
     return (val == Lnast_ntype_bit_and) || (val == Lnast_ntype_bit_or) || (val == Lnast_ntype_bit_xor)
            || (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_plus)
-           || (val == Lnast_ntype_minus)
-           || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq) || (val == Lnast_ntype_ne)
-           || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt) || (val == Lnast_ntype_ge);
+           || (val == Lnast_ntype_minus) || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq)
+           || (val == Lnast_ntype_ne) || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt)
+           || (val == Lnast_ntype_ge);
   }
 
   // basic_op have 1 to 1 translation between LNAST and Lgraph
   bool constexpr is_direct_lgraph_op() const {
-    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && !is_mask_op()
-           && val != Lnast_ntype_mod
-           && val != Lnast_ntype_is && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
+    return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && !is_mask_op() && val != Lnast_ntype_mod && val != Lnast_ntype_is
+           && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }
 
   std::string_view debug_name() const { return namemap[val]; }

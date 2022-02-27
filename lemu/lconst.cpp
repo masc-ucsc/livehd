@@ -1,23 +1,22 @@
 
 
-#include <string_view>
+#include "lconst.hpp"
 
+#include <string_view>
 
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
-
 #include "boost/multiprecision/cpp_int.hpp"
 #include "fmt/format.h"
 #include "iassert.hpp"
 #include "lbench.hpp"
 #include "lrand.hpp"
-#include "lconst.hpp"
-#include "woothash.hpp"
 #include "str_tools.hpp"
+#include "woothash.hpp"
 
 std::string Lconst::serialize() const {
   std::vector<char> v;
-  unsigned char c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
+  unsigned char     c = (explicit_str ? 0x10 : (is_negative() ? 0x01 : 0));
   v.emplace_back(c);
   v.emplace_back(bits >> 16);
   v.emplace_back(bits >> 8);
@@ -31,8 +30,7 @@ std::string Lconst::serialize() const {
   boost::multiprecision::import_bits(res_num1, v.begin() + 4, v.end());
 
   std::vector<unsigned char> v2;
-  for(auto i=0u;i<str.size();++i)
-    v2.emplace_back(str[i]);
+  for (auto i = 0u; i < str.size(); ++i) v2.emplace_back(str[i]);
   Number res_num2;
   boost::multiprecision::import_bits(res_num2, v2.begin() + 4, v2.end());
 
@@ -40,12 +38,10 @@ std::string Lconst::serialize() const {
 }
 
 Lconst Lconst::unserialize(std::string_view v) {
-
   I(v.size() > 4);  // invalid otherwise
 
   std::vector<unsigned char> v2;
-  for(auto i=0u;i<v.size();++i)
-    v2.emplace_back(v[i]);
+  for (auto i = 0u; i < v.size(); ++i) v2.emplace_back(v[i]);
 
   uint8_t  c0 = v2[0];
   uint32_t c1 = v2[1];
@@ -64,7 +60,6 @@ Lconst Lconst::unserialize(std::string_view v) {
 
   return Lconst(res_explicit_str, res_bits, res_num);
 }
-
 
 uint64_t Lconst::hash() const {
   std::vector<uint64_t> v;
@@ -115,26 +110,24 @@ Lconst::Lconst(Number v) {
   bits         = calc_num_bits();
 }
 
-
 Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
-
   // handle binary with special characters ?xZ...
   std::string bin;
   if (unsigned_result) {
-    bin = "0"; // always unsigned, must have a leading 0 (implicit)
-  }else{
+    bin = "0";  // always unsigned, must have a leading 0 (implicit)
+  } else {
     // Look for the first not underscore character (this is the sign)
     for (auto i = 0u; i < txt.size(); ++i) {
       const auto ch2 = txt[i];
       if (ch2 == '_')
         continue;
-      bin.append(1,ch2);
+      bin.append(1, ch2);
       break;
     }
   }
   bool unknown_found = false;
 
-  Number num=0;
+  Number num = 0;
 
   for (auto i = 0u; i < txt.size(); ++i) {
     const auto ch2 = txt[i];
@@ -142,20 +135,20 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
       continue;
 
     if (ch2 == '?' || ch2 == 'x') {
-      bin.append(1,'?');
+      bin.append(1, '?');
       unknown_found = true;
     } else if (ch2 == 'z') {
-      bin.append(1,'z');
+      bin.append(1, 'z');
       unknown_found = true;
     } else if (ch2 == '0') {
-      if (bin != "0") { // remove too many leading zeroes
+      if (bin != "0") {  // remove too many leading zeroes
         num = (num << 1);
-        bin.append(1,'0');
+        bin.append(1, '0');
       }
     } else if (ch2 == '1') {
-      if (bin != "1") { // remove too many leading ones if signed
+      if (bin != "1") {  // remove too many leading ones if signed
         num = (num << 1) | 1;
-        bin.append(1,'1');
+        bin.append(1, '1');
       }
     } else {
       throw std::runtime_error(fmt::format("ERROR: {} binary encoding could not use {}\n", txt, ch2));
@@ -173,7 +166,7 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
   }
 
   if (!unsigned_result && bin.front() == '1') {
-    num = num-(Number(1)<<(bin.size()-1));
+    num = num - (Number(1) << (bin.size() - 1));
   }
 
   return Lconst(false, calc_num_bits(num), num);
@@ -191,7 +184,6 @@ Lconst Lconst::from_string(std::string_view orig_txt) {
 }
 
 Lconst Lconst::from_pyrope(std::string_view orig_txt) {
-
   if (orig_txt.empty())
     return Lconst();
 
@@ -210,82 +202,82 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
   if (txt.front() == '-') {
     negative   = true;
     skip_chars = 1;
-  }else if (txt.front() == '+') {
+  } else if (txt.front() == '+') {
     skip_chars = 1;
   }
 
   auto shift_mode      = 0;
   bool unsigned_result = false;
 
-  if (txt.size() >= (1+skip_chars) && std::isdigit(txt[skip_chars])) {
-    shift_mode = 10; // decimal (maybe not if starts with 0
-    if (txt.size()>= (2+skip_chars) && txt[skip_chars] == '0') {
+  if (txt.size() >= (1 + skip_chars) && std::isdigit(txt[skip_chars])) {
+    shift_mode = 10;  // decimal (maybe not if starts with 0
+    if (txt.size() >= (2 + skip_chars) && txt[skip_chars] == '0') {
       ++skip_chars;
       auto sel_ch = txt[skip_chars];
       if (sel_ch == 's') {
         // 0sb (signed). Too confusing otherwise. is 0sx80 negative and 0sx10 also negative (where is the MSB?)
         ++skip_chars;
         sel_ch = txt[skip_chars];
-        if (sel_ch!='b') {
+        if (sel_ch != 'b') {
           throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding only binary can be signed 0sb...\n", orig_txt));
         }
         I(!unsigned_result);
-      }else{
+      } else {
         unsigned_result = true;
       }
 
-      if (sel_ch == 'x') { // 0x or 0sx
+      if (sel_ch == 'x') {  // 0x or 0sx
         shift_mode = 4;
         ++skip_chars;
-      }else if (sel_ch == 'b') {
+      } else if (sel_ch == 'b') {
         shift_mode = 1;
         ++skip_chars;
-      }else if (sel_ch == 'd') {
-        shift_mode = 10; // BASE 10 decimal
+      } else if (sel_ch == 'd') {
+        shift_mode = 10;  // BASE 10 decimal
         ++skip_chars;
-      }else if (std::isdigit(sel_ch)) { // 0 or 0o or 0s or 0so
+      } else if (std::isdigit(sel_ch)) {  // 0 or 0o or 0s or 0so
         shift_mode = 3;
-      }else if (sel_ch == 'o') { // 0 or 0o or 0s or 0so
+      } else if (sel_ch == 'o') {  // 0 or 0o or 0s or 0so
         shift_mode = 3;
         ++skip_chars;
-      }else{
+      } else {
         throw std::runtime_error(fmt::format("ERROR: {} unknown pyrope encoding (leading {})\n", orig_txt, sel_ch));
       }
     }
-  }else{
+  } else {
     int start_i = static_cast<int>(orig_txt.size());
     int end_i   = 0;
 
-    if (orig_txt.size()>1 && orig_txt.front() == '\'' && orig_txt.back() == '\'') {
+    if (orig_txt.size() > 1 && orig_txt.front() == '\'' && orig_txt.back() == '\'') {
       --start_i;
       ++end_i;
     }
 
     Number num;
     // alnum string (not number, still convert to num)
-    bool prev_escaped=false;
+    bool prev_escaped = false;
     for (int i = start_i - 1; i >= end_i; --i) {
       num <<= 8;
       num |= orig_txt[i];
 
-      if (orig_txt[i] == '\'' && !prev_escaped && i!=0) {
+      if (orig_txt[i] == '\'' && !prev_escaped && i != 0) {
         throw std::runtime_error(fmt::format("ERROR: {} malformed pyrope string. ' must be escaped\n", orig_txt));
       }
 
       if (orig_txt[i] == '\\') {
-        if (prev_escaped) // \\ sequence
+        if (prev_escaped)  // \\ sequence
           prev_escaped = false;
-        else // \x sequence
+        else  // \x sequence
           prev_escaped = true;
       }
     }
 
-    return Lconst(true, (start_i-end_i) * 8, num);
+    return Lconst(true, (start_i - end_i) * 8, num);
   }
 
   Number num;
 
-  if (shift_mode == 10) { // decimal
+  if (shift_mode == 10) {  // decimal
     for (auto i = skip_chars; i < txt.size(); ++i) {
       auto v = char_to_val[(uint8_t)txt[i]];
       if (likely(v >= 0)) {
@@ -297,14 +289,14 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
         throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
     }
-  }else if (shift_mode == 1) {  // 0b binary
+  } else if (shift_mode == 1) {  // 0b binary
     auto v = from_binary(txt.substr(skip_chars), unsigned_result);
     if (!negative)
       return v;
 
     num = -v.get_num();
     return Lconst(false, calc_num_bits(num), num);
-  }else{
+  } else {
     I(shift_mode == 3 || shift_mode == 4);  // octal or hexa
 
     auto first_digit = -1;
@@ -316,7 +308,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
       if (unlikely(v < 0)) {
         throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
-      if (first_digit<0) {
+      if (first_digit < 0) {
         first_digit = v;
       }
 
@@ -389,7 +381,6 @@ Lconst Lconst::unknown_negative(Bits_t nbits) {
   return lc;
 }
 
-
 void Lconst::dump() const {
   if (explicit_str)
     fmt::print("str:{} bits:{}\n", to_string(), bits);
@@ -403,14 +394,13 @@ void Lconst::adjust(const Lconst &o) {
 }
 
 std::pair<std::string, std::string> Lconst::match_binary(const Lconst &l, const Lconst &r) {
-
   auto l_str = l.to_binary();
   auto r_str = r.to_binary();
-  if (l_str.size()!=r_str.size()) {
+  if (l_str.size() != r_str.size()) {
     if (l_str.size() > r_str.size()) {
-      r_str = r_str.append(l_str.size()-r_str.size(), r_str.back());
-    }else{
-      l_str = l_str.append(r_str.size()-l_str.size(), l_str.back());
+      r_str = r_str.append(l_str.size() - r_str.size(), r_str.back());
+    } else {
+      l_str = l_str.append(r_str.size() - l_str.size(), l_str.back());
     }
   }
 
@@ -419,11 +409,11 @@ std::pair<std::string, std::string> Lconst::match_binary(const Lconst &l, const 
 
 bool Lconst::is_known_true() const {
   if (!explicit_str)
-    return num!=0;
+    return num != 0;
 
   if (has_unknowns()) {
     // if there is any one, it is true
-    Number      tmp = num;
+    Number tmp = num;
     while (tmp) {
       auto ch = static_cast<unsigned char>(tmp & 0xFF);
       if (ch == '1')
@@ -434,49 +424,47 @@ bool Lconst::is_known_true() const {
     return false;
   }
 
-  return true; // plain string
+  return true;  // plain string
 }
 
-std::pair<int,int> Lconst::get_mask_range() const {
-	if (num==0)
-    return std::make_pair(-1,-1); // No continuous range
+std::pair<int, int> Lconst::get_mask_range() const {
+  if (num == 0)
+    return std::make_pair(-1, -1);  // No continuous range
 
   int range_end;
   if (is_positive()) {
     range_end = get_bits() - 1;
-  }else{
+  } else {
     range_end = Bits_max;
   }
 
   if (is_mask())  // continuous sequence of ones. Nice
-    return std::make_pair(0,range_end);
+    return std::make_pair(0, range_end);
 
   auto trail = get_trailing_zeroes();
-  if (trail==0)
-    return std::make_pair(-1,-1); // No continuous range
+  if (trail == 0)
+    return std::make_pair(-1, -1);  // No continuous range
 
   auto v2 = rsh_op(trail);
   if (v2.is_mask())  // continuous sequence of ones. Nice
     return std::make_pair(trail, range_end);
 
-  return std::make_pair(-1,-1); // No continuous range
+  return std::make_pair(-1, -1);  // No continuous range
 }
 
-Lconst Lconst::get_mask_value(Bits_t bits) {
-	return Lconst((Number(1) << bits) - 1);
-}
+Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
 
 Lconst Lconst::get_mask_value(Bits_t h, Bits_t l) {
-	if (h==l) {
-		return Lconst(Number(1) << h);
-	}
-	assert(h>l);
+  if (h == l) {
+    return Lconst(Number(1) << h);
+  }
+  assert(h > l);
 
-	Number res_num = Number(1)<<(h-l+1);
-	res_num -= Number(1);
+  Number res_num = Number(1) << (h - l + 1);
+  res_num -= Number(1);
   res_num <<= l;
 
-	return Lconst(false, calc_num_bits(res_num), res_num);
+  return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
 Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bits)); }
@@ -546,12 +534,12 @@ Lconst Lconst::sext_op(Bits_t ebits) const {
 
 Lconst Lconst::get_mask_op() const {
   if (has_unknowns()) {
-		auto sign = static_cast<unsigned char>(num & 0xFF);
-		if (sign == '0')
-			return Lconst(explicit_str, bits, num);
-	  Number res_num = get_num()<<8;
-		res_num |= '0'; // add ZERO to be 0b0whatever
-		return Lconst(explicit_str, bits+8, res_num);
+    auto sign = static_cast<unsigned char>(num & 0xFF);
+    if (sign == '0')
+      return Lconst(explicit_str, bits, num);
+    Number res_num = get_num() << 8;
+    res_num |= '0';  // add ZERO to be 0b0whatever
+    return Lconst(explicit_str, bits + 8, res_num);
   }
 
   if (explicit_str) {
@@ -603,8 +591,8 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
     mask_bits *= 8;
   }
 
-  auto   max_bits = std::max(get_bits(), mask_bits);
-  assert(max_bits<Bits_max);
+  auto max_bits = std::max(get_bits(), mask_bits);
+  assert(max_bits < Bits_max);
   Number src_num;
   if (num < 0) {
     I(!explicit_str);
@@ -685,7 +673,6 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
   }
 
   if (has_unknowns()) {
-
     Bits_t end_bits = mask.get_bits();
     if (mask.is_negative()) {
       end_bits += std::max(value.get_bits(), get_bits());
@@ -697,12 +684,12 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     std::string bin_txt;
     for (std::size_t i = 0u; i < end_bits; ++i) {
       if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero) {
-        auto a_pos = std::min(i, a_bin.size()-1);
+        auto a_pos = std::min(i, a_bin.size() - 1);
         bin_txt.append(1, a_bin[a_pos]);
-      }else{
+      } else {
         bin_txt.append(1, value_bin[value_pos]);
 
-        if (value_bin.size()>(value_pos+1))
+        if (value_bin.size() > (value_pos + 1))
           ++value_pos;
       }
     }
@@ -748,23 +735,23 @@ Lconst Lconst::add_op(const Lconst &o) const {
       auto n_ones     = 0;
       auto n_unknowns = 0;
       if (i >= s_txt.size() || s_txt[i] == '0') {
-      }else if (s_txt[i] == '1'){
+      } else if (s_txt[i] == '1') {
         ++n_ones;
-      }else{
+      } else {
         ++n_unknowns;
       }
 
       if (i >= o_txt.size() || o_txt[i] == '0') {
-      }else if (o_txt[i] == '1'){
+      } else if (o_txt[i] == '1') {
         ++n_ones;
-      }else{
+      } else {
         ++n_unknowns;
       }
 
       if (carry == '1') {
         ++n_ones;
-      }else if (carry == '0') {
-      }else{
+      } else if (carry == '0') {
+      } else {
         ++n_unknowns;
       }
 
@@ -908,7 +895,7 @@ Lconst Lconst::lsh_op(Bits_t amount) const {
 
   if (has_unknowns()) {
     auto qmarks = to_pyrope();
-    return Lconst::from_pyrope(qmarks.append(amount, '0')); // TODO: faster just shift (but big changes once mask is set)
+    return Lconst::from_pyrope(qmarks.append(amount, '0'));  // TODO: faster just shift (but big changes once mask is set)
   }
 
   auto res_num = num << amount;
@@ -931,7 +918,7 @@ Lconst Lconst::rsh_op(Bits_t amount) const {
       return Lconst::from_pyrope("0sb1?");
     }
     auto qmarks = to_pyrope();
-    return Lconst::from_pyrope(qmarks.substr(0,qmarks.size()-amount));
+    return Lconst::from_pyrope(qmarks.substr(0, qmarks.size() - amount));
   }
 
   if (is_string()) {
@@ -952,8 +939,7 @@ Lconst Lconst::ror_op(const Lconst &o) const {
 
 Lconst Lconst::or_op(const Lconst &o) const {
   if (unlikely(has_unknowns() || o.has_unknowns())) {
-
-    auto [l_str,r_str] = match_binary(*this, o);
+    auto [l_str, r_str] = match_binary(*this, o);
 
     std::string result;
 
@@ -961,10 +947,10 @@ Lconst Lconst::or_op(const Lconst &o) const {
       if (l_str[i] == '1' || r_str[i] == '1') {
         if (result.size() != 1 || result.front() != '0')
           result = result.append(1, '0');
-      }else if (l_str[i] == '?' || r_str[i] == '?'){
+      } else if (l_str[i] == '?' || r_str[i] == '?') {
         if (result.size() != 1 || result.front() != '?')
           result = result.append(1, '?');
-      }else{
+      } else {
         if (result.size() != 1 || result.front() != '0')
           result = result.append(1, '0');
       }
@@ -992,8 +978,7 @@ Lconst Lconst::not_op() const {
 
 Lconst Lconst::and_op(const Lconst &o) const {
   if (unlikely(has_unknowns() || o.has_unknowns())) {
-
-    auto [l_str,r_str] = match_binary(*this, o);
+    auto [l_str, r_str] = match_binary(*this, o);
 
     std::string result;
 
@@ -1001,10 +986,10 @@ Lconst Lconst::and_op(const Lconst &o) const {
       if (l_str[i] == '0' || r_str[i] == '0') {
         if (result.size() != 1 || result.front() != '0')
           result = result.append(1, '0');
-      }else if (l_str[i] == '?' || r_str[i] == '?') {
+      } else if (l_str[i] == '?' || r_str[i] == '?') {
         if (result.size() != 1 || result.front() != '?')
           result = result.append(1, '?');
-      }else{
+      } else {
         if (result.size() != 1 || result.front() != '1')
           result = result.append(1, '1');
       }
@@ -1030,7 +1015,7 @@ Lconst Lconst::eq_op(const Lconst &o) const {
   }
 
   if (unlikely(has_unknowns() || o.has_unknowns())) {
-    auto [l_str,r_str] = match_binary(*this, o);
+    auto [l_str, r_str] = match_binary(*this, o);
 
     for (auto i = 0u; i < l_str.size(); ++i) {
       if (l_str[i] == '0' || r_str[i] == '0')
@@ -1063,7 +1048,7 @@ std::string Lconst::to_string(Number num) {
   Number      tmp = num;
   while (tmp) {
     auto ch = static_cast<unsigned char>(tmp & 0xFF);
-    str = str.append(1, ch);
+    str     = str.append(1, ch);
     tmp >>= 8;
   }
 
@@ -1082,20 +1067,20 @@ Lconst Lconst::to_known_rand() const {
   while (tmp) {
     auto ch = static_cast<unsigned char>(tmp & 0xFF);
     if (ch == '?' || ch == 'z')
-      str = str.append(1, rbool.any()?'0':'1');
+      str = str.append(1, rbool.any() ? '0' : '1');
     else
       str = str.append(1, ch);
     tmp >>= 8;
   }
   auto sign = static_cast<unsigned char>(num & 0xFF);
-  if (sign=='?' || sign=='z')
-    return Lconst::from_binary(str,rbool.any());
-  return Lconst::from_binary(str,sign=='0');
+  if (sign == '?' || sign == 'z')
+    return Lconst::from_binary(str, rbool.any());
+  return Lconst::from_binary(str, sign == '0');
 }
 
 std::string Lconst::to_field() const {
   if (explicit_str) {
-    I(!has_unknowns()); // no tuple field should have unknown
+    I(!has_unknowns());  // no tuple field should have unknown
     return to_string();
   }
 
@@ -1106,7 +1091,7 @@ std::string Lconst::to_field() const {
     ss << -v;
 
     fmt::print("warning: strange negative {} field\n", ss.str());
-    return absl::StrCat("-",ss.str());
+    return absl::StrCat("-", ss.str());
   }
   ss << v;
 
@@ -1123,26 +1108,26 @@ std::string Lconst::to_pyrope() const {
       auto sign = static_cast<unsigned char>(num & 0xFF);
 
       std::string str;
-      if (sign=='0') {
+      if (sign == '0') {
         str = "0b";
-      }else{
+      } else {
         str = "0sb";
       }
 
       size_t next_underscore;
-      auto xtra = get_bits()&3;
+      auto   xtra = get_bits() & 3;
       if (xtra) {
-        auto ndigits = 1+4-xtra;
-        str = str.append(ndigits, sign);
-        next_underscore = 4-ndigits;
-      }else{
-        str = str.append(1, sign);
+        auto ndigits    = 1 + 4 - xtra;
+        str             = str.append(ndigits, sign);
+        next_underscore = 4 - ndigits;
+      } else {
+        str             = str.append(1, sign);
         next_underscore = 3;
       }
 
-      for(auto i=1u;i<str_no_underscore.size();++i) {
-        if (next_underscore==0) {
-          str = str.append(1, '_');
+      for (auto i = 1u; i < str_no_underscore.size(); ++i) {
+        if (next_underscore == 0) {
+          str             = str.append(1, '_');
           next_underscore = 4;
         }
         str = str.append(1, str_no_underscore[i]);
@@ -1152,36 +1137,36 @@ std::string Lconst::to_pyrope() const {
       return str;
     }
 
-    if (str_no_underscore.front()=='\'' && str_no_underscore.back() == '\'')
+    if (str_no_underscore.front() == '\'' && str_no_underscore.back() == '\'')
       return str_no_underscore;
 
     return absl::StrCat("'", str_no_underscore, "'");
   }
 
-  const auto        v = get_num();
-  if (is_i()) { // Most common case
+  const auto v = get_num();
+  if (is_i()) {  // Most common case
     auto val = to_i();
-    if (val>=-63 && val<=63) { // Integer
+    if (val >= -63 && val <= 63) {  // Integer
       return std::to_string(val);
     }
 
     char str2[20];
 
     size_t delta;
-    if (val<0) {
-      val = -val;
+    if (val < 0) {
+      val     = -val;
       str2[0] = '-';
       str2[1] = '0';
       str2[2] = 'x';
-      delta=3;
-    }else{
+      delta   = 3;
+    } else {
       str2[0] = '0';
       str2[1] = 'x';
-      delta=2;
+      delta   = 2;
     }
 
-    auto [ptr, ec] = std::to_chars(str2+delta, str2 + 20, val, 16);
-    return std::string(str2, ptr-str2);
+    auto [ptr, ec] = std::to_chars(str2 + delta, str2 + 20, val, 16);
+    return std::string(str2, ptr - str2);
   }
 
   std::stringstream ss;
@@ -1196,7 +1181,7 @@ std::string Lconst::to_pyrope() const {
     if (print_hexa)
       return absl::StrCat("-0x", ss.str());
 
-    return absl::StrCat("-",ss.str());
+    return absl::StrCat("-", ss.str());
   }
   ss << v;
 
@@ -1267,9 +1252,9 @@ std::string Lconst::to_binary() const {
   std::string txt;
   for (auto i = 0u; i < get_bits(); ++i) {
     if (v & 1) {
-      txt = txt.insert(0, 1, '1'); // prepend('1');
+      txt = txt.insert(0, 1, '1');  // prepend('1');
     } else {
-      txt = txt.insert(0, 1, '0'); // prepend('0');
+      txt = txt.insert(0, 1, '0');  // prepend('0');
     }
     v = v >> 1;
   }
@@ -1278,15 +1263,15 @@ std::string Lconst::to_binary() const {
 }
 
 std::string Lconst::to_verilog() const {
-  if (num==0)
+  if (num == 0)
     return "'b0";
 
   if (explicit_str) {
     if (has_unknowns()) {
-      //auto sign = static_cast<unsigned char>(num & 0xFF);
+      // auto sign = static_cast<unsigned char>(num & 0xFF);
 
-      //if (sign=='0')
-        //return absl::StrCat(get_bits()-1, "'b", to_string().substr(1));
+      // if (sign=='0')
+      // return absl::StrCat(get_bits()-1, "'b", to_string().substr(1));
 
       return absl::StrCat(get_bits(), "'sb", to_string());
     }
@@ -1298,11 +1283,10 @@ std::string Lconst::to_verilog() const {
   ss << std::hex;
 
   if (num < 0) {
-    ss << (Number(1)<<get_bits())+num;
+    ss << (Number(1) << get_bits()) + num;
     return absl::StrCat(get_bits(), "'sh", ss.str());
   }
   ss << num;
 
   return absl::StrCat(get_bits(), "'sh", ss.str());
 }
-

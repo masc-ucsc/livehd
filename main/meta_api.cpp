@@ -5,10 +5,10 @@
 #include <regex>
 #include <string>
 
+#include "eprp_utils.hpp"
 #include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
-#include "eprp_utils.hpp"
 
 void Meta_api::open(Eprp_var &var) {
   auto path = var.get("path");
@@ -46,7 +46,7 @@ void Meta_api::save(Eprp_var &var) {
     }
   }
 
-  Graph_library::sync_all(); // nice but not needed
+  Graph_library::sync_all();  // nice but not needed
 }
 
 void Meta_api::create(Eprp_var &var) {
@@ -144,7 +144,7 @@ void Meta_api::liberty(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.liberty path:{} ", path);
-  for (const auto &f : absl::StrSplit(files,',')) {
+  for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -155,7 +155,7 @@ void Meta_api::sdc(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.sdc path:{} ", path);
-  for (const auto &f : absl::StrSplit(files,',')) {
+  for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }
@@ -166,7 +166,7 @@ void Meta_api::spef(Eprp_var &var) {
   auto files = var.get("files");
   auto path  = var.get("path");
   fmt::print("lgraph.spef path:{} ", path);
-  for (const auto &f : absl::StrSplit(files,',')) {
+  for (const auto &f : absl::StrSplit(files, ',')) {
     I(!files.empty());
     fmt::print("file:{} ", f);
   }

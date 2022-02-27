@@ -76,7 +76,6 @@ public:
 #endif
   }
 
-
   virtual bool is_done() const { return true; }
   virtual bool has_made_progress() const { return true; }
 };

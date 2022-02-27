@@ -12,8 +12,7 @@
 
 class SampleMainTest : public ::testing::Test {
 protected:
-  void SetUp() override {
-  }
+  void SetUp() override {}
 };
 
 TEST_F(SampleMainTest, EmptyLgraph) {

@@ -80,10 +80,10 @@ protected:
   static _init _static_initializer;
 
   // NOTE: order of operands to maximize code gen when "name" is known (typical case)
-  inline static std::array<std::array<Port_ID, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>         sink_name2pid;
-  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11>    sink_pid2name;
-  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                             ntype2single_input;
-  inline static absl::flat_hash_map<std::string, int>                                                        name2pid;
+  inline static std::array<std::array<Port_ID, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 256>    sink_name2pid;
+  inline static std::array<std::array<std::string, static_cast<std::size_t>(Ntype_op::Last_invalid)>, 11> sink_pid2name;
+  inline static std::array<bool, static_cast<std::size_t>(Ntype_op::Last_invalid)>                        ntype2single_input;
+  inline static absl::flat_hash_map<std::string, int>                                                     name2pid;
 
   static constexpr std::string_view get_sink_name_slow(Ntype_op op, int pid);
 
@@ -111,7 +111,7 @@ public:
     return op == Ntype_op::Memory || op == Ntype_op::Sub || op == Ntype_op::IO;
   }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
-  static inline bool is_single_driver_per_pin(Ntype_op op) {
+  static inline bool           is_single_driver_per_pin(Ntype_op op) {
     if (is_unlimited_sink(op))
       return true;
     auto c = sink_pid2name[0][static_cast<std::size_t>(op)];  // Is first port Upper or lower case
@@ -128,7 +128,7 @@ public:
       return pid;
     }
     if (c == '$') {
-      assert(str.size()==1);
+      assert(str.size() == 1);
       assert(sink_name2pid[str.front()][static_cast<std::size_t>(op)] == 0);
       return 0;
     }
@@ -143,7 +143,8 @@ public:
       return 1;
     }
 
-    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9', 0)) {  // unlikely case
+    if (__builtin_expect(is_unlimited_sink(op) && str.size() > 1 && str.front() >= '0' && str.front() <= '9',
+                         0)) {  // unlikely case
       return str_tools::to_i(str);
     }
 
@@ -156,7 +157,7 @@ public:
   static inline std::string get_sink_name(Ntype_op op, int pid) {
     if (pid > 10) {
       auto pid_index = pid % 11;  // wrap names around for multi inputs like memory cell
-      auto name = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
+      auto name      = sink_pid2name[pid_index][static_cast<std::size_t>(op)];
       assert(name != "invalid");
 
       return absl::StrCat(pid, name);
@@ -183,7 +184,7 @@ public:
 
   static inline constexpr std::string_view get_driver_name(Ntype_op op) {
     (void)op;
-    assert(!is_multi_driver(op)); // use <PID> for multidriveer pins
+    assert(!is_multi_driver(op));  // use <PID> for multidriveer pins
     return {"Y"};
   }
 

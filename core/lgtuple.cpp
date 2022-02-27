@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
-#include "absl/container/flat_hash_map.h"
-#include "absl/strings/str_cat.h"
+#include "lgtuple.hpp"
 
 #include <algorithm>
 
-#include "lgtuple.hpp"
+#include "absl/container/flat_hash_map.h"
+#include "absl/strings/str_cat.h"
 #include "lgraph.hpp"
 #include "likely.hpp"
 
@@ -19,7 +18,6 @@ static bool inline compare_less(char c1, char c2) {
 }
 
 static bool tuple_sort(const std::pair<std::string, Node_pin> &lhs, const std::pair<std::string, Node_pin> &rhs) {
-
   auto l     = 0u;
   auto l_end = lhs.first.size();
   auto r     = 0u;
@@ -170,9 +168,9 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
   bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
   bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
 
-  if (b.size()>b_pos && b[b_pos] == '.')
+  if (b.size() > b_pos && b[b_pos] == '.')
     ++b_pos;
-  if (a.size()>a_pos && a[a_pos] == '.')
+  if (a.size() > a_pos && a[a_pos] == '.')
     ++a_pos;
 
   return std::make_tuple(a_match, b_match, b_pos);
@@ -251,7 +249,7 @@ std::tuple<std::string, std::string> Lgtuple::learn_fix_int(std::string_view a, 
         ++b_pos;
         a_last_section = a_pos;
         b_last_section = b_pos;
-        new_b = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
+        new_b          = append_field(new_b, a.substr(a_last_section, a_last_section - a_pos));
       } else {
         I(a[a_pos] == ':');
         ++a_pos;  // skip first
@@ -355,7 +353,7 @@ bool Lgtuple::match_either_partial(std::string_view a, std::string_view b) {
   return m1 || m2;  // either reached the end it match_int
 }
 
-void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
+void Lgtuple::add_int(std::string_view key, const std::shared_ptr<Lgtuple const> &tup) {
   I(!key.empty());
   if (tup->is_scalar()) {
     I(!has_dpin(key));  // It was deleted before
@@ -392,7 +390,7 @@ int Lgtuple::get_first_level_pos(std::string_view key) {
   if (key.empty())
     return -1;
 
-  auto skip=0u;
+  auto skip = 0u;
 
   if (key[skip] == ':') {
     ++skip;
@@ -420,7 +418,6 @@ std::string_view Lgtuple::get_first_level_name(std::string_view key) {
 }
 
 std::string_view Lgtuple::get_canonical_name(std::string_view key) {
-
   // Remove xxx.0.0.0
   while (key.size() > 1 && key.back() == '0') {
     auto sz = key.size();
@@ -456,7 +453,7 @@ std::string_view Lgtuple::get_all_but_last_level(std::string_view key) {
 }
 
 std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key) {
-  size_t skip=0;
+  size_t skip = 0;
 
   if (key[skip] == '$' || key[skip] == '%') {
     ++skip;
@@ -468,7 +465,7 @@ std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key)
     return std::pair(Port_invalid, std::string(key.substr(skip)));
   }
 
-  auto key2 = key.substr(skip+1);
+  auto key2 = key.substr(skip + 1);
 
   if (!std::isdigit(key2.front())) {
     Lgraph::error("name should have digit after position specified :digits: not {}\n", key2);
@@ -480,7 +477,7 @@ std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key)
   }
 
   auto x = str_tools::to_i(key2);
-  I(x == str_tools::to_i(key2.substr(0,n)));
+  I(x == str_tools::to_i(key2.substr(0, n)));
 
   return std::pair(static_cast<Port_ID>(x), std::string(key2.substr(n + 1)));
 }
@@ -491,8 +488,8 @@ std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-	if (key.front() == '$' || key.front() == '%' || key.front() == '#')
-		return key.substr(1);
+  if (key.front() == '$' || key.front() == '%' || key.front() == '#')
+    return key.substr(1);
 
   return "";  // empty if no dot left
 }
@@ -553,13 +550,13 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
     auto             e_pos = match_first_partial(key, entry);
     if (e_pos == 0)
       continue;
-    GI(e_pos<entry.size(), entry[e_pos] != '.');  // . not included
+    GI(e_pos < entry.size(), entry[e_pos] != '.');  // . not included
 
     if (!tup) {
       std::string key_with_pos{key};
       std::string expanded{e.first};
       std::tie(key_with_pos, expanded) = learn_fix_int(key_with_pos, expanded);
-      tup = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key_with_pos));
+      tup                              = std::make_shared<Lgtuple>(absl::StrCat(name, ".", key_with_pos));
     }
 
     if (e_pos >= entry.size()) {
@@ -581,7 +578,7 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   return tup;
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple const>& tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple const> &tup) const {
   // create a dpin or subtuple with the selected fields
   std::shared_ptr<Lgtuple> ret_tup;
 
@@ -663,7 +660,7 @@ void Lgtuple::del(std::string_view key) {
   key_map.swap(new_map);
 }
 
-void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const>& tup) {
+void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const> &tup) {
   I(!key.empty());
 
   correct = correct && tup->correct;
@@ -782,7 +779,7 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
 #endif
 }
 
-bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
+bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
   bool ok = true;
 
   std::vector<std::pair<std::string, Node_pin>> delayed_numbers;
@@ -821,7 +818,7 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const>& tup) {
         max_pos = x;
     }
     for (const auto &e : delayed_numbers) {
-      auto x = str_tools::to_i(e.first);
+      auto        x = str_tools::to_i(e.first);
       std::string new_key(std::to_string(x + max_pos + 1));
 
       key_map.emplace_back(new_key, e.second);
@@ -996,7 +993,7 @@ Node_pin Lgtuple::flatten() const {
   return result_node.setup_driver_pin();
 }
 
-std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const>& rhs_tup) const {
+std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple const> &rhs_tup) const {
   (void)rhs_tup;
 
   I(false);  // FIXME: implement it
@@ -1005,8 +1002,8 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const std::shared_ptr<Lgtuple co
   return new_tup;
 }
 
-bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string, Node_pin>> &pending_entries,
-                          std::string_view entry_txt, const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
+bool Lgtuple::add_pending(Node &node, std::vector<std::pair<std::string, Node_pin>> &pending_entries, std::string_view entry_txt,
+                          const Node_pin &ubits_dpin, const Node_pin &sbits_dpin) {
   I(!entry_txt.empty());
 
   if (!sbits_dpin.is_invalid()) {
@@ -1038,9 +1035,9 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
 
   std::vector<std::pair<std::string, Node_pin>> pending_entries;
   {
-    Node_pin         sbits_dpin;
-    Node_pin         ubits_dpin;
-    int              pending_pos = -1;  // <0, no pending
+    Node_pin    sbits_dpin;
+    Node_pin    ubits_dpin;
+    int         pending_pos = -1;  // <0, no pending
     std::string non_attr_field;
 
     for (auto i = 0u; i < key_map.size(); ++i) {
@@ -1374,8 +1371,8 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 }
 
 std::tuple<std::string, bool> Lgtuple::get_flop_name(const Node &flop) const {
-  bool             first_flop = true;
-  std::string    flop_root_name;
+  bool        first_flop = true;
+  std::string flop_root_name;
   if (flop.get_driver_pin().has_name()) {
     flop_root_name = flop.get_driver_pin().get_name();
     if (has_dpin(flop_root_name))
@@ -1544,7 +1541,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
   I(ret_tup->is_correct());
 
-  std::stable_sort(multi_flop_attrs.begin(), multi_flop_attrs.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
+  std::stable_sort(multi_flop_attrs.begin(),
+                   multi_flop_attrs.end(),
+                   tuple_sort);  // mutable (no semantic check. Just faster to process)
 
   for (auto &it : multi_flop_attrs) {
     auto root = get_all_but_last_level(it.first);
@@ -1591,7 +1590,7 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 
   for (const auto &e : key_map) {
     std::string entry{e.first};
-    auto             e_pos = match_first_partial(key, entry);
+    auto        e_pos = match_first_partial(key, entry);
     if (e_pos == 0 || e_pos >= entry.size())
       continue;
 
