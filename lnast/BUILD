@@ -4,7 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "elab",
+    name = "lnast",
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
@@ -15,12 +15,8 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
-        "//task",
-        "//lemu",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@fmt",
-        "@iassert",
+        "//core",
+        "//parser",
     ],
 )
 
@@ -38,7 +34,7 @@ cc_test(
     name = "ast_test",
     srcs = ["tests/ast_test.cpp"],
     deps = [
-        ":elab",
+        ":lnast",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -47,7 +43,7 @@ cc_test(
     name = "symbol_table_test",
     srcs = ["tests/symbol_table_test.cpp"],
     deps = [
-        ":elab",
+        ":lnast",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -56,7 +52,7 @@ cc_test(
     name = "ast_test2",
     srcs = ["tests/ast_test2.cpp"],
     deps = [
-        ":elab",
+        ":lnast",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -69,7 +65,7 @@ cc_test(
         ":pyrope_test",
     ],
     deps = [
-        ":elab",
+        ":lnast",
     ],
 )
 
@@ -78,7 +74,7 @@ cc_test(
     srcs = ["tests/elab_scanner_unit_test.cpp"],
     tags = ["fixme"],
     deps = [
-        ":elab",
+        ":lnast",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -87,7 +83,7 @@ cc_test(
     name = "lnast_bench",
     srcs = ["tests/lnast_bench.cpp"],
     deps = [
-        ":elab",
+        ":lnast",
         "@com_google_benchmark//:benchmark",
     ],
 )
@@ -100,7 +96,7 @@ cc_test(
         ":verilog_test",
     ],
     deps = [
-        ":elab",
+        ":lnast",
     ],
 )
 
@@ -108,6 +104,6 @@ cc_test(
     name = "elab_xlang_test",
     srcs = ["tests/elab_xlang_test.cpp"],
     deps = [
-        ":elab",
+        ":lnast",
     ],
 )

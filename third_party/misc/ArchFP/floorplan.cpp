@@ -1,7 +1,7 @@
 #include "floorplan.hpp"
 
 #include "absl/container/flat_hash_map.h"
-#include "core/lgedgeiter.hpp"
+#include "lgedgeiter.hpp"
 #include "helpers.hpp"
 
 bool   xReflect = false;

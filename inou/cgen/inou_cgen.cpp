@@ -3,7 +3,7 @@
 #include "inou_cgen.hpp"
 
 #include "cgen_verilog.hpp"
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "thread_pool.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);

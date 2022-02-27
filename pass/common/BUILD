@@ -14,7 +14,17 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//core",
+        "//lgraph",
+        "//lnast",
     ],
     alwayslink = True,
+)
+
+cc_test(
+    name = "eprp_test",
+    srcs = ["tests/eprp_test.cpp"],
+    deps = [
+        ":pass",
+        "@com_google_googletest//:gtest_main",
+    ],
 )

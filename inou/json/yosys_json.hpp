@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "../../core/lgraph.hpp"
-#include "../../core/node_pin.hpp"
+#include "lgraph.hpp"
+#include "node_pin.hpp"
 #include "cell.hpp"
-#include "core/edge.hpp"
+#include "edge.hpp"
 #include "inou_json.hpp"
 #include "json_composer.hpp"
 

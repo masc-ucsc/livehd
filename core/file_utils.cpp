@@ -1,5 +1,5 @@
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -20,7 +20,7 @@
 #include <libproc.h>
 #endif
 
-std::string Eprp_utils::get_exe_path() {
+std::string file_utils::get_exe_path() {
   char exePath[PATH_MAX] = {
       0,
   };
@@ -58,7 +58,7 @@ static void clean_dir_thread(char *path) {
   free(path);
 }
 
-void Eprp_utils::clean_dir(std::string_view dir) {
+void file_utils::clean_dir(std::string_view dir) {
   if (dir.empty())
     return;
 

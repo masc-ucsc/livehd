@@ -6,9 +6,13 @@
 #include <vector>
 
 #include "boost/container/static_vector.hpp"
-#include "lgraph_base_core.hpp"
+
+#include "iassert.hpp"
 
 class Graph_core;
+
+using Bits_t=uint32_t;
+using Port_ID=uint32_t;
 
 class Index_iter {
 protected:

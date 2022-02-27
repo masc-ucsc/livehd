@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "../../core/lgraph.hpp"
-#include "core/edge.hpp"
-#include "core/lgraph.hpp"
-#include "core/node_pin.hpp"
+#include "lgraph.hpp"
+#include "edge.hpp"
+#include "lgraph.hpp"
+#include "node_pin.hpp"
 #include "inou_json.hpp"
 
 namespace yjson {

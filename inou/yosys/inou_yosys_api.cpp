@@ -11,7 +11,7 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "inou_yosys_api.hpp"
 #include "kernel/yosys.h"
 #include "lgraph.hpp"
@@ -32,7 +32,7 @@ Inou_yosys_api::Inou_yosys_api(Eprp_var &var, bool do_read) : Pass("inou.yosys",
 void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
   auto script = var.get("script");
 
-  auto main_path = Eprp_utils::get_exe_path();
+  auto main_path = file_utils::get_exe_path();
 
   fmt::print("path:{}\n", main_path);
 

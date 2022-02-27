@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
@@ -183,7 +183,7 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
 
   std::string lgdb("lgdb_lgraph_test");
 
-  Eprp_utils::clean_dir(lgdb);
+  file_utils::clean_dir(lgdb);
 
   Lgraph *lg1 = Lgraph::create(lgdb, "lg1", "file1.xxx");
 

@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "graph_core.hpp"
+#include "iassert.hpp"
+#include "fmt/format.h"
+#include "likely.hpp"
 
 #include <algorithm>
 #include <iterator>

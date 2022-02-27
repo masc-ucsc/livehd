@@ -19,7 +19,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//core",
+        "//lgraph",
     ],
 )
 

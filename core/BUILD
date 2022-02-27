@@ -3,6 +3,11 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+config_setting(
+    name = "use_profiling",
+    values = {"define": "profiling=1"},
+)
+
 cc_library(
     name = "core",
     srcs = glob(
@@ -10,30 +15,41 @@ cc_library(
         exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
-    copts = COPTS + ["-Wno-error=shadow"],
+    copts = COPTS,
+    defines = select({
+        ":use_profiling": [
+            "LIVEHD_PROFILING=1",
+        ],
+        "//conditions:default": [],
+    }),
     includes = ["."],
+    linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
-        "//eprp",
-        "//lemu",
-        "//task",
         "@boost//:multiprecision",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/container:btree",
         "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@fmt",
         "@iassert",
-        "@hif//hif",
-        "@rapidjson//:headers",
-    ],
-    alwayslink = True,
+    ] + select({
+        ":use_profiling": [
+            "@com_google_perfetto//:perfetto",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
-cc_library(
-    name = "tree_lgdb_test",
-    hdrs = ["tests/tree_lgdb_setup.hpp"],
-    copts = COPTS,
-    includes = ["."],
+cc_test(
+    name = "thread_pool_test",
+    srcs = [
+        "tests/concurrentqueue.hpp",
+        "tests/thread_pool_test.cpp",
+    ],
+    # tags = ["long1"], # Run only with long1 set of tests
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",
@@ -41,30 +57,13 @@ cc_library(
 )
 
 cc_test(
-    name = "lgtuple_test",
-    srcs = ["tests/lgtuple_test.cpp"],
-    copts = COPTS,
-    includes = ["."],
+    name = "pool_bench",
+    srcs = ["tests/pool_bench.cpp",
+        "tests/concurrentqueue.hpp",
+    ],
     deps = [
         ":core",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "traversal_hierarchy_test",
-    srcs = ["tests/traversal_hierarchy_test.cpp"],
-    deps = [
-        ":tree_lgdb_test",
-    ],
-)
-
-cc_test(
-    name = "traverse_test",
-    srcs = ["tests/traverse_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":tree_lgdb_test",
+        "@com_google_benchmark//:benchmark",
     ],
 )
 
@@ -80,55 +79,31 @@ cc_test(
 )
 
 cc_test(
-    name = "lgraph_test",
-    srcs = ["tests/lgraph_test.cpp"],
+    name = "lconst_test",
+    srcs = ["tests/lconst_test.cpp"],
     deps = [
         ":core",
+        "//simlib:headers",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_googletest//:gtest_main",
     ],
 )
 
 cc_test(
-    name = "lgraph_each",
-    srcs = ["tests/lgraph_each_test.cpp"],
+    name = "lconst_bench",
+    srcs = ["tests/lconst_bench.cpp"],
     deps = [
         ":core",
-        "@com_google_googletest//:gtest_main",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_benchmark//:benchmark",
     ],
 )
 
 cc_test(
-    name = "node_test",
-    srcs = ["tests/node_test.cpp"],
-    deps = [
-        ":core",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "iter_test",
-    srcs = ["tests/iter_test.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":core",
-    ],
-)
-
-cc_test(
-    name = "graph_bench",
-    srcs = ["tests/graph_bench.cpp"],
-    tags = ["fixme"],
-    deps = [
-        ":core",
-        ":tree_lgdb_test",
-        "@fmt",
-    ],
-)
-
-cc_test(
-    name = "edge_test",
-    srcs = ["tests/edge_test.cpp"],
+    name = "blop_test",
+    srcs = ["tests/blop_test.cpp"],
     deps = [
         ":core",
         "@com_google_googletest//:gtest_main",

@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "prplib",
+    name = "lgcpp",
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
@@ -12,6 +12,6 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//lgcpp/common:lgcpp",
+        "//pass/common:pass",
     ],
 )

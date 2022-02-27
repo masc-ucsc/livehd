@@ -5,7 +5,7 @@
 #include <string_view>
 
 // List of useful methods for parsers in lgraph
-class Eprp_utils {
+class file_utils {
 public:
   static std::string get_exe_path();
 

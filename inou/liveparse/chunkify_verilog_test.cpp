@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "gtest/gtest.h"
 
 class VTest1 : public ::testing::Test {
@@ -13,8 +13,8 @@ protected:
 };
 
 TEST_F(VTest1, interface) {
-  Eprp_utils::clean_dir("tbase");
-  Eprp_utils::clean_dir("tdelta");
+  file_utils::clean_dir("tbase");
+  file_utils::clean_dir("tdelta");
 
   Chunkify_verilog chunker("tbase");
 

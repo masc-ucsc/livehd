@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/node_tree.hpp"
+#include "node_tree.hpp"
 #include "floorplan.hpp"
 
 // This is a wrapper class for MV5 components that wish to be included in a floorplan.

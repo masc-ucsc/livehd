@@ -8,12 +8,11 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <string>
 #include <vector>
 
-#include "../../core/lgraph.hpp"
-#include "../../elab/lnast.hpp"
-#include "../../task/lbench.hpp"
-#include "core/edge.hpp"
-#include "core/lgraph.hpp"
-#include "core/node_pin.hpp"
+#include "lgraph.hpp"
+#include "lbench.hpp"
+#include "edge.hpp"
+#include "lgraph.hpp"
+#include "node_pin.hpp"
 #include "file_output.hpp"
 #include "inou_json.hpp"
 #include "lgedgeiter.hpp"

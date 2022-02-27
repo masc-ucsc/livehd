@@ -11,7 +11,6 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lbench.hpp"
-#include "lgraph.hpp"
 #include "lrand.hpp"
 #include "perf_tracing.hpp"
 
@@ -417,6 +416,7 @@ TEST_F(Setup_graph_core, bench_gc) {
   }
 }
 
+#if 0
 TEST_F(Setup_graph_core, bench_lgraph) {
   // This is to show the full Lgraph overhead (it should be close to Graph_core
   // once it replaced node_internal)
@@ -469,3 +469,4 @@ TEST_F(Setup_graph_core, bench_lgraph) {
     EXPECT_EQ(m1.get_num_out_edges(), 0);
   }
 }
+#endif

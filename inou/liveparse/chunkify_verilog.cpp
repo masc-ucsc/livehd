@@ -13,7 +13,7 @@
 #include <set>
 #include <string>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "graph_library.hpp"
 #include "inou_liveparse.hpp"
 #include "lbench.hpp"
@@ -148,7 +148,7 @@ void Chunkify_verilog::elaborate() {
   write_file(source, get_memblock());
 
   chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
-  Eprp_utils::clean_dir(chunk_dir);
+  file_utils::clean_dir(chunk_dir);
 
   elab_chunk_dir = "";
   if (!elab_path.empty()) {

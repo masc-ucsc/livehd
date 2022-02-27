@@ -14,11 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//elab",
-        "//inou/pyrope:inou_pyrope",
-        "//task",
         "//pass/common:pass",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "//inou/pyrope:inou_pyrope",
     ],
     alwayslink = True,
 )
@@ -37,10 +34,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//elab",
-        "//inou/pyrope:inou_pyrope",
         "//pass/common:pass",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "//inou/pyrope:inou_pyrope",
     ],
 )
 

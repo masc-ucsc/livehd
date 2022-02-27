@@ -14,7 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//elab",
+        "//lnast",
         "//pass/common:pass",
     ],
     alwayslink = True,

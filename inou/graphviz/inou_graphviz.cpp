@@ -2,7 +2,7 @@
 
 #include "inou_graphviz.hpp"
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "graphviz.hpp"
 
 static Pass_plugin sample("inou_graphviz", Inou_graphviz::setup);

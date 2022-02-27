@@ -14,8 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//lemu",
-        "//lgcpp/common:lgcpp",
+        "//lgraph",
+        "//lgext/common:lgcpp",
         "//pass/common:pass",
     ],
     alwayslink = True,

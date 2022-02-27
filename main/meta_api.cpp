@@ -5,7 +5,7 @@
 #include <regex>
 #include <string>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
@@ -36,7 +36,7 @@ void Meta_api::save(Eprp_var &var) {
 
   for (Lgraph *lg : var.lgs) {
     if (lg->is_empty()) {
-      Eprp_utils::clean_dir(lg->get_save_filename());
+      file_utils::clean_dir(lg->get_save_filename());
     } else {
       if (hier != "false" && hier != "0") {
         // lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });

@@ -12,7 +12,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "@fmt",
         "@mockturtle",
     ],
 )
@@ -21,8 +20,7 @@ cc_test(
     name = "mock_test",
     srcs = ["mock_test.cpp"],
     deps = [
-        "//task",
-        "@fmt",
+        "//core",
         "@mockturtle",
     ],
 )

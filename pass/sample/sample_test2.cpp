@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "eprp_utils.hpp"
+#include "file_utils.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lgraph.hpp"
@@ -16,7 +16,7 @@ protected:
 };
 
 TEST_F(SampleMainTest, EmptyLgraph) {
-  Eprp_utils::clean_dir("pass_test_lgdb");
+  file_utils::clean_dir("pass_test_lgdb");
 
   Lgraph *g = Lgraph::create("pass_test_lgdb", "empty", "nosource");
 

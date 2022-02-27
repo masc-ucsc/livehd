@@ -29,6 +29,7 @@ public:
   T* get_ptr() {
     T*   raw_retval      = nullptr;
     bool recycle_success = _pointer_queue.dequeue(raw_retval);
+    (void)recycle_success;
     if (raw_retval == nullptr) {
       raw_retval = new T();
     }
