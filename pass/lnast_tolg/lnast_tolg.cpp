@@ -1679,8 +1679,10 @@ void Lnast_tolg::try_create_flattened_inp(Lgraph *lg) {
 
     inp_artifacts[tg.get_compact()].insert(tg);  // insert the head of the chain
 
-    I(tg.get_driver_pin().get_name().substr(0, 1) == "$");
-    auto hier_name = Lgtuple::get_all_but_first_level(tg.get_driver_pin().get_name());  // get rid of "$" in "$foo"
+    auto tg_name= tg.get_driver_pin().get_name();
+
+    I(tg_name.substr(0, 1) == "$");
+    auto hier_name = Lgtuple::get_all_but_first_level(tg_name);  // get rid of "$" in "$foo"
     if (hier_name.empty())
       continue;
 
