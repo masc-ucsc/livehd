@@ -45,7 +45,7 @@ std::string_view Prp2lnast::get_text(const TSNode &node) const {
   auto length = end - start;
 
   I(end <= prp_file.size());
-  return prp_file.substr(start, length);
+  return std::string_view(prp_file).substr(start, length);
 }
 
 void Prp2lnast::dump_tree_sitter() const {

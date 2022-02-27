@@ -795,7 +795,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   }
   I(has_din && has_clk);  // A flop at least has to have the input and clock, others are optional/have defaults.
 
-  std::string_view pin_name = dpin_get_name(pin);
+  auto pin_name = dpin_get_name(pin);
 
   // Set __clk_pin
   /* FIXME: Currently, this is commented out since LN->LG does not support __clk_pin attribute.
