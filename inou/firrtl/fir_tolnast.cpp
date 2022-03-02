@@ -1067,7 +1067,7 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
   std::size_t pos;
 
   // while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
-  while ((pos = full_name.find(".", prev)) != std::string::npos || (pos = full_name.find("[", prev)) != std::string::npos) {
+  while ((pos = full_name.find('.', prev)) != std::string::npos || (pos = full_name.find('[', prev)) != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1130,7 +1130,8 @@ void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_
   std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> hier_subnames;
   split_hier_name(full_name, hier_subnames);
   auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_add());
-  for (auto subname : hier_subnames) {
+  
+  for (const auto &subname : hier_subnames) {
     std::string field_name = subname.first;
     if (inst_to_mod_map.count(subname.first)) {
       field_name = absl::StrCat("itup_", field_name);
@@ -1203,13 +1204,37 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
       Pass::error("Found IO port {} specified with unknown direction in Protobuf message.", port_name);
     }
 
-    if (port_bits > 0) {  // Specify __bits
+
+    if (port_bits > 0) {  
+
+      // set default value 0 for all module outputs
+      if (full_port_name.substr(0,1) == "%") {
+        auto zero_node = Lnast_node::create_const(0);
+        if (full_port_name.find('.') != std::string::npos) {
+          create_tuple_add_from_str(lnast, parent_node, full_port_name, zero_node);
+        } else {
+          // create_tuple_add_from_str(lnast, parent_node, full_port_name, zero_node);
+          create_default_value_for_scalar_output(lnast, parent_node, full_port_name, zero_node);
+        }
+      }
+
+
+      // specify __bits
       auto value_node = Lnast_node::create_const(port_bits);
       auto extension  = port_sign ? ".__sbits" : ".__ubits";
       create_tuple_add_from_str(lnast, parent_node, absl::StrCat(full_port_name, extension), value_node);
+
     }
   }
 }
+
+  
+void Inou_firrtl_module::create_default_value_for_scalar_output(Lnast &ln, Lnast_nid &parent_node, std::string_view sv, const Lnast_node &value_node) {
+  auto idx_asg = ln.add_child(parent_node, Lnast_node::create_assign());
+  ln.add_child(idx_asg, Lnast_node::create_ref(sv));
+  ln.add_child(idx_asg, value_node);
+}
+
 
 void Inou_firrtl_module::record_all_input_hierarchy(std::string_view port_name) {
   std::size_t pos = port_name.size();

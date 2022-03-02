@@ -1430,6 +1430,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         },
         hier);
 
+    fmt::print("DEBUG9\n");
     lg->each_graph_output(
         [this](Node_pin &dpin) {
           if (dpin.get_name() == "%")
@@ -1475,9 +1476,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     for (auto node : lg->fast()) {  // Non-hierarchical erase attr
       auto op = node.get_type_op();
       if (op == Ntype_op::AttrSet) {
-        if (op == Ntype_op::AttrSet) {
-          try_delete_attr_node(node);
-        }
+        try_delete_attr_node(node);
       }
     }
   }
@@ -1554,13 +1553,14 @@ void Bitwidth::try_delete_attr_node(Node &node) {
           e.sink.connect_driver(dpin_rhs);
         }
       }
+      node.del_node();
+      return;
     }
   }
 
   // auto node_non_hier = node.get_non_hierarchical();
   if (node.is_sink_connected("parent")) {
     auto data_dpin = node.get_sink_pin("parent").get_driver_pin();
-
     for (auto e : node.out_edges()) {
       if (e.driver.get_pid() == 0) {  // No chain pin
         e.sink.connect_driver(data_dpin);
