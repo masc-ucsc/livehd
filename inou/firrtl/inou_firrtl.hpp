@@ -49,6 +49,7 @@ protected:
   Sub_node add_mod_to_library(Eprp_var &var, std::string_view mod_name, std::string_view file_name);
 
   void user_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);
+  void ext_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);
 
   static void to_lnast(Eprp_var &var);
 

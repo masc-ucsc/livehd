@@ -1790,7 +1790,6 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
-// FIXME: n20 TA should be handle here, maybe
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");
@@ -1858,8 +1857,8 @@ void Cprop::reconnect_tuple_get(Node &node) {
   auto [tup_name, key_name] = get_tuple_name_key(node);
 
   auto it = node2tuple.find(node.get_compact());
-
   bool is_attr_get = Lgtuple::is_attribute(key_name);
+
   if (is_attr_get) {
     node.set_type(Ntype_op::AttrGet);
 
@@ -1876,6 +1875,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
       }
 
       node.setup_sink_pin("parent").connect_driver(new_dpin);
+
     }
 
     return;
@@ -2244,6 +2244,7 @@ void Cprop::do_trans(Lgraph *lg) {
   // clean_io(lg);
 }
 
+// original
 void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup) {
   I(!hier);
   I(tup->is_correct());
@@ -2290,6 +2291,78 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
     dpin.get_non_hierarchical().del();
   }
 }
+
+// void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup) {
+//   I(!hier);
+//   I(tup->is_correct());
+
+//   auto *lg          = node.get_class_lgraph();
+//   bool  local_error = false;
+//   bool  tup_scalar  = tup->is_scalar();  // It could have just attributes
+
+//   absl::flat_hash_map<std::string, uint32_t> out_name2bits;
+  
+//   // collect outputs bits info if any
+//   for (const auto &it : tup->get_map()) {
+//     std::string out_name{it.first};
+
+//     fmt::print("DEBUG9 out_name:{}\n", out_name);
+//     if (!Lgtuple::is_attribute(out_name)) 
+//       continue;
+//     auto last_level_name = Lgtuple::get_last_level(out_name);
+//     I(last_level_name != "__dp_assign");  // __dp_assign should not create a tuple
+//     if (last_level_name.substr(3, 4) == "bits") {
+//       auto value_dpin = tup->get_dpin(out_name);
+//       if (!value_dpin.is_invalid() && value_dpin.is_type_const()) {
+//         size_t bits = value_dpin.get_type_const().to_i();
+//         fmt::print("DEBUG8 value_dpin:{}, out_name:{}, bits:{}\n", value_dpin.debug_name(), out_name, bits);
+//         out_name2bits.insert_or_assign(out_name, bits);
+//       }
+//     }
+//   }
+
+
+//   for (const auto &it : tup->get_map()) {
+//     std::string out_name{it.first};
+//     if (Lgtuple::is_attribute(out_name)) 
+//       continue;
+
+//     if (unlikely(it.second.is_invalid())) {
+//       local_error = true;
+//       Pass::error("graph {} has output but it has invalid field {}", lg->get_name(), it.first);
+//       continue;
+//     }
+
+//     auto bits = out_name2bits[absl::StrCat(out_name, ".__ubits")];
+//     fmt::print("DEBUG7 out_name:{} bits:{}\n", out_name, bits);
+
+//     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
+//       out_name = out_name.substr(2);
+//     }
+//     if (tup_scalar)  // Remove foo.0.0.0 if scalar
+//       out_name = Lgtuple::get_canonical_name(out_name);
+
+//     if (unlikely(it.first.empty() || out_name.empty())) {
+//       local_error = true;
+// #ifndef NDEBUG
+//       Pass::info("Tuple {} for graph {} without named field (pyrope supports unnamed)", tup->get_name(), lg->get_name());
+// #endif
+//       continue;
+//     }
+//     if (lg->has_graph_output(out_name))
+//       continue;
+
+//     auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
+//     // auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, 0);
+//     auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, bits);
+//     it.second.connect_sink(flattened_gout);
+//   }
+
+//   if (!local_error) {
+//     auto dpin = lg->get_graph_output("%");  // then delete anything left at %
+//     dpin.get_non_hierarchical().del();
+//   }
+// }
 
 void Cprop::bwd_del_node(Node &node) {
   // a more aggressive del_node that avoids iterations

@@ -1955,6 +1955,35 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
   { var.add(std::move(lnast)); }
 }
 
+
+void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Module& fmodule, std::string_view file_name) {
+#ifndef NDEBUG
+  fmt::print("Module (ext): {}\n", fmodule.external_module().id());
+#endif
+
+  Inou_firrtl_module firmod;
+
+  std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(fmodule.external_module().id(), file_name);
+
+  const firrtl::FirrtlPB_Module_ExternalModule& ext_module = fmodule.external_module();
+
+  lnast->set_root(Lnast_node::create_top());
+  auto idx_stmts = lnast->add_child(lh::Tree_index::root(), Lnast_node::create_stmts());
+
+  // Iterate over I/O of the module.
+  for (int i = 0; i < ext_module.port_size(); i++) {
+    const firrtl::FirrtlPB_Port& port = ext_module.port(i);
+    firmod.list_port_info(*lnast, port, idx_stmts);
+  }
+
+
+  std::lock_guard<std::mutex> guard(eprp_var_mutex);
+  { 
+    var.add(std::move(lnast)); 
+  }
+}
+
+
 void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name) {
   for (int i = 0; i < circuit.module_size(); i++) {
     // std::vector<std::pair<std::string, uint8_t>> vec;
@@ -2223,14 +2252,17 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
 
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.module(i).has_user_module()) {
-      // user_module_to_lnast(var, circuit.module(i), file_name);
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
         TRACE_EVENT("inou", "fir_tolnast:module");
         Lbench b("inou.fir_tolnast:module");
         this->user_module_to_lnast(var, circuit.module(i), file_name);
       });
     } else if (circuit.module(i).has_external_module()) {
-      Pass::info("External Module, nothing to translate to LNAST");
+      thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
+        TRACE_EVENT("inou", "fir_tolnast:module");
+        Lbench b("inou.fir_tolnast:module");
+        this->ext_module_to_lnast(var, circuit.module(i), file_name);
+      });
     } else {
       Pass::error("Module not set.");
     }
