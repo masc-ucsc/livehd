@@ -191,11 +191,12 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
     visited.insert(e.second);
 
     auto *sub_lg = Lgraph::open(path, e.second);
-    if (sub_lg) {
-      bool cont = fn(sub_lg);
-      if (!cont)
-        return;
-    }
+    if (sub_lg == nullptr || sub_lg->is_empty())
+      continue;
+
+    bool cont = fn(sub_lg);
+    if (!cont)
+      return;
   }
 }
 
@@ -206,7 +207,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
     visited.insert(ent.first);
 
     auto *down_lg = Lgraph::open(get_path(), Lg_type_id(ent.first));
-    if (down_lg == nullptr)
+    if (down_lg == nullptr || down_lg->is_empty())
       continue;
     down_lg->each_hier_unique_sub_bottom_up_int(visited, fn);
     fn(down_lg);
@@ -216,6 +217,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
 void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> &fn) {
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
+  fn(this); // itself
 }
 
 void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn, Pending_map *pending_map,

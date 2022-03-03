@@ -1254,6 +1254,8 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
     return std::tuple(nullptr, false);
   }
 
+  std::stable_sort(fixing_tup->key_map.begin(), fixing_tup->key_map.end(), tuple_sort);
+
   for (const auto &e : fixing_tup->get_map()) {
     if (is_attribute(e.first))
       continue;  // Attributes can not from different paths

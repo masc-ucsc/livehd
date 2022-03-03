@@ -23,7 +23,7 @@ cc_library(
     ],
 )
 
-cc_test(
+cc_binary(
     name = "mincut",
     srcs = ["mincut.cpp"],
     copts = [

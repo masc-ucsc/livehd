@@ -300,7 +300,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
 
   std::vector<Lgraph *> all_lgs;
 
-  to_pos[top->get_lgid()] = 0;
+  //to_pos[top->get_lgid()] = 0;
   top->each_hier_unique_sub_bottom_up([&to_pos, &all_lgs](Lgraph *lg) -> bool {
     // fmt::print("adding name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
 
@@ -318,6 +318,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   // top->get_htree().dump();
 
   top->each_hier_unique_sub_bottom_up([&to_pos, &all_visited](Lgraph *lg) -> bool {
+    // fmt::print("1a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
@@ -328,7 +329,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
     lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
-      // fmt::print("checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+      // fmt::print("1b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes
       I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
@@ -345,6 +346,7 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
   all_visited.clear();
   all_visited.resize(all_lgs.size());
   top->each_hier_unique_sub_bottom_up_parallel2([&to_pos, &all_visited](Lgraph *lg) -> bool {
+    // fmt::print("2a.checking name:{} lgid:{}\n", lg->get_name(), lg->get_lgid());
     bool sure_leaf = lg->get_down_class_map().empty();
 
     I(to_pos.find(lg->get_lgid()) != to_pos.end());
@@ -355,16 +357,22 @@ TEST_F(Setup_graphs_test, each_unique_hier_sub_parallel) {
     EXPECT_EQ(all_visited[pos], 1);  // no double insertions
 
     lg->each_local_unique_sub_fast([&all_visited, &to_pos, &sure_leaf](Lgraph *sub_lg) -> bool {
-      // fmt::print("checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+      // fmt::print("2b.checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
 
       EXPECT_FALSE(sure_leaf);  // A leaf should not have sub nodes
       I(to_pos.find(sub_lg->get_lgid()) != to_pos.end());
       auto pos = to_pos[sub_lg->get_lgid()];
 
-      if (sub_lg->is_empty())
+      if (sub_lg->is_empty()) {
+        if (all_visited[pos] != 0) {
+          fmt::print("OOPS: checking name:{} lgid:{}\n", sub_lg->get_name(), sub_lg->get_lgid());
+          sub_lg->dump();
+        }
+
         EXPECT_EQ(all_visited[pos], 0);  // not visited
-      else
+      }else{
         EXPECT_EQ(all_visited[pos], 1);  // already visited
+      }
 
       return true;  // continue
     });
