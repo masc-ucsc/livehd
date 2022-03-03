@@ -1779,11 +1779,14 @@ void Cprop::reconnect_tuple_sub(Node &node) {
     Node_pin dpin;
     if (lg->has_graph_input(io_pins[pid].name)) {
       dpin = lg->get_graph_input(io_pins[pid].name);
+      I(dpin.is_driver());
+      node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
     } else {
-      dpin = lg->add_graph_input(io_pins[pid].name, Port_invalid, 0);
+      // dpin = lg->add_graph_input(io_pins[pid].name, Port_invalid, 0);
+      // fmt::print("DEBUG7: graph input name {}\n", dpin.debug_name());
     }
-    I(dpin.is_driver());
-    node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
+    // I(dpin.is_driver());
+    // node.setup_sink_pin(io_pins[pid].name).connect_driver(dpin);
   }
 }
 

@@ -1206,7 +1206,6 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
 
 
     if (port_bits > 0) {  
-
       // set default value 0 for all module outputs
       if (full_port_name.substr(0,1) == "%") {
         auto zero_node = Lnast_node::create_const(0);
@@ -1218,12 +1217,10 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
         }
       }
 
-
       // specify __bits
       auto value_node = Lnast_node::create_const(port_bits);
       auto extension  = port_sign ? ".__sbits" : ".__ubits";
       create_tuple_add_from_str(lnast, parent_node, absl::StrCat(full_port_name, extension), value_node);
-
     }
   }
 }
