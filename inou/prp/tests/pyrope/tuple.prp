@@ -1,6 +1,6 @@
 /*
 :name: tuple
-:type: parsing
+:type: parsing lgraph compile
 */
 
 pub let top = fun {
@@ -12,5 +12,5 @@ pub let top = fun {
   b = x[2][1]
   c = x[3]
 
-  return (a, b, c)
+  ret (a, b, c)
 }

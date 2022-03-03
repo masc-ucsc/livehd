@@ -491,8 +491,6 @@ void Prp2lnast::process_binary_expression(TSNode node) {
   //  (2) op takes n arguments
   //
   if (!lnast_node.is_invalid()) {
-    auto expr_index = lnast->add_child(stmts_index, lnast_node);
-    auto ref        = get_tmp_ref();
     process_node(lnode);
     auto lhs = primary_node_stack.top();
     primary_node_stack.pop();
@@ -500,6 +498,9 @@ void Prp2lnast::process_binary_expression(TSNode node) {
     auto rhs = primary_node_stack.top();
     primary_node_stack.pop();
 
+    auto expr_index = lnast->add_child(stmts_index, lnast_node);
+    auto ref        = get_tmp_ref();
+    
     lnast->add_child(expr_index, ref);
     lnast->add_child(expr_index, lhs);
     lnast->add_child(expr_index, rhs);

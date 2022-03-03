@@ -69,6 +69,9 @@ class PrpRunner:
         lg_cmd = self.lgshell_parse(test)
 
         lg_cmd.append('|>')
+        lg_cmd.append('pass.lnastopt')
+
+        lg_cmd.append('|>')
         lg_cmd.append('pass.lnast_tolg')
 
         return lg_cmd
