@@ -71,7 +71,7 @@ cc_library(
         "//pass/submatch:pass_submatch",
         "//pass/compiler:pass_compiler",
         # "//pass/mockturtle:pass_mockturtle",
-
+        "//pass/lnast_print:pass_lnast_print",
         #add dependencies to new passes here
     ],
 )
