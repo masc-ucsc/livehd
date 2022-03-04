@@ -324,7 +324,7 @@ void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_vie
 }
 
 void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits) {
-  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_set());
   lnast->add_child(idx_dot, Lnast_node::create_ref(a_var));
   if (is_signed) {
     lnast->add_child(idx_dot, Lnast_node::create_const("__sbits"));
