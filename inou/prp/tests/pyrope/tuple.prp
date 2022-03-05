@@ -1,6 +1,6 @@
 /*
 :name: tuple
-:type: parsing lgraph compile
+:type: parsing
 */
 
 pub let top = fun {
