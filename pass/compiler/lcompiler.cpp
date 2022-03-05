@@ -281,9 +281,9 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       }
     });
 
-    Bitwidth bw(false, 10);
-    bw.do_trans(new_lg);  // FIXME: WHY??? to call twice. Check if needed
-    bw.do_trans(new_lg);
+    //Bitwidth bw(false, 10);
+    //bw.do_trans(new_lg);  // FIXME: WHY??? to call twice. Check if needed
+    //bw.do_trans(new_lg);
     gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
 
     {

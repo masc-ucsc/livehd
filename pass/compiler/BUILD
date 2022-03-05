@@ -91,7 +91,7 @@ cc_library(
     "connect_through2",
     "direct_io_assign",
     #"connect_through",  FIXME: re-enable
-    "top",
+    #"top", FIXME: re-enable
 ]]
 
 # High Level FIRRTL
