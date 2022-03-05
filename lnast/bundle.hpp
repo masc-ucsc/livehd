@@ -20,6 +20,8 @@ public:
     Lconst trivial;
   };
 
+  static inline Lconst invalid_lconst = Lconst::invalid();
+
 protected:
   using Key_map_type = std::vector<std::pair<std::string, Entry>>;
 
@@ -61,9 +63,9 @@ public:
 
   std::string learn_fix(std::string_view key);
 
-  Entry  get_entry(std::string_view key) const;
-  Lconst get_trivial(std::string_view key) const { return get_entry(key).trivial; }
-  Lconst get_trivial() const;
+  const Entry  &get_entry(std::string_view key) const;
+  const Lconst &get_trivial(std::string_view key) const { return get_entry(key).trivial; }
+  const Lconst &get_trivial() const;
 
   bool                    has_bundle(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;

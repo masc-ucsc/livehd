@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "spsc.hpp"
+#include "iassert.hpp"
 
 class raw_ptr_pool {
 public:
@@ -14,7 +15,7 @@ public:
     while (!_pointer_queue.empty()) {
       void *raw_ptr;
       bool  something = _pointer_queue.dequeue(raw_ptr);
-      assert(something);
+      I(something);
       free(raw_ptr);
     }
   }

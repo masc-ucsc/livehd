@@ -64,6 +64,11 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
   dict[name] = value;
 }
 
+void Eprp_var::replace(const Eprp_var::Eprp_lnasts &lns) {
+  lnasts.clear();
+  lnasts = lns;
+}
+
 void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new) {
   // lnast_old.swap(lnast_new);
 

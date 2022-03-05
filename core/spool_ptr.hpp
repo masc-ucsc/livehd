@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "spsc.hpp"
+#include "iassert.hpp"
 
 template <class T>
 class spool_ptr_pool {
@@ -14,14 +15,14 @@ public:
     T* raw_ptr            = new T();
     raw_ptr->shared_count = 1;
     bool something        = _pointer_queue.enqueue(raw_ptr);
-    assert(something);
+    I(something);
   }
 
   ~spool_ptr_pool() {
     while (!_pointer_queue.empty()) {
       T*   raw_ptr   = nullptr;
       bool something = _pointer_queue.dequeue(raw_ptr);
-      assert(something);
+      I(something);
       delete raw_ptr;
     }
   }
@@ -33,13 +34,13 @@ public:
     if (raw_retval == nullptr) {
       raw_retval = new T();
     }
-    assert(raw_retval);
+    I(raw_retval);
     raw_retval->shared_count = 1;
     return raw_retval;
   }
 
   void release_ptr(T* to_release) {
-    assert(to_release->shared_count == 1);
+    I(to_release->shared_count == 1);
     bool fits = _pointer_queue.enqueue(to_release);
     if (fits)
       return;
@@ -56,24 +57,24 @@ public:
   static spool_ptr<T> make(Args&&... args) {
     auto retval = pool.get_ptr();
     retval->reconstruct(std::forward<Args>(args)...);
-    assert(retval->shared_count == 1);
+    I(retval->shared_count == 1);
     return spool_ptr<T>(retval);
   }
 
   static spool_ptr<T> make() {
     auto retval = pool.get_ptr();
-    assert(retval->shared_count == 1);
+    I(retval->shared_count == 1);
     return spool_ptr<T>(retval);
   }
 
   spool_ptr(const spool_ptr& sp) noexcept : data_(sp.data_) {
-    assert(data_);
+    I(data_);
     ++data_->shared_count;
   }
 
   template <class D>
   spool_ptr(const spool_ptr<D>& sp) noexcept : data_(sp.data_) {
-    assert(data_);
+    I(data_);
     ++data_->shared_count;
   }
 
@@ -104,7 +105,7 @@ public:
   T* operator->() const noexcept { return data_; }
 
   T& operator*() const noexcept {
-    assert(*this);
+    I(*this);
     return *data_;
   }
 
@@ -118,12 +119,12 @@ public:
   }
 
 private:
-  spool_ptr(T* data) noexcept : data_(data) { assert(data_); }
+  spool_ptr(T* data) noexcept : data_(data) { I(data_); }
 
   void swap(spool_ptr& sp) noexcept { std::swap(data_, sp.data_); }
 
   void dec_shared_count() {
-    assert(data_);
+    I(data_);
 
     if (data_->shared_count <= 1) {
       pool.release_ptr(data_);

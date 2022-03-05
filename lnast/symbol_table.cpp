@@ -16,7 +16,7 @@ bool Symbol_table::var(std::string_view key) {
   }
 
   auto bundle = std::make_shared<Bundle>(var);
-  bundle->var(field, Lconst::invalid());
+  bundle->var(field, invalid_lconst);
   varmap.insert({std::pair(stack.back().scope, var), bundle});
   return true;
 }
@@ -174,13 +174,13 @@ bool Symbol_table::has_trivial(std::string_view key) const {
   return it->second->has_trivial(field);
 }
 
-Lconst Symbol_table::get_trivial(std::string_view key) const {
+const Lconst &Symbol_table::get_trivial(std::string_view key) const {
   auto [var_sv, field] = get_var_field(key);
   std::string var(var_sv);
 
   const auto it = varmap.find(std::pair(stack.back().scope, var));
   if (it == varmap.end())
-    return Lconst::invalid();
+    return invalid_lconst;
 
   return it->second->get_trivial(field);
 }

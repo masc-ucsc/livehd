@@ -20,6 +20,8 @@ public:
     std::vector<std::string> declared;
   };
 
+  static inline Lconst invalid_lconst = Lconst::invalid();
+
   absl::flat_hash_map<std::pair<std::string, std::string>, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
 
   std::vector<Scope> stack;
@@ -45,7 +47,7 @@ public:
   bool has_known(std::string_view key) const { return has_trivial(key) || has_bundle(key); }
 
   // Lconst can be 0sb? or 123 or string or bool or nil or runtime (0sb? and runtime?)
-  Lconst                  get_trivial(std::string_view key) const;
+  const Lconst           &get_trivial(std::string_view key) const;
   std::shared_ptr<Bundle> get_bundle(std::string_view key) const;
 
   void dump() const;

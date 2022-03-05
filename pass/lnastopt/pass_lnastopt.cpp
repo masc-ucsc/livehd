@@ -19,11 +19,16 @@ Pass_lnastopt::Pass_lnastopt(const Eprp_var &var) : Pass("pass.lnastopt", var) {
 void Pass_lnastopt::work(Eprp_var &var) {
   Opt_lnast p(var);
 
+  Eprp_var::Eprp_lnasts lnlist;
+
   for (const auto &ln : var.lnasts) {
     p.opt(ln);
     Lnast_create ln2;
     ln2.new_lnast("ln2");
     p.reconstruct(ln, ln2);
-    ln2.lnast->dump();
+    //ln2.lnast->dump();
+    lnlist.emplace_back(ln2.lnast);
   }
+
+  var.replace(lnlist);
 }

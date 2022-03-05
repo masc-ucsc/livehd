@@ -541,16 +541,18 @@ std::string Bundle::learn_fix(std::string_view key) {
   return std::string(key);
 }
 
-Bundle::Entry Bundle::get_entry(std::string_view key) const {
+const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
   for (auto &e : key_map) {
     if (match(e.first, key))
       return e.second;
   }
 
-  return Entry(true, Lconst::invalid());
+  static Entry invalid(true, invalid_lconst);
+
+  return invalid;
 }
 
-Lconst Bundle::get_trivial() const {
+const Lconst &Bundle::get_trivial() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
     if (is_attribute(key_map[i].first))
@@ -560,7 +562,7 @@ Lconst Bundle::get_trivial() const {
   }
 
   if (pos < 0)
-    return Lconst::invalid();
+    return invalid_lconst;
 
   return key_map[pos].second.trivial;
 }
@@ -662,7 +664,7 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
   I(!key.empty());
 
   if (tup == nullptr) {
-    set(key, Lconst::invalid());
+    set(key, invalid_lconst);
     return;
   }
 
@@ -835,7 +837,7 @@ Lconst Bundle::flatten() const {
   // a_dpin = (tup[0]|(tup[1]<<tup[0].__sbits)|(tup[2]<<(tup[0..1].__sbits)|.....)
 
   if (!is_correct())
-    return Lconst::invalid();
+    return invalid_lconst;
 
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
 

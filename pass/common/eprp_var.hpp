@@ -47,6 +47,7 @@ public:
   void add(std::unique_ptr<Lnast> lnast);
   void add(const std::shared_ptr<Lnast> &lnast);
   void add(std::string_view name, std::string_view value);
+  void replace(const Eprp_var::Eprp_lnasts &lns);
   void replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<Lnast> &lnast_new);
 
   void delete_label(std::string_view name);
