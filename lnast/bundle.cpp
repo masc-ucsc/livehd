@@ -362,7 +362,7 @@ void Bundle::add_int(std::string_view key, const std::shared_ptr<Bundle const> t
   }
 
   bool root = is_root_attribute(key);
-  for (auto &ent : tup->key_map) {
+  for (const auto &ent : tup->key_map) {
     if (root) {
       key_map.emplace_back(absl::StrCat(ent.first, ".", key), ent.second);
     } else {
@@ -387,7 +387,7 @@ void Bundle::del_int(std::string_view key) {
 
   bool is_attr_key = is_root_attribute(key);
 
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     if (e.first.empty()) {
       if (is_attr_key) {
         new_map.emplace_back(std::move(e));
@@ -533,16 +533,17 @@ std::string_view Bundle::get_all_but_first_level(std::string_view key) {
   return std::string_view("");  // empty if no dot left
 }
 
-std::string Bundle::learn_fix(std::string_view key) {
+std::string Bundle::learn_fix(std::string_view key_sv) {
+  std::string key(key_sv);
   for (auto &e : key_map) {
     std::tie(key, e.first) = learn_fix_int(key, e.first);
   }
 
-  return std::string(key);
+  return key;
 }
 
 const Bundle::Entry &Bundle::get_entry(std::string_view key) const {
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     if (match(e.first, key))
       return e.second;
   }
@@ -568,7 +569,7 @@ const Lconst &Bundle::get_trivial() const {
 }
 
 bool Bundle::has_trivial(std::string_view key) const {
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     if (match(e.first, key))
       return true;
   }
@@ -582,7 +583,7 @@ bool Bundle::has_bundle(std::string_view key) const {
 
   I(!key.empty());  // do not call without sub-fields
 
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     auto e_pos = match_first_partial(key, e.first);
     if (e_pos == 0)
       continue;
@@ -700,6 +701,9 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
 void Bundle::set(std::string_view key, const Entry &&entry) {
   I(!key.empty());
 
+  fmt::print("sz:{} {}\n", key_map.size(), key);
+  dump();
+
   std::string uncanonical_key{key};
   bool        pending_adjust = false;
   if (is_scalar()) {
@@ -749,7 +753,7 @@ void Bundle::set(std::string_view key, const Entry &&entry) {
       // NOTE: full match foo.bar == foo not foo.bar == foo match
       if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
         if (lpart.empty())
-          e.first = absl::StrCat(fpart, ".0"sv);
+          e.first = absl::StrCat(fpart, ".0");
         else
           e.first = absl::StrCat(fpart, ".0.", lpart);
         if (e.first == fixed_key) {
@@ -789,7 +793,7 @@ bool Bundle::concat(const std::shared_ptr<Bundle const> &tup) {
 
   std::vector<std::pair<std::string, Lconst>> delayed_numbers;
 
-  for (auto &it : tup->key_map) {
+  for (const auto &it : tup->key_map) {
     if (has_trivial(it.first)) {
       if (std::isdigit(it.first.front()) && is_single_level(it.first)) {
         delayed_numbers.emplace_back(it.first, it.second.trivial);
@@ -842,7 +846,7 @@ Lconst Bundle::flatten() const {
   std::stable_sort(key_map.begin(), key_map.end(), bundle_sort);
 
   Lconst result;
-  for (auto &e : key_map) {
+  for (const auto &e : key_map) {
     if (is_attribute(e.first))
       continue;
 
@@ -881,7 +885,7 @@ std::shared_ptr<Bundle> Bundle::create_assign(const Lconst &rhs_trivial) const {
     Lconst sbits = Lconst::invalid();
     Lconst ubits = Lconst::invalid();
 
-    for (auto i = 0u; i < key_map.size(); ++i) {
+    for (const auto i = 0u; i < key_map.size(); ++i) {
       const auto &e = key_map[i];
       if (is_attribute(e.first)) {
         auto attr_txt = get_last_level(e.first);

@@ -139,7 +139,9 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 
   auto scope = stack.back().scope;
 
+#ifndef NDEBUG
   dump();
+#endif
 
   if (stack.size() == 1) {  // Just clear everything and be done
     I(stack.back().type == Scope_type::Function);

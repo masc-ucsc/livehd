@@ -46,70 +46,38 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Lcompiler::do_prp_local_cprop_bitwidth() {
-  auto lgcnt = 0;
-  auto hit   = false;
-  for (auto &lg : lgs) {
-    ++lgcnt;
-    if (lg->get_name() == top) {
-      hit = true;
-      lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
-        Bitwidth bw(false, 10);
-        Cprop    cp(false);
-        // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
-        cp.do_trans(lg_sub);
-        gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-
-        // fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
-        bw.do_trans(lg_sub);
-        gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
-
-        // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
-        // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
-        cp.do_trans(lg_sub);
-        gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-
-        // FIXME->sh: bw.is_finished() never raise high!
-        // int      n_iters = 0;
-        // while (true) {
-        //   fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
-        //   cp.do_trans(lg_sub);
-        //   gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
-
-        //   fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
-        //   bw.do_trans(lg_sub);
-        //   gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
-
-        //   if (bw.is_finished()) {
-        //     break;
-        //   }
-        //   n_iters++;
-        //   if (n_iters > 4) {
-        //     Pass::error("graph {} could not converge bw/cprop in {} iterations", lg_sub->get_name(), n_iters);
-        //   }
-        // }
-        // return true
-      });
-
-      Bitwidth bw(false, 10);  // hier = false, max_iters = 10
-      Cprop    cp(false);      // hier = false
-
-      // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg->get_name());
-      cp.do_trans(lg);
-      gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
-
-      // fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg->get_name());
-      bw.do_trans(lg);
-      gviz == true ? gv.do_from_lgraph(lg, "bitwidth-ed") : void();
-
-      // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
-
-      // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg->get_name());
-      cp.do_trans(lg);
-      gviz == true ? gv.do_from_lgraph(lg, "cprop-ed") : void();
+  I(lgs.size());
+  auto *top_lg = lgs[0];
+  if (!top.empty()) {
+    top_lg = nullptr;
+    for (auto lg2 : lgs) {
+      if (lg2->get_name() != top)
+        continue;
+      top_lg = lg2;
+      break;
+    }
+    if (top_lg == nullptr) {
+      Pass::error("Top module {} not specified for pyrope codes!\n", top);
+      return;
     }
   }
-  if (lgcnt > 1 && hit == false)
-    Pass::error("Top module not specified for pyrope codes!\n");
+
+  top_lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
+    Bitwidth bw(false, 10);
+    Cprop    cp(false);
+    // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+    cp.do_trans(lg_sub);
+    gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+
+    // fmt::print("---------------- Local Bitwidth-Inference ({}) ----------- (B-0)\n", lg_sub->get_name());
+    bw.do_trans(lg_sub);
+    gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
+
+    // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
+    // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
+    cp.do_trans(lg_sub);
+    gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+  });
 }
 
 void Lcompiler::do_prp_global_bitwidth_inference() {
@@ -119,7 +87,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
   auto hit   = false;
 
   // todo: when move to the new compressed bottom-up tree paralellism, you don't need to specify top
-  if (top == "") {  // top will be specified only if it is a hierarchical design
+  if (top.empty()) {  // top will be specified only if it is a hierarchical design
     // I(lgs.size() == 1);
     for (auto &lg : lgs) {
       bw.do_trans(lg);
@@ -264,8 +232,10 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       continue;  // WE COULD REMOTE THIS. THEN NO TOP NEEDED
 
     hit = true;
+    Lgraph *new_lg = nullptr;
+
     // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
-    lg->each_hier_unique_sub_bottom_up_parallel2([this, &lg_visited, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
+    lg->each_hier_unique_sub_bottom_up_parallel2([this, &lg_visited, &new_lg, &lg, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
       {
         std::unique_lock<std::mutex> guard(lg_visited_mutex);
         if (lg_visited.find(lg_sub) != lg_visited.end())
@@ -281,6 +251,8 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       // fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
+      if (lg_sub == lg)
+        new_lg = new_lg_sub;
 
       // FIXME->sh: bw.is_finished() malfunction
       // int n_iters = 0;
@@ -309,32 +281,8 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       }
     });
 
-    // for top lgraph
-    Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
     Bitwidth bw(false, 10);
-
-    // fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg->get_name());
-    auto new_lg = fm.do_firrtl_mapping(lg);
-    gviz == true ? gv.do_from_lgraph(new_lg, "firmap-ed") : void();
-
-    // FIXME->sh: bw.is_finished() malfunction
-    // int n_iters = 0;
-    // while (true) {
-    //   fmt::print("-------- {:<28} ({:<30}) -------- (B-{})\n", "Local Bitwidth-Inference", new_lg->get_name(), n_iters);
-    //   bw.do_trans(new_lg);
-    //   gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
-
-    //   if (bw.is_finished()) {
-    //     break;
-    //   }
-    //   n_iters++;
-    //   if (n_iters > 4) {
-    //     Pass::error("graph {} could not converge bw in {} iterations", new_lg->get_name(), n_iters);
-    //   }
-    // }
-
-    // fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg->get_name());
-    bw.do_trans(new_lg);
+    bw.do_trans(new_lg);  // FIXME: WHY??? to call twice. Check if needed
     bw.do_trans(new_lg);
     gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
 
