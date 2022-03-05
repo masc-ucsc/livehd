@@ -6,36 +6,34 @@
 #include "lnast.hpp"
 
 bool Symbol_table::var(std::string_view key) {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (unlikely(it != varmap.end())) {
+  const auto it = stack.back().varmap.find(var);
+  if (unlikely(it != stack.back().varmap.end())) {
     Lnast::info("re-declaring {} which already exists in {}", var, stack.back().scope);
     return false;
   }
 
   auto bundle = std::make_shared<Bundle>(var);
   bundle->var(field, invalid_lconst);
-  varmap.insert({std::pair(stack.back().scope, var), bundle});
+  stack.back().varmap.emplace(var, bundle);
   return true;
 }
 
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
-  auto [v_sv, field] = get_var_field(key);
-  std::string var(v_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
+  const auto it = stack.back().varmap.find(var);
 
   std::shared_ptr<Bundle> var_bundle;
-  if (unlikely(it == varmap.end())) {
+  if (unlikely(it == stack.back().varmap.end())) {
     stack.back().declared.emplace_back(var);
     if (var == key) {
-      varmap.insert({std::pair(stack.back().scope, var), bundle});
+      stack.back().varmap.emplace(var, bundle);
       return true;
     }
     var_bundle = std::make_shared<Bundle>(var);
-    varmap.insert({std::pair(stack.back().scope, var), var_bundle});
+    stack.back().varmap.emplace(var, var_bundle);
   } else {
     if (var == key) {
       it->second = bundle;
@@ -50,16 +48,15 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
 }
 
 bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
+  const auto it = stack.back().varmap.find(var);
 
   std::shared_ptr<Bundle> bundle;
-  if (unlikely(it == varmap.end())) {
+  if (unlikely(it == stack.back().varmap.end())) {
     stack.back().declared.emplace_back(var);
     bundle = std::make_shared<Bundle>(var);
-    varmap.insert({std::pair(stack.back().scope, var), bundle});
+    stack.back().varmap.emplace(var, bundle);
   } else {
     bundle = it->second;
   }
@@ -70,11 +67,10 @@ bool Symbol_table::set(std::string_view key, const Lconst &trivial) {
 }
 
 bool Symbol_table::mut(std::string_view key, const Lconst &trivial) {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (unlikely(it == varmap.end())) {
+  const auto it = stack.back().varmap.find(var);
+  if (unlikely(it == stack.back().varmap.end())) {
     Lnast::info("mutate {} but variable not declared in {}", var, stack.back().scope);
     return false;
   }
@@ -90,17 +86,16 @@ bool Symbol_table::mut(std::string_view key, const Lconst &trivial) {
 }
 
 bool Symbol_table::let(std::string_view key, std::shared_ptr<Bundle> bundle) {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (unlikely(it != varmap.end())) {
+  const auto it = stack.back().varmap.find(var);
+  if (unlikely(it != stack.back().varmap.end())) {
     Lnast::info("let {} but variable already declared in {}", var, stack.back().scope);
     return false;
   }
 
   bundle->set_immutable();
-  varmap.insert({std::pair(stack.back().scope, var), bundle});
+  stack.back().varmap.emplace(var, bundle);
   return true;
 }
 
@@ -135,8 +130,8 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 
   std::shared_ptr<Bundle> outputs;
   if (stack.back().type == Scope_type::Function) {
-    auto it = varmap.find(std::pair(stack.back().scope, "%"));
-    if (it != varmap.end()) {
+    auto it = stack.back().varmap.find("%");
+    if (it != stack.back().varmap.end()) {
       I(has_bundle("%"));
       outputs = it->second;
     }
@@ -149,13 +144,8 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
   if (stack.size() == 1) {  // Just clear everything and be done
     I(stack.back().type == Scope_type::Function);
 
-    varmap.clear();
     stack.clear();
     return outputs;
-  }
-
-  for (auto var : stack.back().declared) {
-    varmap.erase(std::pair(scope, var));
   }
 
   stack.pop_back();
@@ -164,33 +154,30 @@ std::shared_ptr<Bundle> Symbol_table::leave_scope() {
 }
 
 bool Symbol_table::has_trivial(std::string_view key) const {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (it == varmap.end())
+  const auto it = stack.back().varmap.find(var);
+  if (it == stack.back().varmap.end())
     return false;
 
   return it->second->has_trivial(field);
 }
 
 const Lconst &Symbol_table::get_trivial(std::string_view key) const {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (it == varmap.end())
+  const auto it = stack.back().varmap.find(var);
+  if (it == stack.back().varmap.end())
     return invalid_lconst;
 
   return it->second->get_trivial(field);
 }
 
 std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (it == varmap.end())
+  const auto it = stack.back().varmap.find(var);
+  if (it == stack.back().varmap.end())
     return nullptr;
 
   if (var == key)
@@ -200,11 +187,10 @@ std::shared_ptr<Bundle> Symbol_table::get_bundle(std::string_view key) const {
 }
 
 bool Symbol_table::has_bundle(std::string_view key) const {
-  auto [var_sv, field] = get_var_field(key);
-  std::string var(var_sv);
+  auto [var, field] = get_var_field(key);
 
-  const auto it = varmap.find(std::pair(stack.back().scope, var));
-  if (it == varmap.end())
+  const auto it = stack.back().varmap.find(var);
+  if (it == stack.back().varmap.end())
     return false;
 
   return var == key || it->second->has_bundle(field);
@@ -217,8 +203,8 @@ void Symbol_table::dump() const {
 
   for (auto var : stack.back().declared) {
     fmt::print("var:{}\n", var);
-    auto it = varmap.find(std::pair(stack.back().scope, var));
-    if (it != varmap.end()) {
+    auto it = stack.back().varmap.find(var);
+    if (it != stack.back().varmap.end()) {
       if (it->second)
         it->second->dump();
       else

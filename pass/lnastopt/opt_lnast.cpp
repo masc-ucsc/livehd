@@ -740,30 +740,12 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
     auto  lhs_txt  = lhs_data.token.get_text();
 
     switch (data.type.get_raw_ntype()) {
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
-        break;
-      }
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus:
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_mult:
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_div:
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and:
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: {
         ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
         break;

@@ -18,11 +18,11 @@ public:
     std::string              func_id;
     std::string              scope;  // 0.0.1 ...
     std::vector<std::string> declared;
+    absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
   };
 
   static inline Lconst invalid_lconst = Lconst::invalid();
 
-  absl::flat_hash_map<std::pair<std::string, std::string>, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
 
   std::vector<Scope> stack;
 
