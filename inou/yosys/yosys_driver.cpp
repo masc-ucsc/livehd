@@ -51,30 +51,30 @@
 char *optarg;
 int   optind = 1, optcur = 1;
 int   getopt(int argc, char **argv, const char *optstring) {
-  if (optind >= argc || argv[optind][0] != '-')
+    if (optind >= argc || argv[optind][0] != '-')
     return -1;
 
   bool takes_arg = false;
-  int  opt       = argv[optind][optcur];
-  for (int i = 0; optstring[i]; i++)
+    int  opt       = argv[optind][optcur];
+    for (int i = 0; optstring[i]; i++)
     if (opt == optstring[i] && optstring[i + 1] == ':')
       takes_arg = true;
 
   if (!takes_arg) {
-    if (argv[optind][++optcur] == 0)
+      if (argv[optind][++optcur] == 0)
       optind++, optcur = 1;
     return opt;
   }
 
-  if (argv[optind][++optcur]) {
-    optarg = argv[optind++] + optcur;
-    optcur = 1;
-    return opt;
+    if (argv[optind][++optcur]) {
+      optarg = argv[optind++] + optcur;
+      optcur = 1;
+      return opt;
   }
 
-  optarg = argv[++optind];
-  optind++, optcur = 1;
-  return opt;
+    optarg = argv[++optind];
+    optind++, optcur = 1;
+    return opt;
 }
 #endif
 
@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
 
   if (argc == 2) {
     // Run the first argument as a script file
-    run_frontend(argv[1], "script", 0, 0, 0);
+    run_frontend(argv[1], "script");
   }
 }
 
@@ -180,17 +180,18 @@ int main(int argc, char **argv) {
   std::vector<std::string> vlog_defines;
   std::vector<std::string> passes_commands;
   std::vector<std::string> plugin_filenames;
-  std::string              output_filename     = "";
-  std::string              scriptfile          = "";
-  std::string              depsfile            = "";
-  bool                     scriptfile_tcl      = false;
-  bool                     got_output_filename = false;
-  bool                     print_banner        = true;
-  bool                     print_stats         = true;
-  bool                     call_abort          = false;
-  bool                     timing_details      = false;
-  bool                     mode_v              = false;
-  bool                     mode_q              = false;
+  std::string              output_filename = "";
+  std::string              scriptfile      = "";
+  std::string              depsfile        = "";
+  std::string              topmodule       = "";
+  bool                     scriptfile_tcl  = false;
+  bool                     print_banner    = true;
+  bool                     print_stats     = true;
+  bool                     call_abort      = false;
+  bool                     timing_details  = false;
+  bool                     run_shell       = true;
+  bool                     mode_v          = false;
+  bool                     mode_q          = false;
 
 #if defined(YOSYS_ENABLE_READLINE) || defined(YOSYS_ENABLE_EDITLINE)
   if (getenv("HOME") != NULL) {
@@ -266,6 +267,9 @@ int main(int argc, char **argv) {
     printf("    -A\n");
     printf("        will call abort() at the end of the script. for debugging\n");
     printf("\n");
+    printf("    -r <module_name>\n");
+    printf("        elaborate command line arguments using the specified top module\n");
+    printf("\n");
     printf("    -D <macro>[=<value>]\n");
     printf("        set the specified Verilog define (via \"read -define\")\n");
     printf("\n");
@@ -319,7 +323,7 @@ int main(int argc, char **argv) {
   }
 
   int opt;
-  while ((opt = getopt(argc, argv, "MXAQTVSgm:f:Hh:b:o:p:l:L:qv:tds:c:W:w:e:D:P:E:x:")) != -1) {
+  while ((opt = getopt(argc, argv, "MXAQTVSgm:f:Hh:b:o:p:l:L:qv:tds:c:W:w:e:r:D:P:E:x:")) != -1) {
     switch (opt) {
       case 'M': memhasher_on(); break;
       case 'X': yosys_xtrace++; break;
@@ -333,11 +337,17 @@ int main(int argc, char **argv) {
       case 'f': frontend_command = optarg; break;
       case 'H': passes_commands.push_back("help"); break;
       case 'h': passes_commands.push_back(stringf("help %s", optarg)); break;
-      case 'b': backend_command = optarg; break;
-      case 'p': passes_commands.push_back(optarg); break;
+      case 'b':
+        backend_command = optarg;
+        run_shell       = false;
+        break;
+      case 'p':
+        passes_commands.push_back(optarg);
+        run_shell = false;
+        break;
       case 'o':
-        output_filename     = optarg;
-        got_output_filename = true;
+        output_filename = optarg;
+        run_shell       = false;
         break;
       case 'l':
       case 'L':
@@ -365,14 +375,17 @@ int main(int argc, char **argv) {
       case 's':
         scriptfile     = optarg;
         scriptfile_tcl = false;
+        run_shell      = false;
         break;
       case 'c':
         scriptfile     = optarg;
         scriptfile_tcl = true;
+        run_shell      = false;
         break;
       case 'W': log_warn_regexes.push_back(YS_REGEX_COMPILE(optarg)); break;
       case 'w': log_nowarn_regexes.push_back(YS_REGEX_COMPILE(optarg)); break;
       case 'e': log_werror_regexes.push_back(YS_REGEX_COMPILE(optarg)); break;
+      case 'r': topmodule = optarg; break;
       case 'D': vlog_defines.push_back(optarg); break;
       case 'P': {
         auto args = split_tokens(optarg, ":");
@@ -432,19 +445,18 @@ int main(int argc, char **argv) {
 
   for (auto &fn : plugin_filenames) load_plugin(fn, {});
 
-  if (optind == argc && passes_commands.size() == 0 && scriptfile.empty()) {
-    if (!got_output_filename)
-      backend_command = "";
-    shell(yosys_design);
-  }
-
   if (!vlog_defines.empty()) {
     std::string vdef_cmd = "read -define";
     for (const auto &vdef : vlog_defines) vdef_cmd += " " + vdef;
     run_pass(vdef_cmd);
   }
 
-  while (optind < argc) run_frontend(argv[optind++], frontend_command, output_filename == "-" ? &backend_command : NULL);
+  while (optind < argc)
+    if (run_frontend(argv[optind++], frontend_command))
+      run_shell = false;
+
+  if (!topmodule.empty())
+    run_pass("hierarchy -top " + topmodule);
 
   if (!scriptfile.empty()) {
     if (scriptfile_tcl) {
@@ -455,12 +467,14 @@ int main(int argc, char **argv) {
       log_error("Can't exectue TCL script: this version of yosys is not built with TCL support enabled.\n");
 #endif
     } else
-      run_frontend(scriptfile, "script", output_filename == "-" ? &backend_command : NULL);
+      run_frontend(scriptfile, "script");
   }
 
   for (auto &passes_command : passes_commands) run_pass(passes_command);
 
-  if (!backend_command.empty())
+  if (run_shell)
+    shell(yosys_design);
+  else
     run_backend(output_filename, backend_command);
 
   yosys_design->check();
