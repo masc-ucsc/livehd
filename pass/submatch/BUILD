@@ -23,9 +23,9 @@ sh_test(
     name = "basic-test",
     srcs = ["tests/basic_test.sh"],
     data = [
+        "//inou/yosys/tests:verilog_tests",
         "//main:lgshell",
         "//pass/cprop:pass_cprop",
         "//pass/lnast_tolg:pass_lnast_tolg",
-        "//inou/yosys/tests:verilog_tests",
-    ]
+    ],
 )

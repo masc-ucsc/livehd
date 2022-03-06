@@ -113,9 +113,9 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "Test1",     
-    "VecSearch", 
-    "Mul",        
+    "Test1",
+    "VecSearch",
+    "Mul",
     "Test2",
     "VecShiftRegisterSimple",
     "VecShiftRegisterParam",
@@ -199,7 +199,7 @@ cc_library(
     # "ListBuffer",
     # "BankedStore"
     # "BoomDuplicatedDataArray",
-    
+
     # issue2: design too large and not LEC
     # MemAddrCalcUnit
 

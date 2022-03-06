@@ -14,9 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "//pass/common:pass",
         "//lnast",
+        "//pass/common:pass",
     ],
     alwayslink = True,  # Needed to have constructor called
 )
-

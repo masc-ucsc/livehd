@@ -14,8 +14,8 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
-        "@slang",   # Must be before pass because both have FMT and pass has priority (or slang fails)
         "//pass/common:pass",
+        "@slang",  # Must be before pass because both have FMT and pass has priority (or slang fails)
     ],
     alwayslink = True,  # Needed to have constructor called
 )
@@ -42,7 +42,7 @@ sh_test(
     name = "slang_test.sh",
     srcs = ["tests/slang_test.sh"],
     data = [
+        "slang",
         "//inou/yosys/tests:verilog_tests",
-        "slang"
     ],
 )
