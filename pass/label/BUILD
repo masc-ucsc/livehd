@@ -30,3 +30,12 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "synth_test",
+    srcs = ["synth_test.cpp"],
+    deps = [
+        ":pass_label",
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
+    ],
+)
