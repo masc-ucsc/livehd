@@ -183,6 +183,17 @@ Lconst Lconst::from_string(std::string_view orig_txt) {
   return Lconst(true, orig_txt.size() * 8, num);
 }
 
+Lconst Lconst::from_ref(std::string_view orig_txt) {
+  Number num;
+
+  for (int i = orig_txt.size() - 1; i >= 0; --i) {
+    num <<= 8;
+    num += orig_txt[i];
+  }
+
+  return Lconst(true, 0, num);
+}
+
 Lconst Lconst::from_pyrope(std::string_view orig_txt) {
   if (orig_txt.empty())
     return Lconst();
@@ -720,10 +731,13 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
 
 Lconst Lconst::add_op(const Lconst &o) const {
   if (unlikely(is_string() || o.is_string())) {
-    throw std::runtime_error(fmt::format("ERROR: can not add strings {} + {}", to_pyrope(), o.to_pyrope()));
+    return invalid();
   }
 
   if (has_unknowns() || o.has_unknowns()) {
+    if (is_invalid() || o.is_invalid())
+      return invalid();
+
     auto s_txt = to_binary();
     auto o_txt = o.to_binary();
 

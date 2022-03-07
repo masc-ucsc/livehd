@@ -1719,3 +1719,29 @@ TEST_F(Lconst_test, debug_console) {
 
   std::cout << res << "\n";
 }
+
+TEST_F(Lconst_test, ref_const_string) {
+
+  auto ref_a = Lconst::from_ref("a");
+  auto ref_b = Lconst::from_ref("b");
+
+  EXPECT_TRUE(ref_a.is_invalid());
+  EXPECT_TRUE(ref_a.is_ref());
+
+  EXPECT_NE(ref_a, ref_b);
+
+  auto var_b = Lconst::from_pyrope("0");
+  auto var_c = Lconst::from_string("foo");
+
+  EXPECT_FALSE(var_b.is_invalid());
+  EXPECT_FALSE(var_c.is_invalid());
+
+  auto res1 = var_b + var_c; // invalid result (string + xx is invalid)
+
+  EXPECT_TRUE(res1.is_invalid());
+  EXPECT_FALSE(res1.is_ref());
+
+  auto res2 = res1 + Lconst(33); // invalid + const is invalid
+  EXPECT_TRUE(res2.is_invalid());
+
+}
