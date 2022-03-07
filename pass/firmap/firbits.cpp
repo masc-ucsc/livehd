@@ -582,7 +582,7 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges, FBMap &
       bits2 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(std::max(bits1, bits2), sign));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(std::max(bits1, bits2), false));
 }
 
 void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
@@ -1049,7 +1049,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, FBMap &
         firbits_wait_flop = true;
         return;
       }
-
       it = get_fbits_from_hierarchy(e);
     }
 
