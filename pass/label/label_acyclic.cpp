@@ -6,7 +6,7 @@
 #include "pass.hpp"
 
 //#define G_DEBUG 1  // toggle for gather_inou debug print
-#define O_DEBUG 1  // toggle for oneparent merge debug print
+//#define O_DEBUG 1  // toggle for oneparent merge debug print
 //#define M_DEBUG 1  // toggle to get print when merge detected
 //#define S_DEBUG 1  // toggle for after partition print
 //#define F_DEBUG 1  // toggle for final partition coloring print
@@ -25,8 +25,12 @@ void Label_acyclic::dump(Lgraph *g) const {
   int node_tracker = 0;
   
   for (auto n : g->forward(hier)) {
-    fmt::print("Node: {} ,", n.debug_name());
-    if (n.has_color()) fmt::print("Node Color: {}\n", n.get_color());
+    fmt::print("Node: {}", n.debug_name());
+    if (n.has_color()) {
+      fmt::print(", Node Color: {}\n", n.get_color());
+    } else {
+      fmt::print("\n");
+    }
     node_tracker++;
   } 
   fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
@@ -403,9 +407,6 @@ void Label_acyclic::merge_partitions_same_parents() {
 
 
 void Label_acyclic::merge_partitions_one_parent() { 
-  
-  fmt::print("oneparent\n");
-
   // Use part_id to generate Partition lists
   std::vector<int> pwi;     // Partitions with incoming
   std::vector<int> pwo;     // partitions with outgoing
@@ -471,14 +472,6 @@ void Label_acyclic::merge_partitions_one_parent() {
       if (pwi_rm_iter != pwi.end()) pwi.erase(pwi_rm_iter);
       if (pwo_rm_iter != pwo.end()) pwo.erase(pwo_rm_iter);
 
-      /*
-      // If pwi is not empty, keep going
-      if (pwi.size() != 0) {
-        pivot = pwi.begin(); // reset pivot to begin() for merge re-scan
-      } else {
-        keep_going = false;
-      }
-      */
       pivot = pwi.begin();
     } else {
 #ifdef O_DEBUG
@@ -498,8 +491,6 @@ void Label_acyclic::merge_partitions_one_parent() {
 
 
 void Label_acyclic::label(Lgraph *g) {
-  fmt::print("Cutoff is {}\n", cutoff);
-
   if (hier) {
     g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
   }
@@ -516,8 +507,6 @@ void Label_acyclic::label(Lgraph *g) {
     gather_inou(g);
   } 
 
-  dump(g);
-
 #ifdef F_DEBUG
   for (auto n : g->forward(hier)) {
     if (node2id.find(n.get_compact()) != node2id.end()) {
@@ -531,7 +520,7 @@ void Label_acyclic::label(Lgraph *g) {
   // Actual Labeling happens here:
   for (auto n : g->fast(hier)) { 
     n.set_color(node2id[n.get_compact()]);
-    n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+    //n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
   }
 
   if (verbose) dump(g);
