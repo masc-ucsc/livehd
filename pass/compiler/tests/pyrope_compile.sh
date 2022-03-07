@@ -49,6 +49,7 @@ fi
 # pts='tuple_if'
 
 # Note: in this bash script, you MUST specify top module name AT FIRST POSITION
+# pts=''
 #pts_hier='top'
 
 LGSHELL=./bazel-bin/main/lgshell
