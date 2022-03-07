@@ -318,8 +318,6 @@ void Inou_firrtl_module::init_cmemory(Lnast& lnast, Lnast_nid& parent_node, cons
     I(false);
   }
 
-  // auto bits = get_bit_count(type);
-
   // Specify attributes
   bool fwd = false;
   if (cmem.read_under_write() == firrtl::FirrtlPB_Statement_ReadUnderWrite::FirrtlPB_Statement_ReadUnderWrite_NEW) {
@@ -818,7 +816,6 @@ void Inou_firrtl_module::handle_as_usint_op(Lnast& lnast, const firrtl::FirrtlPB
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_const(sub_it->second));
-  // lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
   attach_expr_str2node(lnast, e1_str, idx_conv);
 }
 
@@ -1432,14 +1429,33 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
       break;
     }
     case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
+      Lnast_nid idx_conv;
+      idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call());
+
+      auto temp_var_str = create_tmp_var(); // ___F6
+      auto tmp_node = Lnast_node::create_ref(temp_var_str);
+      lnast.add_child(idx_conv, tmp_node);
+      lnast.add_child(idx_conv, Lnast_node::create_const("__fir_as_sint"));
+
+      auto str_val = rhs_expr.sint_literal().value().value();
+      fmt::print("DEBUG10 temp_var_str:{}, lhs_str:{}, str_val:{}\n", temp_var_str, lhs_str, str_val);
+      // I(false);
+      lnast.add_child(idx_conv, Lnast_node::create_const(str_val));
+
       Lnast_nid idx_asg;
       idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-
       lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-      auto str_val = rhs_expr.sint_literal().value().value();
-      lnast.add_child(idx_asg, Lnast_node::create_const(str_val));
+      lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_str));
       break;
     }
+    // case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
+    //   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+    //   lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
+    //   auto str_val = rhs_expr.sint_literal().value().value();
+
+    //   lnast.add_child(idx_asg, Lnast_node::create_const(str_val));
+    //   break;
+    // }
     case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf
       handle_valid_if_assign(lnast, rhs_expr, parent_node, lhs_str);
       break;
@@ -1739,6 +1755,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         // (2) create the lhs dot and lhs <- rhs assignment
         return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
       } else {
+        // fmt::print("DEBUG9 kConnect\n");
         auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
         init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
 

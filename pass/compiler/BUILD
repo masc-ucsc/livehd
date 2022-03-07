@@ -189,7 +189,6 @@ cc_library(
     "Arbiter_10",
 
     # FIXME:
-
     # issue1: memory
     # "Smem",
     # "SmemStruct",
@@ -199,15 +198,10 @@ cc_library(
     # "ListBuffer",
     # "BankedStore"
     # "BoomDuplicatedDataArray",
-
-    # issue2: design too large and not LEC
-    # MemAddrCalcUnit
-
-    # ???
-    # "MemAddrCalcUnit"
     # "DynamicMemorySearch",
     # "Memo",
     # "Router",
+    
 ]]
 
 sh_test(

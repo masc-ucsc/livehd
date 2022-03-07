@@ -143,7 +143,6 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it != fbmap.end()) {
       if (some_one_ready) {
-        /* I(max_bits == it->second.get_bits()); */
         max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
         I(sign == it->second.get_sign());
         continue;

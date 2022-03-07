@@ -87,8 +87,8 @@ Pyrope_step () {
 
 	rm -rf lgdb_prp
   ${LGSHELL} "inou.pyrope files:${all_files} |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-	# ${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save hier:true"
-	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp top:${top_module} |> lgraph.save hier:true"
+	${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp gviz:true top:${top_module} |> lgraph.save hier:true"
+	# ${LGSHELL} "inou.pyrope files:${all_files} |> pass.compiler path:lgdb_prp top:${top_module} |> lgraph.save hier:true"
 	ret_val=$?
 	if [ $ret_val -ne 0 ]; then
 		echo "ERROR: could not direct compile with files:${all_files}!"

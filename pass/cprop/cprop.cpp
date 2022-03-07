@@ -2265,6 +2265,18 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
       continue;
     }
 
+    int64_t bits = 0;
+    auto full_attr_name = absl::StrCat(out_name, ".__ubits");
+    if (tup->has_dpin(full_attr_name)) {
+      fmt::print("DEBUG12 string:{}\n", out_name);
+      auto bits_dpin = tup->get_dpin(full_attr_name);
+      if (!bits_dpin.is_invalid()) {
+        bits = bits_dpin.get_type_const().to_i();
+        fmt::print("DEBUG10 out_name:{}, bits_node:{}, bits:{}\n", out_name, bits_dpin.debug_name(), bits);
+      }
+    }
+
+
     if (out_name.size() > 2 && out_name.substr(0, 2) == "%.") {
       out_name = out_name.substr(2);
     }
@@ -2282,7 +2294,10 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
       continue;
 
     auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
-    auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, 0);
+    
+    auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, bits);
+    fmt::print("DEBUG11 out_bits:{}\n", lg->get_graph_output_driver_pin(no_pos_name).get_bits());
+
     it.second.connect_sink(flattened_gout);
   }
 
