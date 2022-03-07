@@ -14,11 +14,11 @@
 #include "gmock/gmock.h"
 #include "lgraph.hpp"
 
-#define RUN 1
+#define RUN 0
 
-#define ESSENT_TEST 1
-#define SIMPLE_NO_LOOP 1
-#define SIMPLE_LOOP 1
+#define ESSENT_TEST 0
+#define SIMPLE_NO_LOOP 0
+#define SIMPLE_LOOP 0
 
 
 class Label_acyclic_test : public ::testing::Test { 

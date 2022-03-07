@@ -14,11 +14,11 @@
 #include "gmock/gmock.h"
 #include "lgraph.hpp"
 
-#define RUN 1
+#define RUN 0
 #define DEBUG 0
 
-#define SIMPLE_GRAPH1 1
-#define SIMPLE_GRAPH2 1
+#define SIMPLE_GRAPH1 0
+#define SIMPLE_GRAPH2 0
 #define SIMPLE_GRAPH3 0   // FIXME this test segfaults
 
 class Label_synth_test : public ::testing::Test { 
