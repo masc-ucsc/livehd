@@ -1,0 +1,6 @@
+$a.__ubits = 64
+$b.__ubits = 64
+
+c = $a ^ $b
+d = ($a ^ $b) + 1
+%out = c + d 
