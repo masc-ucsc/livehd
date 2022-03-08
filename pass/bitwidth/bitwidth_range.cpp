@@ -35,8 +35,7 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
       max = bits;
       min = bits;
     }
-  }
-}
+  }}
 
 void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
   I(max_val >= min_val);
@@ -56,6 +55,7 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       } else {
         max = bits;
       }
+      fmt::print("DEBUG9 max:{}, bits:{}\n", max, bits);
     }
 
     if (min_val == 0) {
@@ -64,14 +64,18 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       auto bits = min_val.get_bits();
       if (min_val.is_negative()) {
         min = -bits;
+        fmt::print("DEBUG7 bits:{}\n", bits);
       } else {
         min = bits;
       }
+      fmt::print("DEBUG8 min:{}, bits:{}\n", min, bits);
     }
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { set_range(min_val, max_val); }
+Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { 
+  set_range(min_val, max_val); 
+}
 
 void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
@@ -125,15 +129,15 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
 
   if (size > 63) {
     overflow = true;
-    max      = size - 1;  // Use bits in overflow mode
-    // min      =(size - 1);  // Use bits
+    max      = size - 1;     // Use bits in overflow mode
+    min      = -(size - 1);  // Use bits 
   } else {
     overflow = false;
     max      = (1UL << (size - 1)) - 1;
     // min      = -(1UL << (size - 1));
     // min      = -(1LL << (size - 1));
+    min = -max - 1;
   }
-  min = -max - 1;
 }
 
 void Bitwidth_range::set_ubits_range(Bits_t size) {
