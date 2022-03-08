@@ -1,6 +1,6 @@
-$a.__ubits = 64
-$b.__ubits = 64
+$a.__ubits = 63 
+$b.__ubits = 63
 
 c = $a ^ $b
-d = ($a ^ $b) + 1
+d = ($a ^ $b) + 1 
 %out = c + d 
