@@ -36,6 +36,7 @@ Bitwidth_range::Bitwidth_range(const Lconst &val) {
       min = 0;
     }
     I(min == 0 || min == -max || max == 0);
+    // I(min == 0 || -min <= max || max == 0);
   }
 }
 
@@ -58,7 +59,7 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       } else {
         max = bits; 
       }
-      // fmt::print("DEBUG9 max:{}, bits:{}\n", max, bits);
+      fmt::print("DEBUG9 max:{}, bits:{}\n", max, bits);
     }
 
     if (min_val == 0) {
@@ -71,9 +72,10 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       } else {
         min = 0;
       }
-      // fmt::print("DEBUG8 min:{}, bits:{}\n", min, bits);
+      fmt::print("DEBUG8 min:{}, bits:{}\n", min, bits);
     }
     I(min == 0 || min == -max || max == 0);
+    // I(min == 0 || -min <= max || max == 0);
   }
 }
 
@@ -172,6 +174,7 @@ Bits_t Bitwidth_range::get_sbits() const {
   if (overflow) {
     Bits_t bits = std::max(max, -min);
     I(min == 0 || min == -max || max == 0);
+    // I(min == 0 || -min <= max || max == 0);
     if (min != 0 && max != 0)
       bits++;
     if (bits >= Bits_max)

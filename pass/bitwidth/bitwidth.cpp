@@ -313,9 +313,8 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       if (e.sink.get_pin_name() == "A") {
         max_val = max_val + it->second.get_max();
         min_val = min_val + it->second.get_min();
-        // fmt::print("DEBUG6 max_val:{}, min_val:{}\n",max_val.get_bits(), min_val.get_bits());
-        // fmt::print("DEBUG6 it->second max:{}, min:{}\n", it->second.get_max().get_bits(), it->second.get_min().get_bits());
-        // I(false);
+        fmt::print("DEBUG6 it->second max:{}, min:{}\n", it->second.get_max().get_bits(), it->second.get_min().get_bits());
+        fmt::print("DEBUG6 max bits:{}, min bits:{}\n\n",max_val.get_bits(), min_val.get_bits());
       } else {
         max_val = max_val - it->second.get_min();
         min_val = min_val - it->second.get_max();

@@ -179,7 +179,6 @@ void Lnast::selc2attr_set_get(const Lnast_nid &psts_nid, Lnast_nid &selc_nid) {
     auto c1_assign                    = get_sibling_next(c0_assign);
     ref_data(selc_nid)->type          = Lnast_ntype::create_attr_set();
     ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-    fmt::print("DEBUG10\n");
     auto it1_ast                      = c0_sel;
     auto it2_ast                      = get_sibling_next(it1_ast);
 
@@ -273,7 +272,6 @@ void Lnast::collect_hier_tuple_nids(Lnast_nid &prev_selc_nid, std::stack<Lnast_n
   }
 
   ref_data(prev_selc_nid)->type = Lnast_ntype::create_invalid();
-  fmt::print("DEBUG11\n");
 }
 
 void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_nid &concat_nid) {
@@ -283,7 +281,6 @@ void Lnast::merge_tconcat_paired_assign(const Lnast_nid &psts_nid, const Lnast_n
   auto  c0_assign         = get_first_child(paired_assign_nid);
   set_data(c0_concat, get_data(c0_assign));
   ref_data(paired_assign_nid)->type = Lnast_ntype::create_invalid();
-  fmt::print("DEBUG12\n");
 }
 
 #if 0
@@ -375,7 +372,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   if (sel_is_lhs && paired_type.is_assign() && is_attr_set) {
     // merge the tuple_add at the original assign node
     ref_data(selc_nid)->type   = Lnast_ntype::create_invalid();
-    fmt::print("DEBUG13\n");
     ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
     auto c0_assign             = get_first_child(paired_nid);
     auto c1_assign             = get_sibling_next(c0_assign);
@@ -423,7 +419,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
   // hier_TA: change (sel, paired_assign) -> (invalud, TA) or (TA_assignment_to_parent_TA, TA)
   if (sel_is_lhs && paired_type.is_assign()) {
     ref_data(selc_nid)->type   = Lnast_ntype::create_invalid();
-    fmt::print("DEBUG14\n");
     ref_data(paired_nid)->type = Lnast_ntype::create_tuple_add();
 
     auto c0_paired_asg         = get_first_child(paired_nid);
@@ -512,7 +507,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     }
     add_child(new_tup_add, get_data(c0_paired));  // add final child of the new tup_add
     ref_data(selc_nid)->type = Lnast_ntype::create_invalid();
-    fmt::print("DEBUG15\n");
 
     // FIXME->sh: if declare a tuple at local scope but parent scope also have this tuple_var, should we also insert an TA
     // assignment node here?
@@ -531,7 +525,6 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto c0_assign           = get_first_child(paired_nid);
     set_data(c0_tg, get_data(c0_assign));
     ref_data(paired_nid)->type = Lnast_ntype::create_invalid();
-    fmt::print("DEBUG16\n");
     return;
   }
 
@@ -859,7 +852,6 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
   I(get_name(c0_opr) == c1_assign_name);
   set_data(c0_opr, get_data(c0_assign));
   ref_data(assign_nid)->type = Lnast_ntype::create_invalid();
-  fmt::print("DEBUG17\n");
 }
 
 // note: handle cases: A.foo = A[2] or A.foo = A[1] + A[2] + A.bar; where lhs rhs are both the struct elements;
