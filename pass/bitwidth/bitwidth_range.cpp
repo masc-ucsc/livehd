@@ -58,7 +58,7 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       } else {
         max = bits; 
       }
-      fmt::print("DEBUG9 max:{}, bits:{}\n", max, bits);
+      // fmt::print("DEBUG9 max:{}, bits:{}\n", max, bits);
     }
 
     if (min_val == 0) {
@@ -67,11 +67,11 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
       int32_t bits = min_val.get_bits(); 
       if (min_val.is_negative()) {
         min = -bits; 
-        fmt::print("DEBUG7 bits:{}\n", bits);
+        // fmt::print("DEBUG7 bits:{}\n", bits);
       } else {
         min = 0;
       }
-      fmt::print("DEBUG8 min:{}, bits:{}\n", min, bits);
+      // fmt::print("DEBUG8 min:{}, bits:{}\n", min, bits);
     }
     I(min == 0 || min == -max || max == 0);
   }

@@ -583,8 +583,8 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
   auto idx_stmt_tr = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
   auto idx_stmt_f  = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
 
-  init_expr_add(lnast, expr.mux().t_value(), idx_stmt_tr, lhs);
-  init_expr_add(lnast, expr.mux().f_value(), idx_stmt_f, lhs);
+  init_expr_add(lnast, expr.mux().t_value(), idx_stmt_tr, lhs, true);
+  init_expr_add(lnast, expr.mux().f_value(), idx_stmt_f, lhs, true);
 }
 
 /* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
@@ -1373,7 +1373,7 @@ void Inou_firrtl_module::list_prime_op_info(Lnast& lnast, const firrtl::FirrtlPB
 /*TODO:
  * FixedLiteral */
 void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expression& rhs_expr, Lnast_nid& parent_node,
-                                       std::string_view lhs_noprefixes) {
+                                       std::string_view lhs_noprefixes, bool from_mux) {
   // Note: here, parent_node is the "stmt" node above where this expression will go.
   I(lnast.get_data(parent_node).type.is_stmts());
   auto lhs_str = get_full_name(lhs_noprefixes, false);
@@ -1414,7 +1414,11 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
 
       } else {
-        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+        Lnast_nid idx_asg;
+        if(from_mux)
+          idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+        else 
+          idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
       }
