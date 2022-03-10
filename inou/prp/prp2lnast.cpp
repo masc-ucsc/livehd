@@ -8,6 +8,7 @@
 
 #include "fmt/format.h"
 #include "pass.hpp"
+#include "str_tools.hpp"
 
 extern "C" TSLanguage *tree_sitter_pyrope();
 
@@ -141,6 +142,10 @@ void Prp2lnast::process_node(TSNode node) {
     process_while_statement(node);
   else if (node_type == "function_definition")
     process_function_definition(node);
+  else if (node_type == "type_specification")
+    process_type_specification(node);
+  else if (node_type == "sized_integer_type")
+    process_sized_integer_type(node);
   else if (node_type == "tuple")
     process_tuple(node);
   else if (node_type == "tuple_list")
@@ -316,6 +321,36 @@ void Prp2lnast::process_function_definition(TSNode node) {
   primary_node_stack.push(Lnast_node::create_invalid());
 }
 
+void Prp2lnast::process_type_specification(TSNode node) {
+  auto vnode = get_child(node, "argument");
+  auto tnode = get_child(node, "type");
+  
+  process_node(tnode);
+  process_node(vnode);
+  auto value_node = primary_node_stack.top();
+
+  switch (expr_state_stack.top()) {
+    case Expression_state::Type:
+    case Expression_state::Lvalue:
+    case Expression_state::Decl:
+    {
+      // TODO: Support types other than sized_integer_type
+      auto tuple_set_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
+      lnast->add_child(tuple_set_index, value_node);
+      lnast->add_child(tuple_set_index, Lnast_node::create_const("__ubits"));
+      lnast->add_child(tuple_set_index, Lnast_node::create_const(str_tools::to_s(bitwidth)));
+      break;
+    }
+    // TODO: Handle type checks for rvalues
+    default:
+      break;
+  }
+}
+
+void Prp2lnast::process_sized_integer_type(TSNode node) {
+  bitwidth = str_tools::to_i(get_text(node).substr(1));
+}
+
 void Prp2lnast::process_tuple(TSNode node) {
   // TODO: Handle empty tuple
   process_node(ts_node_child(node, 1));
@@ -335,7 +370,9 @@ void Prp2lnast::process_tuple_or_expression_list(TSNode node) {
     case Expression_state::Const:
       // process_select_list(node);
       break;
-    case Expression_state::Decl: process_declaration_list(node); break;
+    case Expression_state::Decl:
+      process_declaration_list(node);
+      break;
   }
 }
 
@@ -660,6 +697,12 @@ void Prp2lnast::process_identifier(TSNode node) {
       }
       fmt::print("ref = {}\n", ref_name_map[name]);
       primary_node_stack.push(Lnast_node::create_ref(ref_name_map[name]));
+      // FIXME: Temporary fix to avoid default initialize-to-zero strategy
+      if (expr_state_stack.top() == Expression_state::Type) {
+        auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+        lnast->add_child(assign_index, Lnast_node::create_ref(ref_name_map[name]));
+        lnast->add_child(assign_index, Lnast_node::create_const("0b?"));
+      }
       break;
     case Expression_state::Const: primary_node_stack.push(Lnast_node::create_const(name)); break;
     default: break;

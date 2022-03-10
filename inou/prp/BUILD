@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//pass/common:pass",
         "//lnast:lnast",
+        "//core:core",
         "@tree-sitter-pyrope//:tree-sitter-pyrope",
     ],
     alwayslink = True,

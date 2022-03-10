@@ -25,6 +25,9 @@ protected:
   bool                                          is_function_output;
   absl::flat_hash_map<std::string, std::string> ref_name_map;
 
+  // TODO: Replace this with Prp_type
+  uint16_t bitwidth;
+
   // Top
   void process_description();
 
@@ -48,6 +51,11 @@ protected:
   void process_dot_expression(TSNode);
   void process_member_selection(TSNode);
   void process_function_definition(TSNode);
+
+  // Type
+  void process_type_specification(TSNode);
+  void process_primitive_type(TSNode);
+  void process_sized_integer_type(TSNode);
 
   // Select
   void process_select(TSNode);
