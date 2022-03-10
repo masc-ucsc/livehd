@@ -190,9 +190,7 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     if (e.sink.get_pid() == 0) {
       auto n_data_mux = inp_edges.size() - 1;
-
       Bitwidth_range bw(-(n_data_mux >> 1) - 1, (n_data_mux >> 1));
-
       adjust_bw(e.driver, bw);
       continue;
     }
@@ -1110,6 +1108,7 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
       bw             = it->second;
       parent_pending = false;
     }
+    fmt::print("DEBUG10 through_dpin:{}\n", through_dpin.debug_name());
   }
 
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
