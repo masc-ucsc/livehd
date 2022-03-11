@@ -1550,11 +1550,14 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
                    multi_flop_attrs.end(),
                    tuple_sort);  // mutable (no semantic check. Just faster to process)
 
+  // or here
   for (auto &it : multi_flop_attrs) {
     auto root = get_all_but_last_level(it.first);
     auto attr = get_last_level(it.first);
     I(is_root_attribute(attr));
     attr = attr.substr(2);  // remove __
+
+    // use get_mask to get the bit that assigned to the discret flops
 
     for (auto &node : all_flops) {
       if (!root.empty()) {

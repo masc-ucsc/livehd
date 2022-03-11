@@ -816,11 +816,7 @@ void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
 
     any_negative = any_negative || it->second.is_always_negative();
 
-    if (it->second.is_always_positive())
-      bits = it->second.get_sbits() - 1;
-    else
-      bits = it->second.get_sbits();
-
+    bits = it->second.get_sbits();
     if (bits > max_bits)
       max_bits = bits;
   }
