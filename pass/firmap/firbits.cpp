@@ -39,21 +39,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;
 
-#if 0
-  // Iterate over inputs to look for tup_add to fill firbits for inputs
-  lg->each_graph_input([this,&fbmap](Node_pin &dpin) {
-
-    for(auto spin:dpin.out_sinks()) {
-      auto node = spin.get_node();
-      fmt::print("1.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
-      node.dump();
-      if (node.get_type_op() == Ntype_op::AttrSet) {
-      fmt::print("2.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
-        analysis_lg_attr_set(node, fbmap);
-      }
-    }
-  });
-#endif
 
   int firbits_iters = 0;
   do {
