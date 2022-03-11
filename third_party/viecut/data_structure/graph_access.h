@@ -27,7 +27,7 @@
 
 #include "common/definitions.h"
 
-struct Node {
+struct vNode {
     EdgeID firstEdge;
     bool   in_cut;
 };
@@ -173,7 +173,7 @@ class basicGraph {
     // %%%%%%%%%%%%%%%%%%% DATA %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     // split properties for coarsening and uncoarsening
 
-    std::vector<Node> m_nodes;
+    std::vector<vNode> m_nodes;
     std::vector<Edge> m_edges;
 
     std::vector<refinementNode> m_refinement_node_props;
