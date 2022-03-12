@@ -311,8 +311,6 @@ void Bitwidth::process_sum(Node &node, XEdge_iterator &inp_edges) {
       if (e.sink.get_pin_name() == "A") {
         max_val = max_val + it->second.get_max();
         min_val = min_val + it->second.get_min();
-        fmt::print("DEBUG6 it->second max:{}, min:{}\n", it->second.get_max().get_bits(), it->second.get_min().get_bits());
-        fmt::print("DEBUG6 max bits:{}, min bits:{}\n\n",max_val.get_bits(), min_val.get_bits());
       } else {
         max_val = max_val - it->second.get_min();
         min_val = min_val - it->second.get_max();
@@ -849,7 +847,6 @@ void Bitwidth::process_bit_xor(Node &node, XEdge_iterator &inp_edges) {
     else
       bits = it->second.get_sbits();
 
-    // fmt::print("DEBUG5 bits:{}, max_bits:{}\n", bits, max_bits);  
     if (bits > max_bits)
       max_bits = bits;
   }
@@ -1104,7 +1101,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
       bw             = it->second;
       parent_pending = false;
     }
-    fmt::print("DEBUG10 through_dpin:{}\n", through_dpin.debug_name());
   }
 
   if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
@@ -1122,8 +1118,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
       if (parent_pending)
         bw.set_ubits_range(val.to_i());
 
-      // fmt::print("DEBUG4 bw:{}, pending:{}\n", val.to_i(), parent_pending);  
-      bw.dump();
       insert_tposs_nodes(node_attr, val.to_i(), fwd_it);
     } else {  // Attr::Set_sbits
       if (bw.get_sbits() > (val.to_i()))
@@ -1154,7 +1148,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   if (parent_pending && node_attr.is_sink_connected("parent")) {
     auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     bwmap.insert_or_assign(through_dpin.get_compact_class(), bw);
-    // bw.dump();
   }
 }
 
@@ -1460,7 +1453,6 @@ void Bitwidth::bw_pass(Lgraph *lg) {
           }
 
           dpin.set_bits(it->second.get_sbits());
-          it->second.dump();
           if (it->second.is_always_positive()) {
             dpin.set_unsign();
           } else {

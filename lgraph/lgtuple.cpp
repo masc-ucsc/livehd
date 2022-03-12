@@ -1459,7 +1459,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   I(is_correct());
 
   auto [flop_root_name, first_flop] = get_flop_name(flop);
-  (void)first_flop;
+  (void) first_flop;
 
   std::shared_ptr<Lgtuple> ret_tup;
 
@@ -1472,7 +1472,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
   for (auto &e : key_map) {
     auto [attr, new_flop_name] = get_flop_attr_name(flop_root_name, e.first);
-
     auto flop_dpin = Node_pin::find_driver_pin(lg, new_flop_name);
 
     if (attr.empty()) {            // NON-ATTR PATH
@@ -1557,8 +1556,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
     I(is_root_attribute(attr));
     attr = attr.substr(2);  // remove __
 
-    // use get_mask to get the bit that assigned to the discret flops
-
+    int i = 0;
     for (auto &node : all_flops) {
       if (!root.empty()) {
         auto n = node.get_driver_pin().get_name();
@@ -1574,12 +1572,24 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         }
         XEdge::del_edge(dpin2, flop_spin);
       }
-      flop_spin.connect_driver(it.second);
+      if (attr == "initial") {
+      // use get_mask to get the bit that assigned to the corresponding individual flop
+        Lconst init_val = it.second.get_type_const();
+        Lconst masked_val = init_val.get_mask_op(1<<i);
+        auto masked_node  = lg->create_node_const(masked_val);
+        flop_spin.connect_driver(masked_node.setup_driver_pin());
+      } else {
+        flop_spin.connect_driver(it.second);
+      }
+      i++;
     }
   }
-
   return ret_tup;
 }
+
+
+
+
 
 std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std::string_view key) const {
   I(!is_root_attribute(key));
