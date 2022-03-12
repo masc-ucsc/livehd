@@ -1,49 +1,51 @@
-;circuit AMOALU :
-;  module AMOALU : 
-;    input clock : Clock
-;    input reset : UInt<1>
-;    output io : {flip mask : UInt<8>, flip cmd : UInt<5>, flip lhs : UInt<64>, flip rhs : UInt<64>, out : UInt<64>, out_unmasked : UInt<64>}
-;    
-;    clock is invalid
-;    reset is invalid
-;    io is invalid
-;    node _T = eq(io.cmd, UInt<4>("h0d")) @[AMOALU.scala 64:20]
-;    node _T_1 = eq(io.cmd, UInt<4>("h0f")) @[AMOALU.scala 64:43]
-;    node max = or(_T, _T_1) @[AMOALU.scala 64:33]
-;    node _T_2 = eq(io.cmd, UInt<4>("h0c")) @[AMOALU.scala 65:20]
-;    node _T_3 = eq(io.cmd, UInt<4>("h0e")) @[AMOALU.scala 65:43]
-;    node min = or(_T_2, _T_3) @[AMOALU.scala 65:33]
-;    node add = eq(io.cmd, UInt<4>("h08")) @[AMOALU.scala 66:20]
-;    node _T_4 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 67:26]
-;    node _T_5 = eq(io.cmd, UInt<4>("h0b")) @[AMOALU.scala 67:48]
-;    node logic_and = or(_T_4, _T_5) @[AMOALU.scala 67:38]
-;    node _T_6 = eq(io.cmd, UInt<4>("h09")) @[AMOALU.scala 68:26]
-;    node _T_7 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 68:49]
-;    node logic_xor = or(_T_6, _T_7) @[AMOALU.scala 68:39]
-;    node _T_8 = bits(io.mask, 3, 3) @[AMOALU.scala 72:71]
-;    node _T_9 = eq(_T_8, UInt<1>("h00")) @[AMOALU.scala 72:63]
-;    node _T_10 = shl(_T_9, 31) @[AMOALU.scala 72:79]
-;    node _T_11 = or(UInt<64>("h00"), _T_10) @[AMOALU.scala 72:98]
-;    node _T_12 = not(_T_11) @[AMOALU.scala 72:16]
-;    node _T_13 = and(io.lhs, _T_12) @[AMOALU.scala 73:13]
-;    node _T_14 = and(io.rhs, _T_12) @[AMOALU.scala 73:31]
-;    node _T_15 = add(_T_13, _T_14) @[AMOALU.scala 73:21]
-;    node adder_out = tail(_T_15, 1) @[AMOALU.scala 73:21]
-;    node _T_16 = bits(io.mask, 4, 4) @[AMOALU.scala 91:49]
-;    node _T_17 = xor(UInt<4>("h0c"), UInt<4>("h0e")) @[AMOALU.scala 85:29]
-;    node _T_18 = and(io.cmd, _T_17) @[AMOALU.scala 86:17]
-;    node _T_19 = and(UInt<4>("h0c"), _T_17) @[AMOALU.scala 86:39]
-;    node _T_20 = eq(_T_18, _T_19) @[AMOALU.scala 86:25]
-;    node _T_21 = bits(io.lhs, 63, 63) @[AMOALU.scala 88:12]
-;    node _T_22 = bits(io.rhs, 63, 63) @[AMOALU.scala 88:23]
-;    node _T_23 = eq(_T_21, _T_22) @[AMOALU.scala 88:18]
-;    node _T_24 = bits(io.lhs, 63, 32) @[AMOALU.scala 80:13]
-;    node _T_25 = bits(io.rhs, 63, 32) @[AMOALU.scala 80:27]
-;    node _T_26 = lt(_T_24, _T_25) @[AMOALU.scala 80:24]
-;    node _T_27 = bits(io.lhs, 63, 32) @[AMOALU.scala 80:42]
-;    node _T_28 = bits(io.rhs, 63, 32) @[AMOALU.scala 80:58]
-;    node _T_29 = eq(_T_27, _T_28) @[AMOALU.scala 80:53]
-;    node _T_30 = bits(io.lhs, 31, 0) @[AMOALU.scala 79:26]
+circuit AMOALU :
+  module AMOALU : 
+    input clock : Clock
+    input reset : UInt<1>
+    output io : {flip mask : UInt<8>, flip cmd : UInt<5>, flip lhs : UInt<64>, flip rhs : UInt<64>, out : UInt<64>, out_unmasked : UInt<64>}
+    
+    clock is invalid
+    reset is invalid
+    io is invalid
+    node _T = eq(io.cmd, UInt<4>("h0d")) @[AMOALU.scala 64:20]
+    node _T_1 = eq(io.cmd, UInt<4>("h0f")) @[AMOALU.scala 64:43]
+    node max = or(_T, _T_1) @[AMOALU.scala 64:33]
+    node _T_2 = eq(io.cmd, UInt<4>("h0c")) @[AMOALU.scala 65:20]
+    node _T_3 = eq(io.cmd, UInt<4>("h0e")) @[AMOALU.scala 65:43]
+    node min = or(_T_2, _T_3) @[AMOALU.scala 65:33]
+    node add = eq(io.cmd, UInt<4>("h08")) @[AMOALU.scala 66:20]
+    node _T_4 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 67:26]
+    node _T_5 = eq(io.cmd, UInt<4>("h0b")) @[AMOALU.scala 67:48]
+    node logic_and = or(_T_4, _T_5) @[AMOALU.scala 67:38]
+    node _T_6 = eq(io.cmd, UInt<4>("h09")) @[AMOALU.scala 68:26]
+    node _T_7 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 68:49]
+    node logic_xor = or(_T_6, _T_7) @[AMOALU.scala 68:39]
+    node _T_8 = bits(io.mask, 3, 3) @[AMOALU.scala 72:71]
+    node _T_9 = eq(_T_8, UInt<1>("h00")) @[AMOALU.scala 72:63]
+    node _T_10 = shl(_T_9, 31) @[AMOALU.scala 72:79]
+    node _T_11 = or(UInt<64>("h00"), _T_10) @[AMOALU.scala 72:98] 
+    node _T_12 = not(_T_11) @[AMOALU.scala 72:16] 
+    node _T_13 = and(io.lhs, _T_12) @[AMOALU.scala 73:13]
+    node _T_14 = and(io.rhs, _T_12) @[AMOALU.scala 73:31]
+    node _T_15 = add(_T_13, _T_14) @[AMOALU.scala 73:21]
+    node adder_out = tail(_T_15, 1) @[AMOALU.scala 73:21]
+    node _T_16 = bits(io.mask, 4, 4) @[AMOALU.scala 91:49]
+    node _T_17 = xor(UInt<4>("h0c"), UInt<4>("h0e")) @[AMOALU.scala 85:29]
+    node _T_18 = and(io.cmd, _T_17) @[AMOALU.scala 86:17]
+    node _T_19 = and(UInt<4>("h0c"), _T_17) @[AMOALU.scala 86:39]
+    node _T_20 = eq(_T_18, _T_19) @[AMOALU.scala 86:25]
+    node _T_21 = bits(io.lhs, 63, 63) @[AMOALU.scala 88:12]
+    node _T_22 = bits(io.rhs, 63, 63) @[AMOALU.scala 88:23]
+    node _T_23 = eq(_T_21, _T_22) @[AMOALU.scala 88:18]
+    io.out <= _T_23 @[AMOALU.scala 104:10]
+    io.out_unmasked <= _T_23 @[AMOALU.scala 105:19]
+    ;node _T_24 = bits(io.lhs, 63, 32) @[AMOALU.scala 80:13]
+    ;node _T_25 = bits(io.rhs, 63, 32) @[AMOALU.scala 80:27]
+    ;node _T_26 = lt(_T_24, _T_25) @[AMOALU.scala 80:24]
+    ;node _T_27 = bits(io.lhs, 63, 32) @[AMOALU.scala 80:42]
+    ;node _T_28 = bits(io.rhs, 63, 32) @[AMOALU.scala 80:58]
+    ;node _T_29 = eq(_T_27, _T_28) @[AMOALU.scala 80:53]
+    ;node _T_30 = bits(io.lhs, 31, 0) @[AMOALU.scala 79:26]
 ;    node _T_31 = bits(io.rhs, 31, 0) @[AMOALU.scala 79:38]
 ;    node _T_32 = lt(_T_30, _T_31) @[AMOALU.scala 79:35]
 ;    node _T_33 = and(_T_29, _T_32) @[AMOALU.scala 80:69]
@@ -113,35 +115,35 @@
 ;    node _T_92 = not(wmask) @[AMOALU.scala 104:27]
 ;    node _T_93 = and(_T_92, io.lhs) @[AMOALU.scala 104:34]
 ;    node _T_94 = or(_T_91, _T_93) @[AMOALU.scala 104:25]
-;    io.out <= _T_94 @[AMOALU.scala 104:10]
-;    io.out_unmasked <= out @[AMOALU.scala 105:19]
-circuit AMOALU :
-  module AMOALU : 
-    input clock : Clock
-    input reset : UInt<1>
-    output io : {flip mask : UInt<8>, flip cmd : UInt<5>, flip lhs : UInt<64>, flip rhs : UInt<64>, out : UInt<64>, out_unmasked : UInt<64>}
-    
-    clock is invalid
-    reset is invalid
-    io is invalid
-    node _T = eq(io.cmd, UInt<4>("h0d")) @[AMOALU.scala 64:20]
-    node _T_1 = eq(io.cmd, UInt<4>("h0f")) @[AMOALU.scala 64:43]
-    node max = or(_T, _T_1) @[AMOALU.scala 64:33]
-    node _T_2 = eq(io.cmd, UInt<4>("h0c")) @[AMOALU.scala 65:20]
-    node _T_3 = eq(io.cmd, UInt<4>("h0e")) @[AMOALU.scala 65:43]
-    node min = or(_T_2, _T_3) @[AMOALU.scala 65:33]
-    node add = eq(io.cmd, UInt<4>("h08")) @[AMOALU.scala 66:20]
-    node _T_4 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 67:26]
-    node _T_5 = eq(io.cmd, UInt<4>("h0b")) @[AMOALU.scala 67:48]
-    node logic_and = or(_T_4, _T_5) @[AMOALU.scala 67:38]
-    node _T_6 = eq(io.cmd, UInt<4>("h09")) @[AMOALU.scala 68:26]
-    node _T_7 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 68:49]
-    node logic_xor = or(_T_6, _T_7) @[AMOALU.scala 68:39]
-    node _T_8 = bits(io.mask, 3, 3) @[AMOALU.scala 72:71]
-    node _T_9 = eq(_T_8, UInt<1>("h00")) @[AMOALU.scala 72:63]
-    node _T_10 = shl(_T_9, 31) @[AMOALU.scala 72:79]
-    node _T_11 = or(UInt<64>("h00"), _T_10) @[AMOALU.scala 72:98]
-    node _T_12 = not(_T_11) @[AMOALU.scala 72:16]
+;circuit AMOALU :
+;  module AMOALU : 
+;    input clock : Clock
+;    input reset : UInt<1>
+;    output io : {flip mask : UInt<8>, flip cmd : UInt<5>, flip lhs : UInt<64>, flip rhs : UInt<64>, out : UInt<64>, out_unmasked : UInt<64>}
+;    
+;    clock is invalid
+;    reset is invalid
+;    io is invalid
+;    node _T = eq(io.cmd, UInt<4>("h0d")) @[AMOALU.scala 64:20]
+;    node _T_1 = eq(io.cmd, UInt<4>("h0f")) @[AMOALU.scala 64:43]
+;    node max = or(_T, _T_1) @[AMOALU.scala 64:33]
+;    node _T_2 = eq(io.cmd, UInt<4>("h0c")) @[AMOALU.scala 65:20]
+;    node _T_3 = eq(io.cmd, UInt<4>("h0e")) @[AMOALU.scala 65:43]
+;    node min = or(_T_2, _T_3) @[AMOALU.scala 65:33]
+;    node add = eq(io.cmd, UInt<4>("h08")) @[AMOALU.scala 66:20]
+;    node _T_4 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 67:26]
+;    node _T_5 = eq(io.cmd, UInt<4>("h0b")) @[AMOALU.scala 67:48]
+;    node logic_and = or(_T_4, _T_5) @[AMOALU.scala 67:38]
+;    node _T_6 = eq(io.cmd, UInt<4>("h09")) @[AMOALU.scala 68:26]
+;    node _T_7 = eq(io.cmd, UInt<4>("h0a")) @[AMOALU.scala 68:49]
+;    node logic_xor = or(_T_6, _T_7) @[AMOALU.scala 68:39]
+;    node _T_8 = bits(io.mask, 3, 3) @[AMOALU.scala 72:71]
+;    node _T_9 = eq(_T_8, UInt<1>("h00")) @[AMOALU.scala 72:63]
+;    node _T_10 = shl(_T_9, 31) @[AMOALU.scala 72:79]
+;    node _T_11 = or(UInt<64>("h00"), _T_10) @[AMOALU.scala 72:98]
+;    node _T_12 = not(_T_11) @[AMOALU.scala 72:16]
+;    io.out <= _T_12 @[AMOALU.scala 104:10]
+;    io.out_unmasked <= _T_12 @[AMOALU.scala 105:19]
 ;   node _T_13 = and(io.lhs, _T_12) @[AMOALU.scala 73:13]
 ;   node _T_14 = and(io.rhs, _T_12) @[AMOALU.scala 73:31]
 ;   node _T_15 = add(_T_13, _T_14) @[AMOALU.scala 73:21]
@@ -230,5 +232,5 @@ circuit AMOALU :
 ;   node _T_92 = not(wmask) @[AMOALU.scala 104:27]
 ;   node _T_93 = and(_t_92, io.lhs) @[amoalu.scala 104:34]
 ;   node _T_94 = or(_t_91, _t_93) @[amoalu.scala 104:25]
-    io.out <= _T_12 @[AMOALU.scala 104:10]
-    io.out_unmasked <= _T_12 @[AMOALU.scala 105:19]
+;   io.out <= _T_12 @[AMOALU.scala 104:10]
+;   io.out_unmasked <= _T_12 @[AMOALU.scala 105:19]
