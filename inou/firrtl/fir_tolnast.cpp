@@ -1652,7 +1652,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
     initial_node = Lnast_node::create_const(str_val);
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
     auto ref_str = inite.reference().id();
-    // initial_node = Lnast_node::create_ref(ref_str);
+    initial_node = Lnast_node::create_ref(ref_str);
     auto empty_tup_add_op  = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var());
     lnast.add_child(empty_tup_add_op, empty_tup_add_var);
