@@ -188,6 +188,7 @@ cc_library(
     "ClockGroupAggregator",
     "BreakpointUnit",
     "Arbiter_10",
+    "AMOALU",
 
     # FIXME:
     # issue1: memory
