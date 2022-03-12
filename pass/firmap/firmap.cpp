@@ -262,19 +262,19 @@ void Firmap::map_node_fir_bits(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
   auto     new_node_mask = new_lg->create_node(Ntype_op::And);
   Node     new_node_mask_const;
   Node     new_node_lo_const;
-  uint32_t hi = 0, lo = 0;
+  Lconst hi = 0, lo = 0;
   for (auto old_spin : old_node.inp_connected_pins()) {
     if (old_spin == old_node.setup_sink_pin("e1")) {
       pinmap.insert_or_assign(old_spin, new_node_sra.setup_sink_pin("a"));
     } else if (old_spin == old_node.setup_sink_pin("e2")) {
-      hi = old_spin.get_driver_node().get_type_const().to_i();
+      hi = old_spin.get_driver_node().get_type_const();
     } else {
-      lo                = old_spin.get_driver_node().get_type_const().to_i();
+      lo                = old_spin.get_driver_node().get_type_const();
       new_node_lo_const = new_lg->create_node_const(lo);
     }
   }
 
-  auto mask_const     = (1 << (hi - lo + 1)) - 1;
+  Lconst mask_const     = (Lconst(1) << Lconst(hi - lo + 1)) - 1;
   new_node_mask_const = new_lg->create_node_const(mask_const);
 
   new_node_lo_const.connect_driver(new_node_sra.setup_sink_pin("b"));
