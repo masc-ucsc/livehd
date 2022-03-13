@@ -112,6 +112,26 @@ struct Lnast_node {
 
   CREATE_LNAST_NODE(_range)
 
+  // Types
+  CREATE_LNAST_NODE(_type_def)
+  CREATE_LNAST_NODE(_type_spec)
+  
+  CREATE_LNAST_NODE(_none_type)
+  CREATE_LNAST_NODE(_prim_type_uint)
+  CREATE_LNAST_NODE(_prim_type_sint)
+  CREATE_LNAST_NODE(_prim_type_range)
+  CREATE_LNAST_NODE(_prim_type_string)
+  CREATE_LNAST_NODE(_prim_type_boolean)
+  CREATE_LNAST_NODE(_prim_type_type)
+  CREATE_LNAST_NODE(_prim_type_ref)
+  CREATE_LNAST_NODE(_comp_type_tuple)
+  CREATE_LNAST_NODE(_comp_type_array)
+  CREATE_LNAST_NODE(_comp_type_mixin)
+  CREATE_LNAST_NODE(_comp_type_lambda)
+  // CREATE_LNAST_NODE(_comp_type_enum)
+  CREATE_LNAST_NODE(_expr_type)
+  CREATE_LNAST_NODE(_unknown_type)
+
   CREATE_LNAST_NODE(_tuple_concat)
   CREATE_LNAST_NODE(_tuple_add)
   CREATE_LNAST_NODE(_tuple_get)

@@ -13,7 +13,6 @@
 
 class Lnast_writer {
 public:
-  explicit Lnast_writer(std::ofstream&, std::shared_ptr<Lnast>);
   explicit Lnast_writer(std::ostream&, std::shared_ptr<Lnast>);
   void write_all();
 protected:
@@ -44,9 +43,14 @@ protected:
   void move_to_parent() {
     I(nid_stack.size() >= 1);
     current_nid = nid_stack.top();
+    nid_stack.pop();
+  }
+  
+  auto get_ntype() {
+    return lnast->get_type(current_nid);
   }
 
-  auto get_ntype() {
+  auto get_raw_ntype() {
     return lnast->get_type(current_nid).get_raw_ntype();
   }
 
@@ -85,6 +89,7 @@ protected:
 
   void write_binary(std::string_view op);
   void write_unary(std::string_view op);
+  void write_prim_type_int(char sign);
 
   void write_invalid();
   void write_top();
@@ -129,6 +134,22 @@ protected:
   void write_ref();
   void write_const();
   void write_range();
+  void write_type_def();
+  void write_type_spec();
+  void write_none_type();
+  void write_prim_type_uint();
+  void write_prim_type_sint();
+  void write_prim_type_range();
+  void write_prim_type_string();
+  void write_prim_type_boolean();
+  void write_prim_type_type();
+  void write_prim_type_ref();
+  void write_comp_type_tuple();
+  void write_comp_type_array();
+  void write_comp_type_mixin();
+  void write_comp_type_lambda();
+  void write_expr_type();
+  void write_unknown_type();
   void write_tuple_concat();  
   void write_tuple_add();
   void write_tuple_get();

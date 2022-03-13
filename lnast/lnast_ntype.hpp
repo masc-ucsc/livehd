@@ -77,6 +77,24 @@ public:
     // range
     Lnast_ntype_range,
 
+    // types
+    Lnast_ntype_type_def,
+    Lnast_ntype_type_spec,
+    Lnast_ntype_none_type,
+    Lnast_ntype_prim_type_uint,
+    Lnast_ntype_prim_type_sint,
+    Lnast_ntype_prim_type_range,
+    Lnast_ntype_prim_type_string,
+    Lnast_ntype_prim_type_boolean,
+    Lnast_ntype_prim_type_type,
+    Lnast_ntype_prim_type_ref,
+    Lnast_ntype_comp_type_tuple,
+    Lnast_ntype_comp_type_array,
+    Lnast_ntype_comp_type_mixin,
+    Lnast_ntype_comp_type_lambda,
+    Lnast_ntype_expr_type,
+    Lnast_ntype_unknown_type,
+
     // Tuple ops
     Lnast_ntype_tuple_concat,  // ++
     Lnast_ntype_tuple_add,
@@ -151,6 +169,24 @@ protected:
                                       "const",
 
                                       "range",
+
+                                      "type_def",
+                                      "type_spec",
+
+                                      "none_type",
+                                      "prim_type_uint",
+                                      "prim_type_sint",
+                                      "prim_type_range",
+                                      "prim_type_string",
+                                      "prim_type_boolean",
+                                      "prim_type_type",
+                                      "prim_type_ref",
+                                      "comp_type_tuple",
+                                      "comp_type_array",
+                                      "comp_type_mixin",
+                                      "comp_type_lambda",
+                                      "expr_type",
+                                      "unknown_type",
 
                                       "tuple_concat",
                                       "tuple_add",
@@ -229,6 +265,24 @@ public:
   static constexpr Lnast_ntype create_const() { return Lnast_ntype(Lnast_ntype_const); }
 
   static constexpr Lnast_ntype create_range() { return Lnast_ntype(Lnast_ntype_range); }
+
+  static constexpr Lnast_ntype create_type_def() { return Lnast_ntype(Lnast_ntype_type_def); }
+  static constexpr Lnast_ntype create_type_spec() { return Lnast_ntype(Lnast_ntype_type_spec); }
+
+  static constexpr Lnast_ntype create_none_type() { return Lnast_ntype(Lnast_ntype_none_type); }
+  static constexpr Lnast_ntype create_prim_type_uint() { return Lnast_ntype(Lnast_ntype_prim_type_uint); }
+  static constexpr Lnast_ntype create_prim_type_sint() { return Lnast_ntype(Lnast_ntype_prim_type_sint); }
+  static constexpr Lnast_ntype create_prim_type_range() { return Lnast_ntype(Lnast_ntype_prim_type_range); }
+  static constexpr Lnast_ntype create_prim_type_string() { return Lnast_ntype(Lnast_ntype_prim_type_string); }
+  static constexpr Lnast_ntype create_prim_type_boolean() { return Lnast_ntype(Lnast_ntype_prim_type_boolean); }
+  static constexpr Lnast_ntype create_prim_type_type() { return Lnast_ntype(Lnast_ntype_prim_type_type); }
+  static constexpr Lnast_ntype create_prim_type_ref() { return Lnast_ntype(Lnast_ntype_prim_type_ref); }
+  static constexpr Lnast_ntype create_comp_type_tuple() { return Lnast_ntype(Lnast_ntype_comp_type_tuple); }
+  static constexpr Lnast_ntype create_comp_type_array() { return Lnast_ntype(Lnast_ntype_comp_type_array); }
+  static constexpr Lnast_ntype create_comp_type_mixin() { return Lnast_ntype(Lnast_ntype_comp_type_mixin); }
+  static constexpr Lnast_ntype create_comp_type_lambda() { return Lnast_ntype(Lnast_ntype_comp_type_lambda); }
+  static constexpr Lnast_ntype create_expr_type() { return Lnast_ntype(Lnast_ntype_expr_type); }
+  static constexpr Lnast_ntype create_unknown_type() { return Lnast_ntype(Lnast_ntype_unknown_type); }
 
   static constexpr Lnast_ntype create_tuple_concat() { return Lnast_ntype(Lnast_ntype_tuple_concat); }
   static constexpr Lnast_ntype create_tuple_add() { return Lnast_ntype(Lnast_ntype_tuple_add); }
@@ -342,6 +396,10 @@ public:
   bool constexpr is_direct_lgraph_op() const {
     return (val >= Lnast_ntype_bit_and && val <= Lnast_ntype_ge) && !is_mask_op() && val != Lnast_ntype_mod && val != Lnast_ntype_is
            && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
+  }
+
+  bool constexpr is_type() const {
+    return (val >= Lnast_ntype_none_type && val <= Lnast_ntype_unknown_type);
   }
 
   std::string_view debug_name() const { return namemap[val]; }

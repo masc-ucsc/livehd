@@ -88,6 +88,7 @@ void Prp2lnast::process_description() {
   auto tc = ts_tree_cursor_new(ts_root_node);
 
   stmts_index = lnast->add_child(lh::Tree_index::root(), Lnast_node::create_stmts());
+  type_index = stmts_index;
 
   bool go_next = ts_tree_cursor_goto_first_child(&tc);
   while (go_next) {
@@ -144,8 +145,20 @@ void Prp2lnast::process_node(TSNode node) {
     process_function_definition(node);
   else if (node_type == "type_specification")
     process_type_specification(node);
+  else if (node_type == "unsized_integer_type")
+    process_unsized_integer_type(node);
   else if (node_type == "sized_integer_type")
     process_sized_integer_type(node);
+  else if (node_type == "range_type")
+    process_range_type();
+  else if (node_type == "string_type")
+    process_string_type();
+  else if (node_type == "boolean_type")
+    process_boolean_type();
+  else if (node_type == "type_type")
+    process_type_type();
+  else if (node_type == "array_type")
+    process_array_type(node);
   else if (node_type == "tuple")
     process_tuple(node);
   else if (node_type == "tuple_list")
@@ -292,6 +305,7 @@ void Prp2lnast::process_assignment_or_declaration(TSNode node) {
     expr_state_stack.push(Expression_state::Decl);
     process_node(lnode);
     expr_state_stack.pop();
+    primary_node_stack.pop();
   }
 }
 
@@ -324,21 +338,30 @@ void Prp2lnast::process_function_definition(TSNode node) {
 void Prp2lnast::process_type_specification(TSNode node) {
   auto vnode = get_child(node, "argument");
   auto tnode = get_child(node, "type");
-  
-  process_node(tnode);
+
+  //auto prev_stmt_index = lnast->get_last_child(stmts_index);
+
+  auto type_spec_index = lnast->add_child(stmts_index, Lnast_node::create_type_spec());
+
   process_node(vnode);
   auto value_node = primary_node_stack.top();
+  lnast->add_child(type_spec_index, value_node);
 
+  expr_state_stack.push(Expression_state::Type);
+  type_index = type_spec_index;
+  process_node(tnode);
+  expr_state_stack.pop();
+  
   switch (expr_state_stack.top()) {
     case Expression_state::Type:
     case Expression_state::Lvalue:
     case Expression_state::Decl:
     {
       // TODO: Support types other than sized_integer_type
-      auto tuple_set_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
-      lnast->add_child(tuple_set_index, value_node);
-      lnast->add_child(tuple_set_index, Lnast_node::create_const("__ubits"));
-      lnast->add_child(tuple_set_index, Lnast_node::create_const(str_tools::to_s(bitwidth)));
+      // auto tuple_set_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
+      // lnast->add_child(tuple_set_index, value_node);
+      // lnast->add_child(tuple_set_index, Lnast_node::create_const("__ubits"));
+      // lnast->add_child(tuple_set_index, Lnast_node::create_const(str_tools::to_s(bitwidth)));
       break;
     }
     // TODO: Handle type checks for rvalues
@@ -347,8 +370,51 @@ void Prp2lnast::process_type_specification(TSNode node) {
   }
 }
 
+void Prp2lnast::process_unsized_integer_type(TSNode node) {
+  auto text = get_text(node);
+  lnast->add_child(type_index,
+      (text[0] == 'u') ? Lnast_node::create_prim_type_uint() : Lnast_node::create_prim_type_sint());
+}
+
 void Prp2lnast::process_sized_integer_type(TSNode node) {
-  bitwidth = str_tools::to_i(get_text(node).substr(1));
+  auto text = get_text(node);
+  auto prim_type_int_index = lnast->add_child(type_index,
+      (text[0] == 'u') ? Lnast_node::create_prim_type_uint() : Lnast_node::create_prim_type_sint());
+  lnast->add_child(prim_type_int_index, Lnast_node::create_const(text.substr(1)));
+}
+
+void Prp2lnast::process_array_type(TSNode node) {
+  auto base_node = get_child(node);
+  auto length_node = get_sibling(base_node);
+  
+  auto comp_type_array_index = lnast->add_child(type_index, Lnast_node::create_comp_type_array());
+  
+  auto prev_type_index = type_index;
+  type_index = comp_type_array_index;
+  
+  process_node(base_node);
+  expr_state_stack.push(Expression_state::Rvalue);
+  process_node(length_node);
+  expr_state_stack.pop();
+  lnast->add_child(comp_type_array_index, primary_node_stack.top());
+  primary_node_stack.pop();
+  type_index = prev_type_index;
+}
+
+void Prp2lnast::process_range_type() {
+  lnast->add_child(type_index, Lnast_node::create_prim_type_range());
+}
+
+void Prp2lnast::process_string_type() {
+  lnast->add_child(type_index, Lnast_node::create_prim_type_string());
+}
+
+void Prp2lnast::process_boolean_type() {
+  lnast->add_child(type_index, Lnast_node::create_prim_type_boolean());
+}
+
+void Prp2lnast::process_type_type() {
+  lnast->add_child(type_index, Lnast_node::create_prim_type_type());
 }
 
 void Prp2lnast::process_tuple(TSNode node) {
@@ -698,11 +764,13 @@ void Prp2lnast::process_identifier(TSNode node) {
       fmt::print("ref = {}\n", ref_name_map[name]);
       primary_node_stack.push(Lnast_node::create_ref(ref_name_map[name]));
       // FIXME: Temporary fix to avoid default initialize-to-zero strategy
-      if (expr_state_stack.top() == Expression_state::Type) {
+      /*
+        if (expr_state_stack.top() == Expression_state::Type) {
         auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
         lnast->add_child(assign_index, Lnast_node::create_ref(ref_name_map[name]));
         lnast->add_child(assign_index, Lnast_node::create_const("0b?"));
       }
+      */
       break;
     case Expression_state::Const: primary_node_stack.push(Lnast_node::create_const(name)); break;
     default: break;

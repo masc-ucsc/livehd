@@ -55,7 +55,13 @@ protected:
   // Type
   void process_type_specification(TSNode);
   void process_primitive_type(TSNode);
+  void process_unsized_integer_type(TSNode);
   void process_sized_integer_type(TSNode);
+  void process_range_type();
+  void process_string_type();
+  void process_boolean_type();
+  void process_type_type();
+  void process_array_type(TSNode);
 
   // Select
   void process_select(TSNode);
@@ -74,6 +80,7 @@ protected:
   // Lnast Tree Helpers
   std::unique_ptr<Lnast>              lnast;
   lh::Tree_index                      stmts_index;
+  lh::Tree_index                      type_index;
   std::stack<Lnast_node>              rvalue_node_stack;
   std::vector<int>                    tuple_lvalue_positions;
   std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
