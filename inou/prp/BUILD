@@ -16,7 +16,6 @@ cc_library(
     deps = [
         "//lnast",
         "//pass/common:pass",
-        "//lnast:lnast",
         "//core:core",
         "@tree-sitter-pyrope//:tree-sitter-pyrope",
     ],
