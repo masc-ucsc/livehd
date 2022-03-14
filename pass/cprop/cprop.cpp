@@ -837,6 +837,7 @@ void Cprop::tuple_get_mask_mut(Node &node) {
     if (flat_a_dpin.is_invalid()) {
       return;
     }
+    fmt::print("DEBUG10 flat_a_dpin:{}\n", flat_a_dpin.debug_name());
 
     a_spin.del();
     node.setup_sink_pin("a").connect_driver(flat_a_dpin);
