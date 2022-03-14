@@ -1,4 +1,4 @@
-circuit BreakpointUnit_4 :
+circuit  BreakpointUnit_4:
   module BreakpointUnit_4 : 
     input clock : Clock
     input reset : UInt<1>

@@ -838,11 +838,10 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   auto opr_nid  = get_sibling_prev(assign_nid);
   auto opr_type = get_type(opr_nid);
-#if 1
+
   // This whole function should go once select is gone
-  if (opr_type.is_tuple_attr())
+  if (opr_type.is_tuple_attr() || opr_type.is_func_call())
     return;
-#endif
 
   // note: the only valid case to merge a dp_assign is when its pre_sibling is an attr_get
   if (get_type(assign_nid).is_dp_assign() && !opr_type.is_attr_get())

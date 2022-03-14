@@ -83,6 +83,7 @@ public:
   static Lconst from_pyrope(std::string_view txt);
   static Lconst from_binary(std::string_view txt, bool unsigned_result);
   static Lconst from_string(std::string_view txt);
+  static Lconst from_ref(std::string_view txt);
   static Lconst invalid() { return Lconst(true, 0, 0); }
 
   static Lconst unknown(Bits_t nbits);
@@ -93,6 +94,7 @@ public:
   [[nodiscard]] std::string serialize() const;
 
   bool is_invalid() const { return explicit_str && bits == 0; }
+  bool is_ref() const { return is_invalid() && num !=0; }
 
   uint64_t hash() const;
 

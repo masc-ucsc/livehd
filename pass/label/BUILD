@@ -18,3 +18,24 @@ cc_library(
     ],
     alwayslink = True,  # Needed to have constructor called
 )
+
+
+cc_test(
+    name = "acyclic_test",
+    srcs = ["acyclic_test.cpp"],
+    deps = [
+        ":pass_label",
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
+    ],
+)
+
+cc_test(
+    name = "synth_test",
+    srcs = ["synth_test.cpp"],
+    deps = [
+        ":pass_label",
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
+    ],
+)

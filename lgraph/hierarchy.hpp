@@ -44,7 +44,7 @@ protected:
   std::vector<up_entry_t>                           up_vector;
   absl::flat_hash_map<key_entry_t, Hierarchy_index> down_map;
 
-  Hierarchy_index                                 go_down(Hierarchy_index, Lg_type_id lgid, Index_id nid);
+  Hierarchy_index                                 go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id nid);
   std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
 
 public:

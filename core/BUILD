@@ -58,8 +58,9 @@ cc_test(
 
 cc_test(
     name = "pool_bench",
-    srcs = ["tests/pool_bench.cpp",
+    srcs = [
         "tests/concurrentqueue.hpp",
+        "tests/pool_bench.cpp",
     ],
     deps = [
         ":core",

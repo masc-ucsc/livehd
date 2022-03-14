@@ -153,13 +153,27 @@ void Bitwidth::process_not(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.driver.get_compact_class());
     if (it != bwmap.end()) {
-      auto pmax = it->second.get_max().to_i();  // pmax = parent_max
-      auto pmin = it->second.get_min().to_i();
+      auto pmax = it->second.get_max();  // pmax = parent_max
+      auto pmin = it->second.get_min();
       // calculate 1s'complemet value
-      auto pmax_1scomp = ~pmax;
-      auto pmin_1scomp = ~pmin;
-      max_val          = Lconst(std::max(pmax_1scomp, pmin_1scomp));
-      min_val          = Lconst(std::min(pmax_1scomp, pmin_1scomp));
+      auto pmax_1scomp = pmax.not_op();
+      auto pmin_1scomp = pmin.not_op();
+      if (pmax_1scomp > max_val) {
+        max_val = pmax_1scomp;
+      }
+
+      if (pmin_1scomp > max_val) {
+        max_val = pmin_1scomp;
+      }
+
+      if (pmax_1scomp < min_val) {
+        min_val = pmax_1scomp;
+      }
+
+      if (pmin_1scomp < min_val) {
+        min_val = pmin_1scomp;
+      }
+
     } else {
       debug_unconstrained_msg(node, e.driver);
       not_finished = true;
@@ -176,9 +190,7 @@ void Bitwidth::process_mux(Node &node, XEdge_iterator &inp_edges) {
   for (auto e : inp_edges) {
     if (e.sink.get_pid() == 0) {
       auto n_data_mux = inp_edges.size() - 1;
-
       Bitwidth_range bw(-(n_data_mux >> 1) - 1, (n_data_mux >> 1));
-
       adjust_bw(e.driver, bw);
       continue;
     }
@@ -231,9 +243,9 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
 
   auto           max     = a_bw.get_max();
   auto           min     = a_bw.get_min();
-  auto           amount  = n_bw.get_max().to_i();
-  auto           max_val = Lconst(Lconst(max.get_raw_num()) << Lconst(amount));
-  auto           min_val = Lconst(Lconst(min.get_raw_num()) << Lconst(amount));
+  auto           amount  = n_bw.get_max();
+  auto           max_val = max << amount;
+  auto           min_val = min << amount;
   Bitwidth_range bw(min_val, max_val);
 
   adjust_bw(node.get_driver_pin(), bw);
@@ -802,11 +814,7 @@ void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
 
     any_negative = any_negative || it->second.is_always_negative();
 
-    if (it->second.is_always_positive())
-      bits = it->second.get_sbits() - 1;
-    else
-      bits = it->second.get_sbits();
-
+    bits = it->second.get_sbits();
     if (bits > max_bits)
       max_bits = bits;
   }
@@ -843,7 +851,7 @@ void Bitwidth::process_bit_xor(Node &node, XEdge_iterator &inp_edges) {
       max_bits = bits;
   }
 
-  auto max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1;
+  auto max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1; //2^62 -1 
   auto min_val = Lconst(-1) - max_val;
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
@@ -1140,7 +1148,6 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
   if (parent_pending && node_attr.is_sink_connected("parent")) {
     auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
     bwmap.insert_or_assign(through_dpin.get_compact_class(), bw);
-    // bw.dump();
   }
 }
 
@@ -1430,7 +1437,6 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         },
         hier);
 
-    fmt::print("DEBUG9\n");
     lg->each_graph_output(
         [this](Node_pin &dpin) {
           if (dpin.get_name() == "%")
@@ -1450,7 +1456,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
           if (it->second.is_always_positive()) {
             dpin.set_unsign();
           } else {
-            dpin.set_unsign();
+            dpin.set_sign();
           }
 
           if (hier)

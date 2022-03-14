@@ -18,9 +18,10 @@ module Ops(
   wire [8:0] _GEN_11 = sel == 4'h2 ? 9'h1 : _GEN_9; // @[]
   wire [8:0] _GEN_12 = sel == 4'h1 ? $signed(9'sh0) : $signed(_GEN_10); // @[]
   wire [8:0] _GEN_13 = sel == 4'h1 ? 9'h0 : _GEN_11; // @[]
-  wire [8:0] _GEN_14 = sel == 4'h0 ? $signed($signed(is) + $signed(is)) : $signed(_GEN_12); // @[]
+  wire [8:0] _GEN_19 = $signed(is) + $signed(is); // @[]
+  wire [8:0] _GEN_14 = sel == 4'h0 ? $signed(_GEN_19) : $signed(_GEN_12); // @[]
   wire [8:0] _GEN_15 = sel == 4'h0 ? iu + iu : _GEN_13; // @[]
-  assign os = {{5{_GEN_14[8]}},_GEN_14}; // @[]
-  assign ou = {{4'd0}, _GEN_15}; // @[]
+  assign os = {{5{_GEN_14[8]}},_GEN_14};
+  assign ou = {{4'd0}, _GEN_15};
   assign obool = 1'h0;
 endmodule

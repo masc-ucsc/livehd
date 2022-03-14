@@ -39,21 +39,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;
 
-#if 0
-  // Iterate over inputs to look for tup_add to fill firbits for inputs
-  lg->each_graph_input([this,&fbmap](Node_pin &dpin) {
-
-    for(auto spin:dpin.out_sinks()) {
-      auto node = spin.get_node();
-      fmt::print("1.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
-      node.dump();
-      if (node.get_type_op() == Ntype_op::AttrSet) {
-      fmt::print("2.HERE!!!!!!!!!!!!!!! {}\n",node.debug_name());
-        analysis_lg_attr_set(node, fbmap);
-      }
-    }
-  });
-#endif
 
   int firbits_iters = 0;
   do {
@@ -143,7 +128,6 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it != fbmap.end()) {
       if (some_one_ready) {
-        /* I(max_bits == it->second.get_bits()); */
         max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
         I(sign == it->second.get_sign());
         continue;
@@ -583,7 +567,7 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges, FBMap &
       bits2 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(std::max(bits1, bits2), sign));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(std::max(bits1, bits2), false));
 }
 
 void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
@@ -1050,7 +1034,6 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, FBMap &
         firbits_wait_flop = true;
         return;
       }
-
       it = get_fbits_from_hierarchy(e);
     }
 

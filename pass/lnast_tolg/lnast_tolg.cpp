@@ -1011,8 +1011,13 @@ Node_pin Lnast_tolg::setup_node_assign_and_lhs(Lgraph *lg, const Lnast_nid &lnid
   auto lhs       = lnast->get_first_child(lnidx_opr);
   auto lhs_name  = lnast->get_sname(lhs);
   auto lhs_vname = lnast->get_vname(lhs);
-  auto rhs       = lnast->get_sibling_next(lhs);
-  (void)rhs;
+
+  // check if lhs has already a tuple or not
+  // bool already_tuple_lhs = false;
+  // if(name2dpin.find(lhs_name))
+
+
+
   auto assign_node = lg->create_node(Ntype_op::Or);
 
   name2dpin[lhs_name] = assign_node.setup_driver_pin();  // or as assign

@@ -61,7 +61,6 @@ cc_test(
     ],
 )
 
-
 cc_test(
     name = "lgraph_test",
     srcs = ["tests/lgraph_test.cpp"],

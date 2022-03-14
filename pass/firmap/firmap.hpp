@@ -84,7 +84,8 @@ protected:
   void map_node_fir_dshr(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_cvt(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_neg(Node &node, Lgraph *new_lg, PinMap &pinmap);
-  void map_node_fir_and_or_xor(Node &node, Lgraph *new_lg, std::string_view op, PinMap &pinmap);
+  void map_node_fir_or(Node &node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap);
+  void map_node_fir_and_xor(Node &node, Lgraph *new_lg, std::string_view op, PinMap &pinmap);
   void map_node_fir_orr(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_bits(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_not(Node &node, Lgraph *new_lg, FBMap &fbmap, PinMap &pinmap);

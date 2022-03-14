@@ -90,8 +90,9 @@ cc_library(
     "firrtl_tail3",
     "connect_through2",
     "direct_io_assign",
+    "bw_overflow",
     #"connect_through",  FIXME: re-enable
-    #"top", FIXME: re-enable
+    "top",
 ]]
 
 # High Level FIRRTL
@@ -113,9 +114,9 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "Test1",     
-    "VecSearch", 
-    "Mul",        
+    "Test1",
+    "VecSearch",
+    "Mul",
     "Test2",
     "VecShiftRegisterSimple",
     "VecShiftRegisterParam",
@@ -187,9 +188,9 @@ cc_library(
     "ClockGroupAggregator",
     "BreakpointUnit",
     "Arbiter_10",
+    "AMOALU",
 
     # FIXME:
-
     # issue1: memory
     # "Smem",
     # "SmemStruct",
@@ -199,15 +200,10 @@ cc_library(
     # "ListBuffer",
     # "BankedStore"
     # "BoomDuplicatedDataArray",
-    
-    # issue2: design too large and not LEC
-    # MemAddrCalcUnit
-
-    # ???
-    # "MemAddrCalcUnit"
     # "DynamicMemorySearch",
     # "Memo",
     # "Router",
+    
 ]]
 
 sh_test(

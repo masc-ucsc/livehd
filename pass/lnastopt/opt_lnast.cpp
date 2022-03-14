@@ -735,9 +735,11 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
   while (!idx.is_invalid()) {
     const auto &data = ln->get_data(idx);
 
-    auto  lhs_id   = ln->get_first_child(idx);
-    auto &lhs_data = ln->get_data(lhs_id);
-    auto  lhs_txt  = lhs_data.token.get_text();
+    auto  lhs_id    = ln->get_first_child(idx);
+    auto &lhs_data  = ln->get_data(lhs_id);
+    auto  lhs_txt   = lhs_data.token.get_text();
+    auto  rhs_const = st.get_trivial(lhs_txt);
+
 
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus:
@@ -747,7 +749,12 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and:
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or:
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: {
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        if (rhs_const.is_invalid()) {
+          // Could not find a constant value, keep the same original node
+          fmt::print("FIXME: copy similar structure\n");
+        }else{
+          ln2.create_assign_stmts(lhs_txt, rhs_const.to_pyrope());
+        }
         break;
       }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: {
@@ -758,7 +765,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
           const auto &child_data = ln->get_data(child);
 
           if (child_data.type.is_ref()) {  // if reference, check stored trivial value for conditional
-            if (st.get_trivial(lhs_txt).is_known_true()) {
+            if (rhs_const.is_known_true()) {
               idx = ln->get_first_child(ln->get_sibling_next(child));
               break;
             } else {
@@ -780,7 +787,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
           lhs_txt = lhs_txt.substr(1);
         }
         // std::cout << lhs_txt << " : " << st.get_trivial(lhs_txt) << std::endl;
-        ln2.create_assign_stmts(lhs_txt, st.get_trivial(lhs_txt).to_pyrope());
+        ln2.create_assign_stmts(lhs_txt, rhs_const.to_pyrope());
         break;
       }
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: break;

@@ -38,12 +38,12 @@ cc_test(
 cc_test(
     name = "archfp_test",
     srcs = ["tests/archfp_test.cpp"],
+    tags = [
+        "fixme",
+    ],
     deps = [
         ":archfp",
         "@com_google_googletest//:gtest_main",
-    ],
-    tags = [
-        "fixme",
     ],
 )
 
