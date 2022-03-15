@@ -151,12 +151,14 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
       cfg->threads = numthread;
 
       t.restart();
+#ifdef M_DEBUG
       EdgeWeight cut;
-      
       // number of specified edges mismatch  
       // due to discarding of self loops
       cut = mc->perform_minimum_cut(G);
-      if (cut < 0) exit(1);
+#else
+      mc->perform_minimum_cut(G);
+#endif
 
       if (cfg->output_path != "") {
         if (cfg->save_cut) {
