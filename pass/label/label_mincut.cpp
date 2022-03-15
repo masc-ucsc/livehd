@@ -146,8 +146,6 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
     for (int numthread : numthreads) {
       random_functions::setSeed(cfg->seed);
 
-      NodeID n = G->number_of_nodes();
-      EdgeID m = G->number_of_edges();
       
       auto mc = selectMincutAlgorithm<GraphPtr>(cfg->algorithm);       
       cfg->threads = numthread;
@@ -158,6 +156,7 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
       // number of specified edges mismatch  
       // due to discarding of self loops
       cut = mc->perform_minimum_cut(G);
+      if (cut < 0) exit(1);
 
       if (cfg->output_path != "") {
         if (cfg->save_cut) {
@@ -174,6 +173,8 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
       }
 
 #ifdef M_DEBUG
+      NodeID n = G->number_of_nodes();
+      EdgeID m = G->number_of_edges();
       std::cout << "RESULT:\n algo=" << algprint
                 << "\n queue=" << queue_type << "\n graph=" << graphname
                 << "\n time=" << t.elapsed() << "\n cut=" << cut
@@ -181,8 +182,8 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
                 << "\n processes=" << numthread
                 << "\n edge_select=" << cfg->edge_selection
                 << "\n seed=" << cfg->seed << std::endl;
-    }
 #endif
+    }
   }
 }
 
