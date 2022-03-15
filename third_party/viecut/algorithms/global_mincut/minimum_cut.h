@@ -37,6 +37,7 @@ class minimum_cut {
     }
 
     virtual EdgeWeight perform_minimum_cut() {
+        std::cerr << "At /algorithms/global_mincut/minimum_cut.h about to exit\n";
         exit(1);
         return 42;
     }

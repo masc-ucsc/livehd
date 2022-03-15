@@ -2,8 +2,7 @@
 
 #include "label_acyclic.hpp"
 
-#include "cell.hpp"
-#include "pass.hpp"
+//#include "pass.hpp"
 
 //#define G_DEBUG 1  // toggle for gather_inou debug print
 //#define O_DEBUG 1  // toggle for oneparent merge debug print
@@ -12,7 +11,7 @@
 //#define F_DEBUG 1  // toggle for final partition coloring print
 
 // Constructor for Label_acyclic
-Label_acyclic::Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff, bool _merge_en) : verbose(_verbose), hier(_hier), merge_en(_merge_en), cutoff(_cutoff) {
+Label_acyclic::Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m) : verbose(_v), hier(_h), merge_en(_m), cutoff(_c) {
   part_id = 0;  
 }
 

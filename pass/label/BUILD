@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
+        "//third_party/viecut",
     ],
     alwayslink = True,  # Needed to have constructor called
 )
