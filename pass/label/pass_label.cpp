@@ -29,6 +29,9 @@ void Pass_label::setup() {
   Eprp_method m1("pass.label.mincut", "Label a graph with mincut", &Pass_label::label_mincut);
   m1.add_label_optional("hier", "hierarchical traversal/labeling", "false");
   m1.add_label_optional("verbose", "verbose statistics and information", "false");
+  m1.add_label_optional("iters", "how many times to run the mincut algo", "1");
+  m1.add_label_optional("seed", "seed for the randomness of the mincut algo", "0");
+  m1.add_label_optional("alg", "the algorithm to be used for mincut", "vc");
   register_pass(m1);
 
   Eprp_method m2("pass.label.synth", "Label a graph with synthesis boundaries", &Pass_label::label_synth);
@@ -48,7 +51,15 @@ void Pass_label::setup() {
 void Pass_label::label_mincut(Eprp_var &var) {
   Pass_label pp(var);
 
-  Label_mincut p(pp.verbose, pp.hier);
+  auto iters_str = var.get("iters");
+  auto iters     = str_tools::to_i(iters_str);
+  
+  auto seed_str = var.get("seed");
+  auto seed     = str_tools::to_i(seed_str);
+  
+  auto alg_txt = var.get("alg");
+  
+  Label_mincut p(pp.verbose, pp.hier, iters, seed, alg_txt);
 
   for (const auto &l : var.lgs) {
     p.label(l);
