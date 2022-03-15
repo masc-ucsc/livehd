@@ -13,6 +13,8 @@
 
 #include "label_mincut.hpp"
 
+//#define M_DEBUG 1
+
 // typedef graph_access graph_type;
 typedef std::shared_ptr<mutable_graph> GraphPtr;
 
@@ -171,6 +173,7 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
           algprint += "-unlimited";
       }
 
+#ifdef M_DEBUG
       std::cout << "RESULT:\n algo=" << algprint
                 << "\n queue=" << queue_type << "\n graph=" << graphname
                 << "\n time=" << t.elapsed() << "\n cut=" << cut
@@ -179,6 +182,7 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
                 << "\n edge_select=" << cfg->edge_selection
                 << "\n seed=" << cfg->seed << std::endl;
     }
+#endif
   }
 }
 

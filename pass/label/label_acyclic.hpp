@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "pass.hpp"
+#include "cell.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lgraphbase.hpp"
@@ -52,7 +53,7 @@ private:
 
 public:
   void label(Lgraph *g);
-  Label_acyclic(bool _verbose, bool _hier, uint8_t _cutoff, bool _merge_en);
+  Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m);
   void dump(Lgraph *g) const;
 
 };
