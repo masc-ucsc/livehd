@@ -922,10 +922,8 @@ void Inou_firrtl_module::handle_bundle_vec_acc(Lnast& lnast, const firrtl::Firrt
 }
 
 void Inou_firrtl_module::handle_rd_mport_usage(Lnast& lnast, Lnast_nid& parent_node, std::string_view mport_name) {
-  // fmt::print("DEBUG2 rd_mport:{}\n", mport_name);
   auto mem_name     = mport2mem[mport_name];
   auto mem_port_str = mem2port_cnt[mem_name];
-  // fmt::print("DEBUG4 rd port cnt:{}\n", mem_port_str);
 
   auto it = mport_usage_visited.find(mport_name);
   if (it == mport_usage_visited.end()) {
@@ -968,7 +966,6 @@ void Inou_firrtl_module::handle_rd_mport_usage(Lnast& lnast, Lnast_nid& parent_n
 }
 
 void Inou_firrtl_module::handle_wr_mport_usage(Lnast& lnast, Lnast_nid& parent_node, std::string_view mport_name) {
-  // fmt::print("DEBUG2 wr_mport:{}\n", mport_name);
   auto mem_name     = mport2mem[mport_name];
   auto port_cnt     = mem2port_cnt[mem_name];
   auto port_cnt_str = port_cnt;
@@ -1442,8 +1439,6 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
       lnast.add_child(idx_conv, Lnast_node::create_const("__fir_as_sint"));
 
       auto str_val = rhs_expr.sint_literal().value().value();
-      fmt::print("DEBUG10 temp_var_str:{}, lhs_str:{}, str_val:{}\n", temp_var_str, lhs_str, str_val);
-      // I(false);
       lnast.add_child(idx_conv, Lnast_node::create_const(str_val));
 
       Lnast_nid idx_asg;
@@ -1692,7 +1687,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {
       memory_names.insert(stmt.cmemory().id());
-      // fmt::print("DEBUG0 cmemory:{}\n", stmt.cmemory().id());
       init_cmemory(lnast, parent_node, stmt.cmemory());
       break;
     }
@@ -1759,7 +1753,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         // (2) create the lhs dot and lhs <- rhs assignment
         return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
       } else {
-        // fmt::print("DEBUG9 kConnect\n");
         auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
         init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
 
@@ -1864,7 +1857,6 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
 
     std::vector<std::string> tmp_flattened_fields_per_port;
     for (int pcnt = 0; pcnt <= mem2port_cnt[mem_name]; pcnt++) {
-      // fmt::print("DEBUG3 @port_cnt:{}\n", pcnt);
       auto gmask_tmp_var_str = create_tmp_var();
       auto tg_tmp_var_str    = create_tmp_var();
       auto ta_tmp_var_str    = create_tmp_var();

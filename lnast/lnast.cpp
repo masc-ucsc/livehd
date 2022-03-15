@@ -739,8 +739,11 @@ void Lnast::ssa_rhs_if_subtree(const Lnast_nid &if_nid) {
         }
       }
     } else if (get_type(itr_nid).is_phi()) {
-      update_rhs_ssa_cnt_table(get_parent(if_nid), get_first_child(itr_nid));
+      auto c0 = get_first_child(itr_nid);
+      update_rhs_ssa_cnt_table(get_parent(if_nid), c0);
+      ssa_rhs_handle_a_operand(get_parent(if_nid), get_sibling_next(c0));
     } else {  // condition node
+      ssa_rhs_handle_a_operand(get_parent(if_nid), itr_nid);
       continue;
     }
   }
@@ -917,7 +920,7 @@ void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
           ssa_lhs_handle_a_statement(itr_nid, opr_nid);
         }
       }
-    }
+    }  
   }
   ssa_handle_phi_nodes(if_nid);
 }

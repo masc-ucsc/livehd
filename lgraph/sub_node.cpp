@@ -58,7 +58,6 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
   I(entry["name"].IsString());
-  // fmt::print("DEBUG18 old lgid:{}, new lgid:{}\n", lgid, entry["lgid"].GetUint64());
   lgid = entry["lgid"].GetUint64();
   name = entry["name"].GetString();
 
