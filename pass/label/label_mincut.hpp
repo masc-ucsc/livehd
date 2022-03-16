@@ -3,6 +3,7 @@
 #pragma once
 
 #include <vector>
+#include <sys/stat.h>
 
 #include "pass.hpp"
 #include "cell.hpp"

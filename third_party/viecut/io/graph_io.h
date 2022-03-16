@@ -139,6 +139,7 @@ class graph_io {
 
     template <class Graph = graph_access>
     static std::shared_ptr<Graph> readGraphWeighted(std::string file) {
+        bool self_loop_flag = false;
         std::shared_ptr<Graph> G = std::make_shared<Graph>();
         std::string line;
         // open file for reading
@@ -197,6 +198,7 @@ class graph_io {
                 if (!target) break;
                 // check for self-loops
                 if (target - 1 == node) {
+                    self_loop_flag = true;
                     continue;
                 }
 
@@ -213,11 +215,15 @@ class graph_io {
             }
         }
 
+        // As we discard self-loops, this might happen. Thus, no exiting!
+        // But if there are zero self-loops and still edge mismatch, exit
+        // Node counter not matching is however probably a problem with G.
         if (edge_counter != (EdgeID)nmbEdges) {
-            std::cerr << "number of specified edges mismatch" << std::endl;
-            std::cerr << edge_counter << " " << nmbEdges << std::endl;
-            // As we discard self-loops, this might happen. Thus, no exiting!
-            // Node counter not matching is however probably a problem with G.
+            if (!self_loop_flag) {
+                std::cerr << "number of specified edges mismatch" << std::endl;
+                std::cerr << edge_counter << " " << nmbEdges << std::endl;
+                exit(4);
+            }
         }
 
         if (node_counter != (NodeID)nmbNodes) {

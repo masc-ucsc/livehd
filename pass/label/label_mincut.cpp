@@ -194,6 +194,11 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
  * Labels lg based on a result file generated from VieCut and fills id2color
  * * * * * * * * */
 void Label_mincut::viecut_label(std::string result_path) {
+  struct stat buff;
+  if (stat(result_path.c_str(), &buff) != 0) {
+    fmt::print("viecut result file, {}, does no exist inside {}\n", result_name, base_path);
+    return;
+  }
   std::ifstream in_file(result_path);
   std::string one_line;
   int line_tracker = 0;
@@ -259,7 +264,9 @@ void Label_mincut::dump(Lgraph *g) {
  * * * * * * * * */
 void Label_mincut::label(Lgraph *g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
+      lg->ref_node_color_map()->clear(); 
+    });
   }
   g->ref_node_color_map()->clear();
  
