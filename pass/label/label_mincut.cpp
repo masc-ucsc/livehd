@@ -39,6 +39,7 @@ void Label_mincut::gather_ids(Lgraph *g) {
   node_id = 0;                        // ensure reset
   for (auto n : g->forward(hier)) {   // forward iteration for order
     if (n.get_type_op() == Ntype_op::IO) continue;    
+    if (n.get_type_op() == Ntype_op::Const) continue;    
     node2id[n.get_compact()] = node_id; 
     id2node[node_id] = n.get_compact();
     node_id++;
@@ -56,6 +57,8 @@ void Label_mincut::gather_neighs(Lgraph *g) {
     auto curr_node = it.second;
     
     Node tmp_n(g, curr_node); 
+
+    if (tmp_n.get_type_op() == Ntype_op::Const) continue;
     // gather the sinks
     for (auto &e : tmp_n.out_edges()) {
       auto spin = e.sink;
@@ -64,7 +67,8 @@ void Label_mincut::gather_neighs(Lgraph *g) {
       auto dnode = dpin.get_node();
       auto outgoing_id = node2id[snode.get_compact()];
       auto this_id = node2id[dnode.get_compact()];
-      
+     
+      if (snode.get_type_op() == Ntype_op::Const) continue; 
       if (snode.get_type_op() != Ntype_op::IO) { 
         if ((curr_id != outgoing_id) && (curr_id == this_id)) {
           id2neighs[curr_id].insert(outgoing_id);
@@ -82,6 +86,7 @@ void Label_mincut::gather_neighs(Lgraph *g) {
       auto incoming_id = node2id[dnode.get_compact()]; 
       auto this_id = node2id[snode.get_compact()];
       
+      if (dnode.get_type_op() == Ntype_op::Const) continue; 
       if (dnode.get_type_op() != Ntype_op::IO) {
         if ((curr_id != incoming_id) && (curr_id == this_id)) {
           id2neighs[curr_id].insert(incoming_id); 

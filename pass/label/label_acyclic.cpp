@@ -15,57 +15,6 @@ Label_acyclic::Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m) : verbose(_v
   part_id = 0;  
 }
 
-// dump()
-void Label_acyclic::dump(Lgraph *g) const {
-  fmt::print("/---------------/\n");
-  fmt::print("Label_acyclic dump:\n");
-  
-  // Internal Nodes printing 
-  int node_tracker = 0;
-  
-  for (auto n : g->forward(hier)) {
-    fmt::print("Node: {}", n.debug_name());
-    if (n.has_color()) {
-      fmt::print(", Node Color: {}\n", n.get_color());
-    } else {
-      fmt::print("\n");
-    }
-    node_tracker++;
-  } 
-  fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
-  
-  fmt::print("=== id2inc ===\n");
-  for (auto &it : id2inc) {
-    fmt::print("  Part ID: {}\n", it.first);
-    for (auto &n : it.second) {
-      Node node(g, n);
-      fmt::print("    {}\n", node.debug_name());
-    }
-  }
-  
-  fmt::print("=== id2out ===\n");
-  for (auto &it : id2out) {
-    fmt::print("  Part ID: {}\n", it.first);
-    for (auto &n : it.second) {
-      Node node(g, n);
-      fmt::print("    {}\n", node.debug_name());
-    }
-  }
-  
-  fmt::print("=== Roots ===\n");
-  for (auto &it : roots) {
-    Node n(g, it);
-    fmt::print("    {}\n", n.debug_name());
-  }
-
-  fmt::print("=== node2id ===\n");
-  for (auto &it : node2id) {
-    Node n(g, it.first);
-    fmt::print("    {}, ID: {}\n", n.debug_name(), it.second);
-  }
-  fmt::print("/---------------/\n");
-}
-
 
 /* * * * * * *  
  Compares absl::flat_hash_set<Node::Compact>'s
@@ -220,7 +169,8 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     
     for (auto &n : curr_id_nodes) {
       Node tmp_n(g, n);
-      
+     
+      if (tmp_n.get_type_op() == Ntype_op::Const) continue;
       // gather the sinks for id2out and id2outparts
       for (auto &e : tmp_n.out_edges()) {
         auto spin = e.sink;
@@ -231,7 +181,6 @@ void Label_acyclic::gather_inou(Lgraph *g) {
         auto this_id = node2id[dnode.get_compact()];
         
         if (snode.get_type_op() == Ntype_op::Const) continue;
-
         if (snode.get_type_op() != Ntype_op::IO) { 
           if ((curr_id != outgoing_id) && (curr_id == this_id)) {
             common_node1.insert(snode.get_compact());
@@ -250,7 +199,6 @@ void Label_acyclic::gather_inou(Lgraph *g) {
         auto this_id = node2id[snode.get_compact()];
         
         if (dnode.get_type_op() == Ntype_op::Const) continue;
-        
         if (dnode.get_type_op() != Ntype_op::IO) {
           if ((curr_id != incoming_id) && (curr_id == this_id)) {
             common_node2.insert(dnode.get_compact());
@@ -498,6 +446,57 @@ void Label_acyclic::merge_partitions_one_parent() {
       }
     }
   }
+}
+
+// dump()
+void Label_acyclic::dump(Lgraph *g) const {
+  fmt::print("/---------------/\n");
+  fmt::print("Label_acyclic dump:\n");
+  
+  // Internal Nodes printing 
+  int node_tracker = 0;
+  
+  for (auto n : g->forward(hier)) {
+    fmt::print("Node: {}", n.debug_name());
+    if (n.has_color()) {
+      fmt::print(", Node Color: {}\n", n.get_color());
+    } else {
+      fmt::print("\n");
+    }
+    node_tracker++;
+  } 
+  fmt::print("Found {} nodes using g->forward(hier)\n", node_tracker);
+  
+  fmt::print("=== id2inc ===\n");
+  for (auto &it : id2inc) {
+    fmt::print("  Part ID: {}\n", it.first);
+    for (auto &n : it.second) {
+      Node node(g, n);
+      fmt::print("    {}\n", node.debug_name());
+    }
+  }
+  
+  fmt::print("=== id2out ===\n");
+  for (auto &it : id2out) {
+    fmt::print("  Part ID: {}\n", it.first);
+    for (auto &n : it.second) {
+      Node node(g, n);
+      fmt::print("    {}\n", node.debug_name());
+    }
+  }
+  
+  fmt::print("=== Roots ===\n");
+  for (auto &it : roots) {
+    Node n(g, it);
+    fmt::print("    {}\n", n.debug_name());
+  }
+
+  fmt::print("=== node2id ===\n");
+  for (auto &it : node2id) {
+    Node n(g, it.first);
+    fmt::print("    {}, ID: {}\n", n.debug_name(), it.second);
+  }
+  fmt::print("/---------------/\n");
 }
 
 
