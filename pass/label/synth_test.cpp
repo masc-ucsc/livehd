@@ -14,12 +14,14 @@
 #include "gmock/gmock.h"
 #include "lgraph.hpp"
 
-#define RUN 0
-//#define DEBUG 0
+// Defined with #ifdef
+//#define RUN 1
+#define DEBUG 1
 
-#define TEST1 0
-#define TEST2 0
-#define TEST3 0 
+// Defined with #if
+#define TEST1 1
+#define TEST2 1
+#define TEST3 1 
 
 class Label_synth_test : public ::testing::Test { 
   public: 
@@ -39,26 +41,26 @@ TEST_F(Label_synth_test, test1) {
   Label_synth labeler(verbose, hier, synth);
 
   // input/output
-  auto graph_inp_A = a_graph->add_graph_input("A", 1, 10);
-  auto graph_inp_B = a_graph->add_graph_input("B", 3, 10);
-  auto graph_inp_C = a_graph->add_graph_input("C", 5, 10);
-  auto graph_out_Y = a_graph->add_graph_output("Y", 9, 10);
+  auto graph_inp_A = a_graph->add_graph_input("a_graph_in", 1, 10);
+  auto graph_inp_B = a_graph->add_graph_input("b_graph_in", 3, 10);
+  auto graph_inp_C = a_graph->add_graph_input("c_graph_in", 5, 10);
+  auto graph_out_Y = a_graph->add_graph_output("d_graph_in", 9, 10);
  
   // create nodes
   auto sum_node = a_graph->create_node(Ntype_op::Sum);
-  auto sum_node_inp_A = sum_node.setup_sink_pin("A");
-  auto sum_node_inp_B = sum_node.setup_sink_pin("B");
-  auto sum_node_out_Y = sum_node.setup_driver_pin("Y");
+  auto sum_node_inp_A = sum_node.setup_sink_pin(std::string_view("A"));
+  auto sum_node_inp_B = sum_node.setup_sink_pin(std::string_view("B"));
+  auto sum_node_out_Y = sum_node.setup_driver_pin(std::string_view("Y"));
   
   auto mux_node = a_graph->create_node(Ntype_op::Mux);
-  auto mux_node_inp_A = mux_node.setup_sink_pin("A");
-  auto mux_node_inp_B = mux_node.setup_sink_pin("B");
-  auto mux_node_inp_S = mux_node.setup_sink_pin("S");
-  auto mux_node_out_Y = mux_node.setup_driver_pin("Y");
+  auto mux_node_inp_A = mux_node.setup_sink_pin(std::string_view("1"));
+  auto mux_node_inp_B = mux_node.setup_sink_pin(std::string_view("2"));
+  auto mux_node_inp_S = mux_node.setup_sink_pin(std::string_view("3"));
+  auto mux_node_out_Y = mux_node.setup_driver_pin(std::string_view("Y"));
  
   auto xor_node = a_graph->create_node(Ntype_op::Xor);
-  auto xor_node_inp_A = xor_node.setup_sink_pin("A");
-  auto xor_node_out_Y = xor_node.setup_driver_pin("Y");
+  auto xor_node_inp_A = xor_node.setup_sink_pin();
+  auto xor_node_out_Y = xor_node.setup_driver_pin(std::string_view("Y"));
 
   //---------------------------------------------------
   // creating edges
@@ -98,44 +100,44 @@ TEST_F(Label_synth_test, test2) {
   Label_synth labeler(verbose, hier, synth);
 
   // input/output
-  auto graph_inp_A = b_graph->add_graph_input("A", 1, 10);
-  auto graph_inp_B = b_graph->add_graph_input("B", 3, 10);
-  auto graph_inp_C = b_graph->add_graph_input("C", 5, 1);
-  auto graph_out_Y = b_graph->add_graph_output("Y", 9, 10);
+  auto graph_inp_A = b_graph->add_graph_input("a_graph_in", 1, 10);
+  auto graph_inp_B = b_graph->add_graph_input("b_graph_in", 3, 10);
+  auto graph_inp_C = b_graph->add_graph_input("c_graph_in", 5, 1);
+  auto graph_out_Y = b_graph->add_graph_output("y_graph_out", 9, 10);
   
-  auto graph_inp_D = b_graph->add_graph_input("A", 11, 10);
-  auto graph_inp_E = b_graph->add_graph_input("B", 13, 10);
-  auto graph_inp_F = b_graph->add_graph_input("C", 15, 1);
+  auto graph_inp_D = b_graph->add_graph_input("d_graph_in", 11, 10);
+  auto graph_inp_E = b_graph->add_graph_input("e_graph_in", 13, 10);
+  auto graph_inp_F = b_graph->add_graph_input("f_graph_in", 15, 1);
  
   // create nodes
   auto sum_node = b_graph->create_node(Ntype_op::Sum);
-  auto sum_node_inp_A = sum_node.setup_sink_pin("A");
-  auto sum_node_inp_B = sum_node.setup_sink_pin("B");
-  auto sum_node_out_Y = sum_node.setup_driver_pin("Y");
+  auto sum_node_inp_A = sum_node.setup_sink_pin(std::string_view("A"));
+  auto sum_node_inp_B = sum_node.setup_sink_pin(std::string_view("B"));
+  auto sum_node_out_Y = sum_node.setup_driver_pin(std::string_view("Y"));
   
   auto sum_node2 = b_graph->create_node(Ntype_op::Sum);
-  auto sum_node2_inp_A = sum_node2.setup_sink_pin("A");
-  auto sum_node2_inp_B = sum_node2.setup_sink_pin("B");
-  auto sum_node2_out_Y = sum_node2.setup_driver_pin("Y");
+  auto sum_node2_inp_A = sum_node2.setup_sink_pin(std::string_view("A"));
+  auto sum_node2_inp_B = sum_node2.setup_sink_pin(std::string_view("B"));
+  auto sum_node2_out_Y = sum_node2.setup_driver_pin(std::string_view("Y"));
 
   auto mux_node = b_graph->create_node(Ntype_op::Mux);
-  auto mux_node_inp_A = mux_node.setup_sink_pin("A");
-  auto mux_node_inp_B = mux_node.setup_sink_pin("B");
-  auto mux_node_inp_S = mux_node.setup_sink_pin("S");
-  auto mux_node_out_Y = mux_node.setup_driver_pin("Y");
+  auto mux_node_inp_A = mux_node.setup_sink_pin(std::string_view("1"));
+  auto mux_node_inp_B = mux_node.setup_sink_pin(std::string_view("2"));
+  auto mux_node_inp_S = mux_node.setup_sink_pin(std::string_view("3"));
+  auto mux_node_out_Y = mux_node.setup_driver_pin(std::string_view("Y"));
   
   auto mux_node2 = b_graph->create_node(Ntype_op::Mux);
-  auto mux_node2_inp_A = mux_node2.setup_sink_pin("A");
-  auto mux_node2_inp_B = mux_node2.setup_sink_pin("B");
-  auto mux_node2_inp_S = mux_node2.setup_sink_pin("S");
-  auto mux_node2_out_Y = mux_node2.setup_driver_pin("Y");
+  auto mux_node2_inp_A = mux_node2.setup_sink_pin(std::string_view("1"));
+  auto mux_node2_inp_B = mux_node2.setup_sink_pin(std::string_view("2"));
+  auto mux_node2_inp_S = mux_node2.setup_sink_pin(std::string_view("3"));
+  auto mux_node2_out_Y = mux_node2.setup_driver_pin(std::string_view("Y"));
  
   auto xor_node = b_graph->create_node(Ntype_op::Xor);
-  auto xor_node_inp_A = xor_node.setup_sink_pin("A");
-  auto xor_node_out_Y = xor_node.setup_driver_pin("Y");
+  auto xor_node_inp_A = xor_node.setup_sink_pin();
+  auto xor_node_out_Y = xor_node.setup_driver_pin(std::string_view("Y"));
   
   auto xor_node2 = b_graph->create_node(Ntype_op::Xor);
-  auto xor_node2_inp_A = xor_node2.setup_sink_pin("A");
+  auto xor_node2_inp_A = xor_node2.setup_sink_pin();
 
   //---------------------------------------------------
   // creating edges
@@ -183,41 +185,41 @@ TEST_F(Label_synth_test, test3) {
   Label_synth labeler(verbose, hier, synth);
 
   // input/output
-  auto graph_inp_A = c_graph->add_graph_input("A", 1, 10);
+  auto graph_inp_A = c_graph->add_graph_input("a_graph_in", 1, 10);
   //auto graph_out_Y = c_graph->add_graph_output("Y", 3, 10);
  
   // create nodes
   auto xor_node1 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node1_inp_A = xor_node1.setup_sink_pin("A");
-  auto xor_node1_out_Y = xor_node1.setup_driver_pin("Y");
+  auto xor_node1_inp_A = xor_node1.setup_sink_pin();
+  auto xor_node1_out_Y = xor_node1.setup_driver_pin(std::string_view("Y"));
 
   auto xor_node2 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node2_inp_A = xor_node2.setup_sink_pin("A");
+  auto xor_node2_inp_A = xor_node2.setup_sink_pin();
   //auto xor_node2_out_Y = xor_node2.setup_driver_pin("Y");
 
   auto xor_node3 = c_graph->create_node(Ntype_op::Xor);
   //auto xor_node3_inp_A = xor_node3.setup_sink_pin("A");
-  auto xor_node3_out_Y = xor_node3.setup_driver_pin("Y");
+  auto xor_node3_out_Y = xor_node3.setup_driver_pin(std::string_view("Y"));
 
   auto xor_node4 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node4_inp_A = xor_node4.setup_sink_pin("A");
-  auto xor_node4_out_Y = xor_node4.setup_driver_pin("Y");
+  auto xor_node4_inp_A = xor_node4.setup_sink_pin();
+  auto xor_node4_out_Y = xor_node4.setup_driver_pin(std::string_view("Y"));
 
   auto xor_node5 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node5_inp_A = xor_node5.setup_sink_pin("A");
+  auto xor_node5_inp_A = xor_node5.setup_sink_pin();
   //auto xor_node5_out_Y = xor_node5.setup_driver_pin("Y");
 
   auto xor_node6 = c_graph->create_node(Ntype_op::Xor);
   //auto xor_node6_inp_A = xor_node6.setup_sink_pin("A");
-  auto xor_node6_out_Y = xor_node6.setup_driver_pin("Y");
+  auto xor_node6_out_Y = xor_node6.setup_driver_pin(std::string_view("Y"));
 
   auto xor_node7 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node7_inp_A = xor_node7.setup_sink_pin("A");
+  auto xor_node7_inp_A = xor_node7.setup_sink_pin();
   //auto xor_node7_out_Y = xor_node7.setup_driver_pin("Y");
 
   auto xor_node0 = c_graph->create_node(Ntype_op::Xor);
-  auto xor_node0_inp_A = xor_node0.setup_sink_pin("A");
-  auto xor_node0_out_Y = xor_node0.setup_driver_pin("Y");
+  auto xor_node0_inp_A = xor_node0.setup_sink_pin();
+  auto xor_node0_out_Y = xor_node0.setup_driver_pin(std::string_view("Y"));
   
   // creating edges
   c_graph->add_edge(graph_inp_A, xor_node0_inp_A, 10); // input a -> Xor input
@@ -231,6 +233,8 @@ TEST_F(Label_synth_test, test3) {
   c_graph->add_edge(xor_node6_out_Y, xor_node7_inp_A, 10); // 6 -> 7
 
   labeler.label(c_graph);
+
+  fmt::print("swagg\n");
   
   for (const auto &n : c_graph->forward(hier)) {
 #ifdef DEBUG
@@ -240,7 +244,7 @@ TEST_F(Label_synth_test, test3) {
 }
 #endif
 
-#if RUN
+#ifdef RUN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

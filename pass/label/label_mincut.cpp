@@ -212,7 +212,8 @@ void Label_mincut::viecut_label(std::string result_path) {
       std::getline(in_file, one_line);
       if (one_line.size() == 0) continue;
       auto curr_node = id2node[line_tracker++];
-      node2color[curr_node] = str_tools::to_i(one_line);
+      // Add one to avoid 0 as a color
+      node2color[curr_node] = str_tools::to_i(one_line) + 1;
     }
   }
   in_file.close();
@@ -261,6 +262,8 @@ void Label_mincut::dump(Lgraph *g) {
     auto curr_col = it.second;
     fmt::print("  Node: {}, Color: {}\n", tmp_n.debug_name(), curr_col);    
   } 
+  
+  fmt::print("---- fin ----\n");
 }
 
 
@@ -269,8 +272,8 @@ void Label_mincut::dump(Lgraph *g) {
  * * * * * * * * */
 void Label_mincut::label(Lgraph *g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
-      lg->ref_node_color_map()->clear(); 
+    g->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
+      g->ref_node_color_map()->clear(); 
     });
   }
   g->ref_node_color_map()->clear();
@@ -282,7 +285,12 @@ void Label_mincut::label(Lgraph *g) {
   viecut_label(result_location);
   
   for (auto n : g->fast(hier)) {
-    n.set_color(node2color[n.get_compact()]);
+    auto nc = n.get_compact();
+    if (node2color.contains(nc)) {
+      n.set_color(node2color[nc]);
+    } else {
+      n.set_color(0);
+    }
   }
 
   if (verbose) dump(g);

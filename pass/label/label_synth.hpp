@@ -19,7 +19,7 @@ private:
   int collapse_set_min;
 
   absl::flat_hash_set<int>                     collapse_set;
-  absl::flat_hash_map<Node::Compact_flat, int> flat_node2id;
+  absl::flat_hash_map<Node::Compact, int>      flat_node2id;
   absl::flat_hash_map<int, int>                flat_merges;
 
   int  get_free_id();
@@ -34,5 +34,5 @@ public:
 
   Label_synth(bool _verbose, bool _hier, std::string_view alg);
 
-  void dump() const;
+  void dump(Lgraph *g) const;
 };

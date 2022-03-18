@@ -12,7 +12,7 @@
 
 // Constructor for Label_acyclic
 Label_acyclic::Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m) : verbose(_v), hier(_h), merge_en(_m), cutoff(_c) {
-  part_id = 0;  
+  part_id = 1;  
 }
 
 
@@ -450,8 +450,7 @@ void Label_acyclic::merge_partitions_one_parent() {
 
 // dump()
 void Label_acyclic::dump(Lgraph *g) const {
-  fmt::print("/---------------/\n");
-  fmt::print("Label_acyclic dump:\n");
+  fmt::print("---- Label_acyclic dump ----\n");
   
   // Internal Nodes printing 
   int node_tracker = 0;
@@ -496,13 +495,15 @@ void Label_acyclic::dump(Lgraph *g) const {
     Node n(g, it.first);
     fmt::print("    {}, ID: {}\n", n.debug_name(), it.second);
   }
-  fmt::print("/---------------/\n");
+  fmt::print("---- fin ----\n");
 }
 
 
 void Label_acyclic::label(Lgraph *g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
+      g->ref_node_color_map()->clear(); 
+    });
   }
   g->ref_node_color_map()->clear();
 
@@ -528,9 +529,14 @@ void Label_acyclic::label(Lgraph *g) {
 #endif
 
   // Actual Labeling happens here:
-  for (auto n : g->fast(hier)) { 
-    n.set_color(node2id[n.get_compact()]);
-    //n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+  for (auto n : g->fast(hier)) {
+    auto nc = n.get_compact();
+    if (node2id.contains(nc)) { 
+      n.set_color(node2id[nc]);
+      //n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+    } else {
+      n.set_color(0);
+    }
   }
 
   if (verbose) dump(g);

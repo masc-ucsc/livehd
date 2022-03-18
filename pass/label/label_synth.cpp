@@ -18,7 +18,7 @@ Label_synth::Label_synth(bool _verbose, bool _hier, std::string_view alg) : verb
 int Label_synth::get_free_id() { return last_free_id++; }
 
 void Label_synth::set_id(const Node &node, int id) {
-  auto [it, inserted] = flat_node2id.insert({node.get_compact_flat(), id});
+  auto [it, inserted] = flat_node2id.insert({node.get_compact(), id});
   if (inserted || id == it->second)
     return;
 
@@ -58,7 +58,7 @@ void Label_synth::mark_ids(Lgraph *g) {
     }
 
     int  id = 0;
-    auto it = flat_node2id.find(node.get_compact_flat());
+    auto it = flat_node2id.find(node.get_compact());
     if (it == flat_node2id.end()) {
       id = get_free_id();
     } else {
@@ -143,10 +143,20 @@ void Label_synth::merge_ids() {
 #endif
 }
 
-void Label_synth::dump() const {
+void Label_synth::dump(Lgraph *g) const {
+  fmt::print("---- Label Synth dump ----\n");
+  fmt::print("=== flat_merges ===\n");
   for (auto &it : flat_merges) {
     fmt::print("{} -> {}\n", it.first, it.second);
   }
+  
+  fmt::print("=== flat_node2id ===\n");
+  for (auto &it : flat_node2id) {
+    Node node(g, it.first);
+    fmt::print(":{} node:{}\n", it.second, node.debug_name());
+  }
+
+  fmt::print("---- fin ----\n");
 }
 
 void Label_synth::label(Lgraph *g) {
@@ -156,23 +166,27 @@ void Label_synth::label(Lgraph *g) {
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
+      g->ref_node_color_map()->clear(); 
+    });
   }
   g->ref_node_color_map()->clear();
 
+  for (auto n : g->fast(hier)) {
+    auto nc = n.get_compact();
+    if (flat_node2id.find(nc) != flat_node2id.end()) {
+      n.set_color(flat_node2id[nc]); 
+    } else {
+      n.set_color(0);
+    }
+  }
+
+  /*
   for (auto &it : flat_node2id) {
     Node node(g, it.first);
     node.set_color(it.second);
-
-    fmt::print("Node: {}, Color: {}\n", node.debug_name(), node.get_color());
   }
+  */
 
-  if (verbose) {
-    // dump();
-
-    for (auto &it : flat_node2id) {
-      Node node(g, it.first);
-      fmt::print(":{} node:{}\n", it.second, node.debug_name());
-    }
-  }
+  if (verbose) dump(g);
 }

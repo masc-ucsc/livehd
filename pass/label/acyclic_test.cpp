@@ -14,14 +14,16 @@
 #include "gmock/gmock.h"
 #include "lgraph.hpp"
 
-#define RUN 0
+// Defined with #ifdef
+//#define RUN 1
 #define GENERIC_CHECK 1
+#define DEBUG 1
 
-#define ESSENT_TEST 1
-#define SIMPLE_NO_LOOP 1
-#define SIMPLE_LOOP 1
+// Defined with #if
+#define TEST1 1
+#define TEST2 1
+#define TEST3 1
 
-//#define DEBUG 0
 
 class Label_acyclic_test : public ::testing::Test { 
   public: 
@@ -30,7 +32,7 @@ class Label_acyclic_test : public ::testing::Test {
 };
 
 
-#if SIMPLE_NO_LOOP
+#if TEST1
 TEST_F(Label_acyclic_test, simple_graph_no_loop) { 
   Lgraph* a_graph = Lgraph::create("lgdb", "a_graph", "-");
   ASSERT_NE(a_graph, nullptr);
@@ -90,7 +92,7 @@ TEST_F(Label_acyclic_test, simple_graph_no_loop) {
 #endif
 
 
-#if SIMPLE_LOOP
+#if TEST2
 TEST_F(Label_acyclic_test, simple_graph_loop) {
   Lgraph* b_graph = Lgraph::create("lgdb", "b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
@@ -197,7 +199,7 @@ TEST_F(Label_acyclic_test, simple_graph_loop) {
 
 #endif
 
-#if ESSENT_TEST
+#if TEST3
 TEST_F(Label_acyclic_test, essent_test) { 
   Lgraph* c_graph = Lgraph::create("lgdb", "c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
@@ -215,7 +217,6 @@ TEST_F(Label_acyclic_test, essent_test) {
   auto verbose = false;
   auto hier = false;
   auto cutoff = 1;
-  //auto merge_en = true;
   auto merge_en = true;
   Label_acyclic labeler(verbose, hier, cutoff, merge_en);
 
@@ -290,7 +291,7 @@ TEST_F(Label_acyclic_test, essent_test) {
 
 #endif
 
-#if RUN
+#ifdef RUN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
