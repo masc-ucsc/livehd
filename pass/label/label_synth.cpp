@@ -177,7 +177,7 @@ void Label_synth::label(Lgraph *g) {
     if (flat_node2id.find(nc) != flat_node2id.end()) {
       n.set_color(flat_node2id[nc]); 
     } else {
-      n.set_color(0);
+      n.set_color(NO_COLOR);
     }
   }
 

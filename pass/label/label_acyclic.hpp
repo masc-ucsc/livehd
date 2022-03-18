@@ -11,6 +11,8 @@
 #include "lgraphbase.hpp"
 #include "lnast.hpp"
 
+#define NO_COLOR 0
+
 class Label_acyclic {
 private:
   const bool verbose;

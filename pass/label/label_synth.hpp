@@ -9,6 +9,8 @@
 #include "lgraphbase.hpp"
 #include "lnast.hpp"
 
+#define NO_COLOR 0
+
 class Label_synth {
 private:
   const bool verbose;

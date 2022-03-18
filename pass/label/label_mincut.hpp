@@ -12,6 +12,8 @@
 #include "lgraphbase.hpp"
 #include "lnast.hpp"
 
+#define NO_COLOR 0
+
 class Label_mincut {
 private:
   const bool verbose;

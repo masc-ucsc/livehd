@@ -213,7 +213,8 @@ void Label_mincut::viecut_label(std::string result_path) {
       if (one_line.size() == 0) continue;
       auto curr_node = id2node[line_tracker++];
       // Add one to avoid 0 as a color
-      node2color[curr_node] = str_tools::to_i(one_line) + 1;
+      auto t_col = str_tools::to_i(one_line);
+      node2color[curr_node] = (t_col == NO_COLOR) ? (t_col + 1) : (t_col);
     }
   }
   in_file.close();
@@ -289,7 +290,7 @@ void Label_mincut::label(Lgraph *g) {
     if (node2color.contains(nc)) {
       n.set_color(node2color[nc]);
     } else {
-      n.set_color(0);
+      n.set_color(NO_COLOR);
     }
   }
 

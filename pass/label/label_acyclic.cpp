@@ -535,7 +535,7 @@ void Label_acyclic::label(Lgraph *g) {
       n.set_color(node2id[nc]);
       //n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
     } else {
-      n.set_color(0);
+      n.set_color(NO_COLOR);
     }
   }
 
