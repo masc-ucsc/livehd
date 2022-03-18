@@ -40,3 +40,14 @@ cc_test(
         "@fmt",
     ],
 )
+
+cc_test(
+    name = "mincut_test",
+    srcs = ["mincut_test.cpp"],
+    deps = [
+        ":pass_label",
+        "@com_google_googletest//:gtest_main",
+        "@fmt",
+        "//third_party/viecut",
+    ],
+)

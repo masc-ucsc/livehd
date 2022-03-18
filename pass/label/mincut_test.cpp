@@ -1,4 +1,4 @@
-#include "label_synth.hpp"
+#include "label_mincut.hpp"
 
 #include <strings.h>
 #include <unistd.h>
@@ -15,13 +15,14 @@
 #include "lgraph.hpp"
 
 #define RUN 0
-//#define DEBUG 0
 
 #define TEST1 0
 #define TEST2 0
-#define TEST3 0 
+#define TEST3 0
 
-class Label_synth_test : public ::testing::Test { 
+//#define DEBUG 0
+
+class Label_mincut_test : public ::testing::Test { 
   public: 
     void SetUp() override { }
     void TearDown() override { }
@@ -29,14 +30,16 @@ class Label_synth_test : public ::testing::Test {
 
 
 #if TEST1
-TEST_F(Label_synth_test, test1) { 
+TEST_F(Label_mincut_test, test1) { 
   Lgraph* a_graph = Lgraph::create("lgdb", "a_graph", "-");
   ASSERT_NE(a_graph, nullptr);
 
   auto verbose = false;
   auto hier = false;
-  std::string synth = "synth";
-  Label_synth labeler(verbose, hier, synth);
+  auto iters = 1;
+  auto seed = 0;
+  std::string_view alg("vc");
+  Label_mincut labeler(verbose, hier, iters, seed, alg);
 
   // input/output
   auto graph_inp_A = a_graph->add_graph_input("A", 1, 10);
@@ -88,14 +91,16 @@ TEST_F(Label_synth_test, test1) {
 
 
 #if TEST2
-TEST_F(Label_synth_test, test2) {
+TEST_F(Label_mincut_test, test2) {
   Lgraph* b_graph = Lgraph::create("lgdb", "b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
 
   auto verbose = false;
   auto hier = false;
-  std::string synth = "synth";
-  Label_synth labeler(verbose, hier, synth);
+  auto iters = 1;
+  auto seed = 0;
+  std::string_view alg("vc");
+  Label_mincut labeler(verbose, hier, iters, seed, alg);
 
   // input/output
   auto graph_inp_A = b_graph->add_graph_input("A", 1, 10);
@@ -172,15 +177,17 @@ TEST_F(Label_synth_test, test2) {
 }
 #endif
 
-#if TEST3
-TEST_F(Label_synth_test, test3) { 
+#if ESSENT_TEST
+TEST_F(Label_acyclic_test, essent_test) { 
   Lgraph* c_graph = Lgraph::create("lgdb", "c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
   
   auto verbose = false;
   auto hier = false;
-  std::string synth = "synth";
-  Label_synth labeler(verbose, hier, synth);
+  auto iters = 1;
+  auto seed = 0;
+  std::string_view alg("vc");
+  Label_mincut labeler(verbose, hier, iters, seed, alg);
 
   // input/output
   auto graph_inp_A = c_graph->add_graph_input("A", 1, 10);
@@ -233,6 +240,7 @@ TEST_F(Label_synth_test, test3) {
   labeler.label(c_graph);
   
   for (const auto &n : c_graph->forward(hier)) {
+    //ASSERT_EQ(expected[n.debug_name()], static_cast<int>(n.get_color()));
 #ifdef DEBUG
     fmt::print("Node Name:{} , Node Color:{}\n", n.debug_name(), n.get_color()); 
 #endif
