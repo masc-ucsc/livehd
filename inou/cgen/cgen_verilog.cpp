@@ -570,7 +570,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     int out_bits = dpin.get_bits();
     if (dpin.is_unsign())
       --out_bits;
-
+    
     if (range_begin < 0 || range_end < 0) {
       std::string sel;
       auto        max_bits = std::max(mask_v.get_bits(), a_bits);

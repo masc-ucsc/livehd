@@ -607,11 +607,13 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
   Number src_num;
   if (num < 0) {
     I(!explicit_str);
-    src_num = (Number(1) << max_bits) + num;  // mask+num+1
+    // src_num = (Number(1) << max_bits) + num;  // mask+num+1
+    src_num = (Number(1) << max_bits) - num - 1;  // mask+num+1
   } else {
     src_num = num;
   }
 
+  fmt::print("DEBU5 num:{}, src_num:{}\n", num.str(), src_num.str());
   Number pos(1);
   pos = pos << max_bits;
   while (pos) {
