@@ -98,12 +98,6 @@ std::string Inou_firrtl_module::get_full_name(std::string_view term, const bool 
  *  which represents the number of bits that a variable will have. */
 void Inou_firrtl_module::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnast_nid& parent_node, std::string_view port_id,
                                                   bool is_signed) {
-  if (bitwidth <= 0) {
-    /* No need to make a bitwidth node, 0 means implicit bitwidth.
-     * If -1, then that's how I specify that the "port_id" is not an
-     * actual wire but instead the general vector name. */
-    return;
-  }
   auto value_node = Lnast_node::create_const(bitwidth);
   auto extension  = is_signed ? ".__sbits" : ".__ubits";
 
@@ -177,7 +171,8 @@ void Inou_firrtl_module::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Typ
       lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
       lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
       auto wire_bits = get_bit_count(type);
-      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, true);
+      if (wire_bits >= 0)
+        create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, true);
       break;
     }
     case firrtl::FirrtlPB_Type::kUintType: {  // unsigned
@@ -185,13 +180,15 @@ void Inou_firrtl_module::init_wire_dots(Lnast& lnast, const firrtl::FirrtlPB_Typ
       lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
       lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
       auto wire_bits = get_bit_count(type);
-      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
+      if (wire_bits >= 0)
+        create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
       break;
     }
     default: {
       // UInt Analog Reset Clock Types
       auto wire_bits = get_bit_count(type);
-      create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
+      if (wire_bits >= 0)
+        create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
     }
   }
 }
