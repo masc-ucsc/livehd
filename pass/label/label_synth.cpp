@@ -166,8 +166,8 @@ void Label_synth::label(Lgraph *g) {
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
-      g->ref_node_color_map()->clear(); 
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
+      lg->ref_node_color_map()->clear(); 
     });
   }
   g->ref_node_color_map()->clear();

@@ -501,8 +501,8 @@ void Label_acyclic::dump(Lgraph *g) const {
 
 void Label_acyclic::label(Lgraph *g) {
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
-      g->ref_node_color_map()->clear(); 
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
+      lg->ref_node_color_map()->clear(); 
     });
   }
   g->ref_node_color_map()->clear();
