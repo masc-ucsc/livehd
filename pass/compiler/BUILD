@@ -190,6 +190,7 @@ cc_library(
     "Arbiter_10",
     "MaxPeriodFibonacciLFSR",
     "AMOALU",
+    "DebugCustomXbar",
 
     # FIXME:
     # issue1: memory

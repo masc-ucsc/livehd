@@ -98,9 +98,14 @@ std::string Inou_firrtl_module::get_full_name(std::string_view term, const bool 
  *  which represents the number of bits that a variable will have. */
 void Inou_firrtl_module::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidth, Lnast_nid& parent_node, std::string_view port_id,
                                                   bool is_signed) {
-  auto value_node = Lnast_node::create_const(bitwidth);
-  auto extension  = is_signed ? ".__sbits" : ".__ubits";
+  Lnast_node value_node;
+  // encode bitwidth 0 as minus 1, and ignore the processing at cprop
+  if (bitwidth == 0)
+    value_node = Lnast_node::create_const(-1);
+  else 
+    value_node = Lnast_node::create_const(bitwidth);
 
+  auto extension  = is_signed ? ".__sbits" : ".__ubits";
   create_tuple_add_from_str(lnast, parent_node, absl::StrCat(port_id, extension), value_node);
 }
 
