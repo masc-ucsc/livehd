@@ -2294,13 +2294,7 @@ void Cprop::try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple co
       continue;
 
     auto [io_pos, no_pos_name] = Lgtuple::convert_key_to_io(out_name);
-    
 
-      // // firrtl will ignore the outputs with bit 0, we'll need to do so
-    // if (bits >= 0) {
-    //   auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, bits);
-    //   it.second.connect_sink(flattened_gout);
-    // }
     auto flattened_gout        = lg->add_graph_output(no_pos_name, io_pos, bits);
     it.second.connect_sink(flattened_gout);
   }

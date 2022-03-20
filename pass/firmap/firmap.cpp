@@ -65,7 +65,10 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
     if (op == Ntype_op::Sub && node.get_type_sub_node().get_name().substr(0, 10) == "__fir_xorr") {
       clone_edges_fir_xorr(node, pinmap, spinmap_xorr);
       continue;
-    }
+    } else if (op == Ntype_op::Flop) {
+      clone_edges_flop(new_lg, node, pinmap); // separate flop to handle asyn_rst
+      continue;
+    } 
     clone_edges(node, pinmap);
   }
 
@@ -86,6 +89,45 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   pinmap.clear();
   return new_lg;
 }
+
+
+void Firmap::clone_edges_flop(Lgraph *new_lg, Node &node, PinMap &pinmap) {
+  bool is_async_rst = false;
+  for (auto &old_spin : node.inp_connected_pins()) {
+    auto old_dpin = old_spin.get_driver_pin();
+
+    // case of asyn_rst -> create a const 1 node and connect to the async pin 
+    if (old_dpin.get_type_op() == Ntype_op::Sub) {
+      if (old_dpin.get_node().get_type_sub_node().get_name().substr(0, 13) == "__fir_as_asyn") {
+        is_async_rst = true;
+      }
+    }
+
+    auto it = pinmap.find(old_spin);
+    if (it == pinmap.end()) {  // e.g. fir_tail has two inputs, but only e1 need to be mapped
+      continue;
+    }
+
+    pinmap[old_dpin].connect_sink(pinmap[old_spin]);
+  }
+
+  // (1) case of asyn_rst -> create a const 1 node and connect to the async pin 
+  // (2) remove redundant Or_op which comes from __fir_as_asyn
+  if (is_async_rst) {
+    auto new_const_dpin = new_lg->create_node_const(1).setup_driver_pin();
+    auto old_spin = node.setup_sink_pin("clock"); // just pick old node clock to get the mapped new node
+    auto new_flop_node = pinmap[old_spin].get_node();
+    new_const_dpin.connect_sink(new_flop_node.setup_sink_pin("async"));
+
+    auto new_rst_spin = new_flop_node.setup_sink_pin("reset");
+    I(new_rst_spin.get_driver_pin().get_type_op() == Ntype_op::Or);
+    auto new_or_spin = new_rst_spin.get_driver_pin().get_node().get_sink_pin("A");
+    auto new_or_spin_driver = new_or_spin.get_driver_pin();
+    new_rst_spin.connect_driver(new_or_spin_driver);
+    new_or_spin.get_node().del_node();
+  }
+}
+
 
 void Firmap::clone_edges(Node &node, PinMap &pinmap) {
   for (auto &old_spin : node.inp_connected_pins()) {
@@ -139,7 +181,7 @@ void Firmap::map_node_fir_ops(Node &node, std::string_view op, Lgraph *new_lg, F
   } else if (op == "__fir_as_clock") {
     map_node_fir_as_clock(node, new_lg, pinmap);
   } else if (op == "__fir_as_async") {
-    I(false);  // TODO
+    map_node_fir_as_async_reset(node, new_lg, pinmap);
   } else if (op == "__fir_shl") {
     map_node_fir_shl(node, new_lg, pinmap);
   } else if (op == "__fir_shr") {
@@ -625,6 +667,24 @@ void Firmap::map_node_fir_as_clock(Node &old_node, Lgraph *new_lg, PinMap &pinma
     pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
   }
 }
+
+
+void Firmap::map_node_fir_as_async_reset(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
+  
+  auto new_node = new_lg->create_node(Ntype_op::Or);  // note: this is a wiring OR
+  for (auto old_spin : old_node.inp_connected_pins()) {
+    if (old_spin == old_node.setup_sink_pin("e1")) {
+      pinmap.insert_or_assign(old_spin, new_node.setup_sink_pin("A"));
+    }
+  }
+  
+
+  for (auto old_dpin : old_node.out_connected_pins()) {
+    pinmap.insert_or_assign(old_dpin, new_node.setup_driver_pin());
+  }
+}
+
+
 
 void Firmap::map_node_fir_rem(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
   // TODO

@@ -835,8 +835,13 @@ void Inou_firrtl_module::handle_type_conv_op(Lnast& lnast, const firrtl::FirrtlP
 
   lnast.add_child(idx_conv, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_conv, Lnast_node::create_const(sub_it->second));
-  lnast.add_child(idx_conv, Lnast_node::create_const(e1_str));
-  // lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+  // lnast.add_child(idx_conv, Lnast_node::create_const(e1_str));
+  auto first_char = e1_str[0];
+  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+    lnast.add_child(idx_conv, Lnast_node::create_const(e1_str));
+  } else {
+    lnast.add_child(idx_conv, Lnast_node::create_ref(e1_str));
+  }
 }
 
 // --------------------------------------- end of primitive op ----------------------------------------------

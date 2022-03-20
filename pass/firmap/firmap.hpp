@@ -10,7 +10,7 @@
 
 using FBMap   = absl::flat_hash_map<Node_pin::Compact_class_driver, Firrtl_bits>;  // pin->firrtl bits
 using PinMap  = absl::flat_hash_map<Node_pin, Node_pin>;                           // old_pin to new_pin for both dpin and spin
-using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;  // special case for xorr one old spin -> multi newspin
+using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;              // special case for xorr one old spin -> multi newspin
 
 class Firmap {
 protected:
@@ -21,8 +21,6 @@ protected:
   absl::node_hash_map<Lgraph *, FBMap>   &fbmaps;   // firbits maps center
   absl::node_hash_map<Lgraph *, PinMap>  &pinmaps;  // pin maps center
   absl::node_hash_map<Lgraph *, XorrMap> &spinmaps_xorr;
-  // absl::flat_hash_map<Node_pin, Node_pin>                  pinmap;       // old_pin to new_pin for both dpin and spin
-  // absl::flat_hash_map<Node_pin, std::vector<Node_pin>>     spinmap_xorr;
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
 
   static Attr     get_key_attr(std::string_view key);
@@ -45,9 +43,10 @@ protected:
   void analysis_fir_rem(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
-  void analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
+  void analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
+  void analysis_fir_as_async_reset(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_shl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_shr(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
@@ -77,6 +76,7 @@ protected:
   void map_node_fir_as_uint(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_as_sint(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_as_clock(Node &node, Lgraph *new_lg, PinMap &pinmap);
+  void map_node_fir_as_async_reset(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_pad(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_shl(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void map_node_fir_shr(Node &node, Lgraph *new_lg, PinMap &pinmap);
@@ -99,6 +99,7 @@ protected:
   void clone_subgraph_node(Node &node, Lgraph *new_lg, PinMap &pinmap);
   void clone_edges(Node &node, PinMap &pinmap);
   void clone_edges_fir_xorr(Node &node, PinMap &pinmap, XorrMap &spinmap_xorr);
+  void clone_edges_flop(Lgraph *new_lg, Node &node, PinMap &pinmap);
 
 public:
   Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_map<Lgraph *, PinMap> &_pinmaps,

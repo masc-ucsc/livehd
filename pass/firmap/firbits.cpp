@@ -351,21 +351,11 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_mul(node, inp_edges, fbmap);
   } else if (op == "__fir_div") {
     analysis_fir_div(node, inp_edges, fbmap);
-  } else if (op == "__fir_rem") {
-    analysis_fir_rem(node, inp_edges, fbmap);
-  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || op == "__fir_geq" || op == "__fir_eq"
-             || op == "__fir_neq") {
+  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || 
+             op == "__fir_geq" || op == "__fir_eq" || op == "__fir_neq") {
     analysis_fir_comp(node, inp_edges, fbmap);
   } else if (op == "__fir_pad") {
     analysis_fir_pad(node, inp_edges, fbmap);
-  } else if (op == "__fir_as_uint") {
-    analysis_fir_as_uint(node, inp_edges, fbmap);
-  } else if (op == "__fir_as_sint") {
-    analysis_fir_as_sint(node, inp_edges, fbmap);
-  } else if (op == "__fir_as_clock") {
-    analysis_fir_as_clock(node, inp_edges, fbmap);
-  } else if (op == "__fir_as_async") {
-    I(false);  // TODO
   } else if (op == "__fir_shl") {
     analysis_fir_shl(node, inp_edges, fbmap);
   } else if (op == "__fir_shr") {
@@ -378,8 +368,6 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_cvt(node, inp_edges, fbmap);
   } else if (op == "__fir_neg") {
     analysis_fir_neg(node, inp_edges, fbmap);
-  } else if (op == "__fir_not") {
-    analysis_fir_not(node, inp_edges, fbmap);
   } else if (op == "__fir_and" || op == "__fir_or" || op == "__fir_xor") {
     analysis_fir_bitwise(node, inp_edges, fbmap);
   } else if (op == "__fir_andr" || op == "__fir_orr" || op == "__fir_xorr") {
@@ -392,6 +380,11 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_head(node, inp_edges, fbmap);
   } else if (op == "__fir_tail") {
     analysis_fir_tail(node, inp_edges, fbmap);
+  } else if (op == "__fir_as_uint"  || op == "__fir_as_sint" || op == "__fir_as_async" || 
+             op == "__fir_as_clock" || op == "__fir_not") {
+    analysis_fir_single_input_op(node, inp_edges, fbmap);
+  } else if (op == "__fir_rem") {
+    analysis_fir_rem(node, inp_edges, fbmap);
   } else {
     I(false, "typo?");
   }
@@ -800,7 +793,32 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, true));
 }
 
-void Firmap::analysis_fir_as_uint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+void Firmap::analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+  I(inp_edges.size() == 1);
+
+  Bits_t bits1 = 0;
+  for (auto e : inp_edges) {
+    auto it = fbmap.find(e.driver.get_compact_class_driver());
+    if (it == fbmap.end()) {
+      if (firbits_wait_flop == true)
+        return;
+
+      // driver is not from other sugraph, wait next iteration for Flop being solved
+      if (e.driver.get_type_op() == Ntype_op::Flop) {
+        firbits_wait_flop = true;
+        return;
+      }
+      it = get_fbits_from_hierarchy(e);
+    }
+
+    if (e.sink.get_pin_name() == "e1") {
+      bits1 = it->second.get_bits();
+    }
+  }
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, false));
+}
+
+void Firmap::analysis_fir_as_async_reset(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;

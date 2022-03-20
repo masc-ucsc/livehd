@@ -314,7 +314,7 @@ void Lcompiler::do_fir_firbits() {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
 
         // fmt::print("-------- {:<28} ({:<30}) -------- (F-0)\n", "Firrtl Bits Analysis", lg_sub->get_name());
-        fm.do_firbits_analysis(lg_sub);
+        // fm.do_firbits_analysis(lg_sub);
 
         // fmt::print("-------- {:<28} ({:<30}) -------- (F-1)\n", "Firrtl Bits Analysis", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
