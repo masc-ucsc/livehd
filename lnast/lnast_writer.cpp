@@ -105,7 +105,7 @@ void Lnast_writer::write_lnast() {
 }
 
 void Lnast_writer::write_invalid() {
-  print_line(fmt::fg(fmt::color::red), "invalid\n");
+  print(fmt::fg(fmt::color::red), "invalid");
 }
 
 void Lnast_writer::write_top() {
@@ -123,12 +123,14 @@ void Lnast_writer::write_top() {
 void Lnast_writer::write_stmts() {
   if (!move_to_child()) return;
   do {
+    print_line("");
     write_lnast();
+    print("\n");
   } while (move_to_sibling());
 }
 
 void Lnast_writer::write_if() {
-  print_line(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "if");
+  print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "if");
   print(" (");
   move_to_child();
   write_lnast();
@@ -137,7 +139,7 @@ void Lnast_writer::write_if() {
   move_to_sibling();
   write_lnast();
   --depth;
-  print_line("}}\n");
+  print_line("}}");
   move_to_parent();
 }
 
@@ -146,18 +148,17 @@ void Lnast_writer::write_for() { }
 void Lnast_writer::write_while() { }
 
 void Lnast_writer::write_func_call() {
-  print_line("@");
+  print("@");
   move_to_child();
   write_lnast();
   print("(");
   move_to_sibling();
   write_lnast();
-  print(")\n");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_func_def() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = {\n");
@@ -165,18 +166,16 @@ void Lnast_writer::write_func_def() {
   move_to_sibling();
   write_lnast();
   --depth;
-  print_line("}\n");
+  print_line("}");
   move_to_parent();
 }
 
 void Lnast_writer::write_assign() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
   move_to_sibling();
   write_lnast();
-  print("\n");
   move_to_parent();
 }
 
@@ -184,7 +183,6 @@ void Lnast_writer::write_dp_assign() { }
 void Lnast_writer::write_mut() { }
 
 void Lnast_writer::write_binary(std::string_view op) {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
@@ -192,15 +190,14 @@ void Lnast_writer::write_binary(std::string_view op) {
   print("(");
   move_to_sibling();
   write_lnast();
-  print(",");
+  print(", ");
   move_to_sibling();
   write_lnast();
-  print(")\n");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_unary(std::string_view op) {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
@@ -208,7 +205,7 @@ void Lnast_writer::write_unary(std::string_view op) {
   print("(");
   move_to_sibling();
   write_lnast();
-  print(")\n");
+  print(")");
   move_to_parent();
 }
 
@@ -251,7 +248,6 @@ void Lnast_writer::write_const() {
 }
 
 void Lnast_writer::write_range() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
@@ -260,29 +256,24 @@ void Lnast_writer::write_range() {
   print(" ..< ");
   move_to_sibling();
   write_lnast();
-  print("\n");
   move_to_parent();
 }
 
 void Lnast_writer::write_type_def() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
   move_to_sibling();
   write_lnast();
-  print("\n");
   move_to_parent();
 }
 
 void Lnast_writer::write_type_spec() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" : ");
   move_to_sibling();
   write_lnast();
-  print("\n");
   move_to_parent();
 }
 
@@ -300,7 +291,7 @@ void Lnast_writer::write_prim_type_int(char sign) {
   } else {
     print(fmt::fg(fmt::color::gold), "(");
     write_lnast();
-    print(",");
+    print(", ");
     move_to_sibling();
     write_lnast();
     print(fmt::fg(fmt::color::gold), ")");
@@ -322,15 +313,12 @@ void Lnast_writer::write_comp_type_tuple() {
   move_to_child();
   ++depth;
   while (!is_invalid()) {
-    if (get_ntype().is_type()) {
-      print_line("");
-    }
     write_lnast();
-    print("\n");
+    if (!is_last_child()) print(", ");
     move_to_sibling();
   }
   --depth;
-  print_line(fmt::fg(fmt::color::gold), ")");
+  print(fmt::fg(fmt::color::gold), ")");
   move_to_parent();
 }
 
@@ -338,7 +326,7 @@ void Lnast_writer::write_comp_type_array() {
   print(fmt::fg(fmt::color::gold), "#array(");
   move_to_child();
   write_lnast();
-  print(",");
+  print(", ");
   move_to_sibling();
   write_lnast();
   print(fmt::fg(fmt::color::gold), ")");
@@ -350,13 +338,12 @@ void Lnast_writer::write_comp_type_mixin() {
   move_to_child();
   ++depth;
   while (!is_invalid()) {
-    print_line("");
     write_lnast();
-    print("\n");
+    if (!is_last_child()) print(", ");
     move_to_sibling();
   }
   --depth;
-  print_line(fmt::fg(fmt::color::gold), ")");
+  print(fmt::fg(fmt::color::gold), ")");
   move_to_parent();
 }
 
@@ -364,7 +351,7 @@ void Lnast_writer::write_comp_type_lambda() {
   print(fmt::fg(fmt::color::gold), "#lambda(");
   move_to_child();
   write_lnast();
-  print(",");
+  print(", ");
   move_to_sibling();
   write_lnast();
   print(fmt::fg(fmt::color::gold), ")");
@@ -386,66 +373,44 @@ void Lnast_writer::write_unknown_type() {
 void Lnast_writer::write_tuple_concat() { }
 
 void Lnast_writer::write_tuple_add() {
-  print_line("");
   move_to_child();
   write_lnast();
-  print(" = (\n");
+  print(" = (");
   ++depth;
   while (move_to_sibling()) {
-    auto ntype = get_raw_ntype();
-    if (ntype == Lnast_ntype::Lnast_ntype_ref || ntype == Lnast_ntype::Lnast_ntype_const) {
-      print_line("");
-      write_lnast();
-      print("\n");
-    } else {
-      write_lnast();
-    }
+    write_lnast();
+    if (!is_last_child()) print(", ");
   }
   --depth;
-  print_line(")\n");
+  print(")");
   move_to_parent();
 }
 
 void Lnast_writer::write_tuple_get() {
-  print_line("");
   move_to_child();
   write_lnast();
   print(" = ");
   move_to_sibling();
   write_lnast();
   while (move_to_sibling()) {
-    if (get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
-      print(".");
-      write_lnast();
-    } else {
-      print("[");
-      write_lnast();
-      print("]");
-    }
+    print("[");
+    write_lnast();
+    print("]");
   }
-  print("\n");
   move_to_parent();
 }
 
 void Lnast_writer::write_tuple_set() {
-  print_line("");
   move_to_child();
   write_lnast();
   while (move_to_sibling() && !is_last_child()) {
-    if (get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
-      print(".");
-      write_lnast();
-    } else {
-      print("[");
-      write_lnast();
-      print("]");
-    }
+    print("[");
+    write_lnast();
+    print("]");
   }
   print(" = ");
   write_lnast();
-  print("\n");
   move_to_parent();
-
 }
 
 void Lnast_writer::write_attr_set() {}
