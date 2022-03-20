@@ -1535,7 +1535,7 @@ Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this
 void Lgraph::save() {
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 
-  auto wr = Hif_write::create(get_save_filename(), "livehd", Lgraph::version);
+  auto wr = Hif_write::create(get_save_filename(), "lgraph", Lgraph::version);
   if (wr == nullptr) {
     error("cannot save {} in {}", name, get_save_filename());
     return;

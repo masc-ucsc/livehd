@@ -7,7 +7,7 @@ cc_library(
     name = "lnast",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = ["*test*.cpp", "*reader.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -17,6 +17,7 @@ cc_library(
     deps = [
         "//core",
         "//parser",
+        "@hif//hif",
     ],
 )
 

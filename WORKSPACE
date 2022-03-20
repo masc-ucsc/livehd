@@ -118,16 +118,17 @@ http_archive(
     ],
 )
 
-# cryptominisat
+# HIF
 http_archive(
     name = "hif",
     # sha256 = "9eee32fcb0ec4bbe9ed945de55c7161e294e76958af2461c8544ea5c1e484d02",
-    strip_prefix = "hif-d56150abfe89359562591d7358be93c0325f42a6",
+    strip_prefix = "hif-ad84f39c2717648f17e73649c57ba27a42b018b1",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/d56150abfe89359562591d7358be93c0325f42a6.zip",
+        "https://github.com/masc-ucsc/hif/archive/ad84f39c2717648f17e73649c57ba27a42b018b1.zip",
     ],
 )
 
+# cryptominisat
 http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",

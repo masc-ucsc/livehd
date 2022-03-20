@@ -112,9 +112,12 @@ void Lnast_writer::write_top() {
   print_line("{{\n");
   ++depth;
   move_to_child();
-  write_lnast();
+  if (!is_invalid()) {
+    write_lnast();
+  }
   --depth;
   print_line("}}\n");
+  
 }
 
 void Lnast_writer::write_stmts() {
@@ -142,8 +145,29 @@ void Lnast_writer::write_uif() { }
 void Lnast_writer::write_for() { }
 void Lnast_writer::write_while() { }
 
-void Lnast_writer::write_func_call() { }
-void Lnast_writer::write_func_def() { }
+void Lnast_writer::write_func_call() {
+  print_line("@");
+  move_to_child();
+  write_lnast();
+  print("(");
+  move_to_sibling();
+  write_lnast();
+  print(")\n");
+  move_to_parent();
+}
+
+void Lnast_writer::write_func_def() {
+  print_line("");
+  move_to_child();
+  write_lnast();
+  print(" = {\n");
+  ++depth;
+  move_to_sibling();
+  write_lnast();
+  --depth;
+  print_line("}\n");
+  move_to_parent();
+}
 
 void Lnast_writer::write_assign() {
   print_line("");

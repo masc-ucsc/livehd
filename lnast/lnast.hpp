@@ -220,6 +220,8 @@ private:
   uint32_t tup_internal_cnt = 0;
 
 public:
+  static constexpr char version[] = "0.1.0";
+
   explicit Lnast() : top_module_name("noname"), source_filename("") {}
   ~Lnast();
   explicit Lnast(std::string_view _module_name) : top_module_name(_module_name), source_filename("") {}

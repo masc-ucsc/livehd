@@ -73,6 +73,9 @@ cc_library(
         # "//pass/mockturtle:pass_mockturtle",
         "//pass/lnast_print:pass_lnast_print",
         #add dependencies to new passes here
+        "//pass/lnast_save:pass_lnast_save",
+        "//pass/lnast_load:pass_lnast_load",
+        "//inou/hif:inou_hif"
     ],
 )
 

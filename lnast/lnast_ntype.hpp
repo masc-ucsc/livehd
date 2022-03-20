@@ -201,10 +201,10 @@ protected:
                                       "hot_phi"};
 
   Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
-  constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 
 public:
   constexpr explicit Lnast_ntype() = default;
+  constexpr explicit Lnast_ntype(Lnast_ntype_int _val) : val(_val) {}
 
   [[nodiscard]] std::string_view to_sv() const { return namemap[val]; }
 
