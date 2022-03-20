@@ -75,7 +75,7 @@ cc_library(
         #add dependencies to new passes here
         "//pass/lnast_save:pass_lnast_save",
         "//pass/lnast_load:pass_lnast_load",
-        "//inou/hif:inou_hif"
+        #"//inou/hif:inou_hif"
     ],
 )
 
