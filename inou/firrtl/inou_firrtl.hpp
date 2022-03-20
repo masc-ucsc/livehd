@@ -164,7 +164,7 @@ protected:
                                         const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
 
   // Helper Functions (for handling specific cases)
-  uint32_t get_bit_count(const firrtl::FirrtlPB_Type &type);
+  int32_t get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
   void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);

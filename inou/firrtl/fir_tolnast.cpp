@@ -109,7 +109,7 @@ void Inou_firrtl_module::create_bitwidth_dot_node(Lnast& lnast, uint32_t bitwidt
   create_tuple_add_from_str(lnast, parent_node, absl::StrCat(port_id, extension), value_node);
 }
 
-uint32_t Inou_firrtl_module::get_bit_count(const firrtl::FirrtlPB_Type& type) {
+int32_t Inou_firrtl_module::get_bit_count(const firrtl::FirrtlPB_Type& type) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kUintType: {  // UInt type
       return type.uint_type().width().value();
