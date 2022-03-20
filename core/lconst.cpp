@@ -572,75 +572,54 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
     return get_mask_op();  // faster logic for common case
   }
 
-  if (unlikely(mask.is_string())) {
-    throw std::runtime_error(fmt::format("ERROR: can not get_bits for strings {} + {}", to_pyrope(), mask.to_pyrope()));
-  }
-
-  Number res_num;
-  auto   mask_num  = mask.get_num();
-  auto   mask_bits = mask.get_bits();
-  if (mask < 0) {
-    auto m = std::max(get_bits(), mask.get_bits());
-    // mask_num = (Number(1) << m) + ((Lconst(1) - mask).not_op()).get_num();
-    mask_num = ((Number(1) << m) - 1) & (((Lconst(-1) - mask).not_op()).get_num());
+  if (mask.has_unknowns()) {
+    return invalid();
   }
 
   if (has_unknowns()) {
-    // Each bit has 8 bits when has_unknowns(). Expand mask
-    Number new_mask;
-    Number pos(1);
-    pos <<= mask.get_bits();
-    Number pos_mask(0xFF);
-    while (pos) {
-      new_mask <<= 8;
-      if (mask_num & pos) {
-        new_mask = new_mask | pos_mask;
+    std::string orig_str = to_string();
+    std::string new_str;
+
+    Bits_t end_pos = static_cast<int>(orig_str.size());
+    if (mask.is_positive() && end_pos > mask.get_bits())
+      end_pos = mask.get_bits();
+
+    Number num_1(1);
+    for(int i=end_pos-1;i>=0;--i) {
+      if (mask.get_num() & (num_1<<i)) {
+        new_str.push_back(orig_str[i]);
       }
-      pos >>= 1;
     }
-    mask_num = new_mask;
-    mask_bits *= 8;
+
+    return Lconst::from_binary(new_str, true);
   }
 
-  auto max_bits = std::max(get_bits(), mask_bits);
-  assert(max_bits < Bits_max);
-  Number src_num;
-  if (num < 0) {
-    I(!explicit_str);
-    // src_num = (Number(1) << max_bits) + num;  // mask+num+1
-    src_num = (Number(1) << max_bits) - num - 1;  // mask+num+1
-  } else {
-    src_num = num;
+  auto mask_bits = mask.get_bits();
+  if (mask.is_negative())
+    mask_bits--;
+
+  Bits_t end_pos = std::min(get_bits(), mask_bits);
+  Number res_num;
+
+  if (mask.is_negative() && get_bits() > mask_bits) {
+    // case like: 0xfeed, -2
+    res_num = get_num() >> end_pos;
+  }
+  if (is_negative() && get_bits() < mask_bits) {
+    res_num = (Number(1) << mask.rsh_op(end_pos).popcount())-Number(1); // ones after
   }
 
-  fmt::print("DEBU5 num:{}, src_num:{}\n", num.str(), src_num.str());
-  Number pos(1);
-  pos = pos << max_bits;
-  while (pos) {
-    if (mask_num & pos) {
-      auto v  = src_num & pos;
-      res_num = (res_num << 1) | (v ? 1 : 0);
+  Number num_1(1);
+  for(int i=end_pos-1;i>=0;--i) {
+    if (mask.get_num() & (num_1<<i)) {
+      res_num <<= 1;
+      if (get_num() & (num_1<<i)) {
+        res_num |= 1;
+      }
     }
-    pos >>= 1;
   }
 
-  if (has_unknowns()) {
-    auto str = absl::StrCat("0b", to_string(res_num));  // Use the string to remove leading zeroes
-    return Lconst::from_pyrope(str);
-  }
-
-  if (!is_string())
-    return Lconst(false, calc_num_bits(res_num), res_num);
-
-  std::string str;
-  while (res_num) {
-    unsigned char ch = static_cast<unsigned char>(res_num & 0xFF);
-    if (ch)  // remove zeroes from string
-      str = str.append(1, ch);
-    res_num >>= 8;
-  }
-
-  return from_string(str);
+  return Lconst(explicit_str, calc_num_bits(res_num), res_num);
 }
 
 // set_mask(0xFFF, 0xF, 0xa) -> 0xFFa
@@ -670,8 +649,8 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
 
   I(!mask.has_unknowns());  // FIXME: this should work (just someone else could do it?)
 
-  auto mask_min = mask.get_trailing_zeroes();
-  auto mask_max = mask.get_bits();
+  Bits_t mask_min = mask.get_trailing_zeroes();
+  Bits_t mask_max = mask.get_bits();
 
   auto res_num = get_num();
 
@@ -695,7 +674,7 @@ Lconst Lconst::set_mask_op(const Lconst &mask, const Lconst &value) const {
     auto value_bin = value.to_binary();
 
     std::string bin_txt;
-    for (std::size_t i = 0u; i < end_bits; ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(end_bits); ++i) {
       if ((boost::multiprecision::bit_test(mask_num, i) ? true : false) == mask_on_zero) {
         auto a_pos = std::min(i, a_bin.size() - 1);
         bin_txt.append(1, a_bin[a_pos]);
@@ -955,6 +934,8 @@ Lconst Lconst::ror_op(const Lconst &o) const {
 
 Lconst Lconst::or_op(const Lconst &o) const {
   if (unlikely(has_unknowns() || o.has_unknowns())) {
+    bool signed_result = is_negative() || o.is_negative();
+
     auto [l_str, r_str] = match_binary(*this, o);
 
     std::string result;
@@ -972,7 +953,7 @@ Lconst Lconst::or_op(const Lconst &o) const {
       }
     }
 
-    return Lconst::from_binary(result, true);
+    return Lconst::from_binary(result, !signed_result);
   }
 
   Lconst res;
@@ -983,11 +964,36 @@ Lconst Lconst::or_op(const Lconst &o) const {
 }
 
 Lconst Lconst::not_op() const {
-  if (unlikely(is_string())) {
-    throw std::runtime_error(fmt::format("ERROR: can not 'not' strings {}", to_pyrope()));
+  if (unlikely(has_unknowns())) {
+    bool unsigned_result = is_negative(); // toggle sign
+    auto result = to_binary();
+    for(auto &ch:result) {
+      if (ch == '0')
+        ch = '1';
+      else if (ch == '1')
+        ch = '0';
+    }
+    return Lconst::from_binary(result, unsigned_result);
   }
 
   auto res_num = -1 - get_num();
+
+  if (unlikely(is_string())) {
+    return Lconst(explicit_str, bits, res_num);
+  }
+
+  return Lconst(false, calc_num_bits(res_num), res_num);
+}
+
+Lconst Lconst::neg_op() const {
+  if (unlikely(is_string())) {
+    return invalid();
+  }
+  if (unlikely(has_unknowns())) {
+    return Lconst(1).add_op(not_op());
+  }
+
+  auto res_num = - get_num();
 
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
@@ -1266,7 +1272,7 @@ std::string Lconst::to_binary() const {
     return "0";
 
   std::string txt;
-  for (auto i = 0u; i < get_bits(); ++i) {
+  for (auto i = 0; i < get_bits(); ++i) {
     if (v & 1) {
       txt = txt.insert(0, 1, '1');  // prepend('1');
     } else {

@@ -662,55 +662,51 @@ void Bitwidth::process_get_mask(Node &node) {
   }
 
   auto   it2 = bwmap.find(mask_dpin.get_compact_class());
-  Lconst mask_max;
-  Lconst mask_min;
+  Lconst mask_val;
   if (it2 == bwmap.end()) {
     if (!mask_dpin.is_type_const()) {
       debug_unconstrained_msg(node, mask_dpin);
       not_finished = true;
       return;
     }
-    mask_max = mask_dpin.get_type_const(); //65b
-    mask_min = mask_max;
+    mask_val = mask_dpin.get_type_const();
+    fmt::print("0.mask_val:{}\n", mask_val.to_pyrope());
+    node.dump();
   } else {
-    mask_max = it2->second.get_max();
-    mask_min = it2->second.get_min();
-  }
-
-  const Lconst val     = it->second.get_max().get_mask_op(mask_min); // 65b
-  Lconst       min_val = val;
-  if (it->second.get_max() > 0 && it->second.get_min() < 0)
-    min_val = 0;
-  Lconst max_val = val; // 65b
-
-  Lconst val2 = it->second.get_max().get_mask_op(mask_max);
-  Lconst val3 = it->second.get_min().get_mask_op(mask_min);
-  Lconst val4 = it->second.get_min().get_mask_op(mask_max);
-
-  fmt::print("DEBUG7 mask_max:{}, mask_min:{}\n", mask_max.to_pyrope(), mask_min.to_pyrope());
-  it->second.dump();
-  fmt::print("DEBUG8 val:{} val2:{} val3:{} val4:{}\n", val.to_pyrope(), val2.to_pyrope(), val3.to_pyrope(), val4.to_pyrope());
-  if (val2 > max_val)
-    max_val = val2;
-  if (val2 < min_val)
-    min_val = val2;
-
-  if (val3 > max_val)
-    max_val = val3;
-  if (val3 < min_val)
-    min_val = val3;
-
-  if (val4 > max_val)
-    max_val = val4;
-  if (val4 < min_val)
-    min_val = val4;
-
-  if (mask_max != Lconst(-1)) {
-    fmt::print("DEBUG9 max_val:{}, min_val:{}\n", max_val.to_pyrope(), min_val.to_pyrope());
+    mask_val = it2->second.get_max().or_op(it2->second.get_min());
+    fmt::print("1.mask_val:{} {} {}\n", mask_val.to_pyrope(), it2->second.get_max().to_pyrope(), it2->second.get_min().to_pyrope());
     node.dump();
   }
 
-  adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
+  Lconst  a_max = it->second.get_max();
+  Lconst  a_min = it->second.get_min();
+
+  Lconst res_max = a_max.get_mask_op(mask_val);
+  Lconst res_min = res_max;
+
+  fmt::print("1.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
+
+  if (a_min < 0) { //2s complement usual
+    auto tmp = Lconst(-1).get_mask_op(mask_val);
+    if (tmp > res_max)
+      res_max = tmp;
+    if (tmp < res_min)
+      res_min = tmp;
+
+    a_min = a_min.neg_op();
+  }
+  fmt::print("2.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
+
+  Lconst val2 = a_min.get_mask_op(mask_val);
+  if (val2 > res_max) {
+    res_max = val2;
+  }
+  if (val2 < res_min) {
+    res_min = val2;
+  }
+  fmt::print("3.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
+
+  adjust_bw(node.get_driver_pin(), Bitwidth_range(res_min, res_max));
 }
 
 void Bitwidth::process_sext(Node &node, XEdge_iterator &inp_edges) {

@@ -391,7 +391,7 @@ void Firmap::map_node_fir_xorr(Node &old_node, Lgraph *new_lg, FBMap &fbmap, Pin
       std::vector<Node_pin> new_spins;
       new_spins.emplace_back(new_node_xor.setup_sink_pin("A"));
       auto e1_bits = it->second.get_bits();
-      for (uint32_t i = 1; i < e1_bits; i++) {
+      for (auto i = 1; i < e1_bits; i++) {
         auto new_node_sra = new_lg->create_node(Ntype_op::SRA);
         new_spins.emplace_back(new_node_sra.setup_sink_pin("a"));
         new_node_sra.setup_sink_pin("b").connect_driver(new_lg->create_node_const(i));

@@ -472,7 +472,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         final_expr = a;
       } else if (range_begin < 0 || range_end < 0) {  // no continuous range
         std::string sel;
-        for (auto i = 0u; i < a_bits; ++i) {
+        for (auto i = 0; i < a_bits; ++i) {
           if (mask_v.and_op(Lconst(1) << i).is_known_false()) {  // use a
             if (sel.empty())
               sel = absl::StrCat(a, "[", i, "]");
@@ -570,11 +570,11 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     int out_bits = dpin.get_bits();
     if (dpin.is_unsign())
       --out_bits;
-    
+
     if (range_begin < 0 || range_end < 0) {
       std::string sel;
       auto        max_bits = std::max(mask_v.get_bits(), a_bits);
-      for (auto i = 0u; i < max_bits; ++i) {
+      for (auto i = 0; i < max_bits; ++i) {
         if (mask_v.and_op(Lconst(1) << i).is_known_false())
           continue;
 

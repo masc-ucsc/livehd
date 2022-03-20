@@ -78,7 +78,7 @@ public:
 
   // BEGIN ATTRIBUTE ACCESSORS
 
-  uint32_t get_bits() const { return driver.get_bits(); }
+  Bits_t get_bits() const { return driver.get_bits(); }
 
   // END ATTRIBUTE ACCESSORS
 };

@@ -559,7 +559,7 @@ void Pass_lnast_fromlg::attach_mask_node(Lnast& lnast, Lnast_nid& parent_node, c
   {
     auto [range_begin, range_end] = const_mask.get_mask_range();
     if (range_begin < 0 || range_end < 0) {  // no continuous range (just do a list of bits)
-      for (auto b = 0u; b < const_mask.get_bits(); ++b) {
+      for (auto b = 0; b < const_mask.get_bits(); ++b) {
         auto bit_mask = Lconst(1) << b;
         if (const_mask.and_op(bit_mask) != 0) {
           lnast.add_child(gm_tup_node, Lnast_node::create_const(b));

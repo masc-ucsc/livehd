@@ -227,7 +227,7 @@ int Node_pin::get_num_edges() const {
   return current_g->get_num_out_edges(*this);
 }
 
-uint32_t Node_pin::get_bits() const {
+Bits_t Node_pin::get_bits() const {
   I(is_driver());
   return current_g->get_bits(get_root_idx());
 }
@@ -243,7 +243,7 @@ void Node_pin::set_size(const Node_pin &dpin) {
     set_sign();
 }
 
-void Node_pin::set_bits(uint32_t bits) {
+void Node_pin::set_bits(Bits_t bits) {
   I(is_driver());
   current_g->set_bits(get_root_idx(), bits);
 }

@@ -9,13 +9,16 @@
 Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   if (!overflow) {
     return Lconst(val);
-  } 
-
-  if (val >= 0) {
-    return Lconst::get_mask_value(val);
+  }
+  if (val == 0) {
+    return Lconst(0);
   }
 
-  return Lconst::get_neg_mask_value(-val);  // Lconst(0) - (Lconst(1).lsh_op(-val));
+  if (val > 0) {
+    return Lconst::get_mask_value(val-1);
+  }
+
+  return Lconst::get_neg_mask_value(-(val+1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
 Bitwidth_range::Bitwidth_range(const Lconst &val) {
@@ -49,33 +52,20 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
     I(max >= min);
   } else {
     overflow = true;
-    if (max_val == 0) {
-      max = 0;
-    } else {
-      int32_t bits = max_val.get_bits(); //64
-      if (max_val.is_negative()) {
-        max = 0;
-      } else {
-        max = bits; 
-      }
-    }
+    min = 0;
+    max = 0;
+    if (min_val.is_negative())
+      min = -(min_val.get_bits());
+    if (max_val.is_positive())
+      max = max_val.get_bits();
 
-    if (min_val == 0) {
-      min = 0;
-    } else {
-      int32_t bits = min_val.get_bits(); 
-      if (min_val.is_negative()) {
-        min = -bits; 
-      } else {
-        min = 0;
-      }
-    }
+    fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
     I(min == 0 || min <= max || max == 0);
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { 
-  set_range(min_val, max_val); 
+Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
+  set_range(min_val, max_val);
 }
 
 void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
@@ -133,7 +123,7 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
   if (size > 63) {
     overflow = true;
     max      = size - 1;     // Use bits in overflow mode
-    min      = -static_cast<int>(size - 1);  // Use bits 
+    min      = -static_cast<int>(size - 1);  // Use bits
   } else {
     overflow = false;
     max      = (1ULL << (size - 1)) - 1;

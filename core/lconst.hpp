@@ -7,7 +7,7 @@
 #include "boost/multiprecision/cpp_int.hpp"
 #include "iassert.hpp"
 
-using Bits_t               = uint32_t;  // bits type (future use)
+using Bits_t               = int32_t;  // bits type (future use)
 constexpr int    Bits_bits = 17;
 constexpr Bits_t Bits_max  = ((1ULL << Bits_bits) - 1);
 
@@ -121,7 +121,8 @@ public:
   [[nodiscard]] Lconst ror_op(const Lconst &o) const;
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
-  [[nodiscard]] Lconst not_op() const;
+  [[nodiscard]] Lconst not_op() const; // bitwise not
+  [[nodiscard]] Lconst neg_op() const; // change sign
   [[nodiscard]] Lconst concat_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst eq_op(const Lconst &o) const;

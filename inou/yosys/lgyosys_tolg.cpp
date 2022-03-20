@@ -1030,7 +1030,7 @@ static uint32_t get_output_size(const RTLIL::Cell *cell) {
   return 0;  // must be determined later?
 }
 
-static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, uint32_t nbits, const Node_pin &current_dpin) {
+static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, Bits_t nbits, const Node_pin &current_dpin) {
   fmt::print("connect_partial_dpin to:{} or_offset:{} from pin:{} bits:{}\n",
              or_node.debug_name(),
              or_offset,

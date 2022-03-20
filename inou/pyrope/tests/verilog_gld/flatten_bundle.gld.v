@@ -5,6 +5,7 @@ module flatten_bundle(
   ,output reg signed [42:0] out
 );
 
+  // assign out = {10'sh100, in3, {1'h0, in2}, 17'shff00, in1};
   assign out = {10'sh100, in3, {1'h0, in2}, 17'shff00, in1};
 
 endmodule
