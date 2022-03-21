@@ -851,6 +851,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
           reset = reset_const.to_verilog();  // hardcoded value???
         }
       } else {
+        reset = get_wire_or_const(node.get_sink_pin("reset").get_driver_pin());
+
         if (node.get_sink_pin("negreset").is_connected()) {
           negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i() != 0;
         }
@@ -858,11 +860,10 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
         if (node.get_sink_pin("async").is_connected()) {
           auto v = node.get_sink_pin("async").get_driver_pin().get_type_const().to_i() != 0;
           if (v) {
-            reset_async = absl::StrCat(negreset ? "or negedge " : "or posedge ", reset);
+            reset_async = absl::StrCat(negreset ? " or negedge " : " or posedge ", reset);
           }
         }
 
-        reset = get_scaped_name(node.get_sink_pin("reset").get_wire_name());
       }
     }
 
