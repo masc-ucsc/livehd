@@ -1,0 +1,113 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#if !defined(TOKEN_MK) \
+ && !defined(TOKEN_PN) \
+ && !defined(TOKEN_ID) \
+ && !defined(TOKEN_LT) \
+ && !defined(TOKEN_TY) \
+ && !defined(TOKEN_KW) \
+ && !defined(TOKEN_FN)
+#error Must define one of the TOKEN_* macro.
+#endif
+
+#ifndef TOKEN_MK
+#define TOKEN_MK(NAME)
+#endif
+#ifndef TOKEN_PN
+#define TOKEN_PN(NAME, SPELLING)
+#endif
+#ifndef TOKEN_ID
+#define TOKEN_ID(NAME)
+#endif
+#ifndef TOKEN_LT
+#define TOKEN_LT(NAME)
+#endif
+#ifndef TOKEN_KW
+#define TOKEN_KW(SPELLING)
+#endif
+#ifndef TOKEN_TY
+#define TOKEN_TY(SPELLING)
+#endif
+#ifndef TOKEN_FN
+#define TOKEN_FN(SPELLING)
+#endif
+
+// Markers
+TOKEN_MK(eof)
+TOKEN_MK(invalid)
+
+// Punctuations
+TOKEN_PN(lbrace,'{')
+TOKEN_PN(rbrace,'}')
+TOKEN_PN(lbrack,'[')
+TOKEN_PN(rbrack,']')
+TOKEN_PN(lparen,'(')
+TOKEN_PN(rparen,')')
+
+TOKEN_PN(equal,'=')
+TOKEN_PN(colon,':')
+TOKEN_PN(comma,',')
+
+// Identifiers
+TOKEN_ID(var)   // %{...}
+TOKEN_ID(fun)   // @{...}
+
+// Literals
+TOKEN_LT(number)     // 123
+
+// Keywords
+TOKEN_KW(if)
+TOKEN_KW(uif)
+TOKEN_KW(for)
+TOKEN_KW(while)
+
+// Types
+TOKEN_TY(none)
+TOKEN_TY(s)
+TOKEN_TY(u)
+TOKEN_TY(sint)
+TOKEN_TY(uint)
+TOKEN_TY(range)
+TOKEN_TY(string)
+TOKEN_TY(boolean)
+TOKEN_TY(type)
+TOKEN_TY(ref)
+TOKEN_TY(tuple)
+TOKEN_TY(array)
+TOKEN_TY(mixin)
+TOKEN_TY(lambda)
+TOKEN_TY(expr)
+TOKEN_TY(unknown)
+
+// Built-In Functions
+TOKEN_FN(bit_and)
+TOKEN_FN(bit_or)
+TOKEN_FN(bit_not)
+TOKEN_FN(bit_xor)
+TOKEN_FN(ror)
+TOKEN_FN(and)
+TOKEN_FN(or)
+TOKEN_FN(not)
+TOKEN_FN(add)
+TOKEN_FN(sub)
+TOKEN_FN(mul)
+TOKEN_FN(div)
+TOKEN_FN(mod)
+TOKEN_FN(shl)
+TOKEN_FN(sra)
+TOKEN_FN(is)
+TOKEN_FN(ne)
+TOKEN_FN(eq)
+TOKEN_FN(lt)
+TOKEN_FN(le)
+TOKEN_FN(gt)
+TOKEN_FN(ge)
+TOKEN_FN(range)
+
+#undef TOKEN_MK
+#undef TOKEN_PN
+#undef TOKEN_ID
+#undef TOKEN_LT
+#undef TOKEN_KW
+#undef TOKEN_TY
+#undef TOKEN_FN
