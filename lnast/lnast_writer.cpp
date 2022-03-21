@@ -16,6 +16,7 @@ Lnast_writer::Lnast_writer(std::ostream &_os, std::shared_ptr<Lnast> _lnast) : o
 
 void Lnast_writer::write_all() {
   depth = 0;
+  is_func_name = false;
   write_metadata();
   current_nid = Lnast_nid::root();
   write_lnast();
@@ -148,9 +149,10 @@ void Lnast_writer::write_for() { }
 void Lnast_writer::write_while() { }
 
 void Lnast_writer::write_func_call() {
-  print("@");
   move_to_child();
+  is_func_name = true;
   write_lnast();
+  is_func_name = false;
   print("(");
   move_to_sibling();
   write_lnast();
@@ -213,10 +215,10 @@ void Lnast_writer::write_bit_and()     { write_binary("bit_add");  }
 void Lnast_writer::write_bit_or()      { write_binary("bit_or");   }
 void Lnast_writer::write_bit_not()     { write_unary("bit_not");   }
 void Lnast_writer::write_bit_xor()     { write_binary("bit_xor");  }
-void Lnast_writer::write_reduce_or()   { write_unary("reduce_or"); }
+void Lnast_writer::write_reduce_or()   { write_unary("ror");       }
 void Lnast_writer::write_logical_and() { write_binary("and");      }
 void Lnast_writer::write_logical_or()  { write_binary("or");       }
-void Lnast_writer::write_logical_not() { write_unary("not ");      }
+void Lnast_writer::write_logical_not() { write_unary("not");       }
 void Lnast_writer::write_plus()        { write_binary("add");      }
 void Lnast_writer::write_minus()       { write_binary("sub");      }
 void Lnast_writer::write_mult()        { write_binary("mul");      }
@@ -227,8 +229,8 @@ void Lnast_writer::write_sra()         { write_binary("sra");      }
 void Lnast_writer::write_is()          { write_binary("is");       }
 void Lnast_writer::write_ne()          { write_binary("ne");       }
 void Lnast_writer::write_eq()          { write_binary("eq");       }
-void Lnast_writer::write_lt()          { write_binary("<");        }
-void Lnast_writer::write_le()          { write_binary("lt");       }
+void Lnast_writer::write_lt()          { write_binary("lt");       }
+void Lnast_writer::write_le()          { write_binary("le");       }
 void Lnast_writer::write_gt()          { write_binary("gt");       }
 void Lnast_writer::write_ge()          { write_binary("ge");       }
 
@@ -240,24 +242,18 @@ void Lnast_writer::write_mask_popcount() { }
 void Lnast_writer::write_mask_xor() { }
 
 void Lnast_writer::write_ref() {
-  print("%{{{}}}", current_text());
+  if (is_func_name) {
+    print("@{{{}}}", current_text());
+  } else {
+    print("%{{{}}}", current_text());
+  }
 }
 
 void Lnast_writer::write_const() {
   print(fmt::fg(fmt::color::light_blue), "{}", current_text());
 }
 
-void Lnast_writer::write_range() {
-  move_to_child();
-  write_lnast();
-  print(" = ");
-  move_to_sibling();
-  write_lnast();
-  print(" ..< ");
-  move_to_sibling();
-  write_lnast();
-  move_to_parent();
-}
+void Lnast_writer::write_range() { write_binary("range"); }
 
 void Lnast_writer::write_type_def() {
   move_to_child();

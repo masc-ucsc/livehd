@@ -17,6 +17,7 @@ public:
   void write_all();
 protected:
   int depth;
+  bool is_func_name;
 
   bool has_file_output;
   std::ostream &os;

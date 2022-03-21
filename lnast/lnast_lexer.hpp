@@ -1,0 +1,77 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
+
+#include <cctype>
+#include <iostream>
+#include <fmt/format.h>
+#include <fmt/os.h>
+#include <fmt/color.h>
+#include "absl/strings/str_cat.h"
+
+class Lnast_token {
+public:
+  enum Kind : uint16_t {
+#define TOKEN_MK(NAME)           NAME,
+#define TOKEN_PN(NAME, SPELLING) NAME,
+#define TOKEN_LT(NAME)           NAME,
+#define TOKEN_ID(NAME)           id_##NAME,
+#define TOKEN_KW(SPELLING)       kw_##SPELLING,
+#define TOKEN_TY(SPELLING)       ty_##SPELLING,
+#define TOKEN_FN(SPELLING)       fn_##SPELLING,
+#include "lnast_tokens.def"
+  };
+
+  explicit Lnast_token(Kind k, std::string_view s) : kind(k), text(s) {}
+
+  bool is(Kind k) { return kind == k; }
+
+  std::string get_string() {
+    switch (kind) {
+#define KIND_STR(KIND)              \
+      case Kind::KIND:              \
+        if (text.empty())           \
+          return #KIND;             \
+        else                        \
+          return #KIND ", " + text;
+#define TOKEN_MK(NAME)           KIND_STR(NAME)
+#define TOKEN_PN(NAME, SPELLING) KIND_STR(NAME)
+#define TOKEN_LT(NAME)           KIND_STR(NAME)
+#define TOKEN_ID(NAME)           KIND_STR(id_##NAME)
+#define TOKEN_KW(SPELLING)       KIND_STR(kw_##SPELLING)
+#define TOKEN_TY(SPELLING)       KIND_STR(ty_##SPELLING)
+#define TOKEN_FN(SPELLING)       KIND_STR(fn_##SPELLING)
+#include "lnast_tokens.def"
+#undef KIND_STR
+    }
+    return "";
+  }
+
+private:
+  Kind kind;
+  std::string text;
+};
+
+class Lnast_lexer {
+public:
+  explicit Lnast_lexer(std::istream&);
+  Lnast_token lex_token();
+
+protected:
+  std::istream& is;
+
+  int get_char();
+  void put_char(char);
+  
+  Lnast_token form_token(Lnast_token::Kind kind, std::string_view str) {
+    return Lnast_token(kind, str);
+  }
+
+  Lnast_token form_token(Lnast_token::Kind kind) {
+    return Lnast_token(kind, "");
+  }
+  
+  Lnast_token lex_identifier(char);
+  Lnast_token lex_type();
+  Lnast_token lex_keyword_or_function(char);
+  Lnast_token lex_number(char);
+};

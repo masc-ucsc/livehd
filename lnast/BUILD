@@ -7,9 +7,9 @@ cc_library(
     name = "lnast",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp", "*reader.cpp"],
+        exclude = ["*test*.cpp"],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(["*.hpp", "*.def"]),
     copts = COPTS,
     includes = ["."],
     linkopts = ["-lpthread"],
@@ -18,6 +18,7 @@ cc_library(
         "//core",
         "//parser",
         "@hif//hif",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -106,5 +107,14 @@ cc_test(
     srcs = ["tests/elab_xlang_test.cpp"],
     deps = [
         ":lnast",
+    ],
+)
+
+cc_test(
+    name = "lexer_test",
+    srcs = ["tests/lexer_test.cpp"],
+    deps = [
+        ":lnast",
+        "@com_google_googletest//:gtest_main",
     ],
 )
