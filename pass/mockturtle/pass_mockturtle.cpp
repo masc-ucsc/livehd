@@ -120,7 +120,7 @@ void Pass_mockturtle::setup_input_signals(const unsigned int &group_id, const XE
   if (edge2mt_sigs.count(input_edge) != 0) {
     I(group_id == edge2mt_sigs[input_edge].gid);
     I(input_edge.get_bits() == edge2mt_sigs[input_edge].signals.size());
-    for (auto i = 0UL; i < input_edge.get_bits(); i++) inp_sigs_mt.emplace_back(edge2mt_sigs[input_edge].signals[i]);
+    for (auto i = 0; i < input_edge.get_bits(); i++) inp_sigs_mt.emplace_back(edge2mt_sigs[input_edge].signals[i]);
   } else {
     bdinp_edges.emplace_back(input_edge);
     edge2mt_sigs[input_edge].gid = group_id;
@@ -129,7 +129,7 @@ void Pass_mockturtle::setup_input_signals(const unsigned int &group_id, const XE
     // To fix, change the edge2signal for a pin2signals (same pin, same signal)
     fmt::print("FIXME: create_pi {}->{}\n", input_edge.driver.debug_name(), input_edge.sink.debug_name());
 #endif
-    for (auto i = 0UL; i < input_edge.get_bits(); i++) inp_sigs_mt.emplace_back(mig.create_pi());
+    for (auto i = 0; i < input_edge.get_bits(); i++) inp_sigs_mt.emplace_back(mig.create_pi());
 
     edge2mt_sigs[input_edge].signals = inp_sigs_mt;
   }
@@ -143,7 +143,7 @@ void Pass_mockturtle::setup_output_signals(const unsigned int &group_id, const X
   if (edge2mt_sigs.count(output_edge) != 0) {
     I(group_id == edge2mt_sigs[output_edge].gid);
     I(output_edge.get_bits() == edge2mt_sigs[output_edge].signals.size());
-    for (auto i = 0UL; i < output_edge.get_bits(); i++) {
+    for (auto i = 0; i < output_edge.get_bits(); i++) {
       typename ntk_type::node old_node = mig.get_node(edge2mt_sigs[output_edge].signals[i]);
       mig.substitute_node(old_node, out_sigs_mt[i]);
       mig.take_out_node(old_node);
@@ -1066,7 +1066,7 @@ void Pass_mockturtle::create_lutified_lgraph(Lgraph *old_lg) {
         new_lg->add_edge(driver_pin, sink_pin, 1);
       }
     } else {
-      for (auto i = 0UL; i < bit_width; i++) {
+      for (auto i = 0; i < bit_width; i++) {
         // note: not working at new lgraph node semantic
         /* Bits_t bits = 1; */
         /* if (i) */
