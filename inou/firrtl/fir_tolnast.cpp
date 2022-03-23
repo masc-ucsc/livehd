@@ -80,7 +80,6 @@ std::string Inou_firrtl_module::get_full_name(std::string_view term, const bool 
   if (output_names.count(term)) {
     return absl::StrCat("%", term);
   } else if (input_names.count(term)) {
-    fmt::print("DEBUG10 {}\n", absl::StrCat("$", term));
     return absl::StrCat("$", term);
   } else if (reg2qpin.count(term2)) {  // check if the register exists
     I(reg2qpin[term2].substr(0, 3) == "_#_");
@@ -862,7 +861,6 @@ void Inou_firrtl_module::handle_bundle_vec_acc(Lnast& lnast, const firrtl::Firrt
 
   if (alter_full_str[0] == '$') {
     flattened_str = absl::StrCat("$", flattened_str);
-    fmt::print("DEBUG9 {}\n", flattened_str);
   } else if (alter_full_str[0] == '%') {
     flattened_str = absl::StrCat("%", flattened_str);
   } else if (alter_full_str.substr(0, 3) == "_#_") {  // note: use _#_ to judge is a reg_qpin without split_hier_name again
@@ -1199,7 +1197,6 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
       record_all_input_hierarchy(port_name);
 
       full_port_name = absl::StrCat("$", port_name);
-      fmt::print("DEBUG8 {}\n", full_port_name);
     } else if (port_dir == firrtl::FirrtlPB_Port_Direction::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT) {
       // output_names.insert(port_name);
       record_all_output_hierarchy(port_name);

@@ -39,7 +39,6 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, cons
 void Lnast_tolg::top_stmts2lgraph(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
   // fmt::print("======== Phase-1: LNAST->Lgraph Start ================================\n");
   process_ast_stmts(lg, lnidx_stmts);
-
   // fmt::print("======== Phase-2: Adding final Module IO/Reg and Final Dpin Name =====\n");
   setup_lgraph_ios_and_final_var_name(lg);
 }
@@ -525,12 +524,14 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       auto        tup_get    = lg->create_node(Ntype_op::TupGet);
       tg_map.insert_or_assign(i, tup_get);
 
+
       Node_pin tn_dpin;
       if (is_input(c1_tg_name)) {
         tn_dpin = create_inp_tg(lg, lnast->get_vname(c1_tg));
       } else {
         tn_dpin = setup_tuple_ref(lg, c1_tg_name);
       }
+      // tn_dpin = setup_tuple_ref(lg, c1_tg_name);
 
       I(!tn_dpin.is_invalid());
       auto tn_spin = tup_get.setup_sink_pin("parent");
@@ -1622,7 +1623,6 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
   auto unified_out_dpin = name2dpin["%"];             // TA node
   auto unified_out_spin = lg->get_graph_output("%");  // Must be created before
   I(!unified_out_spin.is_invalid());
-  // I(!unified_out_dpin.is_invalid());
   if (!unified_out_dpin.is_invalid())
     unified_out_dpin.connect_sink(unified_out_spin);
 
@@ -1806,10 +1806,10 @@ void Lnast_tolg::dfs_try_create_flattened_inp(Lgraph *lg, Node_pin &cur_node_spi
 
   if (is_leaf) {
     Node_pin ginp;
-    if (!lg->has_graph_input(hier_name)) {
-      ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
-    } else if (name2dpin.find(hier_name) != name2dpin.end()) {
+    if (name2dpin.find(hier_name) != name2dpin.end()) {
       ginp = name2dpin[hier_name];
+    } else if (!lg->has_graph_input(hier_name)) {
+      ginp = lg->add_graph_input(hier_name, Port_invalid, 0);
     } else {
       ginp = lg->get_graph_input(hier_name);
     }

@@ -191,6 +191,7 @@ cc_library(
     "MaxPeriodFibonacciLFSR",
     "AMOALU",
     "DebugCustomXbar",
+    "IntSyncSyncCrossingSink"
 
     # FIXME:
     # issue1: memory
