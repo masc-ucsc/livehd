@@ -330,7 +330,7 @@ int main(int argc, char** argv) {
   if (!cmd.empty()) {
     fmt::print("livehd cmd {}\n", cmd);
     Main_api::parse_inline(cmd);
-    exit(0);
+    return 0;
   }
 
   using cl = Replxx::Color;
@@ -403,7 +403,7 @@ int main(int argc, char** argv) {
         int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
           std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
-          exit(-3);
+          return -3;
         }
       }
       livehd_path.append("/livehd");
@@ -411,13 +411,13 @@ int main(int argc, char** argv) {
         int ok = mkdir(livehd_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         if (ok < 0) {
           std::cerr << "error: could not create " << livehd_path << " directory for history.txt\n";
-          exit(-3);
+          return -3;
         }
       }
       int ok = creat(history_file.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
       if (ok < 0) {
         std::cerr << "error: could not create " << history_file << "\n";
-        exit(-3);
+        return -3;
       }
     }
 
@@ -573,8 +573,6 @@ int main(int argc, char** argv) {
 
   if (Main_api::has_errors())
     return 1;
-
-  _exit(0);
 
   return 0;
 }
