@@ -21,7 +21,7 @@ void start_tracing() {
 
   cfg.add_buffers()->set_size_kb(1024);
   auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-  ds_cfg->set_name("track_events");
+  ds_cfg->set_name("track_event");
 
   tracing_session = perfetto::Tracing::NewTrace();
   tracing_fd      = open(trace_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
