@@ -53,7 +53,7 @@ TEST_F(Lnast_lexer_test, mixed) {
   
   check("id_var, c");
   check("equal");
-  check("fn_add");
+  check("fn_plus");
   check("lparen");
   check("id_var, a");
   check("comma");
@@ -82,7 +82,7 @@ TEST_F(Lnast_lexer_test, token_mapping) {
 #define TOKEN_PN(NAME, SPELLING) SS_PN(SPELLING)
 #define TOKEN_KW(SPELLING)       SS(SPELLING)
 #define TOKEN_TY(SPELLING)       SS_TY(SPELLING)
-#define TOKEN_FN(SPELLING)       SS(SPELLING)
+#define TOKEN_FN(NAME, SPELLING) SS(SPELLING)
 #include "lnast_tokens.def"
 #undef SS
 #undef SS_TY
@@ -93,7 +93,7 @@ TEST_F(Lnast_lexer_test, token_mapping) {
 #define TOKEN_PN(NAME, SPELLING) CHECK(NAME)
 #define TOKEN_KW(SPELLING)       CHECK(kw_##SPELLING)
 #define TOKEN_TY(SPELLING)       CHECK(ty_##SPELLING)
-#define TOKEN_FN(SPELLING)       CHECK(fn_##SPELLING)
+#define TOKEN_FN(NAME, SPELLING) CHECK(fn_##NAME)
 #include "lnast_tokens.def"
 #undef CHECK
 }

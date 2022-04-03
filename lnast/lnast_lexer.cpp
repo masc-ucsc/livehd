@@ -96,11 +96,11 @@ Lnast_token Lnast_lexer::lex_keyword_or_function(char first) {
     str += ch;
   }
 #define TOKEN_KW(SPELLING)                         \
-  if (str == #SPELLING)                          \
+  if (str == #SPELLING)                            \
     return form_token(Lnast_token::kw_##SPELLING);
-#define TOKEN_FN(SPELLING)                         \
-  if (str == #SPELLING)                          \
-    return form_token(Lnast_token::fn_##SPELLING);
+#define TOKEN_FN(NAME, SPELLING)                   \
+  if (str == #SPELLING)                            \
+    return form_token(Lnast_token::fn_##NAME);
 #include "lnast_tokens.def"
   return form_token(Lnast_token::invalid);
 }

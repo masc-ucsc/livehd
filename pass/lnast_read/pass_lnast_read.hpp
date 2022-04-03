@@ -4,8 +4,8 @@
 
 class Pass_lnast_read : public Pass {
 public:
-  Pass_lnast_read(const Eprp_var&);
+  Pass_lnast_read(Eprp_var&);
   static void setup();  
-  static void do_work(const Eprp_var& var);
+  static void do_work(Eprp_var& var);
 protected:
 };

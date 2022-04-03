@@ -17,7 +17,7 @@ public:
 #define TOKEN_ID(NAME)           id_##NAME,
 #define TOKEN_KW(SPELLING)       kw_##SPELLING,
 #define TOKEN_TY(SPELLING)       ty_##SPELLING,
-#define TOKEN_FN(SPELLING)       fn_##SPELLING,
+#define TOKEN_FN(NAME, SPELLING) fn_##NAME,
 #include "lnast_tokens.def"
   };
 
@@ -39,12 +39,15 @@ public:
 #define TOKEN_ID(NAME)           KIND_STR(id_##NAME)
 #define TOKEN_KW(SPELLING)       KIND_STR(kw_##SPELLING)
 #define TOKEN_TY(SPELLING)       KIND_STR(ty_##SPELLING)
-#define TOKEN_FN(SPELLING)       KIND_STR(fn_##SPELLING)
+#define TOKEN_FN(NAME, SPELLING) KIND_STR(fn_##NAME)
 #include "lnast_tokens.def"
 #undef KIND_STR
     }
     return "";
   }
+
+  std::string_view get_text() { return text; }
+  Kind get_kind() { return kind; }
 
 private:
   Kind kind;

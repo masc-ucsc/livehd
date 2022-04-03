@@ -162,7 +162,9 @@ void Lnast_writer::write_func_call() {
 
 void Lnast_writer::write_func_def() {
   move_to_child();
+  is_func_name = true;
   write_lnast();
+  is_func_name = false;
   print(" = {\n");
   ++depth;
   move_to_sibling();
