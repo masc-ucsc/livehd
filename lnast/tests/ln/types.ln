@@ -1,0 +1,18 @@
+{
+  %{a} : #none
+  %{b} : #sint
+  %{c} : #uint
+  %{d} : #s(8)
+  %{e} : #u(%{x})
+  %{f} : #range
+  %{g} : #string
+  %{h} : #boolean
+  %{i} : #type
+  %{j} : #ref
+  %{k} : #tuple(#sint, #tuple(#boolean, #s(8)))
+  %{l} : #array(#tuple(#boolean, #boolean), %{x})
+  %{m} : #mixin(#array(#uint, 8), #expr(%{b}))
+  %{n} : #lambda(#tuple(#boolean, #s(4), #ref), #u(8))
+  %{o} : #expr(%{x})
+  %{p} : #unknown
+}

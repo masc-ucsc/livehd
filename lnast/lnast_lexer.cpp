@@ -26,6 +26,9 @@ Lnast_token Lnast_lexer::lex_token() {
       case '\r':
       case '\n':
         continue;
+      case '/':
+        lex_comment();
+        continue;
 #define TOKEN_PN(NAME, SPELLING)                 \
       case SPELLING:                             \
         return form_token(Lnast_token::NAME);
@@ -52,6 +55,22 @@ Lnast_token Lnast_lexer::lex_token() {
         }
         return form_token(Lnast_token::invalid);
     }
+  }
+}
+
+void Lnast_lexer::lex_comment() {
+  char second = get_char();
+  if (second == '*') {
+    while (true) {
+      if (get_char() == '*') {
+        char ch = get_char();
+        if (ch == '/') return;
+        put_char(ch);
+      }
+      if (is.eof()) return;
+    }
+  } else if (second == '/') {
+    while (get_char() != '\n');
   }
 }
 

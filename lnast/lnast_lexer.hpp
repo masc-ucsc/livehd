@@ -72,6 +72,8 @@ protected:
   Lnast_token form_token(Lnast_token::Kind kind) {
     return Lnast_token(kind, "");
   }
+
+  void lex_comment();
   
   Lnast_token lex_identifier(char);
   Lnast_token lex_type();

@@ -59,7 +59,6 @@ void Lnast_parser::parse_var_stmt() {
           // LNAST - tuple_add
           start_tree(Lnast_node::create_tuple_add());
           add_leaf(lhs_node);
-          forward_token();
           parse_list();
           end_tree();
           break;
@@ -210,18 +209,21 @@ void Lnast_parser::parse_type() {
     }
     case Lnast_token::ty_mixin: {
       start_tree(Lnast_node::create_comp_type_mixin());
+      forward_token();
       parse_type_list();
       end_tree();
       break;
     }
     case Lnast_token::ty_lambda: {
       start_tree(Lnast_node::create_comp_type_lambda());
+      forward_token();
       parse_type_list();
       end_tree();
       break;
     }
     case Lnast_token::ty_expr: {
-      start_tree(Lnast_node::create_comp_type_lambda());
+      start_tree(Lnast_node::create_expr_type());
+      forward_token();
       parse_list();
       end_tree();
       break;
@@ -233,6 +235,7 @@ void Lnast_parser::parse_type() {
 
 void Lnast_parser::parse_type_list() {
   fmt::print("parse_type_list\n");
+  forward_token();
   while (cur_kind() != Lnast_token::rparen) {
     if (cur_kind() == Lnast_token::comma) { forward_token(); continue; }
     parse_type();

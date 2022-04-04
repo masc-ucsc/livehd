@@ -118,3 +118,14 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "parser_writer_test",
+    srcs = ["tests/parser_writer_test.cpp"],
+    data = glob(["tests/ln/*.ln"]),
+    deps = [
+        ":lnast",
+        "@com_google_googletest//:gtest_main",
+    ],
+    timeout="short", # to avoid infinite loops
+)

@@ -28,6 +28,15 @@ protected:
   }
 };
 
+TEST_F(Lnast_lexer_test, comment) {
+  start();
+
+  ss << "/* \n multi-line comment \n */";
+  ss << "// comment\n";
+
+  check("eof");
+}
+
 TEST_F(Lnast_lexer_test, mixed) {
   start();
 
