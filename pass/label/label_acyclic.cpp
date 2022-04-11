@@ -4,11 +4,13 @@
 
 //#include "pass.hpp"
 
-//#define G_DEBUG 1  // toggle for gather_inou debug print
-//#define O_DEBUG 1  // toggle for oneparent merge debug print
-//#define M_DEBUG 1  // toggle to get print when merge detected
-//#define S_DEBUG 1  // toggle for after partition print
-//#define F_DEBUG 1  // toggle for final partition coloring print
+#define G_DEBUG 0  // toggle for gather_inou debug print
+#define O_DEBUG 0  // toggle for oneparent merge debug print
+#define M_DEBUG 0  // toggle to get print when merge detected
+#define S_DEBUG 0  // toggle for after partition print
+#define F_DEBUG 0  // toggle for final partition coloring print
+#define CHANGE_NODE_NAMES 1
+
 
 // Constructor for Label_acyclic
 Label_acyclic::Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m) : verbose(_v), hier(_h), merge_en(_m), cutoff(_c) {
@@ -154,11 +156,16 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
  Then, use this info to populate/overwrite id2inc, id2out, id2incparts, id2outparts
  * * * * * * */
 void Label_acyclic::gather_inou(Lgraph *g) {
+  IntSet common_int1;  // use wherever an IntSet is needed
+  IntSet common_int2;  // use wherever an IntSet is needed
+  NodeSet common_node1; // use wherever an NodeSet is needed
+  NodeSet common_node2; // use wherever an NodeSet is needed
+
   for (auto &it : id2nodes) {
     auto curr_id = it.first;
     auto curr_id_nodes = it.second;
 
-#ifdef G_DEBUG    
+#if G_DEBUG    
     fmt::print("curr_id: {}\n", curr_id);
 #endif   
 
@@ -208,7 +215,12 @@ void Label_acyclic::gather_inou(Lgraph *g) {
       }     
     } // END of for loop through all nodes in a part_id
 
-#ifdef G_DEBUG
+    node_set_write(id2out[curr_id], common_node1); 
+    node_set_write(id2inc[curr_id], common_node2); 
+    int_set_write(id2outparts[curr_id], common_int1); 
+    int_set_write(id2incparts[curr_id], common_int2); 
+
+#if G_DEBUG
     fmt::print("common_node1:\n");
     for (auto &n : common_node1) {
       Node some_n(g, n);
@@ -231,10 +243,6 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     }
 #endif
     
-    node_set_write(id2out[curr_id], common_node1); 
-    node_set_write(id2inc[curr_id], common_node2); 
-    int_set_write(id2outparts[curr_id], common_int1); 
-    int_set_write(id2incparts[curr_id], common_int2); 
   } // END of for loop going through all part_ids
 }
 
@@ -303,7 +311,7 @@ void Label_acyclic::merge_partitions_same_parents() {
 
   while (keep_going) {
     // reset the flags and ids
-#ifdef M_DEBUG
+#if M_DEBUG
     fmt::print("Keep Going, current pivot:{}\n", *pivot);
 #endif
 
@@ -333,7 +341,7 @@ void Label_acyclic::merge_partitions_same_parents() {
     }
 
     if (merge_flag) {     
-#ifdef M_DEBUG
+#if M_DEBUG
       fmt::print("Merge Detected, {} -> {}\n", merge_from, merge_into); 
 #endif
       merge_op(merge_from, merge_into);
@@ -349,12 +357,12 @@ void Label_acyclic::merge_partitions_same_parents() {
 
       pivot = pwi.begin(); // reset pivot to begin() for merge re-scan
     } else {
-#ifdef M_DEBUG
+#if M_DEBUG
       fmt::print("Before checking pivot\n");
 #endif
       // No merge possible, check if pivot can be changed
       if ((pivot+1) != pwi.end()) {
-#ifdef M_DEBUG
+#if M_DEBUG
         fmt::print("moving pivot old:{}, new:{}\n", *pivot, *(pivot+1));
 #endif
         ++pivot;            // change pivot
@@ -385,7 +393,7 @@ void Label_acyclic::merge_partitions_one_parent() {
   int merge_from = -1;      // The partition that will be eaten
 
   while (keep_going) {
-#ifdef O_DEBUG
+#if O_DEBUG
     fmt::print("Keep Going, current pivot:{}\n", *pivot);
 #endif
 
@@ -397,7 +405,7 @@ void Label_acyclic::merge_partitions_one_parent() {
 
     // Iterate through pwi to check which are the same
     for (auto i = pwi.begin(); i != pwi.end(); ++i) { 
-#ifdef O_DEBUG
+#if O_DEBUG
       fmt::print("id2incparts[{}]\n", *pivot);
       for (auto &o : id2incparts[*pivot]) {
         fmt::print("{}\n", o);
@@ -417,7 +425,7 @@ void Label_acyclic::merge_partitions_one_parent() {
     }
 
     if (merge_flag) {     
-#ifdef O_DEBUG
+#if O_DEBUG
       fmt::print("Merge Detected, {} -> {}\n", merge_from, merge_into); 
 #endif
       merge_op(merge_from, merge_into);
@@ -433,12 +441,12 @@ void Label_acyclic::merge_partitions_one_parent() {
 
       pivot = pwi.begin();
     } else {
-#ifdef O_DEBUG
+#if O_DEBUG
       fmt::print("Before checking pivot\n");
 #endif
       // No merge possible, check if pivot can be changed
       if ((pivot + 1) != pwi.end()) {
-#ifdef O_DEBUG
+#if O_DEBUG
         fmt::print("moving pivot old:{}, new:{}\n", *pivot, *(pivot+1));
 #endif
         ++pivot;            // change pivot
@@ -447,6 +455,60 @@ void Label_acyclic::merge_partitions_one_parent() {
     }
   }
 }
+
+//find_cycles()
+void Label_acyclic::find_cycles(Lgraph *g) {
+  for (auto &it : node2id) {
+    visited[it.first] = UNVISITED;
+  }
+
+  for (auto &it : visited) {
+    if (visited[it.first] == UNVISITED) {
+      NodeVector n_stack;
+      n_stack.push_back(it.first);
+      visited[it.first] = STACKED;
+      dfs(g, n_stack);
+    }
+  }
+}
+
+// dfs
+void Label_acyclic::dfs(Lgraph *g, NodeVector &stack) {
+  auto top = stack.back(); 
+  Node top_node(g, top);
+  for (auto &e : top_node.out_edges()) {
+    auto spin = e.sink;
+    //auto dpin = e.driver; 
+    auto snode = spin.get_node();
+    //auto dnode = dpin.get_node();
+    auto scomp = snode.get_compact();
+    vStates sstatus = visited[scomp];
+    if (sstatus == STACKED) {
+      NodeVector cycle_stack;
+      cycle_stack.push_back(stack.back());
+      stack.pop_back();
+      
+      while (cycle_stack.back() != scomp) {
+        cycle_stack.push_back(stack.back());
+        stack.pop_back();
+      }
+
+      while (cycle_stack.size() != 0) {
+        cycles[scomp].push_back(cycle_stack.back());
+        stack.push_back(cycle_stack.back());
+        cycle_stack.pop_back();
+      }
+    
+    } else if (sstatus == UNVISITED) {
+      stack.push_back(scomp);
+      visited[scomp] = STACKED;
+      dfs(g, stack);
+    }
+  }
+  visited[top] = DONE;
+  stack.pop_back();
+}
+
 
 // dump()
 void Label_acyclic::dump(Lgraph *g) const {
@@ -518,7 +580,7 @@ void Label_acyclic::label(Lgraph *g) {
     gather_inou(g);
   } 
 
-#ifdef F_DEBUG
+#if F_DEBUG
   for (auto n : g->forward(hier)) {
     if (node2id.find(n.get_compact()) != node2id.end()) {
       fmt::print("Found {} in node2id\n", n.debug_name());
@@ -533,9 +595,27 @@ void Label_acyclic::label(Lgraph *g) {
     auto nc = n.get_compact();
     if (node2id.contains(nc)) { 
       n.set_color(node2id[nc]);
-      //n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+#if CHANGE_NODE_NAMES  
+      n.set_name(std::string(fmt::format("ACYCPART{}", node2id[n.get_compact()])));
+#endif
     } else {
       n.set_color(NO_COLOR);
+    }
+  }
+
+  find_cycles(g);
+  if (cycles.size() != 0) {
+    std::cerr << cycles.size() << " Cycle(s) found, recommend against code gen\n";
+    //fmt::print("{} Cycle(s) found, recommend against code generation.\n", cycles.size()); 
+    auto tmp_iter = 1;
+    for (auto &it : cycles) {
+      std::cerr << "Nodes is Cycle " << tmp_iter++ << "\n";
+      //fmt::print("Nodes in Cycle {}: \n", tmp_iter++);
+      for (auto n : it.second) {
+        Node tmp_n(g, n);
+        //fmt::print("  {}\n", tmp_n.debug_name());
+        std::cerr << "  " << tmp_n.debug_name() << "\n";
+      } 
     }
   }
 
