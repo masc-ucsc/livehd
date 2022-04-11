@@ -54,6 +54,7 @@ TOKEN_ID(fun)   // @{...}
 
 // Literals
 TOKEN_LT(number)     // 123
+TOKEN_LT(string)     // "abc"
 
 // Keywords
 TOKEN_KW(if)

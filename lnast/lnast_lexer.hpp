@@ -79,4 +79,5 @@ protected:
   Lnast_token lex_type();
   Lnast_token lex_keyword_or_function(char);
   Lnast_token lex_number(char);
+  Lnast_token lex_string();
 };

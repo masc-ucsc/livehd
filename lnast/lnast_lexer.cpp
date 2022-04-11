@@ -49,6 +49,8 @@ Lnast_token Lnast_lexer::lex_token() {
       case '8':
       case '9':
         return lex_number(ch);
+      case '"':
+        return lex_string();
       default:
         if (std::isalpha(ch)) {
           return lex_keyword_or_function(ch);
@@ -136,4 +138,24 @@ Lnast_token Lnast_lexer::lex_number(char first) {
     str += ch;
   }
   return form_token(Lnast_token::number, str);
+}
+
+Lnast_token Lnast_lexer::lex_string() {
+  std::string str = "";
+  while (true) {
+    char ch = get_char();
+    switch (ch) {
+      case '"':
+        return form_token(Lnast_token::string, str);
+      case 0:
+        continue;
+      case '\\':
+        str += ch;
+        str += get_char();
+        continue;
+      default:
+        str += ch;
+        continue;
+    }
+  }
 }
