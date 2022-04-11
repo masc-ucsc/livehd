@@ -40,10 +40,15 @@ void Lnast_parser::parse_stmts() {
 
 void Lnast_parser::parse_stmt() {
   fmt::print("parse_stmt\n");
-  if (cur_kind() == Lnast_token::id_var) {
-    parse_var_stmt();
-  } else if (cur_kind() == Lnast_token::id_fun) {
-    parse_fun_stmt();
+  switch (cur_kind()) {
+    case Lnast_token::id_var:
+      return parse_var_stmt();
+    case Lnast_token::id_fun:
+      return parse_fun_stmt();
+    case Lnast_token::kw_if:
+      return parse_if_stmt();
+    default:
+      error();
   }
 }
 
@@ -260,4 +265,17 @@ void Lnast_parser::parse_fun_stmt() {
     parse_list();
     end_tree();
   }
+}
+
+void Lnast_parser::parse_if_stmt() {
+  start_tree(Lnast_node::create_if());
+  forward_token();
+  if (cur_kind() != Lnast_token::lparen) { error(); }
+  forward_token();
+  parse_prim();
+  if (cur_kind() != Lnast_token::rparen) { error(); }
+  forward_token();
+  parse_stmts();
+  // TODO: Add `else if` and `else` branch
+  end_tree();
 }

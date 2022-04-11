@@ -68,7 +68,7 @@ protected:
 	void parse_stmt();
 	void parse_var_stmt();
 	void parse_fun_stmt();
-	// void parse_if_stmt();
+	void parse_if_stmt();
 	// void parse_uif_stmt();
 	// void parse_for_stmt();
   void parse_list();
