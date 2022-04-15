@@ -46,6 +46,18 @@ public:
     return "";
   }
 
+  bool is_ty() {
+    switch (kind) {
+#define TOKEN_TY(SPELLING)      \
+      case Kind::ty_##SPELLING: \
+        return true;
+#include "lnast_tokens.def"
+      default:
+        return false;
+    }
+    return false;
+  }
+
   std::string_view get_text() { return text; }
   Kind get_kind() { return kind; }
 

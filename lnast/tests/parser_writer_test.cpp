@@ -16,11 +16,16 @@ class Lnast_parser_writer_test : public ::testing::Test {
 
 TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
   for (const auto & entry : std::filesystem::directory_iterator("./lnast/tests/ln")) {
+    fmt::print("\nTest - {}\n", entry.path());
+
     // Parser test
     std::ifstream fs;
     fs.open(entry.path());
     Lnast_parser parser(fs);
     auto lnast = parser.parse_all();
+
+    fmt::print("\nlnast->dump():\n\n");
+    lnast->dump();
 
     // Writer test
     std::stringstream ss;
@@ -44,6 +49,8 @@ TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
         break;
       }
     }
+
+    fmt::print("\n");
   }
 }
 

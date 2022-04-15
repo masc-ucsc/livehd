@@ -140,8 +140,62 @@ void Lnast_parser::parse_list() {
   fmt::print("parse_list\n");
   forward_token();
   while (cur_kind() != Lnast_token::rparen) {
-    if (cur_kind() == Lnast_token::comma) { forward_token(); continue; }
-    parse_prim();
+    switch (cur_kind()) {
+      case Lnast_token::comma: {
+        forward_token();
+        continue;
+      }
+      case Lnast_token::id_var: {
+        auto name = cur_text();
+        bool has_value = false;
+        bool has_type = false;
+        forward_token();
+        if (cur_kind() == Lnast_token::equal) {
+          has_value = true;
+          forward_token();
+          start_tree(Lnast_node::create_assign());
+          add_leaf(Lnast_node::create_ref(name));
+          parse_prim();
+        }
+        if (cur_kind() == Lnast_token::colon) {
+          has_type = true;
+          forward_token();
+          if (has_value) {
+            parse_type();
+          } else {
+            start_tree(Lnast_node::create_type_spec());
+            add_leaf(Lnast_node::create_ref(name));
+            parse_type();
+          }
+        }
+        if (has_value || has_type) {
+          end_tree();
+        } else {
+          add_leaf(Lnast_node::create_ref(name));
+        }
+        continue;
+      }
+      case Lnast_token::number: {
+        auto value = cur_text();
+        forward_token();
+        if (cur_kind() == Lnast_token::colon) {
+          forward_token();
+          start_tree(Lnast_node::create_type_spec());
+          add_leaf(Lnast_node::create_const(value));
+          parse_type();
+          end_tree();
+        } else {
+          add_leaf(Lnast_node::create_const(value));
+        }
+        continue;
+      }
+      default:
+        if (cur_token().is_ty()) {
+          parse_type();
+        } else {
+          error();
+        }
+    }
   }
   forward_token();
 }
@@ -194,7 +248,7 @@ void Lnast_parser::parse_type() {
     case Lnast_token::ty_tuple: {
       start_tree(Lnast_node::create_comp_type_tuple());
       forward_token();
-      parse_type_list();
+      parse_list();
       end_tree();
       break;
     }
@@ -215,14 +269,14 @@ void Lnast_parser::parse_type() {
     case Lnast_token::ty_mixin: {
       start_tree(Lnast_node::create_comp_type_mixin());
       forward_token();
-      parse_type_list();
+      parse_list();
       end_tree();
       break;
     }
     case Lnast_token::ty_lambda: {
       start_tree(Lnast_node::create_comp_type_lambda());
       forward_token();
-      parse_type_list();
+      parse_list();
       end_tree();
       break;
     }
@@ -236,16 +290,6 @@ void Lnast_parser::parse_type() {
     default:
       error();
   }
-}
-
-void Lnast_parser::parse_type_list() {
-  fmt::print("parse_type_list\n");
-  forward_token();
-  while (cur_kind() != Lnast_token::rparen) {
-    if (cur_kind() == Lnast_token::comma) { forward_token(); continue; }
-    parse_type();
-  }
-  forward_token();
 }
 
 void Lnast_parser::parse_fun_stmt() {

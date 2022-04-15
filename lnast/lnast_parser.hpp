@@ -37,10 +37,7 @@ protected:
   inline void forward_token() { ++token_index; }
   inline void rewind_token()  { --token_index; }
 
-  inline auto cur_token() {
-    fmt::print("cur_token -> {}\n", token_array[token_index].get_string());
-    return token_array[token_index];
-  }
+  inline auto cur_token() { return token_array[token_index]; }
   inline auto cur_kind() { return token_array[token_index].get_kind(); }
   inline auto cur_text() { return token_array[token_index].get_text(); }
 

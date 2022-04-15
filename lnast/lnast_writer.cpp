@@ -180,6 +180,11 @@ void Lnast_writer::write_assign() {
   print(" = ");
   move_to_sibling();
   write_lnast();
+  if (!is_last_child()) {
+    move_to_sibling();
+    print(" : ");
+    write_lnast();
+  }
   move_to_parent();
 }
 
