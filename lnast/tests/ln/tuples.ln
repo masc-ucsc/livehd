@@ -1,0 +1,13 @@
+{
+  %{_tuple_type} : #tuple(
+    %{a}=1:#uint,
+    %{b}=%{x}:#boolean,
+    3:#s(8),
+    #string
+  )
+  %{_tuple_variale} = (
+    %{a} = 1,
+    2,
+    %{c} = %{x}
+  )
+}

@@ -88,8 +88,7 @@ protected:
   void write_metadata();
   void write_lnast();
 
-  void write_binary(std::string_view op);
-  void write_unary(std::string_view op);
+  void write_n_ary(std::string_view op);
   void write_prim_type_int(char sign);
 
   void write_invalid();
