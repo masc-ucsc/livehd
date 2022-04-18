@@ -13,28 +13,28 @@ using Selc_lrhs_table               = absl::flat_hash_map<Lnast_nid, std::pair<b
 using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid>;                 // rtable = resolve_table
 
 // tricky old C macro to avoid redundant code from function overloadings
-#define CREATE_LNAST_NODE(type)                                                                                     \
-  static Lnast_node create##type() { return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, "")); } \
-  static Lnast_node create##type(std::string_view str) {                                                            \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, str));                                   \
-  }                                                                                                                 \
-  static Lnast_node create##type(std::string_view str, uint32_t line_num) {                                         \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, str));                            \
-  }                                                                                                                 \
-  static Lnast_node create##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {           \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, str));                      \
-  }                                                                                                                 \
-  static Lnast_node create##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create##type(), new_token); }
+#define CREATE_LNAST_NODE(type)                                                                                       \
+  static Lnast_node create_##type() { return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, "")); } \
+  static Lnast_node create_##type(std::string_view str) {                                                             \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, str));                                    \
+  }                                                                                                                   \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num) {                                          \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, line_num, str));                             \
+  }                                                                                                                   \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {            \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str));                       \
+  }                                                                                                                   \
+  static Lnast_node create_##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create_##type(), new_token); }
 
-#define CREATE_LNAST_NODE_sv(type)                                                                          \
-  static Lnast_node create##type(std::string_view sview) {                                                  \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, 0, sview));                         \
-  }                                                                                                         \
-  static Lnast_node create##type(std::string_view sview, uint32_t line_num) {                               \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, 0, 0, line_num, sview));                  \
-  }                                                                                                         \
-  static Lnast_node create##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
-    return Lnast_node(Lnast_ntype::create##type(), State_token(0, pos1, pos2, line_num, sview));            \
+#define CREATE_LNAST_NODE_sv(type)                                                                           \
+  static Lnast_node create_##type(std::string_view sview) {                                                  \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, 0, sview));                         \
+  }                                                                                                          \
+  static Lnast_node create_##type(std::string_view sview, uint32_t line_num) {                               \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, 0, 0, line_num, sview));                  \
+  }                                                                                                          \
+  static Lnast_node create_##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, sview));            \
   }
 
 struct Lnast_node {
@@ -53,96 +53,14 @@ struct Lnast_node {
   constexpr bool is_invalid() const { return type.is_invalid(); }
   void           dump() const;
 
-  CREATE_LNAST_NODE(_invalid)
+#define LNAST_NODE(NAME,VERBAL) \
+  CREATE_LNAST_NODE(NAME)
+#include "lnast_nodes.def"
 
-  CREATE_LNAST_NODE(_top)
-  CREATE_LNAST_NODE(_stmts)
-  CREATE_LNAST_NODE(_if)
-  CREATE_LNAST_NODE(_uif)
-  CREATE_LNAST_NODE(_for)
-  CREATE_LNAST_NODE(_while)
-  CREATE_LNAST_NODE(_func_call)
-  CREATE_LNAST_NODE(_func_def)
-
-  CREATE_LNAST_NODE(_assign)
-  CREATE_LNAST_NODE(_dp_assign)
-  CREATE_LNAST_NODE(_mut)
-
-  CREATE_LNAST_NODE(_bit_and)
-  CREATE_LNAST_NODE(_bit_or)
-  CREATE_LNAST_NODE(_bit_not)
-  CREATE_LNAST_NODE(_bit_xor)
-
-  CREATE_LNAST_NODE(_reduce_or)
-
-  CREATE_LNAST_NODE(_logical_and)
-  CREATE_LNAST_NODE(_logical_or)
-  CREATE_LNAST_NODE(_logical_not)
-
-  CREATE_LNAST_NODE(_plus)
-  CREATE_LNAST_NODE(_minus)
-  CREATE_LNAST_NODE(_mult)
-  CREATE_LNAST_NODE(_div)
-  CREATE_LNAST_NODE(_mod)
-
-  CREATE_LNAST_NODE(_shl)
-  CREATE_LNAST_NODE(_sra)
-
-  CREATE_LNAST_NODE(_sext)
-  CREATE_LNAST_NODE(_set_mask)
-
-  CREATE_LNAST_NODE(_get_mask)
-  CREATE_LNAST_NODE(_mask_and)
-  CREATE_LNAST_NODE(_mask_popcount)
-  CREATE_LNAST_NODE(_mask_xor)
-
-  CREATE_LNAST_NODE(_is)
-  CREATE_LNAST_NODE(_ne)
-  CREATE_LNAST_NODE(_eq)
-  CREATE_LNAST_NODE(_lt)
-  CREATE_LNAST_NODE(_le)
-  CREATE_LNAST_NODE(_gt)
-  CREATE_LNAST_NODE(_ge)
-
-  CREATE_LNAST_NODE(_ref)
-  CREATE_LNAST_NODE(_const)
   static Lnast_node create_const(int64_t v) {
     return Lnast_node(Lnast_ntype::create_const(), State_token(0, 0, 0, 0, std::to_string(v)));
   }
 
-  CREATE_LNAST_NODE(_range)
-
-  // Types
-  CREATE_LNAST_NODE(_type_def)
-  CREATE_LNAST_NODE(_type_spec)
-  
-  CREATE_LNAST_NODE(_none_type)
-  CREATE_LNAST_NODE(_prim_type_uint)
-  CREATE_LNAST_NODE(_prim_type_sint)
-  CREATE_LNAST_NODE(_prim_type_range)
-  CREATE_LNAST_NODE(_prim_type_string)
-  CREATE_LNAST_NODE(_prim_type_boolean)
-  CREATE_LNAST_NODE(_prim_type_type)
-  CREATE_LNAST_NODE(_prim_type_ref)
-  CREATE_LNAST_NODE(_comp_type_tuple)
-  CREATE_LNAST_NODE(_comp_type_array)
-  CREATE_LNAST_NODE(_comp_type_mixin)
-  CREATE_LNAST_NODE(_comp_type_lambda)
-  // CREATE_LNAST_NODE(_comp_type_enum)
-  CREATE_LNAST_NODE(_expr_type)
-  CREATE_LNAST_NODE(_unknown_type)
-
-  CREATE_LNAST_NODE(_tuple_concat)
-  CREATE_LNAST_NODE(_tuple_add)
-  CREATE_LNAST_NODE(_tuple_get)
-  CREATE_LNAST_NODE(_tuple_set)
-
-  CREATE_LNAST_NODE(_attr_set)
-  CREATE_LNAST_NODE(_attr_get)
-
-  CREATE_LNAST_NODE(_err_flag)
-  CREATE_LNAST_NODE(_phi)
-  CREATE_LNAST_NODE(_hot_phi)
 };
 
 class Lnast : public lh::tree<Lnast_node> {

@@ -1,0 +1,107 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+#if !defined(LNAST_NODE)
+#error Must define LNAST_NODE macro.
+#endif
+
+#ifndef LNAST_NODE
+#define LNAST_NODE( NAME, VERBAL )
+#endif
+
+// Invalid
+LNAST_NODE( invalid, invalid )
+
+// Tree Structure
+LNAST_NODE( top, top )
+LNAST_NODE( stmts, stmts )
+LNAST_NODE( if, if )
+LNAST_NODE( uif, uif )
+LNAST_NODE( for, for )
+LNAST_NODE( while, while )
+LNAST_NODE( func_call, fcall )
+LNAST_NODE( func_def, fdef )
+
+// Assignment
+LNAST_NODE( assign, assign )
+LNAST_NODE( dp_assign, dp_assign )
+LNAST_NODE( mut, mut )
+
+// Operators
+// - Bitwidth
+LNAST_NODE( bit_and, and )
+LNAST_NODE( bit_or, or )
+LNAST_NODE( bit_not, not )
+LNAST_NODE( bit_xor, xor )
+// - Bitwidth Insensitive Reduce
+LNAST_NODE( reduce_or, ror )
+// - Logical
+LNAST_NODE( logical_and, land )
+LNAST_NODE( logical_or, lor )
+LNAST_NODE( logical_not, lnot )
+// - Arithmetic
+LNAST_NODE( plus, plus )
+LNAST_NODE( minus, minus )
+LNAST_NODE( mult, mult )
+LNAST_NODE( div, div )
+LNAST_NODE( mod, mod )
+// - Shift
+LNAST_NODE( shl, shl )
+LNAST_NODE( sra, sra )
+// - Bit Manipulation
+LNAST_NODE( sext, sext )
+LNAST_NODE( set_mask, set_mask )
+LNAST_NODE( get_mask, get_mask )
+LNAST_NODE( mask_and, mask_and )
+LNAST_NODE( mask_popcount, mask_popcount )
+LNAST_NODE( mask_xor, mask_xor )
+// - Comparison
+LNAST_NODE( is, is )
+LNAST_NODE( ne, ne )
+LNAST_NODE( eq, eq )
+LNAST_NODE( lt, lt )
+LNAST_NODE( le, le )
+LNAST_NODE( gt, gt )
+LNAST_NODE( ge, ge )
+
+// Variables
+LNAST_NODE( ref, ref )
+LNAST_NODE( const, const )
+LNAST_NODE( range, range )
+
+// Type Statements
+LNAST_NODE( type_def, type_def )
+LNAST_NODE( type_spec, type_spec )
+
+// Types
+LNAST_NODE( none_type, none_type )
+LNAST_NODE( prim_type_uint, prim_type_uint )
+LNAST_NODE( prim_type_sint, prim_type_sint )
+LNAST_NODE( prim_type_range, prim_type_range )
+LNAST_NODE( prim_type_string, prim_type_string )
+LNAST_NODE( prim_type_boolean, prim_type_boolean )
+LNAST_NODE( prim_type_type, prim_type_type )
+LNAST_NODE( prim_type_ref, prim_type_ref )
+LNAST_NODE( comp_type_tuple, comp_type_tuple )
+LNAST_NODE( comp_type_array, comp_type_array )
+LNAST_NODE( comp_type_mixin, comp_type_mixin )
+LNAST_NODE( comp_type_lambda, comp_type_lambda )
+LNAST_NODE( comp_type_enum, comp_type_enum )
+LNAST_NODE( expr_type, expr_type )
+LNAST_NODE( unknown_type, unknown_type )
+
+// Tuple Statements
+LNAST_NODE( tuple_concat, tuple_concat )
+LNAST_NODE( tuple_add, tuple_add )
+LNAST_NODE( tuple_get, tuple_get )
+LNAST_NODE( tuple_set, tuple_set )
+
+// Attribute Statements
+LNAST_NODE( attr_set, attr_set )
+LNAST_NODE( attr_get, attr_get )
+
+// Compiler Internals
+LNAST_NODE( err_flag, err_flag )
+LNAST_NODE( phi, phi )
+LNAST_NODE( hot_phi, hot_phi )
+
+#undef LNAST_NODE

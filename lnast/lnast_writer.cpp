@@ -4,12 +4,6 @@
 
 #include "lnast_ntype.hpp"
 
-#define WRITE_LNAST_NODE(type)                                                                                  \
-  case Lnast_ntype::Lnast_ntype_##type: {                                                                       \
-    write_##type();                                                                                             \
-    break;                                                                                                      \
-  }
-
 Lnast_writer::Lnast_writer(std::ostream &_os, std::shared_ptr<Lnast> _lnast) : os(_os), lnast(_lnast) {
   has_file_output = !(_os.rdbuf() == std::cout.rdbuf());
 }
@@ -33,75 +27,14 @@ void Lnast_writer::write_metadata() {
 void Lnast_writer::write_lnast() {
   I(!is_invalid());
   switch (get_raw_ntype()) {
-    WRITE_LNAST_NODE(invalid)
-    WRITE_LNAST_NODE(top)
-    WRITE_LNAST_NODE(stmts)
-    WRITE_LNAST_NODE(if)
-    WRITE_LNAST_NODE(uif)
-    WRITE_LNAST_NODE(for)
-    WRITE_LNAST_NODE(while)
-    WRITE_LNAST_NODE(func_call)
-    WRITE_LNAST_NODE(func_def)
-    WRITE_LNAST_NODE(assign)
-    WRITE_LNAST_NODE(dp_assign)
-    WRITE_LNAST_NODE(mut)
-    WRITE_LNAST_NODE(bit_and)
-    WRITE_LNAST_NODE(bit_or)
-    WRITE_LNAST_NODE(bit_not)
-    WRITE_LNAST_NODE(bit_xor)
-    WRITE_LNAST_NODE(reduce_or)
-    WRITE_LNAST_NODE(logical_and)
-    WRITE_LNAST_NODE(logical_or)
-    WRITE_LNAST_NODE(logical_not)
-    WRITE_LNAST_NODE(plus)
-    WRITE_LNAST_NODE(minus)
-    WRITE_LNAST_NODE(mult)
-    WRITE_LNAST_NODE(div)
-    WRITE_LNAST_NODE(mod)
-    WRITE_LNAST_NODE(shl)
-    WRITE_LNAST_NODE(sra)
-    WRITE_LNAST_NODE(sext)
-    WRITE_LNAST_NODE(set_mask)
-    WRITE_LNAST_NODE(get_mask)
-    WRITE_LNAST_NODE(mask_and)
-    WRITE_LNAST_NODE(mask_popcount)
-    WRITE_LNAST_NODE(mask_xor)
-    WRITE_LNAST_NODE(is)
-    WRITE_LNAST_NODE(ne)
-    WRITE_LNAST_NODE(eq)
-    WRITE_LNAST_NODE(lt)
-    WRITE_LNAST_NODE(le)
-    WRITE_LNAST_NODE(gt)
-    WRITE_LNAST_NODE(ge)
-    WRITE_LNAST_NODE(ref)
-    WRITE_LNAST_NODE(const)
-    WRITE_LNAST_NODE(range)
-    WRITE_LNAST_NODE(type_def)
-    WRITE_LNAST_NODE(type_spec)
-    WRITE_LNAST_NODE(none_type)
-    WRITE_LNAST_NODE(prim_type_uint)
-    WRITE_LNAST_NODE(prim_type_sint)
-    WRITE_LNAST_NODE(prim_type_range)
-    WRITE_LNAST_NODE(prim_type_string)
-    WRITE_LNAST_NODE(prim_type_boolean)
-    WRITE_LNAST_NODE(prim_type_type)
-    WRITE_LNAST_NODE(prim_type_ref)
-    WRITE_LNAST_NODE(comp_type_tuple)
-    WRITE_LNAST_NODE(comp_type_array)
-    WRITE_LNAST_NODE(comp_type_mixin)
-    WRITE_LNAST_NODE(comp_type_lambda)
-    WRITE_LNAST_NODE(expr_type)
-    WRITE_LNAST_NODE(unknown_type)
-    WRITE_LNAST_NODE(tuple_concat)
-    WRITE_LNAST_NODE(tuple_add)
-    WRITE_LNAST_NODE(tuple_get)
-    WRITE_LNAST_NODE(tuple_set)
-    WRITE_LNAST_NODE(attr_set)
-    WRITE_LNAST_NODE(attr_get)
-    WRITE_LNAST_NODE(err_flag)
-    WRITE_LNAST_NODE(phi)
-    WRITE_LNAST_NODE(hot_phi)
-    WRITE_LNAST_NODE(last_invalid)
+#define LNAST_NODE(NAME, VERBAL)            \
+    case Lnast_ntype::Lnast_ntype_##NAME: { \
+      write_##NAME();                       \
+      break;                                \
+    }
+#include "lnast_nodes.def"
+    default:
+      break;
   }
 }
 
@@ -348,6 +281,10 @@ void Lnast_writer::write_comp_type_lambda() {
   move_to_parent();
 }
 
+void Lnast_writer::write_comp_type_enum() {
+  // TODO: Implement this function
+}
+
 void Lnast_writer::write_expr_type() {
   print(fmt::fg(fmt::color::gold), "#expr(");
   move_to_child();
@@ -410,5 +347,4 @@ void Lnast_writer::write_attr_get() { }
 void Lnast_writer::write_err_flag() { }
 void Lnast_writer::write_phi() { }
 void Lnast_writer::write_hot_phi() { }
-void Lnast_writer::write_last_invalid() { }
 
