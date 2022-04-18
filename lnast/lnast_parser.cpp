@@ -87,7 +87,20 @@ void Lnast_parser::parse_var_stmt() {
           }
           break;
         }
-        case Lnast_token::number: {
+        case Lnast_token::id_fun: {
+          // LNAST - func_call
+          start_tree(Lnast_node::create_assign());
+          add_leaf(lhs_node);
+          start_tree(Lnast_node::create_func_call());
+          add_leaf(Lnast_node::create_ref(cur_text()));
+          forward_token();
+          parse_list();
+          end_tree();
+          end_tree();
+          break;
+        }
+        case Lnast_token::number:
+        case Lnast_token::string: {
           // LNAST - assign
           start_tree(Lnast_node::create_assign());
           add_leaf(lhs_node);
@@ -175,7 +188,8 @@ void Lnast_parser::parse_list() {
         }
         continue;
       }
-      case Lnast_token::number: {
+      case Lnast_token::number:
+      case Lnast_token::string: {
         auto value = cur_text();
         forward_token();
         if (cur_kind() == Lnast_token::colon) {
@@ -214,6 +228,8 @@ void Lnast_parser::parse_prim() {
   if (cur_kind() == Lnast_token::id_var || cur_kind() == Lnast_token::id_fun) { 
     add_leaf(Lnast_node::create_ref(cur_text()));
   } else if (cur_kind() == Lnast_token::number) {
+    add_leaf(Lnast_node::create_const(cur_text()));
+  } else if (cur_kind() == Lnast_token::string) {
     add_leaf(Lnast_node::create_const(cur_text()));
   }
   forward_token();

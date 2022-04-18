@@ -141,11 +141,12 @@ Lnast_token Lnast_lexer::lex_number(char first) {
 }
 
 Lnast_token Lnast_lexer::lex_string() {
-  std::string str = "";
+  std::string str = "\"";
   while (true) {
     char ch = get_char();
     switch (ch) {
       case '"':
+        str += '"';
         return form_token(Lnast_token::string, str);
       case 0:
         continue;
