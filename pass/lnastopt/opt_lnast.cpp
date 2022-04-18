@@ -98,7 +98,7 @@ void Opt_lnast::process_plus(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
     const auto &data = ln->get_data(child);
     // fmt::print("plus:{} n_children:{}\n", data.type.debug_name(), n_children);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -125,7 +125,7 @@ void Opt_lnast::process_minus(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -162,7 +162,7 @@ void Opt_lnast::process_mult(const std::shared_ptr<Lnast> &ln, const Lnast_nid &
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -199,7 +199,7 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -238,7 +238,7 @@ void Opt_lnast::process_div(const std::shared_ptr<Lnast> &ln, const Lnast_nid &l
 //   for (auto child : ln->children(lnid)) {
 //     const auto &data = ln->get_data(child);
 //
-//     if (first_child) {  // first child
+//     if (first_child) {
 //       first_child = false;
 //
 //       I(data.type.is_ref());
@@ -276,7 +276,7 @@ void Opt_lnast::process_bit_and(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -312,7 +312,7 @@ void Opt_lnast::process_bit_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -338,7 +338,7 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -351,6 +351,129 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
     } else {
       result_trivial = Lconst::from_pyrope(data.token.get_text()).not_op();
     }
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_logical_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      operand1;
+  Lconst      operand2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        operand1 = operand1 + st.get_trivial(data.token.get_text());
+      } else {
+        operand1 = operand1 + Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        operand2 = operand2 + st.get_trivial(data.token.get_text());
+      } else {
+        operand2 = operand2 + Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if ((operand1 == 1 || operand1 == -1) && (operand2 == 1 || operand2 == -1)) {  // -1 is also equivalent to true in pyrope
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_logical_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      operand1;
+  Lconst      operand2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        operand1 = operand1 + st.get_trivial(data.token.get_text());
+      } else {
+        operand1 = operand1 + Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        operand2 = operand2 + st.get_trivial(data.token.get_text());
+      } else {
+        operand2 = operand2 + Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (operand1 == 1 || operand1 == -1 || operand2 == 1 || operand2 == -1) {  // -1 is also equivalent to true in pyrope
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_logical_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      operand;
+
+  bool first_child = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (data.type.is_ref()) {
+      operand = st.get_trivial(data.token.get_text());
+    } else {
+      operand = Lconst::from_pyrope(data.token.get_text());
+    }
+  }
+
+  if (operand == 1 || operand == -1) {  // -1 is also equivalent to true in pyrope
+    result_trivial = 0;
+  } else {
+    result_trivial = 1;
   }
 
   st.set(var, result_trivial);
@@ -383,6 +506,51 @@ void Opt_lnast::process_if(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   }
 }
 
+void Opt_lnast::process_ne(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 != arg2) {
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
 void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
   Lconst      result_trivial;
@@ -394,7 +562,7 @@ void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   for (auto child : ln->children(lnid)) {
     const auto &data = ln->get_data(child);
 
-    if (first_child) {  // first child
+    if (first_child) {
       first_child = false;
 
       I(data.type.is_ref());
@@ -420,6 +588,186 @@ void Opt_lnast::process_eq(const std::shared_ptr<Lnast> &ln, const Lnast_nid &ln
   }
 
   if (arg1 == arg2) {
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_lt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 < arg2) {
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_le(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 <= arg2) {
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_gt(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 > arg2) {
+    result_trivial = 1;
+  } else {
+    result_trivial = 0;
+  }
+
+  st.set(var, result_trivial);
+}
+
+void Opt_lnast::process_ge(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+  std::string var;
+  Lconst      result_trivial;
+  Lconst      arg1;
+  Lconst      arg2;
+
+  bool first_child   = true;
+  bool first_operand = true;
+  for (auto child : ln->children(lnid)) {
+    const auto &data = ln->get_data(child);
+
+    if (first_child) {
+      first_child = false;
+
+      I(data.type.is_ref());
+      var = data.token.get_text();
+      continue;
+    }
+
+    if (first_operand) {
+      first_operand = false;
+
+      if (data.type.is_ref()) {
+        arg1 = st.get_trivial(data.token.get_text());
+      } else {
+        arg1 = Lconst::from_pyrope(data.token.get_text());
+      }
+    } else {
+      if (data.type.is_ref()) {
+        arg2 = st.get_trivial(data.token.get_text());
+      } else {
+        arg2 = Lconst::from_pyrope(data.token.get_text());
+      }
+    }
+  }
+
+  if (arg1 >= arg2) {
     result_trivial = 1;
   } else {
     result_trivial = 0;
@@ -709,14 +1057,20 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and: process_bit_and(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or: process_bit_or(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: process_bit_not(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_and: process_logical_and(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_or: process_logical_or(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_not: process_logical_not(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: process_assign(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: process_tuple_get(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_add: process_tuple_add(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_ne: process_ne(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_eq: process_eq(ln, idx); break;
-      // case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_lt: process_lt(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_le: process_le(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_gt: process_gt(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_ge: process_ge(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: process_if(ln, idx); break;
-      // case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_if: std::cout << "BLAAAAAAAAAAAAAAAA\n"; break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_stmts: process_stmts(ln, idx); break;
       default: process_todo(ln, idx);
     }
@@ -740,7 +1094,6 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
     auto  lhs_txt   = lhs_data.token.get_text();
     auto  rhs_const = st.get_trivial(lhs_txt);
 
-
     switch (data.type.get_raw_ntype()) {
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_plus:
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_minus:
@@ -752,7 +1105,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
         if (rhs_const.is_invalid()) {
           // Could not find a constant value, keep the same original node
           fmt::print("FIXME: copy similar structure\n");
-        }else{
+        } else {
           ln2.create_assign_stmts(lhs_txt, rhs_const.to_pyrope());
         }
         break;
