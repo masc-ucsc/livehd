@@ -105,12 +105,6 @@ protected:
   std::string                  ConvergeFCallName(std::string_view func_out, std::string_view func_inp);
 
 private:
-  //----------- For toLNAST ----------
-  // // Maps (module name + I/O name) pair to direction of that I/O in that module.
-  // absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t> mod_to_io_dir_map;
-  // // Map used by external modules to indicate parameters names + values.
-  // absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
-
   //----------- FOR toFIRRTL ---------
   absl::flat_hash_map<std::string, firrtl::FirrtlPB_Port *>      io_map;
   absl::flat_hash_map<std::string, firrtl::FirrtlPB_Statement *> reg_wire_map;

@@ -2270,6 +2270,7 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   }
   // so far you collect all global table informations
 
+  // parallelize the rest of firrtl modules -> lnasts
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.module(i).has_user_module()) {
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
