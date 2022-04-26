@@ -34,7 +34,6 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 
   auto main_path = file_utils::get_exe_path();
 
-  fmt::print("path:{}\n", main_path);
 
   std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/",
@@ -63,12 +62,16 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
         break;
       }
     }
+  }else{
+    script_file = script;
   }
 
   if (access(std::string(script_file).c_str(), R_OK) != F_OK) {
     error("yosys setup could not find the provided script:{} file", script_file);
     return;
   }
+
+  fmt::print("path:{} script:{}\n", main_path, script_file);
 }
 
 void Inou_yosys_api::call_yosys(mustache::data &vars) {
