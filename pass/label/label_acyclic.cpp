@@ -456,6 +456,7 @@ void Label_acyclic::merge_partitions_one_parent() {
   }
 }
 
+#if 0
 //find_cycles()
 void Label_acyclic::find_cycles(Lgraph *g) {
   for (auto &it : node2id) {
@@ -508,7 +509,7 @@ void Label_acyclic::dfs(Lgraph *g, NodeVector &stack) {
   visited[top] = DONE;
   stack.pop_back();
 }
-
+#endif
 
 // dump()
 void Label_acyclic::dump(Lgraph *g) const {
@@ -603,6 +604,7 @@ void Label_acyclic::label(Lgraph *g) {
     }
   }
 
+#if 0
   find_cycles(g);
   if (cycles.size() != 0) {
     std::cerr << cycles.size() << " Cycle(s) found, recommend against code gen\n";
@@ -618,6 +620,7 @@ void Label_acyclic::label(Lgraph *g) {
       } 
     }
   }
+#endif
 
   if (verbose) dump(g);
 }

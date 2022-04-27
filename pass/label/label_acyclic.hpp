@@ -53,6 +53,7 @@ private:
   void merge_partitions_same_parents();
   void merge_partitions_one_parent();
 
+#if 0
   void find_cycles(Lgraph *g);
   /* make a map<Node, status> named visited
    * fill the map with node2id and initialize with UNVISITED
@@ -77,6 +78,7 @@ private:
    * pop from top of stack
    *
    */
+#endif
 
 public:
   void label(Lgraph *g);
