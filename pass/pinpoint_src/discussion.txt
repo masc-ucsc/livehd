@@ -1,0 +1,45 @@
+passes:
+
+ 
+livehd>
+inou.firrtl.tolnast -> (LNorig) 
+|> lnast.save -> (LNorig saved) 
+|> pass.lnast_tolg -> (LG1) 
+|> pass.cprop 
+|> pass.bitwidth -> (LG2) 
+|> save.lgraph -> (LG2 saved) 
+|> inou.cgen.verilog -> (V1)
+
+shell>
+(V1) -> make_netlist.py -> (netlist.v (V2)) -> get_nodes.py -> (sta_report.txt)
+
+                               ____________
+sta_report.txt will be like:  | node1 time |
+                              | node2 time |
+                              | ...        |
+                               -------------
+
+livehd>
+(LG2 saved OR V1 OR V2) -> lgraph.open OR yosys.tolg -> (LG3) 
+|> inou.annotate files:sta_report.txt -> (LG3 annotated) 
+|> pass.locator srcIR:LNorig -> (LNorig with marked nodes ) 
+|> inou.mapsrc files:chisel.file.scala --> (final marked file as output)
+
+===========================================================================================
+1. some steps for synthesis in ./readme_synth.txt
+
+2. netlist generated from these 2 different steps.
+step#1:
+  inou/yosys/tests/trivial1.v --> synth netlist.v --> ot_shell
+  step#1 : works fine
+step#2:
+  inou.cgen dumps trivial1.v --> synth netlist.v --> ot_shell
+  step#2 : error 
+step2 will not work unless we implement a TMAP in lgshell (opentimer only can read trivial netlist verilog style)
+{
+  If I try with trivial1.v from inou/yosys/tests/, it works fine. (without sdc it says no critical paths).
+If I try with :
+livehd> inou.yosys.tolg files:inou/yosys/tests/trivial1.v |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> inou.cgen.verilog odir:opentimer_tests
+then it gives the error
+}
+

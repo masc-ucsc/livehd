@@ -63,6 +63,7 @@ cc_library(
         "//pass/lnast_fromlg:pass_lnast_fromlg",
         "//pass/lnast_tolg:pass_lnast_tolg",
         "//pass/lnastfmt:pass_lnastfmt",
+        "//pass/pinpoint_src:pass_pinpoint_src",
         "//pass/lnastopt:pass_lnastopt",
         "//pass/punch:pass_punch",
         "//pass/sample:pass_sample",
