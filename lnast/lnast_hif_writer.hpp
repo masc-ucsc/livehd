@@ -11,6 +11,9 @@ public:
 
   void write_all() {
     wr = Hif_write::create(filename, "lnast", Lnast::version);
+    auto hif_stmt = Hif_write::create_attr();
+    hif_stmt.add_attr("module_name", lnast->get_top_module_name());
+    wr->add(hif_stmt);
     current_nid = Lnast_nid::root();
     write_hif_stmt();
     wr = nullptr;

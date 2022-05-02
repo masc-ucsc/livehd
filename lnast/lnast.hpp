@@ -151,6 +151,8 @@ public:
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }
 
+  void set_top_module_name(std::string_view name) { top_module_name = name; }
+
   bool             is_lhs(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid) const;
   static bool      is_register(std::string_view name) { return name.front() == '#'; }
   static bool      is_output(std::string_view name) { return name.front() == '%'; }

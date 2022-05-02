@@ -17,7 +17,7 @@ public:
     lnast = std::make_unique<Lnast>();
     rd = Hif_read::open(filename);
     is_top = true;
-    // NOTE: Skip HIF header
+    process_header_stmts();
     while (rd->next_stmt()) {
       process_hif_stmt();
     } ;
@@ -36,6 +36,18 @@ protected:
   std::stack<lh::Tree_index> tree_index;
 
   Hif_read::Statement cur_stmt;
+
+  void process_header_stmts() {
+    // NOTE: Skip first header (HIF version & tool name/version)
+    rd->next_stmt();
+    auto cur_stmt = rd->get_current_stmt();
+    for (const auto &te : cur_stmt.attr) {
+      if (te.lhs == "module_name") {
+        lnast->set_top_module_name(te.rhs);
+      }
+    }
+    rd->next_stmt();
+  }
 
   void process_hif_stmt() {
     cur_stmt = rd->get_current_stmt();
