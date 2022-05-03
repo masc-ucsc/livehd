@@ -1,35 +1,35 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_pinpoint_src.hpp"
+#include "pass_locator.hpp"
 #include "lbench.hpp"
 #include "perf_tracing.hpp"
 
-static Pass_plugin sample("pass_pinpoint_src", Pass_pinpoint_src::setup);
+static Pass_plugin sample("pass_locator", Pass_locator::setup);
 
-void Pass_pinpoint_src::setup() {
-  Eprp_method m1("pass.pinpoint_src", "after inou.pyrope or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)", &Pass_pinpoint_src::begin_pass);
+void Pass_locator::setup() {
+  Eprp_method m1("pass.locator", "after inou.pyrope or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)", &Pass_locator::begin_pass);
   //m1.add_label_optional("odir", "path to put the LNAST", ".");
   register_pass(m1);
 }
 
-Pass_pinpoint_src::Pass_pinpoint_src(const Eprp_var &var) : Pass("pass.pinpoint_src", var) {
+Pass_locator::Pass_locator(const Eprp_var &var) : Pass("pass.locator", var) {
   if (var.has_label("top"))
     top = var.get("top");
 }
 
-void Pass_pinpoint_src::begin_pass(Eprp_var& var) {
-  fmt::print("beginning pinpoint_src pass\n");
-  TRACE_EVENT("pass", "pinpoint_src");
-  Lbench b("pass.pinpoint_src");
+void Pass_locator::begin_pass(Eprp_var& var) {
+  fmt::print("beginning locator pass\n");
+  TRACE_EVENT("pass", "locator");
+  Lbench b("pass.locator");
 
-  Pass_pinpoint_src p(var);
+  Pass_locator p(var);
 
   /*for (const auto& ln : var.lnasts) {
     p.parse_ln(ln, var);
   }*/
 }
 
-/*void Pass_pinpoint_src::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var) {
+/*void Pass_locator::parse_ln(const std::shared_ptr<Lnast>& ln, Eprp_var& var) {
   std::string module_name=top;
   std::shared_ptr<Lnast> lnastfmted = std::make_shared<Lnast>(module_name);
 

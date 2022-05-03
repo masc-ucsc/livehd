@@ -4,7 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_pinpoint_src",
+    name = "pass_locator",
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],

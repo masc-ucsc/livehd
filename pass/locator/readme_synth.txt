@@ -22,7 +22,7 @@ Install steps:
     git submodule update
     make timing
     
-    livehd$ cp ../skywater-pdk/libraries/sky130_fd_sc_hs/latest/timing/sky130_fd_sc_hs__tt_025C_1v50.lib pass/pinpoint_src/sky130.lib
+    livehd$ cp ../skywater-pdk/libraries/sky130_fd_sc_hs/latest/timing/sky130_fd_sc_hs__tt_025C_1v50.lib pass/locator/sky130.lib
 
  2-Run yosys
 
@@ -33,7 +33,7 @@ Install steps:
    
  3-Run STA
 
-livehd/pass/pinpoint_src$ ../../../OpenSTA/app/sta
+livehd/pass/locator$ ../../../OpenSTA/app/sta
 OpenSTA> read_verilog netlist.v 
 OpenSTA> read_liberty sky130.lib 
 Warning: sky130.lib, line 19 default_operating_condition typ not found.
@@ -71,7 +71,7 @@ OpenSTA> report_checks -path_delay max -fields {slew cap input nets fanout} -for
     ~$ cmake ../
     ~$ make 
 
-    ~/livehd/pass/pinpoint_src$ ../../../OpenTimer/bin/ot-shell
+    ~/livehd/pass/locator$ ../../../OpenTimer/bin/ot-shell
     ot> read_celllib sky130.lib
     ot> read_verilog netlist.v
     ot> read_sdc your_sdc.sdc
