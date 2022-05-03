@@ -2,8 +2,10 @@
 #export VERILOG_FILES=../../opentimer_tests/arith.v
 #export DESIGN_NAME=arith
 
-export VERILOG_FILES=../../opentimer_tests/trivial1.v
-export DESIGN_NAME=trivial1
+name=scalar_tuple
+
+export VERILOG_FILES=../../pre_synth/${name}.v
+export DESIGN_NAME=$name
 
 export SYNTH_BUFFERING=0
 export SYNTH_SIZING=0
