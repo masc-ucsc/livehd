@@ -195,6 +195,17 @@ http_archive(
     ],
 )
 
+# OpenTimer
+http_archive(
+    name = "opentimer",
+    build_file = "opentimer.BUILD",
+    patches = ["//external:opentimer.patch"],
+    strip_prefix = "OpenTimer-242f283a0371acd2fd94abfeba496463809979fc",
+    urls = [
+        "https://github.com/OpenTimer/OpenTimer/archive/242f283a0371acd2fd94abfeba496463809979fc.zip",
+    ],
+)
+
 # mockturtle
 http_archive(
     name = "mockturtle",

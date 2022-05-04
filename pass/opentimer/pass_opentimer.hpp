@@ -17,7 +17,7 @@ protected:
   static void work(Eprp_var &var);
 
   void read_files();
-  void build_circuit(LGraph *g);
+  void build_circuit(Lgraph *g);
   void read_sdc();
   void compute_timing();
   void populate_table();

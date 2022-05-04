@@ -5,8 +5,9 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+#include "perf_tracing.hpp"
 
-void setup_pass_opentimer() { Pass_opentimer::setup(); }
+static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
 
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
@@ -40,11 +41,12 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
+  pass.read_files();      // Task1: Read input files (Read user from input) | Status: 75% done
+
   TRACE_EVENT("pass", "OPENTIMER_work");
   Lbench b("pass.OPENTIMER_work");
 
   for (const auto &g : var.lgs) {
-    pass.read_files();      // Task1: Read input files (Read user from input) | Status: 75% done
     pass.build_circuit(g);  // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
     pass.read_sdc();        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
     pass.compute_timing();  // Task4: Compute Timing | Status: 100% done
@@ -94,7 +96,7 @@ void Pass_opentimer::read_sdc() {
       std::string pname;
       int         delay = stoi(line_vec[1]);
       for (std::size_t i = 2; i < line_vec.size(); i++) {
-        if (line_vec[i] == "[get_ports") {
+       if (line_vec[i] == "[get_ports") {
           pname = line_vec[++i];
           pname.pop_back();
           continue;
@@ -153,7 +155,7 @@ void Pass_opentimer::read_sdc() {
   file.close();
 }
 
-void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circuit
+void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
   TRACE_EVENT("pass", "OPENTIMER_build_circuit");
   //  Lbench b("pass.OPENTIMER_build_circuit");
 
@@ -178,11 +180,10 @@ void Pass_opentimer::build_circuit(LGraph *g) {  // Enhance this for build_circu
   for (const auto node : g->forward()) {  // TODO: Do we really need a slow forward. Why not just fast??
     auto op = node.get_type_op();
 
-    if (op != SubGraph_Op) {
-      if (op != GraphIO_Op)
-        Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
-                    node.debug_name(),
-                    node.get_type().get_name());
+    if (op != Ntype_op::Sub) {
+      Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
+          node.debug_name(),
+          Ntype::get_name(op));
       continue;
     }
 
