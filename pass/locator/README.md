@@ -5,11 +5,10 @@ How to run:
    This will create verilog file(s) in pre_synth/ from a pyrope file.
   1.1. If there are multiple files, concat them to a single file.
 2. cd pass/locator
-  2.1. check design name in run.sh (match it to the main verilog file in
-  pre_synth/)
+  2.1. check design name in run.sh (match it to the main verilog file in pre_synth/)
 3. ./make_netlist.sh
     Takes verilog file from livehd/pre_synth/ and generates pass/locator/netlist.v
-4. (run sta and get the timing path)
+4. (run sta and get the timing path)(refer to readme_synth.txt)
     get_nodes.py
 5.  cd ../../ (go to livehd/)
    open lgshell

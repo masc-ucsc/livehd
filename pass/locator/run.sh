@@ -2,7 +2,7 @@
 #export VERILOG_FILES=../../opentimer_tests/arith.v
 #export DESIGN_NAME=arith
 
-name=firrtl_gcd_3bits
+name=hier_tuple_nested_if2
 
 export VERILOG_FILES=../../pre_synth/${name}.v
 export DESIGN_NAME=$name
