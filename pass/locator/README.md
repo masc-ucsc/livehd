@@ -1,12 +1,21 @@
 How to run:                                        
                                                    
-1. in livehd/ run pass/locator/pre_synth.sh   
-    This will create a verilog file in pre_synth/ from a pyrope file.
+1. Provide the input modules in pass/locator/pre_synth.sh
+   in livehd/ run pass/locator/pre_synth.sh   
+   This will create verilog file(s) in pre_synth/ from a pyrope file.
+  1.1. If there are multiple files, concat them to a single file.
 2. cd pass/locator
-  2.1. check design name in run.sh
+  2.1. check design name in run.sh (match it to the main verilog file in
+  pre_synth/)
 3. ./make_netlist.sh
     Takes verilog file from livehd/pre_synth/ and generates pass/locator/netlist.v
-4. get_nodes.py
+4. (run sta and get the timing path)
+    get_nodes.py
+5.  cd ../../ (go to livehd/)
+   open lgshell
+   livehd> inou.yosys.tolg files:pass/locator/netlist.v script:pp.ys top:firrtl_gcd_3bits
+   (pp.ys and sky130.lib are the ones copied from pass/locator/debugged/ to livehd/)
+
 
 For first time users: 
 You need to get the liberty file for Synth. Complete the following steps before
@@ -20,11 +29,18 @@ starting Synth stage.
    libraries/sky130_fd_sc_hs/latest/timing/sky130_fd_sc_hs__tt_025C_1v50.lib to
    pass/locator/sky130.lib
 
+
+To remove old data, remove the following:
+1. rm -r lgdb**** scalar_tuple* pre_synth******* *****
+2. 
+
 ================================================================
+
 TO DO
 2. complete get_nodes.py to get rpt.txt
 
 ================================================================
+
 FROM DISCUSSION.TXT:
 
 
@@ -72,6 +88,7 @@ Is it because the lnast saved in "pass.lnast_save" does not have "name"?
 Bug, @Jing-Hsiang Huang may be able to fix it. Looks like the lnast name is not populated when lnast is loaded
 
 I agree, the last_save should have an “odir:” option (or path: for lgdb as default)
+
 ===========================================================================================
 25April2022
 

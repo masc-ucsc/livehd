@@ -1,6 +1,6 @@
 #!/bin/bash
 
-pts='scalar_tuple '
+pts='firrtl_gcd_3bits'
 
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
@@ -62,7 +62,7 @@ create_pre-synth_verilog () {
      echo "----------------------------------------------------"
      echo "PRP -> HL LNAST -> LG -> save LG "
      echo "----------------------------------------------------"
-     ${LGSHELL} "inou.pyrope files:${PRP_PATH}/${pt}.prp |> pass.lnast_tolg |> pass.bitwidth |> pass.cprop |> lgraph.save hier:true "
+     ${LGSHELL} "inou.pyrope files:${PRP_PATH}/${pt}.prp |> pass.lnast_tolg |> pass.bitwidth |> pass.cprop |> pass.bitwidth |> lgraph.save hier:true "
      
      ret_val=$?
      if [ $ret_val -ne 0 ]; then
@@ -99,4 +99,5 @@ create_pre-synth_verilog () {
 
 rm -rf lgdb*
 rm -r pre_synth
+rm -r ${pts}/
 create_pre-synth_verilog "$pts"

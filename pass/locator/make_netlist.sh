@@ -5,10 +5,6 @@
 # |source run.sh
 # |yosys -c synth.tcl
 
-#rm ./*0.chk.rpt
-#rm ./*0.stat.rpt
-#rm ./*_pre.stat
-#rm ./*_dff.stat
 rm -r out/
 rm netlist.v
 
@@ -33,11 +29,11 @@ yosys -c synth.tcl
 
 echo "** POST-SYNTH NETLIST FORMED:            **"
 echo "** ./netlist.v                           **"
-echo "** ENSURE CORRECT DESIGN NAME IN RUN.SH! **"
+echo "** ENSURED CORRECT DESIGN NAME IN RUN.SH?**"
 
-rm ./*0.chk.rpt
-rm ./*0.stat.rpt
-rm ./*_pre.stat
-rm ./*_dff.stat
+mv ./*0.chk.rpt out/.
+mv ./*0.stat.rpt out/.
+mv ./*_pre.stat out/.
+mv ./*_dff.stat out/.
 
 
