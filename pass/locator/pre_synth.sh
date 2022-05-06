@@ -87,7 +87,6 @@ create_pre-synth_verilog () {
       exit $ret_val
     else
       echo "Successfully generated Verilog: pre_synth/${pt}.v"
-      exit 0
     fi
     
     if [ ! -f pre_synth/${pt}.v ]; then
@@ -132,7 +131,7 @@ create_synth-verilog () {
   export SAVE_NETLIST=netlist.v                     
   mkdir -p out                                       
 
-  if [ -f netlist.v ]; then
+  if [ -f netlist.v && -f out/synthesis.sdc ]; then
     rm netlist.v
     rm -r out/
   fi
@@ -215,7 +214,7 @@ post_synth () {
 
 }
 
-pts='vec_shift_register_param' # scalar_tuple
-#create_pre-synth_verilog "$pts"
+pts='reg__q_pin' # scalar_tuple
+create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
 post_synth "$pts"
