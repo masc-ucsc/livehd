@@ -14,6 +14,7 @@ protected:
   std::string opt_sdc;
   std::string opt_spef;
 
+  static void liberty_open(Eprp_var &var);
   static void work(Eprp_var &var);
 
   void read_files();

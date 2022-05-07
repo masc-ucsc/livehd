@@ -32,12 +32,12 @@ std::string Pass::get_path(const Eprp_var &var) const {
 
   if (var.has_label("path")) {
     _path = var.get("path");
-    if (!setup_directory(_path)) {
-      _path = "/INVALID";
-      error("{} could not gain access to path:{}", pass_name, _path);
-    }
-  } else {
+  }else{
+    _path = "lgdb";
+  }
+  if (!setup_directory(_path)) {
     _path = "/INVALID";
+    error("{} could not gain access to path:{}", pass_name, _path);
   }
 
   return _path;

@@ -19,6 +19,12 @@ void Pass_opentimer::setup() {
   m1.add_label_required("spef", "SPEF file for timing");
 
   register_pass(m1);
+
+  Eprp_method m2("inou.liberty", "Read liberty and populate blackboxes", &Pass_opentimer::liberty_open);
+
+  m2.add_label_required("files", "Liberty files");
+
+  register_pass(m2);
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var) {
@@ -36,6 +42,55 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
   opt_sdc  = var.get("opt_sdc");
   opt_spef = var.get("opt_spef");
+}
+
+void Pass_opentimer::liberty_open(Eprp_var &var) {
+  Pass_opentimer p(var);
+
+  TRACE_EVENT("pass", "OPENTIMER_liberty");
+  Lbench b("pass.OPENTIMER_liberty");
+
+  auto *library = Graph_library::instance(p.path);
+
+  for (const auto f : absl::StrSplit(p.files, ',')) {
+    fmt::print("reading liberty {}\n", f);
+
+    ot::Timer timer;
+
+    timer.read_celllib(f, ot::MIN);
+
+    timer.update_timing();
+
+    const auto &cl=timer.celllib(ot::MIN);
+    for(const auto &it:cl->cells) {
+      auto *g = library->try_find_lgraph(it.first);
+      if (g == nullptr) {
+        g = ::Lgraph::create(p.path, it.first, "-");
+      }
+
+      Sub_node *sub = g->ref_self_sub_node();
+
+      bool has_clock = false;
+      for(const auto &pin:it.second.cellpins) {
+        if (pin.second.is_clock && *pin.second.is_clock) {
+          sub->set_loop_last();
+          has_clock = true;
+        }
+        if (pin.second.direction) {
+          if (*pin.second.direction == ot::CellpinDirection::INPUT)
+            sub->add_input_pin(pin.first);
+          else if (*pin.second.direction == ot::CellpinDirection::OUTPUT)
+            sub->add_output_pin(pin.first);
+        }
+
+        if (pin.second.is_clock)
+          has_clock |= *pin.second.is_clock;
+      }
+
+      if (!has_clock)
+        sub->clear_loop_last();
+    }
+  }
 }
 
 void Pass_opentimer::work(Eprp_var &var) {

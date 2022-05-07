@@ -17,6 +17,12 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
   writer.Key("name");
   writer.String(name.c_str());
 
+  writer.Key("loop_last");
+  writer.Bool(loop_last);
+
+  writer.Key("loop_first");
+  writer.Bool(loop_first);
+
   writer.Key("io_pins");
   writer.StartArray();
   int pos = 0;
@@ -58,8 +64,13 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
   I(entry.HasMember("lgid"));
   I(entry.HasMember("name"));
   I(entry["name"].IsString());
-  lgid = entry["lgid"].GetUint64();
-  name = entry["name"].GetString();
+  I(entry["loop_last"].IsBool());
+  I(entry["loop_first"].IsBool());
+
+  lgid       = entry["lgid"].GetUint64();
+  name       = entry["name"].GetString();
+  loop_last  = entry["loop_last"].GetBool();
+  loop_first = entry["loop_first"].GetBool();
 
   io_pins.resize(1);  // No id ZERO
 

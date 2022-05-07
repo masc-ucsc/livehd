@@ -65,6 +65,7 @@ cc_library(
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/locator:pass_locator",
         "//pass/lnastopt:pass_lnastopt",
+        "//pass/opentimer:pass_opentimer",
         "//pass/punch:pass_punch",
         "//pass/sample:pass_sample",
         "//pass/sat_opt:pass_sat_opt",

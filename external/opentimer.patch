@@ -10,3 +10,35 @@ diff repo
 +#define OT_HOST_SYSTEM "unix"
 +#define OT_INSTALL_PREFIX "/invalid/local"
 +#define OT_TCLSH_PATH "/invalid/tclsh"
+diff repo
+--- /dev/null	2022-04-09 16:15:09.246739476 -0700
++++ ot/timer/timer.hpp	2022-05-05 09:08:45.812679791 -0700
+@@ -117,10 +117,11 @@
+     inline const auto& primary_inputs() const;
+     inline const auto& primary_outputs() const;
+     inline const auto& pins() const;
+     inline const auto& nets() const;
+     inline const auto& gates() const;
++    inline const auto& celllib(Split el) const;
+     inline const auto& clocks() const;
+     inline const auto& tests() const;
+     inline const auto& arcs() const;
+ 
+   private:
+@@ -413,10 +414,16 @@
+ // Expose the gate data structure to users
+ inline const auto& Timer::gates() const {
+   return _gates;
+ }
+ 
++// Function: celllib
++// Expose the celllib data structure to users
++inline const auto& Timer::celllib(Split el) const {
++  return _celllib[el];
++}
++
+ // Function: clocks
+ // Expose the clock data structure to users
+ inline const auto& Timer::clocks() const {
+   return _clocks;
+ }

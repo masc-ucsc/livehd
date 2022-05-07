@@ -10,7 +10,7 @@ cc_library(
         "-w",
         "-O2",
     ],
-    srcs = glob(["lib/**/*.cpp"]),
+    srcs = glob(["ot/**/*.cpp"]),
     includes = ["."],
     visibility = ["//visibility:public"],
 )

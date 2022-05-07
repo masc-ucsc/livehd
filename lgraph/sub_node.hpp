@@ -55,8 +55,11 @@ public:
 private:
   std::string name;
   Lg_type_id  lgid;
+  bool loop_first;
+  bool loop_last;
 
   std::vector<IO_pin> io_pins;
+
 
   absl::flat_hash_map<std::string, Port_ID> name2id;
   std::vector<Port_ID>                      graph_pos2instance_pid;
@@ -112,7 +115,10 @@ public:
     name2id.clear();
     io_pins.clear();
     deleted.clear();
-    lgid = 0;
+
+    lgid       = 0;
+    loop_last  = true;
+    loop_first = false;
   }
 
   [[nodiscard]] bool is_black_box() const {
@@ -124,6 +130,13 @@ public:
     // io_pins.clear();   // FIXME: version?? Do NOT remove mappings, just port id. (allows to reload designs)
     // io_pins.resize(1); // No id ZERO
   }
+
+  [[nodiscard]] bool is_loop_first() const { return loop_first; }
+  void set_loop_first() { loop_first = true; }
+
+  [[nodiscard]] bool is_loop_last() const { return loop_last; }
+  void set_loop_last() { loop_last = true; }
+  void clear_loop_last() { loop_last = false; }
 
   [[nodiscard]] bool is_invalid() const { return lgid == 0; }
 

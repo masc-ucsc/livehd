@@ -391,14 +391,18 @@ bool Node::is_type_tup() const {
   return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
+bool Node::is_type_loop_first() const {
+  auto op = get_type_op();
+  if (op == Ntype_op::Sub) {
+    return get_type_sub_node().is_loop_first();
+  }
+  return Ntype::is_loop_first(op);
+}
+
 bool Node::is_type_loop_last() const {
   auto op = get_type_op();
   if (op == Ntype_op::Sub) {
-    const auto sub_name = get_type_sub_node().get_name();
-    if (sub_name.substr(0, 6)
-        == "__fir_")  // FIXME: NOT NICE to have __fir_ specific RUles. It should be generic language independent
-      return false;
-    return true;
+    return get_type_sub_node().is_loop_last();
   }
   return Ntype::is_loop_last(op);
 }
