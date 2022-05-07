@@ -67,6 +67,7 @@ sta_report.txt will be like:  | node1 time |
 livehd>
 (LG2 saved OR V1 OR V2) -> lgraph.open OR yosys.tolg -> (LG3) 
 |> inou.annotate files:sta_report.txt -> (LG3 annotated) 
+|> pass.lnast_fromlg -> (LNsub)
 |> pass.locator srcIR:LNorig -> (LNorig with marked nodes ) 
 |> inou.mapsrc files:chisel.file.scala --> (final marked file as output)
 

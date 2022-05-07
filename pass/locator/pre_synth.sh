@@ -54,7 +54,6 @@ create_pre-synth_verilog () {
  #   echo "saved LN -> (loaded using hif format)-> LGraph"
  #   echo "----------------------------------------------------"
  #   ${LGSHELL} "pass.lnast_load files:${pt} |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> save.lgraph hier:true"
- #   #FIXME:the lnast loaded has no name!!
  #   ret_val=$?
  #   if [ $ret_val -ne 0 ]; then
  #     echo "ERROR: could not create/save LG for pattern: ${pt}!"
