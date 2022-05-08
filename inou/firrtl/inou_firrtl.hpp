@@ -13,6 +13,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/btree_map.h"
 #include "firrtl.pb.h"
 
 #pragma GCC diagnostic pop
@@ -26,6 +27,9 @@
 struct Global_module_info {
   absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t>                          mod_to_io_dir_map;
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
+  
+  // module_name to io_name to hierarchical_field_name's flip polarity(1st bool) and leaf flag (2nd bool).
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>>> var2flip; 
 };
 
 class Inou_firrtl : public Pass {
@@ -42,8 +46,10 @@ protected:
   void     iterate_circuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input, std::string_view file_name);
   void     iterate_modules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
   void     populate_all_mods_io(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
-  void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, std::string_view port_id,
+  void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
+
+  void     add_glob_flip_info(std::string_view mod_id, bool flipped_in, std::string_view port_id, bool is_leaf = false);
   void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, const uint8_t &dir);
   void     grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalModule &emod);
   Sub_node add_mod_to_library(Eprp_var &var, std::string_view mod_name, std::string_view file_name);
@@ -151,16 +157,18 @@ protected:
 
   std::string create_tmp_var();
   std::string create_tmp_mut_var();
-  std::string get_full_name(std::string_view term, const bool is_rhs);
+  std::string name_prefix_modifier(std::string_view term, const bool is_rhs);
   void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void        declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name,
                                         const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
 
   // Helper Functions (for handling specific cases)
-  int32_t get_bit_count(const firrtl::FirrtlPB_Type &type);
+  int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
-  void     init_wire_dots(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
+  void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, bool flipped, Lnast_nid &parent_node);
+  static void  dump_var2flip(const absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> &module_table);
+  void     add_local_flip_info(bool flipped_in, std::string_view port_id, bool is_leaf = false);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
@@ -229,6 +237,7 @@ protected:
                               const Lnast_node value_node = Lnast_node::create_invalid());
 
   void list_statement_info(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
+  std::string flatten_expr_hier_name(const firrtl::FirrtlPB_Expression &expr);
   void final_mem_interface_assign(Lnast &lnast, Lnast_nid &parent_node);
 
 private:
@@ -237,6 +246,7 @@ private:
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> wire_names;
+  absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> var2flip;
   absl::flat_hash_set<std::string> is_invalid_table;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;
