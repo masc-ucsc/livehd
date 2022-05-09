@@ -46,7 +46,6 @@ protected:
         lnast->set_top_module_name(te.rhs);
       }
     }
-    rd->next_stmt();
   }
 
   void process_hif_stmt() {

@@ -14,13 +14,16 @@ Pass_lnast_save::Pass_lnast_save(const Eprp_var& var) : Pass("pass.lnast_save", 
 
 void Pass_lnast_save::setup() {
   Eprp_method m1("pass.lnast_save", "Serialize LNAST to HIF format", &Pass_lnast_save::do_work);
+  m1.add_label_optional("odir", "Output Directory");
   register_pass(m1);
 }
 
 void Pass_lnast_save::do_work(const Eprp_var& var) {
   Pass_lnast_save pass(var);
+  auto odir = pass.get_odir(var);
+  odir = (odir == "/INVALID") ? "." : odir;
   for (const auto &lnast : var.lnasts) {
-    Lnast_hif_writer writer(lnast->get_top_module_name(), lnast);
+    Lnast_hif_writer writer(absl::StrCat(odir, "/", lnast->get_top_module_name()), lnast);
     writer.write_all();
   }
 }
