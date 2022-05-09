@@ -151,6 +151,32 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
           fmt::print("FIXME: missing sensitivity type\n");
         }
       }
+    } else if (member.kind == slang::SymbolKind::UnknownModule) {
+      const auto &mod = member.as<slang::UnknownModuleSymbol>();
+      fmt::print("unknown module: {}\n", mod.moduleName);
+
+      auto *library = Graph_library::instance("lgdb"); // FIXME: no hardcode path
+
+      auto lgid = library->get_lgid(mod.moduleName);
+      if (lgid == 0) {
+        Pass::error("FIXME: handle unknown (not cell) module ({}). Maybe try in-order (sequential)\n", mod.moduleName);
+      }
+      Sub_node *sub = library->ref_sub(lgid);
+      I(sub);
+
+      for (const auto &n : mod.getPortNames()) {
+        fmt::print("   name: {}\n", n);
+      }
+
+      for (const auto &p : mod.getPortConnections()) {
+        if (p->kind == slang::AssertionExprKind::Simple) {
+          const auto &expr = p->as<slang::SimpleAssertionExpr>();
+          auto inp_or_out = process_expression(expr.expr);
+          fmt::print("  expr:{}\n", inp_or_out);
+        }else{
+          fmt::print("FIXME: unhandled UnknownModule IO expr\n");
+        }
+      }
     } else {
       fmt::print("FIXME: missing body type\n");
     }

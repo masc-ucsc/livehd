@@ -258,6 +258,13 @@ Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, std::string_vi
   if (it != glib2.end()) {
     return it->second;
   }
+
+#ifndef NDEBUG
+  // Maybe never used before Lgraph but exists
+  if (lib->get_lgid_int(name))
+    Lgraph::warn("try_find_lgraph({}) is not open but exists. Load first\n", name);
+#endif
+
   return nullptr;
 }
 
