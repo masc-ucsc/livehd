@@ -13,7 +13,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/btree_map.h"
 #include "firrtl.pb.h"
 
 #pragma GCC diagnostic pop
@@ -29,7 +28,8 @@ struct Global_module_info {
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
   
   // module_name to io_name to hierarchical_field_name's flip polarity(1st bool) and leaf flag (2nd bool).
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>>> var2flip; 
+  // TODO: flat_node_map and flat_hash_set
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>>> var2flip; 
 };
 
 class Inou_firrtl : public Pass {
@@ -72,13 +72,13 @@ protected:
   void process_ln_bit_not_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   void process_ln_reduce_xor_op(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
   firrtl::FirrtlPB_Statement_When *process_ln_if_op(Lnast &ln, const Lnast_nid &lnidx_if);
-  bool                             process_ln_select(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
 
-  void                                  handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
-  void                                  handle_sign_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
-  void                                  handle_clock_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
-  void                                  handle_async_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
-  void                                  handle_reset_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
+  bool process_ln_select(Lnast &ln, const Lnast_nid &lnidx_op, firrtl::FirrtlPB_Statement *fstmt);
+  void handle_attr_assign(Lnast &ln, const Lnast_nid &lhs, const Lnast_nid &rhs);
+  void handle_sign_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
+  void handle_clock_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
+  void handle_async_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
+  void handle_reset_attr(Lnast &ln, std::string_view var_name, const Lnast_nid &rhs);
   firrtl::FirrtlPB_Expression_SubField *make_subfield_expr(std::string_view name);
 
   uint8_t process_op_children(Lnast &ln, const Lnast_nid &lnidx_if, std::string_view firrtl_op);
@@ -167,7 +167,7 @@ protected:
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, bool flipped, Lnast_nid &parent_node);
-  static void  dump_var2flip(const absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> &module_table);
+  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id, bool is_leaf = false);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
@@ -210,6 +210,7 @@ protected:
   void handle_as_usint_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void attach_expr_str2node(Lnast &lnast, std::string_view access_str, Lnast_nid &parent_node);
   std::string flatten_expression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped);
 
   void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
                              const Lnast_node &value_node);
@@ -246,7 +247,7 @@ private:
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> wire_names;
-  absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> var2flip;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> var2flip;
   absl::flat_hash_set<std::string> is_invalid_table;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;

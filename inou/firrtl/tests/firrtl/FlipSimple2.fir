@@ -6,6 +6,5 @@ circuit FlipSimple2 :
     wire _T_1 : {flip a: {flip ab: UInt<1>, ac:UInt<1>}, d: UInt<2>} 
     myinput.a <- _T.a
     _T.d <- myinput.d
-    myinput.d <- _T.d
     _T_1 <- _T
     myoutput <- _T_1

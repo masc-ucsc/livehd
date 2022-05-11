@@ -143,17 +143,15 @@ int32_t Inou_firrtl_module::get_bit_count(const firrtl::FirrtlPB_Type& type) {
 void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::FirrtlPB_Type& type, std::string_view id, bool flipped_in, Lnast_nid& parent_node) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
-      add_local_flip_info(flipped_in, id, false);
+      // add_local_flip_info(flipped_in, id, false);
       auto& btype = type.bundle_type();
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
         auto concat_wire_id = absl::StrCat(id, ".", btype.field(i).id());
         auto tup_name = concat_wire_id.substr(0, concat_wire_id.find_first_of('.')); 
         if (btype.field(i).is_flipped()) {
           wire_init_flip_handling(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), !flipped_in, parent_node);
-          // var2flip.insert(std::pair(tup_name, std::pair(concat_wire_id, !flipped)));
         } else {
           wire_init_flip_handling(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), flipped_in, parent_node);
-          // var2flip.insert(std::pair(tup_name, std::pair(concat_wire_id, flipped)));
         }
       }
       break;
@@ -1520,7 +1518,6 @@ std::string Inou_firrtl_module::flatten_expr_hier_name(const firrtl::FirrtlPB_Ex
   } else if (expr.has_reference()) {
     return expr.reference().id();
   } else {
-    I(false);
     return "";
   }
 }
@@ -1693,7 +1690,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
     create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"), initial_node);
 }
 
-void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> &module_var2flip) {
+void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> &module_var2flip) {
   for (auto &[var, set] : module_var2flip) {
     fmt::print("var:{} \n", var);
     for (auto &set_itr : set) {
@@ -1702,13 +1699,53 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, st
   }
 }
 
+// the sub-fields of lhs and rhs are the same, so we just pass the head of lhs
+// (tup_l), and we could avoid traversing the big var2flip table again to get
+// lhs flattened element.  
+// e.g. tup_l == foo, rhs == bar.a.b.c, is_flipped == true
+// then: bar.a.b.c = foo.a.b.c
+void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_l, std::string_view tup_r, std::string_view flattened_element, bool is_flipped) {
+  // TODO: 0. decorating the $/%/# here? or decorate the prefix at the global var2flip step? 
+ 
+  // 0. swap lhs/rhs if needed
+  if (is_flipped) {
+    auto tmp = tup_l;
+    tup_l = tup_r;
+    tup_r = tmp;
+  }
+
+  // 1. check scalar or tuple
+  if (tup_r == flattened_element) {
+    // it's a pure scalar, just create lnast assignment based on flipness
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+    lnast.add_child(idx_asg, Lnast_node::create_ref(tup_l));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(tup_r));
+    return;
+  }
+  fmt::print("DEBUG3, tup_l:{}, tup_r:{}, flattened_element:{}, flipped:{}\n", tup_l, tup_r, flattened_element, is_flipped);
+  
+  // 2. create TG from rhs  
+  auto temp_var_name = create_tmp_var();
+  auto idx_tg = lnast.add_child(parent_node, Lnast_node::create_tuple_get());
+  lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
+  lnast.add_child(idx_tg, Lnast_node::create_ref(tup_r));
+  lnast.add_child(idx_tg, Lnast_node::create_const(flattened_element.substr(flattened_element.find_first_of('.') + 1)));
+
+  // 3. create TA from lhs, directly put foo as tuple and "a.b.c" as the fields?
+  auto idx_ta = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+  lnast.add_child(idx_ta, Lnast_node::create_ref(tup_l));
+  lnast.add_child(idx_ta, Lnast_node::create_const(flattened_element.substr(flattened_element.find_first_of('.') + 1)));
+  lnast.add_child(idx_ta, Lnast_node::create_ref(temp_var_name));
+}
+
+
 
 void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlPB_Statement& stmt, Lnast_nid& parent_node) {
   switch (stmt.statement_case()) {
     case firrtl::FirrtlPB_Statement::kWire: {
       auto stmt_wire_id = stmt.wire().id();
       wire_names.insert(stmt_wire_id);
-      var2flip[stmt_wire_id].insert(std::tuple(stmt_wire_id, false, false));
+      // var2flip[stmt_wire_id].insert(std::tuple(stmt_wire_id, false, false));
       wire_init_flip_handling(lnast, stmt.wire().type(), stmt_wire_id, false, parent_node);
       break;
     }
@@ -1771,10 +1808,11 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Statement::kConnect: {  // Connect
       auto &lhs_expr      = stmt.connect().location();
       auto &rhs_expr      = stmt.connect().expression();
-      // std::string hier_name_l = flatten_expr_hier_name(lhs_expr);
-      // std::string hier_name_r = flatten_expr_hier_name(rhs_expr);
+      std::string hier_name_l = flatten_expr_hier_name(lhs_expr);
+      std::string hier_name_r = flatten_expr_hier_name(rhs_expr);
       // fmt::print("DEBUG0 hier_name_lhs:{}, hier_name_rhs:{}\n",   hier_name_l, hier_name_r);
       auto  lhs_expr_case = stmt.connect().location().expression_case();
+      auto  rhs_expr_case = stmt.connect().expression().expression_case();
 
       bool is_lhs_tuple
           = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
@@ -1782,7 +1820,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
           || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
 
       if (is_lhs_tuple) {
-        auto rhs_expr_case = stmt.connect().expression().expression_case();
         bool is_rhs_mux    = rhs_expr_case == firrtl::FirrtlPB_Expression::kMux;
 
         std::string tmp_var_string;
@@ -1797,13 +1834,17 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         // (2) create the lhs dot and lhs <- rhs assignment
         return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
       } else {
+        I(rhs_expr_case == firrtl::FirrtlPB_Expression::kReference ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kMux ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kValidIf ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kUintLiteral ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kSubField ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex ||
+          rhs_expr_case == firrtl::FirrtlPB_Expression::kPrimOp 
+         );
         auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
         init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
-
-        // FIXME: renau (is commenting this right)
-        // if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
-        //   handle_wr_mport_usage(lnast, parent_node, lhs_str);
-        // }
       }
       break;
     }
@@ -1814,42 +1855,93 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       std::string hier_name_l  = flatten_expr_hier_name(lhs_expr);
       std::string hier_name_r  = flatten_expr_hier_name(rhs_expr);
       fmt::print("DEBUG1 hier_name_lhs:{}, hier_name_rhs:{}\n",   hier_name_l, hier_name_r);
-      
 
-
-
-      auto  lhs_expr_case = stmt.partial_connect().location().expression_case();
-      // FIXME->sh: might need to extend the special cases to lhs_expr_case != firrtl::FirrtlPB_Expression::kNode
-
-      bool is_lhs_tuple
-          = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
-          || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
-          || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
-
-      if (is_lhs_tuple) {
-        auto rhs_expr_case = stmt.partial_connect().expression().expression_case();
-        bool is_rhs_mux    = rhs_expr_case == firrtl::FirrtlPB_Expression::kMux;
-
-        std::string tmp_var_string;
-        if (is_rhs_mux) {
-          tmp_var_string = create_tmp_mut_var();  // must do SSA afterwards
-        } else {
-          tmp_var_string = create_tmp_var();  // No SSA
-        }
-
-        init_expr_add(lnast, rhs_expr, parent_node, tmp_var_string);
-
-        // (2) create the lhs dot and lhs <- rhs assignment
-        return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
-      } else {
+      if (hier_name_r.empty()) {
+        // the rhs is a component w/o names, such as validif, primitive_op, unsigned integers, and mux
         auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
         init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
-
-        // FIXME: renau (is commenting this right)
-        // if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
-        //   handle_wr_mport_usage(lnast, parent_node, lhs_str);
-        // }
+        break;
       }
+      
+#ifndef NDEBUG
+      if (hier_name_l.find_first_of('.') != std::string::npos && hier_name_r.find_first_of('.') != std::string::npos)
+        I(hier_name_l.substr(hier_name_l.find_first_of('.')) == hier_name_r.substr(hier_name_r.find_first_of('.')));
+#endif
+
+      // collect all hierarchical leafs of rhs
+      std::vector<std::string_view> all_rhs_leaves;
+      std::vector<std::string_view> all_lhs_leaves;
+      auto found = hier_name_r.find_first_of('.');
+      std::string tup_r;
+      if (found != std::string::npos) {
+        tup_r = hier_name_r.substr(0, found);
+      } else {
+        tup_r = hier_name_r;
+      }
+
+      auto found2 = hier_name_l.find_first_of('.');
+      std::string tup_l;
+      if (found2 != std::string::npos) {
+        tup_l = hier_name_l.substr(0, found2);
+      } else {
+        tup_l = hier_name_l;
+      }
+
+      absl::flat_hash_set<std::tuple<std::string, bool, bool>> *tup_r_sets;
+      if (tup_r.at(0) == '_') {
+        // it's local variable or wire
+        tup_r_sets = &var2flip[tup_r];
+      } else {
+        // it's module io, check the global table
+        tup_r_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_r];
+      }
+
+      for (const auto &it : *tup_r_sets) {
+        if (std::get<2>(it) == true) { // is leaf
+          if (std::get<0>(it).find(hier_name_r) != std::string::npos) {
+            fmt::print("DEBUG2, hier_name_r:{}, leaf_name:{}\n", hier_name_r, std::get<0>(it));
+            tuple_flattened_connections(lnast, parent_node, tup_l, tup_r, std::get<0>(it), std::get<1>(it));
+          }
+        }
+      }
+
+
+
+
+
+      // // original funtions
+      // auto  lhs_expr_case = stmt.partial_connect().location().expression_case();
+      // // FIXME->sh: might need to extend the special cases to lhs_expr_case != firrtl::FirrtlPB_Expression::kNode
+
+      // bool is_lhs_tuple
+      //     = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
+      //     || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
+      //     || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
+
+      // if (is_lhs_tuple) {
+      //   auto rhs_expr_case = stmt.partial_connect().expression().expression_case();
+      //   bool is_rhs_mux    = rhs_expr_case == firrtl::FirrtlPB_Expression::kMux;
+
+      //   std::string tmp_var_string;
+      //   if (is_rhs_mux) {
+      //     tmp_var_string = create_tmp_mut_var();  // must do SSA afterwards
+      //   } else {
+      //     tmp_var_string = create_tmp_var();  // No SSA
+      //   }
+
+      //   init_expr_add(lnast, rhs_expr, parent_node, tmp_var_string);
+
+      //   // (2) create the lhs dot and lhs <- rhs assignment
+      //   return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
+      // } else {
+      //   auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
+      //   init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
+
+      //   // FIXME: renau (is commenting this right)
+      //   // if (mport2mem.count(lhs_str)) { //lhs is rd_mport (and must be a scalar rd_mport)
+      //   //   handle_wr_mport_usage(lnast, parent_node, lhs_str);
+      //   // }
+      // }
       break;
     }
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
@@ -2062,12 +2154,12 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
       auto     sub                         = add_mod_to_library(var, module_i_external_module_id, file_name);
       uint64_t inp_pos                     = 0;
       uint64_t out_pos                     = 0;
-      absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> empty_map;
+      absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> empty_map;
       glob_info.var2flip.insert_or_assign(module_i_external_module_id, empty_map); 
 
       for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
         auto port = circuit.module(i).external_module().port(j);
-        auto initial_set = std::set<std::tuple<std::string, bool, bool>>{};
+        auto initial_set = absl::flat_hash_set<std::tuple<std::string, bool, bool>>{};
         initial_set.insert(std::tuple(port.id(), false, false));
         glob_info.var2flip[module_i_external_module_id].insert_or_assign(port.id(), initial_set); 
         add_port_to_map(module_i_external_module_id, port.type(), port.direction(), false, port.id(), sub, inp_pos, out_pos);
@@ -2078,13 +2170,13 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
       auto     sub                     = add_mod_to_library(var, module_i_user_module_id, file_name);
       uint64_t inp_pos                 = 0;
       uint64_t out_pos                 = 0;
-      absl::flat_hash_map<std::string, std::set<std::tuple<std::string, bool, bool>>> empty_map;
+      absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> empty_map;
       glob_info.var2flip.insert_or_assign(module_i_user_module_id, empty_map); 
 
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
-        auto initial_set = std::set<std::tuple<std::string, bool, bool>>{};
-        initial_set.insert(std::tuple(port.id(), false, false));
+        auto initial_set = absl::flat_hash_set<std::tuple<std::string, bool, bool>>{};
+        // initial_set.insert(std::tuple(port.id(), false, false));
         glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
         add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), sub, inp_pos, out_pos);
         Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
@@ -2127,7 +2219,7 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view p
     auto tuple = std::tuple(std::string(port_id), flipped_in, is_leaf);
     auto set_itr = var2flip.find(lnast_tupname);
     if (set_itr == var2flip.end()) {
-      auto new_set = std::set<std::tuple<std::string, bool, bool>>{};
+      auto new_set = absl::flat_hash_set<std::tuple<std::string, bool, bool>>{};
       new_set.insert(tuple);
       var2flip.insert_or_assign(lnast_tupname, new_set);
     } else {
@@ -2138,13 +2230,14 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view p
 
 
 void Inou_firrtl::add_glob_flip_info(std::string_view mod_id, bool flipped_in, std::string_view port_id, bool is_leaf) {
+  fmt::print("DEBUG10 port_id:{}\n", port_id);
   auto found = port_id.find_first_of('.');
   if (found != std::string::npos) {
     auto lnast_tupname = port_id.substr(0, found); 
     auto tuple = std::tuple(std::string(port_id), flipped_in, is_leaf);
     auto set_itr = glob_info.var2flip[mod_id].find(lnast_tupname);
     if (set_itr == glob_info.var2flip[mod_id].end()) {
-      auto new_set = std::set<std::tuple<std::string, bool, bool>>{};
+      auto new_set = absl::flat_hash_set<std::tuple<std::string, bool, bool>>{};
       new_set.insert(tuple);
       glob_info.var2flip[mod_id].insert_or_assign(lnast_tupname, new_set);
     } else {
@@ -2157,7 +2250,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
                                   Sub_node& sub, uint64_t& inp_pos, uint64_t& out_pos) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle type
-      add_glob_flip_info(mod_id, flipped_in, port_id, false);
+      // add_glob_flip_info(mod_id, flipped_in, port_id, false);
       auto& btype = type.bundle_type();
 
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
@@ -2193,7 +2286,6 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       // auto lnast_tupname = port_id.substr(0, port_id.find_first_of('.')); 
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
       glob_info.mod_to_io_dir_map.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
-      // fmt::print("DEBUG7 : module:{}, tup:{:<12}, hier_fields:{:<20}, accu_flipped?:{:<5}, leaf?:{}\n", mod_id, lnast_tupname, port_id, flipped_in, true);
       add_glob_flip_info(mod_id, flipped_in, port_id, true);
       break;
     }
