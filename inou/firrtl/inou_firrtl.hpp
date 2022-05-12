@@ -29,7 +29,7 @@ struct Global_module_info {
   
   // module_name to io_name to hierarchical_field_name's flip polarity(1st bool) and leaf flag (2nd bool).
   // TODO: flat_node_map and flat_hash_set
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>>> var2flip; 
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>>> var2flip; 
 };
 
 class Inou_firrtl : public Pass {
@@ -49,8 +49,8 @@ protected:
   void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
 
-  void     add_glob_flip_info(std::string_view mod_id, bool flipped_in, std::string_view port_id, bool is_leaf = false);
-  void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, const uint8_t &dir);
+  void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir);
+  void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, uint8_t dir);
   void     grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalModule &emod);
   Sub_node add_mod_to_library(Eprp_var &var, std::string_view mod_name, std::string_view file_name);
 
@@ -167,8 +167,8 @@ protected:
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, bool flipped, Lnast_nid &parent_node);
-  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> &module_table);
-  void     add_local_flip_info(bool flipped_in, std::string_view port_id, bool is_leaf = false);
+  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> &module_table);
+  void     add_local_flip_info(bool flipped_in, std::string_view port_id);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
@@ -247,7 +247,7 @@ private:
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> wire_names;
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, bool, bool>>> var2flip;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> var2flip;
   absl::flat_hash_set<std::string> is_invalid_table;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;
