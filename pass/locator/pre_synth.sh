@@ -88,6 +88,13 @@ create_pre-synth_verilog () {
       echo "Successfully generated Verilog: pre_synth/${pt}.v"
     fi
     
+    num_files=(find pre_synth/ -type f | wc -l)
+    if [ $num_files -ne 1 ]; then
+      echo "WARNING: Multiple files found!"
+      echo "Proceed after concatenating the files into a single .v file."
+      exit 1
+    fi
+    
     if [ ! -f pre_synth/${pt}.v ]; then
         echo "ERROR: could not find ${pt}.v in pre_synth/"
         exit 1
@@ -188,6 +195,7 @@ post_synth () {
   
   echo ""
   echo ""
+  rm -r tmp_graphs
 
   for pt in $1
   do
@@ -200,7 +208,7 @@ post_synth () {
      echo "Synthesized verilog to LG "
      echo "synth V -> LG"
      echo "===================================================="
-     ${LGSHELL} "inou.yosys.tolg files:pass/locator/netlist.v script:pp.ys top:${pt} |> lgraph.dump "
+     ${LGSHELL} "inou.yosys.tolg files:pass/locator/netlist.v script:pp.ys top:${pt} |> lgraph.dump |> inou.graphviz.from odir:tmp_graphs"
      
      ret_val=$?
      if [ $ret_val -ne 0 ]; then
@@ -213,7 +221,7 @@ post_synth () {
 
 }
 
-pts='reg__q_pin' # scalar_tuple
+pts='adder_stage' # scalar_tuple
 create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
 post_synth "$pts"
