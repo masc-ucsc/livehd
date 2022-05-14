@@ -35,7 +35,7 @@ void Traverse_lg::travers(Eprp_var& var) {
 
 void Traverse_lg::do_travers(Lgraph* lg, std::string_view module_name) {
   std::ofstream ofs;
-  ofs.open(std::string(module_name), std::ofstream::out | std::ofstream::app);
+  ofs.open(std::string(module_name), std::ofstream::out | std::ofstream::trunc);
   if(!ofs.is_open()) {
     std::cout<<"unable to open file "<<module_name<<".txt"<<std::endl;
     return ;
@@ -43,7 +43,7 @@ void Traverse_lg::do_travers(Lgraph* lg, std::string_view module_name) {
 
   ofs<<std::endl<<std::endl<<module_name<<std::endl<<std::endl<<std::endl;
 
-  for (const auto& node : lg->forward()) {
+  for (const auto& node : lg->fast()) {
     ofs<<"===============================\n";
     ofs<<node.debug_name()<<std::endl;
     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
@@ -61,7 +61,7 @@ void Traverse_lg::do_travers(Lgraph* lg, std::string_view module_name) {
 
     if (node.has_outputs()) {
     ofs<<"OUTPUTS:\n";
-      for (const auto& outdr : node.out_sinks() ) {
+      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
         //auto out_node = outdr.get_node();
         get_output_node(outdr,ofs);
       }
@@ -75,12 +75,13 @@ void Traverse_lg::do_travers(Lgraph* lg, std::string_view module_name) {
 
 void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_type_const() || (node.is_graph_io() && !node.has_inputs())) {
+  if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
     if(node.is_graph_io()) {
       ofs<<node_pin.get_pin_name()<<std::endl;
     } else {
-      ofs<<node.debug_name();
+      ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
       ofs<<std::endl;
     }
     return;
@@ -94,12 +95,13 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
 
 void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) {
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || (node.is_graph_io() && !node.has_inputs())) {
+  if(node.is_type_flop() || node.is_graph_output() ) {
     if(node.is_graph_io()) {
       ofs<<node_pin.get_pin_name()<<std::endl;
     } else {
-      ofs<<node.debug_name();
+      ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
       ofs<<std::endl;
     }
     return;
