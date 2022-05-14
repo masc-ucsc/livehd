@@ -164,21 +164,49 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       Sub_node *sub = library->ref_sub(lgid);
       I(sub);
 
-      for (const auto &n : mod.getPortNames()) {
-        fmt::print("   name: {}\n", n);
+      const auto &plist = mod.getPortConnections();
+      const auto &nlist = mod.getPortNames();
+      I(plist.size() == nlist.size());
+
+      // 1st- create input tuple
+      std::vector<std::pair<std::string, std::string>> inp_tup;
+
+      for(auto i=0u; i<plist.size(); ++i) {
+        const auto &n = nlist[i];
+
+        if (sub->is_output(n))
+          continue;
+
+        const auto &p = plist[i];
+        I(p->kind == slang::AssertionExprKind::Simple);
+        const auto &expr = p->as<slang::SimpleAssertionExpr>();
+
+        inp_tup.emplace_back(std::make_pair(n, process_expression(expr.expr)));
       }
 
-      for (const auto &p : mod.getPortConnections()) {
-        if (p->kind == slang::AssertionExprKind::Simple) {
-          const auto &expr = p->as<slang::SimpleAssertionExpr>();
-          auto inp_or_out = process_expression(expr.expr);
-          fmt::print("  expr:{}\n", inp_or_out);
-        }else{
-          fmt::print("FIXME: unhandled UnknownModule IO expr\n");
-        }
+      auto inp_tup_var = lnast_create_obj.create_lnast_tmp();
+      lnast_create_obj.create_named_tuple(inp_tup_var, inp_tup);
+
+      // 2nd- create function call
+      lnast_create_obj.create_func_call(mod.name, mod.moduleName, inp_tup_var);
+
+      // 3rd- assign output tuple to associated variables
+      for(auto i=0u; i<plist.size(); ++i) {
+        const auto &n = nlist[i];
+
+        if (!sub->is_output(n))
+          continue;
+
+        auto rhs_var = absl::StrCat(mod.name, ".", n);
+
+        const auto &p = plist[i];
+        I(p->kind == slang::AssertionExprKind::Simple);
+
+        const auto &aexpr = p->as<slang::SimpleAssertionExpr>();
+        process_lhs(aexpr.expr, rhs_var);
       }
     } else {
-      fmt::print("FIXME: missing body type\n");
+      Pass::error("FIXME: missing body type\n");
     }
   }
 
@@ -192,8 +220,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
   return true;
 }
 
-bool Slang_tree::process(const slang::AssignmentExpression &expr) {
-  const auto &lhs = expr.left();
+void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rhs_var) {
 
   std::string var_name;
   bool        dest_var_sign;
@@ -245,13 +272,20 @@ bool Slang_tree::process(const slang::AssignmentExpression &expr) {
       lnast_create_obj.create_assign_stmts(var_name, "0b?");  // mark with x so that potential use is poison if needed
   }
 
-  auto rhs_var = process_expression(expr.right());
   if (dest_min_bit.empty() && dest_max_bit.empty()) {
     lnast_create_obj.create_assign_stmts(var_name, rhs_var);
   } else {
     auto bitmask = lnast_create_obj.create_bitmask_stmts(dest_max_bit, dest_min_bit);
     lnast_create_obj.create_set_mask_stmts(var_name, bitmask, rhs_var);
   }
+}
+
+bool Slang_tree::process(const slang::AssignmentExpression &expr) {
+  auto rhs_var = process_expression(expr.right());
+
+  const auto &lhs = expr.left();
+
+  process_lhs(lhs, rhs_var);
 
   return true;
 }

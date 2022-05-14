@@ -334,6 +334,32 @@ void Lnast_create::create_declare_bits_stmts(std::string_view a_var, bool is_sig
   lnast->add_child(idx_dot, Lnast_node::create_const(bits));
 }
 
+void Lnast_create::create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup) {
+
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_func_call());
+
+  lnast->add_child(idx_dot, Lnast_node::create_ref(out_tup));
+  lnast->add_child(idx_dot, Lnast_node::create_ref(fname));
+  lnast->add_child(idx_dot, Lnast_node::create_ref(inp_tup));
+}
+
+void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string,std::string>> &rhs) {
+
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_add());
+
+  lnast->add_child(idx_dot, Lnast_node::create_ref(lhs_var));
+
+  for(const auto &it:rhs) {
+
+    auto idx_assign = lnast->add_child(idx_dot, Lnast_node::create_assign());
+    lnast->add_child(idx_assign, Lnast_node::create_ref(it.first));
+    if (str_tools::is_string(it.second))
+      lnast->add_child(idx_assign, Lnast_node::create_ref(it.second));
+    else
+      lnast->add_child(idx_assign, Lnast_node::create_const(it.second));
+  }
+}
+
 std::string Lnast_create::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty())
     return std::string(a_var);
