@@ -83,6 +83,9 @@ void Lnast_writer::write_while() { }
 
 void Lnast_writer::write_func_call() {
   move_to_child();
+  write_lnast();
+  print(" = ");
+  move_to_sibling();
   is_func_name = true;
   write_lnast();
   is_func_name = false;

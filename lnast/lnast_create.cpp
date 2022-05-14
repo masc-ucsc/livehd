@@ -360,6 +360,18 @@ void Lnast_create::create_named_tuple(std::string_view lhs_var, const std::vecto
   }
 }
 
+std::string Lnast_create::create_tuple_get(std::string_view tup_var, std::string_view field_var) {
+
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
+
+  auto res_var = create_lnast_tmp();
+  lnast->add_child(idx_dot, Lnast_node::create_ref(res_var));
+  lnast->add_child(idx_dot, Lnast_node::create_ref(tup_var));
+  lnast->add_child(idx_dot, Lnast_node::create_const(field_var));
+
+  return res_var;
+}
+
 std::string Lnast_create::create_minus_stmts(std::string_view a_var, std::string_view b_var) {
   if (b_var.empty())
     return std::string(a_var);

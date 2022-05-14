@@ -852,6 +852,8 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   auto c0_opr = get_first_child(opr_nid);
 
+  return; // FIXME: what is this code doing? (it breaks netlist in slang)
+
   I(get_name(c0_opr) == c1_assign_name);
   set_data(c0_opr, get_data(c0_assign));
   ref_data(assign_nid)->type = Lnast_ntype::create_invalid();

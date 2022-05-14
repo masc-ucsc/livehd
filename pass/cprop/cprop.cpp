@@ -540,7 +540,6 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result) {
 }
 
 void Cprop::try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, Node &sub_node, Node &tup_node) {
-  I(sub_node.is_type_sub_present());
   I(tup_node.get_type_op() == Ntype_op::TupAdd);
 
   const auto &sub = sub_node.get_type_sub_node();

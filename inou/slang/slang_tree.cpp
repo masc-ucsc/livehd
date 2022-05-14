@@ -153,7 +153,6 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       }
     } else if (member.kind == slang::SymbolKind::UnknownModule) {
       const auto &mod = member.as<slang::UnknownModuleSymbol>();
-      fmt::print("unknown module: {}\n", mod.moduleName);
 
       auto *library = Graph_library::instance("lgdb"); // FIXME: no hardcode path
 
@@ -197,7 +196,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
         if (!sub->is_output(n))
           continue;
 
-        auto rhs_var = absl::StrCat(mod.name, ".", n);
+        auto rhs_var = lnast_create_obj.create_tuple_get(mod.name, n);
 
         const auto &p = plist[i];
         I(p->kind == slang::AssertionExprKind::Simple);

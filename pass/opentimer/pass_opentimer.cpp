@@ -69,6 +69,7 @@ void Pass_opentimer::liberty_open(Eprp_var &var) {
       }
 
       Sub_node *sub = g->ref_self_sub_node();
+      sub->reset_pins();
 
       bool has_clock = false;
       for(const auto &pin:it.second.cellpins) {
