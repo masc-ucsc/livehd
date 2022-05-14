@@ -1,13 +1,13 @@
 module FlipSimple2(
-  input        myinput_a_ab,
-  output       myinput_a_ac,
-  input  [2:0] myinput_d,
-  input        myinput_e,
-  output       myoutput_a_ab,
-  input        myoutput_a_ac,
-  output [1:0] myoutput_d
+  input        io_in_a_ab,
+  output       io_in_a_ac,
+  input  [2:0] io_in_d,
+  input        io_in_e,
+  output       io_out_a_ab,
+  input        io_out_a_ac,
+  output [1:0] io_out_d
 );
-  assign myinput_a_ac = myoutput_a_ac;
-  assign myoutput_a_ab = myinput_a_ab;
-  assign myoutput_d = myinput_d[1:0];
+  assign io_in_a_ac = io_out_a_ac;
+  assign io_out_a_ab = io_in_a_ab;
+  assign io_out_d = io_in_d[1:0];
 endmodule
