@@ -89,13 +89,11 @@ void Lnast_parser::parse_var_stmt() {
         }
         case Lnast_token::id_fun: {
           // LNAST - func_call
-          start_tree(Lnast_node::create_assign());
-          add_leaf(lhs_node);
           start_tree(Lnast_node::create_func_call());
+          add_leaf(lhs_node);
           add_leaf(Lnast_node::create_ref(cur_text()));
           forward_token();
           parse_list();
-          end_tree();
           end_tree();
           break;
         }
