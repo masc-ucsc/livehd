@@ -81,7 +81,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
     } else {
       ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
+      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
       ofs<<std::endl;
     }
     return;
@@ -101,7 +101,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
     } else {
       ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
+      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_pin_name()<<"("<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"")<<")";}
       ofs<<std::endl;
     }
     return;
