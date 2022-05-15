@@ -8,8 +8,12 @@ How to run:
   2.1. check design name in run.sh (match it to the main verilog file in pre_synth/)
 3. ./make_netlist.sh
     Takes verilog file from livehd/pre_synth/ and generates pass/locator/netlist.v
+
+IMP: no the above 3 steps are merged into pre_synth.sh in form of 3 functions at
+the end of pre_synth.sh. Hence, you need not run the above 3 steps one by one.
+
 4. (run sta and get the timing path)(refer to readme_synth.txt)
-    get_nodes.py
+    FIXME: this has to be scripted in get_nodes.py
 5.  cd ../../ (go to livehd/)
    open lgshell
    livehd> inou.yosys.tolg files:pass/locator/netlist.v script:pp.ys top:firrtl_gcd_3bits

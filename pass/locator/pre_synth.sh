@@ -88,7 +88,7 @@ create_pre-synth_verilog () {
       echo "Successfully generated Verilog: pre_synth/${pt}.v"
     fi
     
-    num_files=(find pre_synth/ -type f | wc -l)
+    num_files=$(find pre_synth/ -type f | wc -l)
     if [ $num_files -ne 1 ]; then
       echo "WARNING: Multiple files found!"
       echo "Proceed after concatenating the files into a single .v file."
@@ -109,15 +109,8 @@ create_synth-verilog () {
 
   cd pass/locator
 
-  echo ""
-  echo ""
-  echo "CURRENTLY IN:"
-  pwd
-  echo ""
-  echo ""
-
 	name=$1
-  export VERILOG_FILES=../../pre_synth/${name}.v    
+  export VERILOG_FILES=../../pre_synth_saved/${name}.v    
   export DESIGN_NAME=$name                          
   export SYNTH_BUFFERING=0                          
   export SYNTH_SIZING=0                             
@@ -134,11 +127,14 @@ create_synth-verilog () {
   export SYNTH_ADDER_TYPE="YOSYS"                   
   export SYNTH_NO_FLAT=0                            
   export SYNTH_SHARE_RESOURCES=0                    
-  export SAVE_NETLIST=netlist.v                     
+  export SAVE_NETLIST=${DESIGN_NAME}.v                     
   mkdir -p out                                       
 
-  if [ -f netlist.v && -f out/synthesis.sdc ]; then
+  if [ -f netlist.v ]; then
     rm netlist.v
+  fi
+  if [ -f ${DESIGN_NAME}.v && -f out/synthesis.sdc ]; then
+    rm ${DESIGN_NAME}.v
     rm -r out/
   fi
   
@@ -172,8 +168,8 @@ create_synth-verilog () {
      exit $ret_val
   else
      echo "** POST-SYNTH NETLIST FORMED:            **"
-     echo "** ./netlist.v                           **"
-     echo "** ENSURED CORRECT DESIGN NAME IN RUN.SH?**"
+     echo "** ./${DESIGN_NAME}.v                    **"
+     echo "** for : $VERILOG_FILES                  **"
   fi
   
   mv ./*0.chk.rpt out/.
@@ -182,10 +178,6 @@ create_synth-verilog () {
   mv ./*_dff.stat out/.
 
   cd ../../
-  echo ""
-  echo ""
-  echo "CURRENTLY IN:"
-  pwd
   echo ""
   echo ""
 }
@@ -199,16 +191,16 @@ post_synth () {
 
   for pt in $1
   do
-    if [ ! -f pass/locator/netlist.v ]; then
+    if [ ! -f pass/locator/${pt}.v ]; then
 
-        echo "ERROR: could not find pass/locator/netlist.v"
+        echo "ERROR: could not find pass/locator/${pt}.v"
         exit 1
     fi
      echo "===================================================="
      echo "Synthesized verilog to LG "
      echo "synth V -> LG"
      echo "===================================================="
-     ${LGSHELL} "inou.yosys.tolg files:pass/locator/netlist.v script:pp.ys top:${pt} |> lgraph.dump |> inou.graphviz.from odir:tmp_graphs"
+     ${LGSHELL} "inou.yosys.tolg files:pass/locator/${pt}.v script:pp.ys top:${pt} |> lgraph.dump |> inou.graphviz.from odir:tmp_graphs"
      
      ret_val=$?
      if [ $ret_val -ne 0 ]; then
@@ -221,7 +213,7 @@ post_synth () {
 
 }
 
-pts='adder_stage' # scalar_tuple
-create_pre-synth_verilog "$pts"
+pts='VecShiftRegisterSimple' # scalar_tuple
+#create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
-post_synth "$pts"
+#post_synth "$pts"
