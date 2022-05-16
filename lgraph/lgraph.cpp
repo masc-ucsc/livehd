@@ -26,13 +26,15 @@ Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid,
 }
 
 void Lgraph::load() {
-  clear();
 
   auto hif = Hif_read::open(get_save_filename());
   if (hif == nullptr) {  // no HIF file
     // clear();
     return;
   }
+
+  // Do not clear if does not exit. The reason is that it may be a blackbox (liberty)
+  clear();
 
   absl::flat_hash_map<std::string, Node_pin::Compact_class_driver> str2dpin;
 
@@ -266,7 +268,7 @@ Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
     return nullptr;
 
   lg = lib->setup_lgraph(name, lib->get_source(name));
-  lg->load();
+  lg->load(); // may fail to load
   return lg;
 }
 
@@ -1663,7 +1665,6 @@ void Lgraph::dump() {
 
   fmt::print("\n");
 
-#if 1
   // node_internal.ref_lock();
   for (size_t i = 0; i < node_internal.size(); ++i) {
     if (!node_internal[i].is_node_state())
@@ -1675,7 +1676,6 @@ void Lgraph::dump() {
     node.dump();
   }
   // node_internal.ref_unlock();
-#endif
 
   fmt::print("\n");
   each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {

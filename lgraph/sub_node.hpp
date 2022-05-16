@@ -35,6 +35,7 @@ public:
     Direction   dir          = Direction::Invalid;
     Port_ID     graph_io_pos = Port_invalid;
     Port_ID     instance_pid = 0;
+    Bits_t      bits         = 0;
 
     [[nodiscard]] bool    is_mapped() const { return graph_io_pos != Port_invalid; }
     [[nodiscard]] bool    is_input() const { return dir == Direction::Input; }
@@ -48,6 +49,7 @@ public:
       dir          = Direction::Invalid;
       name         = "INVALID_PID";
       graph_io_pos = Port_invalid;
+      bits         = 0; // Blackboxes may need to set bits for semantics (bitwidth pass)
       // KEEP instance_pid
     }
   };
@@ -275,6 +277,18 @@ public:
   [[nodiscard]] Port_ID get_io_pos_from_instance_pid(Port_ID instance_pid) const {
     I(has_instance_pin(instance_pid));
     return io_pins[instance_pid].graph_io_pos;
+  }
+
+  void set_bits(std::string_view io_name, Bits_t bits) {
+    I(has_pin(io_name));
+    auto instance_pid = name2id.at(io_name);
+    I(io_pins[instance_pid].name == io_name);
+    io_pins[instance_pid].bits = bits;
+  }
+
+  void set_bits(Port_ID instance_pid, Bits_t bits) {
+    I(has_instance_pin(instance_pid));
+    io_pins[instance_pid].bits = bits;
   }
 
   [[nodiscard]] const IO_pin &get_pin(std::string_view io_name) const {

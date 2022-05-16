@@ -78,10 +78,14 @@ void Pass_opentimer::liberty_open(Eprp_var &var) {
           has_clock = true;
         }
         if (pin.second.direction) {
+          Port_ID pid=0;
           if (*pin.second.direction == ot::CellpinDirection::INPUT)
-            sub->add_input_pin(pin.first);
+            pid = sub->add_input_pin(pin.first);
           else if (*pin.second.direction == ot::CellpinDirection::OUTPUT)
-            sub->add_output_pin(pin.first);
+            pid = sub->add_output_pin(pin.first);
+
+          if (pid)
+            sub->set_bits(pid, 1); // how does the liberty specify multiple bits?
         }
 
         if (pin.second.is_clock)

@@ -43,6 +43,9 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.Key("instance_pid");
     writer.Uint(pos);
 
+    writer.Key("bits");
+    writer.Uint(pin.bits);
+
     writer.Key("dir");
     if (pin.dir == Direction::Invalid)
       writer.String("inv");
@@ -101,6 +104,8 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     }
     size_t instance_pid = io_pin["instance_pid"].GetUint();
 
+    size_t bits = io_pin["bits"].GetUint();
+
     auto io_name     = io_pin["name"].GetString();
     name2id[io_name] = instance_pid;
     if (io_pins.size() <= instance_pid)
@@ -109,6 +114,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
     io_pins[instance_pid].name         = io_name;
     io_pins[instance_pid].dir          = dir;
     io_pins[instance_pid].graph_io_pos = pid;
+    io_pins[instance_pid].bits         = bits;
 
     if (io_pins[instance_pid].is_invalid())
       deleted.emplace_back(instance_pid);

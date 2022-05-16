@@ -524,7 +524,6 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       auto        tup_get    = lg->create_node(Ntype_op::TupGet);
       tg_map.insert_or_assign(i, tup_get);
 
-
       Node_pin tn_dpin;
       if (is_input(c1_tg_name)) {
         tn_dpin = create_inp_tg(lg, lnast->get_vname(c1_tg));

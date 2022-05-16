@@ -1581,15 +1581,38 @@ void Bitwidth::try_delete_attr_node(Node &node) {
 }
 
 void Bitwidth::set_subgraph_boundary_bw(Node &node) {
-  if (!node.is_type_sub_present()) {
-    auto sub_lgid = node.get_type_sub();
-    auto sub_name = node.get_class_lgraph()->get_library().get_name(sub_lgid);
-    // No error because sometimes we could infer backwards the size of outputs
-    Pass::info("Global IO connection pass cannot find existing subgraph {} in lgdb\n", sub_name);
-    return;
-  }
 
   auto sub_lg = node.ref_type_sub_lgraph();
+  if (sub_lg == nullptr) {
+    auto sub_lgid = node.get_type_sub();
+    auto sub_name = node.get_class_lgraph()->get_library().get_name(sub_lgid);
+    // No subnode, but it can be a blackbox (liberty)
+
+    auto *sub_node = node.ref_type_sub_node();
+    if (sub_node == nullptr) {
+
+      // No error because sometimes we could infer backwards the size of outputs
+      Pass::info("Global IO connection pass cannot find existing subgraph {} in lgdb\n", sub_name);
+    }else{
+
+      for(const auto &iopin:sub_node->get_io_pins()) {
+        if (!iopin.is_output())
+          continue;
+
+        if (iopin.bits==0) {
+          Pass::info("Global IO can not find pin {} bits from subgraph {} in lgdb\n", iopin.name, sub_name);
+        }
+        auto top_dpin = node.setup_driver_pin(iopin.name);
+        //top_dpin.set_bits(iopin.bits);
+
+        Bitwidth_range bw;
+        bw.set_sbits_range(iopin.bits);
+
+        adjust_bw(top_dpin, bw);
+      }
+    }
+    return;
+  }
 
   sub_lg->each_graph_output([&node, this](Node_pin &dpin_gout) {
     auto top_dpin = node.setup_driver_pin(dpin_gout.get_name());
