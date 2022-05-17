@@ -1101,6 +1101,50 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
   }
 }
 
+
+void Inou_firrtl_module::create_attr_get_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name,
+                                                   const Lnast_node& dest_node) {
+  I(str_tools::contains(full_name, '.'));
+  I(!dest_node.is_invalid());
+
+  // lh::Tree_index selc_node;
+  auto temp_var_name = create_tmp_var();
+  auto tg_dest_node = Lnast_node::create_ref(temp_var_name);
+  
+  auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
+  ln.add_child(selc_node, tg_dest_node);
+
+  std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> hier_subnames;
+  split_hier_name(full_name, hier_subnames);
+
+  for (const auto &subname : hier_subnames) {
+    std::string_view field_name = subname.first;
+    if (inst_to_mod_map.count(subname.first)) {
+      field_name = absl::StrCat("otup_", field_name);
+    }
+
+    switch (subname.second) {
+      case Leaf_type::Ref: {
+        ln.add_child(selc_node, Lnast_node::create_ref(field_name));
+        break;
+      }
+      case Leaf_type::Const_num:
+      case Leaf_type::Const_str: {
+        ln.add_child(selc_node, Lnast_node::create_const(field_name));
+        break;
+      }
+      default: Pass::error("Unknown port type.");
+    }
+  }
+
+  auto attr_get_node = ln.add_child(parent_node, Lnast_node::create_attr_get());
+  ln.add_child(attr_get_node, dest_node);
+  ln.add_child(attr_get_node, tg_dest_node);
+  ln.add_child(attr_get_node, Lnast_node::create_const("__last_value"));
+
+}
+
+
 // note: Given a string with "."s and "["s in it, this
 // function will be able to deconstruct it into
 // DOT and SELECT nodes in an LNAST.
@@ -1762,7 +1806,7 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   fmt::print("DEBUG5, lhs_full_name:{}, rhs_full_name:{}\n\n", lhs_full_name, rhs_full_name);
 
   auto temp_var_name = create_tmp_var();
-  const auto &tg_dest_node = Lnast_node::create_ref(temp_var_name);
+  const auto &dest_node = Lnast_node::create_ref(temp_var_name);
   
 
   if (is_flipped) {
@@ -1774,15 +1818,16 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     auto it = wire_names.find(rhs_wire_name);
     bool rhs_is_wire_var = it != wire_names.end();
     if (rhs_is_wire_var) {
-      create_tuple_get_from_str(lnast, parent_node, rhs_full_name, tg_dest_node, true);
+      create_tuple_get_from_str(lnast, parent_node, rhs_full_name, dest_node, true);
+      // create_attr_get_from_str(lnast, parent_node, rhs_full_name, dest_node);
     } else {
-      create_tuple_get_from_str(lnast, parent_node, rhs_full_name, tg_dest_node);
+      create_tuple_get_from_str(lnast, parent_node, rhs_full_name, dest_node);
     } 
   } else {
-    create_tuple_get_from_str(lnast, parent_node, rhs_full_name, tg_dest_node);
+    create_tuple_get_from_str(lnast, parent_node, rhs_full_name, dest_node);
   }
 
-  create_tuple_add_from_str(lnast, parent_node, lhs_full_name, tg_dest_node);
+  create_tuple_add_from_str(lnast, parent_node, lhs_full_name, dest_node);
 }
 
 // void Inou_firrtl_module::create_tuple_get_from_str(Lnast &lnast, Lnast_nid &parent_node, std::string_view rhs_full_name) {

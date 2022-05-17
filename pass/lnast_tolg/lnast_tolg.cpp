@@ -524,6 +524,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       auto        tup_get    = lg->create_node(Ntype_op::TupGet);
       tg_map.insert_or_assign(i, tup_get);
 
+
       Node_pin tn_dpin;
       if (is_input(c1_tg_name)) {
         tn_dpin = create_inp_tg(lg, lnast->get_vname(c1_tg));
@@ -1266,10 +1267,10 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
       auto driver_vname = lnast->get_vname(c1_aget);
       I(vname2tuple_head.find(driver_vname) != vname2tuple_head.end());
       auto tup_head_node = vname2tuple_head[driver_vname];
-      driver_var2wire_nodes[driver_vname].push_back(tup_head_node);
+      driver_vname2wire_nodes[driver_vname].push_back(tup_head_node);
     } else {  // if no previous attribute set, use the normal __last_value flow
       auto driver_vname = lnast->get_vname(c1_aget);
-      driver_var2wire_nodes[driver_vname].push_back(flop_node);
+      driver_vname2wire_nodes[driver_vname].push_back(flop_node);
     }
 
     it_aset = lnast->get_sibling_next(it_aset);
@@ -1283,13 +1284,14 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     Node wire_node;
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
     wire_node.get_driver_pin().set_name(hier_fields_cat_name);
+    fmt::print("DEBUG10 hier_fields_cat_name:{}\n", hier_fields_cat_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
     if (!is_tmp_var(c0_aget_vname))
       setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
 
     auto driver_vname = lnast->get_vname(c1_aget);
-    driver_var2wire_nodes[driver_vname].push_back(wire_node);
+    driver_vname2wire_nodes[driver_vname].push_back(wire_node);
 
     it_aset = lnast->get_sibling_next(it_aset);
     if (!it_aset.is_invalid()) {
@@ -1574,7 +1576,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
         vname2ssa_dpin.insert_or_assign(ssa_it->second.var_name, dpin);
       }
     }
-  }
+  } // end of lg->forward()
 
   // create scalar graph outputs or set the final variable name based on vname table
   for (const auto &[vname, dpin_largest_ssa] : vname2ssa_dpin) {
@@ -1585,8 +1587,8 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       continue;
     }
 
-    auto it = driver_var2wire_nodes.find(vname);
-    if (it == driver_var2wire_nodes.end())
+    auto it = driver_vname2wire_nodes.find(vname);
+    if (it == driver_vname2wire_nodes.end())
       continue;
 
     auto driver_ntype = dpin_largest_ssa.get_node().get_type_op();
@@ -1594,8 +1596,20 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       Node_pin wire_spin;
       if (driver_ntype == Ntype_op::TupAdd) {
         if (wire_node.is_type(Ntype_op::Or)) {
-          wire_node.set_type(Ntype_op::TupAdd);  // change wire_node type from Or_Op to dummy TupAdd_Op
-          wire_spin = wire_node.setup_sink_pin("parent");
+          auto dpin_name = wire_node.get_driver_pin().get_name();
+          auto found = dpin_name.find('.');
+          if (found == std::string::npos) {
+            // it's a TA assignment
+            wire_node.set_type(Ntype_op::TupAdd);  // change wire_node type from Or_Op to dummy TupAdd_Op
+            wire_spin = wire_node.setup_sink_pin("parent");
+          } else {
+            // FIXME->sh: check the wire_node name, if it is a hier_name like _T.a.b, then you should replace the or with TG
+            wire_node.set_type(Ntype_op::TupGet);
+            auto field_spin = wire_node.setup_sink_pin("field");
+            auto field_dpin = lg->create_node_const(Lconst::from_string(dpin_name.substr(found + 1))).setup_driver_pin();
+            field_dpin.connect_sink(field_spin);
+            wire_spin = wire_node.setup_sink_pin("parent");
+          }
         } else if (wire_node.is_type(Ntype_op::TupAdd)) {
           wire_spin = wire_node.setup_sink_pin("parent");
         } else {
@@ -1682,11 +1696,9 @@ void Lnast_tolg::try_create_flattened_inp(Lgraph *lg) {
 
     auto tg_name = tg.get_driver_pin().get_name();
 
-    fmt::print("DEBUG1 tg_name:{}\n", tg_name);
     I(tg_name.substr(0, 1) == "$");
     auto hier_name = Lgtuple::get_all_but_first_level(tg_name);  // get rid of "$" in "$foo"
     if (hier_name.empty()) {
-      fmt::print("DEBUG3\n");
       continue;
     }
 

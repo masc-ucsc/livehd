@@ -216,6 +216,7 @@ protected:
                              const Lnast_node &value_node);
   void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node);
   void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &dest_node, bool is_last_value_attr = false);
+  void create_attr_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &dest_node);
   void create_default_value_for_scalar_output(Lnast &ln, Lnast_nid &parent_node, std::string_view sv, const Lnast_node &value_node);
 
   void init_cmemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
