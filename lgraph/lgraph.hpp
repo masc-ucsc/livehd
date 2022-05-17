@@ -6,6 +6,7 @@
 #include "cell.hpp"
 #include "edge.hpp"
 #include "graph_library.hpp"
+#include "hif/hif_read.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 #include "lgraph_attributes.hpp"
@@ -222,10 +223,10 @@ public:
   Node create_node_sub(Lg_type_id sub);
   Node create_node_sub(std::string_view sub_name);
 
-  const Sub_node &get_self_sub_node() const;  // Access all input/outputs
+  [[nodiscard]] const Sub_node &get_self_sub_node() const;  // Access all input/outputs
   Sub_node       *ref_self_sub_node();        // Access all input/outputs
 
-  void load();
+  void load(std::shared_ptr<Hif_read> hif);
   void save();
   void dump();
   void dump_down_nodes();
@@ -237,8 +238,8 @@ public:
   Node_pin get_graph_output(std::string_view str);
   Node_pin get_graph_output_driver_pin(std::string_view str);
 
-  bool has_graph_input(std::string_view name) const;
-  bool has_graph_output(std::string_view name) const;
+  [[nodiscard]] bool has_graph_input(std::string_view name) const;
+  [[nodiscard]] bool has_graph_output(std::string_view name) const;
 
   // Iterators defined in the lgraph_each.cpp
 

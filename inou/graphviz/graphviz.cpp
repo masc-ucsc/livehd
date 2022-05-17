@@ -217,7 +217,8 @@ void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
     Lgraph *lg_child = Lgraph::open(lg_parent->get_path(), lgid);
-    populate_lg_data(lg_child, dot_postfix);
+    if (lg_child)
+      populate_lg_data(lg_child, dot_postfix);
   });
 }
 

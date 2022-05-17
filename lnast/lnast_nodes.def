@@ -68,6 +68,22 @@ LNAST_NODE( ref, ref )
 LNAST_NODE( const, const )
 LNAST_NODE( range, range )
 
+
+// Tuple Statements
+LNAST_NODE( tuple_concat, tuple_concat )
+LNAST_NODE( tuple_add, tuple_add )
+LNAST_NODE( tuple_get, tuple_get )
+LNAST_NODE( tuple_set, tuple_set )
+
+// Attribute Statements
+LNAST_NODE( attr_set, attr_set )
+LNAST_NODE( attr_get, attr_get )
+
+// Compiler Internals
+LNAST_NODE( err_flag, err_flag )
+LNAST_NODE( phi, phi )
+LNAST_NODE( hot_phi, hot_phi )
+
 // Type Statements
 LNAST_NODE( type_def, type_def )
 LNAST_NODE( type_spec, type_spec )
@@ -88,20 +104,5 @@ LNAST_NODE( comp_type_lambda, comp_type_lambda )
 LNAST_NODE( comp_type_enum, comp_type_enum )
 LNAST_NODE( expr_type, expr_type )
 LNAST_NODE( unknown_type, unknown_type )
-
-// Tuple Statements
-LNAST_NODE( tuple_concat, tuple_concat )
-LNAST_NODE( tuple_add, tuple_add )
-LNAST_NODE( tuple_get, tuple_get )
-LNAST_NODE( tuple_set, tuple_set )
-
-// Attribute Statements
-LNAST_NODE( attr_set, attr_set )
-LNAST_NODE( attr_get, attr_get )
-
-// Compiler Internals
-LNAST_NODE( err_flag, err_flag )
-LNAST_NODE( phi, phi )
-LNAST_NODE( hot_phi, hot_phi )
 
 #undef LNAST_NODE
