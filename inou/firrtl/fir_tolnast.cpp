@@ -192,8 +192,17 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
       // auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
       // lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
       // lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
-      Lnast_node zero_node = Lnast_node::create_const(0);
-      create_tuple_add_from_str(lnast, parent_node, id, zero_node);
+
+
+      if (!str_tools::contains(id, '.')) {
+        // it's a scalar variable
+        auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
+        lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
+        lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
+      } else {
+        Lnast_node zero_node = Lnast_node::create_const(0);
+        create_tuple_add_from_str(lnast, parent_node, id, zero_node);
+      }
 
       auto wire_bits = get_bit_count(type);
       if (wire_bits >= 0)

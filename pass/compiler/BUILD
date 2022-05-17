@@ -182,16 +182,16 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "IntXbar",
-    "SimpleClockGroupSource",
-    "FixedClockBroadcast",
-    "ClockGroupAggregator",
+    # "IntXbar",
+    # "SimpleClockGroupSource",
+    # "FixedClockBroadcast",
+    # "ClockGroupAggregator",
     "BreakpointUnit",
     "Arbiter_10",
     "MaxPeriodFibonacciLFSR",
     "AMOALU",
     "DebugCustomXbar",
-    "IntSyncSyncCrossingSink"
+    # "IntSyncSyncCrossingSink"
 
     # FIXME:
     # issue1: memory
