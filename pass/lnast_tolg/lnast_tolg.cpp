@@ -1282,7 +1282,6 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
   if (attr_vname == "__last_value") {
     Node wire_node;
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
-    // wire_node.get_driver_pin().set_name(lnast->get_vname(c1_aget));
     wire_node.get_driver_pin().set_name(hier_fields_cat_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
@@ -1683,10 +1682,13 @@ void Lnast_tolg::try_create_flattened_inp(Lgraph *lg) {
 
     auto tg_name = tg.get_driver_pin().get_name();
 
+    fmt::print("DEBUG1 tg_name:{}\n", tg_name);
     I(tg_name.substr(0, 1) == "$");
     auto hier_name = Lgtuple::get_all_but_first_level(tg_name);  // get rid of "$" in "$foo"
-    if (hier_name.empty())
+    if (hier_name.empty()) {
+      fmt::print("DEBUG3\n");
       continue;
+    }
 
     for (auto &tg_out : tg.out_edges()) {
       dfs_try_create_flattened_inp(lg, tg_out.sink, hier_name, tg);

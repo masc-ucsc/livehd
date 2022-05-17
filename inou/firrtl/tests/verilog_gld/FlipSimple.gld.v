@@ -1,8 +1,9 @@
 module FlipSimple(
-  input        clock,
-  input        reset,
-  input  [3:0] auto_foo_bar,
-  output [4:0] auto_foo_baz
+  input   io_in_a_ab,
+  output  io_in_a_ac,
+  output  io_out_a_ab,
+  input   io_out_a_ac
 );
-  assign auto_foo_baz = auto_foo_bar + 4'hd;
+  assign io_in_a_ac = io_out_a_ac;
+  assign io_out_a_ab = io_in_a_ab;
 endmodule
