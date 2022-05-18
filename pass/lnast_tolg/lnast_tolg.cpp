@@ -486,6 +486,7 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
 
 Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, std::string_view input_field) {
   auto tup_get_inp = lg->create_node(Ntype_op::TupGet);
+ 
   auto tn_spin     = tup_get_inp.setup_sink_pin("parent");
   auto tn_dpin     = name2dpin["$"];
   tn_dpin.connect_sink(tn_spin);
@@ -509,6 +510,8 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
   int                            i = 0;
   std::string                    c0_tg_name;
   std::string                    c0_tg_vname;
+  std::string                    c1_tg_name;
+  std::string                    cn_tg_name;
   auto                           c0_tg_subs = 0;
 
   for (const auto &child : lnast->children(lnidx_tg)) {
@@ -520,9 +523,9 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       i++;
       continue;
     } else if (i == 1) {
-      const auto &c1_tg      = child;
-      auto        c1_tg_name = lnast->get_sname(c1_tg);
-      auto        tup_get    = lg->create_node(Ntype_op::TupGet);
+      const auto &c1_tg = child;
+      c1_tg_name = lnast->get_sname(c1_tg);
+      auto tup_get = lg->create_node(Ntype_op::TupGet);
       tg_map.insert_or_assign(i, tup_get);
 
       Node_pin tn_dpin;
@@ -531,7 +534,6 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       } else {
         tn_dpin = setup_tuple_ref(lg, c1_tg_name);
       }
-      // tn_dpin = setup_tuple_ref(lg, c1_tg_name);
 
       I(!tn_dpin.is_invalid());
       auto tn_spin = tup_get.setup_sink_pin("parent");
@@ -541,7 +543,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
     } else if (child == lnast->get_last_child(lnidx_tg)) {
       // i >= 2
       const auto &cn_tg      = child;
-      auto        cn_tg_name = lnast->get_vname(cn_tg);
+                  cn_tg_name = lnast->get_vname(cn_tg);
       auto        tup_get    = tg_map[i - 1];
       auto        pos_spin   = tup_get.setup_sink_pin("field");
       auto        lntype     = lnast->get_type(cn_tg);
@@ -558,6 +560,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
 
       tup_get.setup_driver_pin().set_name(c0_tg_name);
+      fmt::print("DEBUG8 tuple_get_dpin:{}, c1_tg_name:{}, cn_tg_name:{}\n", tup_get.setup_driver_pin().debug_name(), c1_tg_name, cn_tg_name);
       if (!is_tmp_var(c0_tg_vname))
         setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, c0_tg_subs);
 
@@ -567,7 +570,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       auto tn_spin = new_tup_get.setup_sink_pin("parent");
 
       const auto &cn_tg        = child;
-      auto        cn_tg_name   = lnast->get_vname(cn_tg);
+                  cn_tg_name   = lnast->get_vname(cn_tg);
       auto        prev_tup_get = tg_map[i - 1];
       auto        pos_spin     = prev_tup_get.setup_sink_pin("field");
       auto        lntype       = lnast->get_type(cn_tg);
@@ -1284,7 +1287,7 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     Node wire_node;
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
     wire_node.get_driver_pin().set_name(hier_fields_cat_name);
-    fmt::print("DEBUG10 hier_fields_cat_name:{}\n", hier_fields_cat_name);
+    fmt::print("DEBUG9 hier_fields_cat_name:{}\n", hier_fields_cat_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
     if (!is_tmp_var(c0_aget_vname))
@@ -1609,6 +1612,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
             auto field_dpin = lg->create_node_const(Lconst::from_string(dpin_name.substr(found + 1))).setup_driver_pin();
             field_dpin.connect_sink(field_spin);
             wire_spin = wire_node.setup_sink_pin("parent");
+            fmt::print("DEBUG10:tg_dpin_name:{} driver_ta_dpin_name:{}\n", wire_node.get_driver_pin().debug_name(), dpin_largest_ssa.debug_name());
           }
         } else if (wire_node.is_type(Ntype_op::TupAdd)) {
           wire_spin = wire_node.setup_sink_pin("parent");
