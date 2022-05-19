@@ -140,7 +140,7 @@ void Pass_opentimer::read_sdc() {
     std::copy(std::istream_iterator<std::string>(datastream), std::istream_iterator<std::string>(), std::back_inserter(line_vec));
 
     if (line_vec[0] == "create_clock") {
-      int         period;
+      int         period=1000;
       std::string pname;
       for (std::size_t i = 1; i < line_vec.size(); i++) {
         if (line_vec[i] == "-period") {
