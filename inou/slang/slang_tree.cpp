@@ -74,10 +74,18 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
       std::string var_name;
       if (port.direction == slang::ArgumentDirection::In) {
+        #ifdef LNAST_NODE
         var_name = absl::StrCat("$.:", decl_pos, ":", port.name);
+        #else
+        var_name = absl::StrCat("$", port.name);
+        #endif
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       } else {
+        #ifdef LNAST_NODE
         var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
+        #else
+        var_name = absl::StrCat("%", port.name);
+        #endif
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       }
 
@@ -88,6 +96,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
           fmt::print("WARNING: {} is big endian, Flipping IO to handle. Careful about mix/match with modules\n", port.name);
         }
       }
+      lnast_create_obj.vname2lname.emplace(var_name, var_name);
       lnast_create_obj.create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
       ++decl_pos;
 
@@ -275,7 +284,14 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
     lnast_create_obj.create_assign_stmts(var_name, rhs_var);
   } else {
     auto bitmask = lnast_create_obj.create_bitmask_stmts(dest_max_bit, dest_min_bit);
+#ifdef LNASTOP_DONE
     lnast_create_obj.create_set_mask_stmts(var_name, bitmask, rhs_var);
+#else
+    auto tmp_var = lnast_create_obj.create_lnast_tmp();
+    lnast_create_obj.create_assign_stmts(tmp_var, var_name);
+    lnast_create_obj.create_set_mask_stmts(tmp_var, bitmask, rhs_var);
+    lnast_create_obj.create_assign_stmts(var_name, tmp_var);
+#endif
   }
 }
 

@@ -208,7 +208,6 @@ void Lnast_tolg::process_ast_nary_op_one2n_map(Lgraph *lg, const Lnast_nid &lnid
 }
 
 void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lnidx_opr) {
-  auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr, "");
 
   std::vector<Node_pin> opds;
   for (const auto &child : lnast->children(lnidx_opr)) {
@@ -217,10 +216,12 @@ void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lni
 
     auto opd = setup_ref_node_dpin(lg, child);
     if (opd.is_invalid())
-      Pass::error("for operator node {}, undefined variable {} is used!\n", opr_node.debug_name(), lnast->get_sname(child));
+      Pass::error("for operator node undefined variable {} is used!\n", lnast->get_sname(child));
 
     opds.emplace_back(opd);
   }
+
+  auto opr_node = setup_node_opr_and_lhs(lg, lnidx_opr, "");
   nary_node_rhs_connections(lg, opr_node, opds, lnast->get_type(lnidx_opr).is_minus());
 }
 
@@ -523,7 +524,6 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       auto        c1_tg_name = lnast->get_sname(c1_tg);
       auto        tup_get    = lg->create_node(Ntype_op::TupGet);
       tg_map.insert_or_assign(i, tup_get);
-
 
       Node_pin tn_dpin;
       if (is_input(c1_tg_name)) {
@@ -1540,7 +1540,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
     auto ntype = node.get_type_op();
 
     if (ntype == Ntype_op::Sub) {
-      // TODO: can we rid of this to make it more generic?
+      // TODO: can we rid of this to make it more generic?/out
       if (node.get_type_sub_node().get_name().substr(0, 9) == "__firrtl_")
         continue;
       if (node.get_type_sub_node().get_name().substr(0, 6) != "__fir_")

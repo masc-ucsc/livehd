@@ -592,7 +592,9 @@ void Bitwidth::process_set_mask(Node &node) {
       return;
     } else {
       Pass::info("bw pin:{} is not constrained but constraining to mask size", value_dpin.debug_name());
-      value_bw.set_range(Lconst(0), mask);
+      bw.set_wider_range(Lconst(0), mask);
+      adjust_bw(node.get_driver_pin(), bw);
+      return;
     }
   } else {
     value_bw = it2->second;
@@ -1572,9 +1574,13 @@ void Bitwidth::try_delete_attr_node(Node &node) {
   if (node.is_sink_connected("parent")) {
     auto data_dpin = node.get_sink_pin("parent").get_driver_pin();
     for (auto e : node.out_edges()) {
-      if (e.driver.get_pid() == 0) {  // No chain pin
-        e.sink.connect_driver(data_dpin);
-      }
+      I(e.driver.get_pid() == 0);  // No chain pin
+      e.sink.connect_driver(data_dpin);
+    }
+  }else{
+    auto data_dpin = node.create_const(0);
+    for (auto e : node.out_edges()) {
+      e.sink.connect_driver(data_dpin);
     }
   }
   node.del_node();

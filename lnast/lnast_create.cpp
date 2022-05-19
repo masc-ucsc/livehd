@@ -336,7 +336,7 @@ void Lnast_create::create_assign_stmts(std::string_view lhs_var, std::string_vie
       std::vector<std::string> vec =  absl::StrSplit(lhs_var, '.');
 
       if (vec.size()==2 && (vec[0] == "%" || vec[0] == "$")) {
-        return create_assign_stmts(absl::StrCat(vec[0], vec[1]), rhs_var);
+        return create_assign_stmts(absl::StrCat(vec[0], Bundle::get_first_level_name(vec[1])), rhs_var);
       }
 
 
@@ -480,7 +480,8 @@ std::string Lnast_create::create_tuple_get(std::string_view var) {
   if (Bundle::is_single_level(var))
     return std::string(var);
 
-  if (Bundle::get_first_level(var) == "$") {
+  auto first_level = Bundle::get_first_level(var);
+  if (first_level == "$" || first_level == "%") {
     // fuse with next levels (bugs in lnast_opt otherwise)
 
     auto f = Bundle::get_all_but_first_level(var);
@@ -489,9 +490,9 @@ std::string Lnast_create::create_tuple_get(std::string_view var) {
     auto rest = Bundle::get_all_but_first_level(n);
 
     if (rest.empty())
-      return absl::StrCat("$", n);
+      return absl::StrCat(first_level, n);
 
-    return create_tuple_get(absl::StrCat("$", n, ".", rest));
+    return create_tuple_get(absl::StrCat(first_level, n, ".", rest));
   }
 
   auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_tuple_get());
