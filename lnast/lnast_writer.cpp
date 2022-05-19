@@ -4,7 +4,7 @@
 
 #include "lnast_ntype.hpp"
 
-Lnast_writer::Lnast_writer(std::ostream &_os, std::shared_ptr<Lnast> _lnast) : os(_os), lnast(_lnast) {
+Lnast_writer::Lnast_writer(std::ostream &_os, const std::shared_ptr<Lnast>& _lnast) : os(_os), lnast(_lnast) {
   has_file_output = !(_os.rdbuf() == std::cout.rdbuf());
 }
 
@@ -12,7 +12,16 @@ void Lnast_writer::write_all() {
   depth = 0;
   is_func_name = false;
   write_metadata();
+  nid_stack = {};
   current_nid = Lnast_nid::root();
+  write_lnast();
+}
+
+void Lnast_writer::write_nid(const Lnast_nid& nid) {
+  depth = 0;
+  is_func_name = false;
+  nid_stack = {};
+  current_nid = nid;
   write_lnast();
 }
 

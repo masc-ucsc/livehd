@@ -77,5 +77,7 @@ public:
 
   std::string_view debug_name() const { return namemap[val]; }
 
+  static std::string_view debug_name(Lnast_ntype_int val) { return namemap[val]; }
+
   static_assert(namemap.size() == Lnast_ntype_last_invalid);
 };

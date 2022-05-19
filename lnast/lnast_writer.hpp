@@ -13,15 +13,16 @@
 
 class Lnast_writer {
 public:
-  explicit Lnast_writer(std::ostream&, std::shared_ptr<Lnast>);
+  explicit Lnast_writer(std::ostream&, const std::shared_ptr<Lnast>&);
   void write_all();
+  void write_nid(const Lnast_nid& nid);
 protected:
   int depth;
   bool is_func_name;
 
   bool has_file_output;
   std::ostream &os;
-  std::shared_ptr<Lnast> lnast;
+  const std::shared_ptr<Lnast>& lnast;
   
   std::stack<Lnast_nid> nid_stack;
   Lnast_nid current_nid;

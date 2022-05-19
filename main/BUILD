@@ -79,6 +79,7 @@ cc_library(
         "//pass/lnast_save:pass_lnast_save",
         "//pass/lnast_load:pass_lnast_load",
         #"//inou/hif:inou_hif"
+        "//pass/upass_test:pass_upass_test",
     ],
 )
 
