@@ -2016,18 +2016,18 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         tup_l_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head_l];
       }
 
-      // for (const auto &it : *tup_l_sets) {
-      //   if (std::get<0>(it).find(hier_name_l) != std::string::npos) {
-      //     fmt::print("DEBUG2, hier_name_l:{}, hier_name_r:{}, lhs_leaf_name:{}\n", hier_name_l, hier_name_r, std::get<0>(it));
-      //     tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
-      //   }
-      // }
-      for (auto rit = tup_l_sets->rbegin(); rit != tup_l_sets->rend(); rit++) {
-        if (std::get<0>(*rit).find(hier_name_l) != std::string::npos) {
-          fmt::print("DEBUG2, hier_name_l:{}, hier_name_r:{}, lhs_leaf_name:{}\n", hier_name_l, hier_name_r, std::get<0>(*rit));
-          tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(*rit), std::get<1>(*rit));
+      for (const auto &it : *tup_l_sets) {
+        if (std::get<0>(it).find(hier_name_l) != std::string::npos) {
+          fmt::print("DEBUG2, hier_name_l:{}, hier_name_r:{}, lhs_leaf_name:{}\n", hier_name_l, hier_name_r, std::get<0>(it));
+          tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
         }
       }
+      // for (auto rit = tup_l_sets->rbegin(); rit != tup_l_sets->rend(); rit++) {
+      //   if (std::get<0>(*rit).find(hier_name_l) != std::string::npos) {
+      //     fmt::print("DEBUG2, hier_name_l:{}, hier_name_r:{}, lhs_leaf_name:{}\n", hier_name_l, hier_name_r, std::get<0>(*rit));
+      //     tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(*rit), std::get<1>(*rit));
+      //   }
+      // }
 
 
       // // original funtions

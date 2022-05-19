@@ -1095,8 +1095,10 @@ void Cprop::tuple_tuple_add(const Node &node) {
     // When key is provided it is mostly variations of tuple add
     auto v = (has_parent_tup ? 0x4 : 0) + (has_parent_scalar ? 0x2 : 0) + (has_value_scalar ? 0x1 : 0);
 
+    fmt::print("DEBUG A----TA:{}\n", node.debug_name());
     switch (v) {
-      case 0x0: {
+      case 0x0: { //!has_parent_tup && !has_parent_scalar && !has_value_scalar
+        fmt::print("DEBUG A-0\n");
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1109,10 +1111,12 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x1: {  // has_value_scalar
+        fmt::print("DEBUG A-1\n");
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x2: {
+        fmt::print("DEBUG A-2\n");
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1124,12 +1128,14 @@ void Cprop::tuple_tuple_add(const Node &node) {
         // node_tup->add(parent_dpin); // Maybe missing tuple field?
         node_tup->add(key_name, value_tup);
       } break;
-      case 0x3: {
+      case 0x3: { // has_parent_scalar && has_value_scalar
+        fmt::print("DEBUG A-3\n");
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, "0", parent_dpin);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
-      case 0x4: {
+      case 0x4: {  // has_parent_tup
+        fmt::print("DEBUG A-4\n");
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         if (Lgtuple::is_attribute(key_name) && value_tup->is_scalar()) {
           auto v_dpin = value_tup->get_dpin();
@@ -1159,7 +1165,8 @@ void Cprop::tuple_tuple_add(const Node &node) {
           }
         }
       } break;
-      case 0x5: {
+      case 0x5: { // has_parent_tup && has_value_scalar
+        fmt::print("DEBUG A-5\n");
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
@@ -1271,6 +1278,7 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
+  fmt::print("DEBUG A----TG:{}\n", node.debug_name());
   auto [tup_name, key_name] = get_tuple_name_key(node);
   auto parent_dpin          = node.get_sink_pin("parent").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();

@@ -560,7 +560,7 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
 
       tup_get.setup_driver_pin().set_name(c0_tg_name);
-      fmt::print("DEBUG8 tuple_get_dpin:{}, c1_tg_name:{}, cn_tg_name:{}\n", tup_get.setup_driver_pin().debug_name(), c1_tg_name, cn_tg_name);
+      // fmt::print("DEBUG8 tuple_get_dpin:{}, c1_tg_name:{}, cn_tg_name:{}\n", tup_get.setup_driver_pin().debug_name(), c1_tg_name, cn_tg_name);
       if (!is_tmp_var(c0_tg_vname))
         setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, c0_tg_subs);
 
@@ -1287,7 +1287,7 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     Node wire_node;
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
     wire_node.get_driver_pin().set_name(hier_fields_cat_name);
-    fmt::print("DEBUG9 hier_fields_cat_name:{}\n", hier_fields_cat_name);
+    // fmt::print("DEBUG9 hier_fields_cat_name:{}\n", hier_fields_cat_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
     if (!is_tmp_var(c0_aget_vname))
@@ -1573,8 +1573,9 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       auto it2 = vname2ssa_dpin.find(ssa_it->second.var_name);
       if (it2 != vname2ssa_dpin.end()) {
         auto ssa_it2 = ssa_info_map.find(it2->second.get_compact_class_driver());
-        if (ssa_it2 != ssa_info_map.end() && ssa_it2->second.subs < ssa_it->second.subs)
+        if (ssa_it2 != ssa_info_map.end() && ssa_it2->second.subs < ssa_it->second.subs) {
           vname2ssa_dpin.insert_or_assign(ssa_it->second.var_name, dpin);
+        }
       } else {
         vname2ssa_dpin.insert_or_assign(ssa_it->second.var_name, dpin);
       }
@@ -1612,7 +1613,7 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
             auto field_dpin = lg->create_node_const(Lconst::from_string(dpin_name.substr(found + 1))).setup_driver_pin();
             field_dpin.connect_sink(field_spin);
             wire_spin = wire_node.setup_sink_pin("parent");
-            fmt::print("DEBUG10:tg_dpin_name:{} driver_ta_dpin_name:{}\n", wire_node.get_driver_pin().debug_name(), dpin_largest_ssa.debug_name());
+            // fmt::print("DEBUG10:tg_dpin_name:{} driver_ta_dpin_name:{}\n", wire_node.get_driver_pin().debug_name(), dpin_largest_ssa.debug_name());
           }
         } else if (wire_node.is_type(Ntype_op::TupAdd)) {
           wire_spin = wire_node.setup_sink_pin("parent");
