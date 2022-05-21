@@ -22,11 +22,17 @@ http_archive(
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz",
 )
 
+#http_archive(
+#    name = "rules_hdl",
+#    sha256 = "2326431c5eb66c7e4be8a2d2f89ad6aa929e99727a487e092d9d78e23485ec25",
+#    strip_prefix = "bazel_rules_hdl-89b7ff96dfbc69dc653dac2e4015bb39221b2715",
+#    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/89b7ff96dfbc69dc653dac2e4015bb39221b2715.zip",
+#)
 http_archive(
     name = "rules_hdl",
-    sha256 = "2326431c5eb66c7e4be8a2d2f89ad6aa929e99727a487e092d9d78e23485ec25",
-    strip_prefix = "bazel_rules_hdl-89b7ff96dfbc69dc653dac2e4015bb39221b2715",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/89b7ff96dfbc69dc653dac2e4015bb39221b2715.zip",
+    sha256 = "1d168c75ee9ffb9021ca9ff993ec850353d92e061cc33723360a53ab6fed7263",
+    strip_prefix = "bazel_rules_hdl-49edc8c0370d81007857093ee1c3ded5ff48a2c3",
+    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/49edc8c0370d81007857093ee1c3ded5ff48a2c3.zip",
 )
 
 load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
