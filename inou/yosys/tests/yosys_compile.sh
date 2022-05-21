@@ -39,6 +39,7 @@ fi
 pass=0
 fail=0
 fail_list=""
+pass_list=""
 rm -rf tmp_yosys_mix
 mkdir -p tmp_yosys_mix
 for full_input in ${inputs}
@@ -76,8 +77,8 @@ do
   rm -rf lgdb_yosys tmp_yosys
   mkdir -p tmp_yosys
 
-  #echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:"${full_input}  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
-  echo "inou.verilog path:lgdb_yosys top:${base} files:${full_input} |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  echo "inou.yosys.tolg path:lgdb_yosys top:${base} files:${full_input} |> lgraph.save" | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
+  #echo "inou.verilog path:lgdb_yosys top:${base} files:${full_input} |> pass.compiler "  | ${LGSHELL} -q >tmp_yosys/${input}.log 2>tmp_yosys/${input}.err
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
@@ -144,6 +145,7 @@ do
     fi
   fi
 
+  pass_list+=" "$base
   ((pass++))
 
   ENDTIME=$SECONDS
@@ -161,7 +163,8 @@ if [ $FAIL -eq 0 ]; then
   echo "SUCCESS: pass:${pass} tests without errors"
   exit 0
 else
-  echo "FAIL: ${pass} tests passed but ${fail} failed verification: ${fail_list}"
+  echo "FAIL: ${pass} tests passed: ${pass_list}"
+  echo "FAIL: ${fail} tests failed: ${fail_list}"
   exit 1
 fi
 

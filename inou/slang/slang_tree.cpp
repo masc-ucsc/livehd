@@ -64,13 +64,13 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
   lnast_create_obj.new_lnast(def.name);
 
-  symbol.resolvePortConnections();
+  //symbol.resolvePortConnections();
   auto decl_pos = 0u;
   for (const auto &p : symbol.body.getPortList()) {
     if (p->kind == slang::SymbolKind::Port) {
       const auto &port = p->as<slang::PortSymbol>();
 
-      I(port.defaultValue == nullptr);  // give me a case to DEBUG
+      //I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
       std::string var_name;
       if (port.direction == slang::ArgumentDirection::In) {
@@ -151,7 +151,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
                   return false;
                 }
               } else {
-                fmt::print("TODO: handle kind {}\n", bstmt->kind);
+                fmt::print("TODO: handle kind {}\n", (int)bstmt->kind);
               }
             }
           }

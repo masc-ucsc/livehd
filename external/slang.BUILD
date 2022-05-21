@@ -18,7 +18,10 @@ cmake(
     cache_entries = {
         "SLANG_INCLUDE_TESTS": "OFF",
         "SLANG_INCLUDE_TOOLS": "OFF",
+        "SLANG_INCLUDE_LLVM": "OFF",
+        "SLANG_INCLUDE_DOCS": "OFF",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
     },
     generate_args = select({
         "@platforms//os:macos": [
