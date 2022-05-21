@@ -118,7 +118,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       auto       *expr = ns.getInitializer();
       if (expr) {
         // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
-        lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr));
+        lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr, true)); // get last value for assigns
       }
     } else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
@@ -189,7 +189,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
         I(p->kind == slang::AssertionExprKind::Simple);
         const auto &expr = p->as<slang::SimpleAssertionExpr>();
 
-        inp_tup.emplace_back(std::make_pair(n, process_expression(expr.expr)));
+        inp_tup.emplace_back(std::make_pair(n, process_expression(expr.expr, true))); // module connections should use last_value write
       }
 
       auto inp_tup_var = lnast_create_obj.create_lnast_tmp();
@@ -211,7 +211,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
         I(p->kind == slang::AssertionExprKind::Simple);
 
         const auto &aexpr = p->as<slang::SimpleAssertionExpr>();
-        process_lhs(aexpr.expr, rhs_var);
+        process_lhs(aexpr.expr, rhs_var, true); // last_value in module
       }
     } else {
       Pass::error("FIXME: missing body type\n");
@@ -228,7 +228,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
   return true;
 }
 
-void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rhs_var) {
+void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rhs_var, bool last_value) {
 
   std::string var_name;
   bool        dest_var_sign;
@@ -247,7 +247,7 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
     const auto &es = lhs.as<slang::ElementSelectExpression>();
     I(es.value().kind == slang::ExpressionKind::NamedValue);
 
-    dest_max_bit = process_expression(es.selector());
+    dest_max_bit = process_expression(es.selector(), last_value);
     dest_min_bit = dest_max_bit;
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
@@ -266,8 +266,8 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
     dest_var_bits   = var.type->getBitWidth();
     I(!var.type->isStruct());  // FIXME: structs
 
-    dest_max_bit = process_expression(rs.left());
-    dest_min_bit = process_expression(rs.right());
+    dest_max_bit = process_expression(rs.left(), last_value);
+    dest_min_bit = process_expression(rs.right(), last_value);
   }
 
   auto it = lnast_create_obj.vname2lname.find(var_name);
@@ -296,19 +296,19 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
 }
 
 bool Slang_tree::process(const slang::AssignmentExpression &expr) {
-  auto rhs_var = process_expression(expr.right());
+  auto rhs_var = process_expression(expr.right(), true);
 
   const auto &lhs = expr.left();
 
-  process_lhs(lhs, rhs_var);
+  process_lhs(lhs, rhs_var, true);
 
   return true;
 }
 
-std::string Slang_tree::process_expression(const slang::Expression &expr) {
+std::string Slang_tree::process_expression(const slang::Expression &expr, bool last_value) {
   if (expr.kind == slang::ExpressionKind::NamedValue) {
     const auto &nv = expr.as<slang::NamedValueExpression>();
-    return lnast_create_obj.get_lnast_name(nv.symbol.name);
+    return lnast_create_obj.get_lnast_name(nv.symbol.name, last_value);
   }
 
   if (expr.kind == slang::ExpressionKind::IntegerLiteral) {
@@ -326,8 +326,8 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
 
   if (expr.kind == slang::ExpressionKind::BinaryOp) {
     const auto &op  = expr.as<slang::BinaryExpression>();
-    auto        lhs = process_expression(op.left());
-    auto        rhs = process_expression(op.right());
+    auto        lhs = process_expression(op.left(), last_value);
+    auto        rhs = process_expression(op.right(), last_value);
 
     std::string var;
     switch (op.op) {
@@ -361,15 +361,15 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
     const auto &op = expr.as<slang::UnaryExpression>();
 
     if (op.op == slang::UnaryOperator::BitwiseAnd)
-      return process_mask_and(op);
+      return process_mask_and(op, last_value);
     if (op.op == slang::UnaryOperator::BitwiseNand)
-      return lnast_create_obj.create_bit_not_stmts(process_mask_and(op));
+      return lnast_create_obj.create_bit_not_stmts(process_mask_and(op, last_value));
     if (op.op == slang::UnaryOperator::BitwiseXor)
-      return process_mask_xor(op);
+      return process_mask_xor(op, last_value);
     if (op.op == slang::UnaryOperator::BitwiseXnor)
-      return lnast_create_obj.create_bit_not_stmts(process_mask_xor(op));
+      return lnast_create_obj.create_bit_not_stmts(process_mask_xor(op, last_value));
 
-    auto lhs = process_expression(op.operand());
+    auto lhs = process_expression(op.operand(), last_value);
     switch (op.op) {
       case slang::UnaryOperator::BitwiseNot: return lnast_create_obj.create_bit_not_stmts(lhs);
       case slang::UnaryOperator::LogicalNot: return lnast_create_obj.create_logical_not_stmts(lhs);
@@ -394,7 +394,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
     const auto        &conv    = expr.as<slang::ConversionExpression>();
     const slang::Type *to_type = conv.type;
 
-    auto res = process_expression(conv.operand());  // NOTHING TO DO? (the dp_assign handles it?)
+    auto res = process_expression(conv.operand(), last_value);  // NOTHING TO DO? (the dp_assign handles it?)
 
     const slang::Type *from_type = conv.operand().type;
 
@@ -441,7 +441,7 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
     for (const auto &e : concat.operands()) {
       auto bits = e->type->getBitWidth();
 
-      auto res_var = process_expression(*e);
+      auto res_var = process_expression(*e, last_value);
 
       if (offset) {
         res_var = lnast_create_obj.create_shl_stmts(res_var, std::to_string(offset));
@@ -460,8 +460,8 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
 
-    auto sel_var  = lnast_create_obj.get_lnast_name(var.symbol.name);
-    auto sel_bit  = process_expression(es.selector());
+    auto sel_var  = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
+    auto sel_bit  = process_expression(es.selector(), last_value);
     auto sel_mask = lnast_create_obj.create_shl_stmts("1", sel_bit);
 
     return lnast_create_obj.create_get_mask_stmts(sel_var, sel_mask);
@@ -473,9 +473,9 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
 
     const auto &var = es.value().as<slang::NamedValueExpression>();
 
-    auto sel_var = lnast_create_obj.get_lnast_name(var.symbol.name);
-    auto max_bit = process_expression(es.left());
-    auto min_bit = process_expression(es.right());
+    auto sel_var = lnast_create_obj.get_lnast_name(var.symbol.name, last_value);
+    auto max_bit = process_expression(es.left(), last_value);
+    auto min_bit = process_expression(es.right(), last_value);
 
     auto sel_mask = lnast_create_obj.create_bitmask_stmts(max_bit, min_bit);
     return lnast_create_obj.create_get_mask_stmts(sel_var, sel_mask);
@@ -486,14 +486,14 @@ std::string Slang_tree::process_expression(const slang::Expression &expr) {
   return "FIXME_op";
 }
 
-std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
+std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr, bool last_value) {
   // reduce and does not have a direct mapping in Lgraph
   // And(Not(Ror(Not(inp))), inp.MSB)
 
   const auto &op      = uexpr.operand();
   auto        msb_pos = op.type->getBitWidth() - 1;
 
-  auto inp = process_expression(op);
+  auto inp = process_expression(op, last_value);
 
   auto tmp
       = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_reduce_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
@@ -502,10 +502,10 @@ std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr) {
       lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)
 }
 
-std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr) {
+std::string Slang_tree::process_mask_xor(const slang::UnaryExpression &uexpr, bool last_value) {
   const auto &op = uexpr.operand();
 
-  auto inp = process_expression(op);
+  auto inp = process_expression(op, last_value);
 
   auto mask = lnast_create_obj.create_mask_stmts(std::to_string(op.type->getBitWidth()));
   return lnast_create_obj.create_mask_xor_stmts(mask, inp);

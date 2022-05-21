@@ -31,10 +31,10 @@ protected:
   bool        process_top_instance(const slang::InstanceSymbol& symbol);
   bool        process(const slang::AssignmentExpression& expr);
 
-  void        process_lhs(const slang::Expression &lhs, const std::string &rhs_var);
+  void        process_lhs(const slang::Expression &lhs, const std::string &rhs_var, bool last_value);
 
-  std::string process_expression(const slang::Expression& expr);
-  std::string process_mask_and(const slang::UnaryExpression& uexpr);
-  std::string process_mask_popcount(const slang::UnaryExpression& uexpr);
-  std::string process_mask_xor(const slang::UnaryExpression& uexpr);
+  std::string process_expression(const slang::Expression& expr, bool last_value);
+  std::string process_mask_and(const slang::UnaryExpression& uexpr, bool last_value);
+  std::string process_mask_popcount(const slang::UnaryExpression& uexpr, bool last_value);
+  std::string process_mask_xor(const slang::UnaryExpression& uexpr, bool last_value);
 };

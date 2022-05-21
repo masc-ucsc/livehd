@@ -12,20 +12,27 @@ Lnast_create::Lnast_create() {}
 
 std::string Lnast_create::create_lnast_tmp() { return absl::StrCat("___", ++tmp_var_cnt); }
 
-std::string Lnast_create::get_lnast_name(std::string_view vname) {
-  const auto &it = vname2lname.find(vname);
-  if (it == vname2lname.end()) {  // OOPS, use before assignment (can not be IOs mapped before)
-    auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
-    auto tmp_var = create_lnast_tmp();
-    lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
-    lnast->add_child(idx_dot, Lnast_node::create_ref(vname));
-    lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
+std::string Lnast_create::get_lnast_name(std::string_view vname, bool last_value) {
 
-    // vname2lname.emplace(vname, tmp_var);
-    return tmp_var;
+  std::string_view lname;
+
+  const auto it = vname2lname.find(vname);
+  if (it == vname2lname.end())
+    lname = vname;
+  else
+    lname = it->second;
+
+  if (!last_value) {
+    return std::string(lname);
   }
 
-  return it->second;
+  auto idx_dot = lnast->add_child(idx_stmts, Lnast_node::create_attr_get());
+  auto tmp_var = create_lnast_tmp();
+  lnast->add_child(idx_dot, Lnast_node::create_ref(tmp_var));
+  lnast->add_child(idx_dot, Lnast_node::create_ref(lname));
+  lnast->add_child(idx_dot, Lnast_node::create_const("__last_value"));
+
+  return tmp_var;
 }
 
 std::string_view Lnast_create::get_lnast_lhs_name(std::string_view vname) {

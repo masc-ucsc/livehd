@@ -21,7 +21,7 @@ public:
   absl::flat_hash_map<std::string, std::string> vname2lname;
 
   std::string      create_lnast_tmp();
-  std::string      get_lnast_name(std::string_view val);
+  std::string      get_lnast_name(std::string_view val, bool last_value);
   std::string_view get_lnast_lhs_name(std::string_view val);
 
   void new_lnast(std::string_view name);
