@@ -53,32 +53,6 @@ private:
   void merge_partitions_same_parents();
   void merge_partitions_one_parent();
 
-#if 0
-  void find_cycles(Lgraph *g);
-  /* make a map<Node, status> named visited
-   * fill the map with node2id and initialize with UNVISITED
-   * for Node n in visited:
-   *   if n is UNVISITED
-   *     make a stack of Nodes
-   *     push n onto stack
-   *     change status of Node in visited to STACKED
-   *     dfs(Lgraph *g, stack) 
-   */
-
-
-  void dfs(Lgraph *g, NodeVector &stack);
-  /* for all outNeighs of top of stack
-   *   if outNeigh is in visited, and status == STACKED
-   *     print_cycle();
-   *   else if outNeigh is in visited, and status == UNVISITED
-   *     stack push outNeigh
-   *     set outNeigh in visited to STACKED
-   *     dfs(Lgraph *g, stack)
-   * set top of stack in visited to DONE    
-   * pop from top of stack
-   *
-   */
-#endif
 
 public:
   void label(Lgraph *g);

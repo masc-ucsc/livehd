@@ -9,7 +9,7 @@
 #define M_DEBUG 0  // toggle to get print when merge detected
 #define S_DEBUG 0  // toggle for after partition print
 #define F_DEBUG 0  // toggle for final partition coloring print
-#define CHANGE_NODE_NAMES 1
+#define CHANGE_NODE_NAMES 0
 
 
 // Constructor for Label_acyclic
@@ -456,61 +456,6 @@ void Label_acyclic::merge_partitions_one_parent() {
   }
 }
 
-#if 0
-//find_cycles()
-void Label_acyclic::find_cycles(Lgraph *g) {
-  for (auto &it : node2id) {
-    visited[it.first] = UNVISITED;
-  }
-
-  for (auto &it : visited) {
-    if (visited[it.first] == UNVISITED) {
-      NodeVector n_stack;
-      n_stack.push_back(it.first);
-      visited[it.first] = STACKED;
-      dfs(g, n_stack);
-    }
-  }
-}
-
-// dfs
-void Label_acyclic::dfs(Lgraph *g, NodeVector &stack) {
-  auto top = stack.back(); 
-  Node top_node(g, top);
-  for (auto &e : top_node.out_edges()) {
-    auto spin = e.sink;
-    //auto dpin = e.driver; 
-    auto snode = spin.get_node();
-    //auto dnode = dpin.get_node();
-    auto scomp = snode.get_compact();
-    vStates sstatus = visited[scomp];
-    if (sstatus == STACKED) {
-      NodeVector cycle_stack;
-      cycle_stack.push_back(stack.back());
-      stack.pop_back();
-      
-      while (cycle_stack.back() != scomp) {
-        cycle_stack.push_back(stack.back());
-        stack.pop_back();
-      }
-
-      while (cycle_stack.size() != 0) {
-        cycles[scomp].push_back(cycle_stack.back());
-        stack.push_back(cycle_stack.back());
-        cycle_stack.pop_back();
-      }
-    
-    } else if (sstatus == UNVISITED) {
-      stack.push_back(scomp);
-      visited[scomp] = STACKED;
-      dfs(g, stack);
-    }
-  }
-  visited[top] = DONE;
-  stack.pop_back();
-}
-#endif
-
 // dump()
 void Label_acyclic::dump(Lgraph *g) const {
   fmt::print("---- Label_acyclic dump ----\n");
@@ -604,23 +549,6 @@ void Label_acyclic::label(Lgraph *g) {
     }
   }
 
-#if 0
-  find_cycles(g);
-  if (cycles.size() != 0) {
-    std::cerr << cycles.size() << " Cycle(s) found, recommend against code gen\n";
-    //fmt::print("{} Cycle(s) found, recommend against code generation.\n", cycles.size()); 
-    auto tmp_iter = 1;
-    for (auto &it : cycles) {
-      std::cerr << "Nodes is Cycle " << tmp_iter++ << "\n";
-      //fmt::print("Nodes in Cycle {}: \n", tmp_iter++);
-      for (auto n : it.second) {
-        Node tmp_n(g, n);
-        //fmt::print("  {}\n", tmp_n.debug_name());
-        std::cerr << "  " << tmp_n.debug_name() << "\n";
-      } 
-    }
-  }
-#endif
 
   if (verbose) dump(g);
 }
