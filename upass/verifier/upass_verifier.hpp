@@ -10,7 +10,6 @@ struct uPass_verifier : public upass::uPass {
 public:
 
   using uPass::uPass;
-  // uPass_verifier(const std::shared_ptr<Lnast>& ln) : uPass(ln) {}
 
   // Assignment 
   // void process_assign() override { check_binary(); }
@@ -66,12 +65,6 @@ private:
     move_to_parent();
   }
 
-  // void check_tree(std::function<void()> f) {
-  //   if (!move_to_child()) return;
-  //   f();
-  //   move_to_parent();
-  // }
-
   void end_of_siblings() const {
     if (!is_last_child()) {
       upass::error("");
@@ -84,9 +77,9 @@ private:
       upass::error("invalid\n");
       return;
     }
-    print_types(ty...);
+    // print_types(ty...);
     auto n = get_raw_ntype();
-    print_types(n);
+    // print_types(n);
     if (((n == ty) || ... ) || false) {
       return;
     }

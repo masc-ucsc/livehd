@@ -1,12 +1,13 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_upass_test",
+    name = "upass_runner",
     srcs = glob(
         ["*.cpp"],
+        exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -14,10 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
-        "//pass/common:pass",
-        "//upass/core:upass",
-        "//upass/runner:upass_runner",
-        "//upass/verifier:upass_verifier",
+        "//upass/core:upass"
     ],
-    alwayslink = True,  # Needed to have constructor called
+    alwayslink = True,
 )

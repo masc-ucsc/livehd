@@ -2,15 +2,6 @@
 
 #include "upass_runner.hpp"
 
-namespace upass {
-
-void uPass_runner::write_node() {
-#ifndef NDEBUG
-  wr.write_nid(current_nid);
-  fmt::print("\n");
-#endif
-}
-
 void uPass_runner::process_lnast() {
 
 #define PROCESS_BLOCK(NAME)             \
@@ -22,7 +13,6 @@ void uPass_runner::process_lnast() {
   case Lnast_ntype::Lnast_ntype_##NAME: \
     write_node();                       \
     for (const auto upass : upasses) {  \
-      upass->move_to_nid(current_nid);  \
       upass->process_##NAME();          \
     }                                   \
     break;
@@ -96,6 +86,4 @@ void uPass_runner::process_stmts() {
     process_lnast();
   } while (move_to_sibling());
   move_to_parent();
-}
-
 }
