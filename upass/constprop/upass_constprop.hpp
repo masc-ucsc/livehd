@@ -10,6 +10,7 @@ struct uPass_constprop : public upass::uPass {
 public:
   uPass_constprop(std::shared_ptr<upass::Lnast_manager>&);
   uPass_constprop() = delete;
+  virtual ~uPass_constprop() { }
 
   void process_assign();
   void process_plus();

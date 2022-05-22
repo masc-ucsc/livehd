@@ -316,8 +316,8 @@ public:
     bool quiet = false;
     bool onlyParse = false;
 
-    Compiler(Compilation& compilation) :
-        compilation(compilation), diagEngine(*compilation.getSourceManager()) {
+    Compiler(Compilation& _compilation) :
+        compilation(_compilation), diagEngine(*_compilation.getSourceManager()) {
         diagClient = std::make_shared<TextDiagnosticClient>();
         diagEngine.addClient(diagClient);
     }
