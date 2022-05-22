@@ -8,18 +8,12 @@ class Pass_opentimer : public Pass {
 protected:
   ot::Timer timer;
 
-  std::string opt_lib;
-  std::string opt_lib_max;
-  std::string opt_lib_min;
-  std::string opt_sdc;
-  std::string opt_spef;
-
   static void liberty_open(Eprp_var &var);
   static void work(Eprp_var &var);
 
   void read_files();
   void build_circuit(Lgraph *g);
-  void read_sdc();
+  void read_sdc(std::string_view sdc_file);
   void compute_timing();
   void populate_table();
 

@@ -6,130 +6,65 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
+#include "str_tools.hpp"
 
 static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
 
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
-
-  m1.add_label_required("lib", "Liberty file for timing");
-  m1.add_label_optional("lib_max", "Liberty file for timing");
-  m1.add_label_optional("lib_min", "Liberty file for timing");
-  m1.add_label_required("sdc", "SDC file for timing");
-  m1.add_label_required("spef", "SPEF file for timing");
+  m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
 
   register_pass(m1);
-
-  Eprp_method m2("inou.liberty", "Read liberty and populate blackboxes", &Pass_opentimer::liberty_open);
-
-  m2.add_label_required("files", "Liberty files");
-
-  register_pass(m2);
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var) {
-  opt_lib = var.get("lib");
-  if (var.has_label("lib_max")) {
-    opt_lib_max = var.get("lib_max");
-  } else {
-    opt_lib_max = opt_lib;
-  }
-  if (var.has_label("lib_min")) {
-    opt_lib_min = var.get("lib_min");
-  } else {
-    opt_lib_min = opt_lib;
-  }
 
-  opt_sdc  = var.get("opt_sdc");
-  opt_spef = var.get("opt_spef");
-}
+  auto n_lib_read=0;
 
-void Pass_opentimer::liberty_open(Eprp_var &var) {
-  Pass_opentimer p(var);
+  for (const auto f : absl::StrSplit(files, ',')) {
+    if (str_tools::ends_with(f,".lib")) {
+      fmt::print("opentimer using liberty file '{}'", f);
+      if (n_lib_read == 0)
+        timer.read_celllib(f, ot::MAX);
+      else
+        timer.read_celllib(f, ot::MIN);
 
-  TRACE_EVENT("pass", "OPENTIMER_liberty");
-  Lbench b("pass.OPENTIMER_liberty");
-
-  auto *library = Graph_library::instance(p.path);
-
-  for (const auto f : absl::StrSplit(p.files, ',')) {
-    fmt::print("reading liberty {}\n", f);
-
-    ot::Timer timer;
-
-    timer.read_celllib(f, ot::MIN);
-
-    timer.update_timing();
-
-    const auto &cl=timer.celllib(ot::MIN);
-    for(const auto &it:cl->cells) {
-      auto *g = library->try_find_lgraph(it.first);
-      if (g == nullptr) {
-        g = ::Lgraph::create(p.path, it.first, "-");
-      }
-
-      Sub_node *sub = g->ref_self_sub_node();
-      sub->reset_pins();
-
-      bool has_clock = false;
-      for(const auto &pin:it.second.cellpins) {
-        if (pin.second.is_clock && *pin.second.is_clock) {
-          sub->set_loop_last();
-          has_clock = true;
-        }
-        if (pin.second.direction) {
-          Port_ID pid=0;
-          if (*pin.second.direction == ot::CellpinDirection::INPUT)
-            pid = sub->add_input_pin(pin.first);
-          else if (*pin.second.direction == ot::CellpinDirection::OUTPUT)
-            pid = sub->add_output_pin(pin.first);
-
-          if (pid)
-            sub->set_bits(pid, 1); // how does the liberty specify multiple bits?
-        }
-
-        if (pin.second.is_clock)
-          has_clock |= *pin.second.is_clock;
-      }
-
-      if (!has_clock)
-        sub->clear_loop_last();
+      n_lib_read++;
+    }else if (str_tools::ends_with(f,".spef")) {
+      fmt::print("opentimer using spef file '{}'", f);
+      timer.read_spef(f);
+    }else if (str_tools::ends_with(f,".sdc")) {
+      fmt::print("opentimer using sdc file '{}'", f);
+      read_sdc(f);
+    }else{
+      Pass::error("pass.opentimer unknown file extension '{}'", f);
     }
+  }
+
+  if (n_lib_read >2) {
+    Pass::error("pass.opentime only supports 1 or 2 liberty (max/min) files not {}", files);
   }
 }
 
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
-  pass.read_files();      // Task1: Read input files (Read user from input) | Status: 75% done
-
   TRACE_EVENT("pass", "OPENTIMER_work");
   Lbench b("pass.OPENTIMER_work");
 
   for (const auto &g : var.lgs) {
     pass.build_circuit(g);  // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-    pass.read_sdc();        // Task3: Traverse the lgraph and create fake SDC numbers | Status: 100% done
     pass.compute_timing();  // Task4: Compute Timing | Status: 100% done
     pass.populate_table();  // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
 
-void Pass_opentimer::read_files() {
-  if (opt_lib_max != opt_lib)
-    timer.read_celllib(opt_lib_max, ot::MAX);
-  if (opt_lib_min != opt_lib)
-    timer.read_celllib(opt_lib_min, ot::MIN);
-
-  timer.read_celllib(opt_lib);
-  timer.read_spef(opt_spef);
-}
-
-void Pass_opentimer::read_sdc() {
+void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   std::vector<std::string> line_vec;
-  std::ifstream            file(opt_sdc);
+  std::ifstream            file(sdc_file);
 
   if (!file.is_open()) {
-    error("pass.opentimer could not open sdc:{}", opt_sdc);
+    Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
     return;
   }
 

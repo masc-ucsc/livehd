@@ -48,6 +48,7 @@ cc_library(
         "//inou/firrtl:inou_firrtl_cpp",
         "//inou/graphviz:inou_graphviz",
         "//inou/json:inou_json",
+        "//inou/liberty:inou_liberty",
         "//inou/liveparse:inou_liveparse",
         "//inou/pyrope:inou_pyrope",
         "//inou/prp:inou_prp",
