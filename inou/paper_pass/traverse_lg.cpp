@@ -13,11 +13,6 @@
 #include <algorithm>
 
 
-/*define only 1 of these:*/
-#define DEBUG //print everything
-#define KEEP_DUP //use vector
-//#define DE_DUP //use set 
-
 static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
 
 void Traverse_lg::setup() {
@@ -62,6 +57,11 @@ void Traverse_lg::do_travers(Lgraph* lg) {
     std::vector<std::string> out_vec;
     fmt::print("{}\n", node.debug_name());
 #endif
+#ifdef DE_DUP
+    absl::flat_hash_set<std::string> in_set;
+    absl::flat_hash_set<std::string> out_set;
+    fmt::print("{}\n", node.debug_name());
+#endif
     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
 #ifdef DEBUG
       ofs<<"---------------\n";
@@ -82,6 +82,9 @@ void Traverse_lg::do_travers(Lgraph* lg) {
 #ifdef KEEP_DUP
         get_input_node(indr, in_vec);
 #endif
+#ifdef DE_DUP
+        get_input_node(indr, in_set);
+#endif
       }
     }
 
@@ -96,6 +99,9 @@ void Traverse_lg::do_travers(Lgraph* lg) {
 #endif
 #ifdef KEEP_DUP
         get_output_node(outdr, out_vec);
+#endif
+#ifdef DE_DUP
+        get_output_node(outdr, out_set);
 #endif
       }
     }
@@ -118,13 +124,39 @@ void Traverse_lg::do_travers(Lgraph* lg) {
     const auto& nodeid = node.get_nid().value;
     nodeIOmap[nodeid]= std::make_pair(in_vec,out_vec);//FIXME: make hash of vectors and change datatype accordingly
 #endif
+#ifdef DE_DUP
+    //print the set formed
+    fmt::print("INPUTS:\n");
+    for (const auto& i:in_set) {
+      fmt::print("\t{}\n",i);
+    }
+    fmt::print("OUTPUTS:\n");
+    for (const auto& i:out_set) {
+      fmt::print("\t{}\n",i);
+    }
+
+    if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
+      continue;//do not keep such nodes in nodeIOmap
+    }
+    //insert in map
+    const auto& nodeid = node.get_nid().value;
+    nodeIOmap[nodeid]= std::make_pair(in_set,out_set);//FIXME: make hash of set and change datatype accordingly
+#endif
   }//enf of for lg-> traversal
 
-#ifdef KEEP_DUP
+#if defined KEEP_DUP || defined DE_DUP
   //print the map
+  fmt::print("\n\nMAP FORMED IS:\n");
   for(auto& [n, ioPair]: nodeIOmap) {
-    //fmt::print("{} has INPUTS: {} AND OUTPUTS: {}\n",node, ioPair.first, mapval.second.second );
-    fmt::print("{} has INPUTS:  \n",n);
+    fmt::print("{} has INPUTS:  \t",n);
+    for (auto& ip: ioPair.first) {
+      fmt::print("{}\t",ip);
+    }
+    fmt::print("\nand OUTPUTS: \t");
+    for (auto& op:ioPair.second) {
+      fmt::print("{}\t", op);
+    }
+    fmt::print("\n");
   }
 #endif
 
@@ -236,6 +268,71 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
       for (const auto& outdr : node.out_sinks() ) {
         //auto out_node = outdr.get_node();
         get_output_node(outdr, out_vec);
+      }
+  }
+}
+
+//FOR SET:
+
+void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::flat_hash_set<std::string>& in_set) {
+  auto node = node_pin.get_node();
+  if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
+    if(node.is_graph_io()) {
+      in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+    } else {
+      std::string temp_str (node.get_type_name());
+      if(node.is_type_const()){ 
+        temp_str+=":"; 
+        temp_str+=node.get_type_const().to_pyrope();
+      }
+      else if(node.is_type_flop()){ 
+        temp_str+=":";
+        temp_str+=node_pin.get_pin_name();
+        temp_str+="->";
+        //temp_str+=node.get_driver_pin().get_pin_name();
+        //temp_str+="(";
+        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        //temp_str+=")";
+      }
+      in_set.insert(temp_str);
+    }
+    return;
+  } else {
+      for (const auto& indr : node.inp_drivers()) {
+        //auto inp_node = indr.get_node();
+        get_input_node(indr, in_set);
+      }
+  }
+}
+
+void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::flat_hash_set<std::string>& out_set) {
+  auto node = node_pin.get_node();
+  if(node.is_type_flop() || node.is_graph_output() ) {
+    if(node.is_graph_io()) {
+      //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+      out_set.insert(node_pin.get_pin_name());
+    } else {
+      std::string temp_str(node.get_type_name());
+      if(node.is_type_const()){ 
+        temp_str+=":"; 
+        temp_str+=node.get_type_const().to_pyrope();
+      }
+      else if(node.is_type_flop()){ 
+        temp_str+=":";
+        temp_str+=node_pin.get_pin_name();
+        temp_str+="->";
+        //temp_str+=node.get_driver_pin().get_pin_name();
+        //temp_str+="(";
+        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        //temp_str+=")";
+      }
+      out_set.insert(temp_str);
+    }
+    return;
+  } else {
+      for (const auto& outdr : node.out_sinks() ) {
+        //auto out_node = outdr.get_node();
+        get_output_node(outdr, out_set);
       }
   }
 }
