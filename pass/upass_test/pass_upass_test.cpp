@@ -2,7 +2,9 @@
 
 #include "pass_upass_test.hpp"
 #include "upass_runner.hpp"
+
 #include "upass_verifier.hpp"
+#include "upass_constprop.hpp"
 
 static Pass_plugin sample("pass_upass_test", Pass_upass_test::setup);
 
@@ -16,7 +18,7 @@ Pass_upass_test::Pass_upass_test(const Eprp_var &var) : Pass("pass.upass_test", 
 void Pass_upass_test::work(Eprp_var &var) {
   for (const auto &ln : var.lnasts) {
     auto lm = std::make_shared<upass::Lnast_manager>(ln);
-    auto runner = uPass_runner(lm, {"verifier"});
+    auto runner = uPass_runner(lm, {"verifier", "constprop"});
     runner.run();
     (void)ln;
   }

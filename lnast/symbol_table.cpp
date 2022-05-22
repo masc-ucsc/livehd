@@ -106,7 +106,7 @@ void Symbol_table::always_scope() {
   stack.emplace_back(Scope(Scope_type::Always, stack.back().func_id, stack.back().scope));
 }
 
-void Symbol_table::funcion_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
+void Symbol_table::function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle) {
   std::string_view scope = func_id;
   for (int i = stack.size() - 1; i >= 0; --i) {
     const auto &s = stack[i];

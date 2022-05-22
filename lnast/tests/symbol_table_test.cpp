@@ -16,7 +16,7 @@ protected:
 TEST_F(Symbol_table_test, trivial_constants) {
   Symbol_table st;
 
-  st.funcion_scope("myfunc");
+  st.function_scope("myfunc");
 
   {
     EXPECT_FALSE(st.has_trivial("foo"));
@@ -53,7 +53,7 @@ TEST_F(Symbol_table_test, recursion) {
   Symbol_table st;
 
   //------------------------------------------
-  st.funcion_scope("myfunc");
+  st.function_scope("myfunc");
 
   EXPECT_FALSE(st.has_trivial("foo"));
   auto ok = st.var("foo");
@@ -65,7 +65,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_EQ(st.get_trivial("foo"), Lconst(1));
 
   //------------------------------------------
-  st.funcion_scope("myfunc");
+  st.function_scope("myfunc");
   EXPECT_FALSE(st.has_trivial("foo"));
   auto ok2 = st.var("foo");
   EXPECT_TRUE(ok2);
@@ -76,7 +76,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_EQ(st.get_trivial("foo"), Lconst(2));
 
   //------------------------------------------
-  st.funcion_scope("other_call");
+  st.function_scope("other_call");
   EXPECT_FALSE(st.has_trivial("foo"));
   auto ok4 = st.var("foo");
   EXPECT_TRUE(ok4);
@@ -87,7 +87,7 @@ TEST_F(Symbol_table_test, recursion) {
   EXPECT_EQ(st.get_trivial("foo"), Lconst(3));
 
   //------------------------------------------
-  st.funcion_scope("myfunc");
+  st.function_scope("myfunc");
   EXPECT_FALSE(st.has_trivial("foo"));
   auto ok6 = st.var("foo");
   EXPECT_TRUE(ok6);
@@ -111,7 +111,7 @@ TEST_F(Symbol_table_test, recursion) {
 TEST_F(Symbol_table_test, ordered_check) {
   Symbol_table st;
 
-  st.funcion_scope("my function with spaces and very log name");
+  st.function_scope("my function with spaces and very log name");
 
   st.set("foo.:0:bar", Lconst(1));
   st.set("foo.:1:xxx", Lconst(2));

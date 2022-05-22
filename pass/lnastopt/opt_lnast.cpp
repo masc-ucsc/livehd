@@ -1162,7 +1162,7 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 }
 
 void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
-  st.funcion_scope(ln->get_top_module_name());
+  st.function_scope(ln->get_top_module_name());
 
   if (ln->get_top_module_name() == top || top.empty())
     hier_mode = true;

@@ -26,7 +26,7 @@ public:
 
   std::vector<Scope> stack;
 
-  void                    funcion_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle = nullptr);  // input
+  void                    function_scope(std::string_view func_id, std::shared_ptr<Bundle> inp_bundle = nullptr);  // input
   void                    always_scope();
   void                    conditional_scope();
   std::shared_ptr<Bundle> leave_scope();  // output bundle only when leaving function scope

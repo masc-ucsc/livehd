@@ -19,6 +19,10 @@ public:
   }
   Lnast_manager() = delete;
 
+  auto get_top_module_name() {
+    return lnast->get_top_module_name();
+  }
+
   void move_to_nid(const Lnast_nid& nid) {
     current_nid = nid;
   }
