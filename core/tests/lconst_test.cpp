@@ -862,51 +862,6 @@ TEST_F(Lconst_test, Trivial) {
   }
 }
 
-TEST_F(Lconst_test, Storage) {
-  Lbench b("lemu.LCONST_storage");
-
-  uint64_t data = 3;
-
-  auto  val16_ptr = reinterpret_cast<UInt<16> *>(&data);
-  auto &val16     = *val16_ptr;
-
-  auto  val8_ptr = reinterpret_cast<UInt<8> *>(&data);
-  auto &val8     = *val8_ptr;
-
-  EXPECT_EQ(sizeof(val8), 1);
-  EXPECT_EQ(sizeof(val16), 8);
-
-  print_method(val8);
-  print_method(val16);
-
-  EXPECT_EQ(val8, 0x03_uint);
-  EXPECT_EQ(val16, 0x0003_uint);
-
-  auto  val7_ptr = reinterpret_cast<UInt<7> *>(&data);
-  auto &val7     = *val7_ptr;
-
-  auto  val18_ptr = reinterpret_cast<UInt<18> *>(&data);
-  auto &val18     = *val18_ptr;
-
-  print_method(val7);
-  print_method(val18);
-
-  // FIXME: EXPECT_EQ(0x1f58d11f58d11f58d1_uint, 076543210765432107654321_uint);
-
-  print_method(012345_uint);
-  print_method(0x9876543210987654321_uint);
-  print_method(076543210765432107654321_uint);
-  fmt::print("verilog: {}\n", (076543210765432107654321_uint).to_verilog());
-
-  absl::flat_hash_map<uint32_t, std::string> map;
-
-  map.insert_or_assign(12345, (0x12345_uint).to_string());
-  EXPECT_TRUE(map.contains(12345));
-  auto it = map.find(12345);
-  EXPECT_TRUE(it != map.end());
-  EXPECT_EQ(it->second, "0x12345");
-}
-
 TEST_F(Lconst_test, used_bits) {
   auto a = 0x010_uint;
   print_method(a);
