@@ -13,8 +13,22 @@
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
-struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
-  bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
+//struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
+  //bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
+//};
+
+struct eprp_casecmp_str {
+  struct nocase_compare {
+    bool operator() (const unsigned char& c1, const unsigned char& c2) const {
+      return std::tolower(c1) < std::tolower(c2);
+    }
+  };
+  bool operator() (const std::string & s1, const std::string & s2) const {
+    return std::lexicographical_compare
+      (s1.begin(), s1.end(),
+       s2.begin(), s2.end(),
+       nocase_compare());
+  }
 };
 
 class Lgraph;
