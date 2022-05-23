@@ -633,11 +633,16 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 
     } else if (lnast->get_vname(child) == "__ubits" || lnast->get_vname(child) == "__sbits") {  // at the __bits child
       //(1) create flattened input
+      std::string bits_str = std::string{lnast->get_vname(lnast->get_sibling_next(child))};
+      auto bits = std::stoi(bits_str);
+
       Node_pin flattened_inp;
       if (!lg->has_graph_input(full_inp_hier_name)) {
-        flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, 0);
+        flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, bits);
+        // fmt::print("DEBUGAAAA full_inp_hier_name:{}\n", full_inp_hier_name);                                                                                             
       } else {
         flattened_inp = name2dpin[full_inp_hier_name];
+        flattened_inp.set_bits(bits);
       }
 
       // Create pos and value before TupAdd to preserve topographical order

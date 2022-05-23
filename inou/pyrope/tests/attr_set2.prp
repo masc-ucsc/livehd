@@ -1,0 +1,4 @@
+$inp.__ubits = 2
+%out.__ubits = 4
+
+%out = $inp

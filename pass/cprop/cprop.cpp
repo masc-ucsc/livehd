@@ -1095,10 +1095,8 @@ void Cprop::tuple_tuple_add(const Node &node) {
     // When key is provided it is mostly variations of tuple add
     auto v = (has_parent_tup ? 0x4 : 0) + (has_parent_scalar ? 0x2 : 0) + (has_value_scalar ? 0x1 : 0);
 
-    fmt::print("DEBUG A----TA:{}\n", node.debug_name());
     switch (v) {
       case 0x0: { //!has_parent_tup && !has_parent_scalar && !has_value_scalar
-        fmt::print("DEBUG A-0\n");
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1111,12 +1109,10 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x1: {  // has_value_scalar
-        fmt::print("DEBUG A-1\n");
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x2: {
-        fmt::print("DEBUG A-2\n");
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();
@@ -1129,13 +1125,11 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup->add(key_name, value_tup);
       } break;
       case 0x3: { // has_parent_scalar && has_value_scalar
-        fmt::print("DEBUG A-3\n");
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, "0", parent_dpin);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
       case 0x4: {  // has_parent_tup
-        fmt::print("DEBUG A-4\n");
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         if (Lgtuple::is_attribute(key_name) && value_tup->is_scalar()) {
           auto v_dpin = value_tup->get_dpin();
@@ -1166,7 +1160,6 @@ void Cprop::tuple_tuple_add(const Node &node) {
         }
       } break;
       case 0x5: { // has_parent_tup && has_value_scalar
-        fmt::print("DEBUG A-5\n");
         node_tup = std::make_shared<Lgtuple>(*parent_tup);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
@@ -1278,7 +1271,6 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 }
 
 bool Cprop::tuple_tuple_get(Node &node) {
-  fmt::print("DEBUG A----TG:{}\n", node.debug_name());
   auto [tup_name, key_name] = get_tuple_name_key(node);
   auto parent_dpin          = node.get_sink_pin("parent").get_driver_pin();
   auto parent_node          = parent_dpin.get_node();
@@ -1806,6 +1798,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
       auto field = pos_dpin.get_type_const().to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
+          fmt::print("DEBUG10 turn to AttrSet: node:{}\n", node.debug_name());
           node.set_type(Ntype_op::AttrSet);
         }
       }
@@ -1835,13 +1828,15 @@ void Cprop::reconnect_tuple_add(Node &node) {
     } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
       auto sub_node = e.sink.get_node();
       try_connect_tuple_to_sub(node_tup, sub_node, node);
-    } else if (sink_type == Ntype_op::Get_mask  // get_mask handles tuples at both inputs
-               || sink_type == Ntype_op::TupAdd
+    } else if (    sink_type == Ntype_op::Get_mask  // get_mask handles tuples at both inputs
+               ||  sink_type == Ntype_op::TupAdd
                || (sink_type == Ntype_op::Mux && e.sink.get_pid()
                    && !tuple_done.contains(e.sink.get_node().get_compact()))  // mux handles tuples at inputs, not select
-               || sink_type == Ntype_op::TupGet
+               ||  sink_type == Ntype_op::TupGet
                || (sink_type == Ntype_op::SHL && e.sink.get_pid())  // SHL handles tuples at B (not a)
-    ) {
+              ) {
+      // do nothing
+      fmt::print("DEBUG9: node:{}\n", node.debug_name());
     } else {
       pending_out_edges.emplace_back(e);
     }
