@@ -535,7 +535,7 @@ void Inou_firrtl_module::init_mem_din(Lnast& lnast, std::string_view mem_name, s
   } else {  // din is tuple
     auto& hier_full_names = mem2din_fields[mem_name];
     for (const auto& hier_full_name : hier_full_names) {  // hier_full_name example: foo.bar.baz.20, the last field is bit
-      fmt::print("hier_name:{}\n", hier_full_name);
+      // fmt::print("hier_name:{}\n", hier_full_name);
       std::vector<std::string> hier_sub_names;
       // auto found = hier_full_name.find_last_of('.');  // get rid of last bit field
       auto found = hier_full_name.rfind('.');  // get rid of last bit field
@@ -619,8 +619,8 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
   std::string t_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().t_value());
   std::string f_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().f_value());
   
-  add_assign(lnast, idx_stmt_t, lhs_full, t_rhs_str);
-  add_assign(lnast, idx_stmt_f, lhs_full, f_rhs_str);
+  add_lnast_assign(lnast, idx_stmt_t, lhs_full, t_rhs_str);
+  add_lnast_assign(lnast, idx_stmt_f, lhs_full, f_rhs_str);
 }
 
 /* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
@@ -807,8 +807,6 @@ void Inou_firrtl_module::handle_two_expr_prime_op(Lnast& lnast, const firrtl::Fi
   
   std::string e0_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   std::string e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(1));
-  fmt::print("DEBUG BBB e0_str:{}, e1_str:{}\n", e0_str, e1_str);
-
 
   Lnast_nid idx_primop;
   auto sub_it = Inou_firrtl::op2firsub.find(op.op());
@@ -1633,7 +1631,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
   return expr_str;
 }
 
-void Inou_firrtl_module::add_assign(Lnast& lnast, Lnast_nid &parent_node, std::string_view lhs, std::string_view rhs) {
+void Inou_firrtl_module::add_lnast_assign(Lnast& lnast, Lnast_nid &parent_node, std::string_view lhs, std::string_view rhs) {
   Lnast_nid idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg, Lnast_node::create_ref(lhs));
   lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
@@ -1950,10 +1948,15 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {
+      // TODO:
+      // FIXME->sh: the register should also be flattened out
       // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
       // the flop expansion is handled at lgraph
-      setup_register_bits(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()), parent_node);
 
+
+
+
+      setup_register_bits(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()), parent_node);
       setup_register_reset_init(lnast, parent_node, stmt.register_().id(), stmt.register_().reset(), stmt.register_().init());
       declare_register(lnast, parent_node, stmt);
       setup_register_q_pin(lnast, parent_node, stmt);
@@ -1981,13 +1984,15 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     case firrtl::FirrtlPB_Statement::kWhen: {
-      auto cond_str = return_expr_str(lnast, stmt.when().predicate(), parent_node, true);
+      // auto cond_str = return_expr_str(lnast, stmt.when().predicate(), parent_node, true);
+      auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, stmt.when().predicate());
       auto idx_when = lnast.add_child(parent_node, Lnast_node::create_if());
       lnast.add_child(idx_when, Lnast_node::create_ref(cond_str));
 
       auto idx_stmts_t = lnast.add_child(idx_when, Lnast_node::create_stmts());
 
       for (int i = 0; i < stmt.when().consequent_size(); i++) {
+        fmt::print("DEBUG BBB\n");
         list_statement_info(lnast, stmt.when().consequent(i), idx_stmts_t);
       }
 
@@ -2005,82 +2010,27 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // Nothing to do.
       break;
     }
-    // case firrtl::FirrtlPB_Statement::kConnect: {  // Connect
-    //   auto &lhs_expr      = stmt.connect().location();
-    //   auto &rhs_expr      = stmt.connect().expression();
-    //   std::string hier_name_l = flatten_expr_hier_name(lhs_expr);
-    //   std::string hier_name_r = flatten_expr_hier_name(rhs_expr);
-    //   // fmt::print("DEBUG0 hier_name_lhs:{}, hier_name_rhs:{}\n",   hier_name_l, hier_name_r);
-    //   auto  lhs_expr_case = stmt.connect().location().expression_case();
-    //   auto  rhs_expr_case = stmt.connect().expression().expression_case();
-
-    //   bool is_lhs_tuple
-    //       = (lhs_expr_case == firrtl::FirrtlPB_Expression::kSubField 
-    //       || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess
-    //       || lhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex);
-
-    //   if (is_lhs_tuple) {
-    //     bool is_rhs_mux    = rhs_expr_case == firrtl::FirrtlPB_Expression::kMux;
-
-    //     std::string tmp_var_string;
-    //     if (is_rhs_mux) {
-    //       tmp_var_string = create_tmp_mut_var();  // must do SSA afterwards
-    //     } else {
-    //       tmp_var_string = create_tmp_var();  // No SSA
-    //     }
-
-    //     init_expr_add(lnast, rhs_expr, parent_node, tmp_var_string);
-
-    //     // (2) create the lhs dot and lhs <- rhs assignment
-    //     return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_ref(tmp_var_string));
-    //   } else {
-    //     I(rhs_expr_case == firrtl::FirrtlPB_Expression::kReference ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kMux ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kValidIf ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kUintLiteral ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kSubField ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kSubAccess ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kSubIndex ||
-    //       rhs_expr_case == firrtl::FirrtlPB_Expression::kPrimOp 
-    //      );
-    //     auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
-    //     init_expr_add(lnast, rhs_expr, parent_node, lhs_str);
-    //   }
-    //   break;
-    // }
     case firrtl::FirrtlPB_Statement::kConnect:  
     case firrtl::FirrtlPB_Statement::kPartialConnect: {
-      
       firrtl::FirrtlPB_Expression lhs_expr;
       firrtl::FirrtlPB_Expression rhs_expr;
       if (stmt.statement_case() == firrtl::FirrtlPB_Statement::kConnect) {
-        lhs_expr      = stmt.connect().location();
-        rhs_expr      = stmt.connect().expression();
+        lhs_expr = stmt.connect().location();
+        rhs_expr = stmt.connect().expression();
       } else {
-        lhs_expr      = stmt.partial_connect().location();
-        rhs_expr      = stmt.partial_connect().expression();
+        lhs_expr = stmt.partial_connect().location();
+        rhs_expr = stmt.partial_connect().expression();
       }
       
-      // example: _T <= io.in
-      // means: hier_name_l == "_T", hier_name_r == "io.in"
+      // example: "_T <= io.in" means: hier_name_l == "_T", hier_name_r == "io.in"
       std::string hier_name_l  = flatten_expr_hier_name(lhs_expr);
       std::string hier_name_r  = flatten_expr_hier_name(rhs_expr);
-      // fmt::print("DEBUG1, hier_name_lhs:{}, hier_name_rhs:{}\n", hier_name_l, hier_name_r);
 
-      // FIXME: old functionality deprecated later
-      // the reason is that the lhs might contains hierarchical '.', in that case,
-      // you might need to use the old functionality?
-      // but you also want to get rid of the TA/TG for 
-      // observation: the rhs must be a no-name scalar, so the lhs must be a flattened field.
-      // conclusion: the following if scope should be deprecated. And you should comment it now 
-      // to force you test the right thing. (after the SimpleFlip5)
-      fmt::print("DEBUG AAA hier_name_l:{}\n", hier_name_l);
+
+      // the rhs is a component w/o names, such as validif, primitive_op, unsigned integers, and mux
+      // in this case, the hier_name_l must already a leaf in the hierarchy, and must be non-flipped.
+      // we could safely create a simple lnast assignment.
       if (hier_name_r.empty()) {
-        // the rhs is a component w/o names, such as validif, primitive_op, unsigned integers, and mux
-        // in this case, the hier_name_l must already a leaf in the hierarchy, and must be non-flipped.
-        // we could safely create a simple lnast assignment. 
-        // auto lhs_str = return_expr_str(lnast, lhs_expr, parent_node, false, Lnast_node::create_invalid());
-        
         if (output_names.find(hier_name_l) != output_names.end()) {
           hier_name_l = absl::StrCat("%", hier_name_l);
         }
@@ -2089,32 +2039,60 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         break;
       }
       
-#ifndef NDEBUG
-      if (hier_name_l.find_first_of('.') != std::string::npos && hier_name_r.find_first_of('.') != std::string::npos)
-        I(hier_name_l.substr(hier_name_l.find_first_of('.')) == hier_name_r.substr(hier_name_r.find_first_of('.')));
-#endif
-      // find head of the tuple name so you know entry for the var2flip table
-      auto found_r = hier_name_r.find_first_of('.');
-      std::string tup_head_r;
-      if (found_r != std::string::npos) {
-        tup_head_r = hier_name_r.substr(0, found_r);
-      } else {
-        tup_head_r = hier_name_r;
-      }
 
+      // find head of the tuple name so you know entry for the var2flip table
       auto found_l = hier_name_l.find_first_of('.');
       std::string tup_head_l;
+      std::string tup_rest_l;
       if (found_l != std::string::npos) {
         tup_head_l = hier_name_l.substr(0, found_l);
+        tup_rest_l = hier_name_l.substr(found_l + 1);
       } else {
         tup_head_l = hier_name_l;
       }
 
+      auto found_r = hier_name_r.find_first_of('.');
+      std::string tup_head_r;
+      std::string tup_rest_r;
+      if (found_r != std::string::npos) {
+        tup_head_r = hier_name_r.substr(0, found_r);
+        tup_rest_r = hier_name_r.substr(found_r + 1);
+      } else {
+        tup_head_r = hier_name_r;
+      }
+       
+      // case-I: this is the case that lhs == module_output && rhs == module_input
+      // Pseudo Algorithm:
+      // (1) get the tup_l_sets
+      // (2) get all the flattened fields, and base on that to get the corresponding flattened io
+      // (3) check the leaf fields, if the leaf_field_name matched from both flattened input and output, connect them together
+      // (4) no need to check flipness as you already know who is the module-output and who is the module-input, 
+      //     it must be %foo.a <- $bar.a, which also means you don't need to grep info from the var2flip table!
+      if (tup_head_l == tup_head_r) {
+        // TODO:
+        fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        I (output_names.find(hier_name_l) != output_names.end());
+        I (input_names.find(hier_name_r) != input_names.end());
+        hier_name_l = absl::StrCat("%", hier_name_l);
+        hier_name_r = absl::StrCat("$", hier_name_r);
+        std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
+        std::replace(hier_name_r.begin(), hier_name_r.end(), '.', '_');
+        add_lnast_assign(lnast, parent_node, hier_name_l, hier_name_r);
+        break;
+      }
+      
+      // case-II: this is the normal case that involves firrtl kWire connection
+      // could be (1) wire <- module_input (2) wire <- wire (3) module_output <- wire
+      // I(tup_head_l == tup_head_r);
+
+#ifndef NDEBUG
+      if (hier_name_l.find_first_of('.') != std::string::npos && hier_name_r.find_first_of('.') != std::string::npos)
+        I(hier_name_l.substr(hier_name_l.find_first_of('.')) == hier_name_r.substr(hier_name_r.find_first_of('.')));
+#endif
       absl::btree_set<std::tuple<std::string, bool, uint8_t>> *tup_l_sets;
       auto cond0 = input_names.find(tup_head_l)  == input_names.end();
       auto cond1 = output_names.find(tup_head_l) == output_names.end();
       auto cond2 = reg2qpin.find(tup_head_l)     == reg2qpin.end(); // TODO: check if the reg2qpin recorded as a flattened hierarchical name?
-      // if (tup_head_r.at(0) == '_') {
       if (cond0 && cond1 && cond2) {
         // it's local variable or wire
         tup_l_sets = &var2flip[tup_head_l];

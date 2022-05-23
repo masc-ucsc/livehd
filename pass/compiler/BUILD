@@ -186,12 +186,13 @@ cc_library(
     # "SimpleClockGroupSource",
     # "FixedClockBroadcast",
     # "ClockGroupAggregator",
+    # "IntSyncSyncCrossingSink"
+    "FlipSimple2",
     "BreakpointUnit",
     "Arbiter_10",
     "MaxPeriodFibonacciLFSR",
     "AMOALU",
     "DebugCustomXbar",
-    # "IntSyncSyncCrossingSink"
 
     # FIXME:
     # issue1: memory

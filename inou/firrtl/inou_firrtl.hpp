@@ -159,7 +159,6 @@ protected:
   std::string create_tmp_var();
   std::string create_tmp_mut_var();
   std::string name_prefix_modifier(std::string_view term, const bool is_rhs);
-  std::string expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& expr);
   void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void        declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name,
@@ -185,7 +184,7 @@ protected:
                              std::string_view lhs_of_asg);
   void     handle_valid_if_assign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
                                   std::string_view lhs_of_asg);
-  void     add_assign (Lnast &lnast, Lnast_nid &parent_node, std::string_view lhs_str, std::string_view rhs_str);
+  void     add_lnast_assign (Lnast &lnast, Lnast_nid &parent_node, std::string_view lhs_str, std::string_view rhs_str);
 
   void handle_neq_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void handle_unary_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
@@ -238,6 +237,7 @@ protected:
 
   void list_prime_op_info(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void init_expr_add(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, std::string_view lhs_unalt, bool from_mux = false);
+  std::string expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& expr);
   std::string return_expr_str(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
                               const Lnast_node value_node = Lnast_node::create_invalid());
 
@@ -251,8 +251,6 @@ private:
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> wire_names;
-  // FIXME->sh: check and remove the third directional field if redundant 
-  absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;
   absl::flat_hash_set<std::string> is_invalid_table;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;
@@ -265,7 +263,8 @@ private:
      Maps module name to list of tuples of (signal name + signal biwdith + signal dir + sign). */
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t, bool>>> mod_to_io_map;
 
-  absl::flat_hash_map<std::string, std::pair<firrtl::FirrtlPB_Expression, firrtl::FirrtlPB_Expression>> reg_name2rst_init_expr;
+  // FIXME->sh: check and remove the third directional field if redundant 
+  absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;
 
   absl::flat_hash_map<std::string, uint8_t>     mem2port_cnt;
   absl::flat_hash_map<std::string, uint8_t>     mem2wensize;
