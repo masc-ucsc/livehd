@@ -1256,7 +1256,6 @@ std::string Inou_firrtl_module::flatten_expression(Lnast& ln, Lnast_nid& parent_
   } else if (expr.has_reference()) {
     return expr.reference().id();
   } else {
-    I(false);
     return "";
   }
 }
@@ -1609,7 +1608,8 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
   std::string expr_str;
   // here we only want to check the case of instance connection, so kSubField is sufficient
   std::string expr_str_tmp = flatten_expression(lnast, parent_node, operand_expr);
-  if (operand_expr.expression_case() == firrtl::FirrtlPB_Expression::kSubField ) {
+  auto expr_case = operand_expr.expression_case();
+  if (expr_case == firrtl::FirrtlPB_Expression::kSubField ) {
     auto pos = expr_str_tmp.find_first_of('.');
     if (pos != std::string::npos) {
       auto head = expr_str_tmp.substr(0, pos);
@@ -1622,6 +1622,9 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
         expr_str = expr_str_tmp;       
       }
     }
+  } else if (expr_case == firrtl::FirrtlPB_Expression::kPrimOp) {
+    // this is a recursive case, use the old way
+    expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
   } else {
     expr_str_tmp = name_prefix_modifier(expr_str_tmp, true);
     std::replace(expr_str_tmp.begin(), expr_str_tmp.end(), '.', '_');
