@@ -688,7 +688,7 @@ void Inou_firrtl_module::handle_unary_op(Lnast& lnast, const firrtl::FirrtlPB_Ex
   I(op.arg_size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_not = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_not"));
   lnast.add_child(idx_not, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_not, Lnast_node::create_const("__fir_not"));
@@ -701,7 +701,7 @@ void Inou_firrtl_module::handle_and_reduce_op(Lnast& lnast, const firrtl::Firrtl
   I(op.arg_size() == 1);
 
   auto lhs_str  = lhs;
-  auto e1_str   = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str   = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_andr = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_andr"));
   lnast.add_child(idx_andr, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_andr, Lnast_node::create_const("__fir_andr"));
@@ -714,8 +714,9 @@ void Inou_firrtl_module::handle_or_reduce_op(Lnast& lnast, const firrtl::FirrtlP
   I(op.arg_size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str  = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_orr = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_orr"));
+                                                                                
   lnast.add_child(idx_orr, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_orr, Lnast_node::create_const("__fir_orr"));
   lnast.add_child(idx_orr, Lnast_node::create_ref(e1_str));
@@ -727,7 +728,7 @@ void Inou_firrtl_module::handle_xor_reduce_op(Lnast& lnast, const firrtl::Firrtl
   I(op.arg_size() == 1);
 
   auto lhs_str  = lhs;
-  auto e1_str   = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str   = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_xorr = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_xorr"));
   lnast.add_child(idx_xorr, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_xorr, Lnast_node::create_const("__fir_xorr"));
@@ -740,7 +741,7 @@ void Inou_firrtl_module::handle_negate_op(Lnast& lnast, const firrtl::FirrtlPB_E
   I(op.arg_size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_neg = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_neg"));
   lnast.add_child(idx_neg, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_neg, Lnast_node::create_const("__fir_neg"));
@@ -753,7 +754,7 @@ void Inou_firrtl_module::handle_conv_op(Lnast& lnast, const firrtl::FirrtlPB_Exp
   I(op.arg_size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_cvt = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_cvt"));
   lnast.add_child(idx_cvt, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_cvt, Lnast_node::create_const("__fir_cvt"));
@@ -766,8 +767,9 @@ void Inou_firrtl_module::handle_extract_bits_op(Lnast& lnast, const firrtl::Firr
   I(op.arg_size() == 1 && op.const__size() == 2);
 
   auto lhs_str       = lhs;
-  auto e1_str        = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str        = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_bits_exct = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_bits"));
+                                                                                      
   lnast.add_child(idx_bits_exct, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_bits_exct, Lnast_node::create_const("__fir_bits"));
   lnast.add_child(idx_bits_exct, Lnast_node::create_ref(e1_str));
@@ -781,7 +783,7 @@ void Inou_firrtl_module::handle_head_op(Lnast& lnast, const firrtl::FirrtlPB_Exp
   I(op.arg_size() == 1 && op.const__size() == 1);
 
   auto lhs_str  = lhs;
-  auto e1_str   = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
   auto idx_head = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_head"));
   lnast.add_child(idx_head, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_head, Lnast_node::create_const("__fir_head"));
@@ -794,7 +796,7 @@ void Inou_firrtl_module::handle_tail_op(Lnast& lnast, const firrtl::FirrtlPB_Exp
   I(lnast.get_data(parent_node).type.is_stmts());
   I(op.arg_size() == 1 && op.const__size() == 1);
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
 
   auto idx_tail = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_tail"));
   lnast.add_child(idx_tail, Lnast_node::create_ref(lhs_str));
@@ -809,8 +811,8 @@ void Inou_firrtl_module::handle_concat_op(Lnast& lnast, const firrtl::FirrtlPB_E
   I(op.arg_size() == 2);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
-  auto e2_str  = return_expr_str(lnast, op.arg(1), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
+  auto e2_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(1));
 
   auto idx_concat = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_cat"));
   lnast.add_child(idx_concat, Lnast_node::create_ref(lhs_str));
@@ -825,7 +827,7 @@ void Inou_firrtl_module::handle_pad_op(Lnast& lnast, const firrtl::FirrtlPB_Expr
   I(op.arg_size() == 1 && op.const__size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
 
   auto idx_pad = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_pad"));
   lnast.add_child(idx_pad, Lnast_node::create_ref(lhs_str));
@@ -839,8 +841,8 @@ void Inou_firrtl_module::handle_two_expr_prime_op(Lnast& lnast, const firrtl::Fi
   I(lnast.get_data(parent_node).type.is_stmts());
   I(op.arg_size() == 2);
   
-  std::string e0_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
-  std::string e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(1));
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
+  auto e2_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(1));
 
   Lnast_nid idx_primop;
   auto sub_it = Inou_firrtl::op2firsub.find(op.op());
@@ -850,8 +852,8 @@ void Inou_firrtl_module::handle_two_expr_prime_op(Lnast& lnast, const firrtl::Fi
   lnast.add_child(idx_primop, Lnast_node::create_ref(lhs));
   lnast.add_child(idx_primop, Lnast_node::create_const(sub_it->second));
 
-  attach_expr_str2node(lnast, e0_str, idx_primop);
   attach_expr_str2node(lnast, e1_str, idx_primop);
+  attach_expr_str2node(lnast, e2_str, idx_primop);
 }
 
 void Inou_firrtl_module::handle_static_shift_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -860,7 +862,7 @@ void Inou_firrtl_module::handle_static_shift_op(Lnast& lnast, const firrtl::Firr
   I(op.arg_size() == 1 || op.const__size() == 1);
 
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
 
   Lnast_nid idx_shift;
   auto      sub_it = Inou_firrtl::op2firsub.find(op.op());
@@ -878,7 +880,7 @@ void Inou_firrtl_module::handle_as_usint_op(Lnast& lnast, const firrtl::FirrtlPB
                                             std::string_view lhs) {
   I(op.arg_size() == 1 && op.const__size() == 0);
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
+  auto e1_str  = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
 
   auto sub_it = Inou_firrtl::op2firsub.find(op.op());
   I(sub_it != Inou_firrtl::op2firsub.end());
@@ -894,9 +896,8 @@ void Inou_firrtl_module::handle_type_conv_op(Lnast& lnast, const firrtl::FirrtlP
                                              std::string_view lhs) {
   I(op.arg_size() == 1 && op.const__size() == 0);
   auto lhs_str = lhs;
-  auto e1_str  = return_expr_str(lnast, op.arg(0), parent_node, true);
-
-  auto sub_it = Inou_firrtl::op2firsub.find(op.op());
+  auto e1_str  = expr_str_flattened_or_tg(lnast, parent_node, op.arg(0));
+  auto sub_it  = Inou_firrtl::op2firsub.find(op.op());
   I(sub_it != Inou_firrtl::op2firsub.end());
 
   auto idx_conv = lnast.add_child(parent_node, Lnast_node::create_func_call());
