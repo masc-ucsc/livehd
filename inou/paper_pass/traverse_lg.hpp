@@ -18,23 +18,31 @@
 //#define KEEP_DUP //use vector
 #define DE_DUP //use set 
 
+
 class Traverse_lg : public Pass {
+public:
+  typedef absl::node_hash_map<unsigned int, std::pair<std::vector<std::string>, std::vector<std::string>>> vecMap;
+  typedef absl::node_hash_map<unsigned int, std::pair<absl::flat_hash_set<std::string>, absl::flat_hash_set<std::string>>> setMap;
 private:
+/*
 #ifdef KEEP_DUP
-  absl::node_hash_map<unsigned int, std::pair<std::vector<std::string>, std::vector<std::string>>> nodeIOmap;
+  vecMap nodeIOmap;
 #endif
 #ifdef DE_DUP
-  absl::node_hash_map<unsigned int, std::pair<absl::flat_hash_set<std::string>, absl::flat_hash_set<std::string>>> nodeIOmap;
+  setMap nodeIOmap;
 #endif
+*/
 protected:
-  void do_travers(Lgraph* g);
   //FOR DEBUG:
+  void do_travers(Lgraph* g);
   void get_input_node(const Node_pin &pin, std::ofstream& ofs);
   void get_output_node(const Node_pin &pin, std::ofstream& ofs);
   //FOR VECT PART:
+  void do_travers(Lgraph* g, Traverse_lg::vecMap &nodeIOmap);
   void get_input_node(const Node_pin &pin, std::vector<std::string>& in_vec);
   void get_output_node(const Node_pin &pin, std::vector<std::string>& out_vec);
   //FOR SET PART:
+  void do_travers(Lgraph* g, Traverse_lg::setMap &nodeIOmap);
   void get_input_node(const Node_pin &pin, absl::flat_hash_set<std::string>& in_set);
   void get_output_node(const Node_pin &pin, absl::flat_hash_set<std::string>& out_set);
 

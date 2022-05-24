@@ -29,14 +29,33 @@ void Traverse_lg::travers(Eprp_var& var) {
 
   Traverse_lg p(var);
 
+  I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide only 2 lgraphs to inou.traverse_lg. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
+  I(var.lgs.front()->get_name()!=var.lgs.back()->get_name(), "\n\nINPUT ERROR:\n\t The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
+
+#ifdef KEEP_DUP
+  Traverse_lg::vecMap map_pre_synth;
+  Traverse_lg::vecMap map_post_synth;
+  p.do_travers(var.lgs.front(), map_pre_synth);
+  p.do_travers(var.lgs.back(), map_post_synth);
+#endif
+
+#ifdef DE_DUP
+  Traverse_lg::setMap map_pre_synth;
+  Traverse_lg::setMap map_post_synth;
+  p.do_travers(var.lgs.front(), map_pre_synth);
+  p.do_travers(var.lgs.back(), map_post_synth);
+#endif
+
+#ifdef DEBUG
   for (const auto& l : var.lgs) {
-    p.do_travers(l);  // l->get_name gives the name of the top module (generally same as that of file name)
+    p.do_travers(l);
   }
+#endif
 
 }
 
+//FOR DEBUG:
 void Traverse_lg::do_travers(Lgraph* lg) {
-#ifdef DEBUG
   //std::string_view module_name = lg->get_name();
   std::ofstream ofs;
   ofs.open(std::string(lg->get_name()), std::ofstream::out | std::ofstream::trunc);
@@ -45,128 +64,40 @@ void Traverse_lg::do_travers(Lgraph* lg) {
     return ;
   }
   ofs<<std::endl<<std::endl<<lg->get_name()<<std::endl<<std::endl<<std::endl;
-#endif
 
   for (const auto& node : lg->forward()) {
-#ifdef DEBUG
     ofs<<"===============================\n";
     ofs<<node.debug_name()<<std::endl; //this is the main node for which we will record IO
-#endif
-#ifdef KEEP_DUP
-    std::vector<std::string> in_vec;
-    std::vector<std::string> out_vec;
-    fmt::print("{}\n", node.debug_name());
-#endif
-#ifdef DE_DUP
-    absl::flat_hash_set<std::string> in_set;
-    absl::flat_hash_set<std::string> out_set;
-    fmt::print("{}\n", node.debug_name());
-#endif
     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
-#ifdef DEBUG
       ofs<<"---------------\n";
-#endif
       continue; //do not keep such nodes in nodeIOmap
     }
 
     
     if (node.has_inputs()){
-#ifdef DEBUG
     ofs<<"INPUTS:\n";
-#endif
       for (const auto& indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
-#ifdef DEBUG
         get_input_node(indr, ofs);
-#endif
-#ifdef KEEP_DUP
-        get_input_node(indr, in_vec);
-#endif
-#ifdef DE_DUP
-        get_input_node(indr, in_set);
-#endif
       }
     }
 
     if (node.has_outputs()) {
-#ifdef DEBUG
     ofs<<"OUTPUTS:\n";
-#endif
       for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
         //auto out_node = outdr.get_node();
-#ifdef DEBUG
         get_output_node(outdr,ofs);
-#endif
-#ifdef KEEP_DUP
-        get_output_node(outdr, out_vec);
-#endif
-#ifdef DE_DUP
-        get_output_node(outdr, out_set);
-#endif
       }
     }
 
-#ifdef KEEP_DUP
-    //print the vectors formed
-    fmt::print("INPUTS:\n");
-    for (const auto& i:in_vec) {
-      fmt::print("\t{}\n",i);
-    }
-    fmt::print("OUTPUTS:\n");
-    for (const auto& i:out_vec) {
-      fmt::print("\t{}\n",i);
-    }
-
-    if (in_vec.empty() && out_vec.empty()) {//no i/ps as well as no o/ps
-      continue;//do not keep such nodes in nodeIOmap
-    }
-    //insert in map
-    const auto& nodeid = node.get_nid().value;
-    nodeIOmap[nodeid]= std::make_pair(in_vec,out_vec);//FIXME: make hash of vectors and change datatype accordingly
-#endif
-#ifdef DE_DUP
-    //print the set formed
-    fmt::print("INPUTS:\n");
-    for (const auto& i:in_set) {
-      fmt::print("\t{}\n",i);
-    }
-    fmt::print("OUTPUTS:\n");
-    for (const auto& i:out_set) {
-      fmt::print("\t{}\n",i);
-    }
-
-    if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
-      continue;//do not keep such nodes in nodeIOmap
-    }
-    //insert in map
-    const auto& nodeid = node.get_nid().value;
-    nodeIOmap[nodeid]= std::make_pair(in_set,out_set);//FIXME: make hash of set and change datatype accordingly
-#endif
   }//enf of for lg-> traversal
 
-#if defined KEEP_DUP || defined DE_DUP
-  //print the map
-  fmt::print("\n\nMAP FORMED IS:\n");
-  for(auto& [n, ioPair]: nodeIOmap) {
-    fmt::print("{} has INPUTS:  \t",n);
-    for (auto& ip: ioPair.first) {
-      fmt::print("{}\t",ip);
-    }
-    fmt::print("\nand OUTPUTS: \t");
-    for (auto& op:ioPair.second) {
-      fmt::print("{}\t", op);
-    }
-    fmt::print("\n");
-  }
-#endif
-
-#ifdef DEBUG
   if(ofs.is_open()) {
     ofs.close();
   }
-#endif
 }
-//FOR DEBUG:
+
+
 void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
@@ -208,6 +139,65 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
 }
 
 //FOR VECTOR:
+void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::vecMap &nodeIOmap) {
+
+  for (const auto& node : lg->forward()) {
+    std::vector<std::string> in_vec;
+    std::vector<std::string> out_vec;
+    fmt::print("{}\n", node.debug_name());
+    if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
+      continue; //do not keep such nodes in nodeIOmap
+    }
+
+    
+    if (node.has_inputs()){
+      for (const auto& indr : node.inp_drivers()) {
+        //auto inp_node = indr.get_node();
+        get_input_node(indr, in_vec);
+      }
+    }
+
+    if (node.has_outputs()) {
+      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+        //auto out_node = outdr.get_node();
+        get_output_node(outdr, out_vec);
+      }
+    }
+
+    //print the vectors formed
+    fmt::print("INPUTS:\n");
+    for (const auto& i:in_vec) {
+      fmt::print("\t{}\n",i);
+    }
+    fmt::print("OUTPUTS:\n");
+    for (const auto& i:out_vec) {
+      fmt::print("\t{}\n",i);
+    }
+
+    if (in_vec.empty() && out_vec.empty()) {//no i/ps as well as no o/ps
+      continue;//do not keep such nodes in nodeIOmap
+    }
+    //insert in map
+    const auto& nodeid = node.get_nid().value;
+    nodeIOmap[nodeid]= std::make_pair(in_vec,out_vec);//FIXME: make hash of vectors and change datatype accordingly
+  }//enf of for lg-> traversal
+
+  //print the map
+  fmt::print("\n\nMAP FORMED IS:\n");
+  for(auto& [n, ioPair]: nodeIOmap) {
+    fmt::print("{} has INPUTS:  \t",n);
+    for (auto& ip: ioPair.first) {
+      fmt::print("{}\t",ip);
+    }
+    fmt::print("\nand OUTPUTS: \t");
+    for (auto& op:ioPair.second) {
+      fmt::print("{}\t", op);
+    }
+    fmt::print("\n");
+  }
+
+}
+
 
 void Traverse_lg::get_input_node(const Node_pin &node_pin, std::vector<std::string>& in_vec) {
   auto node = node_pin.get_node();
@@ -273,6 +263,65 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
 }
 
 //FOR SET:
+
+void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap &nodeIOmap) {
+
+  for (const auto& node : lg->forward()) {
+    absl::flat_hash_set<std::string> in_set;
+    absl::flat_hash_set<std::string> out_set;
+    fmt::print("{}\n", node.debug_name());
+    if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
+      continue; //do not keep such nodes in nodeIOmap
+    }
+
+    
+    if (node.has_inputs()){
+      for (const auto& indr : node.inp_drivers()) {
+        //auto inp_node = indr.get_node();
+        get_input_node(indr, in_set);
+      }
+    }
+
+    if (node.has_outputs()) {
+      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+        //auto out_node = outdr.get_node();
+        get_output_node(outdr, out_set);
+      }
+    }
+
+    //print the set formed
+    fmt::print("INPUTS:\n");
+    for (const auto& i:in_set) {
+      fmt::print("\t{}\n",i);
+    }
+    fmt::print("OUTPUTS:\n");
+    for (const auto& i:out_set) {
+      fmt::print("\t{}\n",i);
+    }
+
+    if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
+      continue;//do not keep such nodes in nodeIOmap
+    }
+    //insert in map
+    const auto& nodeid = node.get_nid().value;
+    nodeIOmap[nodeid]= std::make_pair(in_set,out_set);//FIXME: make hash of set and change datatype accordingly
+  }//enf of for lg-> traversal
+
+  //print the map
+  fmt::print("\n\nMAP FORMED IS:\n");
+  for(auto& [n, ioPair]: nodeIOmap) {
+    fmt::print("{} has INPUTS:  \t",n);
+    for (auto& ip: ioPair.first) {
+      fmt::print("{}\t",ip);
+    }
+    fmt::print("\nand OUTPUTS: \t");
+    for (auto& op:ioPair.second) {
+      fmt::print("{}\t", op);
+    }
+    fmt::print("\n");
+  }
+
+}
 
 void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::flat_hash_set<std::string>& in_set) {
   auto node = node_pin.get_node();
