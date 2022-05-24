@@ -1,5 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <fstream>
+
 #include "pass_opentimer.hpp"
 
 #include "lbench.hpp"
@@ -47,7 +49,8 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   std::vector<std::string> line_vec;
-  std::ifstream            file(sdc_file);
+  std::string sdc_file_str(sdc_file);
+  std::ifstream            file(sdc_file_str);
 
   if (!file.is_open()) {
     Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
