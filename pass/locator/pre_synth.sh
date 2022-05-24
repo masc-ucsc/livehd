@@ -110,7 +110,7 @@ create_synth-verilog () {
   cd pass/locator
 
 	name=$1
-  export VERILOG_FILES=../../pre_synth_saved/${name}.v    
+  export VERILOG_FILES=../../pre_synth/${name}.v    
   export DESIGN_NAME=$name                          
   export SYNTH_BUFFERING=0                          
   export SYNTH_SIZING=0                             
@@ -130,9 +130,9 @@ create_synth-verilog () {
   export SAVE_NETLIST=${DESIGN_NAME}.v                     
   mkdir -p out                                       
 
-  if [ -f netlist.v ]; then
-    rm netlist.v
-  fi
+  #if [ -f netlist.v ]; then
+  #  rm netlist.v
+  #fi
   if [ -f ${DESIGN_NAME}.v && -f out/synthesis.sdc ]; then
     rm ${DESIGN_NAME}.v
     rm -r out/
@@ -167,9 +167,9 @@ create_synth-verilog () {
      echo "ERROR: POST-SYNTH NETLIST NOT FORMED"
      exit $ret_val
   else
-     echo "** POST-SYNTH NETLIST FORMED:            **"
-     echo "** ./${DESIGN_NAME}.v                    **"
-     echo "** for : $VERILOG_FILES                  **"
+     echo "** POST-SYNTH NETLIST FORMED in pass/locator:            **"
+     echo "** ./${DESIGN_NAME}.v                                    **"
+     echo "** for : $VERILOG_FILES                                  **"
   fi
   
   mv ./*0.chk.rpt out/.
@@ -213,7 +213,7 @@ post_synth () {
 
 }
 
-pts='VecShiftRegisterSimple' # scalar_tuple
-#create_pre-synth_verilog "$pts"
+pts='adder_stage' # scalar_tuple
+create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
 #post_synth "$pts"

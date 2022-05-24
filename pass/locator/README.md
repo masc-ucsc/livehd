@@ -9,7 +9,7 @@ How to run:
 3. ./make_netlist.sh
     Takes verilog file from livehd/pre_synth/ and generates pass/locator/netlist.v
 
-IMP: no the above 3 steps are merged into pre_synth.sh in form of 3 functions at
+IMP: note that the above 3 steps are merged into pre_synth.sh in form of 3 functions at
 the end of pre_synth.sh. Hence, you need not run the above 3 steps one by one.
 
 4. (run sta and get the timing path)(refer to readme_synth.txt)
