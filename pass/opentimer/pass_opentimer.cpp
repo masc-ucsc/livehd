@@ -25,7 +25,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
     if (str_tools::ends_with(f,".lib")) {
       fmt::print("opentimer using liberty file '{}'", f);
       if (n_lib_read == 0)
-        timer.read_celllib(f, ot::MAX);
+        timer.read_celllib(f);
       else
         timer.read_celllib(f, ot::MIN);
 
@@ -43,19 +43,6 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
   if (n_lib_read >2) {
     Pass::error("pass.opentime only supports 1 or 2 liberty (max/min) files not {}", files);
-  }
-}
-
-void Pass_opentimer::work(Eprp_var &var) {
-  Pass_opentimer pass(var);
-
-  TRACE_EVENT("pass", "OPENTIMER_work");
-  Lbench b("pass.OPENTIMER_work");
-
-  for (const auto &g : var.lgs) {
-    pass.build_circuit(g);  // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
-    pass.compute_timing();  // Task4: Compute Timing | Status: 100% done
-    pass.populate_table();  // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
 
@@ -150,91 +137,3 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   file.close();
 }
 
-void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
-  TRACE_EVENT("pass", "OPENTIMER_build_circuit");
-  //  Lbench b("pass.OPENTIMER_build_circuit");
-
-  g->each_graph_input([this](const Node_pin &pin) {
-    std::string driver_name(pin.get_name());  // OT needs std::string, not string_view support
-
-    fmt::print("\nGraph Input Driver Name {}", driver_name);
-    timer.insert_net(driver_name);
-    timer.insert_primary_input(driver_name);
-    timer.connect_pin(driver_name, driver_name);
-  });
-
-  g->each_graph_output([this](const Node_pin &pin) {
-    std::string driver_name(pin.get_name());  // OT needs std::string, not string_view support
-
-    fmt::print("\nGraph Output Driver Name {}", driver_name);
-    timer.insert_net(driver_name);
-    timer.insert_primary_output(driver_name);
-    timer.connect_pin(driver_name, driver_name);
-  });
-
-  for (const auto node : g->forward()) {  // TODO: Do we really need a slow forward. Why not just fast??
-    auto op = node.get_type_op();
-
-    if (op != Ntype_op::Sub) {
-      Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
-          node.debug_name(),
-          Ntype::get_name(op));
-      continue;
-    }
-
-    auto &sub_node = node.get_type_sub_node();
-    if (!sub_node.is_black_box()) {
-      fmt::print("Not BBox sub found {}, fixme to traverse hierarchy\n", sub_node.get_name());
-      continue;
-    }
-
-    std::string instance_name(node.get_name());  // OT needs std::string
-    std::string type_name(sub_node.get_name());  // OT needs std::string
-
-    timer.insert_gate(instance_name, type_name);
-
-    // CONNECT NETS TO PINS
-    for (const auto &e : node.inp_edges()) {
-      auto        nodepin_name = sub_node.get_name_from_instance_pid(e.sink.get_pid());
-      auto        pin_name     = absl::StrCat(instance_name, ":", nodepin_name);
-      std::string wname(e.driver.get_name());  // OT needs std::string
-
-      fmt::print("\n{},{}", pin_name, wname);
-      timer.insert_net(wname);
-      timer.connect_pin(pin_name, wname);
-    }
-    timer.connect_pin("u3:Y", "out");  // This the last thing to fix
-  }
-}
-
-void Pass_opentimer::compute_timing() {  // Expand this method to compute timing information
-                                         //  Lbench b("pass.OPENTIMER_compute_timing");
-  TRACE_EVENT("pass", "OPENTIMER_compute_timing");
-
-  timer.update_timing();
-
-  auto num_gates = timer.num_gates();
-  fmt::print("Number of gates {}\n", num_gates);
-
-  auto num_primary_inputs = timer.num_primary_inputs();
-  fmt::print("Number of primary inputs {}\n", num_primary_inputs);
-
-  auto num_primary_outputs = timer.num_primary_outputs();
-  fmt::print("Number of primary outputs {}\n", num_primary_outputs);
-
-  auto num_pins = timer.num_pins();
-  fmt::print("Number of pins {}\n", num_pins);
-
-  auto num_nets = timer.num_nets();
-  fmt::print("Number of nets {}\n", num_nets);
-
-  auto opt_path = timer.report_timing(1);
-  std::cout << "Critical Path" << opt_path[0] << '\n';
-
-  // timer.dump_graph(std::cout);
-}
-
-void Pass_opentimer::populate_table() {  // Expand this method to populate the tables in lgraph
-  TRACE_EVENT("pass", "OPENTIMER_populate_table");
-  //  Lbench b("pass.OPENTIMER_populate_table");
-}

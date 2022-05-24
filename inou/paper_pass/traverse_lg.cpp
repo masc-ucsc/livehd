@@ -7,7 +7,6 @@
 #include "lgedgeiter.hpp"
 #include "perf_tracing.hpp"
 #include <fstream>
-#include <bits/stdc++.h>
 #include <utility>
 #include <string>
 #include <algorithm>

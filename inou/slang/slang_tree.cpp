@@ -218,9 +218,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
     }
   }
 
-#ifndef NDEBUG
-  lnast_create_obj.lnast->dump();
-#endif
+  //lnast_create_obj.lnast->dump();
 
   parsed_lnasts.insert_or_assign(def.name, lnast_create_obj.lnast);
   lnast_create_obj.lnast = nullptr;
