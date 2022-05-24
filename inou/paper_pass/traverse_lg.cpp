@@ -106,7 +106,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
     } else {
       ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");}
+      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
       ofs<<std::endl;
     }
     return;
@@ -126,7 +126,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
     } else {
       ofs<<node.get_type_name();
       if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");}
+      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
       ofs<<std::endl;
     }
     return;
@@ -178,14 +178,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::vecMap &nodeIOmap) {
       continue;//do not keep such nodes in nodeIOmap
     }
     //insert in map
-    const auto& nodeid = node.get_nid().value;
+    const auto& nodeid = node.get_compact_flat();
     nodeIOmap[nodeid]= std::make_pair(in_vec,out_vec);//FIXME: make hash of vectors and change datatype accordingly
   }//enf of for lg-> traversal
 
   //print the map
   fmt::print("\n\nMAP FORMED IS:\n");
   for(auto& [n, ioPair]: nodeIOmap) {
-    fmt::print("{} has INPUTS:  \t",n);
+    fmt::print("{} has INPUTS:  \t",n.get_nid());
     for (auto& ip: ioPair.first) {
       fmt::print("{}\t",ip);
     }
@@ -216,7 +216,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::vector<std::stri
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        temp_str+=(node.get_driver_pin().get_wire_name());
         //temp_str+=")";
       }
       in_vec.emplace_back(temp_str);
@@ -248,7 +248,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        temp_str+=(node.get_driver_pin().get_wire_name());
         //temp_str+=")";
       }
       out_vec.emplace_back(temp_str);
@@ -303,14 +303,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap &nodeIOmap) {
       continue;//do not keep such nodes in nodeIOmap
     }
     //insert in map
-    const auto& nodeid = node.get_nid().value;
+    const auto& nodeid = node.get_compact_flat();
     nodeIOmap[nodeid]= std::make_pair(in_set,out_set);//FIXME: make hash of set and change datatype accordingly
   }//enf of for lg-> traversal
 
   //print the map
   fmt::print("\n\nMAP FORMED IS:\n");
   for(auto& [n, ioPair]: nodeIOmap) {
-    fmt::print("{} has INPUTS:  \t",n);
+    fmt::print("{} has INPUTS:  \t",n.get_nid());
     for (auto& ip: ioPair.first) {
       fmt::print("{}\t",ip);
     }
@@ -340,7 +340,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::flat_hash_set<s
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        temp_str+=(node.get_driver_pin().get_wire_name());
         //temp_str+=")";
       }
       in_set.insert(temp_str);
@@ -372,7 +372,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::flat_hash_set<
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().has_name()?node.get_driver_pin().get_name():"");
+        temp_str+=(node.get_driver_pin().get_wire_name());
         //temp_str+=")";
       }
       out_set.insert(temp_str);
