@@ -159,8 +159,8 @@ protected:
   std::string create_tmp_var();
   std::string create_tmp_mut_var();
   std::string name_prefix_modifier(std::string_view term, const bool is_rhs);
-  void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
-  void        declare_register(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
+  void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
+  void        declare_register(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
   void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name,
                                         const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite);
 
@@ -168,6 +168,7 @@ protected:
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node);
+  void     reg_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
