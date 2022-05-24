@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <iostream>
