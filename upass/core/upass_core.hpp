@@ -4,11 +4,12 @@
 #include <memory>
 #include <stack>
 #include <vector>
+
 #include "lnast.hpp"
-#include "lnast_ntype.hpp"
 #include "lnast_manager.hpp"
-#include "upass_utils.hpp"
+#include "lnast_ntype.hpp"
 #include "lnast_writer.hpp"
+#include "upass_utils.hpp"
 
 namespace upass {
 
@@ -27,26 +28,26 @@ public:
   PROCESS_NODE(bit_or)
   PROCESS_NODE(bit_not)
   PROCESS_NODE(bit_xor)
-  
+
   // Bitwidth Insensitive Reduce
   PROCESS_NODE(reduce_or)
-  
+
   // Logical
   PROCESS_NODE(logical_and)
   PROCESS_NODE(logical_or)
   PROCESS_NODE(logical_not)
-  
+
   // Arithmetic
   PROCESS_NODE(plus)
   PROCESS_NODE(minus)
   PROCESS_NODE(mult)
   PROCESS_NODE(div)
   PROCESS_NODE(mod)
-  
+
   // Shift
   PROCESS_NODE(shl)
   PROCESS_NODE(sra)
-  
+
   // Bit Manipulation
   PROCESS_NODE(sext)
   PROCESS_NODE(set_mask)
@@ -54,7 +55,7 @@ public:
   PROCESS_NODE(mask_and)
   PROCESS_NODE(mask_popcount)
   PROCESS_NODE(mask_xor)
-  
+
   // Comparison
   PROCESS_NODE(ne)
   PROCESS_NODE(eq)
@@ -83,12 +84,11 @@ protected:
   bool is_last_child() const { return lm->is_last_child(); }
   void write_node() { lm->write_node(); }
 
-	template<class... Lnast_ntype_int>
+  template <class... Lnast_ntype_int>
   bool is_type(Lnast_ntype_int... ty) const {
     auto n = get_raw_ntype();
-    return (((n == ty) || ... ) || false);
+    return (((n == ty) || ...) || false);
   }
-
 };
 
 struct uPass_node : public uPass {
@@ -101,12 +101,10 @@ public:
   using uPass::uPass;
 };
 
-template<class T>
+template <class T>
 struct uPass_wrapper {
 public:
-  static std::shared_ptr<uPass> get_upass(std::shared_ptr<Lnast_manager>& lm) {
-    return std::make_unique<T>(lm);
-  }
+  static std::shared_ptr<uPass> get_upass(std::shared_ptr<Lnast_manager>& lm) { return std::make_unique<T>(lm); }
 };
 
 class uPass_plugin {
@@ -118,7 +116,7 @@ protected:
   static inline Map_setup registry;
 
 public:
-  uPass_plugin(const std::string &name, Setup_fn setup_fn) {
+  uPass_plugin(const std::string& name, Setup_fn setup_fn) {
     if (registry.find(name) != registry.end()) {
       upass::error("uPass_plugin: {} is already registered", name);
       return;
@@ -126,7 +124,7 @@ public:
     registry[name] = setup_fn;
   }
 
-  static const Map_setup &get_registry() { return registry; }
+  static const Map_setup& get_registry() { return registry; }
 };
 
-}
+}  // namespace upass

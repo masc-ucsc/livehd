@@ -11,11 +11,11 @@ Lnast_parser::Lnast_parser(std::istream &_is) : is(_is) {}
 std::shared_ptr<Lnast> Lnast_parser::parse_all() {
   lnast = std::make_unique<Lnast>();
   lexer = std::make_unique<Lnast_lexer>(is);
- 
+
   read_all_tokens();
   token_index = 0;
   parse_top();
-  
+
   lexer = nullptr;
   return lnast;
 }
@@ -223,7 +223,7 @@ void Lnast_parser::parse_selects() {
 
 void Lnast_parser::parse_prim() {
   fmt::print("parse_prim\n");
-  if (cur_kind() == Lnast_token::id_var || cur_kind() == Lnast_token::id_fun) { 
+  if (cur_kind() == Lnast_token::id_var || cur_kind() == Lnast_token::id_fun) {
     add_leaf(Lnast_node::create_ref(cur_text()));
   } else if (cur_kind() == Lnast_token::number) {
     add_leaf(Lnast_node::create_const(cur_text()));

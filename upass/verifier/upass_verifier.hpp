@@ -2,16 +2,14 @@
 #pragma once
 
 #include "fmt/format.h"
-
-#include "upass_core.hpp"
 #include "lnast_ntype.hpp"
+#include "upass_core.hpp"
 
 struct uPass_verifier : public upass::uPass {
 public:
-
   using uPass::uPass;
 
-  // Assignment 
+  // Assignment
   // void process_assign() override { check_binary(); }
 
   // Operators
@@ -51,7 +49,6 @@ public:
   void process_ge() override { check_binary(); }
 
 private:
-
   void check_binary() {
     move_to_child();
 
@@ -71,7 +68,7 @@ private:
     }
   }
 
-  template<class... Lnast_ntype_int>
+  template <class... Lnast_ntype_int>
   void check_type(Lnast_ntype_int... ty) const {
     if (is_invalid()) {
       upass::error("invalid\n");
@@ -80,7 +77,7 @@ private:
     // print_types(ty...);
     auto n = get_raw_ntype();
     // print_types(n);
-    if (((n == ty) || ... ) || false) {
+    if (((n == ty) || ...) || false) {
       return;
     }
     upass::error("failed\n");
@@ -93,7 +90,6 @@ private:
   }
 
   void print_types() const {}
-
 };
 
 static upass::uPass_plugin verifier("verifier", upass::uPass_wrapper<uPass_verifier>::get_upass);

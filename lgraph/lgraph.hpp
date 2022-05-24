@@ -6,8 +6,8 @@
 #include "cell.hpp"
 #include "edge.hpp"
 #include "graph_library.hpp"
-#include "hif/hif_read.hpp"
 #include "hierarchy.hpp"
+#include "hif/hif_read.hpp"
 #include "lgedge.hpp"
 #include "lgraph_attributes.hpp"
 #include "lgraphbase.hpp"
@@ -224,7 +224,7 @@ public:
   Node create_node_sub(std::string_view sub_name);
 
   [[nodiscard]] const Sub_node &get_self_sub_node() const;  // Access all input/outputs
-  Sub_node       *ref_self_sub_node();        // Access all input/outputs
+  Sub_node                     *ref_self_sub_node();        // Access all input/outputs
 
   void load(std::shared_ptr<Hif_read> hif);
   void save();

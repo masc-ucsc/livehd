@@ -3,8 +3,8 @@
 
 #include <memory>
 
-#include "spsc.hpp"
 #include "iassert.hpp"
+#include "spsc.hpp"
 
 class raw_ptr_pool {
 public:

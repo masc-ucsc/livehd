@@ -49,7 +49,7 @@ public:
       dir          = Direction::Invalid;
       name         = "INVALID_PID";
       graph_io_pos = Port_invalid;
-      bits         = 0; // Blackboxes may need to set bits for semantics (bitwidth pass)
+      bits         = 0;  // Blackboxes may need to set bits for semantics (bitwidth pass)
       // KEEP instance_pid
     }
   };
@@ -57,11 +57,10 @@ public:
 private:
   std::string name;
   Lg_type_id  lgid;
-  bool loop_first;
-  bool loop_last;
+  bool        loop_first;
+  bool        loop_last;
 
   std::vector<IO_pin> io_pins;
-
 
   absl::flat_hash_map<std::string, Port_ID> name2id;
   std::vector<Port_ID>                      graph_pos2instance_pid;
@@ -84,7 +83,7 @@ private:
 public:
   Sub_node() { expunge(); }
 
-  Sub_node(const Sub_node &s) = default;
+  Sub_node(const Sub_node &s)           = default;
   Sub_node &operator=(const Sub_node &) = delete;
 
   void copy_from(std::string_view new_name, Lg_type_id new_lgid, const Sub_node &sub);
@@ -134,11 +133,11 @@ public:
   }
 
   [[nodiscard]] bool is_loop_first() const { return loop_first; }
-  void set_loop_first() { loop_first = true; }
+  void               set_loop_first() { loop_first = true; }
 
   [[nodiscard]] bool is_loop_last() const { return loop_last; }
-  void set_loop_last() { loop_last = true; }
-  void clear_loop_last() { loop_last = false; }
+  void               set_loop_last() { loop_last = true; }
+  void               clear_loop_last() { loop_last = false; }
 
   [[nodiscard]] bool is_invalid() const { return lgid == 0; }
 

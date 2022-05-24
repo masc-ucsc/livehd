@@ -60,7 +60,6 @@ void Lnast_writer::write_top() {
   }
   --depth;
   print_line("}}\n");
-  
 }
 
 void Lnast_writer::write_stmts() {
@@ -234,8 +233,8 @@ void Lnast_writer::write_prim_type_int(char sign) {
   move_to_parent();
 }
 
-void Lnast_writer::write_prim_type_uint() { write_prim_type_int('u'); } 
-void Lnast_writer::write_prim_type_sint() { write_prim_type_int('s'); } 
+void Lnast_writer::write_prim_type_uint() { write_prim_type_int('u'); }
+void Lnast_writer::write_prim_type_sint() { write_prim_type_int('s'); }
 
 void Lnast_writer::write_prim_type_range()   { print(fmt::fg(fmt::color::gold), "#range"); }
 void Lnast_writer::write_prim_type_string()  { print(fmt::fg(fmt::color::gold), "#string"); }

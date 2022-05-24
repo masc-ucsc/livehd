@@ -9,7 +9,6 @@
 #include "str_tools.hpp"
 
 Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {
-
   // 1st entry (hidx=0) is for root
   up_entry_t h_entry;
   h_entry.parent_lg   = top;

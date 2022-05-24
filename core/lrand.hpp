@@ -31,19 +31,19 @@ public:
 #else
   static inline bool initialized = false;
   size_t             lrand_get_seed() {
-    static sfc64 seed{sfc64::default_seed};
+                static sfc64 seed{sfc64::default_seed};
 
-    if (__builtin_expect(initialized, 1))
+                if (__builtin_expect(initialized, 1))
       return seed.uniform<size_t>();
 
     const char* lbench_seed = getenv("LBENCH_SEED");
-    if (lbench_seed) {
-      seed.seed(std::atoi(lbench_seed));
+                if (lbench_seed) {
+                  seed.seed(std::atoi(lbench_seed));
     }
 
-    initialized = true;
+                initialized = true;
 
-    return seed.uniform<size_t>();
+                return seed.uniform<size_t>();
   }
   sfc64() : sfc64(lrand_get_seed()) {}
 #endif
@@ -59,10 +59,10 @@ public:
   }
 
   // no copy ctors so we don't accidentally get the same random again
-  sfc64(sfc64 const&) = delete;
+  sfc64(sfc64 const&)            = delete;
   sfc64& operator=(sfc64 const&) = delete;
 
-  sfc64(sfc64&&) = default;
+  sfc64(sfc64&&)            = default;
   sfc64& operator=(sfc64&&) = default;
 
   ~sfc64() = default;

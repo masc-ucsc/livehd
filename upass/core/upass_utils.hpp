@@ -10,4 +10,4 @@ void error(const char *format, const Args &...args) {
   fmt::print(format, args...);
 }
 
-}
+}  // namespace upass

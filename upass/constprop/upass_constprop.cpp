@@ -1,16 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "upass_constprop.hpp"
+
 #include "lnast_ntype.hpp"
 
-uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm)
-  : uPass(_lm) {
+uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager> &_lm) : uPass(_lm) {
   st.function_scope(_lm->get_top_module_name());
 }
 
 void uPass_constprop::process_assign() {
   move_to_child();
-  
+
   auto lhs_text = current_text();
   move_to_sibling();
 
@@ -32,7 +32,7 @@ void uPass_constprop::process_assign() {
 template <typename F>
 void uPass_constprop::process_nary(F op) {
   move_to_child();
-  
+
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
@@ -40,35 +40,35 @@ void uPass_constprop::process_nary(F op) {
     op(r, current_prim_value());
   }
   st.set(var, r);
-  
+
   move_to_parent();
 }
 
 template <typename F>
 void uPass_constprop::process_binary(F op) {
   move_to_child();
-  
+
   auto var = current_text();
   move_to_sibling();
   Lconst n1 = current_prim_value();
   move_to_sibling();
   Lconst n2 = current_prim_value();
-  Lconst r = op(n1, n2);
+  Lconst r  = op(n1, n2);
   st.set(var, r);
-  
+
   move_to_parent();
 }
 
 template <typename F>
 void uPass_constprop::process_unary(F op) {
   move_to_child();
-  
+
   auto var = current_text();
   move_to_sibling();
   Lconst r = current_prim_value();
   op(r);
   st.set(var, r);
-  
+
   move_to_parent();
 }
 
@@ -132,4 +132,3 @@ void uPass_constprop::process_stmts() {}
 void uPass_constprop::process_tuple_set() {}
 void uPass_constprop::process_tuple_get() {}
 void uPass_constprop::process_tuple_add() {}
-

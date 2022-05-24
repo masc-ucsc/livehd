@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "ot/timer/timer.hpp"
-
 #include "node_pin.hpp"
+#include "ot/timer/timer.hpp"
 #include "pass.hpp"
 
 class Pass_opentimer : public Pass {

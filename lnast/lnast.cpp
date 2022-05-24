@@ -852,7 +852,7 @@ void Lnast::opr_lhs_merge_handle_a_statement(const Lnast_nid &assign_nid) {
 
   auto c0_opr = get_first_child(opr_nid);
 
-  return; // FIXME: what is this code doing? (it breaks netlist in slang)
+  return;  // FIXME: what is this code doing? (it breaks netlist in slang)
 
   I(get_name(c0_opr) == c1_assign_name);
   set_data(c0_opr, get_data(c0_assign));
@@ -922,7 +922,7 @@ void Lnast::ssa_lhs_if_subtree(const Lnast_nid &if_nid) {
           ssa_lhs_handle_a_statement(itr_nid, opr_nid);
         }
       }
-    }  
+    }
   }
   ssa_handle_phi_nodes(if_nid);
 }

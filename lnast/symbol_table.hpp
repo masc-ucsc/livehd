@@ -14,15 +14,14 @@ public:
   struct Scope {
     Scope(Scope_type _type, std::string_view _func_id, std::string_view _scope) : type(_type), func_id(_func_id), scope(_scope) {}
 
-    Scope_type               type;
-    std::string              func_id;
-    std::string              scope;  // 0.0.1 ...
-    std::vector<std::string> declared;
+    Scope_type                                                type;
+    std::string                                               func_id;
+    std::string                                               scope;  // 0.0.1 ...
+    std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope
   };
 
   static inline Lconst invalid_lconst = Lconst::invalid();
-
 
   std::vector<Scope> stack;
 

@@ -555,7 +555,7 @@ public:
   }
 
   bool is_child_of(const Tree_index &child, const Tree_index &potential_parent) const {
-    auto level_stop_at      = potential_parent.level;
+    auto level_stop_at = potential_parent.level;
     // auto level              = child.level - 1;
     auto child_parent_chain = get_parent(child);
 

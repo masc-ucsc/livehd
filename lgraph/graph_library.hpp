@@ -145,7 +145,7 @@ protected:
   void        reload_int();
 
 public:
-  Graph_library(const Graph_library &s) = delete;
+  Graph_library(const Graph_library &s)           = delete;
   Graph_library &operator=(const Graph_library &) = delete;
 
   static bool exists(std::string_view path, std::string_view name) {

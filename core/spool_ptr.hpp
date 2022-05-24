@@ -2,8 +2,8 @@
 
 #include <memory>
 
-#include "spsc.hpp"
 #include "iassert.hpp"
+#include "spsc.hpp"
 
 template <class T>
 class spool_ptr_pool {

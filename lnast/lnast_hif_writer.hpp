@@ -42,13 +42,13 @@ protected:
     current_nid = lnast->get_sibling_next(current_nid);
     return !current_nid.is_invalid();
   }
-  
+
   void move_to_parent() {
     I(nid_stack.size() >= 1);
     current_nid = nid_stack.top();
     nid_stack.pop();
   }
-  
+
   auto get_raw_ntype() {
     return lnast->get_type(current_nid).get_raw_ntype();
   }

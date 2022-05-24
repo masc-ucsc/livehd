@@ -217,7 +217,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
 void Lgraph::each_hier_unique_sub_bottom_up(const std::function<void(Lgraph *lg_sub)> &fn) {
   std::set<Lg_type_id> visited;
   each_hier_unique_sub_bottom_up_int(visited, fn);
-  fn(this); // itself
+  fn(this);  // itself
 }
 
 void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn, Pending_map *pending_map,

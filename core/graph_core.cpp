@@ -1,13 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "graph_core.hpp"
-#include "iassert.hpp"
-#include "fmt/format.h"
-#include "likely.hpp"
 
 #include <algorithm>
 #include <iterator>
 #include <string>
+
+#include "fmt/format.h"
+#include "iassert.hpp"
+#include "likely.hpp"
 
 void Graph_core::Master_entry::readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t, 40> &pending_inp,
                                               boost::container::static_vector<uint32_t, 40> &pending_out) {

@@ -283,7 +283,7 @@ public:
   [[nodiscard]] Compact_flat   get_compact_flat() const;
   [[nodiscard]] Compact_driver get_compact_driver() const;
   [[nodiscard]] Compact_class  get_compact_class() const {
-    // OK to pick a hierarchical to avoid replication of info like names
+     // OK to pick a hierarchical to avoid replication of info like names
     return Compact_class(idx, sink);
   }
 

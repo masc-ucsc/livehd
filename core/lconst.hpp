@@ -94,7 +94,7 @@ public:
   [[nodiscard]] std::string serialize() const;
 
   bool is_invalid() const { return explicit_str && bits == 0; }
-  bool is_ref() const { return is_invalid() && num !=0; }
+  bool is_ref() const { return is_invalid() && num != 0; }
 
   uint64_t hash() const;
 
@@ -121,8 +121,8 @@ public:
   [[nodiscard]] Lconst ror_op(const Lconst &o) const;
   [[nodiscard]] Lconst or_op(const Lconst &o) const;
   [[nodiscard]] Lconst and_op(const Lconst &o) const;
-  [[nodiscard]] Lconst not_op() const; // bitwise not
-  [[nodiscard]] Lconst neg_op() const; // change sign
+  [[nodiscard]] Lconst not_op() const;  // bitwise not
+  [[nodiscard]] Lconst neg_op() const;  // change sign
   [[nodiscard]] Lconst concat_op(const Lconst &o) const;
 
   [[nodiscard]] Lconst eq_op(const Lconst &o) const;

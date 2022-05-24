@@ -4,8 +4,8 @@
 
 #include <algorithm>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/container/btree_map.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "lgraph.hpp"
 #include "likely.hpp"
@@ -941,7 +941,7 @@ Node_pin Lgtuple::flatten() const {
 
   if (all_const) {
     Lconst result;
-    int i = 0;
+    int    i         = 0;
     Bits_t accu_bits = 0;
     for (auto &e : key_map) {
       if (is_attribute(e.first))
@@ -1210,7 +1210,7 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
 
     for (const auto &e : tup->get_map()) {
       std::string key{e.first};
-      auto it = key_entries.find(key);
+      auto        it = key_entries.find(key);
       if (it == key_entries.end()) {
         if (first_iter || is_attribute(key)) {
           key_entries.emplace(key, e.second);  // There can be replicates like :0:a, a, 0
@@ -1465,7 +1465,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   I(is_correct());
 
   auto [flop_root_name, first_flop] = get_flop_name(flop);
-  (void) first_flop;
+  (void)first_flop;
 
   std::shared_ptr<Lgtuple> ret_tup;
 
@@ -1478,7 +1478,7 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
   for (auto &e : key_map) {
     auto [attr, new_flop_name] = get_flop_attr_name(flop_root_name, e.first);
-    auto flop_dpin = Node_pin::find_driver_pin(lg, new_flop_name);
+    auto flop_dpin             = Node_pin::find_driver_pin(lg, new_flop_name);
 
     if (attr.empty()) {            // NON-ATTR PATH
       I(!flop_dpin.is_invalid());  // get_flop_tup ran first, so it should be there
@@ -1580,11 +1580,11 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       }
 
       if (attr == "initial") {
-      // use get_mask to get the bit that assigned to the corresponding individual flop
-        Lconst init_val = it.second.get_type_const();
-        Lconst masked_val = init_val.get_mask_op(1<<i);
+        // use get_mask to get the bit that assigned to the corresponding individual flop
+        Lconst init_val   = it.second.get_type_const();
+        Lconst masked_val = init_val.get_mask_op(1 << i);
         fmt::print("DEBUG9 init_val:{}, flop_node:{}, masked_val:{}\n", init_val, node.debug_name(), masked_val);
-        auto masked_node  = lg->create_node_const(masked_val);
+        auto masked_node = lg->create_node_const(masked_val);
         flop_spin.connect_driver(masked_node.setup_driver_pin());
       } else {
         flop_spin.connect_driver(it.second);
@@ -1594,10 +1594,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
   }
   return ret_tup;
 }
-
-
-
-
 
 std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std::string_view key) const {
   I(!is_root_attribute(key));

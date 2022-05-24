@@ -585,8 +585,8 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
       end_pos = mask.get_bits();
 
     Number num_1(1);
-    for(int i=end_pos-1;i>=0;--i) {
-      if (mask.get_num() & (num_1<<i)) {
+    for (int i = end_pos - 1; i >= 0; --i) {
+      if (mask.get_num() & (num_1 << i)) {
         new_str.push_back(orig_str[i]);
       }
     }
@@ -606,14 +606,14 @@ Lconst Lconst::get_mask_op(const Lconst &mask) const {
     res_num = get_num() >> end_pos;
   }
   if (is_negative() && get_bits() < mask_bits) {
-    res_num = (Number(1) << mask.rsh_op(end_pos).popcount())-Number(1); // ones after
+    res_num = (Number(1) << mask.rsh_op(end_pos).popcount()) - Number(1);  // ones after
   }
 
   Number num_1(1);
-  for(int i=end_pos-1;i>=0;--i) {
-    if (mask.get_num() & (num_1<<i)) {
+  for (int i = end_pos - 1; i >= 0; --i) {
+    if (mask.get_num() & (num_1 << i)) {
       res_num <<= 1;
-      if (get_num() & (num_1<<i)) {
+      if (get_num() & (num_1 << i)) {
         res_num |= 1;
       }
     }
@@ -965,9 +965,9 @@ Lconst Lconst::or_op(const Lconst &o) const {
 
 Lconst Lconst::not_op() const {
   if (unlikely(has_unknowns())) {
-    bool unsigned_result = is_negative(); // toggle sign
-    auto result = to_binary();
-    for(auto &ch:result) {
+    bool unsigned_result = is_negative();  // toggle sign
+    auto result          = to_binary();
+    for (auto &ch : result) {
       if (ch == '0')
         ch = '1';
       else if (ch == '1')
@@ -993,7 +993,7 @@ Lconst Lconst::neg_op() const {
     return Lconst(1).add_op(not_op());
   }
 
-  auto res_num = - get_num();
+  auto res_num = -get_num();
 
   return Lconst(false, calc_num_bits(res_num), res_num);
 }

@@ -46,7 +46,7 @@ public:
   void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
   void        create_declare_bits_stmts(std::string_view a_var, bool is_signed, int bits);
   void        create_func_call(std::string_view out_tup, std::string_view fname, std::string_view inp_tup);
-  void        create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string,std::string>> &rhs);
+  void        create_named_tuple(std::string_view lhs_var, const std::vector<std::pair<std::string, std::string>>& rhs);
   std::string create_tuple_get(std::string_view fields);
   std::string create_tuple_get(std::string_view tup_var, std::string_view field_var);
 

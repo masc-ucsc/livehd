@@ -163,12 +163,12 @@ public:
   }
 
 private:  // all constructor&assignment should be marked as private
-  Edge_raw()                    = default;
-  Edge_raw(const Edge_raw &rhs) = default;
-  Edge_raw(Edge_raw &&rhs)      = delete;
-  ~Edge_raw()                   = default;
+  Edge_raw()                               = default;
+  Edge_raw(const Edge_raw &rhs)            = default;
+  Edge_raw(Edge_raw &&rhs)                 = delete;
+  ~Edge_raw()                              = default;
   Edge_raw &operator=(const Edge_raw &rhs) = default;
-  Edge_raw &operator=(Edge_raw &&rhs) = delete;
+  Edge_raw &operator=(Edge_raw &&rhs)      = delete;
 };
 
 struct __attribute__((packed)) LEdge : public Edge_raw {  // 6 bytes total

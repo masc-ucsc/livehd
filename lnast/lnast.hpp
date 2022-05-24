@@ -53,14 +53,12 @@ struct Lnast_node {
   constexpr bool is_invalid() const { return type.is_invalid(); }
   void           dump() const;
 
-#define LNAST_NODE(NAME,VERBAL) \
-  CREATE_LNAST_NODE(NAME)
+#define LNAST_NODE(NAME, VERBAL) CREATE_LNAST_NODE(NAME)
 #include "lnast_nodes.def"
 
   static Lnast_node create_const(int64_t v) {
     return Lnast_node(Lnast_ntype::create_const(), State_token(0, 0, 0, 0, std::to_string(v)));
   }
-
 };
 
 class Lnast : public lh::tree<Lnast_node> {

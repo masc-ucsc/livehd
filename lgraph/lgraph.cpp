@@ -248,7 +248,7 @@ Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
     return nullptr;
 
   lg = lib->setup_lgraph(lib->get_name(lgid), lib->get_source(lgid));
-  lg->load(hif); // may fail to load
+  lg->load(hif);  // may fail to load
   return lg;
 }
 
@@ -270,7 +270,7 @@ Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
     return nullptr;
 
   lg = lib->setup_lgraph(name, lib->get_source(name));
-  lg->load(hif); // may fail to load
+  lg->load(hif);  // may fail to load
   return lg;
 }
 

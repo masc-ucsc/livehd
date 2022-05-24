@@ -7,18 +7,16 @@
 class Lnast_ntype {
 public:
   enum Lnast_ntype_int : uint8_t {
-#define LNAST_NODE(NAME, VERBAL) \
-    Lnast_ntype_##NAME,
+#define LNAST_NODE(NAME, VERBAL) Lnast_ntype_##NAME,
 #include "lnast_nodes.def"
     Lnast_ntype_last_invalid
   };
 
 protected:
   constexpr static std::array namemap{
-#define LNAST_NODE(NAME, VERBAL) \
-    #VERBAL,
+#define LNAST_NODE(NAME, VERBAL) #VERBAL,
 #include "lnast_nodes.def"
-};
+  };
 
   Lnast_ntype_int val = Lnast_ntype_int::Lnast_ntype_invalid;
 
@@ -30,7 +28,7 @@ public:
 
   [[nodiscard]] Lnast_ntype_int get_raw_ntype() const { return val; }
 
-#define LNAST_NODE(NAME, VERBAL) \
+#define LNAST_NODE(NAME, VERBAL)                                                           \
   static constexpr Lnast_ntype create_##NAME() { return Lnast_ntype(Lnast_ntype_##NAME); } \
   bool constexpr is_##NAME() const { return val == Lnast_ntype_##NAME; }
 #include "lnast_nodes.def"
@@ -71,9 +69,7 @@ public:
            && val != Lnast_ntype_ne && val != Lnast_ntype_le && val != Lnast_ntype_ge;
   }
 
-  bool constexpr is_type() const {
-    return (val >= Lnast_ntype_none_type && val <= Lnast_ntype_unknown_type);
-  }
+  bool constexpr is_type() const { return (val >= Lnast_ntype_none_type && val <= Lnast_ntype_unknown_type); }
 
   std::string_view debug_name() const { return namemap[val]; }
 
