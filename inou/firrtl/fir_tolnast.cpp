@@ -157,7 +157,7 @@ void Inou_firrtl_module::reg_init_flip_handling(Lnast& lnast, const firrtl::Firr
     }
     case firrtl::FirrtlPB_Type::kSintType: 
     case firrtl::FirrtlPB_Type::kUintType:{  
-      fmt::print("DEBUG BBB id:{}\n", id);
+      // fmt::print("DEBUG BBB id:{}\n", id);
       add_local_flip_info(false, id);
       std::replace(id.begin(), id.end(), '.', '_');
       setup_register_bits(lnast, type, absl::StrCat("#", id), parent_node);
@@ -643,7 +643,9 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
   lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lhs_full));
   lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
 
-  auto cond_str   = return_expr_str(lnast, expr.mux().condition(), parent_node, true);
+  // auto cond_str   = return_expr_str(lnast, expr.mux().condition(), parent_node, true);
+  auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
+
   auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
   lnast.add_child(idx_mux_if, Lnast_node::create_ref(cond_str));
 
@@ -672,7 +674,8 @@ void Inou_firrtl_module::handle_valid_if_assign(Lnast& lnast, const firrtl::Firr
   /* lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?")); */
   init_expr_add(lnast, expr.valid_if().value(), parent_node, lhs);
 
-  auto cond_str = return_expr_str(lnast, expr.valid_if().condition(), parent_node, true);
+  // auto cond_str = return_expr_str(lnast, expr.valid_if().condition(), parent_node, true);
+  auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.valid_if().condition());
   auto idx_v_if = lnast.add_child(parent_node, Lnast_node::create_if());
   lnast.add_child(idx_v_if, Lnast_node::create_ref(cond_str));
 
@@ -1658,6 +1661,8 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
   } else if (expr_case == firrtl::FirrtlPB_Expression::kPrimOp) {
     // this is a recursive case, use the old way
     expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
+  } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
+    expr_str = operand_expr.uint_literal().value().value();
   } else {
     expr_str_tmp = name_prefix_modifier(expr_str_tmp, true);
     std::replace(expr_str_tmp.begin(), expr_str_tmp.end(), '.', '_');
@@ -1669,7 +1674,12 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
 void Inou_firrtl_module::add_lnast_assign(Lnast& lnast, Lnast_nid &parent_node, std::string_view lhs, std::string_view rhs) {
   Lnast_nid idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg, Lnast_node::create_ref(lhs));
-  lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
+  auto first_char = rhs[0];
+  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+    lnast.add_child(idx_asg, Lnast_node::create_const(rhs));
+  } else {
+    lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
+  }
 }
 
 /* This function is used when I need the string to access something.
@@ -1959,6 +1969,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     case firrtl::FirrtlPB_Statement::kNode: {  // Node -- nodes are simply named intermediates in a circuit
+      add_local_flip_info(false, stmt.node().id());
       init_expr_add(lnast, stmt.node().expression(), parent_node, stmt.node().id());
       break;
     }
@@ -2047,10 +2058,9 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // (4) no need to check flipness as you already know who is the module-output and who is the module-input, 
       //     it must be %foo.a <- $bar.a, which also means you don't need to grep info from the var2flip table!
       if (tup_head_l == tup_head_r) {
-        // TODO:
         fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
-        I (output_names.find(hier_name_l) != output_names.end());
-        I (input_names.find(hier_name_r) != input_names.end());
+        // I (output_names.find(hier_name_l) != output_names.end());
+        // I (input_names.find(hier_name_r) != input_names.end());
         hier_name_l = absl::StrCat("%", hier_name_l);
         hier_name_r = absl::StrCat("$", hier_name_r);
         std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
@@ -2082,8 +2092,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
 
       for (const auto &it : *tup_l_sets) {
         if (std::get<0>(it).find(hier_name_l) != std::string::npos) {
-          fmt::print("DDD hier_name_l:{}\n", hier_name_l);
-          // fmt::print("DEBUG2, hier_name_l:{}, hier_name_r:{}, lhs_leaf_name:{}\n", hier_name_l, hier_name_r, std::get<0>(it));
           tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
         }
       }
@@ -2358,7 +2366,7 @@ void Inou_firrtl::add_port_sub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_p
 
 void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view id) {
   auto found = id.find_first_of('.');
-  // case-I: scalar flop or scalar wire
+  // case-I: scalar flop or scalar wire or firrtl node
   if (found == std::string::npos) {
     auto tuple = std::tuple(std::string(id), flipped_in, 2);
     I(var2flip.find(id) == var2flip.end());
@@ -2387,17 +2395,25 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view i
 
 void Inou_firrtl::add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir) {
   auto found = port_id.find_first_of('.');
-  if (found != std::string::npos) {
-    auto lnast_tupname = port_id.substr(0, found); 
+  if (found == std::string::npos) {
     auto tuple = std::tuple(std::string(port_id), flipped_in, dir);
-    auto set_itr = glob_info.var2flip[mod_id].find(lnast_tupname);
-    if (set_itr == glob_info.var2flip[mod_id].end()) {
-      auto new_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
-      new_set.insert(tuple);
-      glob_info.var2flip[mod_id].insert_or_assign(lnast_tupname, new_set);
-    } else {
-      set_itr->second.insert(tuple);
-    }
+    auto new_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
+
+    // I(glob_info.var2flip[mod_id].find(port_id) == glob_info.var2flip[mod_id].end());
+    new_set.insert(tuple);
+    glob_info.var2flip[mod_id].insert_or_assign(port_id, new_set);
+    return;
+  }
+
+  auto lnast_tupname = port_id.substr(0, found); 
+  auto tuple = std::tuple(std::string(port_id), flipped_in, dir);
+  auto set_itr = glob_info.var2flip[mod_id].find(lnast_tupname);
+  if (set_itr == glob_info.var2flip[mod_id].end()) {
+    auto new_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
+    new_set.insert(tuple);
+    glob_info.var2flip[mod_id].insert_or_assign(lnast_tupname, new_set);
+  } else {
+    set_itr->second.insert(tuple);
   }
 }
 

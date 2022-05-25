@@ -1331,6 +1331,7 @@ void Lnast_tolg::process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx
     }
     if (i == 1) {  // func_name
       auto fir_func_name = lnast->get_vname(child);
+      fmt::print("DEBUG EEE fir_func_name:{}\n", fir_func_name);
       fc_node            = setup_node_opr_and_lhs(lg, lnidx_fc, fir_func_name);
       ++i;
       continue;
