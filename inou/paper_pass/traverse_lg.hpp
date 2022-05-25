@@ -14,7 +14,7 @@
 #include "absl/container/flat_hash_set.h"
 
 /*define only 1 of these:*/
-//#define DEBUG //print everything
+#define DEBUG //print everything
 //#define KEEP_DUP //use vector
 #define DE_DUP //use set 
 

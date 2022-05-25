@@ -77,6 +77,7 @@ void Traverse_lg::do_travers(Lgraph* lg) {
     if (node.has_inputs()){
     ofs<<"INPUTS:\n";
       for (const auto& indr : node.inp_drivers()) {
+        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
         //auto inp_node = indr.get_node();
         get_input_node(indr, ofs);
       }
@@ -105,8 +106,9 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
       ofs<<node_pin.get_pin_name()<<std::endl;
     } else {
       ofs<<node.get_type_name();
-      if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
+      //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+      //else 
+      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
       ofs<<std::endl;
     }
     return;
@@ -125,8 +127,9 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
       ofs<<node_pin.get_pin_name()<<std::endl;
     } else {
       ofs<<node.get_type_name();
-      if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      else if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
+      //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+      //else 
+      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
       ofs<<std::endl;
     }
     return;
@@ -152,6 +155,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::vecMap &nodeIOmap) {
     
     if (node.has_inputs()){
       for (const auto& indr : node.inp_drivers()) {
+        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
         //auto inp_node = indr.get_node();
         get_input_node(indr, in_vec);
       }
@@ -206,11 +210,12 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::vector<std::stri
       in_vec.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
       std::string temp_str (node.get_type_name());
-      if(node.is_type_const()){ 
-        temp_str+=":"; 
-        temp_str+=node.get_type_const().to_pyrope();
-      }
-      else if(node.is_type_flop()){ 
+      //if(node.is_type_const()){ 
+      //  temp_str+=":"; 
+      //  temp_str+=node.get_type_const().to_pyrope();
+      //}
+      //else 
+      if(node.is_type_flop()){ 
         temp_str+=":";
         temp_str+=node_pin.get_pin_name();
         temp_str+="->";
@@ -238,11 +243,12 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
       out_vec.emplace_back(node_pin.get_pin_name());
     } else {
       std::string temp_str(node.get_type_name());
-      if(node.is_type_const()){ 
-        temp_str+=":"; 
-        temp_str+=node.get_type_const().to_pyrope();
-      }
-      else if(node.is_type_flop()){ 
+      //if(node.is_type_const()){ 
+      //  temp_str+=":"; 
+      //  temp_str+=node.get_type_const().to_pyrope();
+      //}
+      //else 
+      if(node.is_type_flop()){ 
         temp_str+=":";
         temp_str+=node_pin.get_pin_name();
         temp_str+="->";
@@ -278,6 +284,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap &nodeIOmap) {
     if (node.has_inputs()){
       for (const auto& indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
+        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
         get_input_node(indr, in_set);
       }
     }
@@ -330,11 +337,12 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::flat_hash_set<s
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
       std::string temp_str (node.get_type_name());
-      if(node.is_type_const()){ 
-        temp_str+=":"; 
-        temp_str+=node.get_type_const().to_pyrope();
-      }
-      else if(node.is_type_flop()){ 
+      //if(node.is_type_const()){ 
+      //  temp_str+=":"; 
+      //  temp_str+=node.get_type_const().to_pyrope();
+      //}
+      //else 
+      if(node.is_type_flop()){ 
         temp_str+=":";
         temp_str+=node_pin.get_pin_name();
         temp_str+="->";
@@ -362,11 +370,12 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::flat_hash_set<
       out_set.insert(node_pin.get_pin_name());
     } else {
       std::string temp_str(node.get_type_name());
-      if(node.is_type_const()){ 
-        temp_str+=":"; 
-        temp_str+=node.get_type_const().to_pyrope();
-      }
-      else if(node.is_type_flop()){ 
+      //if(node.is_type_const()){ 
+      //  temp_str+=":"; 
+      //  temp_str+=node.get_type_const().to_pyrope();
+      //}
+      //else 
+      if(node.is_type_flop()){ 
         temp_str+=":";
         temp_str+=node_pin.get_pin_name();
         temp_str+="->";
