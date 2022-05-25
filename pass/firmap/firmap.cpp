@@ -587,6 +587,7 @@ void Firmap::map_node_fir_dshr(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
 }
 
 void Firmap::map_node_fir_dshl(Node &old_node, Lgraph *new_lg, PinMap &pinmap) {
+  // FIXME->sh: the dshl are not follow firrtl spec, potential bugs!!!
   auto new_node_shl = new_lg->create_node(Ntype_op::SHL);
   for (auto old_spin : old_node.inp_connected_pins()) {
     if (old_spin == old_node.setup_sink_pin("e1")) {

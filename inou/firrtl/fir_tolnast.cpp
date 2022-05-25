@@ -1527,7 +1527,6 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
       // pre-defined circuit component (not ___tmp variable)
 
       auto it = is_invalid_table.find(lhs_str);
-
       if (it != is_invalid_table.end()) {  // lhs is declared as invalid before
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
@@ -1537,13 +1536,13 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
         auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
-
       } else {
         Lnast_nid idx_asg;
-        if(from_mux)
+        if(from_mux) {
           idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-        else 
+        } else {
           idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+        } 
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
       }
@@ -1662,7 +1661,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
     // this is a recursive case, use the old way
     expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
   } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
-    expr_str = operand_expr.uint_literal().value().value();
+    expr_str = absl::StrCat(operand_expr.uint_literal().value().value(), "ubits", operand_expr.uint_literal().width().value());
   } else {
     expr_str_tmp = name_prefix_modifier(expr_str_tmp, true);
     std::replace(expr_str_tmp.begin(), expr_str_tmp.end(), '.', '_');
@@ -1920,7 +1919,16 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
     lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
+  } else if (lhs_full_name.at(0) == '_') { // lhs is declared as kNode
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
+  } else if (lhs_full_name.at(0) == '#') {
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+    lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
+    lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
   } else {
+    // FIXME->sh: potential problem to not use dp_assign here when firrtl connection has a bitwidth mismatch from lhs/rhs ...
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
     lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
@@ -2058,7 +2066,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // (4) no need to check flipness as you already know who is the module-output and who is the module-input, 
       //     it must be %foo.a <- $bar.a, which also means you don't need to grep info from the var2flip table!
       if (tup_head_l == tup_head_r) {
-        fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        // fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         // I (output_names.find(hier_name_l) != output_names.end());
         // I (input_names.find(hier_name_r) != input_names.end());
         hier_name_l = absl::StrCat("%", hier_name_l);
