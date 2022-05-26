@@ -16,6 +16,6 @@ module SubModule(
     .io_a(submodule_inst_io_a),
     .io_b(submodule_inst_io_b)
   );
-  assign io_out = submodule_inst_io_b; // @[SubModule.scala 20:10]
-  assign submodule_inst_io_a = io_inp; // @[SubModule.scala 19:23]
+  assign io_out = submodule_inst_io_b;
+  assign submodule_inst_io_a = io_inp;
 endmodule

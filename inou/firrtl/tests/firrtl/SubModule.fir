@@ -16,5 +16,8 @@ circuit SubModule :
     inst submodule_inst of SubModuleSubMod @[SubModule.scala 18:30]
     submodule_inst.clock <= clock
     submodule_inst.reset <= reset
-    submodule_inst.io.a <= io.inp @[SubModule.scala 19:23]
-    io.out <= submodule_inst.io.b @[SubModule.scala 20:10]
+
+    wire _T : {flip inp : UInt<4>, out : UInt<4>}
+    io <= _T
+    submodule_inst.io.a <= _T.inp
+    _T.out <= submodule_inst.io.b @[SubModule.scala 20:10]
