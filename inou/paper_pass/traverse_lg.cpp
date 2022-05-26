@@ -197,7 +197,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::vecMap &nodeIOmap) {
     for (auto& op:ioPair.second) {
       fmt::print("{}\t", op);
     }
-    fmt::print("\n");
+    fmt::print("\n\n\n");
   }
 
 }
@@ -325,7 +325,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap &nodeIOmap) {
     for (auto& op:ioPair.second) {
       fmt::print("{}\t", op);
     }
-    fmt::print("\n");
+    fmt::print("\n\n\n");
   }
 
 }
