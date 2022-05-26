@@ -1798,7 +1798,6 @@ void Cprop::reconnect_tuple_add(Node &node) {
       auto field = pos_dpin.get_type_const().to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
-          fmt::print("DEBUG10 turn to AttrSet: node:{}\n", node.debug_name());
           node.set_type(Ntype_op::AttrSet);
         }
       }
@@ -1836,7 +1835,6 @@ void Cprop::reconnect_tuple_add(Node &node) {
                || (sink_type == Ntype_op::SHL && e.sink.get_pid())  // SHL handles tuples at B (not a)
               ) {
       // do nothing
-      fmt::print("DEBUG9: node:{}\n", node.debug_name());
     } else {
       pending_out_edges.emplace_back(e);
     }
