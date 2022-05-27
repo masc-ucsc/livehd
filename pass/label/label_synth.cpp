@@ -149,7 +149,7 @@ void Label_synth::dump(Lgraph *g) const {
   for (auto &it : flat_merges) {
     fmt::print("{} -> {}\n", it.first, it.second);
   }
-  
+
   fmt::print("=== flat_node2id ===\n");
   for (auto &it : flat_node2id) {
     Node node(g, it.first);
@@ -166,16 +166,14 @@ void Label_synth::label(Lgraph *g) {
   merge_ids();
 
   if (hier) {
-    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { 
-      lg->ref_node_color_map()->clear(); 
-    });
+    g->each_hier_unique_sub_bottom_up([](Lgraph *lg) { lg->ref_node_color_map()->clear(); });
   }
   g->ref_node_color_map()->clear();
 
   for (auto n : g->fast(hier)) {
     auto nc = n.get_compact();
     if (flat_node2id.find(nc) != flat_node2id.end()) {
-      n.set_color(flat_node2id[nc]); 
+      n.set_color(flat_node2id[nc]);
     } else {
       n.set_color(NO_COLOR);
     }
@@ -188,5 +186,6 @@ void Label_synth::label(Lgraph *g) {
   }
   */
 
-  if (verbose) dump(g);
+  if (verbose)
+    dump(g);
 }

@@ -20,9 +20,9 @@ private:
   int last_free_id;
   int collapse_set_min;
 
-  absl::flat_hash_set<int>                     collapse_set;
-  absl::flat_hash_map<Node::Compact, int>      flat_node2id;
-  absl::flat_hash_map<int, int>                flat_merges;
+  absl::flat_hash_set<int>                collapse_set;
+  absl::flat_hash_map<Node::Compact, int> flat_node2id;
+  absl::flat_hash_map<int, int>           flat_merges;
 
   int  get_free_id();
   void set_id(const Node &node, int id);

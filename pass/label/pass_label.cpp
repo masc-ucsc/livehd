@@ -53,12 +53,12 @@ void Pass_label::label_mincut(Eprp_var &var) {
 
   auto iters_str = var.get("iters");
   auto iters     = str_tools::to_i(iters_str);
-  
+
   auto seed_str = var.get("seed");
   auto seed     = str_tools::to_i(seed_str);
-  
+
   auto alg_txt = var.get("alg");
-  
+
   Label_mincut p(pp.verbose, pp.hier, iters, seed, alg_txt);
 
   for (const auto &l : var.lgs) {
