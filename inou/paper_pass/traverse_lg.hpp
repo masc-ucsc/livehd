@@ -25,6 +25,7 @@ public:
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
 private:
+  absl::node_hash_map<Node::Compact_flat , std::vector<Node::Compact_flat> > print_map;
 /*
 #ifdef KEEP_DUP
   vecMap nodeIOmap;

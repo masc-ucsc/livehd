@@ -43,7 +43,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   //Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
   p.do_travers(var.lgs.back(), map_post_synth);//synth LG
- // p.do_travers(var.lgs.front(), map_post_synth);//original LG (pre-syn LG)
+  p.do_travers(var.lgs.front(), map_post_synth);//original LG (pre-syn LG)
 #endif
 
 #ifdef DEBUG
@@ -273,6 +273,10 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
 //DE_DUP
 void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap) {
 
+  bool do_matching=false;
+  if (!nodeIOmap.empty()) {
+    do_matching=true;
+  }
   for (const auto& node : lg->forward()) {
     absl::btree_set<std::string> in_set;
     absl::btree_set<std::string> out_set;
@@ -325,36 +329,60 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
       continue;//do not keep such nodes in nodeIOmap
     }
-    //insert in map
-    const auto& nodeid = node.get_compact_flat();
-    std::vector<Node::Compact_flat> tmpVec;
-    if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-      tmpVec.assign((nodeIOmap[std::make_pair(in_set, out_set)]).begin() , (nodeIOmap[std::make_pair(in_set, out_set)]).end() );
-      tmpVec.emplace_back(nodeid);
-    } else {
-      tmpVec.emplace_back(nodeid);
+    
+    if(!do_matching) {
+      //insert in map
+      const auto& nodeid = node.get_compact_flat();
+      std::vector<Node::Compact_flat> tmpVec;
+      if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
+        tmpVec.assign((nodeIOmap[std::make_pair(in_set, out_set)]).begin() , (nodeIOmap[std::make_pair(in_set, out_set)]).end() );
+        tmpVec.emplace_back(nodeid);
+      } else {
+        tmpVec.emplace_back(nodeid);
+      }
+      nodeIOmap[std::make_pair(in_set,out_set)] = tmpVec;//FIXME: make hash of set and change datatype accordingly
     }
-    nodeIOmap[std::make_pair(in_set,out_set)] = tmpVec;//FIXME: make hash of set and change datatype accordingly
+
+    if(do_matching) {
+      if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
+        print_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];
+      }
+
+    }
+
   }//enf of for lg-> traversal
 
-  I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
-  //print the map
-  fmt::print("\n\nMAP FORMED IS:\n");
-  for(auto& [ioPair, n_list]: nodeIOmap) {
-    for (auto& ip: ioPair.first) {
-      fmt::print("{}\t",ip);
+  if(!do_matching) {
+    I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
+    //print the map
+    fmt::print("\n\nMAP FORMED IS:\n");
+    for(auto& [ioPair, n_list]: nodeIOmap) {
+      for (auto& ip: ioPair.first) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("||| \t");
+      for (auto& op:ioPair.second) {
+        fmt::print("{}\t", op);
+      }
+      fmt::print("::: \t");
+      for (auto& n:n_list) {
+        fmt::print("{}\t", n.get_nid());
+      }
+      fmt::print("\n");
     }
-    fmt::print("||| \t");
-    for (auto& op:ioPair.second) {
-      fmt::print("{}\t", op);
+    fmt::print("\n\n\n");
+  } else {
+    fmt::print("\n\nPRINT_MAP (matching done is):\n");
+    for(auto& [k, n_list]: print_map) {
+      fmt::print("{}\t", k.get_nid());
+      fmt::print("::: \t");
+      for (auto& n:n_list) {
+        fmt::print("{}\t", n.get_nid());
+      }
+      fmt::print("\n");
     }
-    fmt::print("::: \t");
-    for (auto& n:n_list) {
-      fmt::print("{}\t", n.get_nid());
-    }
-    fmt::print("\n");
+    fmt::print("\n\n\n");
   }
-  fmt::print("\n\n\n");
 
 }
 
