@@ -11,10 +11,10 @@
 #include "node.hpp"
 #include "pass.hpp"
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
+#include "absl/container/btree_set.h"
 
 /*define only 1 of these:*/
-#define DEBUG //print everything
+//#define DEBUG //print everything
 //#define KEEP_DUP //use vector
 #define DE_DUP //use set 
 
@@ -22,7 +22,8 @@
 class Traverse_lg : public Pass {
 public:
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::vector<std::string>, std::vector<std::string>>> vecMap;
-  typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::flat_hash_set<std::string>, absl::flat_hash_set<std::string>>> setMap;
+  typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> setMap_nodeKey;
+  typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
 private:
 /*
 #ifdef KEEP_DUP
@@ -42,9 +43,9 @@ protected:
   void get_input_node(const Node_pin &pin, std::vector<std::string>& in_vec);
   void get_output_node(const Node_pin &pin, std::vector<std::string>& out_vec);
   //FOR SET PART:
-  void do_travers(Lgraph* g, Traverse_lg::setMap &nodeIOmap);
-  void get_input_node(const Node_pin &pin, absl::flat_hash_set<std::string>& in_set);
-  void get_output_node(const Node_pin &pin, absl::flat_hash_set<std::string>& out_set);
+  void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
+  void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
+  void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
 
 public:
   static void travers(Eprp_var& var);
