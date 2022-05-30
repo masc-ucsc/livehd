@@ -121,7 +121,6 @@ cc_library(
     # "VecShiftRegisterParam",
     # "VecShiftRegister",
     # "BundleConnect",
-    # "SubModule",
     # "SingleEvenFilter",
     # "Xor6Thread2",
     # "XorSelfThread1",
@@ -187,6 +186,7 @@ cc_library(
     # "ClockGroupAggregator",
     # "IntSyncSyncCrossingSink"
     "AMOALU",
+    # "SubModule",
     # "Arbiter_10",
     # "DebugCustomXbar",
     # "MaxPeriodFibonacciLFSR",

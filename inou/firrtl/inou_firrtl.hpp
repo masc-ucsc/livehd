@@ -25,8 +25,8 @@
 #include "pass.hpp"
 
 struct Global_module_info {
-  absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t>                          mod_to_io_dir_map;
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> emod_to_param_map;
+  absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t>                          module2io_dir;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
   
   // module_name to io_name to leaf_hierarchical_field_name's flip polarity(1st bool) and direction (3rd uint8).
   // FIXME->sh: check and remove the third directional field if redundant 
@@ -215,11 +215,13 @@ protected:
   std::string flatten_expression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
   void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped);
 
+  bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
+  bool check_flipness(Lnast& lnast, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
+
   void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
                              const Lnast_node &value_node);
   void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node);
   void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &dest_node, bool is_last_value_attr = false);
-  void create_attr_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &dest_node);
   void create_default_value_for_scalar_var(Lnast &ln, Lnast_nid &parent_node, std::string_view sv, const Lnast_node &value_node);
 
   void init_cmemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
@@ -260,10 +262,7 @@ private:
   // Maps a register name to its q_pin
   absl::flat_hash_map<std::string, std::string> reg2qpin;
   // Maps an instance name to the module name.
-  absl::flat_hash_map<std::string, std::string> inst_to_mod_map;
-  /* Used when a submodule inst is created, have to specify bw of all IO in module.
-     Maps module name to list of tuples of (signal name + signal biwdith + signal dir + sign). */
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint32_t, uint8_t, bool>>> mod_to_io_map;
+  absl::flat_hash_map<std::string, std::string> inst2module;
 
   // FIXME->sh: check and remove the third directional field if redundant 
   absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;

@@ -157,7 +157,6 @@ void Inou_firrtl_module::reg_init_flip_handling(Lnast& lnast, const firrtl::Firr
     }
     case firrtl::FirrtlPB_Type::kSintType: 
     case firrtl::FirrtlPB_Type::kUintType:{  
-      // fmt::print("DEBUG BBB id:{}\n", id);
       add_local_flip_info(false, id);
       std::replace(id.begin(), id.end(), '.', '_');
       setup_register_bits(lnast, type, absl::StrCat("#", id), parent_node);
@@ -179,8 +178,6 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       auto& btype = type.bundle_type();
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        // auto concat_wire_id = absl::StrCat(id, ".", btype.field(i).id());
-        // auto tup_name = concat_wire_id.substr(0, concat_wire_id.find_first_of('.')); 
         if (btype.field(i).is_flipped()) {
           wire_init_flip_handling(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), !flipped_in, parent_node);
         } else {
@@ -203,14 +200,8 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
       add_local_flip_info(flipped_in, id);
       std::replace(id.begin(), id.end(), '.', '_');
       Lnast_node zero_node = Lnast_node::create_const(0);
-      // create_tuple_add_from_str(lnast, parent_node, id, zero_node);
       create_default_value_for_scalar_var(lnast, parent_node, id, zero_node);
 
-
-      // auto wire_bits = get_bit_count(type);
-      // create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
-      // FIXME: handle it when encountered
-      // async_rst_names.insert(id);
       break;
     }
     case firrtl::FirrtlPB_Type::kSintType: {  // signed
@@ -614,12 +605,12 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
 
   /* Also, I need to record this module instance in
    * a map that maps instance name to module name. */
-  inst_to_mod_map[inst.id()] = inst.module_id();
+  inst2module[inst.id()] = inst.module_id();
 
   // If any parameters exist (for ext module), specify those.
   // NOTE->hunter: We currently specify parameters the same way as inputs.
   // FIXME->sh: we should think about another mechanism instead of create fake input (io connection issue later) ?
-  // for (const auto& param : Inou_firrtl::glob_info.emod_to_param_map[inst.module_id()]) {
+  // for (const auto& param : Inou_firrtl::glob_info.ext_module2param[inst.module_id()]) {
   //   auto idx_dot_p = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
   //   if (isdigit(param.second[0])) {
   //     lnast.add_child(idx_dot_p, Lnast_node::create_const(param.second));
@@ -962,7 +953,7 @@ void Inou_firrtl_module::handle_bundle_vec_acc(Lnast& lnast, const firrtl::Firrt
       create_tuple_add_from_str(lnast, parent_node, flattened_str, value_node);
     }
     return;
-  } else if (inst_to_mod_map.count(alter_full_str.substr(0, alter_full_str.find('.')))) {
+  } else if (inst2module.count(alter_full_str.substr(0, alter_full_str.find('.')))) {
     // note: instead of using alter_full_str, I use flattened_str.
     auto inst_name = flattened_str.substr(0, flattened_str.find('.'));
     if (inst_name.substr(0, 2) == "_T")
@@ -978,8 +969,8 @@ void Inou_firrtl_module::handle_bundle_vec_acc(Lnast& lnast, const firrtl::Firrt
       is_hier_io              = true;
     }
 
-    auto module_name = inst_to_mod_map[inst_name];
-    auto dir         = Inou_firrtl::glob_info.mod_to_io_dir_map[std::pair(module_name, str_without_inst)];
+    auto module_name = inst2module[inst_name];
+    auto dir         = Inou_firrtl::glob_info.module2io_dir[std::pair(module_name, str_without_inst)];
 
     if (is_hier_io) {
       if (dir == 1) {  // PORT_DIRECTION_IN
@@ -1162,49 +1153,6 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
 }
 
 
-void Inou_firrtl_module::create_attr_get_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name,
-                                                   const Lnast_node& dest_node) {
-  I(str_tools::contains(full_name, '.'));
-  I(!dest_node.is_invalid());
-
-  // lh::Tree_index selc_node;
-  auto temp_var_name = create_tmp_var();
-  auto tg_dest_node = Lnast_node::create_ref(temp_var_name);
-  
-  auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
-  ln.add_child(selc_node, tg_dest_node);
-
-  std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> hier_subnames;
-  split_hier_name(full_name, hier_subnames);
-
-  for (const auto &subname : hier_subnames) {
-    std::string_view field_name = subname.first;
-    if (inst_to_mod_map.count(subname.first)) {
-      field_name = absl::StrCat("otup_", field_name);
-    }
-
-    switch (subname.second) {
-      case Leaf_type::Ref: {
-        ln.add_child(selc_node, Lnast_node::create_ref(field_name));
-        break;
-      }
-      case Leaf_type::Const_num:
-      case Leaf_type::Const_str: {
-        ln.add_child(selc_node, Lnast_node::create_const(field_name));
-        break;
-      }
-      default: Pass::error("Unknown port type.");
-    }
-  }
-
-  auto attr_get_node = ln.add_child(parent_node, Lnast_node::create_attr_get());
-  ln.add_child(attr_get_node, dest_node);
-  ln.add_child(attr_get_node, tg_dest_node);
-  ln.add_child(attr_get_node, Lnast_node::create_const("__last_value"));
-
-}
-
-
 // note: Given a string with "."s and "["s in it, this
 // function will be able to deconstruct it into
 // DOT and SELECT nodes in an LNAST.
@@ -1227,8 +1175,8 @@ void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_
   split_hier_name(full_name, hier_subnames);
 
   for (const auto &subname : hier_subnames) {
-    std::string_view field_name = subname.first;
-    if (inst_to_mod_map.count(subname.first)) {
+    auto field_name = subname.first;
+    if (inst2module.count(subname.first)) {
       field_name = absl::StrCat("otup_", field_name);
     }
 
@@ -1259,7 +1207,7 @@ void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_
   
   for (const auto &subname : hier_subnames) {
     std::string field_name = subname.first;
-    if (inst_to_mod_map.count(subname.first)) {
+    if (inst2module.count(subname.first)) {
       field_name = absl::StrCat("itup_", field_name);
     }
     switch (subname.second) {
@@ -1649,7 +1597,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
     auto pos = expr_str_tmp.find_first_of('.');
     if (pos != std::string::npos) {
       auto head = expr_str_tmp.substr(0, pos);
-      if (inst_to_mod_map.count(head)) { 
+      if (inst2module.count(head)) { 
         // use the old way, which should return the lhs of an TG
         expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
       } else {
@@ -1896,23 +1844,29 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
 
   auto lhs_full_name = absl::StrCat(hier_name_l, chop_head_flattened_element);
   auto rhs_full_name = absl::StrCat(hier_name_r, chop_head_flattened_element);
-  fmt::print("DEBUG DDD, lhs_full_name:{}, rhs_full_name:{}\n\n", lhs_full_name, rhs_full_name);
+  fmt::print("DEBUG EEE, lhs_full_name:{}, rhs_full_name:{}\n\n", lhs_full_name, rhs_full_name);
 
   std::string rhs_wire_name;
-  if (is_flipped) {
-    auto pos = rhs_full_name.find('.');
-    if (pos != std::string::npos) 
-      rhs_wire_name = rhs_full_name.substr(0, pos);
-  }
-  // fmt::print("DEBUG6, is_flipped:{}, rhs_wire_name:{}\n", is_flipped, rhs_wire_name);
+  // if (is_flipped) {
+  //   auto pos = rhs_full_name.find('.');
+  //   if (pos != std::string::npos) 
+  //     rhs_wire_name = rhs_full_name.substr(0, pos);
+  // }
+  auto pos = rhs_full_name.find('.');
+  if (pos != std::string::npos) 
+    rhs_wire_name = rhs_full_name.substr(0, pos);
+
+  fmt::print("DEBUG6, is_flipped:{}, rhs_wire_name:{}\n", is_flipped, rhs_wire_name);
 
   std::replace(lhs_full_name.begin(), lhs_full_name.end(), '.', '_');
   std::replace(rhs_full_name.begin(), rhs_full_name.end(), '.', '_');
+  fmt::print("DEBUG7, is_flipped:{}, rhs_full_name:{}\n", is_flipped, rhs_full_name);
 
 
   auto it = wire_names.find(rhs_wire_name);
   bool rhs_is_wire_var = it != wire_names.end();
-  if (is_flipped && rhs_is_wire_var) {
+  // if (is_flipped && rhs_is_wire_var) {
+  if (rhs_is_wire_var) {
     auto temp_var_name = create_tmp_var();
     auto attr_get_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
     lnast.add_child(attr_get_node, Lnast_node::create_ref(temp_var_name));
@@ -2029,23 +1983,27 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       std::string hier_name_r  = flatten_expr_hier_name(rhs_expr);
 
 
-      // the rhs is a component w/o names, such as validif, primitive_op, unsigned integers, and mux
-      // in this case, the hier_name_l must already a leaf in the hierarchy, and must be non-flipped.
-      // we could safely create a simple lnast assignment.
+      // case-I: the rhs is a component w/o names, such as validif, primitive_op,
+      // unsigned integers, and mux in this case, the hier_name_l must already
+      // a leaf in the hierarchy, and must be non-flipped. We could safely
+      // create a simple lnast assignment.
       if (hier_name_r.empty()) {
         if (output_names.find(hier_name_l) != output_names.end()) {
           hier_name_l = absl::StrCat("%", hier_name_l);
         }
         std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
         init_expr_add(lnast, rhs_expr, parent_node, hier_name_l);
-        break;
+        return;
       }
       
       
-      // this is the case that the "combinational" connection involves a node, then no need to worry about flipness, 
-      // also no need to worry about flattened hierarchical connection as kNode must be a scalar
-      bool c0 = node_names.find(hier_name_l) != node_names.end() || node_names.find(hier_name_r) != node_names.end();
-      bool c1 = reg2qpin.find(hier_name_l) == reg2qpin.end() && reg2qpin.find(hier_name_r) == reg2qpin.end();
+      // case-II: "combinational" connection that involves a node, no need to
+      // worry about flipness, also no need to worry about flattened
+      // hierarchical connection as kNode must be a scalar
+      bool c0 = node_names.find(hier_name_l) != node_names.end() || 
+                node_names.find(hier_name_r) != node_names.end();
+      bool c1 = reg2qpin.find(hier_name_l) == reg2qpin.end() && 
+                reg2qpin.find(hier_name_r) == reg2qpin.end();
       if (c0 && c1) {
         hier_name_l = name_prefix_modifier(hier_name_l, false);
         hier_name_r = name_prefix_modifier(hier_name_r, true);
@@ -2053,13 +2011,13 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         std::replace(hier_name_r.begin(), hier_name_r.end(), '.', '_');
         I(hier_name_l.at(0) != '#');
         add_lnast_assign(lnast, parent_node, hier_name_l, hier_name_r);
-        break;
+        return;
       }
 
-      // find head of the tuple name so you know entry for the var2flip table
+      // note: get head of the tuple name so you know entry for the var2flip table
       auto found_l = hier_name_l.find_first_of('.');
-      std::string tup_head_l;
-      std::string tup_rest_l;
+      std::string tup_head_l, tup_head_r;
+      std::string tup_rest_l, tup_rest_r;
       if (found_l != std::string::npos) {
         tup_head_l = hier_name_l.substr(0, found_l);
         tup_rest_l = hier_name_l.substr(found_l + 1);
@@ -2068,26 +2026,62 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       }
 
       auto found_r = hier_name_r.find_first_of('.');
-      std::string tup_head_r;
-      std::string tup_rest_r;
       if (found_r != std::string::npos) {
         tup_head_r = hier_name_r.substr(0, found_r);
         tup_rest_r = hier_name_r.substr(found_r + 1);
       } else {
         tup_head_r = hier_name_r;
       }
+
+
+      // case-III: submodule instantiation IO connection     
+      
+      bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
+      bool is_sub_out_connection = inst2module.find(tup_head_r) != inst2module.end();
+      
+      if (is_sub_inp_connection) {
+        // bool lhs_is_flipped = check_flipness(lnast, tup_head_l, hier_name_l, true);
+        // if(!lhs_is_flipped) {
+        fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        hier_name_r = name_prefix_modifier(hier_name_r, true);
+        std::replace(hier_name_r.begin(), hier_name_r.end(), '.', '_');
+        auto value_node = Lnast_node::create_ref(hier_name_r);
+        create_tuple_add_from_str(lnast, parent_node, hier_name_l, value_node);
+        // } else {
+          // hier_name_l.swap(hier_name_r);
+          // hier_name_l = name_prefix_modifier(hier_name_l, false);
+          // std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
+          // fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+          // auto dest_node = Lnast_node::create_ref(hier_name_l);
+          // create_tuple_get_from_str(lnast, parent_node, hier_name_r, dest_node);
+        // }
+        return;
+      }
+
+      if (is_sub_out_connection) {
+          hier_name_l = name_prefix_modifier(hier_name_l, false);
+          std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
+          fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+          auto dest_node = Lnast_node::create_ref(hier_name_l);
+          create_tuple_get_from_str(lnast, parent_node, hier_name_r, dest_node);
+        return;
+      }
+
        
-      // case-I: this is the case that lhs == module_output && rhs == module_input
+      // case-IV: lhs == module_output && rhs == module_input
       // Pseudo Algorithm:
       // (1) get the tup_l_sets
-      // (2) get all the flattened fields, and base on that to get the corresponding flattened io
-      // (3) check the leaf fields, if the leaf_field_name matched from both flattened input and output, connect them together
-      // (4) no need to check flipness as you already know who is the module-output and who is the module-input, 
-      //     it must be %foo.a <- $bar.a, which also means you don't need to grep info from the var2flip table!
+      // (2) get all the flattened fields, and base on that to get the
+      //     corresponding flattened io
+      // (3) check the leaf fields, if the leaf_field_name matched from both
+      //     flattened input and output, connect them together
+      // (4) no need to check flipness as you already know who is the
+      //     module-output and who is the module-input, it must be %foo.a <-
+      //     $bar.a, which also means you don't need to grep info from the var2flip
+      //     table!
         
-      bool not_a_register = reg2qpin.find(tup_head_l) == reg2qpin.end(); // some cases has syntax: #foo <= #foo
+      bool not_a_register = reg2qpin.find(tup_head_l) == reg2qpin.end(); // syntax example: #foo <= #foo
       if (tup_head_l == tup_head_r && not_a_register) {
-        // fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         // I (output_names.find(hier_name_l) != output_names.end());
         // I (input_names.find(hier_name_r) != input_names.end());
         hier_name_l = absl::StrCat("%", hier_name_l);
@@ -2095,25 +2089,19 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
         std::replace(hier_name_r.begin(), hier_name_r.end(), '.', '_');
         add_lnast_assign(lnast, parent_node, hier_name_l, hier_name_r);
-        break;
+        return;
       }
       
-      // TODO: handle submodule connection here     
-      bool is_submodule_connection = inst_to_mod_map.find(tup_head_l) != inst_to_mod_map.end() ||
-                                     inst_to_mod_map.find(tup_head_r) != inst_to_mod_map.end();
-      if (is_submodule_connection) {
-        I(false);
-      }
 
 #ifndef NDEBUG
       if (hier_name_l.find_first_of('.') != std::string::npos && hier_name_r.find_first_of('.') != std::string::npos)
         I(hier_name_l.substr(hier_name_l.find_first_of('.')) == hier_name_r.substr(hier_name_r.find_first_of('.')));
 #endif
 
-      fmt::print("DEBUG CCC hier_name_l:{}, tup_head_l:{}, hier_name_r:{}, tup_head_r:{}\n", hier_name_l, tup_head_l, hier_name_r, tup_head_r);
-      // case-III: this is the normal case that involves firrtl kWire connection
-      // could be (1) wire <- module_input (2) wire <- wire (3) module_output <- wire
-      // I(tup_head_l == tup_head_r);
+      // case-V: this is the normal case that involves firrtl kWire connection
+      // could be (1) wire <- module_input (2) wire <- wire (3) module_output
+      // <- wire I(tup_head_l == tup_head_r);
+      fmt::print("DEBUG DDD hier_name_l:{}, tup_head_l:{}, hier_name_r:{}, tup_head_r:{}\n", hier_name_l, tup_head_l, hier_name_r, tup_head_r);
       absl::btree_set<std::tuple<std::string, bool, uint8_t>> *tup_l_sets;
       auto cond0 = input_names.find(tup_head_l)  == input_names.end();
       auto cond1 = output_names.find(tup_head_l) == output_names.end();
@@ -2127,12 +2115,12 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
 
       for (const auto &it : *tup_l_sets) {
         if (std::get<0>(it).find(hier_name_l) != std::string::npos) {
-          fmt::print("DEBUG EEE :{}\n", std::get<0>(it));
           tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
         }
       }
-      break;
+      return;
     }
+
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
       auto id = stmt.is_invalid().expression().reference().id();
       auto it = wire_names.find(id);
@@ -2154,6 +2142,52 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
   }
   // TODO: Attach source info into node creation (line #, col #).
 }
+
+
+bool Inou_firrtl_module::check_flipness(Lnast &lnast, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance) {
+  absl::btree_set<std::tuple<std::string, bool, uint8_t>> *tup_sets;
+  if (is_sub_instance) { 
+    // example hier_name:  "sub_inst.io.a", need to chop sub_inst before hook
+    // with original fliptable interface
+    //
+    auto submodule_name = inst2module[tup_head];
+    I(hier_name.find_first_of('.' != std::string::npos));
+    auto chop_instance_hier_name = hier_name.substr(hier_name.find_first_of('.') + 1);
+    std::string new_tup_head;
+    auto found2 = chop_instance_hier_name.find_first_of('.');
+    if (found2 != std::string::npos) {
+      new_tup_head = chop_instance_hier_name.substr(0, found2);
+    } else {
+      new_tup_head = chop_instance_hier_name;
+    }
+
+    tup_sets = &Inou_firrtl::glob_info.var2flip[submodule_name][new_tup_head];
+    for (const auto &it : *tup_sets) {
+      if (std::get<0>(it).find(chop_instance_hier_name) != std::string::npos) {
+        // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
+        return std::get<1>(it);
+      }
+    }
+    I(false); // must hit the flipness table
+    return false;
+  } else if (input_names.find(tup_head) == input_names.end() && output_names.find(tup_head) == output_names.end()) {
+    // it's local variable or wire or register
+    tup_sets = &var2flip[tup_head];
+  } else {
+    // it's module io, check the global table
+    tup_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head];
+  }
+
+  for (const auto &it : *tup_sets) {
+    if (std::get<0>(it).find(hier_name) != std::string::npos) {
+      // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, std::get<0>(it), std::get<1>(it));
+      return std::get<1>(it);
+    }
+  }
+  I(false); // must hit the flipness table
+  return false;
+}
+
 
 void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& parent_node) {
   for (auto& mem_name : memory_names) {
@@ -2477,7 +2511,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     }
 
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
-      glob_info.mod_to_io_dir_map.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
+      glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, false, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }
@@ -2490,7 +2524,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
       // auto lnast_tupname = port_id.substr(0, port_id.find_first_of('.')); 
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      glob_info.mod_to_io_dir_map.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
+      glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
       add_global_io_flipness(mod_id, flipped_in, port_id, dir);
       break;
     }
@@ -2531,13 +2565,12 @@ void Inou_firrtl::grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalMod
       case firrtl::FirrtlPB_Module_ExternalModule_Parameter::kRawString: param_str = emod.parameter(j).raw_string(); break;
       default: I(false);
     }
-    glob_info.emod_to_param_map[emod.defined_name()].insert({emod.parameter(j).id(), param_str});
+    glob_info.ext_module2param[emod.defined_name()].insert({emod.parameter(j).id(), param_str});
   }
 
   // Add them to the map to let us know what ports exist in this module.
   for (const auto& elem : port_list) {
-    glob_info.mod_to_io_dir_map[std::pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
-    // mod_to_io_map[emod.defined_name()].insert({std::get<0>(elem), std::get<2>(elem), std::get<1>(elem), std::get<3>(elem)});
+    glob_info.module2io_dir[std::pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
   }
 }
 
@@ -2673,8 +2706,8 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, std::string_view file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
-    Inou_firrtl::glob_info.mod_to_io_dir_map.clear();
-    Inou_firrtl::glob_info.emod_to_param_map.clear();
+    Inou_firrtl::glob_info.module2io_dir.clear();
+    Inou_firrtl::glob_info.ext_module2param.clear();
     Inou_firrtl::glob_info.var2flip.clear();
 
     const firrtl::FirrtlPB_Circuit& circuit = firrtl_input.circuit(i);
