@@ -189,7 +189,10 @@ struct JsonElement {
   template <class T>
   JsonElement& operator=(const VectorAsObject<T>& vaobj) {
     type          = etObject;
-    memcpy((void*)&value, &vaobj, sizeof(vaobj));
+    // FIXME: change back to old implementation for compiling
+    // memcpy((void*)&value, &vaobj, sizeof(vaobj));
+    void* vec_ptr = (void*)&vaobj;
+    memcpy((void*)&value, &vec_ptr, sizeof(vaobj));
     return *this;
   }
   void SetObjectPtr(const Object* obj) {
