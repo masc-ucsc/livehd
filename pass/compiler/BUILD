@@ -186,7 +186,7 @@ cc_library(
     # "ClockGroupAggregator",
     # "IntSyncSyncCrossingSink"
     "AMOALU",
-    # "SubModule",
+    "Top",
     # "Arbiter_10",
     # "DebugCustomXbar",
     # "MaxPeriodFibonacciLFSR",

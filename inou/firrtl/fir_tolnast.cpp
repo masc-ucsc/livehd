@@ -206,49 +206,23 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     }
     case firrtl::FirrtlPB_Type::kSintType: {  // signed
       add_local_flip_info(flipped_in, id);
-      // auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
-      // lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
-      // lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
       std::replace(id.begin(), id.end(), '.', '_');
       Lnast_node zero_node = Lnast_node::create_const(0);
       create_default_value_for_scalar_var(lnast, parent_node, id, zero_node);
-      // create_tuple_add_from_str(lnast, parent_node, id, zero_node);
-      // auto wire_bits = get_bit_count(type);
-      // if (wire_bits >= 0)
-      //   create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, true);
       break;
     }
     case firrtl::FirrtlPB_Type::kUintType: {  // unsigned
       add_local_flip_info(flipped_in, id);
-      // auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
-      // lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
-      // lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
 
       std::replace(id.begin(), id.end(), '.', '_');
       Lnast_node zero_node = Lnast_node::create_const(0);
       create_default_value_for_scalar_var(lnast, parent_node, id, zero_node);
-
-      // if (!str_tools::contains(id, '.')) {
-      //   // it's a scalar variable
-      //   auto idx_asg_wire = lnast.add_child(parent_node, Lnast_node::create_assign());
-      //   lnast.add_child(idx_asg_wire, Lnast_node::create_ref(id));
-      //   lnast.add_child(idx_asg_wire, Lnast_node::create_const("0"));
-      // } else {
-      //   Lnast_node zero_node = Lnast_node::create_const(0);
-      //   create_tuple_add_from_str(lnast, parent_node, id, zero_node);
-      // }
-
-      // auto wire_bits = get_bit_count(type);
-      // if (wire_bits >= 0)
-      //   create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
       break;
     }
     default: {
       // UInt Analog Reset Clock Types
       add_local_flip_info(flipped_in, id);
-      // auto wire_bits = get_bit_count(type);
-      // if (wire_bits >= 0)
-      //   create_bitwidth_dot_node(lnast, wire_bits, parent_node, id, false);
+      break;
     }
   }
 }
@@ -1152,6 +1126,20 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
   }
 }
 
+void Inou_firrtl_module::create_tuple_get_for_instance_otup(Lnast& lnast, Lnast_nid& parent_node, std::string_view full_name,
+                                                   const Lnast_node& dest_node) {
+  I(str_tools::contains(full_name, '.'));
+  I(!dest_node.is_invalid());
+
+  auto selc_node = lnast.add_child(parent_node, Lnast_node::create_tuple_get());
+  lnast.add_child(selc_node, dest_node);
+  auto pos = full_name.find('.');
+  auto tup_head = full_name.substr(0, pos);
+  auto tup_merged_fields = std::string{full_name.substr(pos + 1)};
+  std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
+  lnast.add_child(selc_node, Lnast_node::create_ref(absl::StrCat("otup_", tup_head)));
+  lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
+}
 
 // note: Given a string with "."s and "["s in it, this
 // function will be able to deconstruct it into
@@ -1196,6 +1184,22 @@ void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_
   if (is_last_value_attr)
     ln.add_child(selc_node, Lnast_node::create_const("__last_value"));
 }
+
+
+void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view full_name,
+                                                   const Lnast_node& value_node) {
+  I(str_tools::contains(full_name, '.'));
+  auto selc_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+  auto pos = full_name.find('.');
+  auto tup_head = full_name.substr(0, pos);
+  auto tup_merged_fields = std::string{full_name.substr(pos + 1)};
+  std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
+  lnast.add_child(selc_node, Lnast_node::create_ref(absl::StrCat("itup_", tup_head)));
+  lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
+  lnast.add_child(selc_node, value_node);
+}
+
+
 
 void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name,
                                                    const Lnast_node& value_node) {
@@ -1278,12 +1282,6 @@ void Inou_firrtl_module::list_port_info(Lnast& lnast, const firrtl::FirrtlPB_Por
       // set default value 0 for all module outputs
       if (full_port_name.substr(0,1) == "%") {
         auto zero_node = Lnast_node::create_const(0);
-        // if (full_port_name.find('.') != std::string::npos) {
-        //   create_tuple_add_from_str(lnast, parent_node, full_port_name, zero_node);
-        // } else {
-        //   // create_tuple_add_from_str(lnast, parent_node, full_port_name, zero_node);
-        //   create_const_value_for_scalar_var(lnast, parent_node, full_port_name, zero_node);
-        // }
         create_default_value_for_scalar_var(lnast, parent_node, full_port_name, zero_node);
       }
 
@@ -2037,7 +2035,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // case-III: submodule instantiation IO connection     
       
       bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
-      bool is_sub_out_connection = inst2module.find(tup_head_r) != inst2module.end();
       
       if (is_sub_inp_connection) {
         // bool lhs_is_flipped = check_flipness(lnast, tup_head_l, hier_name_l, true);
@@ -2046,7 +2043,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         hier_name_r = name_prefix_modifier(hier_name_r, true);
         std::replace(hier_name_r.begin(), hier_name_r.end(), '.', '_');
         auto value_node = Lnast_node::create_ref(hier_name_r);
-        create_tuple_add_from_str(lnast, parent_node, hier_name_l, value_node);
+        create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, value_node);
         // } else {
           // hier_name_l.swap(hier_name_r);
           // hier_name_l = name_prefix_modifier(hier_name_l, false);
@@ -2058,12 +2055,13 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         return;
       }
 
+      bool is_sub_out_connection = inst2module.find(tup_head_r) != inst2module.end();
       if (is_sub_out_connection) {
           hier_name_l = name_prefix_modifier(hier_name_l, false);
           std::replace(hier_name_l.begin(), hier_name_l.end(), '.', '_');
           fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
           auto dest_node = Lnast_node::create_ref(hier_name_l);
-          create_tuple_get_from_str(lnast, parent_node, hier_name_r, dest_node);
+          create_tuple_get_for_instance_otup(lnast, parent_node, hier_name_r, dest_node);
         return;
       }
 
