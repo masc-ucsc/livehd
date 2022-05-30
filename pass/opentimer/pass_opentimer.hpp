@@ -11,11 +11,15 @@ protected:
 
   ot::Timer timer;
 
+  std::vector<std::string> sdc_file_list;
+  std::vector<std::string> spef_file_list;
+
   static void liberty_open(Eprp_var &var);
   static void work(Eprp_var &var);
 
   void read_files();
   void build_circuit(Lgraph *g);
+  void read_sdc_spef();
   void read_sdc(std::string_view sdc_file);
   void compute_timing(Lgraph *g);
   void populate_table();

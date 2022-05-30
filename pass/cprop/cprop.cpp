@@ -1239,14 +1239,21 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
     mux_dpin.connect(e.sink);
   }
 
-  auto new_tg_parent_dpin = ori_tg.setup_sink_pin("parent").get_driver_pin();
-
+  Port_ID pid = 1; // 0 is for mux select
   for (const auto &itr : parent_tup->get_sort_map()) {
     if (Lgtuple::is_attribute(itr.first)) {
-      continue;
+      continue; // attributes on array index are not propagated??
     }
 
-    // 1. create new tuple_gets to fetch the value from the tuple_add
+#if 0
+  HERE: Multidimensional has an issue with this. Mux???
+
+     ???
+      out = mux({a,b}, 0.0,0.1,1.0,1.1)
+
+    // OLD FIELD CODE
+
+     // 1. create new tuple_gets to fetch the value from the tuple_add
     //    and then connect the tg output to the corresponding mux input port
     auto new_tg   = ori_tg.create(Ntype_op::TupGet);
     auto mux_spin = mux_node.setup_sink_pin(std::to_string(str_tools::to_i(itr.first) + 1));
@@ -1262,11 +1269,16 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
     // 2. fetch sub_tuple for the new TGs
     auto sub_tuple                   = parent_tup->get_sub_tuple(itr.first);
     node2tuple[new_tg.get_compact()] = sub_tuple;
+#endif
+
+    auto spin = mux_node.setup_sink_pin_raw(pid);
+    spin.connect_driver(itr.second);
   }
 
   // node2tuple[mux_node.get_compact()] = parent_tup;
   tuple_mux_mut(mux_node);
   ori_tg.del_node();
+
   return true;
 }
 

@@ -15,6 +15,7 @@ void Pass_opentimer::work(Eprp_var &var) {
 
   for (const auto &g : var.lgs) {
     pass.build_circuit(g);   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
+    pass.read_sdc_spef();
     pass.compute_timing(g);  // Task4: Compute Timing | Status: 100% done
     pass.populate_table();   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
@@ -27,6 +28,17 @@ std::string Pass_opentimer::get_driver_net_name(const Node_pin &dpin) const {
   }
 
   return dpin.get_wire_name();
+}
+
+// SDC and SPEF must be read after the circuit is created
+void Pass_opentimer::read_sdc_spef() {
+
+  for(const auto &f:sdc_file_list) {
+    read_sdc(f);
+  }
+  for(const auto &f:spef_file_list) {
+    timer.read_spef(f);
+  }
 }
 
 void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
@@ -133,6 +145,29 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
     }
   }
+
+  // Set all the inputs/outputs to zero by default
+  g->each_graph_input([this](Node_pin &dpin) {
+    auto pname = dpin.get_name();
+
+    timer.set_at(pname, ot::MIN, ot::FALL, 0.0);
+    timer.set_at(pname, ot::MIN, ot::RISE, 0.0);
+    timer.set_at(pname, ot::MAX, ot::FALL, 0.0);
+    timer.set_at(pname, ot::MAX, ot::RISE, 0.0);
+
+    timer.set_slew(pname, ot::MAX, ot::FALL, 0.0);
+    timer.set_slew(pname, ot::MAX, ot::RISE, 0.0);
+    timer.set_slew(pname, ot::MIN, ot::FALL, 0.0);
+    timer.set_slew(pname, ot::MIN, ot::RISE, 0.0);
+  });
+  g->each_graph_output([this](Node_pin &dpin) {
+    auto pname = dpin.get_name();
+
+    timer.set_rat(pname, ot::MIN, ot::FALL, 0.0);
+    timer.set_rat(pname, ot::MIN, ot::RISE, 0.0);
+    timer.set_rat(pname, ot::MAX, ot::FALL, 0.0);
+    timer.set_rat(pname, ot::MAX, ot::RISE, 0.0);
+  });
 }
 
 void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compute timing information
@@ -141,6 +176,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
 
   timer.update_timing();
 
+#if 0
   auto num_gates = timer.num_gates();
   fmt::print("Number of gates {}\n", num_gates);
 
@@ -156,12 +192,18 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
   auto num_nets = timer.num_nets();
   fmt::print("Number of nets {}\n", num_nets);
 
-  // timer.dump_graph(std::cout);
-
-  auto opt_path = timer.report_timing(1);
+  auto opt_path = timer.update_timing();
 
   if (opt_path.size())
     std::cout << "Critical Path" << opt_path[0] << '\n';
+
+  // timer.dump_graph(std::cout);
+#endif
+
+  float max_delay=0;
+  std::string max_pin;
+
+  const auto &pins = timer.pins();
 
   for (const auto node : g->fast()) {
     auto op = node.get_type_op();
@@ -172,19 +214,42 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
     auto        instance_name = node.create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
-    fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
+    //fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
     timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
-    for (const auto &dpin : node.out_connected_pins()) {
+    for (auto &dpin : node.out_connected_pins()) {
       auto pin_name = absl::StrCat(instance_name, ":", dpin.get_pin_name());
-      auto delay_at = timer.report_at(pin_name, ot::MAX, ot::FALL);
-      if (delay_at)
-        fmt::print(" delay_at pin:{} at:{}\n", pin_name, *delay_at);
+      auto it = pins.find(pin_name);
+      I(it != pins.end()); // just inserted before
+
+      auto at_f = it->second.at(ot::MAX, ot::FALL);
+      auto at_r = it->second.at(ot::MAX, ot::RISE);
+
+      float delay = 0.0;
+      if (at_f) {
+        delay = *at_f;
+      }
+      if (at_r && *at_r > delay) {
+        delay = *at_r;
+      }
+      if (delay>0) {
+        dpin.set_delay(delay);
+
+        fmt::print(" pin {} {}\n", pin_name, delay);
+
+        if (delay > max_delay) {
+          max_delay = delay;
+          max_pin   = pin_name;
+        }
+      }else{
+        dpin.del_delay();
+      }
     }
   }
 
-  timer.dump_slack(std::cout);
+  if (!max_pin.empty())
+    fmt::print("slowest delay:{} pin:{}\n", max_delay, max_pin);
 }
 
 void Pass_opentimer::populate_table() {  // Expand this method to populate the tables in lgraph

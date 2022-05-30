@@ -32,11 +32,9 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
       n_lib_read++;
     } else if (str_tools::ends_with(f, ".spef")) {
-      fmt::print("opentimer using spef file '{}'", f);
-      timer.read_spef(f);
+      spef_file_list.emplace_back(f);
     } else if (str_tools::ends_with(f, ".sdc")) {
-      fmt::print("opentimer using sdc file '{}'", f);
-      read_sdc(f);
+      sdc_file_list.emplace_back(f);
     } else {
       Pass::error("pass.opentimer unknown file extension '{}'", f);
     }
@@ -48,10 +46,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 }
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
-  std::vector<std::string> line_vec;
-  std::string sdc_file_str(sdc_file);
-  std::ifstream            file(sdc_file_str);
-
+  std::ifstream  file(sdc_file);
   if (!file.is_open()) {
     Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
     return;
@@ -59,32 +54,32 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
 
   std::string line;
 
-  while (getline(file, line)) {
-    std::stringstream datastream(line);
-    std::copy(std::istream_iterator<std::string>(datastream), std::istream_iterator<std::string>(), std::back_inserter(line_vec));
+  while (std::getline(file, line)) {
+    std::vector<std::string> line_vec = absl::StrSplit(line,' ', absl::SkipWhitespace());
 
     if (line_vec[0] == "create_clock") {
-      int         period = 1000;
-      std::string pname;
+      float       period = 1000;
+      std::string pname  = "clock";
       for (std::size_t i = 1; i < line_vec.size(); i++) {
         if (line_vec[i] == "-period") {
-          period = stoi(line_vec[++i]);
-          continue;
+          period = std::stof(line_vec[++i], nullptr);
         } else if (line_vec[i] == "-name") {
           pname = line_vec[++i];
-          continue;
         }
       }
       timer.create_clock(pname, period);
+
     } else if (line_vec[0] == "set_input_delay") {
       std::string pname;
-      int         delay = stoi(line_vec[1]);
+      float       delay = std::stof(line_vec[1], nullptr);
       for (std::size_t i = 2; i < line_vec.size(); i++) {
         if (line_vec[i] == "[get_ports") {
           pname = line_vec[++i];
           pname.pop_back();
-          continue;
         }
+      }
+      if (pname.empty()) {
+        Pass::error("SDC file {} set_input_delay only supports [get_ports XX] syntax not {}", sdc_file, line);
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_at(pname, ot::MIN, ot::RISE, delay);
@@ -94,16 +89,29 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         timer.set_at(pname, ot::MAX, ot::RISE, delay);
       } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
         timer.set_at(pname, ot::MIN, ot::FALL, delay);
+      } else if (line_vec[2] == "-max") {
+        timer.set_at(pname, ot::MAX, ot::FALL, delay);
+        timer.set_at(pname, ot::MAX, ot::RISE, delay);
+      } else if (line_vec[2] == "-min") {
+        timer.set_at(pname, ot::MIN, ot::FALL, delay);
+        timer.set_at(pname, ot::MIN, ot::RISE, delay);
+      } else {
+        timer.set_at(pname, ot::MIN, ot::FALL, delay);
+        timer.set_at(pname, ot::MIN, ot::RISE, delay);
+        timer.set_at(pname, ot::MAX, ot::FALL, delay);
+        timer.set_at(pname, ot::MAX, ot::RISE, delay);
       }
     } else if (line_vec[0] == "set_input_transition") {
       std::string pname;
-      int         delay = stoi(line_vec[1]);
+      float       delay = std::stof(line_vec[1], nullptr);
       for (std::size_t i = 2; i < line_vec.size(); i++) {
         if (line_vec[i] == "[get_ports") {
           pname = line_vec[++i];
           pname.pop_back();
-          continue;
         }
+      }
+      if (pname.empty()) {
+        Pass::error("SDC file {} set_input_transition only supports [get_ports XX] syntax not {}", sdc_file, line);
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_slew(pname, ot::MIN, ot::RISE, delay);
@@ -113,16 +121,30 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         timer.set_slew(pname, ot::MAX, ot::RISE, delay);
       } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
         timer.set_slew(pname, ot::MIN, ot::FALL, delay);
+      } else if (line_vec[2] == "-max") {
+        timer.set_slew(pname, ot::MAX, ot::FALL, delay);
+        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
+      } else if (line_vec[2] == "-max") {
+        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
+        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
+      }else{
+        timer.set_slew(pname, ot::MAX, ot::FALL, delay);
+        timer.set_slew(pname, ot::MAX, ot::RISE, delay);
+        timer.set_slew(pname, ot::MIN, ot::FALL, delay);
+        timer.set_slew(pname, ot::MIN, ot::RISE, delay);
       }
+
     } else if (line_vec[0] == "set_output_delay") {
       std::string pname;
-      int         delay = stoi(line_vec[1]);
+      float       delay = std::stof(line_vec[1], nullptr);
       for (std::size_t i = 2; i < line_vec.size(); i++) {
         if (line_vec[i] == "[get_ports") {
           pname = line_vec[++i];
           pname.pop_back();
-          continue;
         }
+      }
+      if (pname.empty()) {
+        Pass::error("SDC file {} set_output_delay only supports [get_ports XX] syntax not {}", sdc_file, line);
       }
       if (line_vec[2] == "-min" && line_vec[3] == "-rise") {
         timer.set_rat(pname, ot::MIN, ot::RISE, delay);
@@ -132,9 +154,19 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         timer.set_rat(pname, ot::MAX, ot::RISE, delay);
       } else if (line_vec[2] == "-max" && line_vec[3] == "-fall") {
         timer.set_rat(pname, ot::MIN, ot::FALL, delay);
+      } else if (line_vec[2] == "-max") {
+        timer.set_rat(pname, ot::MAX, ot::FALL, delay);
+        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
+      } else if (line_vec[2] == "-min") {
+        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
+        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
+      }else{
+        timer.set_rat(pname, ot::MAX, ot::FALL, delay);
+        timer.set_rat(pname, ot::MAX, ot::RISE, delay);
+        timer.set_rat(pname, ot::MIN, ot::FALL, delay);
+        timer.set_rat(pname, ot::MIN, ot::RISE, delay);
       }
     }
-    line_vec.clear();
   }
   file.close();
 }
