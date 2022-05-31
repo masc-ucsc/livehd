@@ -273,9 +273,9 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::str
 //DE_DUP
 void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap) {
 
-  bool do_matching=false;
+  bool do_matching=false; //for post syn graph, make map. do not match map!
   if (!nodeIOmap.empty()) {
-    do_matching=true;
+    do_matching=true; //now we have pre-syn graph and post-syn map ready. 
   }
   for (const auto& node : lg->forward()) {
     // absl::btree_set<std::string> in_set;
@@ -347,10 +347,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     if(do_matching) {
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-        print_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];
+        matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];
+      } else {
+        unmatched_list.emplace_back(node.get_compact_flat());
       }
-
-    }
+    }//end of if(do_matching)
 
   }//enf of for lg-> traversal
 
@@ -373,9 +374,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n");
     }
     fmt::print("\n\n\n");
-  } else {
-    fmt::print("\n\nPRINT_MAP (matching done is):\n");
-    for(auto& [k, n_list]: print_map) {
+  } else { //do_matching
+    fmt::print("\n\nmatched_map (matching done is):\n");
+    for(auto& [k, n_list]: matched_map) {
       fmt::print("{}\t", k.get_nid());
       fmt::print("::: \t");
       for (auto& n:n_list) {
@@ -383,7 +384,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
       fmt::print("\n");
     }
-    fmt::print("\n\n\n");
+    fmt::print("\n\n The unmatched flops are:\n");
+    for(const auto& v: unmatched_list) {
+      fmt::print("{}\n",v.get_nid());
+    }
+    fmt::print("\n\n===============================\n");
   }
 
 }
