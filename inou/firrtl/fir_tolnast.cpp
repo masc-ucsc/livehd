@@ -2461,6 +2461,7 @@ void Inou_firrtl::add_port_sub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_p
     sub.add_input_pin(port_id);  //, inp_pos);
     inp_pos++;
   } else {
+    fmt::print("DEBUG AAA port_id:{}\n", port_id);
     sub.add_output_pin(port_id);  //, out_pos);
     out_pos++;
   }
@@ -2501,7 +2502,6 @@ void Inou_firrtl::add_global_io_flipness(std::string_view mod_id, bool flipped_i
     auto tuple = std::tuple(std::string(port_id), flipped_in, dir);
     auto new_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
 
-    // I(glob_info.var2flip[mod_id].find(port_id) == glob_info.var2flip[mod_id].end());
     new_set.insert(tuple);
     glob_info.var2flip[mod_id].insert_or_assign(port_id, new_set);
     return;
@@ -2550,12 +2550,23 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       }
       break;
     }
-    case firrtl::FirrtlPB_Type::kUintType:     // UInt type
-    case firrtl::FirrtlPB_Type::kSintType:     // SInt type
-    case firrtl::FirrtlPB_Type::kResetType:    // Reset type
-    case firrtl::FirrtlPB_Type::kAsyncResetType:  // AsyncReset type
-    case firrtl::FirrtlPB_Type::kClockType: {  // Clock type
-      // auto lnast_tupname = port_id.substr(0, port_id.find_first_of('.')); 
+    case firrtl::FirrtlPB_Type::kUintType: {    // UInt type
+      add_port_sub(sub, inp_pos, out_pos, port_id, dir);
+      glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
+      if (type.uint_type().width().value() != 0)
+        add_global_io_flipness(mod_id, flipped_in, port_id, dir);
+      break;
+    }
+    case firrtl::FirrtlPB_Type::kSintType: {   // SInt type
+      add_port_sub(sub, inp_pos, out_pos, port_id, dir);
+      glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
+      if (type.sint_type().width().value() != 0)
+        add_global_io_flipness(mod_id, flipped_in, port_id, dir);
+      break;
+    }
+    case firrtl::FirrtlPB_Type::kResetType:     
+    case firrtl::FirrtlPB_Type::kAsyncResetType:   
+    case firrtl::FirrtlPB_Type::kClockType: {  
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
       glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
       add_global_io_flipness(mod_id, flipped_in, port_id, dir);
