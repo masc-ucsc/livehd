@@ -46,7 +46,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 }
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
-  std::ifstream  file(sdc_file);
+  std::ifstream  file(std::string{sdc_file});
   if (!file.is_open()) {
     Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
     return;
