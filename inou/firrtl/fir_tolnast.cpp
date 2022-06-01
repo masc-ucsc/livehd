@@ -1823,6 +1823,8 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
 }
 
 void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> &module_var2flip) {
+(void) module_var2flip;
+#ifndef NDEBUG  
   for (auto &[var, set] : module_var2flip) {
     fmt::print("var:{} \n", var);
     for (auto &set_itr : set) {
@@ -1830,6 +1832,7 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
       fmt::print("  hier_name:{:<20}, accu_flipped:{:<5}, dir:{}\n", std::get<0>(set_itr), std::get<1>(set_itr), std::get<2>(set_itr)); 
     }
   }
+#endif
 }
 
 // the sub-fields of lhs and rhs are the same, so we just pass the head of lhs

@@ -609,6 +609,7 @@ bool Node::has_color() const {
 
 // LCOV_EXCL_START
 void Node::dump() const {
+#ifndef NDEBUG
   fmt::print("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
   if (has_color()) {
     fmt::print(" color:{} ", get_color());
@@ -624,6 +625,7 @@ void Node::dump() const {
   } else {
     fmt::print("\n");
   }
+
   for (const auto &edge : inp_edges()) {
     fmt::print("  inp bits: {:<3} pid: {:<2} name: {:<30} <- nid: {} idx: {} pid: {:<2} name: {}\n",
                edge.get_bits(),
@@ -644,6 +646,7 @@ void Node::dump() const {
                edge.sink.get_pid(),
                edge.sink.debug_name());
   }
+#endif
 }
 // LCOV_EXCL_STOP
 //

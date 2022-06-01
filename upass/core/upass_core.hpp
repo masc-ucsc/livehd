@@ -118,7 +118,7 @@ protected:
 public:
   uPass_plugin(const std::string& name, Setup_fn setup_fn) {
     if (registry.find(name) != registry.end()) {
-      upass::error("uPass_plugin: {} is already registered", name);
+      upass::error("uPass_plugin: {} is already registered\n", name);
       return;
     }
     registry[name] = setup_fn;

@@ -392,12 +392,14 @@ void Bitwidth::process_memory(Node &node) {
       }
     }
 
+#ifndef NDEBUG    
     fmt::print("Memory {} has bits:{} (din bits:{}) and size:{} (addr size:{})\n",
                node.debug_name(),
                mem_bits,
                mem_din_bits,
                mem_size,
                (1UL << mem_addr_bits));
+#endif
   }
 
   if (mem_bits && mem_din_bits) {
@@ -672,11 +674,9 @@ void Bitwidth::process_get_mask(Node &node) {
       return;
     }
     mask_val = mask_dpin.get_type_const();
-    fmt::print("0.mask_val:{}\n", mask_val.to_pyrope());
     node.dump();
   } else {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
-    fmt::print("1.mask_val:{} {} {}\n", mask_val.to_pyrope(), it2->second.get_max().to_pyrope(), it2->second.get_min().to_pyrope());
     node.dump();
   }
 
@@ -685,8 +685,6 @@ void Bitwidth::process_get_mask(Node &node) {
 
   Lconst res_max = a_max.get_mask_op(mask_val);
   Lconst res_min = res_max;
-
-  fmt::print("1.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
 
   if (a_min < 0) { //2s complement usual
     auto tmp = Lconst(-1).get_mask_op(mask_val);
@@ -697,7 +695,6 @@ void Bitwidth::process_get_mask(Node &node) {
 
     a_min = a_min.neg_op();
   }
-  fmt::print("2.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
 
   Lconst val2 = a_min.get_mask_op(mask_val);
   if (val2 > res_max) {
@@ -706,7 +703,6 @@ void Bitwidth::process_get_mask(Node &node) {
   if (val2 < res_min) {
     res_min = val2;
   }
-  fmt::print("3.a_max:{} a_min:{} res_max:{} res_min:{} mask_val:{}\n", a_max.to_pyrope(), a_min.to_pyrope(), res_max.to_pyrope(), res_min.to_pyrope(), mask_val.to_pyrope());
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(res_min, res_max));
 }
@@ -1353,7 +1349,6 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     auto lgit = lg->forward(hier);
     for (auto fwd_it = lgit.begin(); fwd_it != lgit.end(); ++fwd_it) {
       auto node = *fwd_it;
-      // fmt::print("{}\n", node.debug_name());
       auto inp_edges = node.inp_edges();
       auto op        = node.get_type_op();
 
