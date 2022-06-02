@@ -29,7 +29,7 @@ public:
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
 private:
   absl::node_hash_map<Node::Compact_flat , std::vector<Node::Compact_flat> > matched_map;
-  std::vector<Node::Compact_flat> unmatched_list;
+  absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> unmatched_map;
 /*
 #ifdef KEEP_DUP
   vecMap nodeIOmap;

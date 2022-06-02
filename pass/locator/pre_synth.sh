@@ -213,7 +213,7 @@ post_synth () {
 
 }
 
-pts='adder_stage' # scalar_tuple
-create_pre-synth_verilog "$pts"
+pts='pipe_10' # scalar_tuple
+#create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
 #post_synth "$pts"

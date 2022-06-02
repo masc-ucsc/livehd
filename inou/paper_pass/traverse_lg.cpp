@@ -349,7 +349,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
         matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];
       } else {
-        unmatched_list.emplace_back(node.get_compact_flat());
+        unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);
       }
     }//end of if(do_matching)
 
@@ -385,8 +385,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n");
     }
     fmt::print("\n\n The unmatched flops are:\n");
-    for(const auto& v: unmatched_list) {
-      fmt::print("{}\n",v.get_nid());
+    for(const auto& [fn,iov]: unmatched_map) {
+      fmt::print("{}\n",fn.get_nid());
+      for (auto& ip: iov.first) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("||| \t");
+      for (auto& op:iov.second) {
+        fmt::print("{}\t", op);
+      }
+      fmt::print("\n\n");
     }
     fmt::print("\n\n===============================\n");
   }
