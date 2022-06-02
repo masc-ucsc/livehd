@@ -55,7 +55,8 @@ pts=$(echo $unsorted | tr " " "\n" | sort -V)
 
 pts='Snxn100k Snxn200k Snxn300k Snxn400k Snxn500k Snxn600k Snxn700k Snxn800k Snxn900k Snxn1000k'
 pts='Snxn1000k'
-pts='Snxn100k'
+# pts='Snxn330k'
+# pts='Snxn100k'
 echo -e "All Benchmark Patterns:" '\n'$pts
 
 
