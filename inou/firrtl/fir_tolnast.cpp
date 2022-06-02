@@ -141,17 +141,17 @@ int32_t Inou_firrtl_module::get_bit_count(const firrtl::FirrtlPB_Type& type) {
 }
 
 
-void Inou_firrtl_module::reg_init_flip_handling(Lnast& lnast, const firrtl::FirrtlPB_Type& type, std::string id, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement &stmt) {
+void Inou_firrtl_module::reg_flip_info_collection(Lnast& lnast, const firrtl::FirrtlPB_Type& type, std::string id, Lnast_nid& parent_node, const firrtl::FirrtlPB_Statement &stmt) {
   switch (type.type_case()) {
     case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
       for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        reg_init_flip_handling(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), parent_node, stmt);
+        reg_flip_info_collection(lnast, type.bundle_type().field(i).type(), absl::StrCat(id, ".", type.bundle_type().field(i).id()), parent_node, stmt);
       }
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        reg_init_flip_handling(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
+        reg_flip_info_collection(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
       }
       break;
     }
@@ -1936,7 +1936,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     }
     case firrtl::FirrtlPB_Statement::kRegister: {
       auto stmt_reg_id = stmt.register_().id();
-      reg_init_flip_handling(lnast, stmt.register_().type(), stmt_reg_id, parent_node, stmt);
+      reg_flip_info_collection(lnast, stmt.register_().type(), stmt_reg_id, parent_node, stmt);
 
       // setup_register_bits(lnast, stmt.register_().type(), absl::StrCat("#", stmt.register_().id()), parent_node);
       // setup_register_reset_init(lnast, parent_node, stmt.register_().id(), stmt.register_().reset(), stmt.register_().init());
