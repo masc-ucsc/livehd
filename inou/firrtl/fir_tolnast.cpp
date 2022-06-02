@@ -1763,12 +1763,10 @@ void Inou_firrtl_module::declare_register(Lnast& lnast, Lnast_nid& parent_node, 
   auto full_register_name = absl::StrCat("#", reg_name);
   auto tmp_var_str        = create_tmp_var();
   lnast.add_child(idx_attget, Lnast_node::create_ref(tmp_var_str));
-  // lnast.add_child(idx_attget, Lnast_node::create_ref(lnast.add_string(full_register_name)));
   lnast.add_child(idx_attget, Lnast_node::create_ref(full_register_name));
   lnast.add_child(idx_attget, Lnast_node::create_const("__create_flop"));
 
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-  // lnast.add_child(idx_asg, Lnast_node::create_ref(lnast.add_string(full_register_name)));
   lnast.add_child(idx_asg, Lnast_node::create_ref(full_register_name));
   lnast.add_child(idx_asg, Lnast_node::create_ref(tmp_var_str));
 }
@@ -1806,7 +1804,6 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
     initial_node = Lnast_node::create_const(str_val);
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
     auto ref_str = inite.reference().id();
-    // initial_node = Lnast_node::create_ref(ref_str);
     auto empty_tup_add_op  = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var());
     lnast.add_child(empty_tup_add_op, empty_tup_add_var);
@@ -1938,11 +1935,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     case firrtl::FirrtlPB_Statement::kRegister: {
-      // TODO:
-      // FIXME->sh: the register should also be flattened out
-      // no matter it's scalar or tuple register, we only create for the top hierarchical variable,
-      // the flop expansion is handled at lgraph
-
       auto stmt_reg_id = stmt.register_().id();
       reg_init_flip_handling(lnast, stmt.register_().type(), stmt_reg_id, parent_node, stmt);
 
@@ -2461,7 +2453,6 @@ void Inou_firrtl::add_port_sub(Sub_node& sub, uint64_t& inp_pos, uint64_t& out_p
     sub.add_input_pin(port_id);  //, inp_pos);
     inp_pos++;
   } else {
-    fmt::print("DEBUG AAA port_id:{}\n", port_id);
     sub.add_output_pin(port_id);  //, out_pos);
     out_pos++;
   }

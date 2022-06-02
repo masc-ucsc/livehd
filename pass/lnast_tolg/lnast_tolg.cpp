@@ -208,15 +208,18 @@ void Lnast_tolg::process_ast_nary_op_one2n_map(Lgraph *lg, const Lnast_nid &lnid
 }
 
 void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lnidx_opr) {
-
   std::vector<Node_pin> opds;
   for (const auto &child : lnast->children(lnidx_opr)) {
-    if (child == lnast->get_first_child(lnidx_opr))
+    if (child == lnast->get_first_child(lnidx_opr)) {
+      fmt::print("DEBUG AAA lhs name:{}\n", lnast->get_sname(child));
       continue;  // the lhs has been handled at setup_node_opr_and_lhs();
+    }
 
     auto opd = setup_ref_node_dpin(lg, child);
-    if (opd.is_invalid())
-      Pass::error("for operator node undefined variable {} is used!\n", lnast->get_sname(child));
+    fmt::print("DEBUG BBB rhs name:{}\n", lnast->get_sname(child));
+    // if (opd.is_invalid()) {
+    //   Pass::error("for operator node undefined variable {} is used!\n", lnast->get_sname(child));
+    // }
 
     opds.emplace_back(opd);
   }
