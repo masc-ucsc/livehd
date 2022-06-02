@@ -29,8 +29,8 @@ void Traverse_lg::travers(Eprp_var& var) {
 
   Traverse_lg p(var);
 
-  I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide only 2 lgraphs to inou.traverse_lg. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
-  I(var.lgs.front()->get_name()!=var.lgs.back()->get_name(), "\n\nINPUT ERROR:\n\t The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
+  fmt::print("\nLGs : {}\n",var.lgs.size());
+  I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide exactly 2 lgraphs to inou.traverse_lg. CHECK: The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
 
 #ifdef KEEP_DUP
   Traverse_lg::vecMap map_pre_synth;
@@ -371,7 +371,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       for (auto& n:n_list) {
         fmt::print("{}\t", n.get_nid());
       }
-      fmt::print("\n");
+      fmt::print("\n\n");
     }
     fmt::print("\n\n\n");
   } else { //do_matching
@@ -400,7 +400,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
     if(node.is_graph_io()) {
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
-      std::string temp_str (node.get_type_name());
+      std::string temp_str (node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name());
       //if(node.is_type_const()){ 
       //  temp_str+=":"; 
       //  temp_str+=node.get_type_const().to_pyrope();
@@ -412,7 +412,8 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().get_wire_name());
+        //temp_str+=(node.get_driver_pin().get_wire_name());
+        temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());
         //temp_str+=")";
       }
       in_set.insert(temp_str);
@@ -434,7 +435,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
       //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       out_set.insert(node_pin.get_pin_name());
     } else {
-      std::string temp_str(node.get_type_name());
+      std::string temp_str (node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name());
       //if(node.is_type_const()){ 
       //  temp_str+=":"; 
       //  temp_str+=node.get_type_const().to_pyrope();
@@ -446,7 +447,8 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
-        temp_str+=(node.get_driver_pin().get_wire_name());
+        //temp_str+=(node.get_driver_pin().get_wire_name());
+        temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());
         //temp_str+=")";
       }
       out_set.insert(temp_str);
