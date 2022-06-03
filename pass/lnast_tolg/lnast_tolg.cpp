@@ -211,15 +211,13 @@ void Lnast_tolg::process_ast_nary_op_direct_map(Lgraph *lg, const Lnast_nid &lni
   std::vector<Node_pin> opds;
   for (const auto &child : lnast->children(lnidx_opr)) {
     if (child == lnast->get_first_child(lnidx_opr)) {
-      fmt::print("DEBUG AAA lhs name:{}\n", lnast->get_sname(child));
       continue;  // the lhs has been handled at setup_node_opr_and_lhs();
     }
 
     auto opd = setup_ref_node_dpin(lg, child);
-    fmt::print("DEBUG BBB rhs name:{}\n", lnast->get_sname(child));
-    // if (opd.is_invalid()) {
-    //   Pass::error("for operator node undefined variable {} is used!\n", lnast->get_sname(child));
-    // }
+    if (opd.is_invalid()) {
+      Pass::error("for operator node undefined variable {} is used!\n", lnast->get_sname(child));
+    }
 
     opds.emplace_back(opd);
   }
@@ -563,7 +561,6 @@ void Lnast_tolg::process_ast_tuple_get_op(Lgraph *lg, const Lnast_nid &lnidx_tg)
       name2dpin[c0_tg_name] = tup_get.setup_driver_pin();
 
       tup_get.setup_driver_pin().set_name(c0_tg_name);
-      // fmt::print("DEBUG8 tuple_get_dpin:{}, c1_tg_name:{}, cn_tg_name:{}\n", tup_get.setup_driver_pin().debug_name(), c1_tg_name, cn_tg_name);
       if (!is_tmp_var(c0_tg_vname))
         setup_dpin_ssa(name2dpin[c0_tg_name], c0_tg_vname, c0_tg_subs);
 
@@ -642,7 +639,6 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       Node_pin flattened_inp;
       if (!lg->has_graph_input(full_inp_hier_name)) {
         flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, bits);
-        // fmt::print("DEBUGAAAA full_inp_hier_name:{}\n", full_inp_hier_name);                                                                                             
       } else {
         flattened_inp = name2dpin[full_inp_hier_name];
         flattened_inp.set_bits(bits);
@@ -1295,7 +1291,6 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     Node wire_node;
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
     wire_node.get_driver_pin().set_name(hier_fields_cat_name);
-    // fmt::print("DEBUG9 hier_fields_cat_name:{}\n", hier_fields_cat_name);
     name2dpin[c0_aget_name] = wire_node.setup_driver_pin();
 
     if (!is_tmp_var(c0_aget_vname))
@@ -1621,7 +1616,6 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
             auto field_dpin = lg->create_node_const(Lconst::from_string(dpin_name.substr(found + 1))).setup_driver_pin();
             field_dpin.connect_sink(field_spin);
             wire_spin = wire_node.setup_sink_pin("parent");
-            // fmt::print("DEBUG10:tg_dpin_name:{} driver_ta_dpin_name:{}\n", wire_node.get_driver_pin().debug_name(), dpin_largest_ssa.debug_name());
           }
         } else if (wire_node.is_type(Ntype_op::TupAdd)) {
           wire_spin = wire_node.setup_sink_pin("parent");

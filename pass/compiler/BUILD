@@ -191,8 +191,8 @@ cc_library(
     "FlipSimple2",
     "NotAnd",
     "BreakpointUnit",
-    # "DebugCustomXbar",
-    # "MaxPeriodFibonacciLFSR",
+    "DebugCustomXbar",
+    "MaxPeriodFibonacciLFSR",
 
     # FIXME:
     # issue1: memory

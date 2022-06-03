@@ -18,7 +18,7 @@ module MaxPeriodFibonacciLFSR(
   reg  state_0; // @[PRNG.scala 47:50]
   reg  state_1; // @[PRNG.scala 47:50]
   reg  state_2; // @[PRNG.scala 47:50]
-  wire  _T_3 = state_2 ^ state_0 ^ state_1 ^ state_0; // @[LFSR.scala 15:41]
+  wire  _K_3 = state_2 ^ state_0 ^ state_1 ^ state_0; // @[LFSR.scala 15:41]
   wire  _GEN_2 = io_increment ? state_1 : state_2; // @[PRNG.scala 61:23 62:11 47:50]
   wire  _GEN_5 = io_seed_valid ? io_seed_bits_2 : _GEN_2; // @[PRNG.scala 65:25 66:11]
   assign io_out_0 = state_0; // @[PRNG.scala 69:10]
@@ -30,7 +30,7 @@ module MaxPeriodFibonacciLFSR(
     end else if (io_seed_valid) begin // @[PRNG.scala 65:25]
       state_0 <= io_seed_bits_0; // @[PRNG.scala 66:11]
     end else if (io_increment) begin // @[PRNG.scala 61:23]
-      state_0 <= _T_3; // @[PRNG.scala 62:11]
+      state_0 <= _K_3; // @[PRNG.scala 62:11]
     end
     if (reset) begin // @[PRNG.scala 47:50]
       state_1 <= 1'h0; // @[PRNG.scala 47:50]
