@@ -278,8 +278,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     do_matching=true;
   }
   for (const auto& node : lg->forward()) {
-    absl::btree_set<std::string> in_set;
-    absl::btree_set<std::string> out_set;
+    // absl::btree_set<std::string> in_set;
+    // absl::btree_set<std::string> out_set;
+    std::set<std::string> in_set;
+    std::set<std::string> out_set;
     fmt::print("{}\n", node.debug_name());
     
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
@@ -386,7 +388,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
 }
 
-void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
+// void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
+void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_type_const() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
@@ -418,7 +421,8 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::
   }
 }
 
-void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
+// void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
+void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_output()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
