@@ -19,7 +19,8 @@ genccs = rule(
         "generator": attr.label(
             executable = True,
             mandatory = True,
-            cfg = "host",
+            # cfg = "host",
+            cfg = "exec",
             allow_files = True,
         ),
     },
@@ -64,7 +65,8 @@ verilator_run = rule(
             mandatory = False,
             executable = True,
             doc = "Verilator binary path",
-            cfg = "host",
+            # cfg = "host",
+            cfg = "exec",
             allow_files = True,
         ),
         "srcs": attr.label_list(
@@ -72,7 +74,8 @@ verilator_run = rule(
             doc = "Source Verilog files passed to verilator",
             allow_files = True,
             allow_empty = False,
-            cfg = "host",
+            # cfg = "host",
+            cfg = "exec",
         ),
         "args": attr.string_list(
             mandatory = False,
