@@ -17,7 +17,7 @@ void Pass_opentimer::work(Eprp_var &var) {
     pass.build_circuit(g);   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
     pass.read_sdc_spef();
     pass.compute_timing(g);  // Task4: Compute Timing | Status: 100% done
-    pass.populate_table();   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
+    pass.populate_table(g);   // Task5: Traverse the lgraph and populate the tables | Status: 0% done
   }
 }
 
@@ -200,7 +200,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
   // timer.dump_graph(std::cout);
 #endif
 
-  float max_delay=0;
+  max_delay=0;
   std::string max_pin;
 
   const auto &pins = timer.pins();
@@ -248,11 +248,94 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
     }
   }
 
-  if (!max_pin.empty())
-    fmt::print("slowest delay:{} pin:{}\n", max_delay, max_pin);
+  if (!max_pin.empty()) {
+    if (margin) {
+      margin_delay = (max_delay/100.0) * (100-margin);
+      fmt::print("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin, margin, margin_delay);
+    }else{
+      fmt::print("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin);
+    }
+  }
 }
 
-void Pass_opentimer::populate_table() {  // Expand this method to populate the tables in lgraph
+void Pass_opentimer::populate_table(Lgraph *lg) {
   TRACE_EVENT("pass", "OPENTIMER_populate_table");
   //  Lbench b("pass.OPENTIMER_populate_table");
+
+  if (margin_delay<=0 || max_delay<=0)
+    return; // Nothing to do
+
+  lg->ref_node_color_map()->clear(); // Delete all the colors
+
+  for(auto node:lg->fast()) {
+    for (auto &dpin:node.out_connected_pins()) {
+      if (!dpin.has_delay())
+        continue;
+
+      auto delay = dpin.get_delay();
+      if (delay < margin_delay)
+        continue;
+
+      fmt::print("---------FAST delay:{}\n", delay);
+      node.dump();
+
+      int color = 100 * ((delay - margin_delay)/(max_delay - margin_delay));
+
+      if (node.has_color()) {
+        auto co = node.get_color();
+        if (co >= color)
+          continue;
+      }
+      node.set_color(color);
+
+      backpath_set_color(node, color);
+    }
+  }
+}
+
+void Pass_opentimer::backpath_set_color(Node &node, int color) {
+
+  I(node.get_color() == color);
+
+  // Find inp_edge with highest delay
+  Node_pin dpin;
+  float    dpin_delay=0;
+  for(auto &e:node.inp_edges()) {
+    if (!e.driver.has_delay())
+      continue;
+
+    auto delay = e.driver.get_delay();
+    if (delay < dpin_delay)
+      continue;
+
+    dpin = e.driver;
+    dpin_delay = delay;
+  }
+
+  if (dpin_delay <= 0)
+    return;
+
+  if (dpin.is_graph_io())
+    return;
+
+  auto back_node = dpin.get_node();
+  if (back_node.is_type_loop_first() || back_node.is_type_loop_last())
+    return; // Do no cross constants/flops/memories
+
+  fmt::print("---------DEP\n");
+  back_node.dump();
+
+  if (!back_node.has_color()) {
+    back_node.set_color(color);
+    return;
+  }
+  auto back_color = back_node.get_color();
+  if (back_color >= color)
+    return;
+
+  back_node.set_color(color);
+
+  fmt::print("---------REC\n");
+  back_node.dump();
+  backpath_set_color(back_node, color); // recursive (should not be too deep stop in flops)
 }

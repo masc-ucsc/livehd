@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <fstream>
+#include <string>
 
 #include "pass_opentimer.hpp"
 
@@ -15,6 +16,7 @@ static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
+  m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
 
   register_pass(m1);
 }
@@ -43,6 +45,17 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
   if (n_lib_read > 2) {
     Pass::error("pass.opentime only supports 1 or 2 liberty (max/min) files not {}", files);
   }
+
+  if (var.has_label("margin")) {
+    std::string txt{var.get("margin")};
+    margin = std::stof(txt, nullptr);
+    if (margin<0 || margin>100) {
+      Pass::error("pass.opentimer margin must be between 0 and 100 not {}", margin);
+    }
+  }else{
+    margin = 0;
+  }
+  margin_delay = 0;
 }
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {

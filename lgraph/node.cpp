@@ -592,6 +592,10 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
 //----- Subject to changes in the future:
+void Node::del_color() {
+  current_g->ref_node_color_map()->erase(get_compact());
+}
+
 void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or_assign(get_compact(), new_color); }
 
 int Node::get_color() const {

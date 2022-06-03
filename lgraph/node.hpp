@@ -371,6 +371,7 @@ public:
   Bits_t get_bits() const;
 
   void set_color(int color);
+  void del_color();
   int  get_color() const;
   bool has_color() const;
   // END ATTRIBUTE ACCESSORS
