@@ -375,15 +375,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     fmt::print("\n\n\n");
   } else { //do_matching
-    fmt::print("\n\nmatched_map (matching done is):\n");
-    for(auto& [k, n_list]: matched_map) {
-      fmt::print("{}\t", k.get_nid());
-      fmt::print("::: \t");
-      for (auto& n:n_list) {
-        fmt::print("{}\t", n.get_nid());
-      }
-      fmt::print("\n");
-    }
     fmt::print("\n\n The unmatched flops are:\n");
     for(const auto& [fn,iov]: unmatched_map) {
       fmt::print("{}\n",fn.get_nid());
@@ -397,6 +388,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n\n");
     }
     fmt::print("\n\n===============================\n");
+    fmt::print("\n\nmatched_map (matching done is):\n");
+    for(auto& [k, n_list]: matched_map) {
+      fmt::print("{}\t", k.get_nid());
+      fmt::print("::: \t");
+      for (auto& n:n_list) {
+        fmt::print("{}\t", n.get_nid());
+      }
+      fmt::print("\n");
+    }
+    fmt::print("\n\n===============================\n");
   }
 
 }
@@ -408,16 +409,13 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
     if(node.is_graph_io()) {
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
-      std::string temp_str (node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name());
-      //if(node.is_type_const()){ 
-      //  temp_str+=":"; 
-      //  temp_str+=node.get_type_const().to_pyrope();
-      //}
-      //else 
-      if(node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)){ 
+      bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
+      std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
+
+      if(isFlop){ 
         temp_str+=":";
-        temp_str+=node_pin.get_pin_name();
-        temp_str+="->";
+        //temp_str+=node_pin.get_pin_name();//in inputs, this is always Y/Q.
+        //temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
         //temp_str+=(node.get_driver_pin().get_wire_name());
@@ -443,16 +441,13 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
       //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       out_set.insert(node_pin.get_pin_name());
     } else {
-      std::string temp_str (node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name());
-      //if(node.is_type_const()){ 
-      //  temp_str+=":"; 
-      //  temp_str+=node.get_type_const().to_pyrope();
-      //}
-      //else 
-      if(node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)){ 
+      bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
+      std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
+      
+      if(isFlop){ 
         temp_str+=":";
-        temp_str+=node_pin.get_pin_name();
-        temp_str+="->";
+        //temp_str+=node_pin.get_pin_name();//in outputs, this is always din/D
+        //temp_str+="->";
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
         //temp_str+=(node.get_driver_pin().get_wire_name());

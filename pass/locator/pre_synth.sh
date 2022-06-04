@@ -91,7 +91,8 @@ create_pre-synth_verilog () {
     num_files=$(find pre_synth/ -type f | wc -l)
     if [ $num_files -ne 1 ]; then
       echo "WARNING: Multiple files found!"
-      echo "Proceed after concatenating the files into a single .v file."
+      echo "Concatenating the files into a single .v file."
+      cat pre_synth/*.v > pre_synth/concatenated_${pt}.v
       exit 1
     fi
     
@@ -213,7 +214,7 @@ post_synth () {
 
 }
 
-pts='pipe_10' # scalar_tuple
-#create_pre-synth_verilog "$pts"
+pts='counter_nested_if' 
+create_pre-synth_verilog "$pts"
 create_synth-verilog "$pts"
 #post_synth "$pts"
