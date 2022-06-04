@@ -117,7 +117,6 @@ cc_library(
     # "Test1",
     # "VecSearch",
     # "Mul",
-    # "VecShiftRegisterParam",
     "VecShiftRegister",
     "BundleConnect",
     "SingleEvenFilter",
