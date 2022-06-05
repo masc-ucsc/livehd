@@ -4,7 +4,7 @@
 LGSHELL=./bazel-bin/main/lgshell
 LGCHECK=./inou/yosys/lgcheck
 PRP_PATH=./inou/pyrope/tests
-
+PATTERN_PATH=./inou/firrtl/tests/proto
 if [ ! -f $LGSHELL ]; then
     if [ -f ./main/lgshell ]; then
         LGSHELL=./main/lgshell
@@ -14,6 +14,80 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
+create_pre-synth_verilog_from_firrtl () {
+  
+  rm -rf lgdb*
+  rm -r pre_synth
+
+
+  echo ""
+  echo ""
+  echo "===================================================="
+  echo "Input firrtl to get LN with src location; And output a verilog for synth "
+  echo "FRTL -> LN -> LG -> V"
+  echo "===================================================="
+
+  for pt in $1
+  do
+    file=$(basename $pt)
+    if [ "${file#*.}" == "hi.pb" ]; then
+      echo "Using High Level FIRRTL"
+      FIRRTL_LEVEL='hi'
+    elif [ "${file#*.}" == "lo.pb" ]; then
+      echo "Using Low Level FIRRTL"
+      FIRRTL_LEVEL='lo'
+    elif [ "${file#*.}" == "ch.pb" ]; then
+      FIRRTL_LEVEL='ch'
+      echo "Warning: Experimental Chirrtl extension"
+    else
+      echo "Illegal FIRRTL extension. Either ch.pb, hi.pb or lo.pb"
+      exit 1
+    fi
+
+    if [ ! -f "${PATTERN_PATH}/${file}" ]; then
+      echo "Could not access test ${pt} at path ${PATTERN_PATH}"
+      exit 1
+    fi
+
+    pt=$(basename -s .${file#*.} $pt)
+
+    if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
+        echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
+        exit 1
+    fi
+    rm -rf ./lgdb_${pt}
+
+    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:true top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+    ret_val=$?
+    if [ $ret_val -ne 0 ]; then
+      echo "ERROR: could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
+      exit $ret_val
+    fi
+  done #end of for
+    
+  for pt in $1
+  do
+    pt=$(basename -s .${file#*.} $pt)
+    echo ""
+    echo ""
+    echo ""
+    echo "----------------------------------------------------"
+    echo "LGraph -> Verilog"
+    echo "----------------------------------------------------"
+
+    rm -rf tmp_firrtl
+    ${LGSHELL} "lgraph.open path:lgdb_${pt} name:${pt} hier:true |> inou.cgen.verilog odir:pre_synth/"
+    cat pre_synth/*.v > pre_synth/top_${pt}.v
+    ret_val=$?
+    if [ $ret_val -eq 0 ] && [ -f "pre_synth/top_${pt}.v" ]; then
+        echo "Successfully generate Verilog: pre_synth/top_${pt}.v"
+    else
+        echo "ERROR: Firrtl compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
+        exit $ret_val
+    fi
+  done
+    
+}
 
 create_pre-synth_verilog () {
   
@@ -111,7 +185,7 @@ create_synth-verilog () {
   cd pass/locator
 
 	name=$1
-  export VERILOG_FILES=../../pre_synth/${name}.v    
+  export VERILOG_FILES=../../pre_synth/top_${name}.v    
   export DESIGN_NAME=$name                          
   export SYNTH_BUFFERING=0                          
   export SYNTH_SIZING=0                             
@@ -214,7 +288,19 @@ post_synth () {
 
 }
 
-pts='counter_nested_if' 
-create_pre-synth_verilog "$pts"
-create_synth-verilog "$pts"
+#pts='BundleConnect.hi.pb SingleEvenFilter.hi.pb Xor6Thread2.hi.pb XorSelfThread1.hi.pb Mux4.hi.pb Life.hi.pb Cell_alone.hi.pb LFSR16.hi.pb LogShifter.hi.pb Test2.hi.pb Accumulator.hi.pb Coverage.hi.pb TrivialAdd.hi.pb VendingMachineSwitch.hi.pb VendingMachine.hi.pb Trivial.hi.pb Tail.hi.pb TrivialArith.hi.pb Shifts.hi.pb Darken.hi.pb HiLoMultiplier.hi.pb AddNot.hi.pb GCD_3bits.hi.pb Test3.hi.pb Register.hi.pb RegisterSimple.hi.pb Parity.hi.pb ResetShiftRegister.hi.pb SimpleALU.hi.pb ByteSelector.hi.pb MaxN.hi.pb Max2.hi.pb Flop.hi.pb EnableShiftRegister.hi.pb Decrementer.hi.pb Counter.hi.pb RegXor.hi.pb PlusAnd.hi.pb'
+
+pts='Adder4.ch.pb IntXbar.ch.pb SimpleClockGroupSource.ch.pb FixedClockBroadcast.ch.pb ClockGroupAggregator.ch.pb IntSyncSyncCrossingSink.ch.pb AMOALU.ch.pb Top.ch.pb Arbiter_10.ch.pb FlipSimple2.ch.pb NotAnd.ch.pb BreakpointUnit.ch.pb DebugCustomXbar.ch.pb MaxPeriodFibonacciLFSR.ch.pb'
+#create_pre-synth_verilog "$pts"
+
+rm pre_synth/*
+rm -r lgdb_*
+rm *dot
+rm -f lgcheck*
+
+for pt in $pts
+do
+  create_pre-synth_verilog_from_firrtl "$pt"
+  create_synth-verilog "$pt"
+done
 #post_synth "$pts"
