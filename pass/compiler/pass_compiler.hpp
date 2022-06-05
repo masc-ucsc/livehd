@@ -16,6 +16,7 @@ protected:
   bool             check_option_gviz(Eprp_var &var);
   std::string_view check_option_top(Eprp_var &var);
   std::string_view check_option_firrtl(Eprp_var &var);
+  static Sub_node *setup_firmap_library_gen(Graph_library *lib, std::string_view cell_name, const std::vector<std::string> &inp, std::string_view out);
   static void      setup_firmap_library(Lgraph *lg);
   static void      pyrope_compilation(Eprp_var &var, Lcompiler &compiler);
   static void      firrtl_compilation(Eprp_var &var, Lcompiler &compiler);
