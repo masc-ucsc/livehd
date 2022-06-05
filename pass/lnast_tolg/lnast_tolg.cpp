@@ -1684,7 +1684,7 @@ void Lnast_tolg::post_process_ginp_attr_connections(Lgraph *lg) {
 }
 
 void Lnast_tolg::try_create_flattened_inp(Lgraph *lg) {
-  auto uinp = lg->get_graph_input("$");
+  auto uinp = lg->get_graph_input("$").get_non_hierarchical(); // hierarchical not needed, it should be faster this way
 
   for (auto &e : uinp.out_edges()) {
     auto tg = e.sink.get_node();

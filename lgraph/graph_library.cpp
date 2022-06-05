@@ -3,8 +3,8 @@
 #include "graph_library.hpp"
 
 #include <dirent.h>
-#include <limits.h>
-#include <stdlib.h>
+#include <climits>
+#include <cstdlib>
 #include <sys/stat.h>
 #ifdef __APPLE__
 #include <copyfile.h>
@@ -30,7 +30,7 @@ Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
 
 class Cleanup_graph_library {
 public:
-  Cleanup_graph_library(){};
+  Cleanup_graph_library() = default;
   ~Cleanup_graph_library() {
     Graph_library::sync_all();
     Graph_library::shutdown();
@@ -195,7 +195,7 @@ Graph_library *Graph_library::instance_int(std::string_view path) {
     return nullptr;
   }
 
-  Graph_library *graph_library = new Graph_library(full_path);
+  auto *graph_library = new Graph_library(full_path);
   global_instances.insert(std::make_pair(full_path, graph_library));
   global_instances.insert(std::make_pair(spath, graph_library));
 
@@ -232,6 +232,7 @@ Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view s
                       source);  // LCOV_EXCL_LINE
       }
     }
+    attributes[it->second].tried_to_load = false;
     return it->second;
   }
   return add_name_int(name, source);
@@ -247,6 +248,14 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
     return false;
   I(attributes.size() > lgid);
   I(sub_nodes.size() > lgid);
+
+#if 0
+  // Modules that start with __ are internal (like __fir_add and not saved as module/lgraph)
+  auto name =  sub_nodes[lgid]->get_name();
+  if (name.size()>2 && name[0] == '_' && name[1] == '_')
+    return false;
+#endif
+
   return sub_nodes[lgid]->get_lgid() == lgid;
 }
 
@@ -438,9 +447,9 @@ void Graph_library::reload_int() {
 
   // FIXME: BEGIN DELETE THIS and replace with json reload
 
-  liberty_list.push_back("fake_bad.lib");  // FIXME
-  sdc_list.push_back("fake_bad.sdc");      // FIXME
-  spef_list.push_back("fake_bad.spef");    // FIXME
+  liberty_list.emplace_back("fake_bad.lib");  // FIXME
+  sdc_list.emplace_back("fake_bad.sdc");      // FIXME
+  spef_list.emplace_back("fake_bad.spef");    // FIXME
   {
     name2id.clear();
     attributes.resize(1);                 // 0 is not a valid ID
@@ -712,14 +721,14 @@ void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgrap
     expunge_int(name);
 }
 
-void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
 
 void Graph_library::each_lgraph(std::string_view                                                  match,
-                                const std::function<void(Lg_type_id lgid, std::string_view name)> f1) const {
+                                const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 

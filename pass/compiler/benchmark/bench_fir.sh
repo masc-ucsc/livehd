@@ -27,7 +27,7 @@ else
   LGDB=${MADA_SCRAP}/lgdb   # NSF
 fi
 
-LGDB=/local/scrap/masc/swang203/lgdb
+# LGDB=/local/scrap/masc/swang203/lgdb
 # LGDB=/local/scrap/masc/swang203/lgdb
 GVIZ='false'
 
@@ -81,6 +81,7 @@ fucntion() {
 
     # perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true"
     perf stat -o pp ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:${LGDB}/gen_verilog"
+    #perf record -g ${LGSHELL} "inou.firrtl.tolnast path:${LGDB} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb |> pass.compiler gviz:${GVIZ} top:${pt} firrtl:true |> lgraph.open path:${LGDB} name:${pt} hier:true |> inou.cgen.verilog odir:${LGDB}/gen_verilog"
 
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
