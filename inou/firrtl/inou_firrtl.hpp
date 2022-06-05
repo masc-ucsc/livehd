@@ -165,7 +165,6 @@ protected:
 
   // Helper Functions (for handling specific cases)
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
-  void     create_bitwidth_dot_node(Lnast &lnast, uint32_t bw, Lnast_nid &parent_node, std::string_view port_id, bool is_signed);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node);
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> &module_table);
@@ -202,7 +201,7 @@ protected:
   void handle_tail_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void handle_concat_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void handle_pad_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_two_expr_prime_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
+  void handle_binary_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
                                 std::string_view lhs);
 
   void handle_static_shift_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
@@ -211,7 +210,6 @@ protected:
                            std::string_view lhs);
   void handle_as_usint_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
   void attach_expr_str2node(Lnast &lnast, std::string_view access_str, Lnast_nid &parent_node);
-  std::string flatten_expression(Lnast &ln, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
   void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped);
 
   bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
@@ -247,7 +245,11 @@ protected:
                               const Lnast_node value_node = Lnast_node::create_invalid());
 
   void list_statement_info(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
-  std::string flatten_expr_hier_name(const firrtl::FirrtlPB_Expression &expr);
+  std::string flatten_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx);
+  std::string flatten_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  std::string get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr);
+  void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
+  uint16_t get_vector_size(const firrtl::FirrtlPB_Type& type);
   void final_mem_interface_assign(Lnast &lnast, Lnast_nid &parent_node);
 
 private:
@@ -265,6 +267,9 @@ private:
   absl::flat_hash_map<std::string, std::string> reg2qpin;
   // Maps an instance name to the module name.
   absl::flat_hash_map<std::string, std::string> inst2module;
+
+	// record all vector size here including all module io, wire, register 
+	absl::flat_hash_map<std::string, uint8_t> var2vec_size;
 
   // FIXME->sh: check and remove the third directional field if redundant 
   absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;

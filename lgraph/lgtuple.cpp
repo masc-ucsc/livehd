@@ -1583,7 +1583,6 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         // use get_mask to get the bit that assigned to the corresponding individual flop
         Lconst init_val   = it.second.get_type_const();
         Lconst masked_val = init_val.get_mask_op(1 << i);
-        fmt::print("DEBUG9 init_val:{}, flop_node:{}, masked_val:{}\n", init_val, node.debug_name(), masked_val);
         auto masked_node = lg->create_node_const(masked_val);
         flop_spin.connect_driver(masked_node.setup_driver_pin());
       } else {

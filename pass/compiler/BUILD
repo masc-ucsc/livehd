@@ -116,7 +116,6 @@ cc_library(
 ) for t in [
     # "Test1",
     # "VecSearch",
-    # "Mul",
     "VecShiftRegister",
     "BundleConnect",
     "SingleEvenFilter",
@@ -177,6 +176,7 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
+    "Mul",
     "IntXbar",
     "SimpleClockGroupSource",
     "FixedClockBroadcast",

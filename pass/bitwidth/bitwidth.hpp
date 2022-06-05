@@ -60,6 +60,7 @@ protected:
   void debug_unconstrained_msg(Node &node, Node_pin &d_dpin);
   void try_delete_attr_node(Node &node);
   void set_subgraph_boundary_bw(Node &node);
+  void dump(Lgraph *lg);
 
   void bw_pass(Lgraph *lg);
 

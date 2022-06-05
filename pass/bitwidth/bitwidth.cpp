@@ -674,10 +674,8 @@ void Bitwidth::process_get_mask(Node &node) {
       return;
     }
     mask_val = mask_dpin.get_type_const();
-    node.dump();
   } else {
     mask_val = it2->second.get_max().or_op(it2->second.get_min());
-    node.dump();
   }
 
   Lconst  a_max = it->second.get_max();
@@ -1487,8 +1485,12 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       }
     }
   }
+  
+  // note: only enable for detailed bitwidth debug
+  // dump(lg);
+}
 
-#ifndef NDEBUG
+void Bitwidth::dump(Lgraph *lg) {
   for (auto node : lg->fast(hier)) {
     for (auto dpin : node.out_connected_pins()) {
       auto it = bwmap.find(dpin.get_compact_class());
@@ -1506,7 +1508,6 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       }
     }
   }
-#endif
 }
 
 void Bitwidth::try_delete_attr_node(Node &node) {
