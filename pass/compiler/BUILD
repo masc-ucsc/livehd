@@ -115,7 +115,7 @@ cc_library(
     ],
 ) for t in [
     # "Test1",
-    # "VecSearch",
+    "VecSearch",
     "VecShiftRegister",
     "BundleConnect",
     "SingleEvenFilter",

@@ -110,15 +110,12 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   // (1) get the runtime idx tuple field
   // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
   std::string rtidx_str = get_runtime_idx_field_name(rhs_expr);
+  rtidx_str = name_prefix_modifier(rtidx_str, true);
   std::string_view tup_head;
   auto pos = hier_name_r_ori.find('.');
   if (pos != std::string::npos) {
     tup_head = hier_name_r_ori.substr(0, pos);
   }
-
-  (void) hier_name_r_ori;
-  (void) lnast;
-  (void) parent_node;
 
   // (2) know the vector size of this field
   I (var2vec_size.find(tup_head) != var2vec_size.end());
@@ -146,7 +143,6 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     auto rhs_flattened_name = absl::StrCat(tup_head, "_", i);
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
-
   return;
 }
 
