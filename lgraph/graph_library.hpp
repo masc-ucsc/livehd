@@ -93,7 +93,7 @@ protected:
   [[nodiscard]] Lgraph        *try_find_lgraph_int(std::string_view name) const;
   [[nodiscard]] Lgraph        *try_find_lgraph_int(const Lg_type_id lgid) const;
 
-  Sub_node       &reset_sub_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Sub_node      *create_sub_int(std::string_view name, std::string_view source);
   [[nodiscard]] Sub_node       *ref_or_create_sub_int(std::string_view name, std::string_view source);
   [[nodiscard]] Sub_node       *ref_or_create_sub_int(std::string_view name);
   [[nodiscard]] Sub_node       *ref_sub_int(Lg_type_id lgid);
@@ -148,29 +148,6 @@ protected:
   void        reload_int();
 
 public:
-  Graph_library(const Graph_library &s)           = delete;
-  Graph_library &operator=(const Graph_library &) = delete;
-
-  static bool exists(std::string_view path, std::string_view name) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    return exists_int(path, name);
-  }
-
-  [[nodiscard]] bool exists(Lg_type_id lgid) const {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    return exists_int(lgid);
-  }
-
-  static Lgraph *try_find_lgraph(std::string_view path, std::string_view name) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    return try_find_lgraph_int(path, name);
-  }
-
-  static Lgraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    return try_find_lgraph_int(path, lgid);
-  }
-
   [[nodiscard]] Lgraph *try_find_lgraph(std::string_view name) const {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return try_find_lgraph_int(name);
@@ -182,11 +159,34 @@ public:
     return try_find_lgraph_int(lgid);
   }
 
+  // FIXME: To delete direct path interface
+  static Lgraph *try_find_lgraph(std::string_view path, Lg_type_id lgid) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    return try_find_lgraph_int(path, lgid);
+  }
+
+  static Lgraph *try_find_lgraph(std::string_view path, std::string_view name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    return try_find_lgraph_int(path, name);
+  }
+
+  static bool exists(std::string_view path, std::string_view name) {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    return exists_int(path, name);
+  }
+  Graph_library(const Graph_library &s)           = delete;
+  Graph_library &operator=(const Graph_library &) = delete;
+
+  [[nodiscard]] bool exists(Lg_type_id lgid) const {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    return exists_int(lgid);
+  }
+
   [[nodiscard]] Lg_type_id get_max_version() const { return max_next_version - 1; }
 
-  Sub_node &reset_sub(std::string_view name, std::string_view source) {
+  Sub_node *create_sub(std::string_view name, std::string_view source) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
-    return reset_sub_int(name, source);
+    return create_sub_int(name, source);
   }
 
   [[nodiscard]] Sub_node *ref_or_create_sub(std::string_view name, std::string_view source) {

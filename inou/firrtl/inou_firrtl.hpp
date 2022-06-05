@@ -53,7 +53,6 @@ protected:
   void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir);
   void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, uint8_t dir);
   void     grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalModule &emod);
-  Sub_node add_mod_to_library(Eprp_var &var, std::string_view mod_name, std::string_view file_name);
 
   void user_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);
   void ext_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);

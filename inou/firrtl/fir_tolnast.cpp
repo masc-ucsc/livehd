@@ -2366,13 +2366,16 @@ void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Modu
 
 
 void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name) {
+
+  Graph_library *lib = Graph_library::instance(var.get("path", "lgdb"));
+
   for (int i = 0; i < circuit.module_size(); i++) {
     // std::vector<std::pair<std::string, uint8_t>> vec;
     if (circuit.module(i).has_external_module()) {
       /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
        * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
       auto     module_i_external_module_id = circuit.module(i).external_module().id();
-      auto     sub                         = add_mod_to_library(var, module_i_external_module_id, file_name);
+      auto     *sub                        = lib->create_sub(module_i_external_module_id, file_name);
       uint64_t inp_pos                     = 0;
       uint64_t out_pos                     = 0;
       absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> empty_map;
@@ -2383,12 +2386,12 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
         auto initial_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
         // initial_set.insert(std::pair(port.id(), false));
         glob_info.var2flip[module_i_external_module_id].insert_or_assign(port.id(), initial_set); 
-        add_port_to_map(module_i_external_module_id, port.type(), port.direction(), false, port.id(), sub, inp_pos, out_pos);
+        add_port_to_map(module_i_external_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
       }
       continue;
     } else if (circuit.module(i).has_user_module()) {
       auto     module_i_user_module_id = circuit.module(i).user_module().id();
-      auto     sub                     = add_mod_to_library(var, module_i_user_module_id, file_name);
+      auto     *sub                    = lib->create_sub(module_i_user_module_id, file_name);
       uint64_t inp_pos                 = 0;
       uint64_t out_pos                 = 0;
       absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> empty_map;
@@ -2398,26 +2401,13 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
         auto port = circuit.module(i).user_module().port(j);
         auto initial_set = absl::btree_set<std::tuple<std::string, bool, uint8_t>>{};
         glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
-        add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), sub, inp_pos, out_pos);
+        add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
         Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
       }
     } else {
       Pass::error("Module not set.");
     }
   }
-}
-
-Sub_node Inou_firrtl::add_mod_to_library(Eprp_var& var, std::string_view mod_name, std::string_view file_name) {
-  std::string fpath;
-  if (var.has_label("path")) {
-    fpath = var.get("path");
-  } else {
-    fpath = "lgdb";
-  }
-
-  auto* library = Graph_library::instance(fpath);
-  auto& sub     = library->reset_sub(mod_name, file_name);
-  return sub;
 }
 
 /* Used to populate Sub_Nodes so that when Lgraphs are constructed,

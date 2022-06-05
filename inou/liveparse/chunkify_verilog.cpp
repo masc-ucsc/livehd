@@ -190,7 +190,7 @@ void Chunkify_verilog::elaborate() {
         module_io_pos = 1;
         in_module     = true;
 
-        sub = &library->reset_sub(module_name, source);
+        sub = library->create_sub(module_name, source);
         I(sub);
 
       } else if (txt == "input") {

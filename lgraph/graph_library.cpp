@@ -321,7 +321,7 @@ Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgi
   return lib->try_find_lgraph_int(lgid);
 }
 
-Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view source) {
+Sub_node *Graph_library::create_sub_int(std::string_view name, std::string_view source) {
   graph_library_clean = false;
 
   Lg_type_id lgid = get_lgid_int(name);
@@ -333,12 +333,12 @@ Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view s
     auto sub = sub_nodes[lgid];
     sub->reset_pins();
 
-    return *sub;
+    return sub;
   }
 
   lgid = add_name_int(name, source);
   I(lgid);
-  return *sub_nodes[lgid];
+  return sub_nodes[lgid];
 }
 
 Sub_node *Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"); }

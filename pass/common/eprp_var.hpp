@@ -68,7 +68,7 @@ public:
 
   [[nodiscard]] bool has_label(std::string_view name) const { return dict.find(name) != dict.end(); };
 
-  [[nodiscard]] std::string_view get(std::string_view name) const;
+  [[nodiscard]] std::string_view get(std::string_view name, std::string_view default_value="") const;
 
   void clear() {
     dict.clear();
