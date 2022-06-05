@@ -444,6 +444,15 @@ bool Node::is_type_sub_present() const {
   if (!is_type_sub())
     return false;
 
+#if 0
+  auto sub_lgid = current_g->get_type_sub(nid);
+  auto *sub_lg  = current_g->ref_library()->try_find_lgraph(sub_lgid);
+  if (sub_lg)
+    return sub_lg;
+  
+  HERE!!!
+#endif
+
   auto *sub_lg = ref_type_sub_lgraph();
   if (sub_lg)
     return !sub_lg->is_empty();

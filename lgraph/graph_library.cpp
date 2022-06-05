@@ -341,17 +341,17 @@ Sub_node &Graph_library::reset_sub_int(std::string_view name, std::string_view s
   return *sub_nodes[lgid];
 }
 
-Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"); }
+Sub_node *Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"); }
 
-Sub_node &Graph_library::ref_or_create_sub_int(std::string_view name, std::string_view source) {
+Sub_node *Graph_library::ref_or_create_sub_int(std::string_view name, std::string_view source) {
   Lg_type_id lgid = get_lgid_int(name);
   if (lgid) {
-    return *sub_nodes[lgid];
+    return sub_nodes[lgid];
   }
 
   lgid = add_name_int(name, source);
   I(lgid);
-  return *sub_nodes[lgid];
+  return sub_nodes[lgid];
 }
 
 Sub_node *Graph_library::ref_sub_int(Lg_type_id lgid) {
@@ -547,7 +547,8 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
   std::lock_guard<std::mutex> guard(lgs_mutex);
 
   global_name2lgraph[path][name] = lg;
-  attributes[lgid].lg            = lg;  // It could be already set if there was a copy
+  attributes[lgid].lg            = lg;   // It could be already set if there was a copy
+  attributes[lgid].tried_to_load = true; // already present
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
@@ -695,6 +696,7 @@ Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string
 
   global_name2lgraph[path][name] = lg;
   attributes[id].lg              = lg;  // It could be already set if there was a copy
+  attributes[id].tried_to_load   = true;
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
@@ -712,7 +714,8 @@ void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgrap
     I(it != global_name2lgraph[path].end());
     I(it->second == lg);
     global_name2lgraph[path].erase(it);
-    attributes[lgid].lg = 0;
+    attributes[lgid].lg            = nullptr;
+    attributes[lgid].tried_to_load = false;
   } else {
     I(it == global_name2lgraph[path].end());
   }

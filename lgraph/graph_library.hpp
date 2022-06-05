@@ -94,9 +94,9 @@ protected:
   [[nodiscard]] Lgraph        *try_find_lgraph_int(const Lg_type_id lgid) const;
 
   Sub_node       &reset_sub_int(std::string_view name, std::string_view source);
-  Sub_node       &ref_or_create_sub_int(std::string_view name, std::string_view source);
-  Sub_node       &ref_or_create_sub_int(std::string_view name);
-  Sub_node       *ref_sub_int(Lg_type_id lgid);
+  [[nodiscard]] Sub_node       *ref_or_create_sub_int(std::string_view name, std::string_view source);
+  [[nodiscard]] Sub_node       *ref_or_create_sub_int(std::string_view name);
+  [[nodiscard]] Sub_node       *ref_sub_int(Lg_type_id lgid);
   [[nodiscard]] const Sub_node &get_sub_int(Lg_type_id lgid) const;
 
   Lg_type_id add_name_int(std::string_view name, std::string_view source);
@@ -189,12 +189,12 @@ public:
     return reset_sub_int(name, source);
   }
 
-  Sub_node &ref_or_create_sub(std::string_view name, std::string_view source) {
+  [[nodiscard]] Sub_node *ref_or_create_sub(std::string_view name, std::string_view source) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_or_create_sub_int(name, source);
   }
 
-  Sub_node &ref_or_create_sub(std::string_view name) {
+  [[nodiscard]] Sub_node *ref_or_create_sub(std::string_view name) {
     std::lock_guard<std::mutex> guard(lgs_mutex);
     return ref_or_create_sub_int(name);
   }

@@ -1436,14 +1436,14 @@ Node Lgraph::create_node_const(const Lconst &value) {
 
   I(node_internal[nid].get_dst_pid() == 0);
 
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
 Node Lgraph::create_node_lut(const Lconst &lut) {
   auto nid = create_node().get_nid();
   set_type_lut(nid, lut);
 
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
 Node Lgraph::create_node_sub(Lg_type_id sub_id) {
@@ -1452,15 +1452,15 @@ Node Lgraph::create_node_sub(Lg_type_id sub_id) {
   auto nid = create_node().get_nid();
   set_type_sub(nid, sub_id);
 
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
 Node Lgraph::create_node_sub(std::string_view sub_name) {
   auto  nid = create_node().get_nid();
-  auto &sub = library->ref_or_create_sub(sub_name);
-  set_type_sub(nid, sub.get_lgid());
+  auto *sub = library->ref_or_create_sub(sub_name);
+  set_type_sub(nid, sub->get_lgid());
 
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return Node{this, Hierarchy::hierarchical_root(), nid};
 }
 
 const Sub_node &Lgraph::get_self_sub_node() const { return library->get_sub(get_lgid()); }
