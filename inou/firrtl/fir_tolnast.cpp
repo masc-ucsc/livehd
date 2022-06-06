@@ -88,18 +88,12 @@ std::string Inou_firrtl_module::name_prefix_modifier(std::string_view name, cons
 }
 
 std::string Inou_firrtl_module::get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr) {
-  if (expr.has_sub_field()) {
-    return get_runtime_idx_field_name(expr.sub_field().expression());
-  } else if (expr.has_sub_access()) {
-    return get_runtime_idx_field_name(expr.sub_access().index());
-  } else if (expr.has_sub_index()) {
-    return get_runtime_idx_field_name(expr.sub_index().expression());
-  } else if (expr.has_reference()) {
-    return expr.reference().id();
-  } else {
-    I(false); // should already encounter the runtime_idx field
-    return "";
-  }
+   I (expr.has_sub_access());
+  bool dummy = false;
+  auto idx_str = flatten_expr_hier_name(expr.sub_access().index(), dummy);
+  // fmt::print("DEBUG CCC idx_str:{}\n", idx_str);
+  // return absl::StrCat(get_runtime_idx_field_name(expr.sub_access().expression()), ".", idx_str);
+  return idx_str;
 }
 
 
@@ -111,17 +105,17 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
   std::string rtidx_str = get_runtime_idx_field_name(rhs_expr);
   rtidx_str = name_prefix_modifier(rtidx_str, true);
-  std::string_view tup_head;
-  auto pos = hier_name_r_ori.find('.');
+  std::string_view vec_name;
+  auto pos = hier_name_r_ori.rfind('.');
   if (pos != std::string::npos) {
-    tup_head = hier_name_r_ori.substr(0, pos);
+    vec_name = hier_name_r_ori.substr(0, pos);
   }
 
   // (2) know the vector size of this field
-  I (var2vec_size.find(tup_head) != var2vec_size.end());
-  auto rt_vec_size = var2vec_size[tup_head];
-  fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_r_ori:{}, tuple_head:{}, rt_vec_size:{}\n", rtidx_str, tup_head, hier_name_r_ori, rt_vec_size);
+  auto rt_vec_size = get_vector_size(lnast, vec_name);
+  // fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_r_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_r_ori, vec_name, rt_vec_size);
   
+  vec_name = name_prefix_modifier(vec_name, true);
   // (3) create another function to create __fir_mux for 2^field_bits cases
   //     lhs <- __fir_mux(runtime_idx, value0, value1, ..., value2^filed_bits-1);
   std::vector<std::string> cond_strs;
@@ -140,10 +134,23 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     lnast.add_child(idx_mux, Lnast_node::create_ref(cond_strs[i]));
     auto idx_stmt_t = lnast.add_child(idx_mux, Lnast_node::create_stmts());
     // auto rhs_flattened_name = name_prefix_modifier(tup_head, true);
-    auto rhs_flattened_name = absl::StrCat(tup_head, "_", i);
+    auto rhs_flattened_name = absl::StrCat(vec_name, "_", i);
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
   return;
+}
+
+uint16_t Inou_firrtl_module::get_vector_size(const Lnast &lnast, std::string_view vec_name) {
+  if (var2vec_size.find(vec_name) == var2vec_size.end()) {
+    auto module_name = lnast.get_top_module_name();
+    I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
+    auto &io_var2vec_size = Inou_firrtl::glob_info.module_var2vec_size[module_name];
+
+    I(io_var2vec_size.find(vec_name) != io_var2vec_size.end());
+    return io_var2vec_size[vec_name];
+  } else {
+    return var2vec_size[vec_name];
+  }
 }
 
 
@@ -189,7 +196,6 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
-      fmt::print("DEBUG CCC reg id:{}, vec_size:{}\n", id, type.vector_type().size());                                               
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         handle_register(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
@@ -232,7 +238,6 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
       break;
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
-      fmt::print("DEBUG BBB wire id:{}, vec_size:{}\n", id, type.vector_type().size());                                               
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         wire_init_flip_handling(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), false, parent_node);
@@ -2551,8 +2556,9 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
 
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
-      // FIXME->sh: will runtime_idx happens on module io? probably but don't overdesign for now
-      // fmt::print("DEBUG DDD port id:{}, vec_size:{}\n", port_id, type.vector_type().size());                                               
+      absl::flat_hash_map<std::string, uint16_t> var2vec_size;
+      var2vec_size.insert_or_assign(port_id, type.vector_type().size());
+      glob_info.module_var2vec_size.insert_or_assign(mod_id, var2vec_size);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, false, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }

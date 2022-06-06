@@ -27,6 +27,7 @@
 struct Global_module_info {
   absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t>                          module2io_dir;
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
   
   // module_name to io_name to leaf_hierarchical_field_name's flip polarity(1st bool) and direction (3rd uint8).
   // FIXME->sh: check and remove the third directional field if redundant 
@@ -249,7 +250,7 @@ protected:
   std::string flatten_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
   std::string get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr);
   void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
-  uint16_t get_vector_size(const firrtl::FirrtlPB_Type& type);
+  uint16_t get_vector_size(const Lnast &lnast, std::string_view vec_name);
   void final_mem_interface_assign(Lnast &lnast, Lnast_nid &parent_node);
 
 private:
@@ -269,7 +270,7 @@ private:
   absl::flat_hash_map<std::string, std::string> inst2module;
 
 	// record all vector size here including all module io, wire, register 
-	absl::flat_hash_map<std::string, uint8_t> var2vec_size;
+	absl::flat_hash_map<std::string, uint16_t> var2vec_size;
 
   // FIXME->sh: check and remove the third directional field if redundant 
   absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;

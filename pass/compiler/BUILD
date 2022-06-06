@@ -114,7 +114,7 @@ cc_library(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    # "Test1",
+    "Test1",
     "VecSearch",
     "VecShiftRegister",
     "BundleConnect",
