@@ -419,7 +419,8 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
         //temp_str+=(node.get_driver_pin().get_wire_name());
-        temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());
+        //temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());//FIXME:changed to line below temporarily for debugging. revert back!
+        temp_str+=std::to_string(node.get_compact_flat().get_nid());
         //temp_str+=")";
       }
       in_set.insert(temp_str);
@@ -451,7 +452,8 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         //temp_str+=node.get_driver_pin().get_pin_name();
         //temp_str+="(";
         //temp_str+=(node.get_driver_pin().get_wire_name());
-        temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());
+        //temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());//FIXME:changed to line below temporarily for debugging. revert back!
+        temp_str+=std::to_string(node.get_compact_flat().get_nid());
         //temp_str+=")";
       }
       out_set.insert(temp_str);
