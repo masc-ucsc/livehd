@@ -351,6 +351,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       } else {
         unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);
       }
+      /*insert in full_orig_map*/
+      const auto& nodeid = node.get_compact_flat();
+      std::vector<Node::Compact_flat> tmpVec;
+      if(full_orig_map.find(std::make_pair(in_set, out_set)) != full_orig_map.end()) {
+        tmpVec.assign((full_orig_map[std::make_pair(in_set, out_set)]).begin() , (full_orig_map[std::make_pair(in_set, out_set)]).end() );
+        tmpVec.emplace_back(nodeid);
+      } else {
+        tmpVec.emplace_back(nodeid);
+      }
+      full_orig_map[std::make_pair(in_set,out_set)] = tmpVec;//FIXME: make hash of set and change datatype accordingly
     }//end of if(do_matching)
 
   }//enf of for lg-> traversal
@@ -375,6 +385,23 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     fmt::print("\n\n\n");
   } else { //do_matching
+    fmt::print("\n\nThe complete orig map is:\n");
+    for(const auto& [iov,fn]: full_orig_map) {
+      for (auto& ip: iov.first) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("||| \t");
+      for (auto& op:iov.second) {
+        fmt::print("{}\t", op);
+      }
+      fmt::print("::: \t");
+      for (auto& op:fn) {
+        fmt::print("{}\t", op.get_nid());
+      }
+      fmt::print("\n\n");
+    }
+    fmt::print("\n\n===============================\n");
+
     fmt::print("\n\n The unmatched flops are:\n");
     for(const auto& [fn,iov]: unmatched_map) {
       fmt::print("{}\n",fn.get_nid());
