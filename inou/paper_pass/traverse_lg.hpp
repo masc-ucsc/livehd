@@ -32,6 +32,7 @@ private:
   //absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> unmatched_map;
   absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> unmatched_map;
   absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat> > full_orig_map;
+  absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> > IOtoNodeMap_orig;
 /*
 #ifdef KEEP_DUP
   vecMap nodeIOmap;
@@ -53,8 +54,8 @@ protected:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
-  void get_input_node(const Node_pin &pin, std::set<std::string>& in_set);
-  void get_output_node(const Node_pin &pin, std::set<std::string>& out_set);
+  void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set);
+  void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set);
 
 public:
   static void travers(Eprp_var& var);

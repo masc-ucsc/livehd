@@ -282,18 +282,19 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     // absl::btree_set<std::string> out_set;
     std::set<std::string> in_set;
     std::set<std::string> out_set;
+    std::set<std::string> io_set;
     fmt::print("{}\n", node.debug_name());
     
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
     if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
       for (const auto& indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
-        get_input_node(indr, in_set);
+        get_input_node(indr, in_set, io_set);
       }
 
       for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
         //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_set);
+        get_output_node(outdr, out_set, io_set);
       }
       
     }
@@ -325,6 +326,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     fmt::print("OUTPUTS:\n");
     for (const auto& i:out_set) {
+      fmt::print("\t{}\n",i);
+    }
+    fmt::print("IOs:\n");
+    for (const auto& i:io_set) {
       fmt::print("\t{}\n",i);
     }
 
@@ -361,6 +366,17 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         tmpVec.emplace_back(nodeid);
       }
       full_orig_map[std::make_pair(in_set,out_set)] = tmpVec;//FIXME: make hash of set and change datatype accordingly
+      /*IOtoNodeMap_orig insertion*/
+      std::vector<Node::Compact_flat> tempVec;
+      if(IOtoNodeMap_orig.find(io_set) != IOtoNodeMap_orig.end()) {
+        tempVec.assign((IOtoNodeMap_orig[io_set]).begin() , (IOtoNodeMap_orig[io_set]).end() );
+        tempVec.emplace_back(nodeid);
+      } else {
+        tempVec.emplace_back(nodeid);
+      }
+      if(!io_set.empty()) {
+        IOtoNodeMap_orig[io_set] = tempVec;//FIXME: make hash of set and change datatype accordingly
+      }
     }//end of if(do_matching)
 
   }//enf of for lg-> traversal
@@ -385,6 +401,18 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     fmt::print("\n\n\n");
   } else { //do_matching
+    fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
+    for(const auto& [iov,fn]: IOtoNodeMap_orig) {
+      for (auto& ip: iov) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("::: \t");
+      for (auto& op:fn) {
+        fmt::print("{}\t", op.get_nid());
+      }
+      fmt::print("\n\n");
+    }
+    fmt::print("\n\n===============================\n");
     fmt::print("\n\nThe complete orig map is:\n");
     for(const auto& [iov,fn]: full_orig_map) {
       for (auto& ip: iov.first) {
@@ -430,11 +458,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
-void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set) {
+void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_type_const() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+      io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
       bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
       std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
@@ -451,23 +480,25 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         //temp_str+=")";
       }
       in_set.insert(temp_str);
+      io_set.insert(isFlop?"":temp_str);//do not want flops in pure io_set
     }
     return;
   } else {
       for (const auto& indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
-        get_input_node(indr, in_set);
+        get_input_node(indr, in_set, io_set);
       }
   }
 }
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
-void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set) {
+void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_output()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
       //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       out_set.insert(node_pin.get_pin_name());
+      io_set.insert(node_pin.get_pin_name());
     } else {
       bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
       std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
@@ -484,12 +515,13 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         //temp_str+=")";
       }
       out_set.insert(temp_str);
+      io_set.insert(isFlop?"":temp_str);//do not want flops in pure io_set
     }
     return;
   } else {
       for (const auto& outdr : node.out_sinks() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_set);
+        get_output_node(outdr, out_set, io_set);
       }
   }
 }
