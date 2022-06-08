@@ -480,7 +480,7 @@ void Bitwidth::process_memory(Node &node) {
     }
 
     if (mem_size && mem_addr_bits_missing) {
-      Bitwidth_range addr_bw(-mem_size / 2 - 1, mem_size / 2);
+      Bitwidth_range addr_bw(-mem_size/2, mem_size/2 - 1);
       auto           addr_sbits = addr_bw.get_sbits();
       for (auto &dpin : addr_drivers) {
         auto it = bwmap.find(dpin.get_compact_class());
