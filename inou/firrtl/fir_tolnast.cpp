@@ -78,12 +78,14 @@ std::string Inou_firrtl_module::name_prefix_modifier(std::string_view name, cons
   } else if (reg2qpin.count(flattened_name)) {  // check if the register exists
     I(reg2qpin[flattened_name].substr(0, 3) == "_#_");
     if (is_rhs) {
+      fmt::print("hit1! flattened_name:{}\n", reg2qpin[flattened_name]);
       return reg2qpin[flattened_name];
     } else {
+      fmt::print("hit2! flattened_name:{}\n", absl::StrCat("#", flattened_name));
       return absl::StrCat("#", flattened_name);
     }
   } else {
-    return std::string(flattened_name);
+    return flattened_name;
   }
 }
 
@@ -107,20 +109,12 @@ std::string Inou_firrtl_module::get_runtime_idx_field_name(const firrtl::FirrtlP
     I(false);
     return "";
   }
-
-
-
-  // I(expr.has_sub_access());
-  // bool dummy = false;
-  // auto idx_str = flatten_expr_hier_name(expr.sub_access().index(), dummy);
-  // fmt::print("DEBUG CCC idx_str:{}\n", idx_str);
-  // // return absl::StrCat(get_runtime_idx_field_name(expr.sub_access().expression()), ".", idx_str);
-  // return idx_str;
 }
 
-void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
+void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, 
+                                                std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
   std::string rhs_flattened_name = name_prefix_modifier(hier_name_r_ori, true);
-
+  fmt::print("DEBUG YYY hier_name_r_ori:{} rhs_flattened_name:{}\n", hier_name_r_ori, rhs_flattened_name);
   // idea: 
   // (1) get the runtime idx tuple field
   // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
@@ -174,12 +168,13 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     // auto rhs_flattened_name = name_prefix_modifier(tup_head, true);
     std::string lhs_flattened_name;
     if (is_2d_vector) {
-      lhs_flattened_name = absl::StrCat(vec_name,"_", i, "_", leaf_field_name);
+      lhs_flattened_name = absl::StrCat(vec_name,".", i, ".", leaf_field_name);
     } else {
-      lhs_flattened_name = absl::StrCat(vec_name,"_", i);
+      lhs_flattened_name = absl::StrCat(vec_name,".", i);
     }
+    // auto lhs_flattened_name = name_prefix_modifier(lhs_flattened_name_pre, false);
+    fmt::print("DEBUG ZZZ-lhs lhs_flattened_name:{}\n", lhs_flattened_name);
 
-    fmt::print("DEBUG EEE rhs_flattened_name:{}\n", lhs_flattened_name);
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
   return;
@@ -238,15 +233,16 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   for (int i = 0; i < rt_vec_size; i++) {
     lnast.add_child(idx_mux, Lnast_node::create_ref(cond_strs[i]));
     auto idx_stmt_t = lnast.add_child(idx_mux, Lnast_node::create_stmts());
-    // auto rhs_flattened_name = name_prefix_modifier(tup_head, true);
-    std::string rhs_flattened_name;
-    if (is_2d_vector) {
-      rhs_flattened_name = absl::StrCat(vec_name,"_", i, "_", leaf_field_name);
-    } else {
-      rhs_flattened_name = absl::StrCat(vec_name,"_", i);
-    }
 
-    fmt::print("DEBUG EEE rhs_flattened_name:{}\n", rhs_flattened_name);
+    std::string rhs_flattened_name_pre;
+    if (is_2d_vector) {
+      rhs_flattened_name_pre = absl::StrCat(vec_name, ".", i, ".", leaf_field_name);
+    } else {
+      rhs_flattened_name_pre = absl::StrCat(vec_name, ".", i);
+    }
+    std::string rhs_flattened_name = name_prefix_modifier(rhs_flattened_name_pre, true);
+    fmt::print("DEBUG ZZZ-rhs rhs_flattened_name:{}\n", rhs_flattened_name);
+
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
   return;
@@ -309,7 +305,7 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
-      fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
+      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         handle_register(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
       }
@@ -323,7 +319,7 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
         head_chopped_hier_name = id.substr(id.find_first_of('.') + 1);
 
       std::replace(id.begin(), id.end(), '.', '_');
-      fmt::print("DEBUG CCC flattend vec id:{}\n", id);
+      // fmt::print("DEBUG CCC flattend vec id:{}\n", id);
       setup_register_bits(lnast, type, absl::StrCat("#", id), parent_node);
       setup_register_reset_init(lnast, parent_node, id, stmt.register_().reset(), stmt.register_().init(), head_chopped_hier_name);
       declare_register(lnast, parent_node, id);
@@ -353,7 +349,7 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
-      fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
+      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         wire_init_flip_handling(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), false, parent_node);
       }
@@ -374,7 +370,7 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     case firrtl::FirrtlPB_Type::kSintType: {  // signed
       add_local_flip_info(flipped_in, id);
       std::replace(id.begin(), id.end(), '.', '_');
-      fmt::print("DEBUG CCC flattend vec id:{}\n", id);
+      // fmt::print("DEBUG CCC flattend vec id:{}\n", id);
       Lnast_node zero_node = Lnast_node::create_const(0);
       create_default_value_for_scalar_var(lnast, parent_node, id, zero_node);
       break;
@@ -2677,7 +2673,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
       absl::flat_hash_map<std::string, uint16_t> var2vec_size;
       var2vec_size.insert_or_assign(port_id, type.vector_type().size());
-      fmt::print("DEBUG BBB vec id:{}, size:{}\n", port_id, type.vector_type().size());
+      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", port_id, type.vector_type().size());
       glob_info.module_var2vec_size.insert_or_assign(mod_id, var2vec_size);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, false, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
