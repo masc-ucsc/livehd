@@ -250,6 +250,7 @@ protected:
   std::string flatten_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
   std::string get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr);
   void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
+  void handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
   uint16_t get_vector_size(const Lnast &lnast, std::string_view vec_name);
   void final_mem_interface_assign(Lnast &lnast, Lnast_nid &parent_node);
 

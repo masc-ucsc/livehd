@@ -91,6 +91,7 @@ cc_library(
     "connect_through2",
     "direct_io_assign",
     "bw_overflow",
+    "mem_comb1",
     #"connect_through",  FIXME: re-enable
     "top",
 ]]

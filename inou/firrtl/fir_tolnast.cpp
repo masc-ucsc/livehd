@@ -88,33 +88,71 @@ std::string Inou_firrtl_module::name_prefix_modifier(std::string_view name, cons
 }
 
 std::string Inou_firrtl_module::get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr) {
-   I (expr.has_sub_access());
-  bool dummy = false;
-  auto idx_str = flatten_expr_hier_name(expr.sub_access().index(), dummy);
+  if (expr.has_sub_field()) {
+    return get_runtime_idx_field_name(expr.sub_field().expression());
+    // return absl::StrCat(flatten_expr_hier_name(expr.sub_field().expression(), is_runtime_idx), ".", expr.sub_field().field());
+  } else if (expr.has_sub_access()) {
+    bool dummy = false;
+    auto idx_str = flatten_expr_hier_name(expr.sub_access().index(), dummy);
+    fmt::print("DEBUG AAA idx_str:{}\n", idx_str);
+    // return absl::StrCat(get_runtime_idx_field_name(expr.sub_access().expression()), ".", idx_str);
+    return idx_str;
+  } else if (expr.has_sub_index()) {
+    return get_runtime_idx_field_name(expr.sub_index().expression());
+    // return absl::StrCat(flatten_expr_hier_name(expr.sub_index().expression(), is_runtime_idx), ".", expr.sub_index().index().value());
+  } else if (expr.has_reference()) {
+    I(false);
+    return "";
+  } else {
+    I(false);
+    return "";
+  }
+
+
+
+  // I(expr.has_sub_access());
+  // bool dummy = false;
+  // auto idx_str = flatten_expr_hier_name(expr.sub_access().index(), dummy);
   // fmt::print("DEBUG CCC idx_str:{}\n", idx_str);
-  // return absl::StrCat(get_runtime_idx_field_name(expr.sub_access().expression()), ".", idx_str);
-  return idx_str;
+  // // return absl::StrCat(get_runtime_idx_field_name(expr.sub_access().expression()), ".", idx_str);
+  // return idx_str;
 }
 
-
-void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &rhs_expr) {
-  std::string lhs_flattened_name = name_prefix_modifier(hier_name_l_ori, false);
+void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
+  std::string rhs_flattened_name = name_prefix_modifier(hier_name_r_ori, true);
 
   // idea: 
   // (1) get the runtime idx tuple field
   // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
-  std::string rtidx_str = get_runtime_idx_field_name(rhs_expr);
+  std::string rtidx_str = get_runtime_idx_field_name(lhs_expr);
   rtidx_str = name_prefix_modifier(rtidx_str, true);
+
+
+  bool is_2d_vector = false;
+  std::string leaf_field_name = "";
+  auto found = hier_name_l_ori.find(".."); 
+  if (found != std::string::npos) {
+    is_2d_vector = true;
+    leaf_field_name = hier_name_l_ori.substr(found+2);
+  }
+  
+  fmt::print("DEBUG DDD is_2d_vector:{}, leaf_field_name:{}\n", is_2d_vector, leaf_field_name);
+
   std::string_view vec_name;
-  auto pos = hier_name_r_ori.rfind('.');
+  auto pos = hier_name_l_ori.rfind('.');
   if (pos != std::string::npos) {
-    vec_name = hier_name_r_ori.substr(0, pos);
+    if (is_2d_vector) {
+      vec_name = hier_name_l_ori.substr(0, pos-1);
+    } else {
+      vec_name = hier_name_l_ori.substr(0, pos);
+    }
   }
 
   // (2) know the vector size of this field
   auto rt_vec_size = get_vector_size(lnast, vec_name);
-  // fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_r_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_r_ori, vec_name, rt_vec_size);
-  
+  fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_l_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_l_ori, vec_name, rt_vec_size);
+
+
   vec_name = name_prefix_modifier(vec_name, true);
   // (3) create another function to create __fir_mux for 2^field_bits cases
   //     lhs <- __fir_mux(runtime_idx, value0, value1, ..., value2^filed_bits-1);
@@ -134,7 +172,81 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     lnast.add_child(idx_mux, Lnast_node::create_ref(cond_strs[i]));
     auto idx_stmt_t = lnast.add_child(idx_mux, Lnast_node::create_stmts());
     // auto rhs_flattened_name = name_prefix_modifier(tup_head, true);
-    auto rhs_flattened_name = absl::StrCat(vec_name, "_", i);
+    std::string lhs_flattened_name;
+    if (is_2d_vector) {
+      lhs_flattened_name = absl::StrCat(vec_name,"_", i, "_", leaf_field_name);
+    } else {
+      lhs_flattened_name = absl::StrCat(vec_name,"_", i);
+    }
+
+    fmt::print("DEBUG EEE rhs_flattened_name:{}\n", lhs_flattened_name);
+    add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
+  }
+  return;
+}
+
+void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &rhs_expr) {
+  std::string lhs_flattened_name = name_prefix_modifier(hier_name_l_ori, false);
+
+  // idea: 
+  // (1) get the runtime idx tuple field
+  // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
+  std::string rtidx_str = get_runtime_idx_field_name(rhs_expr);
+  rtidx_str = name_prefix_modifier(rtidx_str, true);
+
+
+  bool is_2d_vector = false;
+  std::string leaf_field_name = "";
+  auto found = hier_name_r_ori.find(".."); 
+  if (found != std::string::npos) {
+    is_2d_vector = true;
+    leaf_field_name = hier_name_r_ori.substr(found+2);
+  }
+  
+  fmt::print("DEBUG DDD is_2d_vector:{}, leaf_field_name:{}\n", is_2d_vector, leaf_field_name);
+
+  std::string_view vec_name;
+  auto pos = hier_name_r_ori.rfind('.');
+  if (pos != std::string::npos) {
+    if (is_2d_vector) {
+      vec_name = hier_name_r_ori.substr(0, pos-1);
+    } else {
+      vec_name = hier_name_r_ori.substr(0, pos);
+    }
+  }
+
+  // (2) know the vector size of this field
+  auto rt_vec_size = get_vector_size(lnast, vec_name);
+  fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_r_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_r_ori, vec_name, rt_vec_size);
+
+
+  vec_name = name_prefix_modifier(vec_name, true);
+  // (3) create another function to create __fir_mux for 2^field_bits cases
+  //     lhs <- __fir_mux(runtime_idx, value0, value1, ..., value2^filed_bits-1);
+  std::vector<std::string> cond_strs;
+  for (int i = 0; i < rt_vec_size; i++) {
+    auto idx_eq = lnast.add_child(parent_node, Lnast_node::create_func_call());
+    auto cond_str = create_tmp_var();
+    lnast.add_child(idx_eq, Lnast_node::create_ref(cond_str));
+    lnast.add_child(idx_eq, Lnast_node::create_const("__fir_eq"));
+    lnast.add_child(idx_eq, Lnast_node::create_ref(rtidx_str));
+    lnast.add_child(idx_eq, Lnast_node::create_const(i));
+    cond_strs.push_back(cond_str);
+  }
+
+  auto idx_mux = lnast.add_child(parent_node, Lnast_node::create_if());
+  for (int i = 0; i < rt_vec_size; i++) {
+    lnast.add_child(idx_mux, Lnast_node::create_ref(cond_strs[i]));
+    auto idx_stmt_t = lnast.add_child(idx_mux, Lnast_node::create_stmts());
+    // auto rhs_flattened_name = name_prefix_modifier(tup_head, true);
+    std::string rhs_flattened_name;
+    if (is_2d_vector) {
+      rhs_flattened_name = absl::StrCat(vec_name,"_", i, "_", leaf_field_name);
+    } else {
+      rhs_flattened_name = absl::StrCat(vec_name,"_", i);
+    }
+
+    fmt::print("DEBUG EEE rhs_flattened_name:{}\n", rhs_flattened_name);
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
   return;
@@ -146,7 +258,7 @@ uint16_t Inou_firrtl_module::get_vector_size(const Lnast &lnast, std::string_vie
     I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
     auto &io_var2vec_size = Inou_firrtl::glob_info.module_var2vec_size[module_name];
 
-    I(io_var2vec_size.find(vec_name) != io_var2vec_size.end());
+    // I(io_var2vec_size.find(vec_name) != io_var2vec_size.end());
     return io_var2vec_size[vec_name];
   } else {
     return var2vec_size[vec_name];
@@ -197,6 +309,7 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
+      fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         handle_register(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
       }
@@ -210,6 +323,7 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
         head_chopped_hier_name = id.substr(id.find_first_of('.') + 1);
 
       std::replace(id.begin(), id.end(), '.', '_');
+      fmt::print("DEBUG CCC flattend vec id:{}\n", id);
       setup_register_bits(lnast, type, absl::StrCat("#", id), parent_node);
       setup_register_reset_init(lnast, parent_node, id, stmt.register_().reset(), stmt.register_().init(), head_chopped_hier_name);
       declare_register(lnast, parent_node, id);
@@ -239,6 +353,7 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
+      fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         wire_init_flip_handling(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), false, parent_node);
       }
@@ -259,6 +374,7 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     case firrtl::FirrtlPB_Type::kSintType: {  // signed
       add_local_flip_info(flipped_in, id);
       std::replace(id.begin(), id.end(), '.', '_');
+      fmt::print("DEBUG CCC flattend vec id:{}\n", id);
       Lnast_node zero_node = Lnast_node::create_const(0);
       create_default_value_for_scalar_var(lnast, parent_node, id, zero_node);
       break;
@@ -2051,9 +2167,12 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // (2) it always be the flattened connection case
       // action: we just flatten the lhs and rhs and insert the multiplexers 
       // to handle the runtime vector elements selection.
+      // Todo: (1) fix the rhs issues on RenameTable pattern
+      //       (2) mimic rhs cases and finish the lhs cases, should be the same 
       if (is_runtime_idx_l) {
         fmt::print("Todo: Handle lhs runtime index\n");
-        hier_name_r = name_prefix_modifier(hier_name_r, true);
+        // hier_name_r = name_prefix_modifier(hier_name_r, true);
+        handle_lhs_runtime_idx(lnast, parent_node, hier_name_l, hier_name_r, lhs_expr);
         return;
       } 
 
@@ -2558,6 +2677,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       glob_info.module2io_dir.insert_or_assign(std::pair(std::string(mod_id), std::string(port_id)), dir);
       absl::flat_hash_map<std::string, uint16_t> var2vec_size;
       var2vec_size.insert_or_assign(port_id, type.vector_type().size());
+      fmt::print("DEBUG BBB vec id:{}, size:{}\n", port_id, type.vector_type().size());
       glob_info.module_var2vec_size.insert_or_assign(mod_id, var2vec_size);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, false, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);

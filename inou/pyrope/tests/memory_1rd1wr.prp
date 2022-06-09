@@ -1,11 +1,5 @@
 // Simple 1rd+1wr memory (rd 0 cycles, wr 1 cycle)
 
-$rd_addr.__sbits = 8 // 256 entries
-$wr_addr.__sbits = 8 // same as rd_addr
-
-rd_a.__sbits = 8
-rd_a := $rd_addr + 32
-
 // addr_ports = (rd_a, $wr_addr)
 
 // wr_data.__sbits = 32
@@ -31,6 +25,12 @@ rd_a := $rd_addr + 32
 // res.0.__ubits = 32
 
 // %out = res.0
+
+$rd_addr.__sbits = 8 // 256 entries
+$wr_addr.__sbits = 8 // same as rd_addr
+
+rd_a.__sbits = 8
+rd_a := $rd_addr + 32
 
 addr_ports = ($wr_addr, rd_a)
 
