@@ -1472,7 +1472,9 @@ Bwd_edge_iterator Lgraph::backward(bool visit_sub) { return Bwd_edge_iterator(th
 Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub); }
 
 void Lgraph::save() {
+#ifndef NDEBUG
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
+#endif
 
   auto wr = Hif_write::create(get_save_filename(), "lgraph", Lgraph::version);
   if (wr == nullptr) {

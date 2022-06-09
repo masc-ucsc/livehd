@@ -1,14 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "meta_api.hpp"
 
 #include <regex>
 #include <string>
 
+#include "meta_api.hpp"
 #include "file_utils.hpp"
 #include "graph_library.hpp"
 #include "lgraph.hpp"
 #include "main_api.hpp"
+#include "thread_pool.hpp"
 
 void Meta_api::open(Eprp_var &var) {
   auto path = var.get("path");
@@ -46,9 +47,16 @@ void Meta_api::save(Eprp_var &var) {
     } else {
       if (hier != "false" && hier != "0") {
         // lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
-        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { g->save(); });
+        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
+          thread_pool.add([g]() -> void {
+            g->save();
+          });
+         });
+      }else{
+        thread_pool.add([lg]() -> void {
+          lg->save();
+        });
       }
-      lg->save();
     }
   }
 
