@@ -478,8 +478,12 @@ Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
 
   auto name = get_name_int(lgid);
 
+  auto &attr = attributes[lgid];
+
   auto hif = Hif_read::open(absl::StrCat(path, "/", name));
   if (hif == nullptr) {
+    attr.lg            = nullptr;
+    attr.tried_to_load = true;
     return nullptr;
   }
 
@@ -487,9 +491,8 @@ Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
 
   lg->load(hif);
 
-  auto &attr = attributes[lgid];
-  attr.lg = lg;
   attr.tried_to_load = true;
+  attr.lg            = lg;
 
   return lg;
 }
