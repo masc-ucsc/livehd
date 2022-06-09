@@ -405,6 +405,7 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   auto it = hier_fbmap.find(h_dpin.get_compact_class_driver());
   if (it == hier_fbmap.end()) {
 #ifndef NDEBUG
+    hier_lg->dump();
     Pass::error("{} input driver {} not ready\n", e.sink.get_node().debug_name(), e.driver.debug_name());
 #endif
     firbits_issues = true;

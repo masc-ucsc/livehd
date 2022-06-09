@@ -1801,6 +1801,7 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
+int count2 = 0;
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");
@@ -1810,6 +1811,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
       auto field = pos_dpin.get_type_const().to_field();
       if (Lgtuple::is_root_attribute(field)) {
         if (!Ntype::has_sink(Ntype_op::Flop, field.substr(2)) && field != "__fdef") {
+          fmt::print("DEBUG BBB TA->AttrSet node:{} total number:{}\n", node.debug_name(), ++count2);
           node.set_type(Ntype_op::AttrSet);
         }
       }
@@ -1905,6 +1907,7 @@ void Cprop::reconnect_tuple_get(Node &node) {
   }
 }
 
+int count = 0;
 Node_pin Cprop::expand_data_and_attributes(Node &node, std::string_view key_name, XEdge_iterator &pending_out_edges,
                                            const std::shared_ptr<Lgtuple const> &node_tup) {
   I(!hier);
@@ -1928,6 +1931,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, std::string_view key_name
     use_tup->add(attr, it.second);
 
     auto attr_node = node.create(Ntype_op::AttrSet);
+    fmt::print("DEBUG AAA TA->AttrSet node:{} total number:{}\n", node.debug_name(), ++count);
     auto an_spin   = attr_node.setup_sink_pin("parent");
     auto af_spin   = attr_node.setup_sink_pin("field");
     auto av_spin   = attr_node.setup_sink_pin("value");

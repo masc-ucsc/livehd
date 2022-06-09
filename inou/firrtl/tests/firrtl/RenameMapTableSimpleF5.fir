@@ -1,0 +1,12 @@
+circuit RenameMapTableSimpleF5 :
+  module RenameMapTableSimpleF5 : 
+    input clock : Clock
+    input reset : UInt<1>
+    output io : {flip map_reqs : {lrs1 : UInt<6>, lrs2 : UInt<6>, lrs3 : UInt<6>, ldst : UInt<6>}[1], map_resps : {prs1 : UInt<6>, prs2 : UInt<6>, prs3 : UInt<6>, stale_pdst : UInt<6>}[1], flip remap_reqs : {ldst : UInt<6>, pdst : UInt<6>, valid : UInt<1>}[1], flip ren_br_tags : {valid : UInt<1>, bits : UInt<3>}[1], flip brupdate : {b1 : {resolve_mask : UInt<8>, mispredict_mask : UInt<8>}, b2 : {uop : {uopc : UInt<7>, inst : UInt<32>, debug_inst : UInt<32>, is_rvc : UInt<1>, debug_pc : UInt<40>, iq_type : UInt<3>, fu_code : UInt<10>, ctrl : {br_type : UInt<4>, op1_sel : UInt<2>, op2_sel : UInt<3>, imm_sel : UInt<3>, op_fcn : UInt<4>, fcn_dw : UInt<1>, csr_cmd : UInt<3>, is_load : UInt<1>, is_sta : UInt<1>, is_std : UInt<1>}, iw_state : UInt<2>, iw_p1_poisoned : UInt<1>, iw_p2_poisoned : UInt<1>, is_br : UInt<1>, is_jalr : UInt<1>, is_jal : UInt<1>, is_sfb : UInt<1>, br_mask : UInt<8>, br_tag : UInt<3>, ftq_idx : UInt<4>, edge_inst : UInt<1>, pc_lob : UInt<6>, taken : UInt<1>, imm_packed : UInt<20>, csr_addr : UInt<12>, rob_idx : UInt<5>, ldq_idx : UInt<3>, stq_idx : UInt<3>, rxq_idx : UInt<2>, pdst : UInt<6>, prs1 : UInt<6>, prs2 : UInt<6>, prs3 : UInt<6>, ppred : UInt<4>, prs1_busy : UInt<1>, prs2_busy : UInt<1>, prs3_busy : UInt<1>, ppred_busy : UInt<1>, stale_pdst : UInt<6>, exception : UInt<1>, exc_cause : UInt<64>, bypassable : UInt<1>, mem_cmd : UInt<5>, mem_size : UInt<2>, mem_signed : UInt<1>, is_fence : UInt<1>, is_fencei : UInt<1>, is_amo : UInt<1>, uses_ldq : UInt<1>, uses_stq : UInt<1>, is_sys_pc2epc : UInt<1>, is_unique : UInt<1>, flush_on_commit : UInt<1>, ldst_is_rs1 : UInt<1>, ldst : UInt<6>, lrs1 : UInt<6>, lrs2 : UInt<6>, lrs3 : UInt<6>, ldst_val : UInt<1>, dst_rtype : UInt<2>, lrs1_rtype : UInt<2>, lrs2_rtype : UInt<2>, frs3_en : UInt<1>, fp_val : UInt<1>, fp_single : UInt<1>, xcpt_pf_if : UInt<1>, xcpt_ae_if : UInt<1>, xcpt_ma_if : UInt<1>, bp_debug_if : UInt<1>, bp_xcpt_if : UInt<1>, debug_fsrc : UInt<2>, debug_tsrc : UInt<2>}, valid : UInt<1>, mispredict : UInt<1>, taken : UInt<1>, cfi_type : UInt<3>, pc_sel : UInt<2>, jalr_target : UInt<40>, target_offset : SInt<1>}}, flip rollback : UInt<1>}
+    
+    io is invalid
+    reg regs : UInt<4>[1][5], clock @[rename-maptable.scala 71:25]
+    node _T = bits(io.remap_reqs[0].valid, 0, 0) @[Bitwise.scala 72:15]
+
+    io.map_resps[0].prs1 <= _T
+
