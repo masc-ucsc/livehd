@@ -186,22 +186,11 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
   }
 }
 
-Lgraph::~Lgraph() { library->unregister(name, lgid, this); }
-
-bool Lgraph::exists(std::string_view path, std::string_view name) { return Graph_library::try_find_lgraph(path, name) != nullptr; }
-
-Lgraph *Lgraph::create(std::string_view path, std::string_view name, std::string_view source) {
-  auto *lib = Graph_library::instance(path);
-  I(lib);
-  auto *lg = lib->setup_lgraph(name, source);
-  lg->clear();
-
-  return lg;
-}
+Lgraph::~Lgraph() { library->unregister(this); }
 
 Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
-  auto  lg_source = get_library().get_source(get_lgid());
-  auto *new_lg    = Lgraph::create(get_path(), new_lg_name, lg_source);
+  auto  lg_source = library->get_source(get_lgid());
+  auto *new_lg    = library->create_lgraph(new_lg_name, lg_source);
 
   auto *new_sub = new_lg->ref_self_sub_node();
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
@@ -222,67 +211,13 @@ Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
   return new_lg;
 }
 
-Lgraph *Lgraph::open_or_create(std::string_view path, std::string_view name, std::string_view source) {
-  auto *lg = open(path, name);
-  if (lg != nullptr)
-    return lg;
-
-  return create(path, name, source);
-}
-
-Lgraph *Lgraph::open(std::string_view path, Lg_type_id lgid) {
-  auto *lib = Graph_library::instance(path);
-  if (unlikely(lib == nullptr))
-    return nullptr;
-
-  Lgraph *lg = lib->try_find_lgraph(lgid);
-  if (likely(lg != nullptr)) {
-    return lg;
-  }
-
-  if (!lib->exists(lgid))
-    return nullptr;
-
-  auto hif = Hif_read::open(absl::StrCat(path, "/", lib->get_name(lgid)));
-  if (hif == nullptr)
-    return nullptr;
-
-  lg = lib->setup_lgraph(lib->get_name(lgid), lib->get_source(lgid));
-  lg->load(hif);  // may fail to load
-  return lg;
-}
-
-Lgraph *Lgraph::open(std::string_view path, std::string_view name) {
-  Lgraph *lg = Graph_library::try_find_lgraph(path, name);
-  if (lg) {
-    return lg;
-  }
-
-  auto *lib = Graph_library::instance(path);
-  if (lib == nullptr)
-    return nullptr;
-
-  if (unlikely(!lib->has_name(name)))
-    return nullptr;
-
-  auto hif = Hif_read::open(absl::StrCat(path, "/", name));
-  if (hif == nullptr)
-    return nullptr;
-
-  lg = lib->setup_lgraph(name, lib->get_source(name));
-  lg->load(hif);  // may fail to load
-  return lg;
-}
-
-void Lgraph::rename(std::string_view path, std::string_view orig, std::string_view dest) {
-  bool valid = Graph_library::instance(path)->rename_name(orig, dest);
-  if (valid)
-    warn("lgraph::rename find original graph {} in path {}", orig, path);
-  else
-    error("cannot find original graph {} in path {}", orig, path);
-}
-
 void Lgraph::clear() {
+  clear_int();
+
+  library->clear(lgid);
+}
+
+void Lgraph::clear_int() {
   Lgraph_attributes::clear();  // last. Removes lock at the end
 
   auto nid1 = create_node_int();

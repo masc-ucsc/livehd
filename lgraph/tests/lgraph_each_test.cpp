@@ -94,21 +94,22 @@ protected:
   std::vector<Lgraph *> lgs;
 
   void SetUp() override {
-    top = Lgraph::create("lgdb_lg_each", "top", "nosource");
+    auto *lib = Graph_library::instance("lgdb_lg_each");
+    top = lib->create_lgraph("top", "nosource");
     ASSERT_NE(top, nullptr);
-    c1 = Lgraph::create("lgdb_lg_each", "c1", "nosource");
+    c1 = lib->create_lgraph("c1", "nosource");
     ASSERT_NE(c1, nullptr);
-    c2 = Lgraph::create("lgdb_lg_each", "c2", "nosource");
+    c2 = lib->create_lgraph("c2", "nosource");
     ASSERT_NE(c2, nullptr);
-    c3 = Lgraph::create("lgdb_lg_each", "c3", "nosource");
+    c3 = lib->create_lgraph("c3", "nosource");
     ASSERT_NE(c3, nullptr);
-    gc11 = Lgraph::create("lgdb_lg_each", "gc11", "nosource");
+    gc11 = lib->create_lgraph("gc11", "nosource");
     ASSERT_NE(gc11, nullptr);
-    gc31 = Lgraph::create("lgdb_lg_each", "gc31", "nosource");
+    gc31 = lib->create_lgraph("gc31", "nosource");
     ASSERT_NE(gc31, nullptr);
-    gc32 = Lgraph::create("lgdb_lg_each", "gc32", "nosource");
+    gc32 = lib->create_lgraph("gc32", "nosource");
     ASSERT_NE(gc32, nullptr);
-    top2 = Lgraph::create("lgdb_lg_each", "top2", "nosource");
+    top2 = lib->create_lgraph("top2", "nosource");
     ASSERT_NE(top2, nullptr);
 
     lgs.push_back(top);
@@ -154,7 +155,7 @@ protected:
       std::string lg_name{"lg_name"};
       lg_name += std::to_string(i);
 
-      auto *lg = Lgraph::create("lgdb_lg_each", lg_name, "nosource");
+      auto *lg = lib->create_lgraph(lg_name, "nosource");
       add_io(lg);
 
       for (int j = rnd_cells.any(); j > 0; --j) {
@@ -187,7 +188,7 @@ TEST_F(Setup_graphs_test, each_local_sub) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
-      Lgraph *child = Lgraph::open(parent->get_path(), node.get_type_sub());
+      Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
       if (child == nullptr)
         return;
 
@@ -234,7 +235,7 @@ TEST_F(Setup_graphs_test, each_local_sub_twice) {
     fmt::print("checking parent:{}\n", parent->get_name());
     parent->each_local_sub_fast([parent, &children2, this](Node &node, Lg_type_id lgid) {
       (void)lgid;
-      Lgraph *child = Lgraph::open(parent->get_path(), node.get_type_sub());
+      Lgraph *child = parent->ref_library()->open_lgraph(node.get_type_sub());
       if (child == nullptr)
         return;
 

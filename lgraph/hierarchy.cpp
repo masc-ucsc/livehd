@@ -29,7 +29,7 @@ Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
   auto *parent_lg = h_entry.parent_lg;
   auto  lgid      = parent_lg->get_type_sub(h_entry.parent_nid);
 
-  return Lgraph::open(top->get_path(), lgid);
+  return parent_lg->ref_library()->open_lgraph(lgid);
 }
 
 std::tuple<Hierarchy_index, Lgraph *, Index_id> Hierarchy::get_instance_up(const Hierarchy_index hidx) const {

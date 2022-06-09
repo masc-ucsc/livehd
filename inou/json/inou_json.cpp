@@ -57,6 +57,12 @@ void Inou_json::tolg(Eprp_var &var) {
   }
 
   std::vector<Lgraph *> lgs;
+
+  auto *lib = Graph_library::instance(lgdb);
+  if (lib == nullptr) {
+    error("inou.json.tolg: could not open graph_library lgdb:{} path", lgdb);
+  }
+
   for (const auto &f : absl::StrSplit(files, ',')) {
     auto name = str_tools::get_str_after_last_if_exists(f, '/');
     if (str_tools::ends_with(name, ".json")) {
@@ -72,7 +78,7 @@ void Inou_json::tolg(Eprp_var &var) {
       continue;
     }
 
-    Lgraph *lg = Lgraph::create(lgdb, name, f);
+    Lgraph *lg = lib->create_lgraph(name, f);
 
     char                      buffer[65536];
     rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));

@@ -51,12 +51,7 @@ void Pass_compiler::compile(Eprp_var &var) {
 
   if (!get_firrtl.empty()) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
-    Lgraph *seed_lg;
-    auto   *library = Graph_library::instance(path);
-    if (!library->exists(path, "__firop_seed")) {
-      seed_lg = Lgraph::create(path, "__firop_seed", "-");
-      setup_firmap_library(seed_lg);
-    }
+    setup_firmap_library(path);
     firrtl_compilation(var, compiler);
     // google::protobuf::ShutdownProtobufLibrary();
   } else {
@@ -94,8 +89,10 @@ Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::strin
   return sub;
 }
 
-void Pass_compiler::setup_firmap_library(Lgraph *lg) {
-  auto *lib = lg->ref_library();
+void Pass_compiler::setup_firmap_library(std::string_view path) {
+  auto   *lib = Graph_library::instance(path);
+  if (lib->exists("__fir_const"))
+    return;
 
   auto *sub_fir_const = setup_firmap_library_gen(lib, "__fir_const", {}, "Y");
   sub_fir_const->set_loop_first();

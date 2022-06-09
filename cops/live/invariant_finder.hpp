@@ -43,8 +43,8 @@ public:
 
   Invariant_finder(const Invariant_find_options &pack) : boundaries(pack.hierarchical_separator) {
     processed   = false;
-    elab_graph  = Lgraph::open(pack.elab_lgdb, pack.top);
-    synth_graph = Lgraph::open(pack.synth_lgdb, pack.top);
+    elab_graph  = Lgraph_open(pack.elab_lgdb, pack.top);
+    synth_graph = Lgraph_open(pack.synth_lgdb, pack.top);
   }
 
   const Invariant_boundaries &get_boundaries() {

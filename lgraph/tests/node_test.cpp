@@ -22,11 +22,14 @@ protected:
   std::vector<Lgraph *> lgs;
 
   void SetUp() override {
-    top = Lgraph::create("lgdb_node_test", "top", "nosource");
+    auto *lib = Graph_library::instance("lgdb_node_test");
+    I(lib);
+
+    top = lib->create_lgraph("top", "nosource");
     ASSERT_NE(top, nullptr);
-    c1 = Lgraph::create("lgdb_node_test", "c1", "nosource");
+    c1 = lib->create_lgraph("c1", "nosource");
     ASSERT_NE(c1, nullptr);
-    c2 = Lgraph::create("lgdb_node_test", "c2", "nosource");
+    c2 = lib->create_lgraph("c2", "nosource");
     ASSERT_NE(c2, nullptr);
 
     //---------------------------------------------------

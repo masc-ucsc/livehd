@@ -78,8 +78,9 @@ struct LG2Yosys_Pass : public Yosys::Pass {
 
     std::vector<Lgraph *> lgs;
     if (single_graph_mode) {
-      Lgraph *lg = Lgraph::open(path, name);
-      if (lg == 0) {
+      auto *lib = Graph_library::instance(path);
+      auto *lg  = lib->open_lgraph(name);
+      if (lg == nullptr) {
         log_error("could not open graph %s in path %s\n.", name.c_str(), path.c_str());
       } else {
         lgs.push_back(lg);

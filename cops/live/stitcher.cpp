@@ -17,7 +17,7 @@ Live_stitcher::Live_stitcher(Stitch_pass_options &pack) {
   boundaries = Invariant_boundaries::deserialize(invariant_file);
   invariant_file.close();
 
-  original = Lgraph::open(pack.osynth_lgdb, boundaries->top);
+  original = Lgraph_open(pack.osynth_lgdb, boundaries->top);
 
   if (!original) {
     Pass::error(fmt::format("Live_stitcher: I was not able to open original synthesized netlist {} in {}",

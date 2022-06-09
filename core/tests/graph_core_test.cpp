@@ -427,7 +427,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
     });
     Lbench b("test1_lg_insert_" + std::to_string(sz));
 
-    auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");
+    auto *lg = Lgraph_create("graph_core_test", "lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();
@@ -447,7 +447,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
     });
     Lbench b("test2_lg_delete_" + std::to_string(sz));
 
-    auto *lg = Lgraph::create("graph_core_test", "lg_test1", "test");
+    auto *lg = Lgraph_create("graph_core_test", "lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();

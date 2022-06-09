@@ -16,7 +16,13 @@ void Meta_api::open(Eprp_var &var) {
   auto hier = var.get("hier");
   assert(!name.empty());
 
-  Lgraph *lg = Lgraph::open(path, name);
+  auto *lib = Graph_library::instance(path);
+  if (lib==nullptr) {
+    Main_api::error("could not open graph library path {}", path);
+    return;
+  }
+
+  Lgraph *lg = lib->open_lgraph(name);
 
   if (lg == nullptr) {
     Main_api::warn("lgraph.open could not find {} lgraph in {} path", name, path);
@@ -54,8 +60,12 @@ void Meta_api::create(Eprp_var &var) {
   auto name = var.get("name");
   assert(!name.empty());
 
-  Lgraph *lg = Lgraph::create(path, name, "lgshell");
-
+  auto *lib = Graph_library::instance(path);
+  if (lib == nullptr) {
+    Main_api::error("lgraph.create could not graph_library in {} path", path);
+    return;
+  }
+  Lgraph *lg = lib->open_lgraph(name);
   if (lg == nullptr) {
     Main_api::error("lgraph.create could not open {} lgraph in {} path", name, path);
     return;
@@ -89,7 +99,7 @@ void Meta_api::match(Eprp_var &var) {
   auto path  = var.get("path");
   auto match = var.get("match");
 
-  const auto *library = Graph_library::instance(path);
+  auto *library = Graph_library::instance(path);
   if (library == nullptr) {
     Main_api::warn("lgraph.match could not open {} path", path);
     return;
@@ -98,10 +108,10 @@ void Meta_api::match(Eprp_var &var) {
   std::vector<Lgraph *> lgs;
 
   try {
-    library->each_lgraph(match, [&lgs, path](Lg_type_id lgid, std::string_view name) {
+    library->each_lgraph(match, [&lgs, library](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
-      Lgraph *lg = Lgraph::open(path, name);
+      auto *lg = library->open_lgraph(name);
       if (lg) {
         if (lg->is_empty()) {
           fmt::print("lgraph.match lgraph {} is empty\n", name);

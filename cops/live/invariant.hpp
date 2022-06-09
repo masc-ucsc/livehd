@@ -59,7 +59,7 @@ public:
         g->get_name());  // FIXME: It would be better to use string_view, BUT, Lgraph can delete/add Lgraphs names (can it???)
   }
 
-  static Lgraph *get_graph(Graph_ID id, const std::string &lgdb) { return Lgraph::open(lgdb, id); }
+  static Lgraph *get_graph(Graph_ID id, const std::string &lgdb) { return Lgraph_open(lgdb, id); }
 
   bool is_invariant_boundary(Net_ID net) const {
     if (net.first == 0)

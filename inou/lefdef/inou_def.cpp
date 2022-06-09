@@ -17,7 +17,7 @@ std::vector<Lgraph *> Inou_def::generate() {
   I(false);
 #else
   // clear since loading from def
-  auto *g = Lgraph::create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
+  auto *g = Lgraph_create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
 
   const Tech_library &tlib            = g->get_tlibrary();
   const int           cell_types_size = tlib.get_cell_types_size();

@@ -952,7 +952,7 @@ void Cprop::tuple_get_mask_mut(Node &node) {
 void Cprop::tuple_subgraph(const Node &node) {
   const auto &sub = node.get_type_sub_node();
 
-  auto *sub_lg = node.ref_library()->try_find_lgraph(sub.get_lgid());
+  auto *sub_lg = node.ref_library()->try_ref_lgraph(sub.get_lgid());
   if (sub_lg == nullptr || sub_lg->is_empty()) {
     std::string sub_name{sub.get_name()};
     if (str_tools::starts_with(sub_name, "__")) {

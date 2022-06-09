@@ -32,7 +32,8 @@ public:
 
 #if TEST1
 TEST_F(Label_mincut_test, test1) {
-  Lgraph *a_graph = Lgraph::create("lgdb", "a_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *a_graph = lib->create_lgraph("a_graph", "-");
   ASSERT_NE(a_graph, nullptr);
 
   auto             verbose = false;
@@ -92,7 +93,8 @@ TEST_F(Label_mincut_test, test1) {
 
 #if TEST2
 TEST_F(Label_mincut_test, test2) {
-  Lgraph *b_graph = Lgraph::create("lgdb", "b_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *b_graph = lib->create_lgraph("b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
 
   auto             verbose = false;
@@ -179,7 +181,8 @@ TEST_F(Label_mincut_test, test2) {
 
 #if TEST3
 TEST_F(Label_mincut_test, test3) {
-  Lgraph *c_graph = Lgraph::create("lgdb", "c_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *c_graph = lib->create_lgraph("c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
 
   auto             verbose = false;

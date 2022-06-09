@@ -50,7 +50,7 @@ public:
   void replace(Lgraph *nsynth);
 
   void replace(const std::string &nsynth) {
-    Lgraph *synth = Lgraph::open(nsynth, boundaries->top);
+    Lgraph *synth = Lgraph_open(nsynth, boundaries->top);
     replace(synth);
   }
 };

@@ -100,9 +100,11 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
 void generate_graphs(int n) {
   unsigned int rseed = 123;
 
+  auto *lib = Graph_library::instance("lgdb_iter_test");
+
   for (int i = 0; i < n; i++) {
     std::string                    gname = "test_" + std::to_string(i);
-    Lgraph                        *g     = Lgraph::create("lgdb_iter_test", gname, "test");
+    Lgraph                        *g     = lib->create_lgraph(gname, "test");
     std::vector<Node_pin::Compact> spins;
     std::vector<Node_pin::Compact> dpins;
 
@@ -207,9 +209,11 @@ void generate_graphs(int n) {
 }
 
 bool fwd(int n) {
+  auto *lib = Graph_library::instance("lgdb_iter_test");
+
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph     *g     = Lgraph::open("lgdb_iter_test", gname);
+    Lgraph     *g     = lib->open_lgraph(gname);
     if (g == nullptr)
       return false;
 
@@ -225,10 +229,12 @@ bool fwd(int n) {
 }
 
 bool bwd(int n) {
+  auto *lib = Graph_library::instance("lgdb_iter_test");
+
   for (int i = 0; i < n; i++) {
     std::string gname = "test_" + std::to_string(i);
-    Lgraph     *g     = Lgraph::open("lgdb_iter_test", gname);
-    if (g == 0)
+    Lgraph     *g     = lib->open_lgraph(gname);
+    if (g == nullptr)
       return false;
 
     // g->dump();
@@ -277,7 +283,8 @@ bool bwd(int n) {
 
 void simple_line() {
   std::string gname   = "top_0";
-  Lgraph     *g0      = Lgraph::create("lgdb_iter_test", "g0", "test");
+  auto *lib = Graph_library::instance("lgdb_iter_test");
+  Lgraph     *g0      = lib->create_lgraph("g0", "test");
   auto       &sfuture = g0->ref_library()->setup_sub("future", "test");
   if (!sfuture.has_pin("fut_i"))
     sfuture.add_input_pin("fut_i", 10);
@@ -285,9 +292,9 @@ void simple_line() {
     sfuture.add_output_pin("fut_o", 11);
   g0->ref_library()->sync();
 
-  Lgraph *s0 = Lgraph::create("lgdb_iter_test", "s0", "test");
-  Lgraph *s1 = Lgraph::create("lgdb_iter_test", "s1", "test");
-  Lgraph *s2 = Lgraph::create("lgdb_iter_test", "s2", "test");
+  Lgraph *s0 = lib->create_lgraph("s0", "test");
+  Lgraph *s1 = lib->create_lgraph("s1", "test");
+  Lgraph *s2 = lib->create_lgraph("s2", "test");
 
   auto g0_i_pin = g0->add_graph_input("g0_i", 1, 0);
   auto g0_o_pin = g0->add_graph_output("g0_o", 2, 0);
@@ -352,8 +359,9 @@ void simple_line() {
 
 void simple(int num) {
   std::string gname = "simple_iter";
-  Lgraph     *g     = Lgraph::create("lgdb_iter_test", gname, "test");
-  Lgraph     *sub_g = Lgraph::create("lgdb_iter_test", "sub", "test");
+  auto       *lib   = Graph_library::instance("lgdb_iter_test");
+  Lgraph     *g     = lib->create_lgraph(gname, "test");
+  Lgraph     *sub_g = lib->create_lgraph("sub", "test");
 
   for (int i = 0; i < 256; i++) {
     // Disconnected IOs from 1000-1512
@@ -604,7 +612,16 @@ int main(int argc, char **argv) {
     }
 
     fmt::print("benchmarking path:{} name:{} niters:{}\n", argv[1], argv[2], niters);
-    auto *lg = Lgraph::open(argv[1], argv[2]);
+    auto *lib = Graph_library::instance(argv[1]);
+    if (lib == nullptr) {
+      fmt::print("could not open graph library {}\n", argv[1]);
+      exit(-3);
+    }
+    auto *lg = lib->open_lgraph(argv[2]);
+    if (lg == nullptr) {
+      fmt::print("could not open lgraph {}\n", argv[2]);
+      exit(-3);
+    }
 
     TRACE_EVENT("core", "fwd.custom");
     Lbench bench("fwd.custom");
@@ -682,7 +699,13 @@ int main(int argc, char **argv) {
     }
 #endif
 #ifdef ITER_REBUILD
-    auto                                                         *tlg = Lgraph::create(argv[1], "topo_sorted", "-");
+    auto *lib = Graph_library::instance(argv[1]);
+    if (lib==nullptr) {
+      fmt::print("ERROR: could not open graph_library {}\n", argv[1]);
+      exit(-3);
+    }
+    auto  *tlg = lib->create_lgraph("topo_sorted", "-");
+
     absl::flat_hash_map<Node::Compact_class, Node::Compact_class> lg2tlg;
     for (auto node : lg->forward()) {
       auto tnode = tlg->create_node(node);

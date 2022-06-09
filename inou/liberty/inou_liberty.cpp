@@ -41,12 +41,7 @@ void Inou_liberty::liberty_open(Eprp_var &var) {
 
     const auto &cl=timer.celllib(ot::MAX);
     for(const auto &it:cl->cells) {
-      auto *g = library->try_find_lgraph(it.first);
-      if (g == nullptr) {
-        g = ::Lgraph::create(p.path, it.first, "-");
-      }
-
-      Sub_node *sub = g->ref_self_sub_node();
+      auto *sub = library->ref_or_create_sub(it.first);
       sub->reset_pins();
 
       bool has_clock = false;

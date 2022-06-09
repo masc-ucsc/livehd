@@ -92,9 +92,12 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   g->each_local_sub_fast([this, indent, space](Node &node, Lg_type_id lgid) {
     (void)node;
 
-    Lgraph *sub_lg = Lgraph::open(path, Lg_type_id(lgid));
+    auto *lib = Graph_library::instance(path);
+
+    Lgraph *sub_lg = lib->open_lgraph(Lg_type_id(lgid));
     if (!sub_lg)
       return;
+
     if (sub_lg->is_empty()) {
       int n_inp = 0;
       int n_out = 0;
@@ -182,9 +185,9 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 
 void Pass_sample::create_sample_graph(Lgraph *g) {
   auto lg_path = g->get_path();
-  auto lg_source{g->get_library().get_source(g->get_lgid())};
 
-  Lgraph *lg = Lgraph::create(lg_path, "pass_sample", lg_source);
+  auto *lg = g->ref_library()->create_lgraph("pass_sample","-");
+
   fmt::print("Creating new sample Lgraph...\n");
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4);  // First io in module, 4 bits
   auto graph_inp_b = lg->add_graph_input("g_inp_b", 1, 1);  // Module position 1, 1 bit

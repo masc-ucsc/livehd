@@ -190,7 +190,7 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
 
     visited.insert(e.second);
 
-    auto *sub_lg = Lgraph::open(path, e.second);
+    auto *sub_lg = ref_library()->open_lgraph(e.second);
     if (sub_lg == nullptr || sub_lg->is_empty())
       continue;
 
@@ -206,7 +206,7 @@ void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, c
       continue;
     visited.insert(ent.first);
 
-    auto *down_lg = Lgraph::open(get_path(), Lg_type_id(ent.first));
+    auto *down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
     if (down_lg == nullptr || down_lg->is_empty())
       continue;
     down_lg->each_hier_unique_sub_bottom_up_int(visited, fn);
@@ -248,7 +248,7 @@ void Lgraph::bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &par
                                   std::vector<Lgraph *> &leafs) {
   bool leaf = true;
   for (const auto &ent : get_down_class_map()) {
-    auto *down_lg = Lgraph::open(get_path(), Lg_type_id(ent.first));
+    auto *down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
     if (down_lg != nullptr && !down_lg->is_empty()) {
       leaf = false;
       parent_map[down_lg].emplace_back(this);

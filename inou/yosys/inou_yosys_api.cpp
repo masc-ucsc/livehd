@@ -258,7 +258,7 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
     error("unrecognized abc {} option. Either true or false", techmap);
   }
 
-  auto gl = Graph_library::instance(path);
+  auto *gl = Graph_library::instance(path);
 
   uint32_t max_version = gl->get_max_version();
 
@@ -270,8 +270,8 @@ void Inou_yosys_api::do_tolg(Eprp_var &var) {
   gl->each_lgraph([&lgs, gl, max_version, this](Lg_type_id id, std::string_view name) {
     (void)name;
     if (gl->get_version(id) > max_version) {
-      Lgraph *lg = Lgraph::open(path, id);
-      if (lg == 0) {
+      Lgraph *lg = gl->try_ref_lgraph(id);
+      if (lg == nullptr) {
         warn("could not open graph lgid:{} in path:{}", (int)id, path);
       } else {
         lgs.push_back(lg);

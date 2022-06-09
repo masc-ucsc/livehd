@@ -27,7 +27,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Com
   for (auto child_idx : nt.children(tidx)) {
     const Node& child = nt.get_data(child_idx);
     if (child.is_type_sub_present()) {
-      const auto child_lg = Lgraph::open(path, child.get_type_sub());
+      const auto child_lg = root_lg->ref_library()->open_lgraph(child.get_type_sub());
       sub_lg_count[child_lg]++;
     } else {  // if (child.is_type_synth())
       grid_count[child.get_type_op()]++;
@@ -39,7 +39,7 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Com
     const Node& child = nt.get_data(child_idx);
 
     if (child.is_type_sub_present()) {
-      const auto child_lg = Lgraph::open(path, child.get_type_sub());
+      const auto child_lg = root_lg->ref_library()->open_lgraph(child.get_type_sub());
       if (sub_lg_count[child_lg] == 0) {
         continue;
       }

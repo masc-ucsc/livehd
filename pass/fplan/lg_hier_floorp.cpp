@@ -18,7 +18,7 @@ FPContainer* Lg_hier_floorp::load_lg_modules(Lgraph* lg) {
   absl::flat_hash_map<Lgraph*, unsigned int> sub_lg_count;
   lg->each_local_sub_fast([&](Node& n, Lg_type_id lgid) {
     (void)n;
-    Lgraph* sub_lg = Lgraph::open(path, lgid);
+    Lgraph* sub_lg = root_lg->ref_library()->open_lgraph(lgid);
     sub_lg_count[sub_lg]++;
   });
 

@@ -6,7 +6,8 @@
 #include "lgraph.hpp"
 
 Lgraph* create_some_random_lgraph() {
-  Lgraph* lg = Lgraph::create("lgdb_bench", "random", "-");
+  auto *lib = Graph_library::instance("lgdb_bench");
+  auto* lg  = lib->create_lgraph("random", "-");
 
   I(false);
 
@@ -96,7 +97,12 @@ int main(int argc, char** argv) {
     lg = create_some_random_lgraph();
   } else if (argc == 3) {
     fmt::print("benchmark the graph lgdb:{} name:{}\n", argv[1], argv[2]);
-    lg = Lgraph::open(argv[1], argv[2]);
+    auto *lib = Lgraph::instance(argv[1]);
+    lg = lib->open_lgraph(argv[2]);
+    if (lg==nullptr) {
+      fmt::print("could not open lgraph {}\n", argv[2]);
+      exit(-3);
+    }
   } else {
     fmt::print("usage:\n\t{} <lgdb> <lg_name>\n", argv[0]);
     exit(-2);

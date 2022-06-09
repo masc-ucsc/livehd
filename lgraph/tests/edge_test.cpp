@@ -34,7 +34,8 @@ protected:
   absl::flat_hash_map<int, bool> n2_graph_pos_created;
 
   void SetUp() override {
-    g = Lgraph::create("lgdb_edge_test", "test0", "test");
+    auto lib = Graph_library::instance("lgdb_edge_test");
+    g = lib->create_lgraph("test0", "test");
 
     n1 = g->create_node_sub("n1");  // creates n1
     n2 = g->create_node_sub("n2");  // creates n2
@@ -425,7 +426,8 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
 }
 
 TEST_F(Edge_test, trivial_delete2) {
-  Lgraph *g2 = Lgraph::create("lgdb_edge_test", "test22", "test");
+  auto lib = Graph_library::instance("lgdb_edge_test");
+  Lgraph *g2 = lib->create_lgraph("test22", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");
@@ -488,7 +490,8 @@ TEST_F(Edge_test, trivial_delete2) {
 }
 
 TEST_F(Edge_test, trivial_delete3) {
-  Lgraph *g2 = Lgraph::create("lgdb_edge_test", "test3", "test");
+  auto lib = Graph_library::instance("lgdb_edge_test");
+  Lgraph *g2 = lib->create_lgraph("test3", "test");
 
   auto nn1 = g2->create_node_sub("n1");
   auto nn2 = g2->create_node_sub("n2");

@@ -74,7 +74,7 @@ unsigned int FPObject::findNode(Node_tree& tree, lh::Tree_index tidx, double cX,
         continue;
       }
 
-      Lgraph* child_lg = Lgraph::open(tree.get_root_lg()->get_path(), child->get_type_sub());
+      Lgraph* child_lg = tree.get_root_lg()->ref_library()->open_lgraph(child->get_type_sub());
 
       if (child_lg->get_name() != getName()) {
         child_idx = tree.get_sibling_next(child_idx);

@@ -20,7 +20,7 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
 
   auto    lg_name   = lg->get_name();
   auto    lg_source = lg->get_library().get_source(lg->get_lgid());
-  Lgraph *new_lg    = Lgraph::create(lg->get_path(), lg_name.substr(9), lg_source);
+  Lgraph *new_lg    = lg->ref_library()->create_lgraph(lg_name.substr(9), lg_source);
 
   I(pinmaps.find(lg) != pinmaps.end());  // call add_map_entry first (needed for multithreaded)
 

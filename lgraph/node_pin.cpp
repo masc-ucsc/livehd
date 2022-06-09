@@ -14,7 +14,10 @@ Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx)
 }
 
 Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
-  current_g = Lgraph::open(path, Lg_type_id(comp.lgid));
+  auto *lib = Graph_library::instance(path);
+  I(lib);
+  current_g = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
+  I(current_g); // If we created a Compact, the lgraph has to exist as open
   top_g     = current_g;
 
   hidx = Hierarchy::non_hierarchical();

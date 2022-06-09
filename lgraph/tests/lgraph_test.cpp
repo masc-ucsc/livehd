@@ -185,7 +185,9 @@ TEST_F(Setup_lgraph, add_remove_inputs) {
 
   file_utils::clean_dir(lgdb);
 
-  Lgraph *lg1 = Lgraph::create(lgdb, "lg1", "file1.xxx");
+  auto *lib = Graph_library::instance(lgdb);
+
+  Lgraph *lg1 = lib->create_lgraph("lg1", "file1.xxx");
 
   check_ios(lg1);
 

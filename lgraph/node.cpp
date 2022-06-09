@@ -93,7 +93,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
     : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = _g->ref_library();
-  top_g     = lib->try_find_lgraph(Lg_type_id(comp.lgid));
+  top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
   I(top_g);
@@ -104,7 +104,8 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
 Node::Node(std::string_view path, const Compact_flat &comp)
     : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
-  top_g = Graph_library::try_find_lgraph(path, Lg_type_id(comp.lgid));
+  auto *lib = Graph_library::instance(path);
+  top_g = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
   I(top_g);
@@ -437,21 +438,12 @@ Lg_type_id Node::get_type_sub() const { return current_g->get_type_sub(nid); }
 
 Lgraph *Node::ref_type_sub_lgraph() const {
   auto lgid = current_g->get_type_sub(nid);
-  return Lgraph::open(top_g->get_path(), lgid);
+  return top_g->ref_library()->open_lgraph(lgid);
 }
 
 bool Node::is_type_sub_present() const {
   if (!is_type_sub())
     return false;
-
-#if 0
-  auto sub_lgid = current_g->get_type_sub(nid);
-  auto *sub_lg  = current_g->ref_library()->try_find_lgraph(sub_lgid);
-  if (sub_lg)
-    return sub_lg;
-  
-  HERE!!!
-#endif
 
   auto *sub_lg = ref_type_sub_lgraph();
   if (sub_lg)

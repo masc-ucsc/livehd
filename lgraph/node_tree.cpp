@@ -46,7 +46,7 @@ Node_tree::Node_tree(Lgraph* root_arg)
 
         bool found = false;
         while (sub_hidx != ht->invalid_index()) {
-          Lgraph* sub_lg = Lgraph::open(root->get_path(), cn.get_type_sub());
+          Lgraph* sub_lg = Lgraph_open(root->get_path(), cn.get_type_sub());
 
           if (debug_verbose) {
             fmt::print("testing l:{}, p:{} ({})\n", (int)sub_hidx.level, (int)sub_hidx.pos, sub_lg->get_name());

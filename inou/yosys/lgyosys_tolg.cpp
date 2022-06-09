@@ -644,7 +644,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
     if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) {  // sub_cell type
       std::string mod_name(&(cell->type.c_str()[1]));
 
-      sub_lg = Lgraph::open_or_create(g->get_path(), mod_name, "-");
+      sub_lg = g->ref_library()->ref_or_create_lgraph(mod_name, "-");
     }
 
     for (const auto &conn : cell->connections()) {
@@ -2246,16 +2246,13 @@ struct Yosys2lg_Pass : public Yosys::Pass {
     cell_port_inputs.clear();
     driven_signals.clear();
 
-    auto library = Graph_library::instance(path);
+    auto *library = Graph_library::instance(path);
 
     for (auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
       std::string    mod_name(&mod->name.c_str()[1]);
 
-      auto *g = library->try_find_lgraph(mod_name);
-      if (g == nullptr) {
-        g = ::Lgraph::create(path, mod_name, "-");
-      }
+      auto *g = library->ref_or_create_lgraph(mod_name, "-");
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {
@@ -2302,7 +2299,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
           }
         }
 
-        auto *g = library->try_find_lgraph(mod_name);
+        auto *g = library->try_ref_lgraph(mod_name);
         I(g);
 
         process_cell_drivers_intialization(mod, g);

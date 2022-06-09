@@ -18,7 +18,9 @@ protected:
 TEST_F(SampleMainTest, EmptyLgraph) {
   file_utils::clean_dir("pass_test_lgdb");
 
-  Lgraph *g = Lgraph::create("pass_test_lgdb", "empty", "nosource");
+  auto *lib = Graph_library::instance("pass_test_lgdb");
+
+  Lgraph *g = lib->create_lgraph("empty", "nosource");
 
   Eprp_var var;
   var.add(g);

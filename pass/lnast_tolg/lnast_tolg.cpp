@@ -23,13 +23,19 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, cons
   if (src.empty())
     src = "-";
 
-  auto *lg = Lgraph::create(path, module_name, src);
+  std::vector<Lgraph *> lgs;
+
+  auto *lib = Graph_library::instance(path);
+  if (lib==nullptr) {
+    Pass::error("lnast_tolg: unable to open graph_library {}", path);
+    return lgs;
+  }
+  auto *lg = lib->create_lgraph(module_name, src);
 
   name2dpin["$"] = lg->get_graph_input("$");
   I(!lg->get_graph_input("$").is_invalid());
   I(!lg->get_graph_output("%").is_invalid());
 
-  std::vector<Lgraph *> lgs;
   top_stmts2lgraph(lg, top_stmts);
   lgs.push_back(lg);
 

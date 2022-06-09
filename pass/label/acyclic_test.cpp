@@ -31,7 +31,9 @@ public:
 
 #if TEST1
 TEST_F(Label_acyclic_test, simple_graph_no_loop) {
-  Lgraph *a_graph = Lgraph::create("lgdb", "a_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *a_graph = lib->create_lgraph("a_graph", "-");
+
   ASSERT_NE(a_graph, nullptr);
 
   auto          verbose  = false;
@@ -90,7 +92,8 @@ TEST_F(Label_acyclic_test, simple_graph_no_loop) {
 
 #if TEST2
 TEST_F(Label_acyclic_test, simple_graph_loop) {
-  Lgraph *b_graph = Lgraph::create("lgdb", "b_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *b_graph = lib->create_lgraph("b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
   std::vector<int>                      expected_gen = {3, 0, 0, 0, 0, 3};
   absl::flat_hash_map<std::string, int> expected;
@@ -197,7 +200,8 @@ TEST_F(Label_acyclic_test, simple_graph_loop) {
 
 #if TEST3
 TEST_F(Label_acyclic_test, essent_test) {
-  Lgraph *c_graph = Lgraph::create("lgdb", "c_graph", "-");
+  auto *lib = Graph_library::instance("lgdb");
+  Lgraph *c_graph = lib->create_lgraph("c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
   std::vector<int>                      expected_gen = {1, 1, 3, 1, 1, 1, 1, 3};
   absl::flat_hash_map<std::string, int> expected;

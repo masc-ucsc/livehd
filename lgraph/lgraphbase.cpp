@@ -41,8 +41,6 @@ void Lgraph_Base::clear() {
   node_internal.clear();
 
   Lgraph_base_core::clear();
-
-  library->clear(lgid);
 }
 
 void Lgraph_Base::emplace_back() {

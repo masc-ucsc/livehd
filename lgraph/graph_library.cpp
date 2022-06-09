@@ -26,7 +26,6 @@
 #include "rapidjson/prettywriter.h"
 
 Graph_library::Global_instances   Graph_library::global_instances;
-Graph_library::Global_name2lgraph Graph_library::global_name2lgraph;
 
 class Cleanup_graph_library {
 public:
@@ -40,41 +39,19 @@ public:
 static Cleanup_graph_library private_instance;
 
 void Graph_library::shutdown_int() {
-  absl::flat_hash_set<Lgraph *> lg_deleted;
-  for (auto it : global_name2lgraph) {
-    for (const auto &it2 : it.second) {
-      if (lg_deleted.contains(it2.second))
-        continue;
+  // global_instances has many inserts with full and short path
+  absl::flat_hash_set<Graph_library *> deleted;
 
-      lg_deleted.insert(it2.second);
-
-      delete it2.second;  // delete Lgraphs (may be inserted many times different paths)
-    }
-  }
-  global_name2lgraph.clear();
-  absl::flat_hash_set<Graph_library *> gl_deleted;
-
-  // The same graph library is inserted TWICE (full and short path)
   for (const auto &it : global_instances) {
-    if (gl_deleted.contains(it.second))
+    if (deleted.contains(it.second))
       continue;
-
-    gl_deleted.insert(it.second);
-
+    deleted.insert(it.second);
     delete it.second;
   }
   global_instances.clear();
 }
 
 void Graph_library::sync_all_int() {
-#if 0
-  // Every data structure is mmap, no need to sync
-  for (auto &it : global_name2lgraph) {
-    for (auto &it2 : it.second) {
-      it2.second->sync();
-    }
-  }
-#endif
   for (auto &it : global_instances) {
     it.second->clean_library_int();
   }
@@ -199,12 +176,6 @@ Graph_library *Graph_library::instance_int(std::string_view path) {
   global_instances.insert(std::make_pair(full_path, graph_library));
   global_instances.insert(std::make_pair(spath, graph_library));
 
-  auto it2 = global_name2lgraph.find(graph_library->path);
-  if (it2 == global_name2lgraph.end()) {
-    auto &glib = global_name2lgraph[graph_library->path];  // insert
-    I(glib.empty());
-  }
-
   return graph_library;
 }
 
@@ -238,9 +209,8 @@ Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view s
   return add_name_int(name, source);
 }
 
-bool Graph_library::exists_int(std::string_view path, std::string_view name) {
-  const Graph_library *lib = instance_int(path);
-  return lib->name2id.find(name) != lib->name2id.end();
+bool Graph_library::exists_int(std::string_view name) const {
+  return name2id.find(name) != name2id.end();
 }
 
 bool Graph_library::exists_int(Lg_type_id lgid) const {
@@ -259,66 +229,19 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
   return sub_nodes[lgid]->get_lgid() == lgid;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, std::string_view name) {
-  const Graph_library *lib = instance_int(path);  // path must be full path
+Lgraph *Graph_library::try_ref_lgraph_int(std::string_view name) const {
+  const auto it = name2id.find(name);
+  if (it == name2id.end())
+    return nullptr;
 
-  const auto &glib2 = global_name2lgraph[lib->path];  // WARNING: This inserts name too when needed
-  const auto  it    = glib2.find(name);
-  if (it != glib2.end()) {
-    return it->second;
-  }
-
-#ifndef NDEBUG
-  // Maybe never used before Lgraph but exists
-  if (lib->get_lgid_int(name))
-    Lgraph::warn("try_find_lgraph({}) is not open but exists. Load first\n", name);
-#endif
-
-  return nullptr;
+  return attributes[it->second].lg;
 }
 
-Lgraph *Graph_library::try_find_lgraph_int(std::string_view name) const {
-  I(global_name2lgraph.find(path) != global_name2lgraph.end());
-
-  const auto &glib2 = global_name2lgraph[path];
-  const auto  it    = glib2.find(name);
-  if (it != glib2.end()) {
-    return it->second;
-  }
-  return nullptr;
-}
-
-Lgraph *Graph_library::try_find_lgraph_int(const Lg_type_id lgid) const {
+Lgraph *Graph_library::try_ref_lgraph_int(const Lg_type_id lgid) const {
   if (lgid >= attributes.size())
     return nullptr;
 
-  Lgraph *lg = attributes[lgid].lg;
-
-#ifndef NDEBUG
-  {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    // Check consistency across
-    auto name = get_name_int(lgid);
-
-    if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-      if (lg != global_name2lgraph[path][name]) {
-        fmt::print("global_name2lgraph[{}][{}] = {}\n", path, name, global_name2lgraph[path][name]->get_name());
-        fmt::print("lg :{}\n", lg->get_name());
-      }
-      I(lg != nullptr);
-      I(lg == global_name2lgraph[path][name]);
-    } else {
-      I(lg == nullptr);
-    }
-  }
-#endif
-
-  return lg;
-}
-
-Lgraph *Graph_library::try_find_lgraph_int(std::string_view path, Lg_type_id lgid) {
-  const Graph_library *lib = instance_int(path);  // path must be full path
-  return lib->try_find_lgraph_int(lgid);
+  return attributes[lgid].lg;
 }
 
 Sub_node *Graph_library::create_sub_int(std::string_view name, std::string_view source) {
@@ -407,15 +330,9 @@ bool Graph_library::rename_name_int(std::string_view orig, std::string_view dest
 
   auto dest_it = name2id.find(dest);
   if (dest_it != name2id.end()) {
-    auto it2 = global_name2lgraph[path].find(dest);
-    I(it2 != global_name2lgraph[path].end());
     expunge_int(dest);
   }
 
-  auto it2 = global_name2lgraph[path].find(orig);
-  if (it2 != global_name2lgraph[path].end()) {  // orig around, but not open
-    global_name2lgraph[path].erase(it2);
-  }
   name2id.erase(it);
   I(name2id.find(orig) == name2id.end());
 
@@ -527,26 +444,17 @@ void Graph_library::reload_int() {
   }
 }
 
-Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view source) {
-  Lg_type_id     lgid;
-  Graph_library *lib;
-  {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
-    auto                       *lg = try_find_lgraph_int(name);
-    if (lg)
-      return lg;
+Lgraph *Graph_library::ref_or_create_lgraph_int(std::string_view name, std::string_view source) {
+  auto *lg = try_ref_lgraph_int(name);
+  if (lg)
+    return lg;
 
-    I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
+  auto lgid = reset_id_int(name, source);
 
-    lgid = reset_id_int(name, source);
-    lib  = instance_int(path);
-  }
-  // ::Lgraph constructor can get the lock again. So release lock in graph_library
+  lg = new Lgraph(path, name, lgid, this);
 
-  auto                       *lg = new Lgraph(path, name, lgid, lib);
-  std::lock_guard<std::mutex> guard(lgs_mutex);
+  lg->clear_int();
 
-  global_name2lgraph[path][name] = lg;
   attributes[lgid].lg            = lg;   // It could be already set if there was a copy
   attributes[lgid].tried_to_load = true; // already present
 
@@ -557,6 +465,110 @@ Lgraph *Graph_library::setup_lgraph(std::string_view name, std::string_view sour
 #endif
 
   return lg;
+}
+
+Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view source) {
+  auto *lg = ref_or_create_lgraph_int(name, source);
+  lg->clear_int();
+  clear_int(lg->get_lgid());
+  return lg;
+}
+
+Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
+
+  auto name = get_name_int(lgid);
+
+  auto hif = Hif_read::open(absl::StrCat(path, "/", name));
+  if (hif == nullptr) {
+    return nullptr;
+  }
+
+  auto *lg = new Lgraph(path, name, lgid, this);
+
+  lg->load(hif);
+
+  auto &attr = attributes[lgid];
+  attr.lg = lg;
+  attr.tried_to_load = true;
+
+  return lg;
+}
+
+Lgraph *Graph_library::open_or_create_lgraph(std::string_view name, std::string_view source) {
+  Lgraph *lg=nullptr;
+  bool pending_load;
+  {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) =  open_or_create_lgraph_int(name, source);
+  }
+  if (pending_load) { // out of the lock because it can be slow and call graph library
+    I(lg==nullptr);
+    auto lgid = get_lgid_int(name);
+    return do_pending_load_int(lgid);
+  }
+  return lg;
+}
+
+Lgraph *Graph_library::open_lgraph(std::string_view name, std::string_view source) {
+  Lgraph *lg=nullptr;
+  bool pending_load;
+  {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) =  open_lgraph_int(name, source);
+  }
+  if (pending_load) { // out of the lock because it can be slow and call graph library
+    I(lg==nullptr);
+    auto lgid = get_lgid_int(name);
+    return do_pending_load_int(lgid);
+  }
+  return lg;
+}
+
+Lgraph *Graph_library::open_lgraph(Lg_id_t lgid) {
+  Lgraph *lg=nullptr;
+  bool pending_load;
+  {
+    std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) =  open_lgraph_int(lgid);
+  }
+  if (pending_load) { // out of the lock because it can be slow and call graph library
+    I(lg==nullptr);
+    return do_pending_load_int(lgid);
+  }
+  return lg;
+}
+
+std::pair<Lgraph *, bool> Graph_library::open_lgraph_int(Lg_id_t lgid) {
+  I(attributes.size()> lgid);
+
+  const auto &attr = attributes[lgid];
+  if (attr.is_blackbox())
+    return {nullptr, false}; // already tried to open and failed
+  if (attr.lg)
+    return {attr.lg, false};
+
+  return {nullptr, true};
+}
+
+std::pair<Lgraph *, bool> Graph_library::open_lgraph_int(std::string_view name, std::string_view source) {
+
+  auto lgid = get_lgid_int(name);
+  if (!lgid) { // no lgid exists
+    lgid = reset_id_int(name, source); // get new ID
+  }
+
+  return open_lgraph_int(lgid);
+}
+
+std::pair<Lgraph *, bool> Graph_library::open_or_create_lgraph_int(std::string_view name, std::string_view source) {
+
+  auto [lg, pending_load] = open_lgraph_int(name, source);
+  if (lg) {
+    return {lg, pending_load};
+  }
+  I(!pending_load);
+
+  return {create_lgraph_int(name, source), false};
 }
 
 Graph_library::Graph_library(std::string_view _path) : path(_path), library_file(absl::StrCat(path, "/", "graph_library.json")) {
@@ -582,13 +594,7 @@ void Graph_library::recycle_id_int(Lg_type_id lgid) { recycled_id.insert(lgid); 
 void Graph_library::expunge_int(std::string_view name) {
   auto it2 = name2id.find(name);
   if (it2 == name2id.end()) {
-    I(global_name2lgraph[path].find(name) == global_name2lgraph[path].end());
     return;  // already gone
-  }
-
-  auto it3 = global_name2lgraph[path].find(name);
-  if (it3 != global_name2lgraph[path].end()) {
-    global_name2lgraph[path].erase(it3);
   }
 
   auto id = it2->second;
@@ -680,48 +686,14 @@ Lg_type_id Graph_library::copy_lgraph_int(std::string_view name, std::string_vie
   return id_new;
 }
 
-Lg_type_id Graph_library::register_lgraph_int(std::string_view name, std::string_view source, Lgraph *lg) {
-  I(false);  // deprecated
-
-  if (global_name2lgraph[path].find(name) != global_name2lgraph[path].end()) {
-    I(global_name2lgraph[path][name] == lg);
-    I(attributes.size() > lg->get_lgid());
-    I(attributes[lg->get_lgid()].lg == lg);
-    return lg->get_lgid();
-  }
-
-  GI(global_name2lgraph[path].find(name) != global_name2lgraph[path].end(), global_name2lgraph[path][name] == lg);
-
-  Lg_type_id id = reset_id_int(name, source);
-
-  global_name2lgraph[path][name] = lg;
-  attributes[id].lg              = lg;  // It could be already set if there was a copy
-  attributes[id].tried_to_load   = true;
-
-#ifndef NDEBUG
-  const auto &it = name2id.find(name);
-  I(it != name2id.end());
-  I(sub_nodes[id]->get_name() == name);
-#endif
-
-  return id;
-}
-
-void Graph_library::unregister_int(std::string_view name, Lg_type_id lgid, Lgraph *lg) {
+void Graph_library::unregister_int(Lgraph *lg) {
+  auto lgid = lg->get_lgid();
   I(attributes.size() > (size_t)lgid);
-  auto it = global_name2lgraph[path].find(name);
-  if (lg) {
-    I(it != global_name2lgraph[path].end());
-    I(it->second == lg);
-    global_name2lgraph[path].erase(it);
-    attributes[lgid].lg            = nullptr;
-    attributes[lgid].tried_to_load = false;
-  } else {
-    I(it == global_name2lgraph[path].end());
-  }
+  attributes[lgid].lg            = nullptr;
+  attributes[lgid].tried_to_load = false;
 
   if (sub_nodes[lgid]->is_invalid())
-    expunge_int(name);
+    expunge_int(lg->get_name());
 }
 
 void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {

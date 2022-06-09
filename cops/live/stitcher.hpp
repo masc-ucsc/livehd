@@ -17,7 +17,7 @@ public:
   Live_stitcher(Stitch_pass_options &pack);
 
   void stitch(const std::string &nsynth, const std::set<Net_ID> &diffs) {
-    Lgraph *synth = Lgraph::open(nsynth, boundaries->top);
+    Lgraph *synth = Lgraph_open(nsynth, boundaries->top);
     stitch(synth, diffs);
   }
 

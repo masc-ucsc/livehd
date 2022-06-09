@@ -171,6 +171,8 @@ protected:
   void bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &parent_map, absl::flat_hash_set<Lgraph *> &leafs_set,
                             std::vector<Lgraph *> &leafs);
 
+  void clear_int(); // same as clear but when called by graph_library to avoid locks
+  void load(std::shared_ptr<Hif_read> hif);
 public:
   Lgraph()               = delete;
   Lgraph(const Lgraph &) = delete;
@@ -194,12 +196,14 @@ public:
 
   Lgraph *clone_skeleton(std::string_view new_lg_name);
 
+#if 0
   static bool    exists(std::string_view path, std::string_view name);
   static Lgraph *create(std::string_view path, std::string_view name, std::string_view source);
   static Lgraph *open(std::string_view path, Lg_type_id lgid);
   static Lgraph *open(std::string_view path, std::string_view name);
   static Lgraph *open_or_create(std::string_view path, std::string_view name, std::string_view source);
   static void    rename(std::string_view path, std::string_view orig, std::string_view dest);
+#endif
 
   void clear() override;
 
@@ -226,7 +230,6 @@ public:
   [[nodiscard]] const Sub_node &get_self_sub_node() const;  // Access all input/outputs
   Sub_node                     *ref_self_sub_node();        // Access all input/outputs
 
-  void load(std::shared_ptr<Hif_read> hif);
   void save();
   void dump();
   void dump_down_nodes();
