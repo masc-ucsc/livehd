@@ -572,7 +572,7 @@ void Inou_firrtl_module::init_cmemory(Lnast& lnast, Lnast_nid& parent_node, cons
 void Inou_firrtl_module::handle_mport_declaration(Lnast& lnast, Lnast_nid& parent_node,
                                                   const firrtl::FirrtlPB_Statement_MemoryPort& mport) {
   // (void) parent_node;
-  auto mem_name = mport.memory_id();
+  const auto &mem_name = mport.memory_id();
   mport2mem.insert_or_assign(mport.id(), mem_name);
 
   mem2port_cnt[mem_name]++;
@@ -624,16 +624,13 @@ void Inou_firrtl_module::handle_mport_declaration(Lnast& lnast, Lnast_nid& paren
   lnast.add_child(idx_ta_mrdport_ini, Lnast_node::create_const("true"));
 
   auto dir_case = mport.direction();
-  if (dir_case
-      == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
+  if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_READ) {
     // only need to initialize mem_res[rd_port] when you are sure it's a read mport
     init_mem_res(lnast, mem_name, std::to_string(port_cnt_str));
     // FIXME->sh:
     // if you already know it's a read mport,  you should let mport = mem_res[rd_port] here, or the mem_port_cnt might duplicately
     // count one more port_cnt, see the cases from ListBuffer.fir (search push_tail).
-  } else if (dir_case
-             == firrtl::FirrtlPB_Statement_MemoryPort_Direction::
-                 FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
+  } else if (dir_case == firrtl::FirrtlPB_Statement_MemoryPort_Direction::FirrtlPB_Statement_MemoryPort_Direction_MEMORY_PORT_DIRECTION_WRITE) {
     // noly need to initialize mem_din[wr_port] when you are sure it's a write mport
     init_mem_din(lnast, mem_name, std::to_string(port_cnt_str));
     I(mport2mask_bitvec.find(mport.id()) == mport2mask_bitvec.end());
