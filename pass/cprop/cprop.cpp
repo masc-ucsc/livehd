@@ -2099,7 +2099,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
   if (!tuple_found)
     return;
 
-  for (auto iter = 0; iter < 6; ++iter) {
+  for (auto iter = 0; iter < 12; ++iter) {
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
       if (tuple_done.contains(node.get_compact()))

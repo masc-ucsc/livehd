@@ -171,7 +171,7 @@ void Lcompiler::do_fir_cprop() {
       lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
         Cprop cp(false);
 
-        // fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg_sub->get_name());
+        //fmt::print("-------- {:<28} ({:<30}) -------- (C-0)\n", "Copy-Propagation", lg_sub->get_name());
         cp.do_trans(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
       });
