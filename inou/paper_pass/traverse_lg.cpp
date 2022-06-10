@@ -348,6 +348,30 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         tmpVec.emplace_back(nodeid);
       }
       nodeIOmap[std::make_pair(in_set,out_set)] = tmpVec;//FIXME: make hash of set and change datatype accordingly
+
+      //the IOtoNodeMap_synth making:
+      if(!io_set.empty()) {
+        std::vector<Node::Compact_flat> tempnodeVec;
+        setMap_pairKey internalMap;
+        if(IOtoNodeMap_synth.find(io_set) != IOtoNodeMap_synth.end()) {
+          //founf IO, insert in internal map against this location.
+          internalMap=IOtoNodeMap_synth[io_set];
+          if(internalMap.find(std::make_pair(in_set, out_set)) != internalMap.end()) {
+            tempnodeVec.assign((internalMap[std::make_pair(in_set, out_set)]).begin() , (internalMap[std::make_pair(in_set, out_set)]).end() );
+            tempnodeVec.emplace_back(nodeid);
+          } else {
+            tempnodeVec.emplace_back(nodeid);
+          }
+          internalMap[std::make_pair(in_set,out_set)] = tempnodeVec;
+
+        } else {
+          //make a new entry in the internal map 
+          tempnodeVec.emplace_back(nodeid);
+          internalMap[std::make_pair(in_set,out_set)] = tempnodeVec;
+        }
+          IOtoNodeMap_synth[io_set] = internalMap;//FIXME: make hash of set and change datatype accordingly
+      }
+
     }
 
     if(do_matching) {
@@ -398,6 +422,32 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("{}\t", n.get_nid());
       }
       fmt::print("\n\n");
+    }
+    fmt::print("\n\n===============================\n");
+    fmt::print("\n\nIOtoNodeMap_synth MAP FORMED IS:\n");
+    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
+      for (auto& ip: ioval) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("\n");
+      
+      for(auto& [ioPair, n_list]: inMap) {
+        fmt::print("\t\t\t\t");
+        for (auto& ip: ioPair.first) {
+          fmt::print("{}\t",ip);
+        }
+        fmt::print("||| \t");
+        for (auto& op:ioPair.second) {
+          fmt::print("{}\t", op);
+        }
+        fmt::print("::: \t");
+        for (auto& n:n_list) {
+          fmt::print("{}\t", n.get_nid());
+        }
+        fmt::print("\n");
+      }
+      fmt::print("\n");
+
     }
     fmt::print("\n\n\n");
   } else { //do_matching
@@ -455,6 +505,33 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
   }
 
+  if(do_matching) {
+    /*doing the actual matching here*/
+    
+    for(const auto& [iov,fn]: IOtoNodeMap_orig) {
+      if(fn.size()!=1) {continue;}
+      auto orig_node = fn.front();
+      //go to the best match in IOtoNodeMap_synth
+      if(IOtoNodeMap_synth.find(iov)!=IOtoNodeMap_synth.end()) {
+        for (const auto& [k,synNodes]: IOtoNodeMap_synth[iov]) {
+          for (const auto& synNode: synNodes) {
+          //std::vector<Node::Compact_flat> vc = synNode;
+          matching_map[synNode]=orig_node;
+          }
+        }
+      }
+    }
+
+    /*Printing "matching map"*/
+    fmt::print("\n THE MATCHING_MAP is:\n");
+    for (const auto& [k,v]:matching_map) {
+      fmt::print("\n{}\t:::\t{}\t",k.get_nid(),v.get_nid());
+      }
+      fmt::print("\n");
+
+  }//if(do_matching) closes here
+
+
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
@@ -480,7 +557,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         //temp_str+=")";
       }
       in_set.insert(temp_str);
-      io_set.insert(isFlop?"":temp_str);//do not want flops in pure io_set
+      if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
     }
     return;
   } else {
@@ -515,7 +592,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         //temp_str+=")";
       }
       out_set.insert(temp_str);
-      io_set.insert(isFlop?"":temp_str);//do not want flops in pure io_set
+      if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
     }
     return;
   } else {

@@ -33,6 +33,8 @@ private:
   absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> unmatched_map;
   absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat> > full_orig_map;
   absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> > IOtoNodeMap_orig;
+  absl::node_hash_map<std::set<std::string>, setMap_pairKey > IOtoNodeMap_synth;
+  absl::node_hash_map<Node::Compact_flat, Node::Compact_flat > matching_map;
 /*
 #ifdef KEEP_DUP
   vecMap nodeIOmap;
