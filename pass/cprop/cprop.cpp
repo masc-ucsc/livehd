@@ -772,7 +772,7 @@ void Cprop::tuple_flop_mut(Node &node) {
     if (flop_tup) {
       flop_tup->dump();
     }
-    tuple_issues = true;
+    //tuple_issues = true;
   }
 
   if (flop_tup) {
@@ -790,7 +790,6 @@ void Cprop::tuple_flop_mut(Node &node) {
       tuple_done.insert(e.second.get_node().get_compact());
     }
   }
-  tuple_issues = true;  // FIXME: trigger next iter, no issues
 }
 
 void Cprop::tuple_get_mask_mut(Node &node) {
@@ -2099,7 +2098,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
   if (!tuple_found)
     return;
 
-  for (auto iter = 0; iter < 12; ++iter) {
+  for (auto iter = 0; iter < 6; ++iter) {
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
       if (tuple_done.contains(node.get_compact()))
