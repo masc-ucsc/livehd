@@ -114,10 +114,8 @@ std::string Inou_firrtl_module::get_runtime_idx_field_name(const firrtl::FirrtlP
 void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, 
                                                 std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
   std::string rhs_flattened_name = name_prefix_modifier(hier_name_r_ori, true);
-  fmt::print("DEBUG YYY hier_name_r_ori:{} rhs_flattened_name:{}\n", hier_name_r_ori, rhs_flattened_name);
-  // idea: 
+  // fmt::print("DEBUG YYY hier_name_r_ori:{} rhs_flattened_name:{}\n", hier_name_r_ori, rhs_flattened_name);
   // (1) get the runtime idx tuple field
-  // FIXME->sh: does not pass the RenameTable pattern .... check it later, but focus on Mul.fir now
   std::string rtidx_str = get_runtime_idx_field_name(lhs_expr);
   rtidx_str = name_prefix_modifier(rtidx_str, true);
 
@@ -130,7 +128,6 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     leaf_field_name = hier_name_l_ori.substr(found+2);
   }
   
-  // fmt::print("DEBUG DDD is_2d_vector:{}, leaf_field_name:{}\n", is_2d_vector, leaf_field_name);
 
   std::string_view vec_name;
   auto pos = hier_name_l_ori.rfind('.');

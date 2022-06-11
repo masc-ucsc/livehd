@@ -191,6 +191,7 @@ cc_library(
     "NotAnd",
     "BreakpointUnit",
     "DebugCustomXbar",
+    "RenameMapTableSimpleF5",
     "MaxPeriodFibonacciLFSR",
 
     # FIXME:
