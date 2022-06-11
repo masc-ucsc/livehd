@@ -14,12 +14,12 @@ void start_tracing() {
   perfetto::TracingInitArgs args;
   perfetto::TraceConfig     cfg;
 
-  args.backends = perfetto::kInProcessBackend;
+  args.backends |= perfetto::kInProcessBackend;
 
   perfetto::Tracing::Initialize(args);
   perfetto::TrackEvent::Register();
 
-  cfg.add_buffers()->set_size_kb(1024);
+  cfg.add_buffers()->set_size_kb(32768);
   auto* ds_cfg = cfg.add_data_sources()->mutable_config();
   ds_cfg->set_name("track_event");
 

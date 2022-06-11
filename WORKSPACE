@@ -267,7 +267,7 @@ rules_fuzzing_init()
 http_archive(
     name = "com_google_perfetto",
     build_file = "perfetto.BUILD",
-    sha256 = "9d2955736ce9d234e0f5153acfefea8facfa762c9167024902ea98f9010207aa",
-    strip_prefix = "perfetto-23.0/sdk",
-    urls = ["https://github.com/google/perfetto/archive/refs/tags/v23.0.tar.gz"],
+    sha256 = "73a4b895df9222ddb231b8d903099d6da08cd079f27983f540e89156fa88ba67",
+    strip_prefix = "perfetto-25.0/sdk",
+    urls = ["https://github.com/google/perfetto/archive/refs/tags/v25.0.tar.gz"],
 )

@@ -8,7 +8,6 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
-#include "perf_tracing.hpp"
 #include "str_tools.hpp"
 
 static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);

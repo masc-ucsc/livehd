@@ -7,6 +7,9 @@
 #include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
+
+// WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
+#undef has_member
 #include "perf_tracing.hpp"
 
 static Pass_plugin sample("inou_liberty", Inou_liberty::setup);

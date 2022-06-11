@@ -4,8 +4,11 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
-#include "perf_tracing.hpp"
 #include "str_tools.hpp"
+
+// WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
+#undef has_member
+#include "perf_tracing.hpp"
 
 void Pass_opentimer::work(Eprp_var &var) {
   Pass_opentimer pass(var);
