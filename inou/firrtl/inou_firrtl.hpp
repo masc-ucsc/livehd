@@ -31,7 +31,7 @@ struct Global_module_info {
   
   // module_name to io_name to leaf_hierarchical_field_name's flip polarity(1st bool) and direction (3rd uint8).
   // FIXME->sh: check and remove the third directional field if redundant 
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>>> var2flip; 
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>>> var2flip; 
 };
 
 class Inou_firrtl : public Pass {
@@ -51,7 +51,7 @@ protected:
   void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
 
-  void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir);
+  void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id);
   void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, uint8_t dir);
   void     grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalModule &emod);
 
@@ -168,7 +168,7 @@ protected:
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node);
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
-  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> &module_table);
+  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
   void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
@@ -274,7 +274,7 @@ private:
 	absl::flat_hash_map<std::string, uint16_t> var2vec_size;
 
   // FIXME->sh: check and remove the third directional field if redundant 
-  absl::flat_hash_map<std::string, absl::btree_set<std::tuple<std::string, bool, uint8_t>>> var2flip;
+  absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> var2flip;
 
   absl::flat_hash_map<std::string, uint8_t>     mem2port_cnt;
   absl::flat_hash_map<std::string, uint8_t>     mem2wensize;
