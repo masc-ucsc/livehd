@@ -15,6 +15,7 @@ void Pass_compiler::setup() {
   m1.add_label_optional("path", "lgraph path", "lgdb");
   m1.add_label_optional("files", "files to process (comma separated)");
   m1.add_label_optional("firrtl", "is firrtl front-end");
+  m1.add_label_optional("cprop_only", "only valid for firrtl frontend. No firmap/BW pass");
   m1.add_label_optional("top", "specify the top module");
   m1.add_label_optional("odir", "output directory", ".");
   m1.add_label_optional("gviz", "dump graphviz");
@@ -33,6 +34,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   auto          top        = pc.check_option_top(var);
   auto          gviz       = pc.check_option_gviz(var);
   auto          get_firrtl = pc.check_option_firrtl(var);
+  auto          only_cprop = pc.check_option_cprop(var);
 
   Lcompiler compiler(path, odir, top, gviz);
   fmt::print("top module_name is: {}\n", top);
@@ -52,7 +54,7 @@ void Pass_compiler::compile(Eprp_var &var) {
   if (!get_firrtl.empty()) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
     setup_firmap_library(path);
-    firrtl_compilation(var, compiler);
+    firrtl_compilation(var, compiler, only_cprop);
     // google::protobuf::ShutdownProtobufLibrary();
   } else {
     pyrope_compilation(var, compiler);
@@ -69,11 +71,13 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
   compiler.do_prp_global_bitwidth_inference();
 }
 
-void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler) {
+void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, bool &only_cprop) {
   compiler.do_fir_lnast2lgraph(var.lnasts);
   compiler.do_fir_cprop();
-  compiler.do_fir_firbits();
-  compiler.do_fir_firmap_bitwidth();
+	if (!only_cprop) {
+    compiler.do_fir_firbits();
+    compiler.do_fir_firmap_bitwidth();
+  }
 }
 
 Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::string_view cell_name, const std::vector<std::string> &inp, std::string_view out) {
@@ -143,6 +147,17 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
     gviz_en = false;
   }
   return gviz_en;
+}
+
+bool Pass_compiler::check_option_cprop(Eprp_var &var) {
+  bool is_cprop_only;
+  if (var.has_label("cprop_only")) {
+    auto co = var.get("cprop_only");
+    is_cprop_only = co != "false" && co != "0";
+  } else {
+    is_cprop_only = false;
+  }
+  return is_cprop_only;
 }
 
 std::string_view Pass_compiler::check_option_top(Eprp_var &var) {
