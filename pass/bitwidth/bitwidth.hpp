@@ -26,6 +26,7 @@ protected:
 
   void set_bw_1bit(Node_pin &&dpin);
   void set_bw_1bit(Node_pin &dpin);
+  void set_bits_sign(Node_pin &dpin, const Bitwidth_range &bw);
   void adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw);
   void adjust_bw(Node_pin &dpin, const Bitwidth_range &bw);
 

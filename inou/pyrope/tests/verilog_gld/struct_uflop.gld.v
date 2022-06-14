@@ -1,13 +1,13 @@
-module struct_flop(
+module struct_uflop(
   input signed clk2
-  ,input signed [2:0] a
+  ,input [2:0] a
   ,input signed enable
   ,input signed load
   ,output reg [2:0] out
 );
 
-reg signed [2:0] flop_next;
-reg signed [2:0] flop_q;
+reg [2:0] flop_next;
+reg [2:0] flop_q;
 
 always @(*) begin
   if (load) begin

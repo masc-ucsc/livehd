@@ -1974,6 +1974,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
 }
 
 void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_var2flip) {
+  (void)module_var2flip;
 #ifndef NDEBUG  
   for (auto &[var, set] : module_var2flip) {
     fmt::print("var:{} \n", var);

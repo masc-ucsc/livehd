@@ -5,6 +5,7 @@
 #include "cgen_verilog.hpp"
 #include "file_utils.hpp"
 #include "thread_pool.hpp"
+#include "perf_tracing.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
@@ -21,6 +22,8 @@ void Inou_cgen::setup() {
 }
 
 void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
+  TRACE_EVENT("inou", "cgen");
+
   Inou_cgen pp(var);
 
   auto dir     = pp.get_odir(var);

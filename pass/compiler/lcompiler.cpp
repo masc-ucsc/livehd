@@ -46,6 +46,8 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Lcompiler::do_prp_local_cprop_bitwidth() {
+  TRACE_EVENT("pass", "compile.local_cprop");
+
   I(lgs.size());
   auto *top_lg = lgs[0];
   if (!top.empty()) {
@@ -113,6 +115,8 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 // ----------------------- FIRRTL compilation functions start ----------------------------
 
 void Lcompiler::do_fir_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &lnasts) {
+  TRACE_EVENT("pass", "compile.lnast2lg");
+
   for (const auto &ln : lnasts) {
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);
   }
@@ -158,6 +162,8 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Lcompiler::do_fir_cprop() {
+  TRACE_EVENT("pass", "compile.fir_cprop");
+
   auto lgcnt                   = 0;
   auto hit                     = false;
   auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
@@ -210,6 +216,8 @@ void Lcompiler::setup_maps() {  // single-thread
 }
 
 void Lcompiler::do_fir_firmap_bitwidth() {
+  TRACE_EVENT("pass", "compile.fir_firmap_bw");
+
   auto lgcnt                  = 0;
   auto hit                    = false;
   auto top_name_before_firmap = absl::StrCat("__firrtl_", top);
@@ -246,7 +254,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       I(lg_sub->get_name().substr(0, 6) != "__fir_");
 
       Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
-      Bitwidth bw(false, 10);
+      Bitwidth bw(false, 3);
 
       // fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
@@ -272,7 +280,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 
       // fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg_sub->get_name());
       bw.do_trans(new_lg_sub);
-      bw.do_trans(new_lg_sub);
+      //bw.do_trans(new_lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
 
       {
@@ -299,6 +307,8 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 }
 
 void Lcompiler::do_fir_firbits() {
+  TRACE_EVENT("pass", "compile.fir_firbits");
+
   auto lgcnt                   = 0;
   auto hit                     = false;
   auto top_name_before_mapping = absl::StrCat("__firrtl_", top);
