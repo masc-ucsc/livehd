@@ -649,6 +649,8 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
         flattened_inp = name2dpin[full_inp_hier_name];
         flattened_inp.set_bits(bits);
       }
+      if (lnast->get_vname(child) == "__ubits")
+        flattened_inp.set_unsign();
 
       // Create pos and value before TupAdd to preserve topographical order
       auto af_dpin = setup_field_dpin(lg, lnast->get_vname(child));

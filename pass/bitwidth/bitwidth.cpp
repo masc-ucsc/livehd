@@ -93,7 +93,10 @@ void Bitwidth::process_flop(Node &node) {
     if (it == bwmap.end()) {
       auto bits = cpin.get_bits();
       if (bits) {
-        bw.set_sbits_range(bits);
+        if (cpin.is_unsign())
+          bw.set_ubits_range(bits);
+        else
+          bw.set_sbits_range(bits);
       }else{
         //bwmap.insert_or_assign(cpin.get_compact_class(), bw); // do not overwrite if already assigned
         debug_unconstrained_msg(node, cpin);
@@ -1045,6 +1048,118 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
   }
 }
 
+void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
+
+  I(node_attr.is_sink_connected("value"));
+
+  auto dpin_val  = node_attr.get_sink_pin("value").get_driver_pin();
+  auto attr_dpin = node_attr.get_driver_pin("Y");
+
+  // copy parent's bw for some judgement and then update to attr_set value
+  Bitwidth_range bw;
+  bool           parent_pending = true;
+
+  if (node_attr.is_sink_connected("parent")) {
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
+    auto it           = bwmap.find(through_dpin.get_compact_class());
+    if (it != bwmap.end()) {
+      bw             = it->second;
+      parent_pending = false;
+    }
+  }else{
+    parent_pending = false;
+  }
+
+  I(dpin_val.get_node().is_type_const());
+  auto val = dpin_val.get_node().get_type_const();
+
+  if (attr == Attr::Set_ubits) {
+
+    Bits_t bits = val.to_i();
+
+    if (!parent_pending) {
+      Bitwidth_range set_bw;
+      set_bw.set_ubits_range(bits);
+
+      if (bw.get_max() > set_bw.get_max()) {
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}ubits\n",
+                    node_attr.debug_name(),
+                    attr_dpin.debug_name(),
+                    bw.get_max(),
+                    bits);
+      }
+      if (bw.get_min() < 0) {
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}ubits\n",
+                    node_attr.debug_name(),
+                    attr_dpin.debug_name(),
+                    bw.get_min(),
+                    bits);
+
+      }
+    }else{
+      bw.set_ubits_range(bits);
+    }
+
+    insert_tposs_nodes(node_attr, bits, fwd_it);
+  } else if (attr == Attr::Set_sbits) {
+    Bits_t bits = val.to_i();
+
+    if (!parent_pending) {
+      Bitwidth_range set_bw;
+      set_bw.set_sbits_range(bits);
+
+      if (bw.get_max() > set_bw.get_max()) {
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}sbits\n",
+                    node_attr.debug_name(),
+                    attr_dpin.debug_name(),
+                    bw.get_max(),
+                    bits);
+      }
+      if (bw.get_min() < set_bw.get_min()) {
+        Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}sbits\n",
+                    node_attr.debug_name(),
+                    attr_dpin.debug_name(),
+                    bw.get_min(),
+                    bits);
+
+      }
+    }else{
+      bw.set_sbits_range(bits);
+    }
+  } else if (attr == Attr::Set_max) {
+    I(false);  // FIXME: todo
+  } else if (attr == Attr::Set_min) {
+    I(false);  // FIXME: todo
+  } else {
+    I(false);
+    // note-I:  Attr::unsigned may need insert Tposs also
+    // note-II: Attr::set_dp_assign handled in another method
+  }
+
+  if (!attr_dpin.is_invalid()) {
+    set_bits_sign(attr_dpin, bw);
+    bwmap.insert_or_assign(attr_dpin.get_compact_class(), bw);
+    for(auto &e:attr_dpin.out_edges()) {
+      if (!e.sink.is_type_flop())
+        continue;
+
+      auto reg_qpin = e.sink.get_node().setup_driver_pin();
+      if (reg_qpin.get_bits()==0)
+        continue;
+
+      set_bits_sign(reg_qpin, bw);
+      bwmap.insert_or_assign(reg_qpin.get_compact_class(), bw);
+    }
+  }
+
+  // upwards propagate for one step node_attr, most graph input BW are handled here
+  if (parent_pending) {
+    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
+    set_bits_sign(through_dpin, bw);
+    bwmap.insert_or_assign(through_dpin.get_compact_class(), bw);
+  }
+}
+
 void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
   I(node_attr.is_sink_connected("field"));
 
@@ -1059,83 +1174,12 @@ void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd
 
   if (attr == Attr::Set_dp_assign) {
     process_attr_set_dp_assign(node_attr);
-    return;
-  }
-
-  I(node_attr.is_sink_connected("value"));
-  auto dpin_val = node_attr.get_sink_pin("value").get_driver_pin();
-
-  if (!dpin_key.get_node().is_type_const()) {
-    not_finished = true;
-    return;  // can not handle now
-  }
-
-  auto attr_dpin = node_attr.get_driver_pin("Y");
-
-  std::string dpin_name;
-  if (attr_dpin.has_name())
-    dpin_name = attr_dpin.get_name();
-
-  // copy parent's bw for some judgement and then update to attr_set value
-  Bitwidth_range bw(0);
-  bool           parent_pending = true;
-
-  if (node_attr.is_sink_connected("parent")) {
-    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
-    auto it           = bwmap.find(through_dpin.get_compact_class());
-    if (it != bwmap.end()) {
-      bw             = it->second;
-      parent_pending = false;
+  }else{
+    if (!dpin_key.get_node().is_type_const()) {
+      not_finished = true;
+      return;  // can not handle now
     }
-  }
-
-  if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
-    I(dpin_val.get_node().is_type_const());
-    auto val = dpin_val.get_node().get_type_const();
-
-    if (attr == Attr::Set_ubits) {
-      if ((bw.get_sbits() - 1) > (val.to_i()))
-        Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}ubits\n",
-                    node_attr.debug_name(),
-                    dpin_name,
-                    bw.get_sbits(),
-                    val.to_i());
-
-      if (parent_pending)
-        bw.set_ubits_range(val.to_i());
-
-      insert_tposs_nodes(node_attr, val.to_i(), fwd_it);
-    } else {  // Attr::Set_sbits
-      if (bw.get_sbits() > (val.to_i()))
-        Pass::error("bitwidth mismatch at node {}. \nVariable {} needs {}sbits, but constrained to {}sbits\n",
-                    node_attr.debug_name(),
-                    dpin_name,
-                    bw.get_sbits(),
-                    val.to_i());
-
-      if (parent_pending)
-        bw.set_sbits_range(val.to_i());
-    }
-  } else if (attr == Attr::Set_max) {
-    I(false);  // FIXME: todo
-  } else if (attr == Attr::Set_min) {
-    I(false);  // FIXME: todo
-  } else {
-    I(false);
-    // note-I:  Attr::unsigned may need insert Tposs also
-    // note-II: Attr::set_dp_assign handled in another method
-  }
-
-  for (auto out_dpin : node_attr.out_connected_pins()) {
-    set_bits_sign(out_dpin, bw);
-    bwmap.insert_or_assign(out_dpin.get_compact_class(), bw);
-  }
-
-  // upwards propagate for one step node_attr, most graph input BW are handled here
-  if (parent_pending && node_attr.is_sink_connected("parent")) {
-    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
-    set_bits_sign(through_dpin, bw);
-    bwmap.insert_or_assign(through_dpin.get_compact_class(), bw);
+    process_attr_set_bw(node_attr, attr, fwd_it);
   }
 }
 
@@ -1168,6 +1212,7 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
       ntposs = node_attr.create(Ntype_op::Get_mask);
       ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));
       ntposs.setup_sink_pin("a").connect_driver(name_dpin);
+      ntposs.setup_driver_pin().set_unsign();
 
       auto sink_node = e.sink.get_node();
       if (sink_node.get_type_op() == Ntype_op::AttrSet) {
@@ -1175,9 +1220,9 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
         auto key      = dpin_key.get_type_const().to_field();
         auto attr     = get_key_attr(key);
         if (attr == Attr::Set_dp_assign) {
-          auto range_const = (Lconst(1UL) << Lconst(ubits)) - 1;
-          bwmap.insert_or_assign(ntposs.setup_driver_pin().get_compact_class(), Bitwidth_range(Lconst(0), range_const));
-          // no need to set bits because added to the iterator
+          Bitwidth_range bw;
+          bw.set_ubits_range(ubits);
+          adjust_bw(ntposs.setup_driver_pin(), bw);
         }
       }
     }
@@ -1195,9 +1240,6 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
     return;
 
   auto        attr_dpin = node_attr.get_driver_pin("Y");
-  std::string dpin_name;
-  if (attr_dpin.has_name())
-    dpin_name = attr_dpin.get_name();
 
   I(node_attr.is_sink_connected("parent"));
   bool parent_data_pending = false;
@@ -1217,7 +1259,7 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   auto parent_attr_it = bwmap.find(parent_attr_dpin.get_compact_class());
   if (parent_attr_it == bwmap.end()) {
 #ifndef NDEBUG
-    fmt::print("attr_set propagate bwmap to AttrSet parent:{}\n", dpin_name);
+    fmt::print("attr_set propagate bwmap to AttrSet parent:{}\n", attr_dpin.debug_name());
 #endif
     not_finished = true;
     return;
@@ -1227,17 +1269,17 @@ void Bitwidth::process_attr_set_propagate(Node &node_attr) {
   if (parent_attr_bw.get_sbits() && data_bw.get_sbits()) {
     if (parent_attr_bw.get_sbits() < data_bw.get_sbits()) {
       Pass::error("bitwidth mismatch. Variable {} needs {}bits, but constrained to {}bits\n",
-                  dpin_name,
+                  attr_dpin.debug_name(),
                   data_bw.get_sbits(),
                   parent_attr_bw.get_sbits());
     } else if (parent_attr_bw.get_max() < data_bw.get_max()) {
       Pass::error("bitwidth mismatch. Variable {} needs {}max, but constrained to {}max\n",
-                  dpin_name,
+                  attr_dpin.debug_name(),
                   data_bw.get_max().to_pyrope(),
                   parent_attr_bw.get_max().to_pyrope());
     } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
       Pass::warn("bitwidth mismatch. Variable {} needs {}min, but constrained to {}min\n",
-                 dpin_name,
+                 attr_dpin.debug_name(),
                  data_bw.get_min().to_pyrope(),
                  parent_attr_bw.get_min().to_pyrope());
     }
@@ -1311,7 +1353,11 @@ void Bitwidth::bw_pass(Lgraph *lg) {
           if (dpin.get_bits()) {
             Bitwidth_range bw;
 
-            bw.set_sbits_range(dpin.get_bits());  // We do not know if it was sign/unsigned start +1 in case
+            if (dpin.is_unsign()) {
+              bw.set_ubits_range(dpin.get_bits());
+            }else{
+              bw.set_sbits_range(dpin.get_bits());
+            }
             bwmap.insert_or_assign(dpin.get_compact_class(), bw);
           }
         },
@@ -1353,7 +1399,11 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         if (bits) {
           Bitwidth_range bw;
 
-          bw.set_sbits_range(bits);
+          if (dpin.is_unsign()) {
+            bw.set_ubits_range(bits);
+          }else{
+            bw.set_sbits_range(bits);
+          }
           bwmap.insert_or_assign(dpin.get_compact_class(), bw); // do not overwrite if already assigned
           continue; // once bits are set, do not overwrite
         }
