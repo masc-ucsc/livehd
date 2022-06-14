@@ -158,7 +158,6 @@ protected:
 
   std::string create_tmp_var();
   std::string create_tmp_mut_var();
-  std::string name_prefix_modifier(std::string_view term, const bool is_rhs);
   void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
   void        declare_register(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
   void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name,
@@ -246,9 +245,10 @@ protected:
                               const Lnast_node value_node = Lnast_node::create_invalid());
 
   void list_statement_info(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
-  std::string flatten_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx);
-  std::string flatten_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  std::string get_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx);
+  std::string get_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
   std::string get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr);
+  std::string name_prefix_modifier_flattener(std::string_view term, const bool is_rhs);
   void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
   void handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
   uint16_t get_vector_size(const Lnast &lnast, std::string_view vec_name);

@@ -6,8 +6,8 @@ $io.addr.__ubits = 10
 $io.dataIn.__ubits = 32
 %dataOut.__ubits = 32
 
-F7 = mem_interface_args.__last_value
-mem_res = __memory(F7)
+F1 = mem_interface_args.__last_value
+mem_res = __memory(F1)
 
 mem_addr    = ()
 mem_din     = ()
@@ -18,31 +18,33 @@ mem_wensize = 1
 mem_size    = 0b0000010000000000 //1024
 mem_rdport  = ()
 
+// dummy initialization
 if (true) {
   mem_clock     = $clock
   mem_addr.0    = 0
   mem_enable.0  = 0
-  mem_rdport.0  = true  
+  mem_rdport.0  = true  // ==0 is WR, !=0 is RD, assume RD at initialization 
   mem_din.0     = 0
 
   mem_clock         = $clock 
   mem_addr.1        = 0
   mem_enable.1      = 0
   mem_rdport.1      = true
-  // bug? where is mem_din.1 = 0? should you also provide it?
+  // FIXME:sh where is mem_din.1 = 0? should you also provide it?
   mem_res.1.__ubits = 32
   F14               = mem_res.1
   dataOut_MPORT     = F14
+
+  mem_rdport.0  = false 
+  F9            = MPORT.__last_value
+  mem_din.0     = F9
+  MPORT         = $io.dataIn
 }
 
 F8            = $io.addr
 mem_addr.0    = F8
 mem_enable.0  = 1
-mem_rdport.0  = false 
 
-F9            = MPORT.__last_value
-mem_din.0     = F9
-MPORT         = $io.dataIn
 
 dataOut_WIRE = 0
 F11          = $io.enable
@@ -56,7 +58,8 @@ if (F11) {
 }
 
 mem_rdport.1  = true
-%dataOut = dataOut_MPORT
+foo = dataOut_MPORT
+%dataOut = foo
 
 F15 = (addr = mem_addr, clock = mem_clock, din = mem_din, enable = mem_enable, fwd = mem_fwd, type = mem_type, wensize = mem_wensize, size = mem_size, rdport = mem_rdport)
 mem_interface_args = F15

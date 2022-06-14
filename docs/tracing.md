@@ -5,7 +5,7 @@
 Add `--define=profiling=1` to build arguments
 
 ```sh
-bazel build --define=profiling=1 //...
+bazel build --define=profiling=1 -c opt //...
 ```
 
 ### Profile

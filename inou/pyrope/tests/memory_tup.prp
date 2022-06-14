@@ -1,0 +1,28 @@
+
+$rd_addr.__sbits = 6 // 256 entries
+$wr_addr.__sbits = 6 // same as rd_addr
+
+$inp1.__ubits = 3
+$inp2.__sbits = 10
+
+tmp = (f1=$inp1, f2=$inp2)
+
+addr_ports = ($wr_addr, $rd_addr)
+
+res = __memory(mem.__last_value)
+mem.addr    = addr_ports
+//mem.bits    = 32
+//mem.size inferred (256 entries)
+mem.clock   = $my_ram_clock
+mem.din     = (tmp, 0)
+mem.enable  = (true, true)
+
+// mem.fwd     = false default value is false
+mem.type  = 1  // 1:sync memory (0:async)
+
+mem.wensize = 1 // no wmask, all bits always written
+mem.rdport = (false, true) // port 0 rd, port 1 wr
+
+%out1 = res.1.inp1
+%out2 = res.1.inp2
+

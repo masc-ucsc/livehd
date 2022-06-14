@@ -12,12 +12,14 @@ circuit SmemStruct :
     mportw.aa.d1 <= io.din.aa.d1
     wire rd_en : UInt<1> 
     node _T = gt(io.addr, UInt<6>("h020")) 
+
     when _T : 
       rd_en <= io.en 
       skip 
     else : 
       rd_en <= UInt<1>("h01") 
       skip 
+
     wire _T_1 : UInt 
     _T_1 is invalid 
     when rd_en : 
