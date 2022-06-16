@@ -200,13 +200,6 @@ cc_library(
     # "SmemStruct",
     # "MaskedSmem",
     # "MaskedSmemStruct",
-    # "Router",
-    # "ListBuffer",
-    # "BankedStore"
-    # "BoomDuplicatedDataArray",
-    # "DynamicMemorySearch",
-    # "Memo",
-    # "Router",
     
 ]]
 
