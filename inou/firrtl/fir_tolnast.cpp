@@ -123,7 +123,7 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   }
   
 
-  std::string_view vec_name;
+  std::string vec_name;
   auto pos2 = hier_name_l_ori.rfind('.');
   if (pos2 != std::string::npos) {
     if (is_2d_vector) {
@@ -189,9 +189,8 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
     leaf_field_name = hier_name_r_ori.substr(pos + 2);
   }
   
-  // fmt::print("DEBUG DDD is_2d_vector:{}, leaf_field_name:{}\n", is_2d_vector, leaf_field_name);
 
-  std::string_view vec_name;
+  std::string vec_name;
   auto pos2 = hier_name_r_ori.rfind('.');
   if (pos2 != std::string::npos) {
     if (is_2d_vector) {
@@ -203,12 +202,12 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
 
   // (2) know the vector size of this field
   auto rt_vec_size = get_vector_size(lnast, vec_name);
-  // fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_r_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_r_ori, vec_name, rt_vec_size);
 
 
   vec_name = name_prefix_modifier_flattener(vec_name, true);
   // (3) create another function to create __fir_mux for 2^field_bits cases
   //     lhs <- __fir_mux(runtime_idx, value0, value1, ..., value2^filed_bits-1);
+
   std::vector<std::string> cond_strs;
   for (int i = 0; i < rt_vec_size; i++) {
     auto idx_eq = lnast.add_child(parent_node, Lnast_node::create_func_call());
@@ -232,7 +231,6 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
       rhs_flattened_name = absl::StrCat(vec_name, ".", i);
     }
     rhs_flattened_name = name_prefix_modifier_flattener(rhs_flattened_name, true);
-    // fmt::print("DEBUG ZZZ-rhs rhs_flattened_name:{}\n", rhs_flattened_name);
 
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
@@ -296,7 +294,6 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
-      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         handle_register(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node, stmt);
       }
@@ -342,7 +339,6 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
     }
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
       var2vec_size.insert_or_assign(id, type.vector_type().size());                                               
-      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", id, type.vector_type().size());
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         wire_init_flip_handling(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), false, parent_node);
       }
@@ -651,7 +647,7 @@ void Inou_firrtl_module::init_mem_res(Lnast& lnast, std::string_view mem_name, s
   auto  mem_res_str     = absl::StrCat(mem_name, "_res");
   auto& hier_full_names = mem2din_fields[mem_name];
   for (const auto& hier_full_name : hier_full_names) {  // hier_full_name example: foo.bar.baz.20, the last field is bit
-    fmt::print("DEBUG DDD hier_name:{}\n", hier_full_name);
+    // fmt::print("DEBUG DDD hier_name:{}\n", hier_full_name);
     std::vector<std::string> hier_sub_names;
     split_hier_name(hier_full_name, hier_sub_names);
 
@@ -693,7 +689,7 @@ void Inou_firrtl_module::init_mem_din(Lnast& lnast, std::string_view mem_name, s
     auto& hier_full_names = mem2din_fields[mem_name];
     for (const auto& hier_full_name : hier_full_names) {  // hier_full_name example: foo.bar.baz.20, the last field is bit
       // fmt::print("hier_name:{}\n", hier_full_name);
-      fmt::print("DEBUG EEE hier_full_name:{}\n", hier_full_name);
+      // fmt::print("DEBUG EEE hier_full_name:{}\n", hier_full_name);
       std::vector<std::string> hier_sub_names;
       // auto found = hier_full_name.find_last_of('.');  // get rid of last bit field
       auto found = hier_full_name.rfind('.');  // get rid of last bit field
@@ -2068,13 +2064,13 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       bool is_rd_mport = mport2mem.find(tup_head_r) != mport2mem.end();
 
       if (is_rd_mport) {
-        fmt::print("DEBUG BBB handle rd_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        // fmt::print("DEBUG BBB handle rd_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_rd_mport_from_usage(lnast, parent_node, tup_head_r);
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
         add_lnast_assign(lnast, parent_node, hier_name_l, tup_head_r);
         return;
       } else if (is_wr_mport) {
-        fmt::print("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        // fmt::print("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_wr_mport_from_usage(lnast, parent_node, tup_head_l);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
         if (!absl::StrContains(hier_name_l, '.')) {

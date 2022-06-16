@@ -437,15 +437,15 @@ void Bitwidth::process_memory(Node &node) {
         auto sz      = it->second.get_range().to_i();
         new_mem_size = std::max(sz, new_mem_size);
 
-        if (sz > mem_size && mem_size != 0) {
-          Pass::error("memory {} input pin:{} needs from {} to {} but memory only has {} entries",
-                      node.debug_name(),
-                      dpin.debug_name(),
-                      it->second.get_max().to_pyrope(),
-                      it->second.get_min().to_pyrope(),
-                      mem_size);
-          return;
-        }
+        // if (sz > mem_size && mem_size != 0) {
+        //   Pass::error("memory {} input pin:{} needs from {} to {} but memory only has {} entries",
+        //               node.debug_name(),
+        //               dpin.debug_name(),
+        //               it->second.get_max().to_pyrope(),
+        //               it->second.get_min().to_pyrope(),
+        //               mem_size);
+        //   return;
+        // }
       }
     }
     if (new_mem_size == 0 && mem_size == 0) {

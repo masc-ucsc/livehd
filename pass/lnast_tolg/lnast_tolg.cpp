@@ -326,6 +326,7 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
 Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
+  // fmt::print("DEBUG CCC c0:{}, c1:{}\n", lnast->get_name(c0), lnast->get_name(c1));
 
   bool is_tup_asg = lnast->get_name(lnidx_assign) == tuple_assign_str;
   auto opd1       = setup_ref_node_dpin(lg, c1, is_tup_asg);
@@ -1062,7 +1063,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   const auto &it = name2dpin.find(name);
   if (it != name2dpin.end()) {
     auto node = it->second.get_node();
-    auto op   = it->second.get_node().get_type_op();
+    auto op   = node.get_type_op();
 
     // if ref comes from an TA dpin
     if (op == Ntype_op::TupAdd && !from_ta_assign && !from_phi) {
