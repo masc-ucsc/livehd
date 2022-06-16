@@ -72,7 +72,7 @@ cc_library(
     "firrtl_tail",
     "nested_if",
     "counter_nested_if",
-    "tuple_reg",
+    # "tuple_reg", incorrect lgraph creation with a weird dp_assign 0 in value (no way to constrain)
     "tuple_reg2",
     "tuple_nested1",
     "tuple_nested2",

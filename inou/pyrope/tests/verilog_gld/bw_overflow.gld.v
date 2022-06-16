@@ -1,10 +1,10 @@
 module bw_overflow(
-   input signed [62:0] a
-  ,input signed [62:0] b
+   input [62:0] a
+  ,input [62:0] b
   ,output reg signed [64:0] out
 );
-reg [61:0] __p8_0_u;
-reg [61:0] __p10_0_u;
+reg [62:0] __p8_0_u;
+reg [62:0] __p10_0_u;
 always_comb begin
   __p8_0_u = a;
   __p10_0_u = b;

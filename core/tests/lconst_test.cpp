@@ -123,7 +123,7 @@ TEST_F(Lconst_test, to_from_pyrope) {
 TEST_F(Lconst_test, lvar_sizes) {
   auto l1 = Lconst::from_pyrope("-1");  // 0xFF or -1
   fmt::print("l1:{} bits:{}\n", l1.to_pyrope(), l1.get_bits());
-  EXPECT_EQ(Lconst::from_pyrope("false"), l1.eq_op(Lconst::from_pyrope("0xFF")));
+  EXPECT_TRUE(Lconst::from_pyrope("false") == l1.eq_op(Lconst::from_pyrope("0xFF")));
 
   EXPECT_FALSE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_false());
   EXPECT_TRUE(l1.eq_op(Lconst::from_pyrope("-1")).is_known_true());
@@ -136,7 +136,7 @@ TEST_F(Lconst_test, lvar_sizes) {
   auto s1 = l1 + Lconst::from_pyrope("1");
   fmt::print("s1:{} bits:{}\n", s1.to_pyrope(), s1.get_bits());
   EXPECT_EQ(s1.eq_op(Lconst::from_pyrope("0x0")).is_known_false(), false);
-  EXPECT_EQ(s1.get_bits(), 1);
+  EXPECT_EQ(s1.get_bits(), 0);
 
   auto s2 = l1 + Lconst::from_pyrope("-1");
   fmt::print("s2:{} bits:{}\n", s2.to_pyrope(), s2.get_bits());
@@ -1285,14 +1285,19 @@ TEST_F(Lconst_test, serialize) {
 }
 
 TEST_F(Lconst_test, zerocase) {
+
   Lconst nothing;
   EXPECT_EQ(nothing.get_bits(), 0);
-  EXPECT_EQ(Lconst(0).get_bits(), 1);
+  EXPECT_EQ(Lconst(0).get_bits(), 0);
 
-  EXPECT_EQ(Lconst::from_pyrope("0x0").get_bits(), 1);
-  EXPECT_EQ(Lconst::from_pyrope("0").get_bits(), 1);
-  EXPECT_EQ(Lconst::from_pyrope("0b0").get_bits(), 1);
+  EXPECT_EQ(Lconst::from_pyrope("0x0").get_bits(), 0);
+  EXPECT_EQ(Lconst::from_pyrope("0").get_bits(), 0);
+  EXPECT_EQ(Lconst::from_pyrope("0b0").get_bits(), 0);
+  EXPECT_EQ(Lconst::from_pyrope("0b1").get_bits(), 2);
+  EXPECT_EQ(Lconst::from_pyrope("0sb1").get_bits(), 1);
   EXPECT_EQ(Lconst::from_pyrope("0b?").get_bits(), 2);
+
+  EXPECT_EQ(Lconst::from_pyrope("0sb?").get_bits(), 1);
 }
 
 TEST_F(Lconst_test, cpp_int_vs_lconst) {
@@ -1381,7 +1386,7 @@ TEST_F(Lconst_test, lconst_add) {
   {
     auto a = Lconst::from_pyrope("1") + Lconst::from_pyrope("-1");
     EXPECT_EQ(a.to_i(), 0);
-    EXPECT_EQ(a.get_bits(), 1);
+    EXPECT_EQ(a.get_bits(), 0);
   }
   {
     auto a = Lconst::from_pyrope("0b0?") + Lconst::from_pyrope("1");

@@ -115,7 +115,7 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
 
   if (size == 0) {
     overflow = true;
-    max      = 326768;
+    max      = 32768;
     min      = -32768;
     return;
   }
@@ -137,7 +137,7 @@ void Bitwidth_range::set_ubits_range(Bits_t size) {
 
   if (size == 0) {
     overflow = true;
-    max      = 326768;
+    max      = 32768;
     min      = 0;
     return;
   }
@@ -147,7 +147,7 @@ void Bitwidth_range::set_ubits_range(Bits_t size) {
 
   if (size >= 62) {
     overflow = true;
-    max      = size;  // Use bits in overflow mode
+    max      = size+1;  // Use bits in overflow mode
   } else {
     overflow = false;
     max      = (1ULL << size) - 1;

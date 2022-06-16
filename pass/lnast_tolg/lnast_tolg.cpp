@@ -641,6 +641,8 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       //(1) create flattened input
       std::string bits_str = std::string{lnast->get_vname(lnast->get_sibling_next(child))};
       auto bits = std::stoi(bits_str);
+      if (lnast->get_vname(child) == "__ubits")
+        bits++; // WARNING: in lgraph/lnast all the bit sizes assume signed. So 1 bit unsigned is 2 bits signed
 
       Node_pin flattened_inp;
       if (!lg->has_graph_input(full_inp_hier_name)) {

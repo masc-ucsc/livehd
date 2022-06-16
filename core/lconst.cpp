@@ -117,11 +117,11 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
     bin = "0";  // always unsigned, must have a leading 0 (implicit)
   } else {
     // Look for the first not underscore character (this is the sign)
-    for (auto i = 0u; i < txt.size(); ++i) {
-      const auto ch2 = txt[i];
+    for (const auto ch2:txt) {
       if (ch2 == '_')
         continue;
-      bin.append(1, ch2);
+      if (ch2 == '1' || ch2 == '0')
+        bin = ch2;
       break;
     }
   }
@@ -204,7 +204,7 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
   if (txt == "true") {
     return Lconst(false, 1, -1);
   } else if (txt == "false") {
-    return Lconst(false, 1, 0);
+    return Lconst(false, 0, 0);
   }
 
   bool negative   = false;

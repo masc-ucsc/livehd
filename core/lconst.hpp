@@ -45,7 +45,9 @@ protected:
   Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) { assert(d < Bits_max); }
 
   static Bits_t calc_num_bits(const Number &num) {
-    if (num == 0 || num == -1)
+    if (num == 0)
+      return 0;
+    if (num == -1)
       return 1;
     if (num > 0)
       return msb(num) + 2;  // +2 because values are signed (msb==0 is 1 bit)
