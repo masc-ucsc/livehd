@@ -463,7 +463,11 @@ std::pair<int, int> Lconst::get_mask_range() const {
   return std::make_pair(-1, -1);  // No continuous range
 }
 
-Lconst Lconst::get_mask_value(Bits_t bits) { return Lconst((Number(1) << bits) - 1); }
+Lconst Lconst::get_mask_value(Bits_t bits) { 
+  if (bits==0)
+    return Lconst(Number(1));
+  return Lconst((Number(1) << (bits)) - 1); 
+}
 
 Lconst Lconst::get_mask_value(Bits_t h, Bits_t l) {
   if (h == l) {
@@ -478,9 +482,17 @@ Lconst Lconst::get_mask_value(Bits_t h, Bits_t l) {
   return Lconst(false, calc_num_bits(res_num), res_num);
 }
 
-Lconst Lconst::get_neg_mask_value(Bits_t bits) { return Lconst((Number(-1) << bits)); }
+Lconst Lconst::get_neg_mask_value(Bits_t bits) {
+  if (bits<=1)
+    return Lconst(Number(1));
+  return Lconst((Number(-1) << bits));
+}
 
-Lconst Lconst::get_mask_value() const { return get_mask_value(get_bits()); }
+Lconst Lconst::get_mask_value() const {
+  if (num==0)
+    return Lconst(Number(1));
+  return get_mask_value(get_bits()-1);
+}
 
 size_t Lconst::get_trailing_zeroes() const {
   if (num == 0)

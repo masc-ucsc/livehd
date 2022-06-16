@@ -1905,7 +1905,6 @@ void Cprop::reconnect_tuple_get(Node &node) {
   }
 }
 
-int count = 0;
 Node_pin Cprop::expand_data_and_attributes(Node &node, std::string_view key_name, XEdge_iterator &pending_out_edges,
                                            const std::shared_ptr<Lgtuple const> &node_tup) {
   I(!hier);

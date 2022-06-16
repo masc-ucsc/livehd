@@ -15,7 +15,7 @@ Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
   }
 
   if (val > 0) {
-    return Lconst::get_mask_value(val-1);
+    return Lconst::get_mask_value(val);
   }
 
   return Lconst::get_neg_mask_value(-(val+1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
@@ -59,7 +59,7 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
     if (max_val.is_positive())
       max = max_val.get_bits();
 
-    fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
+    //fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
     I(min == 0 || min <= max || max == 0);
   }
 }

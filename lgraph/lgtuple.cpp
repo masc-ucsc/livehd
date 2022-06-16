@@ -841,7 +841,7 @@ std::pair<Node, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dp
   if (dpin.is_type_const()) {
     auto v      = dpin.get_type_const();
     auto v_bits = v.get_bits();
-    auto v_mask = v.get_mask_value();
+    auto v_mask = Lconst::get_mask_value(v_bits);
 
     auto just_mask_dpin = result_node.create_const(v_mask).setup_driver_pin();
 

@@ -466,8 +466,6 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
       auto value_dpin = node.get_sink_pin("value").get_driver_pin();
       auto value      = get_expression(value_dpin);
 
-      // fmt::print("a_bits:{} mask:{} minr:{} maxr:{}\n", a_bits, mask_v.to_pyrope(), range_begin, range_end);
-
       if (range_begin > static_cast<int>(a_bits)) {
         final_expr = a;
       } else if (range_begin < 0 || range_end < 0) {  // no continuous range
@@ -513,42 +511,6 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
         }
         fout->append("  ", var_it->second, replace, value, ";\n");
         return;  // special case, multiple statements
-
-#if 0
-        std::string a_high;
-        std::string a_low;
-
-        Lconst a_val; // only if const
-        bool a_is_const = a_dpin.is_type_const();
-        if (a_is_const) {
-          a_val = a_dpin.get_type_const();
-        }
-
-        if (range_end< static_cast<int>(a_bits)) {
-          if (a_is_const) {
-            // auto v = a_val.get_mask_op(Lconst::get_mask_value(a_bits, range_end));
-            auto v = a_val.rsh_op(range_end);
-            a_high = absl::StrCat(v.to_verilog(),",");
-          }else if (static_cast<int>(a_bits)==(range_end+1)) {
-            a_high = absl::StrCat(a, "[", range_end, "],");
-          }else{
-            a_high = absl::StrCat(a, "[", a_bits-1, ":", range_end, "],");
-          }
-        }
-
-        if (range_begin>0) {
-          if (a_is_const) {
-            auto v = a_val.get_mask_op(Lconst::get_mask_value(range_begin));
-            a_low = absl::StrCat(",", v.to_verilog());
-          }else if (range_begin==1) {
-            a_low = absl::StrCat(",", a, "[0]");
-          }else{
-            a_low = absl::StrCat(",", a, "[", range_begin-1, ":0]");
-          }
-        }
-
-        final_expr = absl::StrCat("{", a_high, a_replaced, a_low, "}");
-#endif
       }
     }
   } else if (op == Ntype_op::Get_mask) {
@@ -561,41 +523,47 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
     auto a_dpin = node.get_sink_pin("a").get_driver_pin();
     auto a_bits = a_dpin.get_bits();
     auto a      = get_expression(a_dpin);
-
-    auto [range_begin, range_end] = mask_v.get_mask_range();
-    Bits_t a_bits_to_use          = static_cast<Bits_t>(range_end - range_begin);
-    if (a_bits_to_use > dpin.get_bits())
-      range_end = dpin.get_bits() + range_begin;
-
-    int out_bits = dpin.get_bits();
-    if (dpin.is_unsign())
-      --out_bits;
-
-    if (range_begin < 0 || range_end < 0) {
-      std::string sel;
-      auto        max_bits = std::max(mask_v.get_bits(), a_bits);
-      for (auto i = 0; i < max_bits; ++i) {
-        if (mask_v.and_op(Lconst(1) << i).is_known_false())
-          continue;
-
-        if (sel.empty())
-          sel = absl::StrCat(a, "[", i, "]");
-        else
-          sel = absl::StrCat(sel, ",", a, "[", i, "]");
-      }
-      final_expr = absl::StrCat("{", sel, "}");
-    } else if (range_begin >= static_cast<int>(a_bits)) {
-      final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
-    } else if (range_end > static_cast<int>(a_bits)) {
-      auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
-      final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
-    } else if (range_begin == 0 && range_end >= out_bits) {
+    if (mask_v == Lconst(-1)) {
       final_expr = a;
-    } else if (a_bits_to_use == 1) {
-      final_expr = absl::StrCat(a, "[", range_begin, "]");
-    } else {
-      final_expr = absl::StrCat(a, "[", range_end - 1, ":", range_begin, "]");
+    }else{
+
+      auto [range_begin, range_end] = mask_v.get_mask_range();
+      Bits_t a_bits_to_use          = static_cast<Bits_t>(range_end - range_begin);
+      if (a_bits_to_use > dpin.get_bits())
+        range_end = dpin.get_bits() + range_begin;
+
+      int out_bits = dpin.get_bits();
+      if (dpin.is_unsign())
+        --out_bits;
+
+      if (range_begin < 0 || range_end < 0) {
+        std::string sel;
+        auto        max_bits = std::max(mask_v.get_bits(), a_bits);
+        for (auto i = 0; i < max_bits; ++i) {
+          if (mask_v.and_op(Lconst(1) << i).is_known_false())
+            continue;
+
+          if (sel.empty())
+            sel = absl::StrCat(a, "[", i, "]");
+          else
+            sel = absl::StrCat(sel, ",", a, "[", i, "]");
+        }
+        final_expr = absl::StrCat("{", sel, "}");
+      } else if (range_begin >= static_cast<int>(a_bits)) {
+        final_expr = absl::StrCat("{", range_end - range_begin, "{", a, "[", a_bits - 1, "]}}");
+      } else if (range_end > static_cast<int>(a_bits)) {
+        auto top   = absl::StrCat("{{", range_end - a_bits, "{", a, "[", a_bits - 1, "]}}");
+        final_expr = absl::StrCat(top, ",", a, "[", a_bits - 1, ":", range_begin, "]}");
+      } else if (range_begin == 0 && range_end >= out_bits) {
+        final_expr = a;
+      } else if (a_bits_to_use == 1) {
+        final_expr = absl::StrCat(a, "[", range_begin, "]");
+      } else {
+        final_expr = absl::StrCat(a, "[", range_end - 1, ":", range_begin, "]");
+      }
+
     }
+
 
   } else if (op == Ntype_op::Sext) {
     auto lhs      = get_expression(node.get_sink_pin("a").get_driver_pin());
