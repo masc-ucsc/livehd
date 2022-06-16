@@ -218,6 +218,7 @@ protected:
   // void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
   //                            const Lnast_node &value_node);
   void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node);
+  void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &target_node);
   void create_tuple_add_for_instance_itup(Lnast &ln, Lnast_nid &parent_node, std::string_view lhs_full_name, std::string rhs_full_name);
   void create_tuple_get_for_instance_otup(Lnast &ln, Lnast_nid &parent_node, std::string_view rhs_full_name, std::string lhs_full_name);
   void direct_instances_connection(Lnast &ln, Lnast_nid &parent_node, std::string lhs_full_name, std::string rhs_full_name);

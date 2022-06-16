@@ -1245,6 +1245,35 @@ void Inou_firrtl_module::create_tuple_get_for_instance_otup(Lnast& lnast, Lnast_
   lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
 }
 
+void Inou_firrtl_module::create_tuple_get_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name, const Lnast_node& target_node) {
+  I(absl::StrContains(full_name, '.'));
+
+  std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> hier_subnames;
+  split_hier_name(full_name, hier_subnames);
+  auto selc_node = ln.add_child(parent_node, Lnast_node::create_tuple_get());
+  ln.add_child(selc_node, target_node);
+
+  for (const auto &subname : hier_subnames) {
+    std::string field_name = subname.first;
+    if (inst2module.count(subname.first)) {
+      field_name = absl::StrCat("otup_", field_name);
+    }
+    switch (subname.second) {
+      case Leaf_type::Ref: {
+        ln.add_child(selc_node, Lnast_node::create_ref(field_name));
+        break;
+      }
+      case Leaf_type::Const_num:
+      case Leaf_type::Const_str: {
+        ln.add_child(selc_node, Lnast_node::create_const(field_name));
+        break;
+      }
+      default: Pass::error("Unknown port type.");
+    }
+  }
+}
+
+
 
 void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_node, std::string_view full_name, const Lnast_node& value_node) {
   I(absl::StrContains(full_name, '.'));
@@ -2067,7 +2096,14 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         // fmt::print("DEBUG BBB handle rd_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_rd_mport_from_usage(lnast, parent_node, tup_head_r);
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
-        add_lnast_assign(lnast, parent_node, hier_name_l, tup_head_r);
+        if (!absl::StrContains(hier_name_r, '.')) {
+          add_lnast_assign(lnast, parent_node, hier_name_l, tup_head_r);
+        } else {
+          auto target_var_str = create_tmp_var();
+          Lnast_node target_node = Lnast_node::create_ref(target_var_str);
+          create_tuple_get_from_str(lnast, parent_node, hier_name_r, target_node);
+          add_lnast_assign(lnast, parent_node, hier_name_l, target_var_str);
+        }
         return;
       } else if (is_wr_mport) {
         // fmt::print("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
