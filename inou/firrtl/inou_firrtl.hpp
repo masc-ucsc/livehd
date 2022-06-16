@@ -215,10 +215,9 @@ protected:
   bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
   bool check_flipness(Lnast& lnast, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
 
-  void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
-                             const Lnast_node &value_node);
+  // void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
+  //                            const Lnast_node &value_node);
   void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node);
-  void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &dest_node, bool is_last_value_attr = false);
   void create_tuple_add_for_instance_itup(Lnast &ln, Lnast_nid &parent_node, std::string_view lhs_full_name, std::string rhs_full_name);
   void create_tuple_get_for_instance_otup(Lnast &ln, Lnast_nid &parent_node, std::string_view rhs_full_name, std::string lhs_full_name);
   void direct_instances_connection(Lnast &ln, Lnast_nid &parent_node, std::string lhs_full_name, std::string rhs_full_name);
@@ -226,8 +225,8 @@ protected:
 
   void init_cmemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
   void handle_mport_declaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void handle_rd_mport_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
-  void handle_wr_mport_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
+  void initialize_rd_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
+  void initialize_wr_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
   void init_mem_din(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str);
   void init_mem_res(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str);
 
