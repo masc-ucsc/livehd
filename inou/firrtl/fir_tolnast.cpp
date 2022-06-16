@@ -116,20 +116,20 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
 
   bool is_2d_vector = false;
   std::string leaf_field_name = "";
-  auto found = hier_name_l_ori.find(".."); 
-  if (found != std::string::npos) {
+  auto pos = hier_name_l_ori.find(".."); 
+  if (pos != std::string::npos) {
     is_2d_vector = true;
-    leaf_field_name = hier_name_l_ori.substr(found+2);
+    leaf_field_name = hier_name_l_ori.substr(pos + 2);
   }
   
 
   std::string_view vec_name;
-  auto pos = hier_name_l_ori.rfind('.');
-  if (pos != std::string::npos) {
+  auto pos2 = hier_name_l_ori.rfind('.');
+  if (pos2 != std::string::npos) {
     if (is_2d_vector) {
-      vec_name = hier_name_l_ori.substr(0, pos-1);
+      vec_name = hier_name_l_ori.substr(0, pos2 - 1);
     } else {
-      vec_name = hier_name_l_ori.substr(0, pos);
+      vec_name = hier_name_l_ori.substr(0, pos2);
     }
   }
 
@@ -183,21 +183,21 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
 
   bool is_2d_vector = false;
   std::string leaf_field_name = "";
-  auto found = hier_name_r_ori.find(".."); 
-  if (found != std::string::npos) {
+  auto pos = hier_name_r_ori.find(".."); 
+  if (pos != std::string::npos) {
     is_2d_vector = true;
-    leaf_field_name = hier_name_r_ori.substr(found+2);
+    leaf_field_name = hier_name_r_ori.substr(pos + 2);
   }
   
   // fmt::print("DEBUG DDD is_2d_vector:{}, leaf_field_name:{}\n", is_2d_vector, leaf_field_name);
 
   std::string_view vec_name;
-  auto pos = hier_name_r_ori.rfind('.');
-  if (pos != std::string::npos) {
+  auto pos2 = hier_name_r_ori.rfind('.');
+  if (pos2 != std::string::npos) {
     if (is_2d_vector) {
-      vec_name = hier_name_r_ori.substr(0, pos-1);
+      vec_name = hier_name_r_ori.substr(0, pos2 - 1);
     } else {
-      vec_name = hier_name_r_ori.substr(0, pos);
+      vec_name = hier_name_r_ori.substr(0, pos2);
     }
   }
 
@@ -306,8 +306,10 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
     case firrtl::FirrtlPB_Type::kUintType:{  
       add_local_flip_info(false, id);
       std::string head_chopped_hier_name;
-      if (id.find_first_of('.') != std::string::npos)
+      // if (id.find_first_of('.') != std::string::npos)
+      if (absl::StrContains(id, '.')) {
         head_chopped_hier_name = id.substr(id.find_first_of('.') + 1);
+      }
 
       std::replace(id.begin(), id.end(), '.', '_');
       // fmt::print("DEBUG CCC flattend vec id:{}\n", id);
@@ -1140,10 +1142,9 @@ void Inou_firrtl_module::set_leaf_type(std::string_view subname, std::string_vie
 
 void Inou_firrtl_module::split_hier_name(std::string_view full_name, std::vector<std::string>& hier_subnames) {
   std::size_t prev = 0;
-  std::size_t pos;
+  std::size_t pos = full_name.find('.', prev);
 
-  // while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
-  while ((pos = full_name.find(".", prev)) != std::string::npos || (pos = full_name.find("[", prev)) != std::string::npos) {
+  while (pos != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1152,10 +1153,11 @@ void Inou_firrtl_module::split_hier_name(std::string_view full_name, std::vector
       hier_subnames.emplace_back(subname);
     }
     prev = pos + 1;
+    pos = full_name.find('.', prev);
   }
 
   if (prev < full_name.size()) {
-    auto subname = full_name.substr(prev, std::string::npos);
+    auto subname = full_name.substr(prev);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
     }
@@ -1163,13 +1165,11 @@ void Inou_firrtl_module::split_hier_name(std::string_view full_name, std::vector
   }
 }
 
-void Inou_firrtl_module::split_hier_name(std::string_view                                                    full_name,
-                                         std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>>& hier_subnames) {
+void Inou_firrtl_module::split_hier_name(std::string_view full_name, std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>>& hier_subnames) {
   std::size_t prev = 0;
-  std::size_t pos;
 
-  // while ((pos = full_name.find_first_of(".[", prev)) != std::string_view::npos) {
-  while ((pos = full_name.find('.', prev)) != std::string::npos || (pos = full_name.find('[', prev)) != std::string::npos) {
+  std::size_t pos = full_name.find('.', prev);
+  while (pos != std::string::npos) {
     if (pos > prev) {
       auto subname = full_name.substr(prev, pos - prev);
       if (subname.back() == ']') {
@@ -1178,10 +1178,11 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
       set_leaf_type(subname, full_name, prev, hier_subnames);
     }
     prev = pos + 1;
+    pos = full_name.find('.', prev);
   }
 
   if (prev < full_name.size()) {
-    auto subname = full_name.substr(prev, std::string::npos);
+    auto subname = full_name.substr(prev);
     if (subname.back() == ']') {
       subname = subname.substr(0, subname.size() - 1);  // exclude ']'
     }
@@ -1189,10 +1190,6 @@ void Inou_firrtl_module::split_hier_name(std::string_view                       
   }
 }
 
-// note: Given a string with "."s and "["s in it, this
-// function will be able to deconstruct it into
-// DOT and SELECT nodes in an LNAST.
-// note: "#" prefix need to be ready if the full_name is a register
 
 void Inou_firrtl_module::direct_instances_connection(Lnast &lnast, Lnast_nid &parent_node, std::string lhs_full_name, std::string rhs_full_name) {
   I(str_tools::contains(lhs_full_name, '.'));
@@ -1576,7 +1573,7 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
     case firrtl::FirrtlPB_Expression::kSubField:
     case firrtl::FirrtlPB_Expression::kSubIndex:   // SubIndex
     case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
-      I(false); // tuple/vector related stuff already handled in kConnect statement
+      I(false); // tuple/vector related stuff already handled in connect statement
       break;
     }
     case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
@@ -1880,8 +1877,9 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
 
   std::string rhs_wire_name;
   auto pos = rhs_full_name.find('.');
-  if (pos != std::string::npos) 
+  if (pos != std::string::npos) {
     rhs_wire_name = rhs_full_name.substr(0, pos);
+  }
 
 
   lhs_full_name = name_prefix_modifier_flattener(lhs_full_name, false);
@@ -2025,20 +2023,20 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       
       
       // preparation: get head of the tuple name so you know entry for the var2flip table
-      auto found_l = hier_name_l.find_first_of('.');
+      auto pos_l = hier_name_l.find_first_of('.');
       std::string tup_head_l, tup_head_r;
       std::string tup_rest_l, tup_rest_r;
-      if (found_l != std::string::npos) {
-        tup_head_l = hier_name_l.substr(0, found_l);
-        tup_rest_l = hier_name_l.substr(found_l + 1);
+      if (pos_l != std::string::npos) {
+        tup_head_l = hier_name_l.substr(0, pos_l);
+        tup_rest_l = hier_name_l.substr(pos_l + 1);
       } else {
         tup_head_l = hier_name_l;
       }
 
-      auto found_r = hier_name_r.find_first_of('.');
-      if (found_r != std::string::npos) {
-        tup_head_r = hier_name_r.substr(0, found_r);
-        tup_rest_r = hier_name_r.substr(found_r + 1);
+      auto pos_r = hier_name_r.find_first_of('.');
+      if (pos_r != std::string::npos) {
+        tup_head_r = hier_name_r.substr(0, pos_r);
+        tup_rest_r = hier_name_r.substr(pos_r + 1);
       } else {
         tup_head_r = hier_name_r;
       }
@@ -2079,7 +2077,12 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         fmt::print("DEBUG CCC handle wr_mport hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         initialize_wr_mport_from_usage(lnast, parent_node, tup_head_l);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
-        add_lnast_assign(lnast, parent_node, tup_head_l, hier_name_r);
+        if (!absl::StrContains(hier_name_l, '.')) {
+          add_lnast_assign(lnast, parent_node, tup_head_l, hier_name_r);
+        } else {
+          Lnast_node value_node = Lnast_node::create_ref(hier_name_r);
+          create_tuple_add_from_str(lnast, parent_node, hier_name_l, value_node);
+        }
         return;
       }
 
@@ -2136,7 +2139,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       }
 
       for (const auto &it : *tup_l_sets) {
-        if (it.first.find(hier_name_l) != std::string::npos) {
+        if (absl::StrContains(it.first, hier_name_l)) {
           tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
         }
       }
@@ -2173,7 +2176,7 @@ bool Inou_firrtl_module::check_flipness(Lnast &lnast, std::string_view tup_head,
     // with original fliptable interface
     //
     auto submodule_name = inst2module[tup_head];
-    I(hier_name.find_first_of('.' != std::string::npos));
+    I(absl::StrContains(hier_name, '.'));
     auto chop_instance_hier_name = hier_name.substr(hier_name.find_first_of('.') + 1);
     std::string new_tup_head;
     auto found2 = chop_instance_hier_name.find_first_of('.');
@@ -2185,7 +2188,7 @@ bool Inou_firrtl_module::check_flipness(Lnast &lnast, std::string_view tup_head,
 
     tup_sets = &Inou_firrtl::glob_info.var2flip[submodule_name][new_tup_head];
     for (const auto &it : *tup_sets) {
-      if (it.first.find(chop_instance_hier_name) != std::string::npos) {
+      if (absl::StrContains(it.first, chop_instance_hier_name)) {
         return it.second;
       }
     }
@@ -2200,7 +2203,7 @@ bool Inou_firrtl_module::check_flipness(Lnast &lnast, std::string_view tup_head,
   }
 
   for (const auto &it : *tup_sets) {
-    if (it.first.find(hier_name) != std::string::npos) {
+    if (absl::StrContains(it.first, hier_name)) {
       return it.second;
     }
   }
