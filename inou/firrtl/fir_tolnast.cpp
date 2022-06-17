@@ -745,7 +745,9 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
   auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
 
   auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
-  lnast.add_child(idx_mux_if, Lnast_node::create_ref(cond_str));
+  // lnast.add_child(idx_mux_if, Lnast_node::create_ref(cond_str));
+  attach_expr_str2node(lnast, cond_str, idx_mux_if);
+
 
   auto idx_stmt_t = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
   auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
@@ -788,7 +790,7 @@ void Inou_firrtl_module::handle_unary_op(Lnast& lnast, const firrtl::FirrtlPB_Ex
   auto idx_not = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_not"));
   lnast.add_child(idx_not, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_not, Lnast_node::create_const("__fir_not"));
-  lnast.add_child(idx_not, Lnast_node::create_ref(e1_str));
+  attach_expr_str2node(lnast, e1_str, idx_not);
 }
 
 void Inou_firrtl_module::handle_and_reduce_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -801,7 +803,8 @@ void Inou_firrtl_module::handle_and_reduce_op(Lnast& lnast, const firrtl::Firrtl
   auto idx_andr = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_andr"));
   lnast.add_child(idx_andr, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_andr, Lnast_node::create_const("__fir_andr"));
-  lnast.add_child(idx_andr, Lnast_node::create_ref(e1_str));
+  // lnast.add_child(idx_andr, Lnast_node::create_ref(e1_str));
+  attach_expr_str2node(lnast, e1_str, idx_andr);
 }
 
 void Inou_firrtl_module::handle_or_reduce_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -913,8 +916,8 @@ void Inou_firrtl_module::handle_concat_op(Lnast& lnast, const firrtl::FirrtlPB_E
   auto idx_concat = lnast.add_child(parent_node, Lnast_node::create_func_call());  // "__fir_cat"));
   lnast.add_child(idx_concat, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_concat, Lnast_node::create_const("__fir_cat"));
-  lnast.add_child(idx_concat, Lnast_node::create_ref(e1_str));
-  lnast.add_child(idx_concat, Lnast_node::create_ref(e2_str));
+  attach_expr_str2node(lnast, e1_str, idx_concat);
+  attach_expr_str2node(lnast, e2_str, idx_concat);
 }
 
 void Inou_firrtl_module::handle_pad_op(Lnast& lnast, const firrtl::FirrtlPB_Expression_PrimOp& op, Lnast_nid& parent_node,
@@ -968,7 +971,7 @@ void Inou_firrtl_module::handle_static_shift_op(Lnast& lnast, const firrtl::Firr
 
   lnast.add_child(idx_shift, Lnast_node::create_ref(lhs_str));
   lnast.add_child(idx_shift, Lnast_node::create_const(sub_it->second));
-  lnast.add_child(idx_shift, Lnast_node::create_ref(e1_str));
+	attach_expr_str2node(lnast, e1_str, idx_shift);
   lnast.add_child(idx_shift, Lnast_node::create_const(op.const_(0).value()));
 }
 
@@ -1971,7 +1974,8 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Statement::kWhen: {
       auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, stmt.when().predicate());
       auto idx_when = lnast.add_child(parent_node, Lnast_node::create_if());
-      lnast.add_child(idx_when, Lnast_node::create_ref(cond_str));
+      // lnast.add_child(idx_when, Lnast_node::create_ref(cond_str));
+			attach_expr_str2node(lnast, cond_str, idx_when);
 
       auto idx_stmts_t = lnast.add_child(idx_when, Lnast_node::create_stmts());
 

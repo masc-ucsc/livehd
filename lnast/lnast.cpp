@@ -1062,7 +1062,13 @@ void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, cons
       = add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(t_nid), get_subs(t_nid)));  // ssa update later
 
   update_global_lhs_ssa_cnt_table(lhs_phi_nid);
-  add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(cond_nid), get_subs(cond_nid)));
+  auto first_char = get_token(cond_nid).get_text()[0];
+  if ( isdigit(first_char) || first_char == '-' || first_char == '+') {
+    add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_const(), get_token(cond_nid), get_subs(cond_nid)));
+  } else {
+    add_child(new_phi_nid, Lnast_node(Lnast_ntype::create_ref(), get_token(cond_nid), get_subs(cond_nid)));
+  }
+
   add_child(new_phi_nid, Lnast_node(get_type(t_nid), get_token(t_nid), get_subs(t_nid)));
   add_child(new_phi_nid, Lnast_node(get_type(f_nid), get_token(f_nid), get_subs(f_nid)));
   new_added_phi_node_table.insert_or_assign(get_name(lhs_phi_nid),

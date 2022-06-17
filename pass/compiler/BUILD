@@ -200,9 +200,11 @@ cc_library(
     # "SmemStruct",
     # "MaskedSmem",
     # "MaskedSmemStruct",
+    # "Rob"
 
-    # issue-2: lgraph const node limits
-    # "ALU"
+    # issue-2: missing variable name, like the opt case of string_view!?
+    # "PredRenameStage"
+
 
     # issue-3: run-time index
     # "BranchKillableQueue_3"
@@ -211,27 +213,57 @@ cc_library(
 
     # issue-4: assert bw_sbits fail
     # "DecodeUnit"
+    # "MulDiv"
+    # "RenameBusyTable_*"
+    # "UOPCodeFDivDecoder"
 
-    # issue-n: ??? TODO
-    # "BranchMaskGenerationLogic"
+    # issue-5: firbits cannot converge within 10 iterations
+    # "RegisterFileSynthesizable"
+    # "RegisterFileSynthesizable_1"
+    # "RegisterFileSynthesizable_2"
+    
+    # issue-6: non-LEC
+    # "ALU"
+    # "RenameMapTable"
+
+    # issue-7: no bits set at verilog-gen
     # "CompareRecFN"
-    # "CSRFile"
-    # "DivSqrtRecF64ToRaw_mulAddZ31"
-    # "IssueSlot_*"
-    # "MulAddRecFNToRaw_*"
+    # "RecFNToIN"
+    # "RecFNToIN_1"
 
-    # FIXME:
+    # issue-8: cannot find register qpin
+    # "CSRFile"
+
+    # issue-9: need last value of a variable??
+    # "DivSqrtRecF64ToRaw_mulAddZ31"
+
+    # issue-A: non-flattend wire variable _T_ctrl.br_type??
+    # "IssueSlot*"
+
+    # issue-B: firbits signness unequal
+    # "MulAddRecFNToRaw*"
+    # "RoundAnyRawFNToRecFN*"
+
+    # issue-C: boost cannot shift by a negative value
+    # "RegisterReadDecode"
+
+    # issue-n: ??? 
+
     # BoomCore passing submodules
     # "Arbiter_15"
     # "Arbiter_16"
     # "Arbiter_17"
     # "Arbiter_18"
+    # "BranchMaskGenerationLogic"
     # "BasicDispatcher"
     # "BreakpointUnit_4"
     # "FMADecoder"
     # "FMADecoder_1"
     # "FMADecoder_2"
     # "Mul54"
+    # "PipelinedMultiplier"
+    # "UOPCodeFPUDecoder"
+    
     
 ]]
 
