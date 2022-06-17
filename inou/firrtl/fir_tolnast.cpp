@@ -105,8 +105,7 @@ std::string Inou_firrtl_module::get_runtime_idx_field_name(const firrtl::FirrtlP
   }
 }
 
-void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, 
-                                                std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
+void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, const firrtl::FirrtlPB_Expression &lhs_expr) {
   std::string rhs_flattened_name = name_prefix_modifier_flattener(hier_name_r_ori, true);
   // fmt::print("DEBUG YYY hier_name_r_ori:{} rhs_flattened_name:{}\n", hier_name_r_ori, rhs_flattened_name);
   // (1) get the runtime idx tuple field
@@ -162,7 +161,6 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
       lhs_flattened_name = absl::StrCat(vec_name,".", i);
     }
     lhs_flattened_name = name_prefix_modifier_flattener(lhs_flattened_name, false);
-    // fmt::print("DEBUG ZZZ-lhs lhs_flattened_name:{}\n", lhs_flattened_name);
 
     add_lnast_assign(lnast, idx_stmt_t, lhs_flattened_name, rhs_flattened_name);
   }
@@ -1549,7 +1547,8 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
           idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
         } 
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-        lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+        // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
+				attach_expr_str2node(lnast, rhs_str, idx_asg);
       }
       break;
     }
@@ -1618,7 +1617,11 @@ std::string Inou_firrtl_module::get_expr_hier_name(const firrtl::FirrtlPB_Expres
     return absl::StrCat(get_expr_hier_name(expr.sub_index().expression(), is_runtime_idx), ".", expr.sub_index().index().value());
   } else if (expr.has_reference()) {
     return expr.reference().id();
-  } else {
+  } else if (expr.has_uint_literal()) {
+		return expr.uint_literal().value().value(); 
+  } else if (expr.has_sint_literal()) {
+		return expr.sint_literal().value().value(); 
+	} else {
     return "";
   }
 }
@@ -1924,12 +1927,14 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   } else if (lhs_full_name.at(0) == '#') {
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
+    // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
+		attach_expr_str2node(lnast, rhs_full_name, idx_asg);
   } else {
     // FIXME->sh: potential problem to not use dp_assign here when firrtl connection has a bitwidth mismatch from lhs/rhs ...
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
-    lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
+    // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
+		attach_expr_str2node(lnast, rhs_full_name, idx_asg);
   }
   return;
 }
@@ -2022,6 +2027,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // the lhs and rhs and insert the multiplexers to handle the runtime
       // vector elements selection.
       if (is_runtime_idx_l) {
+				fmt::print("DEBUG ZZZ hier_name_r:{}\n", hier_name_r);
         handle_lhs_runtime_idx(lnast, parent_node, hier_name_l, hier_name_r, lhs_expr);
         return;
       } 
