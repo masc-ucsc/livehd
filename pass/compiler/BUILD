@@ -193,6 +193,10 @@ cc_library(
     "DebugCustomXbar",
     "RenameMapTableSimpleF5",
     "MaxPeriodFibonacciLFSR",
+    "BranchMaskGenerationLogic",
+    "BasicDispatcher",
+    "FMADecoder",
+    "UOPCodeFPUDecoder"
 
     # FIXME:
     # issue-1: memory
@@ -251,15 +255,10 @@ cc_library(
     # "Arbiter_16"
     # "Arbiter_17"
     # "Arbiter_18"
-    # "BranchMaskGenerationLogic"
-    # "BasicDispatcher"
-    # "BreakpointUnit_4"
-    # "FMADecoder"
     # "FMADecoder_1"
     # "FMADecoder_2"
     # "Mul54"
     # "PipelinedMultiplier"
-    # "UOPCodeFPUDecoder"
     
     
 ]]
