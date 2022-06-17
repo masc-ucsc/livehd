@@ -196,7 +196,8 @@ cc_library(
     "BranchMaskGenerationLogic",
     "BasicDispatcher",
     "FMADecoder",
-    "UOPCodeFPUDecoder"
+    "UOPCodeFPUDecoder",
+    "UOPCodeFDivDecoder"
 
     # FIXME:
     # issue-1: memory
@@ -212,7 +213,6 @@ cc_library(
     # "DecodeUnit"
     # "MulDiv"
     # "RenameBusyTable_*"
-    # "UOPCodeFDivDecoder"
     # "PredRenameStage"
 
     # issue-4: firbits cannot converge within 10 iterations: 
