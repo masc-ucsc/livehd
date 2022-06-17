@@ -116,20 +116,17 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   bool is_2d_vector = false;
   std::string leaf_field_name = "";
   auto pos = hier_name_l_ori.find(".."); 
+  std::string vec_name;
   if (pos != std::string::npos) {
     is_2d_vector = true;
     leaf_field_name = hier_name_l_ori.substr(pos + 2);
+		vec_name = hier_name_l_ori.substr(0, pos);
   }
   
 
-  std::string vec_name;
   auto pos2 = hier_name_l_ori.rfind('.');
-  if (pos2 != std::string::npos) {
-    if (is_2d_vector) {
-      vec_name = hier_name_l_ori.substr(0, pos2 - 1);
-    } else {
-      vec_name = hier_name_l_ori.substr(0, pos2);
-    }
+  if (pos2 != std::string::npos && !is_2d_vector) {
+		vec_name = hier_name_l_ori.substr(0, pos2);
   }
 
   // (2) know the vector size of this field
@@ -177,23 +174,20 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
   rtidx_str = name_prefix_modifier_flattener(rtidx_str, true);
 
 
+  std::string vec_name;
   bool is_2d_vector = false;
   std::string leaf_field_name = "";
   auto pos = hier_name_r_ori.find(".."); 
   if (pos != std::string::npos) {
     is_2d_vector = true;
     leaf_field_name = hier_name_r_ori.substr(pos + 2);
+		vec_name = hier_name_r_ori.substr(0, pos);
   }
   
 
-  std::string vec_name;
   auto pos2 = hier_name_r_ori.rfind('.');
-  if (pos2 != std::string::npos) {
-    if (is_2d_vector) {
-      vec_name = hier_name_r_ori.substr(0, pos2 - 1);
-    } else {
-      vec_name = hier_name_r_ori.substr(0, pos2);
-    }
+  if (pos2 != std::string::npos && !is_2d_vector) {
+		vec_name = hier_name_r_ori.substr(0, pos2);
   }
 
   // (2) know the vector size of this field

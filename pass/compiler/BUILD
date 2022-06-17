@@ -204,12 +204,9 @@ cc_library(
     # "SmemStruct",
     # "MaskedSmem",
     # "MaskedSmemStruct",
-    # "Rob"
 
-    # issue-2: run-time index
-    # "BranchKillableQueue_3"
-    # "BranchKillableQueue_4"
-    # "BranchKillableQueue_5"
+    # issue-1-1: lconst.cpp:329
+    # "Rob"
 
     # issue-3: assert bw_sbits fail
     # "DecodeUnit"
@@ -222,6 +219,9 @@ cc_library(
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
+    # "BranchKillableQueue_3"
+    # "BranchKillableQueue_4"
+    # "BranchKillableQueue_5"
     
     # issue-5: non-LEC
     # "ALU"
