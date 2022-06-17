@@ -215,7 +215,8 @@ cc_library(
     # "UOPCodeFDivDecoder"
     # "PredRenameStage"
 
-    # issue-4: firbits cannot converge within 10 iterations
+    # issue-4: firbits cannot converge within 10 iterations: 
+    # possible solution: set_bit() flop qpin directly
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
@@ -246,6 +247,7 @@ cc_library(
     # "RoundAnyRawFNToRecFN*"
 
     # issue-D: boost cannot shift by a negative value
+    # right shift cannot guarantee, might be able to be commented
     # "RegisterReadDecode"
 
     # issue-n: ??? 

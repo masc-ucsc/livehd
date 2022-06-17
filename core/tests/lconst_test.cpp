@@ -1284,6 +1284,13 @@ TEST_F(Lconst_test, serialize) {
   EXPECT_EQ(c, s_c);
 }
 
+
+TEST_F(Lconst_test, octal) {
+  EXPECT_EQ(Lconst::from_pyrope("0o77"), Lconst::from_pyrope("0b111_111"));
+  EXPECT_EQ(Lconst::from_pyrope("08"), Lconst::from_pyrope("8"));
+}
+
+
 TEST_F(Lconst_test, zerocase) {
 
   Lconst nothing;

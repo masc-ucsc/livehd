@@ -247,7 +247,8 @@ Lconst Lconst::from_pyrope(std::string_view orig_txt) {
         shift_mode = 10;  // BASE 10 decimal
         ++skip_chars;
       } else if (std::isdigit(sel_ch)) {  // 0 or 0o or 0s or 0so
-        shift_mode = 3;
+        // shift_mode = 3;
+        shift_mode = 10;
       } else if (sel_ch == 'o') {  // 0 or 0o or 0s or 0so
         shift_mode = 3;
         ++skip_chars;
