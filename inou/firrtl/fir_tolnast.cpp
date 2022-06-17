@@ -1294,22 +1294,6 @@ void Inou_firrtl_module::create_tuple_add_from_str(Lnast& ln, Lnast_nid& parent_
   ln.add_child(selc_node, value_node);
 }
 
-/* Given an expression that may or may
- * not have hierarchy, flatten it. */
-std::string Inou_firrtl_module::get_expr_hier_name(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr) {
-  if (expr.has_sub_field()) {
-    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
-  } else if (expr.has_sub_access()) {
-    auto idx_str = return_expr_str(lnast, expr.sub_access().index(), parent_node, true);
-    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_access().expression()), ".", idx_str);
-  } else if (expr.has_sub_index()) {
-    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
-  } else if (expr.has_reference()) {
-    return expr.reference().id();
-  } else {
-    return "";
-  }
-}
 
 //----------Ports-------------------------
 
@@ -1605,6 +1589,22 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
   }
 }
 
+/* Given an expression that may or may
+ * not have hierarchy, flatten it. */
+std::string Inou_firrtl_module::get_expr_hier_name(Lnast& lnast, Lnast_nid& parent_node, const firrtl::FirrtlPB_Expression& expr) {
+  if (expr.has_sub_field()) {
+    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
+  } else if (expr.has_sub_access()) {
+    auto idx_str = return_expr_str(lnast, expr.sub_access().index(), parent_node, true);
+    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_access().expression()), ".", idx_str);
+  } else if (expr.has_sub_index()) {
+    return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
+  } else if (expr.has_reference()) {
+    return expr.reference().id();
+  } else {
+    return "";
+  }
+}
 
 std::string Inou_firrtl_module::get_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx) {
   if (expr.has_sub_field()) {
@@ -1646,7 +1646,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
       if (inst2module.count(head)) { 
         auto tmp_var = create_tmp_var();
         create_tuple_get_for_instance_otup(lnast, parent_node, expr_str_tmp, tmp_var);
-        return tmp_var;
+        expr_str = tmp_var;
       } else {
         expr_str = name_prefix_modifier_flattener(expr_str_tmp, true);
       }
@@ -1656,8 +1656,13 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
     expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
   } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
     expr_str = absl::StrCat(operand_expr.uint_literal().value().value(), "ubits", operand_expr.uint_literal().width().value());
-		// fmt::print("DEBUG AAA expr_str:{}\n", expr_str);
-  } else {
+  } else if (expr_case == firrtl::FirrtlPB_Expression::kSubAccess) {
+		auto tmp_var = create_tmp_var();
+		bool dummy = false;
+		std::string hier_name_r = get_expr_hier_name(operand_expr, dummy);
+		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, hier_name_r, operand_expr);
+		expr_str = tmp_var;
+	} else {
     expr_str = name_prefix_modifier_flattener(expr_str_tmp, true);
   }
   return expr_str;
@@ -2027,7 +2032,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // the lhs and rhs and insert the multiplexers to handle the runtime
       // vector elements selection.
       if (is_runtime_idx_l) {
-				fmt::print("DEBUG ZZZ hier_name_r:{}\n", hier_name_r);
         handle_lhs_runtime_idx(lnast, parent_node, hier_name_l, hier_name_r, lhs_expr);
         return;
       } 

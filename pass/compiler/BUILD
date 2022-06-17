@@ -202,49 +202,46 @@ cc_library(
     # "MaskedSmemStruct",
     # "Rob"
 
-    # issue-2: missing variable name, like the opt case of string_view!?
-    # "PredRenameStage"
-
-
-    # issue-3: run-time index
+    # issue-2: run-time index
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
 
-    # issue-4: assert bw_sbits fail
+    # issue-3: assert bw_sbits fail
     # "DecodeUnit"
     # "MulDiv"
     # "RenameBusyTable_*"
     # "UOPCodeFDivDecoder"
+    # "PredRenameStage"
 
-    # issue-5: firbits cannot converge within 10 iterations
+    # issue-4: firbits cannot converge within 10 iterations
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
     
-    # issue-6: non-LEC
+    # issue-5: non-LEC
     # "ALU"
     # "RenameMapTable"
 
-    # issue-7: no bits set at verilog-gen
+    # issue-6: no bits set at verilog-gen
     # "CompareRecFN"
     # "RecFNToIN"
     # "RecFNToIN_1"
 
-    # issue-8: cannot find register qpin
+    # issue-7: cannot find register qpin
     # "CSRFile"
 
-    # issue-9: need last value of a variable??
+    # issue-A: need last value of a variable??
     # "DivSqrtRecF64ToRaw_mulAddZ31"
 
-    # issue-A: non-flattend wire variable _T_ctrl.br_type??
+    # issue-B: non-flattend wire variable _T_ctrl.br_type??
     # "IssueSlot*"
 
-    # issue-B: firbits signness unequal
+    # issue-C: firbits signness unequal
     # "MulAddRecFNToRaw*"
     # "RoundAnyRawFNToRecFN*"
 
-    # issue-C: boost cannot shift by a negative value
+    # issue-D: boost cannot shift by a negative value
     # "RegisterReadDecode"
 
     # issue-n: ??? 
