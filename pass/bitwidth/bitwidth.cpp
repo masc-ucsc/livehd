@@ -873,7 +873,14 @@ void Bitwidth::process_bit_and(Node &node, XEdge_iterator &inp_edges) {
     }
 
     Bits_t bw_sbits = it->second.get_sbits();
-    I(bw_sbits);
+    if (bw_sbits==0) {
+      auto zero_dpin    = node.create_const(0).setup_driver_pin();
+      for (auto &e : node.out_edges()) {
+        zero_dpin.connect(e.sink);
+      }
+      node.del_node();
+      return;
+    }
 
     if (it->second.is_always_positive()) {
       if (bw_sbits <= pos_min_sbits) {

@@ -975,6 +975,10 @@ void Cprop::tuple_subgraph(const Node &node) {
             auto parent_node = node_input_spin.get_driver_node();
             auto parent_tup  = find_lgtuple(parent_node);
             if (parent_tup) {
+              if (!parent_tup->is_correct()) {
+                node_tup->set_issue();
+                I(tuple_issues); // should be set already
+              }
               for (const auto &e : parent_tup->get_map()) {
                 if (Lgtuple::is_attribute(e.first))
                   continue;
@@ -989,6 +993,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                 ++n_ports;
                 if (!e.second.is_type_const()) {
                   node_tup->set_issue();
+                  tuple_issues = true;
                   continue;  // Maybe later
                 }
 
@@ -1010,6 +1015,7 @@ void Cprop::tuple_subgraph(const Node &node) {
             Pass::info("Memory {} still can not figure out ports. (Maybe more iterations)", node.debug_name());
 #endif
             node_tup->set_issue();
+            tuple_issues = true;
           } else {
             fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
             for (auto i = 0u; i < read_map.size(); ++i) {
