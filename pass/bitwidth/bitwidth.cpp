@@ -825,6 +825,15 @@ void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
       max_bits = bits;
   }
 
+  if (max_bits==0) {
+    auto zero_dpin    = node.create_const(0).setup_driver_pin();
+    for (auto &e : node.out_edges()) {
+      zero_dpin.connect(e.sink);
+    }
+    node.del_node();
+    return;
+  }
+
   Lconst max_val(0);
   if (!any_negative) {
     max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1;
