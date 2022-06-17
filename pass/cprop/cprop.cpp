@@ -542,6 +542,9 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result) {
 void Cprop::try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, Node &sub_node, Node &tup_node) {
   I(tup_node.get_type_op() == Ntype_op::TupAdd);
 
+  if (!tup->is_correct())
+    return;
+
   const auto &sub = sub_node.get_type_sub_node();
 
   for (auto &it : sub.get_input_pins()) {
@@ -1173,23 +1176,29 @@ void Cprop::tuple_tuple_add(const Node &node) {
     if (has_parent_tup) {
       node_tup = std::make_shared<Lgtuple>(*parent_tup);
     } else if (parent_is_a_sub) {
-      node_tup = std::make_shared<Lgtuple>(tup_name);
-
       auto parent_node = node.get_sink_pin("parent").get_driver_node();
       I(parent_node.is_type_sub());
 
       const auto &sub = parent_node.get_type_sub_node();
-      for (auto &it : sub.get_output_pins()) {
-        auto sub_dpin = parent_node.setup_driver_pin_raw(it.second);
-        auto pin_name{it.first->name};
-        if (pin_name.size() > 2 && pin_name.substr(0, 2) == "%.") {
-          pin_name = pin_name.substr(2);
-        }
-        if (it.first->has_io_pos()) {
-          auto io_name = absl::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
-          node_tup->add(io_name, sub_dpin);
-        } else {
-          node_tup->add(pin_name, sub_dpin);
+      std::string sub_name{sub.get_name()};
+      node_tup = std::make_shared<Lgtuple>(tup_name);
+
+      if (sub_name == "__memory") {
+        node_tup->set_issue(); // Still did not traverse the memory
+        tuple_issues = true;
+      }else{
+        for (auto &it : sub.get_output_pins()) {
+          auto sub_dpin = parent_node.setup_driver_pin_raw(it.second);
+          auto pin_name{it.first->name};
+          if (pin_name.size() > 2 && pin_name.substr(0, 2) == "%.") {
+            pin_name = pin_name.substr(2);
+          }
+          if (it.first->has_io_pos()) {
+            auto io_name = absl::StrCat(std::string(":") + std::to_string(it.first->get_io_pos()) + std::string(":"), pin_name);
+            node_tup->add(io_name, sub_dpin);
+          } else {
+            node_tup->add(pin_name, sub_dpin);
+          }
         }
       }
     } else {
@@ -1453,7 +1462,12 @@ void Cprop::tuple_attr_set(const Node &node) {
   } else {
     auto value_tup = find_lgtuple(value_spin.get_driver_node());
     if (value_tup) {
-      node_tup = parent_tup->create_assign(value_tup);
+      if (value_tup->is_correct()) {
+        node_tup = parent_tup->create_assign(value_tup);
+      }else{
+        node_tup = std::make_shared<Lgtuple>(value_tup->get_name());
+        node_tup->set_issue();
+      }
     } else {
       node_tup = parent_tup->create_assign(value_spin.get_driver_pin());
     }
@@ -1468,7 +1482,6 @@ void Cprop::tuple_attr_set(const Node &node) {
 
   I(node_tup);
 
-  I(node_tup->is_correct());
   tuple_done.insert(node.get_compact());
   node2tuple[node.get_compact()] = node_tup;
 }
@@ -1604,9 +1617,15 @@ void Cprop::reconnect_memory_port(Node &node, size_t n_ports, std::string_view f
     Node_pin dpin;
 
     auto sub_tup = tup->get_sub_tuple(field_expanded);
+    if (sub_tup == nullptr && i==0) {
+      sub_tup = tup->get_sub_tuple(field);
+    }
+
     if (sub_tup == nullptr) {
       if (field == "enable") {
         dpin = node.create_const(Lconst(1)).setup_driver_pin(); // all enabled by default
+      }else if (field == "din") {
+        dpin = node.create_const(Lconst(0)).setup_driver_pin();
       }else{
         Pass::warn("could not find memory input tuple with field {}", field);
         tuple_issues = true;
@@ -1631,6 +1650,7 @@ void Cprop::reconnect_memory_port_const(Node &node, std::string_view field, std:
 }
 
 void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
+
 
   auto n_ports    = 0u;
   auto n_rd_ports = 0u;
@@ -1698,7 +1718,11 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
   reconnect_memory_port_const(node, "wensize", tup);
   reconnect_memory_port_const(node, "size", tup);
 
-  //node.dump();
+#ifndef NDEBUG
+  fmt::print("MEMORY STATS:\n");
+  tup->dump();
+  node.dump();
+#endif
 }
 
 void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
@@ -2199,7 +2223,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
       if (op != Ntype_op::Get_mask && op != Ntype_op::SHL && (op < Ntype_op::Mux || op == Ntype_op::Const))
         continue;
 
-      // fmt::print("tuple  node:{}\n", node.debug_name());
+      //fmt::print("tuple  node:{}\n", node.debug_name());
 
       I(op != Ntype_op::IO);  // no IOs in fwd iterator
 

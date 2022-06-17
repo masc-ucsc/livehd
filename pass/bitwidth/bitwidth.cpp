@@ -359,6 +359,10 @@ void Bitwidth::process_memory(Node &node) {
           Bits_t dbits = 0;
           if (it != bwmap.end()) {
             dbits = it->second.get_sbits();
+            if (n_addr && it->second.is_always_positive()) {
+              // TODO: drop bits from din too (but requires to add get_mask at the read-out)
+              --dbits;
+            }
           } else {
             if (n_din)
               mem_din_bits_missing = true;
@@ -378,7 +382,7 @@ void Bitwidth::process_memory(Node &node) {
       }
     }
 
-#ifndef NDEBUG    
+#ifndef NDEBUG
     fmt::print("Memory {} has bits:{} (din bits:{}) and size:{} (addr size:{})\n",
                node.debug_name(),
                mem_bits,
@@ -491,9 +495,7 @@ void Bitwidth::process_memory(Node &node) {
   data_bw.set_sbits_range(mem_bits);
   for (auto &dpin : din_drivers) {
     auto it = bwmap.find(dpin.get_compact_class());
-    if (it != bwmap.end()) {
-      I(it->second.get_sbits() <= mem_bits);  // error already reported
-    } else {
+    if (it == bwmap.end()) {
       bwmap.insert_or_assign(dpin.get_compact_class(), data_bw);
     }
   }
@@ -846,7 +848,7 @@ void Bitwidth::process_bit_xor(Node &node, XEdge_iterator &inp_edges) {
       max_bits = bits;
   }
 
-  auto max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1; //2^62 -1 
+  auto max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1; //2^62 -1
   auto min_val = Lconst(-1) - max_val;
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
@@ -1524,7 +1526,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       }
     }
   }
-  
+
   // note: only enable for detailed bitwidth debug
   // dump(lg);
 }
