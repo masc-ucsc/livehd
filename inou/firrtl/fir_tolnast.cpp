@@ -135,8 +135,6 @@ void Inou_firrtl_module::handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_
 
   // (2) know the vector size of this field
   auto rt_vec_size = get_vector_size(lnast, vec_name);
-  // fmt::print("DEBUG AAA runtime_idx name:{}, hier_name_l_ori:{}, vec_name:{}, rt_vec_size:{}\n", rtidx_str, hier_name_l_ori, vec_name, rt_vec_size);
-
 
   vec_name = name_prefix_modifier_flattener(vec_name, true);
   // (3) create another function to create __fir_mux for 2^field_bits cases
@@ -766,12 +764,8 @@ void Inou_firrtl_module::handle_valid_if_assign(Lnast& lnast, const firrtl::Firr
                                                 std::string_view lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
 
-  // FIXME->sh: do the trick to declare variable with the validif value, hope this could make the validif to fit the role of "else
-  // mux"
-  /* auto lhs_full = name_prefix_modifier_flattener(lnast, parent_node, lhs, false); */
-  /* auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign()); */
-  /* lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lnast.add_string(lhs_full))); */
-  /* lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?")); */
+	// FIXME->sh: do the trick to declare variable with the validif value, hope
+	// this could make the validif to fit the role of "else mux"
   init_expr_add(lnast, expr.valid_if().value(), parent_node, lhs);
 
   auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.valid_if().condition());
@@ -1656,6 +1650,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
     expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
   } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
     expr_str = absl::StrCat(operand_expr.uint_literal().value().value(), "ubits", operand_expr.uint_literal().width().value());
+		// fmt::print("DEBUG AAA expr_str:{}\n", expr_str);
   } else {
     expr_str = name_prefix_modifier_flattener(expr_str_tmp, true);
   }
@@ -2247,18 +2242,6 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
     for (auto& it : mem2rd_mports[mem_name]) {
       auto mport_name          = it.first;
       auto cnt_of_rd_mport     = it.second;
-      // auto one_of_wr_mport_cnt = mem2one_wr_mport[mem_name];
-
-      // FIXME->sh: Once new cprop is done, no longer leverage the din field and dp_assign to infer the bits on the memory output.
-      // auto idx_tg        = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
-      // auto temp_var_name = create_tmp_var();
-      // lnast.add_child(idx_tg, Lnast_node::create_ref(temp_var_name));
-      // lnast.add_child(idx_tg, Lnast_node::create_ref(absl::StrCat(mem_name, "_din")));
-      // lnast.add_child(idx_tg, Lnast_node::create_const(one_of_wr_mport_cnt));
-
-      // auto idx_asg = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign());
-      // lnast.add_child(idx_asg, Lnast_node::create_ref(mport_name));
-      // lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
 
       auto idx_tg2        = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get());
       auto temp_var_name2 = create_tmp_var();
@@ -2275,32 +2258,6 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
     }
 
     std::vector<std::string> tmp_flattened_fields_per_port;
-    // for (int pcnt = 0; pcnt <= mem2port_cnt[mem_name]; pcnt++) {
-    //   auto gmask_tmp_var_str = create_tmp_var();
-    //   auto tg_tmp_var_str    = create_tmp_var();
-    //   auto ta_tmp_var_str    = create_tmp_var();
-    //   auto idx_tg            = lnast.add_child(parent_node, Lnast_node::create_tuple_get());
-    //   lnast.add_child(idx_tg, Lnast_node::create_ref(tg_tmp_var_str));
-    //   lnast.add_child(idx_tg, Lnast_node::create_ref(absl::StrCat(mem_name, "_din")));
-    //   lnast.add_child(idx_tg, Lnast_node::create_const(pcnt));
-
-    //   auto idx_empty_ta = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    //   lnast.add_child(idx_empty_ta, Lnast_node::create_ref(ta_tmp_var_str));
-
-    //   auto idx_gmask = lnast.add_child(parent_node, Lnast_node::create_get_mask());
-    //   lnast.add_child(idx_gmask, Lnast_node::create_ref(gmask_tmp_var_str));
-    //   lnast.add_child(idx_gmask, Lnast_node::create_ref(tg_tmp_var_str));
-    //   lnast.add_child(idx_gmask, Lnast_node::create_ref(ta_tmp_var_str));
-    //   tmp_flattened_fields_per_port.emplace_back(gmask_tmp_var_str);
-    // }
-    //// note:  __F33 = (tmp0, tmp1, ..., tmp_pcnt); din = __F33
-    // auto idx_final_mem_din_ta = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    // auto final_ta_tmp_var_str = create_tmp_var();
-    // lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(final_ta_tmp_var_str));
-
-    // for (auto& e : tmp_flattened_fields_per_port) {
-    //   lnast.add_child(idx_final_mem_din_ta, Lnast_node::create_ref(e));
-    // }
 
     auto idx_ta_margs = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
     auto temp_var_str = create_tmp_var();
@@ -2314,9 +2271,6 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
     lnast.add_child(idx_asg_clock, Lnast_node::create_const("clock"));
     lnast.add_child(idx_asg_clock, Lnast_node::create_ref(absl::StrCat(mem_name, "_clock")));
 
-    // auto idx_asg_din = lnast.add_child(idx_ta_margs, Lnast_node::create_assign());
-    // lnast.add_child(idx_asg_din, Lnast_node::create_const("din"));
-    // lnast.add_child(idx_asg_din, Lnast_node::create_ref(final_ta_tmp_var_str));
 
     auto idx_asg_din = lnast.add_child(idx_ta_margs, Lnast_node::create_assign());
     lnast.add_child(idx_asg_din, Lnast_node::create_const("din"));

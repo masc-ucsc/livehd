@@ -195,11 +195,43 @@ cc_library(
     "MaxPeriodFibonacciLFSR",
 
     # FIXME:
-    # issue1: memory
+    # issue-1: memory
     # "Smem",
     # "SmemStruct",
     # "MaskedSmem",
     # "MaskedSmemStruct",
+
+    # issue-2: lgraph const node limits
+    # "ALU"
+
+    # issue-3: run-time index
+    # "BranchKillableQueue_3"
+    # "BranchKillableQueue_4"
+    # "BranchKillableQueue_5"
+
+    # issue-4: assert bw_sbits fail
+    # "DecodeUnit"
+
+    # issue-n: ??? TODO
+    # "BranchMaskGenerationLogic"
+    # "CompareRecFN"
+    # "CSRFile"
+    # "DivSqrtRecF64ToRaw_mulAddZ31"
+    # "IssueSlot_*"
+    # "MulAddRecFNToRaw_*"
+
+    # FIXME:
+    # BoomCore passing submodules
+    # "Arbiter_15"
+    # "Arbiter_16"
+    # "Arbiter_17"
+    # "Arbiter_18"
+    # "BasicDispatcher"
+    # "BreakpointUnit_4"
+    # "FMADecoder"
+    # "FMADecoder_1"
+    # "FMADecoder_2"
+    # "Mul54"
     
 ]]
 
