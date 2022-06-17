@@ -977,24 +977,27 @@ void Cprop::tuple_subgraph(const Node &node) {
                   continue;
 
                 auto l = str_tools::to_lower(Lgtuple::get_first_level_name(e.first));
-                if (l == "addr") {
-                  ++n_ports;
-                } else if (l == "rdport") {
-                  if (!e.second.is_type_const()) {
-                    node_tup->set_issue();
-                    continue;  // Maybe later
-                  }
+                if (l != "rdport")
+                  continue;
 
-                  auto v = e.second.get_type_const();
-                  if (!v.is_i()) {
-                    Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
-                  }
-                  if (v.is_known_false()) {
-                    read_map.emplace_back(false);
-                  } else {
-                    read_map.emplace_back(true);
-                    ++n_rd_ports;
-                  }
+                if (Lgtuple::is_attribute(e.first))
+                  continue;
+
+                ++n_ports;
+                if (!e.second.is_type_const()) {
+                  node_tup->set_issue();
+                  continue;  // Maybe later
+                }
+
+                auto v = e.second.get_type_const();
+                if (!v.is_i()) {
+                  Pass::error("Memory {} rdport:{} must be a constant bitmask (1 rd, 0 wr)", node.debug_name(), v.to_pyrope());
+                }
+                if (v.is_known_false()) {
+                  read_map.emplace_back(false);
+                } else {
+                  read_map.emplace_back(true);
+                  ++n_rd_ports;
                 }
               }
             }

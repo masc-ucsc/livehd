@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+
 #include <stack>
+
+#include "absl/container/node_hash_map.h"
 
 #include "elab_scanner.hpp"
 #include "lhtree.hpp"
@@ -117,10 +120,10 @@ private:
   std::string create_tmp_var();
 
   // hierarchical statements node -> symbol table
-  absl::flat_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
-  absl::flat_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
-  absl::flat_hash_map<Lnast_nid, Selc_lrhs_table> selc_lrhs_tables;
-  absl::flat_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables;  // for each if-subtree scope
+  absl::node_hash_map<Lnast_nid, Phi_rtable>      phi_resolve_tables;
+  absl::node_hash_map<Lnast_nid, Cnt_rtable>      ssa_rhs_cnt_tables;
+  absl::node_hash_map<Lnast_nid, Selc_lrhs_table> selc_lrhs_tables;
+  absl::node_hash_map<Lnast_nid, Phi_rtable>      new_added_phi_node_tables;  // for each if-subtree scope
   absl::flat_hash_set<std::string>                tuplized_table;
   absl::flat_hash_map<std::string, Lnast_nid>     candidates_update_phi_resolve_table;
   absl::flat_hash_map<std::string, int16_t>       global_ssa_lhs_cnt_table;
