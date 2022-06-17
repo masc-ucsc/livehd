@@ -1601,17 +1601,22 @@ void Cprop::reconnect_memory_port(Node &node, size_t n_ports, std::string_view f
   for(auto i=0u; i<n_ports; ++i) {
     auto field_expanded = absl::StrCat(field, ".", str_tools::to_s(i));
 
+    Node_pin dpin;
+
     auto sub_tup = tup->get_sub_tuple(field_expanded);
     if (sub_tup == nullptr) {
-      Pass::warn("could not find memory input tuple with field {}", field);
-      tuple_issues = true;
-      return;
+      if (field == "enable") {
+        dpin = node.create_const(Lconst(1)).setup_driver_pin(); // all enabled by default
+      }else{
+        Pass::warn("could not find memory input tuple with field {}", field);
+        tuple_issues = true;
+        return;
+      }
+    }else{
+      dpin = sub_tup->flatten();
     }
 
-    auto dpin = sub_tup->flatten();
     node.setup_sink_pin_raw(field_pid + (11*i)).connect_driver(dpin);
-
-    fmt::print("field:{} pid:{}\n", field_expanded, (11*i)+field_pid);
   }
 }
 
@@ -1655,11 +1660,6 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
     }
   }
 
-  if (n_clocks !=1 && n_clocks != n_ports){
-    Pass::error("memory {} has {} clocks but {} ports (1 or {})", node.debug_name(), n_clocks, n_ports, n_ports);
-    return;
-  }
-
   reconnect_memory_port(node, n_ports, "addr", tup);
   reconnect_memory_port(node, n_ports, "din", tup);
   reconnect_memory_port(node, n_ports, "enable", tup);
@@ -1698,7 +1698,7 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
   reconnect_memory_port_const(node, "wensize", tup);
   reconnect_memory_port_const(node, "size", tup);
 
-  node.dump();
+  //node.dump();
 }
 
 void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
