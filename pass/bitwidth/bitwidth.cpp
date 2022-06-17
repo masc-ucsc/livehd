@@ -237,6 +237,15 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
     n_bw.set_wider_range(n_it->second);
   }
 
+  if (n_bw.get_sbits()==0) { // zero shift
+    auto zero_dpin    = node.create_const(0).setup_driver_pin();
+    for (auto &e : node.out_edges()) {
+      zero_dpin.connect(e.sink);
+    }
+    node.del_node();
+    return;
+  }
+
   auto           max     = a_bw.get_max();
   auto           min     = a_bw.get_min();
   auto           amount  = n_bw.get_max();
