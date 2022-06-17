@@ -47,6 +47,9 @@ protected:
   std::shared_ptr<Lgtuple const> find_lgtuple(const Node_pin &up_dpin) const;
   std::shared_ptr<Lgtuple const> find_lgtuple(const Node &up_node) const;
 
+  void reconnect_memory_port(Node &node, size_t n_ports, std::string_view field, std::shared_ptr<Lgtuple const> tup);
+  void reconnect_memory_port_const(Node &node, std::string_view field, std::shared_ptr<Lgtuple const> tup);
+  void reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup);
   void reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype);
   void reconnect_tuple_sub(Node &node);
   void reconnect_tuple_add(Node &node);

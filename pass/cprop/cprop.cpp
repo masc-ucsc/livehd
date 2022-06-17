@@ -1595,6 +1595,112 @@ std::shared_ptr<Lgtuple const> Cprop::find_lgtuple(const Node &up_node) const {
   return nullptr;
 }
 
+void Cprop::reconnect_memory_port(Node &node, size_t n_ports, std::string_view field, std::shared_ptr<Lgtuple const> tup) {
+
+  auto field_pid = Ntype::get_sink_pid(Ntype_op::Memory, field);
+  for(auto i=0u; i<n_ports; ++i) {
+    auto field_expanded = absl::StrCat(field, ".", str_tools::to_s(i));
+
+    auto sub_tup = tup->get_sub_tuple(field_expanded);
+    if (sub_tup == nullptr) {
+      Pass::warn("could not find memory input tuple with field {}", field);
+      tuple_issues = true;
+      return;
+    }
+
+    auto dpin = sub_tup->flatten();
+    node.setup_sink_pin_raw(field_pid + (11*i)).connect_driver(dpin);
+
+    fmt::print("field:{} pid:{}\n", field_expanded, (11*i)+field_pid);
+  }
+}
+
+void Cprop::reconnect_memory_port_const(Node &node, std::string_view field, std::shared_ptr<Lgtuple const> tup) {
+  auto dpin = tup->get_dpin(field);
+  if (dpin.is_invalid())
+    return;
+
+  auto field_pid = Ntype::get_sink_pid(Ntype_op::Memory, field);
+
+  node.setup_sink_pin_raw(field_pid).connect_driver(dpin);
+}
+
+void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
+
+  auto n_ports    = 0u;
+  auto n_rd_ports = 0u;
+  auto n_clocks   = 0u;
+
+  std::vector<bool> read_map;
+
+  for(const auto &e:tup->get_map()) {
+    if (Lgtuple::is_attribute(e.first))
+      continue;
+
+    auto field = str_tools::to_lower(Lgtuple::get_first_level_name(e.first));
+    if (field == "rdport") {
+      ++n_ports;
+      auto v = e.second.get_type_const();
+      I(v.is_i());
+
+      if (v.is_known_false()) {
+        read_map.emplace_back(false);
+      } else {
+        read_map.emplace_back(true);
+        ++n_rd_ports;
+      }
+    }
+    if (field == "clock") {
+      ++n_clocks;
+    }
+  }
+
+  if (n_clocks !=1 && n_clocks != n_ports){
+    Pass::error("memory {} has {} clocks but {} ports (1 or {})", node.debug_name(), n_clocks, n_ports, n_ports);
+    return;
+  }
+
+  reconnect_memory_port(node, n_ports, "addr", tup);
+  reconnect_memory_port(node, n_ports, "din", tup);
+  reconnect_memory_port(node, n_ports, "enable", tup);
+  reconnect_memory_port(node, n_ports, "rdport", tup);
+
+  auto type_dpin = tup->get_dpin("type");
+  if (type_dpin.is_invalid()) {
+    tup->dump();
+    Pass::error("memory {} has no type", node.debug_name());
+    return;
+  }
+
+  auto type_val = type_dpin.get_node().get_type_const().to_i();
+  if (n_clocks==0) {
+    if (type_val!=2) {
+      connect_clock_pin_if_needed(node);
+    }
+  }else if (n_clocks==1) {
+    if (type_val==2) {
+      Pass::error("memory {} is array but has clock", node.debug_name());
+      return;
+    }
+    reconnect_memory_port_const(node, "clock", tup);
+  } else {
+    if (type_val==2) {
+      Pass::error("memory {} is array but has clock", node.debug_name());
+      return;
+    }
+    reconnect_memory_port(node, n_clocks, "clock", tup);
+  }
+
+  reconnect_memory_port_const(node, "bits", tup);
+  reconnect_memory_port_const(node, "fwd", tup);
+  reconnect_memory_port_const(node, "posclk", tup);
+  reconnect_memory_port_const(node, "type", tup);
+  reconnect_memory_port_const(node, "wensize", tup);
+  reconnect_memory_port_const(node, "size", tup);
+
+  node.dump();
+}
+
 void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
   if (!node.is_sink_connected("$"))
     return;
@@ -1607,18 +1713,7 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
   node.set_type(cell_ntype);
 
   I(cell_ntype != Ntype_op::Sub);  // structural is not allowed with subs
-  if (cell_ntype == Ntype_op::Memory) {
-    auto type_dpin = tup->get_dpin("type");
-
-    if (type_dpin.is_invalid()) {
-      connect_clock_pin_if_needed(node);
-    } else {
-      auto v = type_dpin.get_node().get_type_const().to_i();
-      if (v != 2)
-        connect_clock_pin_if_needed(node);
-    }
-    // memories should have the outputs already connected
-  } else {
+  if (cell_ntype != Ntype_op::Memory) {
     auto sink_list = node.out_sinks();
     if (!sink_list.empty()) {
       for (auto &dp : node.out_connected_pins()) {
@@ -1636,49 +1731,46 @@ void Cprop::reconnect_sub_as_cell(Node &node, Ntype_op cell_ntype) {
   if (tup) {
     input_spin.del();
 
-    for (const auto &e : tup->get_sort_map()) {
-      if (Lgtuple::is_attribute(e.first)) {
-        continue;
-      }
+    if (cell_ntype == Ntype_op::Memory) {
+      reconnect_memory(node, tup);
+    }else{
+      for (const auto &e : tup->get_sort_map()) {
+        if (Lgtuple::is_attribute(e.first))
+          continue;
 
-      std::string pin_name;
-      int         pin_pid = 0;
-      if (Ntype::is_single_sink(cell_ntype)) {
-        pin_pid  = 0;
-        pin_name = Ntype::get_sink_name(cell_ntype, 0);
-      } else {
-        pin_name = Lgtuple::get_first_level_name(e.first);
-        if (!Ntype::has_sink(cell_ntype, pin_name)) {
-          Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist",
-                      node.debug_name(),
-                      Ntype::get_name(cell_ntype),
-                      pin_name);
-          return;
+        std::string pin_name;
+        int         pin_pid = 0;
+        if (Ntype::is_single_sink(cell_ntype)) {
+          pin_pid  = 0;
+          pin_name = Ntype::get_sink_name(cell_ntype, 0);
+        } else {
+          pin_name = Lgtuple::get_first_level_name(e.first);
+          if (!Ntype::has_sink(cell_ntype, pin_name)) {
+            Pass::error("node:{} trying to connect cell:{} pin:{}, pin name does not exist",
+                        node.debug_name(),
+                        Ntype::get_name(cell_ntype),
+                        pin_name);
+            return;
+          }
+          pin_pid = Ntype::get_sink_pid(cell_ntype, pin_name);
+          I(pin_pid >= 0);
         }
-        pin_pid = Ntype::get_sink_pid(cell_ntype, pin_name);
-        I(pin_pid >= 0);
-      }
 
-      auto spin = node.setup_sink_pin_raw(pin_pid);
-      if (spin.is_connected() && Ntype::is_single_driver_per_pin(cell_ntype)) {
-        if (cell_ntype != Ntype_op::Memory) {
+        auto spin = node.setup_sink_pin_raw(pin_pid);
+        if (spin.is_connected() && Ntype::is_single_driver_per_pin(cell_ntype)) {
           Pass::error("node:{} with cell:{} pin:{} can not have multiple drivers",
                       node.debug_name(),
                       Ntype::get_name(cell_ntype),
                       pin_name);
           return;
         }
-        int delta_pid = 0;
-        do {
-          delta_pid += 11;
-          spin = node.setup_sink_pin_raw(pin_pid + delta_pid);
-        } while (spin.is_connected());
+        XEdge_iterator out_edges;  // Empty list
+        auto           dpin = expand_data_and_attributes(node, e.first, out_edges, tup);
+        I(!dpin.is_invalid());
+        spin.connect_driver(dpin);  // e.second);
       }
-      XEdge_iterator out_edges;  // Empty list
-      auto           dpin = expand_data_and_attributes(node, e.first, out_edges, tup);
-      I(!dpin.is_invalid());
-      spin.connect_driver(dpin);  // e.second);
     }
+
   } else {
     // Possible direct connect if there is a single pin
     auto driver_list = input_spin.inp_drivers();
@@ -1803,7 +1895,6 @@ void Cprop::reconnect_tuple_sub(Node &node) {
   }
 }
 
-int count2 = 0;
 void Cprop::reconnect_tuple_add(Node &node) {
   // Some tupleAdd should be converted to AttrSet
   auto pos_spin = node.get_sink_pin("field");

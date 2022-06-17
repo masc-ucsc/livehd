@@ -535,7 +535,7 @@ void Inou_firrtl_module::init_cmemory(Lnast& lnast, Lnast_nid& parent_node, cons
   lnast.add_child(idx_asg_mfwd, Lnast_node::create_ref(absl::StrCat(cmem.id(), "_fwd")));
   lnast.add_child(idx_asg_mfwd, Lnast_node::create_const(fwd));  // note: initialized
 
-  auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+  auto idx_ta_mlat = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_ta_mlat, Lnast_node::create_ref(absl::StrCat(cmem.id(), "_type")));
   lnast.add_child(idx_ta_mlat, Lnast_node::create_const(cmem.sync_read() ? 1 : 0));
 
@@ -605,11 +605,6 @@ void Inou_firrtl_module::handle_mport_declaration(Lnast& lnast, Lnast_nid& paren
   lnast.add_child(idx_ta_men_ini, Lnast_node::create_ref(absl::StrCat(mem_name, "_enable")));
   lnast.add_child(idx_ta_men_ini, Lnast_node::create_const(port_cnt_str));
   lnast.add_child(idx_ta_men_ini, Lnast_node::create_const(default_val_str));
-
-  auto idx_ta_mlat_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
-  lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_ref(absl::StrCat(mem_name, "_type")));
-  lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_const(port_cnt_str));
-  lnast.add_child(idx_ta_mlat_ini, Lnast_node::create_const(default_val_str));
 
   auto idx_ta_mrdport_ini = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_add());
   lnast.add_child(idx_ta_mrdport_ini, Lnast_node::create_ref(absl::StrCat(mem_name, "_rdport")));

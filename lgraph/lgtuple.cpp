@@ -920,6 +920,9 @@ Node_pin Lgtuple::flatten() const {
   Node_pin a_dpin;
   bool     all_const = true;
 
+  if (is_trivial_scalar())
+    return get_dpin();
+
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
 
   for (auto &e : key_map) {
