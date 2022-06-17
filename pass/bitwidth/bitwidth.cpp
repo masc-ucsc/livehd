@@ -237,7 +237,7 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
     n_bw.set_wider_range(n_it->second);
   }
 
-  if (n_bw.get_sbits()==0) { // zero shift
+  if (n_bw.get_sbits()==0 || a_bw.get_sbits()==0) { // zero shift or zero amount to shift
     auto zero_dpin    = node.create_const(0).setup_driver_pin();
     for (auto &e : node.out_edges()) {
       zero_dpin.connect(e.sink);
