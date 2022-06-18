@@ -1060,11 +1060,10 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   auto name  = lnast->get_sname(lnidx_opd);  // name = ssa_name
   auto vname = lnast->get_vname(lnidx_opd);
   I(!name.empty());
-  fmt::print("DEBUG BBB-0 name:{}, vname:{}\n", name, vname);
 
   if (lnast->get_type(lnidx_opd).is_const()) {  // High priority in search to avoid alias
     auto node_dpin  = create_const(lg, vname);
-    fmt::print("DEBUG BBB-1 name:{}, node_dpin:{}, node:{}\n", name, node_dpin.debug_name(), node_dpin.get_node().debug_name());
+    fmt::print("DEBUG BBB name:{}, vname:{}\n", name, vname);
     I(!node_dpin.is_invalid());
     name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table    
     return node_dpin;
@@ -1166,10 +1165,8 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
     auto lg_fir_const_node = lg->create_node_sub("__fir_const");
     auto fir_const_node_dpin = lg_fir_const_node.setup_driver_pin("Y"); 
     fir_const_node_dpin.set_name(const_str);
-    fmt::print("DEBUG CCC fir_const_node_dpin:{}, const_str:{}\n", fir_const_node_dpin.debug_name(), const_str);
     return fir_const_node_dpin;
   } else {
-    fmt::print("DEBUG DDD const_str:{}\n", const_str);
     auto lc = Lconst::from_pyrope(const_str);
     return lg->create_node_const(lc).setup_driver_pin();
   }

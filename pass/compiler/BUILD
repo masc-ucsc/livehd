@@ -197,7 +197,11 @@ cc_library(
     "BasicDispatcher",
     "FMADecoder",
     "UOPCodeFPUDecoder",
-    "UOPCodeFDivDecoder"
+    "UOPCodeFDivDecoder",
+    "CompareRecFN",
+    "RegisterReadDecode",
+    "RenameBusyTable",
+    "PredRenameStage"
 
     # FIXME:
     # issue-1: memory
@@ -206,14 +210,9 @@ cc_library(
     # "MaskedSmem",
     # "MaskedSmemStruct",
 
-    # issue-1-1: lconst.cpp:329
+    # issue-1-1: lconst.cpp:329 (fixed)
     # "Rob"
 
-    # issue-3: assert bw_sbits fail
-    # "DecodeUnit"
-    # "MulDiv"
-    # "RenameBusyTable_*"
-    # "PredRenameStage"
 
     # issue-4: firbits cannot converge within 10 iterations: 
     # possible solution: set_bit() flop qpin directly
@@ -227,11 +226,9 @@ cc_library(
     # issue-5: non-LEC
     # "ALU"
     # "RenameMapTable"
+    # "DecodeUnit"
+    # "MulDiv"
 
-    # issue-6: no bits set at verilog-gen
-    # "CompareRecFN"
-    # "RecFNToIN"
-    # "RecFNToIN_1"
 
     # issue-7: cannot find register qpin
     # "CSRFile"
@@ -246,11 +243,6 @@ cc_library(
     # "MulAddRecFNToRaw*"
     # "RoundAnyRawFNToRecFN*"
 
-    # issue-D: boost cannot shift by a negative value
-    # right shift cannot guarantee, might be able to be commented
-    # "RegisterReadDecode"
-
-    # issue-n: ??? 
 
     # BoomCore passing submodules
     # "Arbiter_15"
@@ -261,6 +253,8 @@ cc_library(
     # "FMADecoder_2"
     # "Mul54"
     # "PipelinedMultiplier"
+    # "RecFNToIN"
+    # "RecFNToIN_1"
     
     
 ]]

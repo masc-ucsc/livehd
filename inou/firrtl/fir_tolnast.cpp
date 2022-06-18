@@ -1631,7 +1631,18 @@ std::string Inou_firrtl_module::get_expr_hier_name(const firrtl::FirrtlPB_Expres
 std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& operand_expr) {
   std::string expr_str;
   // here we only want to check the case of instance connection, so kSubField is sufficient
-  std::string expr_str_tmp = get_expr_hier_name(lnast, parent_node, operand_expr);
+	
+	
+	bool is_runtime_idx_r = false;
+	std::string expr_str_tmp = get_expr_hier_name(operand_expr, is_runtime_idx_r);
+	
+  // std::string expr_str_tmp = get_expr_hier_name(lnast, parent_node, operand_expr);
+	if (is_runtime_idx_r) {
+		auto tmp_var = create_tmp_var();
+		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, expr_str_tmp, operand_expr);
+		return tmp_var;
+	}
+
   auto expr_case = operand_expr.expression_case();
   if (expr_case == firrtl::FirrtlPB_Expression::kSubField ) {
     auto pos = expr_str_tmp.find_first_of('.');
@@ -1650,12 +1661,6 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
     expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
   } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
     expr_str = absl::StrCat(operand_expr.uint_literal().value().value(), "ubits", operand_expr.uint_literal().width().value());
-  } else if (expr_case == firrtl::FirrtlPB_Expression::kSubAccess) {
-		auto tmp_var = create_tmp_var();
-		bool dummy = false;
-		std::string hier_name_r = get_expr_hier_name(operand_expr, dummy);
-		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, hier_name_r, operand_expr);
-		expr_str = tmp_var;
 	} else {
     expr_str = name_prefix_modifier_flattener(expr_str_tmp, true);
   }
