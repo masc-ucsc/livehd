@@ -725,30 +725,106 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
 /* No mux node type exists in LNAST. To support FIRRTL muxes, we instead
  * map a mux to an if-else statement whose condition is the same condition
  * as the first argument (the condition) of the mux. */
-void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node,
-                                           std::string_view lhs) {
+void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string_view lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
 
-  auto lhs_full    = name_prefix_modifier_flattener(lhs, false);
-  auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lhs_full));
-  lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
 
-  auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
+	// ori
+  // std::string t_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().t_value());
+  // std::string f_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().f_value());
+	
+	
+	// FIXME:
+	// 此 solution 是可以 work, 缺點就是本來好端端直接 flatten extr_str 就了事, 但是現在
+	// 不能爽爽直接 flatten, 還要 check 一堆 table .....
+	// TODO: think about a better solution
 
-  auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
-  // lnast.add_child(idx_mux_if, Lnast_node::create_ref(cond_str));
-  attach_expr_str2node(lnast, cond_str, idx_mux_if);
+	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
+	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
+	fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
 
 
-  auto idx_stmt_t = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
-  auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
+	// preparation: get head of the tuple name so you know entry for the var2flip table
+	auto pos_t = t_str.find_first_of('.');
+	// std::string tup_head_t, tup_head_f;
+	// std::string tup_rest_t, tup_rest_f;
+	std::string tup_head_t;
+	std::string tup_rest_t;
+	if (pos_t != std::string::npos) {
+		tup_head_t = t_str.substr(0, pos_t);
+		tup_rest_t = t_str.substr(pos_t + 1);
+	} else {
+		tup_head_t = t_str;
+	}
 
-  std::string t_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().t_value());
-  std::string f_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().f_value());
+	std::vector<std::string> head_chopped_hier_names;
+	auto const& module_var2flip = Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()];
+  for (auto &[var, set] : module_var2flip) {
+		if (var == tup_head_t) {
+			for (auto &[hier_name, flipped] : set) {
+				auto pos = hier_name.find(t_str);
+				if ( pos != std::string::npos && hier_name != t_str) {
+					head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
+				}
+			}
+		}
+  }
+	
+	// most cases
+	if (head_chopped_hier_names.size() == 0) {
+		auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+		lnast.add_child(idx_pre_asg, Lnast_node::create_ref(lhs));
+		lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
+
+		auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
+
+		auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
+		attach_expr_str2node(lnast, cond_str, idx_mux_if);
+
+		auto idx_stmt_t = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
+		auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
+
+
+		t_str = name_prefix_modifier_flattener(t_str, true);
+		f_str = name_prefix_modifier_flattener(f_str, true);
+		add_lnast_assign(lnast, idx_stmt_t, lhs, t_str);
+		add_lnast_assign(lnast, idx_stmt_f, lhs, f_str);
+		return;
+	}
+
+	// rare cases
+	for (const auto &head_chopped_hier_name : head_chopped_hier_names) {
+		auto new_lhs = absl::StrCat(lhs, ".", head_chopped_hier_name);
+		new_lhs      = name_prefix_modifier_flattener(new_lhs, false);
+		auto idx_pre_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+		lnast.add_child(idx_pre_asg, Lnast_node::create_ref(new_lhs));
+		lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
+
+		auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
+
+		auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
+		attach_expr_str2node(lnast, cond_str, idx_mux_if);
+
+		auto idx_stmt_t = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
+		auto idx_stmt_f = lnast.add_child(idx_mux_if, Lnast_node::create_stmts());
+
+
+		auto new_t_str = absl::StrCat(t_str, ".", head_chopped_hier_name);
+		auto new_f_str = absl::StrCat(f_str, ".", head_chopped_hier_name);
+		new_t_str = name_prefix_modifier_flattener(new_t_str, true);
+		new_f_str = name_prefix_modifier_flattener(new_f_str, true);
+		add_lnast_assign(lnast, idx_stmt_t, new_lhs, new_t_str);
+		add_lnast_assign(lnast, idx_stmt_f, new_lhs, new_f_str);
+	}
+
+	// t_str = name_prefix_modifier_flattener(t_str, true);
+	// f_str = name_prefix_modifier_flattener(f_str, true);
+	// fmt::print("DEBUG AAA t_str_prefix: {}, f_str_prefixed: {}\n", t_str, f_str);
+
   
-  add_lnast_assign(lnast, idx_stmt_t, lhs_full, t_rhs_str);
-  add_lnast_assign(lnast, idx_stmt_f, lhs_full, f_rhs_str);
+	// ori
+  // add_lnast_assign(lnast, idx_stmt_t, lhs_full, t_str);
+  // add_lnast_assign(lnast, idx_stmt_f, lhs_full, f_str);
 }
 
 /* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
@@ -1480,15 +1556,13 @@ void Inou_firrtl_module::list_prime_op_info(Lnast& lnast, const firrtl::FirrtlPB
 }
 
 //--------------Expressions-----------------------
-void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expression& rhs_expr, Lnast_nid& parent_node,
-                                       std::string_view lhs_noprefixes, bool from_mux) {
+void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expression& rhs_expr, Lnast_nid& parent_node, std::string_view lhs_noprefixes) {
   // Note: here, parent_node is the "stmt" node above where this expression will go.
   I(lnast.get_data(parent_node).type.is_stmts());
   auto lhs_str = name_prefix_modifier_flattener(lhs_noprefixes, false);
   switch (rhs_expr.expression_case()) {
     case firrtl::FirrtlPB_Expression::kReference: {  // Reference
       auto tmp_rhs_str = rhs_expr.reference().id();
-
       std::string rhs_str;
       if (is_invalid_table.find(tmp_rhs_str) != is_invalid_table.end()) {
         // create __last_value
@@ -1518,14 +1592,8 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
         lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
       } else {
-        Lnast_nid idx_asg;
-        if(from_mux) {
-          idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
-        } else {
-          idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
-        } 
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
         lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_str));
-        // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_str));
 				attach_expr_str2node(lnast, rhs_str, idx_asg);
       }
       break;
@@ -1564,14 +1632,14 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
       handle_mux_assign(lnast, rhs_expr, parent_node, lhs_str);
       break;
     }
+    case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
+      list_prime_op_info(lnast, rhs_expr.prim_op(), parent_node, lhs_str);
+      break;
+    }
     case firrtl::FirrtlPB_Expression::kSubField:
     case firrtl::FirrtlPB_Expression::kSubIndex:   // SubIndex
     case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
       I(false); // tuple/vector related stuff already handled in connect statement
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
-      list_prime_op_info(lnast, rhs_expr.prim_op(), parent_node, lhs_str);
       break;
     }
     case firrtl::FirrtlPB_Expression::kFixedLiteral: {  // FixedLiteral
@@ -1589,13 +1657,19 @@ std::string Inou_firrtl_module::get_expr_hier_name(Lnast& lnast, Lnast_nid& pare
   if (expr.has_sub_field()) {
     return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_field().expression()), ".", expr.sub_field().field());
   } else if (expr.has_sub_access()) {
-    auto idx_str = return_expr_str(lnast, expr.sub_access().index(), parent_node, true);
+    auto idx_str = get_expr_hier_name(lnast, parent_node, expr.sub_access().index());
     return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_access().expression()), ".", idx_str);
   } else if (expr.has_sub_index()) {
     return absl::StrCat(get_expr_hier_name(lnast, parent_node, expr.sub_index().expression()), ".", expr.sub_index().index().value());
   } else if (expr.has_reference()) {
     return expr.reference().id();
-  } else {
+  } else if (expr.has_prim_op()) {
+		auto expr_string = create_tmp_var();
+		list_prime_op_info(lnast, expr.prim_op(), parent_node, expr_string);
+		return expr_string;
+	} else if (expr.has_uint_literal()) {
+    return absl::StrCat(expr.uint_literal().value().value(), "ubits", expr.uint_literal().width().value());
+	} else {
     return "";
   }
 }
@@ -1625,24 +1699,22 @@ std::string Inou_firrtl_module::get_expr_hier_name(const firrtl::FirrtlPB_Expres
  * The sub-module connections will be involved with TupleGet from the instance. This is handled
  * in the old fir2lnast. So,
  * (1) check if the operand comes from instance
- * (2) if yes, follow the old mechanism: return_expr_str();
+ * (2) if yes, follow the old mechanism: create tuple_gets to retrieve the hierarchical field value
  * (3) if not, flattened the operand str and create a simple assignment to the prime_op/mux/valid_if ... etc
  * */
 std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& operand_expr) {
   std::string expr_str;
-  // here we only want to check the case of instance connection, so kSubField is sufficient
-	
 	
 	bool is_runtime_idx_r = false;
 	std::string expr_str_tmp = get_expr_hier_name(operand_expr, is_runtime_idx_r);
 	
-  // std::string expr_str_tmp = get_expr_hier_name(lnast, parent_node, operand_expr);
 	if (is_runtime_idx_r) {
 		auto tmp_var = create_tmp_var();
 		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, expr_str_tmp, operand_expr);
 		return tmp_var;
 	}
 
+  // here we only want to check the case of instance connection, so kSubField is sufficient
   auto expr_case = operand_expr.expression_case();
   if (expr_case == firrtl::FirrtlPB_Expression::kSubField ) {
     auto pos = expr_str_tmp.find_first_of('.');
@@ -1657,8 +1729,7 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
       }
     }
   } else if (expr_case == firrtl::FirrtlPB_Expression::kPrimOp) {
-    // this is a recursive case, use the old way
-    expr_str = return_expr_str(lnast, operand_expr, parent_node, true);
+		expr_str = get_expr_hier_name(lnast, parent_node, operand_expr);
   } else if (expr_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
     expr_str = absl::StrCat(operand_expr.uint_literal().value().value(), "ubits", operand_expr.uint_literal().width().value());
 	} else {
@@ -1676,74 +1747,6 @@ void Inou_firrtl_module::add_lnast_assign(Lnast& lnast, Lnast_nid &parent_node, 
   } else {
     lnast.add_child(idx_asg, Lnast_node::create_ref(rhs));
   }
-}
-
-/* This function is used when I need the string to access something.
- * If it's a Reference or a Const, we format them as a string and return.
- * If it's a SubField, we have to create dot nodes and get the variable
- * name that points to the right bundle element (see handle_bundle_vec_acc function). */
-std::string Inou_firrtl_module::return_expr_str(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node,
-                                                const bool is_rhs, const Lnast_node value_node) {
-  I(lnast.get_data(parent_node).type.is_stmts());
-
-  std::string expr_string = "";
-  switch (expr.expression_case()) {
-    case firrtl::FirrtlPB_Expression::kReference: {  // Reference
-      expr_string = name_prefix_modifier_flattener(expr.reference().id(), is_rhs);
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kUintLiteral: {  // UIntLiteral
-      expr_string = absl::StrCat(expr.uint_literal().value().value(), "ubits", expr.uint_literal().width().value());
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kSintLiteral: {  // SIntLiteral
-      expr_string = absl::StrCat(expr.sint_literal().value().value(), "sbits", expr.uint_literal().width().value());
-      /* expr_string = expr.sint_literal().value().value(); */
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kValidIf: {  // ValidIf
-      expr_string = create_tmp_var();
-      handle_valid_if_assign(lnast, expr, parent_node, expr_string);
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kMux: {  // Mux
-      expr_string = create_tmp_var();
-      handle_mux_assign(lnast, expr, parent_node, expr_string);
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kSubField:     // SubField
-    case firrtl::FirrtlPB_Expression::kSubIndex:     // SubIndex
-    case firrtl::FirrtlPB_Expression::kSubAccess: {  // SubAccess
-      if (is_rhs) {
-        I(value_node.is_invalid());
-        auto tmp_sv = create_tmp_var();
-        // handle_bundle_vec_acc(lnast, expr, parent_node, true, Lnast_node::create_ref(tmp_sv));
-        expr_string = tmp_sv;
-      } else {
-        I(!value_node.is_invalid());
-        expr_string = "__INVALID__";
-        // handle_bundle_vec_acc(lnast, expr, parent_node, false, value_node);
-      }
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kPrimOp: {  // PrimOp
-      // This case is special. We need to create a set of nodes for it and return the lhs of that node.
-      expr_string = create_tmp_var();
-      list_prime_op_info(lnast, expr.prim_op(), parent_node, expr_string);
-      break;
-    }
-    case firrtl::FirrtlPB_Expression::kFixedLiteral: {  // FixedLiteral
-      // FIXME: Not yet supported in LNAST.
-      I(false);
-      break;
-    }
-    default: {
-      // Error: I don't think this should occur if we're using Chisel's protobuf utility.
-      Pass::error("provided invalid expression number: {}", expr.expression_case());
-      I(false);
-    }
-  }
-  return expr_string;
 }
 
 /* This function takes in a string and adds it into the LNAST as
@@ -1850,8 +1853,7 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
   for (auto &[var, set] : module_var2flip) {
     fmt::print("var:{} \n", var);
     for (auto &set_itr : set) {
-      // dir: 0 = module input, 1 = module ouput, 2 = neutral direction of a wire 
-      fmt::print("  hier_name:{:<20}, accu_flipped:{:<5}, dir:{}\n", set_itr.first, set_itr.second); 
+      fmt::print("  hier_name:{:<20}, accu_flipped:{:<5}\n", set_itr.first, set_itr.second); 
     }
   }
 #endif
@@ -1879,7 +1881,6 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   } else {
     hier_name_r = hier_name_r_ori;
   }
-  // std::string hier_name_r = name_prefix_modifier_flattener(hier_name_r_ori, true);
 
   if (output_names.find(hier_name_l_ori) != output_names.end()) {
     hier_name_l = absl::StrCat("%", hier_name_l_ori);
@@ -1888,7 +1889,6 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   } else {
     hier_name_l = hier_name_l_ori;
   }
-  // std::string hier_name_l = name_prefix_modifier_flattener(hier_name_l_ori, false);
 
   std::string_view chop_head_flattened_element;
   if (is_flipped) {
@@ -1906,10 +1906,8 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     rhs_wire_name = rhs_full_name.substr(0, pos);
   }
 
-
   lhs_full_name = name_prefix_modifier_flattener(lhs_full_name, false);
   rhs_full_name = name_prefix_modifier_flattener(rhs_full_name, true);
-
 
   auto it = wire_names.find(rhs_wire_name);
   bool rhs_is_wire_var = it != wire_names.end();
@@ -1923,7 +1921,6 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
     lnast.add_child(idx_asg, Lnast_node::create_ref(temp_var_name));
-  // } else if (lhs_full_name.at(0) == '_') { // lhs is declared as kNode
   } else if (node_names.find(lhs_full_name) != node_names.end()) {  // lhs is declared as kNode
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
@@ -1931,13 +1928,10 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   } else if (lhs_full_name.at(0) == '#') {
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
-    // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
 		attach_expr_str2node(lnast, rhs_full_name, idx_asg);
   } else {
-    // FIXME->sh: potential problem to not use dp_assign here when firrtl connection has a bitwidth mismatch from lhs/rhs ...
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
-    // lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
 		attach_expr_str2node(lnast, rhs_full_name, idx_asg);
   }
   return;

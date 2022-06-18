@@ -210,7 +210,7 @@ cc_library(
     # "MaskedSmem",
     # "MaskedSmemStruct",
 
-    # issue-1-1: lconst.cpp:329 (fixed)
+    # issue-2: node could have a middle struct from other component *****
     # "Rob"
 
 

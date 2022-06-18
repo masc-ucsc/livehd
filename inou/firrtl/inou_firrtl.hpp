@@ -239,10 +239,8 @@ protected:
   void record_all_output_hierarchy(std::string_view port_name);
 
   void list_prime_op_info(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void init_expr_add(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, std::string_view lhs_unalt, bool from_mux = false);
+  void init_expr_add(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, std::string_view lhs_unalt);
   std::string expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& expr);
-  std::string return_expr_str(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
-                              const Lnast_node value_node = Lnast_node::create_invalid());
 
   void list_statement_info(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
   std::string get_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx);

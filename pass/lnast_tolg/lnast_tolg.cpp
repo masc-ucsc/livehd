@@ -1063,7 +1063,6 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
 
   if (lnast->get_type(lnidx_opd).is_const()) {  // High priority in search to avoid alias
     auto node_dpin  = create_const(lg, vname);
-    fmt::print("DEBUG BBB name:{}, vname:{}\n", name, vname);
     I(!node_dpin.is_invalid());
     name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table    
     return node_dpin;
