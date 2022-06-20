@@ -738,10 +738,9 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	// 此 solution 是可以 work, 缺點就是本來好端端直接 flatten extr_str 就了事, 但是現在
 	// 不能爽爽直接 flatten, 還要 check 一堆 table .....
 	// TODO: think about a better solution
-
 	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
 	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
-	fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
+	// fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
 
 
 	// preparation: get head of the tuple name so you know entry for the var2flip table
@@ -1679,7 +1678,9 @@ std::string Inou_firrtl_module::get_expr_hier_name(const firrtl::FirrtlPB_Expres
     return absl::StrCat(get_expr_hier_name(expr.sub_field().expression(), is_runtime_idx), ".", expr.sub_field().field());
   } else if (expr.has_sub_access()) {
     auto idx_str = expr.sub_access().index().uint_literal().value().value();
-    is_runtime_idx = true;
+    if (!isdigit(idx_str[0])) {
+      is_runtime_idx = true;
+    }
     return absl::StrCat(get_expr_hier_name(expr.sub_access().expression(), is_runtime_idx), ".", idx_str);
   } else if (expr.has_sub_index()) {
     return absl::StrCat(get_expr_hier_name(expr.sub_index().expression(), is_runtime_idx), ".", expr.sub_index().index().value());

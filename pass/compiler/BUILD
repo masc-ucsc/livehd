@@ -77,7 +77,7 @@ cc_library(
     "tuple_nested1",
     "tuple_nested2",
     "get_mask1",
-    "vec_shift_register_param",
+    # "vec_shift_register_param", FIXME: no input connect to the shift register?
     "hier_tuple2",
     "capricious_bits",
     "capricious_bits2",
