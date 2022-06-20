@@ -508,7 +508,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   if(do_matching) {
     /*doing the actual matching here*/
     
-    for(const auto& [iov,fn]: IOtoNodeMap_orig) {
+    //for(const auto& [iov,fn]: IOtoNodeMap_orig) {
+    for (auto it = IOtoNodeMap_orig.cbegin(); it!= IOtoNodeMap_orig.cend();++it) {
+      auto iov = it->first;
+      auto fn = it->second;
       if(fn.size()!=1) {continue;}
       auto orig_node = fn.front();
       //go to the best match in IOtoNodeMap_synth
@@ -516,7 +519,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         for (const auto& [k,synNodes]: IOtoNodeMap_synth[iov]) {
           for (const auto& synNode: synNodes) {
           //std::vector<Node::Compact_flat> vc = synNode;
-          matching_map[synNode]=orig_node;
+          /*inserting in matching_map*/
+          //const auto& nodeid = node.get_compact_flat();
+          std::vector<Node::Compact_flat> tmpVec;
+          if(matching_map.find(synNode) != matching_map.end()) {
+            tmpVec.assign((matching_map[synNode]).begin() , (matching_map[synNode]).end() );
+            tmpVec.emplace_back(orig_node);
+          } else {
+            tmpVec.emplace_back(orig_node);
+          }
+          matching_map[synNode]=tmpVec;
           }
         }
       }
@@ -525,8 +537,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /*Printing "matching map"*/
     fmt::print("\n THE MATCHING_MAP is:\n");
     for (const auto& [k,v]:matching_map) {
-      fmt::print("\n{}\t:::\t{}\t",k.get_nid(),v.get_nid());
+      fmt::print("\n{}\t:::\t",k.get_nid());
+      for (auto& v1:v) {
+        fmt::print("{}\t", v1.get_nid());
       }
+    }
       fmt::print("\n");
 
   }//if(do_matching) closes here
