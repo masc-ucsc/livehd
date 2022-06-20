@@ -509,10 +509,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /*doing the actual matching here*/
     
     //for(const auto& [iov,fn]: IOtoNodeMap_orig) {
-    for (auto it = IOtoNodeMap_orig.cbegin(); it!= IOtoNodeMap_orig.cend();++it) {
+    for (absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> >::iterator it = IOtoNodeMap_orig.begin(); it!= IOtoNodeMap_orig.end();) {
       auto iov = it->first;
       auto fn = it->second;
-      if(fn.size()!=1) {continue;}
+      if(fn.size()!=1) {
+        ++it;
+        continue;
+      }
       auto orig_node = fn.front();
       //go to the best match in IOtoNodeMap_synth
       if(IOtoNodeMap_synth.find(iov)!=IOtoNodeMap_synth.end()) {
@@ -531,6 +534,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
           matching_map[synNode]=tmpVec;
           }
         }
+        IOtoNodeMap_orig.erase(it++);
+        IOtoNodeMap_synth.erase(iov);
+      } else {
+        ++it;
       }
     }
 
@@ -543,6 +550,45 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
     }
       fmt::print("\n");
+
+    /*printing changed map*/
+    fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
+    for(const auto& [iov,fn]: IOtoNodeMap_orig) {
+      for (auto& ip: iov) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("::: \t");
+      for (auto& op:fn) {
+        fmt::print("{}\t", op.get_nid());
+      }
+      fmt::print("\n\n");
+    }
+    fmt::print("\n\n===============================\n");
+
+    fmt::print("\n\nIOtoNodeMap_synth MAP ALTERED IS:\n");
+    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
+      for (auto& ip: ioval) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("\n");
+      
+      for(auto& [ioPair, n_list]: inMap) {
+        fmt::print("\t\t\t\t");
+        for (auto& ip: ioPair.first) {
+          fmt::print("{}\t",ip);
+        }
+        fmt::print("||| \t");
+        for (auto& op:ioPair.second) {
+          fmt::print("{}\t", op);
+        }
+        fmt::print("::: \t");
+        for (auto& n:n_list) {
+          fmt::print("{}\t", n.get_nid());
+        }
+        fmt::print("\n");
+      }
+      fmt::print("\n");
+    }
 
   }//if(do_matching) closes here
 
