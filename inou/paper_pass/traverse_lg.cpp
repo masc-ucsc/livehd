@@ -375,10 +375,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
 
     if(do_matching) {
+      /*if orig graph IO-set pair is as-is found in the synth nodeIOmap, then it is direct match!*/
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-        matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];
+        matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)]; //FIXME: put this in matching_map. no need of matched_map then 
       } else {
-        unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);
+        unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);//FIXME: this won't be needed once matched map is removed and entries put in matching_map are erased from the main maps!
       }
       /*insert in full_orig_map*/
       const auto& nodeid = node.get_compact_flat();
@@ -536,10 +537,68 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         }
         IOtoNodeMap_orig.erase(it++);
         IOtoNodeMap_synth.erase(iov);
+        //erase the node from full_orig_map  - value has nodes.
+        for (auto it_o = full_orig_map.begin(); it_o!= full_orig_map.end();) {
+          if (std::find( (it_o->second).begin(), (it_o->second).end(), orig_node) != (it_o->second).end() ) {
+            full_orig_map.erase(it_o++);
+          } else ++it_o;
+        }
       } else {
         ++it;
       }
     }
+
+    I(!matching_map.empty(), "There should be some node in matching_map to further go to pass_2");
+
+    /*entry on the graph IO matched! moving to pass_2 in matching*/
+    for ( auto & [k,v_map]: IOtoNodeMap_synth) {
+      //for (auto& [iov,n]:v_map) {
+      for(auto it=v_map.begin(); it!=v_map.end();){
+        auto iv = (it->first).first;//this is i/p set for [n]
+        auto ov = (it->first).second;//this is o/p set for [n]
+        auto n = it->second;
+
+        bool foundFull = false;
+        bool foundPartial = false;
+        //for (auto [pairIO, nods]:full_orig_map) {
+        for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end();){
+          auto pairIO = ito->first;
+          auto nods = ito->second;
+          if (iv == pairIO.first && ov==pairIO.second) {
+            foundFull = true;
+            //std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
+            for (const auto & n1:n){matching_map[n1]=nods;}
+            full_orig_map.erase(ito++);
+            continue;
+          } else if (iv == pairIO.first || ov==pairIO.second) {
+            foundPartial = true;
+            for (const auto & n1:n){matching_map[n1]=nods;}
+            full_orig_map.erase(ito++);
+            continue;
+          } else {++ito;}
+        } 
+        if (foundFull || foundPartial) {
+          v_map.erase(it++);
+        } else {++it;}   
+                            
+
+//        bool found = std::for_each(iov.first.begin(), 
+//                                 iov.first.end(), 
+//                                 [](const std::string& i) {
+//                                   if (i.contains("flop")) {
+//                                     auto SflopID = i.substr(5);
+//                                     if(matching_map.find(SflopID)!=matching_map.end()) {
+//                                       //flop matched in input set
+//                                       i="flop:"+matching_map.find(SflopID);//FIXME:need the value of matching_map to be single value!
+//                                       return true;
+//                                     }
+//                                   } else {return false;}
+//                                 })
+//       // bool found = std::any_of(s.begin(), s.end(), [](const int& x) { return x == 0 || x == 9 ; });
+//        auto ov = iov.second;
+      }
+    }
+
 
     /*Printing "matching map"*/
     fmt::print("\n THE MATCHING_MAP is:\n");
@@ -552,7 +611,24 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n");
 
     /*printing changed map*/
-    fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
+    fmt::print("\n\n===============================\n");
+    fmt::print("\n\nThe complete orig map ALTERED is:\n");
+    for(const auto& [iov,fn]: full_orig_map) {
+      for (auto& ip: iov.first) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("||| \t");
+      for (auto& op:iov.second) {
+        fmt::print("{}\t", op);
+      }
+      fmt::print("::: \t");
+      for (auto& op:fn) {
+        fmt::print("{}\t", op.get_nid());
+      }
+      fmt::print("\n\n");
+    }
+    fmt::print("\n\n===============================\n");
+    fmt::print("\n\nThe IOtoNodeMap_orig map ALTERED is:\n");
     for(const auto& [iov,fn]: IOtoNodeMap_orig) {
       for (auto& ip: iov) {
         fmt::print("{}\t",ip);
