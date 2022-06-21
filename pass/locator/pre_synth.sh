@@ -185,7 +185,9 @@ create_synth-verilog () {
   cd pass/locator
 
 	name=$1
-  export VERILOG_FILES=../../pre_synth/top_${name}.v    
+  #FIRRTL# export VERILOG_FILES=../../pre_synth/top_${name}.v    
+  #PRP#
+  export VERILOG_FILES=../../pre_synth/${name}.v 
   export DESIGN_NAME=$name                          
   export SYNTH_BUFFERING=0                          
   export SYNTH_SIZING=0                             
@@ -290,17 +292,23 @@ post_synth () {
 
 #pts='BundleConnect.hi.pb SingleEvenFilter.hi.pb Xor6Thread2.hi.pb XorSelfThread1.hi.pb Mux4.hi.pb Life.hi.pb Cell_alone.hi.pb LFSR16.hi.pb LogShifter.hi.pb Test2.hi.pb Accumulator.hi.pb Coverage.hi.pb TrivialAdd.hi.pb VendingMachineSwitch.hi.pb VendingMachine.hi.pb Trivial.hi.pb Tail.hi.pb TrivialArith.hi.pb Shifts.hi.pb Darken.hi.pb HiLoMultiplier.hi.pb AddNot.hi.pb GCD_3bits.hi.pb Test3.hi.pb Register.hi.pb RegisterSimple.hi.pb Parity.hi.pb ResetShiftRegister.hi.pb SimpleALU.hi.pb ByteSelector.hi.pb MaxN.hi.pb Max2.hi.pb Flop.hi.pb EnableShiftRegister.hi.pb Decrementer.hi.pb Counter.hi.pb RegXor.hi.pb PlusAnd.hi.pb'
 
-pts='Adder4.ch.pb IntXbar.ch.pb SimpleClockGroupSource.ch.pb FixedClockBroadcast.ch.pb ClockGroupAggregator.ch.pb IntSyncSyncCrossingSink.ch.pb AMOALU.ch.pb Top.ch.pb Arbiter_10.ch.pb FlipSimple2.ch.pb NotAnd.ch.pb BreakpointUnit.ch.pb DebugCustomXbar.ch.pb MaxPeriodFibonacciLFSR.ch.pb'
-#create_pre-synth_verilog "$pts"
+#pts='Adder4.ch.pb IntXbar.ch.pb SimpleClockGroupSource.ch.pb FixedClockBroadcast.ch.pb ClockGroupAggregator.ch.pb IntSyncSyncCrossingSink.ch.pb AMOALU.ch.pb Top.ch.pb Arbiter_10.ch.pb FlipSimple2.ch.pb NotAnd.ch.pb BreakpointUnit.ch.pb DebugCustomXbar.ch.pb MaxPeriodFibonacciLFSR.ch.pb'
 
-rm pre_synth/*
-rm -r lgdb_*
-rm *dot
-rm -f lgcheck*
-
-for pt in $pts
-do
-  create_pre-synth_verilog_from_firrtl "$pt"
-  create_synth-verilog "$pt"
-done
+#################FOR PRP
+pts='test4'
+create_pre-synth_verilog "$pts"
+create_synth-verilog "$pt"
 #post_synth "$pts"
+#################FOR PRP
+
+# rm pre_synth/*
+# rm -r lgdb_*
+# rm *dot
+# rm -f lgcheck*
+# 
+# for pt in $pts
+# do
+#   create_pre-synth_verilog_from_firrtl "$pt"
+#   create_synth-verilog "$pt"
+# done
+# #post_synth "$pts"
