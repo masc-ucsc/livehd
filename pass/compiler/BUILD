@@ -201,7 +201,6 @@ cc_library(
     "CompareRecFN",
     "RegisterReadDecode",
     "RenameBusyTable",
-    "PredRenameStage"
 
     # FIXME:
     # issue-1: memory
@@ -210,15 +209,19 @@ cc_library(
     # "MaskedSmem",
     # "MaskedSmemStruct",
 
-    # issue-2: node could have a middle struct from other component *****
+    # issue-2: bitwidth mismatch on memory output *****
     # "Rob"
+
+    # issue-3: firbits cannot converge within 10 iterations because
+    # attr_set nodes for bits at memory read port has been removed 
+    #
+    # "RegisterFileSynthesizable"
+    # "RegisterFileSynthesizable_1"
+    # "RegisterFileSynthesizable_2"
 
 
     # issue-4: firbits cannot converge within 10 iterations: 
     # possible solution: set_bit() flop qpin directly
-    # "RegisterFileSynthesizable"
-    # "RegisterFileSynthesizable_1"
-    # "RegisterFileSynthesizable_2"
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
@@ -255,6 +258,7 @@ cc_library(
     # "PipelinedMultiplier"
     # "RecFNToIN"
     # "RecFNToIN_1"
+    # "PredRenameStage"
     
     
 ]]

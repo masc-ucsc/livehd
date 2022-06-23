@@ -51,8 +51,6 @@ protected:
   void process_attr_get(Node &node);
   void process_attr_set_dp_assign(Node &node);
   void process_attr_set_bw(Node &node, Bitwidth::Attr attr, Fwd_edge_iterator::Fwd_iter &fwd_it);
-  void process_attr_set_new_attr(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
-  void process_attr_set_propagate(Node &node);
   void process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it);
   // void insert_tposs_nodes(Node &node_attr, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it, const Bitwidth_range &bw);
   void insert_tposs_nodes(Node &node_attr, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it);

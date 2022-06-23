@@ -1198,28 +1198,6 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   }
 }
 
-void Bitwidth::process_attr_set_new_attr(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  I(node_attr.is_sink_connected("field"));
-
-  auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
-  auto key      = dpin_key.get_type_const().to_field();
-  auto attr     = get_key_attr(key);
-
-  if (attr == Attr::Set_other) {
-    not_finished = true;
-    return;
-  }
-
-  if (attr == Attr::Set_dp_assign) {
-    process_attr_set_dp_assign(node_attr);
-  }else{
-    if (!dpin_key.get_node().is_type_const()) {
-      not_finished = true;
-      return;  // can not handle now
-    }
-    process_attr_set_bw(node_attr, attr, fwd_it);
-  }
-}
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
@@ -1263,72 +1241,28 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
     fwd_it.add_node(ntposs);  // add once the edges are added
 }
 
-void Bitwidth::process_attr_set_propagate(Node &node_attr) {
-  if (node_attr.out_connected_pins().size() == 0)
-    return;
 
-  auto        attr_dpin = node_attr.get_driver_pin("Y");
+void Bitwidth::process_attr_set(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fwd_it) {
 
-  I(node_attr.is_sink_connected("parent"));
-  bool parent_data_pending = false;
-  auto data_dpin           = node_attr.get_sink_pin("parent").get_driver_pin();
+  I(node_attr.is_sink_connected("field"));
 
-  I(node_attr.is_sink_connected("chain"));
-  auto parent_attr_dpin = node_attr.get_sink_pin("chain").get_driver_pin();
+  auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
+  auto key      = dpin_key.get_type_const().to_field();
+  auto attr     = get_key_attr(key);
 
-  Bitwidth_range data_bw(0);
-  auto           data_it = bwmap.find(data_dpin.get_compact_class());
-  if (data_it != bwmap.end()) {
-    data_bw = data_it->second;
-  } else {
-    parent_data_pending = true;
-  }
-
-  auto parent_attr_it = bwmap.find(parent_attr_dpin.get_compact_class());
-  if (parent_attr_it == bwmap.end()) {
-#ifndef NDEBUG
-    fmt::print("attr_set propagate bwmap to AttrSet parent:{}\n", attr_dpin.debug_name());
-#endif
+  if (attr == Attr::Set_other) {
     not_finished = true;
     return;
   }
-  const auto parent_attr_bw = parent_attr_it->second;
 
-  if (parent_attr_bw.get_sbits() && data_bw.get_sbits()) {
-    if (parent_attr_bw.get_sbits() < data_bw.get_sbits()) {
-      Pass::error("bitwidth mismatch. Variable {} needs {}bits, but constrained to {}bits\n",
-                  attr_dpin.debug_name(),
-                  data_bw.get_sbits(),
-                  parent_attr_bw.get_sbits());
-    } else if (parent_attr_bw.get_max() < data_bw.get_max()) {
-      Pass::error("bitwidth mismatch. Variable {} needs {}max, but constrained to {}max\n",
-                  attr_dpin.debug_name(),
-                  data_bw.get_max().to_pyrope(),
-                  parent_attr_bw.get_max().to_pyrope());
-    } else if (parent_attr_bw.get_min() > data_bw.get_min()) {
-      Pass::warn("bitwidth mismatch. Variable {} needs {}min, but constrained to {}min\n",
-                 attr_dpin.debug_name(),
-                 data_bw.get_min().to_pyrope(),
-                 parent_attr_bw.get_min().to_pyrope());
-    }
-  }
-
-  // Do not pass the parent_attr_bw. data_bw is smaller (or failed), pass the smallest possible
-
-  for (auto out_dpin : node_attr.out_connected_pins()) {
-    bwmap.insert_or_assign(out_dpin.get_compact_class(), data_bw);
-  }
-
-  if (parent_data_pending) {
-    bwmap.insert_or_assign(data_dpin.get_compact_class(), data_bw);
-  }
-}
-
-void Bitwidth::process_attr_set(Node &node, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  if (node.is_sink_connected("field")) {
-    process_attr_set_new_attr(node, fwd_it);
+  if (attr == Attr::Set_dp_assign) {
+    process_attr_set_dp_assign(node_attr);
   } else {
-    process_attr_set_propagate(node);
+    if (!dpin_key.get_node().is_type_const()) {
+      not_finished = true;
+      return;  // can not handle now
+    }
+    process_attr_set_bw(node_attr, attr, fwd_it);
   }
 }
 
