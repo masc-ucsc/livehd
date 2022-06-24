@@ -340,9 +340,11 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_head(node, inp_edges, fbmap);
   } else if (op == "__fir_tail") {
     analysis_fir_tail(node, inp_edges, fbmap);
+  } else if (op == "__fir_as_sint") {
+    analysis_fir_single_input_op(node, inp_edges, fbmap, true);
   } else if (op == "__fir_as_uint"  || op == "__fir_as_sint" || op == "__fir_as_async" || 
              op == "__fir_as_clock" || op == "__fir_not") {
-    analysis_fir_single_input_op(node, inp_edges, fbmap);
+    analysis_fir_single_input_op(node, inp_edges, fbmap, false);
   } else if (op == "__fir_rem") {
     analysis_fir_rem(node, inp_edges, fbmap);
   } else {
@@ -754,7 +756,7 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &
   fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, true));
 }
 
-void Firmap::analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+void Firmap::analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap, bool sign) {
   I(inp_edges.size() == 1);
 
   Bits_t bits1 = 0;
@@ -776,7 +778,7 @@ void Firmap::analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges,
       bits1 = it->second.get_bits();
     }
   }
-  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, false));
+  fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, sign));
 }
 
 void Firmap::analysis_fir_as_async_reset(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {

@@ -12,7 +12,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//inou/graphviz:inou_graphviz",
-        # "//inou/yosys:yosys2",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
@@ -201,6 +200,7 @@ cc_library(
     "CompareRecFN",
     "RegisterReadDecode",
     "RenameBusyTable",
+    "RoundAnyRawFNToRecFN",
 
     # FIXME:
     # issue-1: memory
@@ -210,11 +210,10 @@ cc_library(
     # "MaskedSmemStruct",
 
     # issue-2: bitwidth mismatch on memory output *****
+    # %io_com_xcpt_bits_cause_1_d0_lg__firrtl_Rob not ready *****
     # "Rob"
 
-
-
-    # issue-4: remaining TupAdd after cprop
+    # issue-3: remaining TupAdd after cprop
     # (firbits iterations > 10 is solved)
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
@@ -242,7 +241,6 @@ cc_library(
 
     # issue-C: firbits signness unequal
     # "MulAddRecFNToRaw*"
-    # "RoundAnyRawFNToRecFN*"
 
 
     # BoomCore passing submodules

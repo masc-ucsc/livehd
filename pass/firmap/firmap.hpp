@@ -42,7 +42,7 @@ protected:
   void analysis_fir_rem(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
-  void analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
+  void analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap, bool sign);
   void analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
   void analysis_fir_as_async_reset(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap);
