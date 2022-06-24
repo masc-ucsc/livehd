@@ -1110,7 +1110,7 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
       Bitwidth_range set_bw;
       set_bw.set_ubits_range(bits);
 
-      // FIXME->sh: should just follow what attr_set says
+      // Deprecated->sh: bw should just follow what attr_set says if the number bits of bw is larger then attr bits
       // if (bw.get_max() > set_bw.get_max()) {
       //   Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}ubits\n",
       //               node_attr.debug_name(),
@@ -1118,13 +1118,14 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
       //               bw.get_max(),
       //               bits);
       // }
-      if (bw.get_min() < 0) {
-        Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}ubits\n",
-                    node_attr.debug_name(),
-                    attr_dpin.debug_name(),
-                    bw.get_min(),
-                    bits);
-      }
+      // Deprecated->sh: bw should just follow what attr_set says if the number bits of bw is larger then attr bits
+      // if (bw.get_min() < 0) {
+      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}ubits\n",
+      //               node_attr.debug_name(),
+      //               attr_dpin.debug_name(),
+      //               bw.get_min(),
+      //               bits);
+      // }
     } else {
       bw.set_ubits_range(bits);
     }
@@ -1150,13 +1151,14 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
       Bitwidth_range set_bw;
       set_bw.set_sbits_range(bits);
 
-      if (bw.get_max() > set_bw.get_max()) {
-        Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}sbits\n",
-                    node_attr.debug_name(),
-                    attr_dpin.debug_name(),
-                    bw.get_max(),
-                    bits);
-      }
+      // Deprecated->sh: bw should just follow what attr_set says if bw is larger then attr bits
+      // if (bw.get_max() > set_bw.get_max()) {
+      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}sbits\n",
+      //               node_attr.debug_name(),
+      //               attr_dpin.debug_name(),
+      //               bw.get_max(),
+      //               bits);
+      // }
       if (bw.get_min() < set_bw.get_min()) {
         Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}sbits\n",
                     node_attr.debug_name(),

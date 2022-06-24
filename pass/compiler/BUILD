@@ -212,11 +212,6 @@ cc_library(
     # issue-2: bitwidth mismatch on memory output *****
     # "Rob"
 
-    # issue-3: firbits cannot converge within 10 iterations because
-    # attr_set nodes for bits at memory read port has been removed 
-    # "RegisterFileSynthesizable"
-    # "RegisterFileSynthesizable_1"
-    # "RegisterFileSynthesizable_2"
 
 
     # issue-4: remaining TupAdd after cprop
@@ -230,6 +225,10 @@ cc_library(
     # "RenameMapTable"
     # "DecodeUnit"
     # "MulDiv"
+    # --------- memory read port mismatch from the lgcheck2.err log ----------
+    # "RegisterFileSynthesizable"
+    # "RegisterFileSynthesizable_1"
+    # "RegisterFileSynthesizable_2"
 
 
     # issue-7: #reg_misa___0 lgtuple assertion !is_root_attribute(key)
