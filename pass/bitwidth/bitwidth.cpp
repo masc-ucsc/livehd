@@ -1054,6 +1054,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
 
   auto it = bwmap.find(dpin_lhs.get_compact_class());
   if (it == bwmap.end()) {
+    fmt::print("  BBB-2\n");
     if (!not_finished)
       Pass::info("node:{} dp_assign lhs node:{} is not ready (another iteration)",
                  node_dp.debug_name(),
@@ -1068,6 +1069,7 @@ void Bitwidth::process_attr_set_dp_assign(Node &node_dp) {
 
   auto it2 = bwmap.find(dpin_rhs.get_compact_class());
   if (it2 == bwmap.end()) {
+    fmt::print("  BBB-3\n");
     if (!not_finished)
       Pass::info("node:{} dp_assign rhs node:{} is not ready (another iteration)",
                  node_dp.debug_name(),
@@ -1108,13 +1110,14 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
       Bitwidth_range set_bw;
       set_bw.set_ubits_range(bits);
 
-      if (bw.get_max() > set_bw.get_max()) {
-        Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}ubits\n",
-                    node_attr.debug_name(),
-                    attr_dpin.debug_name(),
-                    bw.get_max(),
-                    bits);
-      }
+      // FIXME->sh: should just follow what attr_set says
+      // if (bw.get_max() > set_bw.get_max()) {
+      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}ubits\n",
+      //               node_attr.debug_name(),
+      //               attr_dpin.debug_name(),
+      //               bw.get_max(),
+      //               bits);
+      // }
       if (bw.get_min() < 0) {
         Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}ubits\n",
                     node_attr.debug_name(),
@@ -1256,6 +1259,7 @@ void Bitwidth::process_attr_set(Node &node_attr, Fwd_edge_iterator::Fwd_iter &fw
   }
 
   if (attr == Attr::Set_dp_assign) {
+    fmt::print("  BBB-1\n");
     process_attr_set_dp_assign(node_attr);
   } else {
     if (!dpin_key.get_node().is_type_const()) {
@@ -1385,6 +1389,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       } else if (op == Ntype_op::And) {
         process_bit_and(node, inp_edges);
       } else if (op == Ntype_op::AttrSet) {
+        fmt::print("DEBUG BBB node:{}\n", node.debug_name());
         process_attr_set(node, fwd_it);
       } else if (op == Ntype_op::AttrGet) {
         process_attr_get(node);

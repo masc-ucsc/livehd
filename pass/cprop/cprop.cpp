@@ -1123,7 +1123,7 @@ void Cprop::tuple_tuple_add(const Node &node) {
         node_tup = std::make_shared<Lgtuple>(tup_name);
         add_pin_with_check(node_tup, key_name, value_dpin);
       } break;
-      case 0x2: {
+      case 0x2: { // has_parent_scalar
         if (!has_value_tup) {
           if (!tuple_issues) {
             node.dump();

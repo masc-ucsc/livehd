@@ -95,7 +95,8 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
   auto qpin = node.get_driver_pin();
   auto bits = qpin.get_bits() - 1; // turn from lgraph signed bits back to firrtl ubits 
   fbmap.insert_or_assign(qpin.get_compact_class_driver(), Firrtl_bits(bits, false));
-
+  
+  // deprecated
   // auto d_dpin    = node.get_sink_pin("din").get_driver_pin();
   // auto it_d_dpin = fbmap.find(d_dpin.get_compact_class_driver());
 

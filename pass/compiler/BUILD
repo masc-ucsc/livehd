@@ -214,16 +214,13 @@ cc_library(
 
     # issue-3: firbits cannot converge within 10 iterations because
     # attr_set nodes for bits at memory read port has been removed 
-    #
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
 
 
-
-    # issue-4: solve the firbits iterations > 10 problems, 
-    # but there are remaining TupAdd after cprop ......
-    #
+    # issue-4: remaining TupAdd after cprop
+    # (firbits iterations > 10 is solved)
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
@@ -235,7 +232,7 @@ cc_library(
     # "MulDiv"
 
 
-    # issue-7: cannot find register qpin
+    # issue-7: #reg_misa___0 lgtuple assertion !is_root_attribute(key)
     # "CSRFile"
 
     # issue-A: need last value of a variable??

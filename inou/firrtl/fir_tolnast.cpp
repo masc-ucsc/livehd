@@ -1926,7 +1926,8 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
     lnast.add_child(idx_asg, Lnast_node::create_ref(rhs_full_name));
   } else if (lhs_full_name.at(0) == '#') {
-    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+    // auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_dp_assign());
+    auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
 		attach_expr_str2node(lnast, rhs_full_name, idx_asg);
   } else {
@@ -2352,7 +2353,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);
