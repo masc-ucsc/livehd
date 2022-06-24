@@ -1102,7 +1102,7 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   auto val = dpin_val.get_node().get_type_const();
 
   if (attr == Attr::Set_ubits) {
-    Bits_t bits = val.to_i();
+    auto bits = static_cast<Bits_t>(val.to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;

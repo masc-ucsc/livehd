@@ -2168,7 +2168,17 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       }
 
       for (const auto &it : *tup_l_sets) {
-        if (absl::StrContains(it.first, hier_name_l)) {
+        auto pos = it.first.find(hier_name_l);
+        bool hit = false;
+        if (pos != std::string::npos) {
+          I(pos == 0);
+          auto pos2 = hier_name_l.size();
+          if (it.first.size() > pos2 && it.first.at(pos2) == '.') {
+            hit = true;
+          }
+        }
+        
+        if (it.first == hier_name_l || hit) {
           tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
         }
       }
@@ -2342,7 +2352,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);

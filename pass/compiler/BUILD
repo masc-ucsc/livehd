@@ -220,8 +220,10 @@ cc_library(
     # "RegisterFileSynthesizable_2"
 
 
-    # issue-4: firbits cannot converge within 10 iterations: 
-    # possible solution: set_bit() flop qpin directly
+
+    # issue-4: solve the firbits iterations > 10 problems, 
+    # but there are remaining TupAdd after cprop ......
+    #
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
