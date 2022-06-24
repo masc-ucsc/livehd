@@ -153,37 +153,7 @@ void Firmap::analysis_lg_const(Node &node, FBMap &fbmap) {
   fbmap.insert_or_assign(dpin.get_compact_class_driver(), Firrtl_bits(bits, false));
 }
 
-void Firmap::analysis_lg_attr_set(Node &node, FBMap &fbmap) {
-  if (node.is_sink_connected("field")) {
-    analysis_lg_attr_set_new_attr(node, fbmap);
-  } else {
-    analysis_lg_attr_set_propagate(node, fbmap);
-  }
-}
-
-// from firrtl front-end, the only possible attr_set_propagate will happen is the variable pre-declaration before mux, so the
-// attr_propagate could just follow the chain fbits
-void Firmap::analysis_lg_attr_set_propagate(Node &node_attr, FBMap &fbmap) {
-  I(node_attr.is_sink_connected("parent"));
-  I(false);  // Chain is not longer in use. When is this called?
-  auto parent_attr_dpin = node_attr.get_sink_pin("chain").get_driver_pin();
-
-  auto parent_attr_it = fbmap.find(parent_attr_dpin.get_compact_class_driver());
-  if (parent_attr_it == fbmap.end()) {
-#ifndef NDEBUG
-    fmt::print("    {} input driver {} not ready\n", node_attr.debug_name(), parent_attr_dpin.debug_name());
-#endif
-    firbits_issues = true;
-    return;
-  }
-
-  const auto parent_attr_bw = parent_attr_it->second;
-  for (auto out_dpin : node_attr.out_connected_pins()) {
-    fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), parent_attr_bw);
-  }
-}
-
-void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
+void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   I(node_attr.is_sink_connected("field"));
   auto dpin_key = node_attr.get_sink_pin("field").get_driver_pin();
   auto key      = dpin_key.get_type_const().to_firrtl();
@@ -205,57 +175,26 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
   // copy parent's bw for some judgement and then update to attr_set value
   Firrtl_bits fb(0);
   bool        parent_pending   = false;
-  bool        is_set_graph_inp = false;
-  bool        has_through_dpin = false;
   if (node_attr.is_sink_connected("parent")) {
-    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
-    is_set_graph_inp  = through_dpin.is_graph_input();
-    auto it           = fbmap.find(through_dpin.get_compact_class_driver());
+    auto parent_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
+    auto it          = fbmap.find(parent_dpin.get_compact_class_driver());
     if (it != fbmap.end()) {
-      fb               = it->second;
-      has_through_dpin = true;
+      fb = it->second;
     } else {
       parent_pending = true;
     }
   }
 
-  if (attr == Attr::Set_ubits || attr == Attr::Set_sbits) {
-    I(dpin_val.get_node().is_type_const());
-    auto val = dpin_val.get_node().get_type_const();
-    // auto attr_dpin = node_attr.get_driver_pin("Y");
+  I(attr == Attr::Set_ubits || attr == Attr::Set_sbits);
+  I(dpin_val.get_node().is_type_const());
 
-    if (attr == Attr::Set_ubits) {
-#if 0
-      // NO checks. The lgtuple is not built and compares things like foo.bar.__ubits with foo.xxx.__ubits
-      if (fb.get_sign() == true && has_through_dpin && !is_set_graph_inp)
-        I(false, "cannot set ubits to a signed parent node in firrtl!");
+  auto val = dpin_val.get_node().get_type_const();
+  auto bits = val.to_i();
 
-      if (fb.get_bits() && (fb.get_bits()) > (val.to_i())) {
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}ubits, but constrained to {}ubits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
-			}
-#else
-      (void)has_through_dpin;
-      (void)is_set_graph_inp;
-#endif
-      // "0.__ubits"
-      // if (val.is_i()) {
-      fb.set_bits_sign(val.to_i(), false);
-      // }
-
-    } else {  // Attr::Set_sbits
-#if 0
-      // NO checks. The lgtuple is not built and compares things like foo.bar.__ubits with foo.xxx.__ubits
-      if (fb.get_sign() == false && has_through_dpin && !is_set_graph_inp)
-        I(false, "cannot set sbits to an unsigned parent node in firrtl!");
-
-      if (fb.get_bits() && fb.get_bits() > (val.to_i()))
-        Pass::error("Firrtl bitwidth mismatch. Variable {} needs {}sbits, but constrained to {}sbits\n", attr_dpin.debug_name(), fb.get_bits(), val.to_i());
-#endif
-
-      fb.set_bits_sign(val.to_i(), true);
-    }
-  } else {
-    I(false);
+  if (attr == Attr::Set_ubits) {
+    fb.set_bits_sign(bits, false);
+  } else {  // Attr::Set_sbits
+    fb.set_bits_sign(bits, true);
   }
 
   for (auto out_dpin : node_attr.out_connected_pins()) {
@@ -264,10 +203,11 @@ void Firmap::analysis_lg_attr_set_new_attr(Node &node_attr, FBMap &fbmap) {
 
   // upwards propagate for one step node_attr, most graph input bits are set here
   if (parent_pending) {
-    auto through_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
-    fbmap.insert_or_assign(through_dpin.get_compact_class_driver(), fb);
+    auto parent_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
+    fbmap.insert_or_assign(parent_dpin.get_compact_class_driver(), fb);
   }
 }
+
 
 void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
   auto dpin_lhs = node_dp.get_sink_pin("parent").get_driver_pin();

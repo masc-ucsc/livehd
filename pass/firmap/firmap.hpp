@@ -31,7 +31,6 @@ protected:
   void analysis_lg_attr_set(Node &node, FBMap &fbmap);
   void analysis_lg_attr_set_dp_assign(Node &node, FBMap &fbmap);
   void analysis_lg_attr_set_new_attr(Node &node, FBMap &fbmap);
-  void analysis_lg_attr_set_propagate(Node &node, FBMap &fbmap);
   void analysis_lg_flop(Node &node, FBMap &fbmap);
   void analysis_lg_mux(Node &node, FBMap &fbmap);
   void analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap);

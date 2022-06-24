@@ -1091,7 +1091,7 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   Node_pin parent_dpin;
   if (node_attr.is_sink_connected("parent")) {
     parent_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
-    auto it           = bwmap.find(parent_dpin.get_compact_class());
+    auto it = bwmap.find(parent_dpin.get_compact_class());
     if (it != bwmap.end()) {
       bw             = it->second;
       parent_pending = false;
@@ -1102,7 +1102,6 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   auto val = dpin_val.get_node().get_type_const();
 
   if (attr == Attr::Set_ubits) {
-
     Bits_t bits = val.to_i();
 
     if (!parent_pending) {
@@ -1122,22 +1121,23 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
                     attr_dpin.debug_name(),
                     bw.get_min(),
                     bits);
-
       }
-    }else{
+    } else {
       bw.set_ubits_range(bits);
     }
 
-    if (bw.get_sbits()<=bits) { // no need to constrain, just connect parent
+    if (bw.get_sbits() <= bits) { // no need to constrain, just connect parent
       if (parent_dpin.is_invalid()) {
         parent_dpin    = node_attr.create_const(0).setup_driver_pin();
         parent_pending = false;
       }
+
       for (auto &e : node_attr.out_edges()) {
         parent_dpin.connect(e.sink);
       }
+      
       node_attr.del_node();
-    }else{
+    } else {
       insert_tposs_nodes(node_attr, bits, fwd_it);
     }
   } else if (attr == Attr::Set_sbits) {
@@ -1162,7 +1162,7 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
                     bits);
 
       }
-    }else{
+    } else {
       bw.set_sbits_range(bits);
     }
   } else if (attr == Attr::Set_max) {
@@ -1178,7 +1178,7 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   if (!node_attr.is_invalid()) {
     set_bits_sign(attr_dpin, bw);
     bwmap.insert_or_assign(attr_dpin.get_compact_class(), bw);
-    for(auto &e:attr_dpin.out_edges()) {
+    for(auto &e : attr_dpin.out_edges()) {
       if (!e.sink.is_type_flop())
         continue;
 
