@@ -228,19 +228,19 @@ cc_library(
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
+    
+    # issue-C: verilog gen: some node doesn't have bits set? 
+    # ghost n53_or floating around
+    # "MulAddRecFNToRaw_preMul"
+    # "DivSqrtRecF64ToRaw_mulAddZ31"
 
 
     # issue-7: #reg_misa___0 lgtuple assertion !is_root_attribute(key)
     # "CSRFile"
 
-    # issue-A: need last value of a variable??
-    # "DivSqrtRecF64ToRaw_mulAddZ31"
 
     # issue-B: non-flattend wire variable _T_ctrl.br_type??
     # "IssueSlot*"
-
-    # issue-C: firbits signness unequal
-    # "MulAddRecFNToRaw*"
 
 
     # BoomCore passing submodules

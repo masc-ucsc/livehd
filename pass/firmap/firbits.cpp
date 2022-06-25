@@ -90,31 +90,18 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
   } while (firbits_wait_flop);
 }
 
+
+/* * *
+ * we know firrtl flop bits originally, set on the qpin directly, no need to be propagated from other node
+ * * */
 void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
   I(node.is_sink_connected("din"));
   auto qpin = node.get_driver_pin();
   auto bits = qpin.get_bits() - 1; // turn from lgraph signed bits back to firrtl ubits 
-  fbmap.insert_or_assign(qpin.get_compact_class_driver(), Firrtl_bits(bits, false));
-  
-  // deprecated
-  // auto d_dpin    = node.get_sink_pin("din").get_driver_pin();
-  // auto it_d_dpin = fbmap.find(d_dpin.get_compact_class_driver());
-
-  // if (it_d_dpin != fbmap.end()) {
-  //   auto bits = it_d_dpin->second.get_bits();
-  //   auto sign = it_d_dpin->second.get_sign();
-  //   fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(bits, sign));
-  //   return;
-  // } else {
-// #ifndef NDEBUG
-  //   auto qpin = node.get_driver_pin();
-  //   fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
-  //   fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
-// #endif
-
-  //   firbits_issues = true;
-  //   return;
-  // }
+  auto it = fbmap.find(qpin.get_compact_class_driver());
+  if (it == fbmap.end()) {
+    fbmap.insert_or_assign(qpin.get_compact_class_driver(), Firrtl_bits(bits, false));
+  }
 }
 
 void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
@@ -128,6 +115,7 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
   for (auto e : inp_edges) {
     if (e.sink.get_pid() == 0)
       continue;  // Skip select
+
 
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it != fbmap.end()) {
@@ -176,7 +164,7 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
 
   I(dpin_key.get_node().is_type_const());
 
-  // copy parent's bw for some judgement and then update to attr_set value
+  // copy parent's fb for some judgement and then update to attr_set value
   Firrtl_bits fb(0); 
   bool        parent_pending = false;
   auto        parent_dpin    = node_attr.get_sink_pin("parent").get_driver_pin();
@@ -201,15 +189,18 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   } else {  // Attr::Set_sbits
     fb.set_bits_sign(bits, true);
   }
+
+  auto attr_dpin = node_attr.get_driver_pin();
+
   
   // original
   if (parent_dpin.is_graph_input()) {
-    for (auto out_dpin : node_attr.out_connected_pins()) {
+    for (auto out_dpin : node_attr.out_connected_pins()) 
       fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), fb);
-    }
+  } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%'){
+      fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   } else {
     for (auto &e : node_attr.out_edges()) {
-      // parent_dpin.connect(e.sink);
       auto sink_node = e.sink.get_node();
       if (sink_node.is_type_flop()) { // this includes all submodule and __fir_ops
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
@@ -218,7 +209,6 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
         fbmap.insert_or_assign(dpin_of_sink_node.get_compact_class_driver(), fb);
       }
     }
-    // node_attr.del_node();
   }
   
 
