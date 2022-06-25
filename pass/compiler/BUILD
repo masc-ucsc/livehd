@@ -218,30 +218,26 @@ cc_library(
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
-    
-    # issue-5: non-LEC
-    # "ALU"
-    # "RenameMapTable"
-    # "DecodeUnit"
-    # "MulDiv"
-    # --------- memory read port mismatch from the lgcheck2.err log ----------
-    # "RegisterFileSynthesizable"
-    # "RegisterFileSynthesizable_1"
-    # "RegisterFileSynthesizable_2"
-    
+
     # issue-C: verilog gen: some node doesn't have bits set? 
     # ghost n53_or floating around
     # "MulAddRecFNToRaw_preMul"
     # "DivSqrtRecF64ToRaw_mulAddZ31"
 
-
     # issue-7: #reg_misa___0 lgtuple assertion !is_root_attribute(key)
     # "CSRFile"
 
-
-    # issue-B: non-flattend wire variable _T_ctrl.br_type??
-    # "IssueSlot*"
-
+    # issue-5: non-LEC
+    # "ALU"
+    # "RenameMapTable"
+    # "DecodeUnit"
+    # "MulDiv"
+    # "IssueSlot_1"
+    # --------- memory read port mismatch from the lgcheck2.err log ----------
+    # "RegisterFileSynthesizable"
+    # "RegisterFileSynthesizable_1"
+    # "RegisterFileSynthesizable_2"
+    
 
     # BoomCore passing submodules
     # "Arbiter_15"
