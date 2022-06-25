@@ -1823,24 +1823,26 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
     auto str_val = inite.uint_literal().value().value();
     initial_node = Lnast_node::create_const(str_val);
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
-    auto ref_str_pre = inite.reference().id();
-    std::string ref_str;
-    if (head_chopped_hier_name != "") {
-      ref_str = absl::StrCat(ref_str_pre, "_", head_chopped_hier_name);
-    } else {
-      ref_str = ref_str_pre;
-    }
+
+    (void) head_chopped_hier_name;
+    // auto ref_str_pre = inite.reference().id();
+    // std::string ref_str;
+    // if (head_chopped_hier_name != "") {
+    //   ref_str = absl::StrCat(ref_str_pre, "_", head_chopped_hier_name);
+    // } else {
+    //   ref_str = ref_str_pre;
+    // }
 
 
-    auto empty_tup_add_op  = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-    auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var());
-    lnast.add_child(empty_tup_add_op, empty_tup_add_var);
+    // auto empty_tup_add_op  = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+    // auto empty_tup_add_var = Lnast_node::create_ref(create_tmp_var());
+    // lnast.add_child(empty_tup_add_op, empty_tup_add_var);
 
-    auto get_mask_op = lnast.add_child(parent_node, Lnast_node::create_get_mask());
-    initial_node     = Lnast_node::create_ref(create_tmp_var());
-    lnast.add_child(get_mask_op, initial_node);
-    lnast.add_child(get_mask_op, Lnast_node::create_ref(ref_str));
-    lnast.add_child(get_mask_op, empty_tup_add_var);
+    // auto get_mask_op = lnast.add_child(parent_node, Lnast_node::create_get_mask());
+    // initial_node     = Lnast_node::create_ref(create_tmp_var());
+    // lnast.add_child(get_mask_op, initial_node);
+    // lnast.add_child(get_mask_op, Lnast_node::create_ref(ref_str));
+    // lnast.add_child(get_mask_op, empty_tup_add_var);
   }
 
   if (!initial_node.is_invalid())

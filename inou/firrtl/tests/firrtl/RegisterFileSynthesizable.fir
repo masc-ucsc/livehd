@@ -1,0 +1,55 @@
+circuit RegisterFileSynthesizable :
+  module RegisterFileSynthesizable : 
+    input clock : Clock
+    input reset : UInt<1>
+    output io : {read_ports : {flip addr : UInt<6>, data : UInt<65>}[3], flip write_ports : {valid : UInt<1>, bits : {addr : UInt<6>, data : UInt<65>}}[2]}
+    
+    clock is invalid
+    reset is invalid
+    io is invalid
+    cmem regfile : UInt<65>[48] @[regfile.scala 117:20]
+    wire read_data : UInt<65>[3] @[regfile.scala 122:23]
+    reg read_addrs_0 : UInt, clock @[regfile.scala 125:50]
+    read_addrs_0 <= io.read_ports[0].addr @[regfile.scala 125:50]
+    reg read_addrs_1 : UInt, clock @[regfile.scala 125:50]
+    read_addrs_1 <= io.read_ports[1].addr @[regfile.scala 125:50]
+    reg read_addrs_2 : UInt, clock @[regfile.scala 125:50]
+    read_addrs_2 <= io.read_ports[2].addr @[regfile.scala 125:50]
+    node _T = or(read_addrs_0, UInt<6>("h00")) @[regfile.scala 128:28]
+    node _T_1 = bits(_T, 5, 0) @[regfile.scala 128:28]
+    infer mport _T_2 = regfile[_T_1], clock @[regfile.scala 128:28]
+    read_data[0] <= _T_2 @[regfile.scala 128:18]
+    node _T_3 = or(read_addrs_1, UInt<6>("h00")) @[regfile.scala 128:28]
+    node _T_4 = bits(_T_3, 5, 0) @[regfile.scala 128:28]
+    infer mport _T_5 = regfile[_T_4], clock @[regfile.scala 128:28]
+    read_data[1] <= _T_5 @[regfile.scala 128:18]
+    node _T_6 = or(read_addrs_2, UInt<6>("h00")) @[regfile.scala 128:28]
+    node _T_7 = bits(_T_6, 5, 0) @[regfile.scala 128:28]
+    infer mport _T_8 = regfile[_T_7], clock @[regfile.scala 128:28]
+    read_data[2] <= _T_8 @[regfile.scala 128:18]
+    io.read_ports[0].data <= read_data[0] @[regfile.scala 154:29]
+    io.read_ports[1].data <= read_data[1] @[regfile.scala 154:29]
+    io.read_ports[2].data <= read_data[2] @[regfile.scala 154:29]
+    when io.write_ports[0].valid : @[regfile.scala 162:24]
+      infer mport _T_9 = regfile[io.write_ports[0].bits.addr], clock @[regfile.scala 163:14]
+      _T_9 <= io.write_ports[0].bits.data @[regfile.scala 163:32]
+      skip @[regfile.scala 162:24]
+    when io.write_ports[1].valid : @[regfile.scala 162:24]
+      infer mport _T_10 = regfile[io.write_ports[1].bits.addr], clock @[regfile.scala 163:14]
+      _T_10 <= io.write_ports[1].bits.data @[regfile.scala 163:32]
+      skip @[regfile.scala 162:24]
+    node _T_11 = eq(io.write_ports[0].valid, UInt<1>("h00")) @[regfile.scala 171:16]
+    node _T_12 = eq(io.write_ports[1].valid, UInt<1>("h00")) @[regfile.scala 172:16]
+    node _T_13 = or(_T_11, _T_12) @[regfile.scala 171:41]
+    node _T_14 = neq(io.write_ports[0].bits.addr, io.write_ports[1].bits.addr) @[regfile.scala 173:45]
+    node _T_15 = or(_T_13, _T_14) @[regfile.scala 172:41]
+    node _T_16 = eq(io.write_ports[0].bits.addr, UInt<1>("h00")) @[regfile.scala 174:45]
+    node _T_17 = or(_T_15, _T_16) @[regfile.scala 173:78]
+    node _T_18 = bits(reset, 0, 0) @[regfile.scala 171:15]
+    node _T_19 = or(_T_17, _T_18) @[regfile.scala 171:15]
+    node _T_20 = eq(_T_19, UInt<1>("h00")) @[regfile.scala 171:15]
+    when _T_20 : @[regfile.scala 171:15]
+      printf(clock, UInt<1>(1), "Assertion failed: [regfile] too many writers a register\n    at regfile.scala:171 assert(!io.write_ports(i).valid ||\n") @[regfile.scala 171:15]
+      stop(clock, UInt<1>(1), 1) @[regfile.scala 171:15]
+      skip @[regfile.scala 171:15]
+    
