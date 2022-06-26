@@ -71,7 +71,8 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
       } else if (op == Ntype_op::Const) {
         analysis_lg_const(node, fbmap);
       } else if (op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
-        continue;  // Nothing to do for this
+        node.dump();
+        I(false); // cprop should clean up all the TupAdd and TupGet nodes
       } else if (op == Ntype_op::AttrSet) {
         analysis_lg_attr_set(node, fbmap);
         if (node.is_invalid())

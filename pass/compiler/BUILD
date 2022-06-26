@@ -213,7 +213,7 @@ cc_library(
     # %io_com_xcpt_bits_cause_1_d0_lg__firrtl_Rob not ready *****
     # "Rob"
 
-    # issue-3: remaining TupAdd after cprop
+    # issue-3: non-of the TupAdds are solved after cprop
     # (firbits iterations > 10 is solved)
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
