@@ -800,8 +800,12 @@ void Bitwidth::process_assignment_or(Node &node, XEdge_iterator &inp_edges) {
     not_finished = true;
     return;
   }
+  for (auto &out : node.out_edges()) {
+    inp_edges[0].driver.connect_sink(out.sink);
+  }
+  node.del_node();
 
-  adjust_bw(node.get_driver_pin(), it->second);
+  //adjust_bw(node.get_driver_pin(), it->second);
 }
 
 void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
