@@ -624,12 +624,15 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
   } else if (op == Ntype_op::Const) {
     // final_expr = node.get_type_const().to_verilog();
     return;  // Done before at create_locals
-  } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrSet || op == Ntype_op::AttrGet) {
+  } else if (op == Ntype_op::TupAdd || op == Ntype_op::TupGet || op == Ntype_op::AttrGet) {
     node.dump();
     Pass::error("could not generate verilog unless it is low level Lgraph node:{} is type {}\n",
                 node.debug_name(),
                 Ntype::get_name(op));
     return;
+  } else if (op == Ntype_op::AttrSet) {
+    //final_expr = get_expression(node.get_sink_pin("parent").get_driver_pin());
+    return; // just drop it
   } else {
     std::string txt_op;
     if (op == Ntype_op::Mult)
@@ -749,7 +752,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
       continue;
 
     if (node.get_driver_pin().get_bits() == 0) {
-      if (!node.is_type_const()) {
+      if (op != Ntype_op::Const && op != Ntype_op::AttrSet) {
         node.dump();
         Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
       }
@@ -968,6 +971,30 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
           add_to_pin2var(fout, a_dpin, name2, false);
         }
       }
+    } else if (op == Ntype_op::AttrSet) {
+      auto dpin_key = node.get_sink_pin("field").get_driver_pin();
+      I(dpin_key.get_node().is_type_const());
+      auto key  = dpin_key.get_type_const().to_field();
+
+      bool dp_assign = str_tools::ends_with(key, "__dp_assign");
+
+      Node_pin attr_dpin;
+      if (dp_assign) {
+        attr_dpin = node.get_sink_pin("value").get_driver_pin();
+      }else{
+        attr_dpin = node.get_sink_pin("parent").get_driver_pin();
+      }
+      std::string attr_name;
+      if (attr_dpin.is_invalid()) {
+        attr_name = "0";
+      }else{
+        attr_name = get_wire_or_const(attr_dpin);
+        add_to_pin2var(fout, attr_dpin, attr_name, out_unsigned);
+      }
+
+      pin2expr.insert({node.get_driver_pin().get_compact_class(), Expr(attr_name, false)});
+
+      continue;
     } else if (!node.is_type_flop()) {
       if (node.has_name() && node.get_name()[0] != '_')
         continue;

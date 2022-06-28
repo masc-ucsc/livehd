@@ -452,7 +452,7 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
       }
       lg->add_edge(field_pos_dpin, field_pos_spin);
       lg->add_edge(value_dpin, value_spin);
-      
+
       auto tup_add_dpin = tup_add.setup_driver_pin();
       name2dpin[tup_name] = tup_add_dpin;
       tup_add_dpin.set_name(tup_name);
@@ -497,7 +497,7 @@ void Lnast_tolg::process_ast_tuple_struct(Lgraph *lg, const Lnast_nid &lnidx_tup
 
 Node_pin Lnast_tolg::create_inp_tg(Lgraph *lg, std::string_view input_field) {
   auto tup_get_inp = lg->create_node(Ntype_op::TupGet);
- 
+
   auto tn_spin     = tup_get_inp.setup_sink_pin("parent");
   auto tn_dpin     = name2dpin["$"];
   tn_dpin.connect_sink(tn_spin);
@@ -828,7 +828,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
         auto tn_spin = tup_add.setup_sink_pin("parent");
         tn_dpin.connect_sink(tn_spin);
       }
-      
+
       auto ta_dpin = tup_add.setup_driver_pin();
       name2dpin.insert_or_assign(tup_sname, ta_dpin);
       ta_dpin.set_name(tup_sname);
@@ -1058,7 +1058,7 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   if (lnast->get_type(lnidx_opd).is_const()) {  // High priority in search to avoid alias
     auto node_dpin  = create_const(lg, vname);
     I(!node_dpin.is_invalid());
-    name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table    
+    name2dpin[name] = node_dpin;  // for io and reg, the %$# identifier are still used in symbol table
     return node_dpin;
   }
 
@@ -1138,7 +1138,7 @@ Node_pin Lnast_tolg::create_scalar_access_tg(Lgraph *lg, const Node_pin &tg_tupn
   auto tn_dpin = tg_tupname_dpin;
 
   // must be pos 0 as the case is "bar = a + 1", implicitly get a.0
-  auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();  
+  auto field_pos_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
   tn_dpin.connect_sink(tn_spin);
   field_pos_dpin.connect_sink(field_pos_spin);
   return tup_get.setup_driver_pin();
@@ -1156,7 +1156,7 @@ Node_pin Lnast_tolg::create_const(Lgraph *lg, std::string_view const_str) {
     // NOTE: FIRRTL needs bits in constants for the bitwidth inference pass.
     // TODO: It may be cleaner to create a __fir_const sub in the LNAST gen
     auto lg_fir_const_node = lg->create_node_sub("__fir_const");
-    auto fir_const_node_dpin = lg_fir_const_node.setup_driver_pin("Y"); 
+    auto fir_const_node_dpin = lg_fir_const_node.setup_driver_pin("Y");
     fir_const_node_dpin.set_name(const_str);
     return fir_const_node_dpin;
   } else {

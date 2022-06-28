@@ -78,6 +78,7 @@ do
   mkdir -p tmp_slang
 
   echo "inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.compiler |> lgraph.save odir:lgdb_slang"  | ${LGSHELL} -q >tmp_slang/${input}.log 2>tmp_slang/${input}.err
+  echo "CMD: inou.verilog path:lgdb_slang top:${base} files:${full_input} |> pass.compiler |> lgraph.save odir:lgdb_slang"
   if [ $? -eq 0 ]; then
     echo "Successfully created graph from ${input}"
   else
@@ -105,6 +106,7 @@ do
 
   echo "lgraph.match path:lgdb_slang |> pass.cprop |> inou.cgen.verilog odir:tmp_slang" | ${LGSHELL} -q 2>tmp_slang/${input}.err
   LC=$(grep -iv Warning tmp_slang/${input}.err | grep -v perf_event | grep -v "recommended to use " | grep -v "IPC=" | wc -l | cut -d" " -f1)
+  echo "lgraph.match path:lgdb_slang |> pass.cprop |> inou.cgen.verilog odir:tmp_slang"
   if [[ $LC -gt 0 ]]; then
     echo "FAIL: Faulty $LC err verilog file tmp_slang/${input}.err"
     ((fail++))

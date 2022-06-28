@@ -685,8 +685,7 @@ void Bitwidth::process_get_mask(Node &node) {
     auto tmp = Lconst(-1).get_mask_op(mask_val);
     if (tmp > res_max)
       res_max = tmp;
-    if (tmp < res_min)
-      res_min = tmp;
+    res_min = Lconst(0);
 
     a_min = a_min.neg_op();
   }
@@ -1483,13 +1482,35 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     }
   }
 
-  if (!hier && !not_finished) {
+  if (false && !hier && !not_finished) {
     // delete all the attr_set/get for bitwidth
     for (auto node : lg->fast()) {  // Non-hierarchical erase attr
       auto op = node.get_type_op();
       if (op == Ntype_op::AttrSet) {
         try_delete_attr_node(node);
+        continue;
       }
+#if 0
+      // DISABLED because the fast iterator can delete inputs for
+      // attr_set node before the attr_set is evaluated
+
+      if (op == Ntype_op::Const)
+        continue;
+      for (auto dpin : node.out_connected_pins()) {
+        auto it = bwmap.find(dpin.get_compact_class());
+        if (it == bwmap.end())
+          continue;
+        auto v = it->second.get_max();
+        if (it->second.get_min() != v)
+          continue;
+        fmt::print("could delete node:{} with value:{}\n",node.debug_name(), v.to_pyrope());
+        auto data_dpin = node.create_const(v);
+        for (auto e : dpin.out_edges()) {
+          e.sink.connect_driver(data_dpin);
+        }
+        dpin.del();
+      }
+#endif
     }
   }
 

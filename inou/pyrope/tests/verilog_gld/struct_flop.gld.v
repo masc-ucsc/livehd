@@ -21,7 +21,7 @@ always @(*) begin
   out = flop_next;
 end
 
-always @(posedge clk2) begin
+always @(negedge clk2) begin
    flop_q <= flop_next;
 end
 

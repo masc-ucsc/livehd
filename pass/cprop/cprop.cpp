@@ -2071,7 +2071,7 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, std::string_view key_name
 
     value_dpin = attr_node.setup_driver_pin("Y");  // to chain all the attributes
     auto str   = node_tup->get_name();
-    if (!str.empty())
+    if (!str.empty() && Node_pin::find_driver_pin(node.get_class_lgraph(), str).is_invalid())
       value_dpin.set_name(str);
     else if (value_dpin.has_name())
       value_dpin.del_name();
