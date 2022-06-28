@@ -351,6 +351,7 @@ void Firmap::map_node_fir_cat(Node &old_node, Lgraph *new_lg, FBMap &fbmap, PinM
 
       auto e2_bits        = it->second.get_bits();
       auto new_node_const = new_lg->create_node_const(e2_bits);
+      I(e2_bits >=0);
       new_node_const.connect_driver(new_node_shl.setup_sink_pin("B"));   // e2.fbits -> shl
       pinmap.insert_or_assign(e.sink, new_node_or.setup_sink_pin("A"));  // e2 -> or
     }

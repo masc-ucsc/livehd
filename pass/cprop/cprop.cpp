@@ -1018,6 +1018,10 @@ void Cprop::tuple_subgraph(const Node &node) {
             tuple_issues = true;
           } else {
             fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
+
+            node.dump();
+            node_tup->dump();
+
             for (auto i = 0u; i < read_map.size(); ++i) {
               if (read_map[i]) {
                 fmt::print(" {}", i);
@@ -1132,8 +1136,8 @@ void Cprop::tuple_tuple_add(const Node &node) {
           return;
         }
         node_tup = std::make_shared<Lgtuple>(tup_name);
-        // node_tup->add(parent_dpin); // Maybe missing tuple field?
-        node_tup->add(key_name, value_tup);
+        node_tup->add(parent_dpin); // Maybe missing tuple field?
+        // node_tup->add(key_name, value_tup);
       } break;
       case 0x3: { // has_parent_scalar && has_value_scalar
         node_tup = std::make_shared<Lgtuple>(tup_name);
@@ -2285,8 +2289,10 @@ void Cprop::tuple_pass(Lgraph *lg) {
       break;
   }
 
-  if (tuple_issues)
+  if (tuple_issues) {
+    fmt::print("DEBUG AAA\n");
     return;
+  }
 
   // tuple chain clean up and connect default flop pins
   for (auto node : lg->fast()) {

@@ -160,8 +160,8 @@ protected:
   std::string create_tmp_mut_var();
   void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
   void        declare_register(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
-  void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name,
-                                        const firrtl::FirrtlPB_Expression &resete, const firrtl::FirrtlPB_Expression &inite, std::string_view head_chopped_hier_name);
+  void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name, const firrtl::FirrtlPB_Expression &resete,
+                                        const firrtl::FirrtlPB_Expression &inite, std::string_view head_chopped_hier_name, bool bits_set_done);
 
   // Helper Functions (for handling specific cases)
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
@@ -169,7 +169,6 @@ protected:
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
-  void     setup_register_bits(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string_view id, Lnast_nid &parent_node);
   void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void     split_hier_name(std::string_view                                                    hier_name,

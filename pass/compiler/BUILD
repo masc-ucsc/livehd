@@ -211,21 +211,18 @@ cc_library(
 
     # issue-2: bitwidth mismatch on memory output *****
     # %io_com_xcpt_bits_cause_1_d0_lg__firrtl_Rob not ready *****
-    # "Rob"
+    # "Rob" fitbits
 
-    # issue-3: non-of the TupAdds are solved after cprop
-    # (firbits iterations > 10 is solved)
+    # issue-3: non-of the TupAdds are solved after cprop because if
+    # tuple_issues flag remains (by the way, firbits iterations > 10 is solved)
+    # next step: reproduce by a cascated memory?
     # "BranchKillableQueue_3"
     # "BranchKillableQueue_4"
     # "BranchKillableQueue_5"
 
-    # issue-C: verilog gen: some node doesn't have bits set? 
-    # ghost n53_or floating around
-    # "MulAddRecFNToRaw_preMul"
-    # "DivSqrtRecF64ToRaw_mulAddZ31"
-
-    # issue-7: #reg_misa___0 lgtuple assertion !is_root_attribute(key)
+    # issue-7: verilog-gen mux doesn't have bits
     # "CSRFile"
+
 
     # issue-5: non-LEC
     # "ALU"
@@ -237,6 +234,9 @@ cc_library(
     # "RegisterFileSynthesizable"
     # "RegisterFileSynthesizable_1"
     # "RegisterFileSynthesizable_2"
+    # --------- Looks like the msb signedness problem ------------------------
+    # "MulAddRecFNToRaw_preMul"
+    # "DivSqrtRecF64ToRaw_mulAddZ31"
     
 
     # BoomCore passing submodules
@@ -267,3 +267,11 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 )
+
+
+# Intro
+# Related
+# LNAST + eval  
+# LGrph + eval
+# Para + eval
+# Conclusion

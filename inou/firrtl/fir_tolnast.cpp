@@ -298,9 +298,12 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
       }
 
       std::replace(id.begin(), id.end(), '.', '_');
-      // fmt::print("DEBUG CCC flattend vec id:{}\n", id);
-      setup_register_bits(lnast, type, absl::StrCat("#", id), parent_node);
-      setup_register_reset_init(lnast, parent_node, id, stmt.register_().reset(), stmt.register_().init(), head_chopped_hier_name);
+
+      auto reg_bits = get_bit_count(type);
+      bool bits_set_done = reg_bits > 0 ? true : false; // some chirrtl code don't have bits set on register, but must have bits set on init expression
+      setup_register_bits_scalar(lnast, absl::StrCat("#", id), reg_bits, parent_node, false);
+      setup_register_reset_init(lnast, parent_node, id, stmt.register_().reset(), stmt.register_().init(), head_chopped_hier_name, bits_set_done);
+      
       declare_register(lnast, parent_node, id);
       setup_register_q_pin(lnast, parent_node, id);
       break;
@@ -372,56 +375,10 @@ void Inou_firrtl_module::wire_init_flip_handling(Lnast& lnast, const firrtl::Fir
 // When creating a register, we have to set the register's
 // clock, reset, and init values using "dot" nodes in the LNAST.
 // These functions create all of those when a reg is first declared.
-void Inou_firrtl_module::setup_register_bits(Lnast& lnast, const firrtl::FirrtlPB_Type& type, std::string_view id,
-                                             Lnast_nid& parent_node) {
-  switch (type.type_case()) {
-    case firrtl::FirrtlPB_Type::kBundleType: {  // Bundle Type
-      for (int i = 0; i < type.bundle_type().field_size(); i++) {
-        setup_register_bits(lnast,
-                            type.bundle_type().field(i).type(),
-                            absl::StrCat(id, ".", type.bundle_type().field(i).id()),
-                            parent_node);
-      }
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kVectorType: {  // Vector Type
-      for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        setup_register_bits(lnast, type.vector_type().type(), absl::StrCat(id, ".", i), parent_node);
-      }
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kFixedType: {  // Fixed Point
-      I(false);                                // FIXME: Unsure how to implement
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kAsyncResetType: {  // AsyncReset
-      auto reg_bits = get_bit_count(type);
-      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, false);
-      async_rst_names.emplace(id.substr(1));
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kSintType: {
-      auto reg_bits = get_bit_count(type);
-      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, true);
-      break;
-    }
-    case firrtl::FirrtlPB_Type::kClockType: {
-      break;
-    }
-
-    default: {
-      /* UInt Analog Reset Types*/
-      auto reg_bits = get_bit_count(type);
-      setup_register_bits_scalar(lnast, id, reg_bits, parent_node, false);
-    }
-  }
-}
-
-void Inou_firrtl_module::setup_register_bits_scalar(Lnast& lnast, std::string_view id, uint32_t bitwidth, Lnast_nid& parent_node,
-                                                    bool is_signed) {
+void Inou_firrtl_module::setup_register_bits_scalar(Lnast& lnast, std::string_view id, uint32_t bits, Lnast_nid& parent_node, bool is_signed) {
   // Specify __bits, if bitwidth is explicit
-  if (bitwidth > 0) {
-    auto value_node = Lnast_node::create_const(bitwidth);
+  if (bits > 0) {
+    auto value_node = Lnast_node::create_const(bits);
     auto extension  = is_signed ? ".__sbits" : ".__ubits";
     create_tuple_add_from_str(lnast, parent_node, absl::StrCat(id, extension), value_node);
   }
@@ -1793,7 +1750,10 @@ void Inou_firrtl_module::declare_register(Lnast& lnast, Lnast_nid& parent_node, 
 void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& parent_node, std::string_view reg_raw_name,
                                                    const firrtl::FirrtlPB_Expression& resete,
                                                    const firrtl::FirrtlPB_Expression& inite,
-                                                   std::string_view head_chopped_hier_name) {
+                                                   std::string_view head_chopped_hier_name, bool bits_set_done) {
+
+
+
   bool tied0_reset = false;
   auto resete_case = resete.expression_case();
 
@@ -1822,6 +1782,14 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
   if (inite_case == firrtl::FirrtlPB_Expression::kUintLiteral || inite_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
     auto str_val = inite.uint_literal().value().value();
     initial_node = Lnast_node::create_const(str_val);
+
+    if (!bits_set_done) {
+      auto bits = inite.uint_literal().width().value();
+      if (bits == 0) 
+        bits = 1;
+      setup_register_bits_scalar(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, false);
+    }
+
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
     // (void) head_chopped_hier_name;
     auto ref_str_pre = inite.reference().id();

@@ -15,16 +15,19 @@ public:
   Firrtl_bits() : bits(0), sign(false) {}
 
   Firrtl_bits(const Firrtl_bits &i) {
+    I(i.bits >= 0);
     bits = i.bits;
     sign = i.sign;
   };
 
   Firrtl_bits(const Bits_t _bits, const bool _sign) {
+    // I(bits >= 0); //FIXME: ???
     bits = _bits;
     sign = _sign;
   };
 
   Firrtl_bits(const Bits_t _bits) {
+    // I(bits >= 0); //FIXME: ???
     bits = _bits;
     sign = false;
   };
