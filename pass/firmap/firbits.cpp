@@ -218,23 +218,21 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   
   // original
   if (parent_dpin.is_graph_input()) {
-    fmt::print("DEBUG BBB-1\n");
     for (auto out_dpin : node_attr.out_connected_pins()) 
       fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), fb);
   } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%'){
-      fmt::print("DEBUG BBB-2\n");
       fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   } else {
     for (auto &e : node_attr.out_edges()) {
       auto sink_node = e.sink.get_node();
       if (sink_node.is_type_flop()) { // this includes all submodule and __fir_ops
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
-        fmt::print("DEBUG BBB-3 set fb on node_dpin:{}\n", dpin_of_sink_node.debug_name());
         
         dpin_of_sink_node.set_bits(bits + 1); // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
         fbmap.insert_or_assign(dpin_of_sink_node.get_compact_class_driver(), fb);
       }
     }
+    fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   }
   
 
