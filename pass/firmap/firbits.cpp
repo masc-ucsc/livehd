@@ -32,7 +32,7 @@ void Firmap::add_map_entry(Lgraph *lg) {  // single-thread
   spinmaps_xorr.insert_or_assign(lg, XorrMap());
 }
 
-void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
+void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
   TRACE_EVENT("pass", "firbits");
   Lbench b("pass.firbits");
 
@@ -52,7 +52,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
     firbits_wait_flop = false;
 
     for (auto node : lg->forward()) {
-      // fmt::print("{}\n", node.debug_name());
       auto op = node.get_type_op();
 
       I(op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And && op != Ntype_op::Sum && op != Ntype_op::Mult
@@ -71,7 +70,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threaded
       } else if (op == Ntype_op::Const) {
         analysis_lg_const(node, fbmap);
       } else if (op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
-        node.dump();
         I(false); // cprop should clean up all the TupAdd and TupGet nodes
       } else if (op == Ntype_op::AttrSet) {
         analysis_lg_attr_set(node, fbmap);
@@ -205,6 +203,7 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   I(attr == Attr::Set_ubits || attr == Attr::Set_sbits);
   I(dpin_val.get_node().is_type_const());
   I(!parent_dpin.is_invalid());
+  fmt::print("DEBUG AAA node_attr:{}\n", node_attr.debug_name());
 
   auto val  = dpin_val.get_node().get_type_const();
   auto bits = static_cast<Bits_t>(val.to_i());
@@ -216,19 +215,21 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   }
 
   auto attr_dpin = node_attr.get_driver_pin();
-
   
   // original
   if (parent_dpin.is_graph_input()) {
+    fmt::print("DEBUG BBB-1\n");
     for (auto out_dpin : node_attr.out_connected_pins()) 
       fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), fb);
   } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%'){
+      fmt::print("DEBUG BBB-2\n");
       fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   } else {
     for (auto &e : node_attr.out_edges()) {
       auto sink_node = e.sink.get_node();
       if (sink_node.is_type_flop()) { // this includes all submodule and __fir_ops
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
+        fmt::print("DEBUG BBB-3 set fb on node_dpin:{}\n", dpin_of_sink_node.debug_name());
         
         dpin_of_sink_node.set_bits(bits + 1); // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
         fbmap.insert_or_assign(dpin_of_sink_node.get_compact_class_driver(), fb);
@@ -382,7 +383,12 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
   auto it = hier_fbmap.find(h_dpin.get_compact_class_driver());
   if (it == hier_fbmap.end()) {
 #ifndef NDEBUG
-    hier_lg->dump();
+    // hier_lg->dump();
+    fmt::print("----------------------\n");
+    fmt::print("DEBUG driver node dump\n");
+    e.driver.get_node().dump();
+    fmt::print("DEBUG sink node dump\n");
+    e.sink.get_node().dump();
     Pass::error("{} input driver {} not ready\n", e.sink.get_node().debug_name(), e.driver.debug_name());
 #endif
     firbits_issues = true;
@@ -391,8 +397,8 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
 }
 
 void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+  
   I(inp_edges.size() == 2);
-
   Bits_t bits1 = 0, bits2 = 0;
   for (auto &e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
@@ -876,6 +882,12 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
 }
 
 void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
+  auto dpin_cmpt = node.get_driver_pin("Y").get_compact_class_driver();
+  auto it2 = fbmap.find(dpin_cmpt);
+  if (it2 != fbmap.end()) 
+    return;
+  
+
   I(inp_edges.size());
   bool sign;
 

@@ -1752,8 +1752,6 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
                                                    const firrtl::FirrtlPB_Expression& inite,
                                                    std::string_view head_chopped_hier_name, bool bits_set_done) {
 
-
-
   bool tied0_reset = false;
   auto resete_case = resete.expression_case();
 
@@ -1785,8 +1783,8 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
 
     if (!bits_set_done) {
       auto bits = inite.uint_literal().width().value();
-      if (bits == 0) 
-        bits = 1;
+      // if (bits == 0) 
+      //   bits = 1;
       setup_register_bits_scalar(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, false);
     }
 
