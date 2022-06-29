@@ -1,0 +1,19 @@
+1. color propagation bug at arounf line#319 in opentimer.cpp
+
+2. opentimer should be marking from datapath launch point to capture point.
+Hence, the path starts from graph_input or flop and goes to graph_output or
+flop. Entire path colored.
+
+
+Failing examples due to set_mask:
+
+1.
+livehd> inou.verilog files:pass/locator/netlists_chirrtl/NotAnd.v |> pass.lnast_tolg |> pass.cprop |> pass.opentimer files:inou/slang/test/verilog/sky_130.lib margin:10
+  		○ Errors out with "parser/elab_scanner.cpp:461 :assertion false failed. Abort trap:6" and complains about "_attr_set_" node.
+1.1. (adding pass.bitwidth to the above command)
+livehd> inou.verilog files:pass/locator/netlists_chirrtl/NotAnd.v |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth  |> pass.opentimer files:inou/slang/test/verilog/sky_130.lib margin:10
+		○ Error: pass/opentimer/pass_opentimer.cpp:114 assertion false failed. Abort trap:6" : due to set_mask
+
+2. 
+Previous (1.1) set of commands with inou/slang/tests/verilog/sky130_rca.v and
+with inou/slang/tests/verilog/sky130_trivial.v also fails in the same way.
