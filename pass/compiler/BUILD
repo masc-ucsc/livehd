@@ -203,41 +203,53 @@ cc_library(
     "RoundAnyRawFNToRecFN",
 
     # FIXME:
-    # issue-1: memory
-    # "Smem",
-    # "SmemStruct",
-    # "MaskedSmem",
-    # "MaskedSmemStruct",
-
-    # issue-2: bitwidth mismatch on memory output *****
-    # %io_com_xcpt_bits_cause_1_d0_lg__firrtl_Rob not ready *****
-    # "Rob" fitbits
-
-    # issue-3: non-of the TupAdds are solved after cprop because if
-    # tuple_issues flag remains (by the way, firbits iterations > 10 is solved)
-    # next step: reproduce by a cascated memory?
-    # "BranchKillableQueue_3"
-    # "BranchKillableQueue_4"
-    # "BranchKillableQueue_5"
-
-    # issue-7: verilog-gen mux doesn't have bits
-    # "CSRFile"
+    # issue-layer1
+      # issue#1: memory
+      # "Smem",
+      # "SmemStruct",
+      # "MaskedSmem",
+      # "MaskedSmemStruct",
+      # issue#2: bitwidth mismatch on memory output *****
+      #          assertion it->second.get_sbits() <= addr_sbits *****
+      # "Rob" fitbits
 
 
-    # issue-5: non-LEC
-    # "ALU"
-    # "RenameMapTable"
-    # "DecodeUnit"
-    # "MulDiv"
-    # "IssueSlot_1"
-    # --------- memory read port mismatch from the lgcheck2.err log ----------
-    # "RegisterFileSynthesizable"
-    # "RegisterFileSynthesizable_1"
-    # "RegisterFileSynthesizable_2"
-    # --------- Looks like the msb signedness problem ------------------------
-    # "MulAddRecFNToRaw_preMul"
-    # "DivSqrtRecF64ToRaw_mulAddZ31"
-    
+      # issue#4: non-of the TupAdds are solved after cprop because if
+      #          tuple_issues flag remains. And the reason is that the
+      #          n150_mux tries to use TGs to get result from Mem 
+      # "MemBranchSimplified"
+      # "BranchKillableQueue_3"
+      # "BranchKillableQueue_4"
+      # "BranchKillableQueue_5"
+
+
+      # issue-5: non-LEC
+      # "ALU"
+      # "RenameMapTable"
+      # "DecodeUnit"
+      # "MulDiv"
+      # "IssueSlot_1"
+      # "CSRFile"
+      # --------- memory read port mismatch from the lgcheck2.err log ----------
+      # "RegisterFileSynthesizable"
+      # "RegisterFileSynthesizable_1"
+      # "RegisterFileSynthesizable_2"
+      # --------- Looks like the msb signedness problem ------------------------
+      # "MulAddRecFNToRaw_preMul"
+      # "DivSqrtRecF64ToRaw_mulAddZ31"
+
+
+    # issue-layer2
+      # issue#1: the inst hierarchical output might be used directly to some primOp,
+      #          see ALUUnit.fir:1377. In this case, current fir_tolnast will assume it's
+      #          an wire and try to get the flattened name of alu.io.out ...
+      #          Solution: create a temporary wire-struct immediately after the module instantiation
+      #                    also flattened this new wire-struct, so the later parent module can use it 
+      #                    as normal.
+      # "ALUUnit"
+
+
+
 
     # BoomCore passing submodules
     # "Arbiter_15"

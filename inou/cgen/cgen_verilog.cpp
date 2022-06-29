@@ -752,7 +752,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
       continue;
 
     if (node.get_driver_pin().get_bits() == 0) {
-      if (op != Ntype_op::Const && op != Ntype_op::AttrSet) {
+      if (op != Ntype_op::Const && op != Ntype_op::AttrSet && op != Ntype_op::Mux) {
         node.dump();
         Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
       }

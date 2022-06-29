@@ -225,7 +225,7 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   } else {
     for (auto &e : node_attr.out_edges()) {
       auto sink_node = e.sink.get_node();
-      if (sink_node.is_type_flop()) { // this includes all submodule and __fir_ops
+      if (sink_node.is_type_flop()) { 
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
         
         dpin_of_sink_node.set_bits(bits + 1); // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
