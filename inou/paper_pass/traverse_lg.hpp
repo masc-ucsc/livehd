@@ -58,6 +58,7 @@ protected:
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set);
   void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set);
+  std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
 
 public:
   static void travers(Eprp_var& var);
