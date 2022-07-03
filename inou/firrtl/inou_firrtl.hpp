@@ -25,7 +25,7 @@
 #include "pass.hpp"
 
 struct Global_module_info {
-  absl::flat_hash_map<std::pair<std::string, std::string>, uint8_t>                          module2io_dir;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>>    module2outputs; // <hier_name, bits, sign>
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
   
@@ -169,7 +169,7 @@ protected:
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
-  void     setup_register_bits_scalar(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
+  void     setup_scalar_bits(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
   void     split_hier_name(std::string_view                                                    hier_name,
                            std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> &hier_subnames);

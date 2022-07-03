@@ -203,7 +203,6 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   I(attr == Attr::Set_ubits || attr == Attr::Set_sbits);
   I(dpin_val.get_node().is_type_const());
   I(!parent_dpin.is_invalid());
-  fmt::print("DEBUG AAA node_attr:{}\n", node_attr.debug_name());
 
   auto val  = dpin_val.get_node().get_type_const();
   auto bits = static_cast<Bits_t>(val.to_i());
