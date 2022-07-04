@@ -157,7 +157,7 @@ cc_library(
     "PlusAnd",
 ]]
 
-# Experimental Chirrtl extension
+# CHIRRTL extension
 [sh_test(
     name = "firrtl_compile-%s" % t,
     srcs = ["tests/firrtl_compile.sh"],
@@ -223,32 +223,9 @@ cc_library(
       # "BranchKillableQueue_4"
       # "BranchKillableQueue_5"
 
-
-      # issue-5: non-LEC
-      # "ALU"
-      # "RenameMapTable"
-      # "DecodeUnit"
-      # "MulDiv"
-      # "IssueSlot_1"
-      # "CSRFile"
-      # --------- memory read port mismatch from the lgcheck2.err log ----------
-      # "RegisterFileSynthesizable"
-      # "RegisterFileSynthesizable_1"
-      # "RegisterFileSynthesizable_2"
-      # --------- Looks like the msb signedness problem ------------------------
-      # "MulAddRecFNToRaw_preMul"
-      # "DivSqrtRecF64ToRaw_mulAddZ31"
-
-
     # issue-layer2
-      # issue-n: non-LEC
-      # ALUUnit
-      # DivUnit
-      # FPToInt
 
     # BoomCore passing layer2
-    # "INToRecFN"
-
 
     # BoomCore passing layer1
     # "Arbiter_15"
@@ -279,6 +256,42 @@ sh_test(
     ],
 )
 
+[sh_test(
+    name = "firrtl_compile-%s" % t,
+    srcs = ["tests/firrtl_compile_compiles.sh"],
+    args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
+    data = [
+        "//inou/firrtl:tests/proto/%s.ch.pb" % t,
+        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
+        "//inou/firrtl:post_io_renaming.py",
+        "//main:lgshell",
+    ],
+    tags = [
+        "firrtl_compile",
+        "firrtl_compile_compiles-ch",
+    ],
+    deps = [
+        "//inou/yosys:scripts",
+    ],
+) for t in [
+    "FMADecoder_1",
+    "Mul54",
+    "PipelinedMultiplier",
+    "RecFNToIN",
+    "PredRenameStage",
+    "RenameMapTable",
+    "MulDiv",
+    "IssueSlot_1",
+    "CSRFile",
+    "RegisterFileSynthesizable",
+    "ALUUnit",
+    "FPToInt",
+    "ALU",
+    "DecodeUnit",
+    "DivUnit",
+    "MulAddRecFNToRaw_preMul",
+    "DivSqrtRecF64ToRaw_mulAddZ31",
+]]
 
 # Intro
 # Related

@@ -13,17 +13,14 @@ if [ ! -f $LGSHELL ]; then
     fi
 fi
 
-PATTERN_PATH=./inou/firrtl/tests/proto
+
+PATTERN_PATH=$(dirname $1)
 if [ -f "${PATTERN_PATH}/${file}.${FIRRTL_LEVEL}.pb" ]; then
   echo "Could not access test ${pts} at path ${PATTERN_PATH}"
   exit 1
 fi
 
 FIRRTL_LEVEL='ch'
-pts='FMADecoder_1 Mul54 PipelinedMultiplier RecFNToIN PredRenameStage
-RenameMapTable MulDiv IssueSlot_1 CSRFile RegisterFileSynthesizable ALUUnit
-FPToInt ALU DecodeUnit DivUnit MulAddRecFNToRaw_preMul
-DivSqrtRecF64ToRaw_mulAddZ31'
 
 firrtl_test() {
   echo ""
@@ -32,7 +29,7 @@ firrtl_test() {
   echo "======================================================================"
   echo "                         ${FIRRTL_LEVEL}FIRRTL Full Compilation"
   echo "======================================================================"
-  for pt in $pts
+  for pt in $1
   do
     if [ ! -f ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb ]; then
         echo "ERROR: could not find ${pt}.${FIRRTL_LEVEL}.pb in ${PATTERN_PATH}"
