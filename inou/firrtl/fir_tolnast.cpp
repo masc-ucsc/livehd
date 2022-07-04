@@ -301,9 +301,13 @@ void Inou_firrtl_module::handle_register(Lnast& lnast, const firrtl::FirrtlPB_Ty
 
       auto reg_bits = get_bit_count(type);
       bool bits_set_done = reg_bits > 0 ? true : false; // some chirrtl code don't have bits set on register, but must have bits set on init expression
-      setup_scalar_bits(lnast, absl::StrCat("#", id), reg_bits, parent_node, false);
+      if (type.type_case() == firrtl::FirrtlPB_Type::kUintType) {
+        setup_scalar_bits(lnast, absl::StrCat("#", id), reg_bits, parent_node, false);
+      } else {
+        setup_scalar_bits(lnast, absl::StrCat("#", id), reg_bits, parent_node, true);
+      }
+
       setup_register_reset_init(lnast, parent_node, id, stmt.register_().reset(), stmt.register_().init(), head_chopped_hier_name, bits_set_done);
-      
       declare_register(lnast, parent_node, id);
       setup_register_q_pin(lnast, parent_node, id);
       break;
@@ -1798,17 +1802,22 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
   Lnast_node initial_node;
 
   auto inite_case = inite.expression_case();
-  if (inite_case == firrtl::FirrtlPB_Expression::kUintLiteral || inite_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
+  if (inite_case == firrtl::FirrtlPB_Expression::kUintLiteral) {
     auto str_val = inite.uint_literal().value().value();
     initial_node = Lnast_node::create_const(str_val);
 
     if (!bits_set_done) {
       auto bits = inite.uint_literal().width().value();
-      // if (bits == 0) 
-      //   bits = 1;
       setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, false);
     }
+  } else if (inite_case == firrtl::FirrtlPB_Expression::kSintLiteral) {
+    auto str_val = inite.uint_literal().value().value();
+    initial_node = Lnast_node::create_const(str_val);
 
+    if (!bits_set_done) {
+      auto bits = inite.uint_literal().width().value();
+      setup_scalar_bits(lnast, absl::StrCat("#", reg_raw_name), bits, parent_node, true);
+    }
   } else if (inite_case == firrtl::FirrtlPB_Expression::kReference) {
     // (void) head_chopped_hier_name;
     auto ref_str_pre = inite.reference().id();
