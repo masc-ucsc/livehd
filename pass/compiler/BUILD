@@ -262,7 +262,7 @@ sh_test(
     args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
     data = [
         "//inou/firrtl:tests/proto/%s.ch.pb" % t,
-        "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
+        # "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
         "//inou/firrtl:post_io_renaming.py",
         "//main:lgshell",
     ],
