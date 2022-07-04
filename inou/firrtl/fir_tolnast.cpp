@@ -2060,6 +2060,8 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
           for (const auto &it : tup_r_sets) {
             // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
             auto pos = it.first.find_first_of('.');
+            if (pos == std::string::npos)
+              continue;
             auto head_chopped_hier_name = it.first.substr(pos + 1);
             // hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
             auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);

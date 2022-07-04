@@ -22,9 +22,9 @@ fi
 FIRRTL_LEVEL='ch'
 pts='FMADecoder_1 Mul54 PipelinedMultiplier RecFNToIN PredRenameStage
 RenameMapTable MulDiv IssueSlot_1 CSRFile RegisterFileSynthesizable ALUUnit
-FPToInt ALU DecodeUnit '
-# MulAddRecFNToRaw_preMul DivSqrtRecF64ToRaw_mulAddZ31 
-# DivUnit 
+FPToInt ALU DecodeUnit DivUnit MulAddRecFNToRaw_preMul
+DivSqrtRecF64ToRaw_mulAddZ31'
+
 firrtl_test() {
   echo ""
   echo ""
