@@ -551,115 +551,119 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     I(!matching_map.empty(), "There should be some node in matching_map to further go to pass_2");
 
     /*entry on the graph IO matched! moving to pass_2 in matching*/
-    /*First: resolve the map*/
-    for ( auto & [k,v_map]: IOtoNodeMap_synth) {
-      //for (auto& [iov,n]:v_map) 
-      for(auto it=v_map.begin(); it!=v_map.end();){
-        auto& iv = (it->first).first;//this is i/p set for [n]
-        auto& ov = (it->first).second;//this is o/p set for [n]
-        //auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
-
-        /*resolve here: if iv contains any entry from matching_map, resolve and make ivResolved. ||ly for ov*/
-        std::set<std::string> randSet1;
-        for (auto set_it =iv.begin(); set_it!=iv.end(); set_it++) {
-          if ((*set_it).find("flop:") != std::string::npos) {//if iv has flop
-            auto SflopID = (*set_it).substr(5);//synth flop name captured for comparison
-            std::vector<std::string> OflopID = get_map_val(matching_map, SflopID);//FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-            I(OflopID.size()<2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-            if(!(OflopID).empty()){
-              std::string i_r="flop:"+OflopID[0];
-              randSet1.emplace(i_r);//resolved entry in randSet1
-              //iv.erase(*set_it);
-            } else {
+    bool change_done = true;
+    while (change_done) {
+      change_done = false;
+      /*First: resolve the map*/
+      for ( auto & [k,v_map]: IOtoNodeMap_synth) {
+        //for (auto& [iov,n]:v_map) 
+        for(auto it=v_map.begin(); it!=v_map.end();){
+          auto& iv = (it->first).first;//this is i/p set for [n]
+          auto& ov = (it->first).second;//this is o/p set for [n]
+          //auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
+  
+          /*resolve here: if iv contains any entry from matching_map, resolve and make ivResolved. ||ly for ov*/
+          std::set<std::string> randSet1;
+          for (auto set_it =iv.begin(); set_it!=iv.end(); set_it++) {
+            if ((*set_it).find("flop:") != std::string::npos) {//if iv has flop
+              auto SflopID = (*set_it).substr(5);//synth flop name captured for comparison
+              std::vector<std::string> OflopID = get_map_val(matching_map, SflopID);//FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
+              I(OflopID.size()<2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
+              if(!(OflopID).empty()){
+                std::string i_r="flop:"+OflopID[0];
+                randSet1.emplace(i_r);//resolved entry in randSet1
+                //iv.erase(*set_it);
+              } else {
+                randSet1.emplace(*set_it);
+              }
+            } else { //iv value does NOT have flop
               randSet1.emplace(*set_it);
             }
-          } else { //iv value does NOT have flop
-            randSet1.emplace(*set_it);
-          }
-        }/*now we have iv resolved in randSet1!*/
-        std::set<std::string> randSet2;
-        for (auto set_it =ov.begin(); set_it!=ov.end(); set_it++) {
-          if ((*set_it).find("flop:") != std::string::npos) {//if ov has flop
-            auto SflopID = (*set_it).substr(5);//synth flop name captured for comparison
-            std::vector<std::string> OflopID = get_map_val(matching_map, SflopID);//FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-            I(OflopID.size()<2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-            if(!(OflopID).empty()){
-              std::string o_r="flop:"+OflopID[0];
-              randSet2.emplace(o_r);//resolved entry in randSet2
-              //ov.erase(*set_it);
-            } else {
+          }/*now we have iv resolved in randSet1!*/
+          std::set<std::string> randSet2;
+          for (auto set_it =ov.begin(); set_it!=ov.end(); set_it++) {
+            if ((*set_it).find("flop:") != std::string::npos) {//if ov has flop
+              auto SflopID = (*set_it).substr(5);//synth flop name captured for comparison
+              std::vector<std::string> OflopID = get_map_val(matching_map, SflopID);//FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
+              I(OflopID.size()<2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
+              if(!(OflopID).empty()){
+                std::string o_r="flop:"+OflopID[0];
+                randSet2.emplace(o_r);//resolved entry in randSet2
+                //ov.erase(*set_it);
+              } else {
+                randSet2.emplace(*set_it);
+              }
+            } else { //ov value does NOT have flop
               randSet2.emplace(*set_it);
             }
-          } else { //ov value does NOT have flop
-            randSet2.emplace(*set_it);
-          }
-        }/*now we have ov resolved in randSet2!*/
-        /*make pair<randSet1,randSet2> and replace <iv,ov> with it:*/
-        auto extracted_entry = v_map.extract(it++);
-        extracted_entry.key() = std::make_pair(randSet1,randSet2);
-        v_map.insert(std::move(extracted_entry));
-      }//end of for(auto it=v_map.begin(); it!=v_map.end();
-    }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth) //map resolved
-
-    /*printing the resolved map*/
-    fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
-    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-      for (auto& ip: ioval) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("\n");
-      
-      for(auto& [ioPair, n_list]: inMap) {
-        fmt::print("\t\t\t\t");
-        for (auto& ip: ioPair.first) {
+          }/*now we have ov resolved in randSet2!*/
+          /*make pair<randSet1,randSet2> and replace <iv,ov> with it:*/
+          auto extracted_entry = v_map.extract(it++);
+          extracted_entry.key() = std::make_pair(randSet1,randSet2);
+          v_map.insert(std::move(extracted_entry));
+        }//end of for(auto it=v_map.begin(); it!=v_map.end();
+      }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth) //map resolved
+  
+      /*printing the resolved map*/
+      fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
+      for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
+        for (auto& ip: ioval) {
           fmt::print("{}\t",ip);
         }
-        fmt::print("||| \t");
-        for (auto& op:ioPair.second) {
-          fmt::print("{}\t", op);
-        }
-        fmt::print("::: \t");
-        for (auto& n:n_list) {
-          fmt::print("{}\t", n.get_nid());
+        fmt::print("\n");
+        
+        for(auto& [ioPair, n_list]: inMap) {
+          fmt::print("\t\t\t\t");
+          for (auto& ip: ioPair.first) {
+            fmt::print("{}\t",ip);
+          }
+          fmt::print("||| \t");
+          for (auto& op:ioPair.second) {
+            fmt::print("{}\t", op);
+          }
+          fmt::print("::: \t");
+          for (auto& n:n_list) {
+            fmt::print("{}\t", n.get_nid());
+          }
+          fmt::print("\n");
         }
         fmt::print("\n");
       }
-      fmt::print("\n");
+      /*Second: do the matching part*/
+      for ( auto & [k,v_map]: IOtoNodeMap_synth) {
+        //for (auto& [iov,n]:v_map) 
+        for(auto it=v_map.begin(); it!=v_map.end();){
+          auto& iv = (it->first).first;//this is i/p set for [n]
+          auto& ov = (it->first).second;//this is o/p set for [n]
+          auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
+          /*start finding and matching in the resolved map!!:*/
+          bool foundFull = false;
+          bool foundPartial = false;
+          //for (auto [pairIO, nods]:full_orig_map) 
+          for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end(); ito++){
+            auto pairIO = ito->first;
+            auto nods = ito->second;
+            if (iv == pairIO.first && ov==pairIO.second) {
+              foundFull = true;
+              //std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
+              for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+              //full_orig_map.erase(ito++);
+              continue;
+            } else if (iv == pairIO.first || ov==pairIO.second) {
+              foundPartial = true;
+              for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+              //full_orig_map.erase(ito++);
+              continue;
+            } //else {++ito;}
+          } 
+          if (foundFull || foundPartial) {
+            v_map.erase(it++);
+            change_done = true;//FIXME: should change_done be evaluated here only?
+          } else {++it;}   
+                              
+        }//end of for(auto it=v_map.begin(); it!=v_map.end();
+      }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth)
     }
-    /*Second: do the matching part*/
-    for ( auto & [k,v_map]: IOtoNodeMap_synth) {
-      //for (auto& [iov,n]:v_map) 
-      for(auto it=v_map.begin(); it!=v_map.end();){
-        auto& iv = (it->first).first;//this is i/p set for [n]
-        auto& ov = (it->first).second;//this is o/p set for [n]
-        auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
-        /*start finding and matching in the resolved map!!:*/
-        bool foundFull = false;
-        bool foundPartial = false;
-        //for (auto [pairIO, nods]:full_orig_map) 
-        for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end(); ito++){
-          auto pairIO = ito->first;
-          auto nods = ito->second;
-          if (iv == pairIO.first && ov==pairIO.second) {
-            foundFull = true;
-            //std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
-            for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-            //full_orig_map.erase(ito++);
-            continue;
-          } else if (iv == pairIO.first || ov==pairIO.second) {
-            foundPartial = true;
-            for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-            //full_orig_map.erase(ito++);
-            continue;
-          } //else {++ito;}
-        } 
-        if (foundFull || foundPartial) {
-          v_map.erase(it++);
-        } else {++it;}   
-                            
-      }//end of for(auto it=v_map.begin(); it!=v_map.end();
-    }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth)
-
 
     /*Printing "matching map"*/
     fmt::print("\n THE MATCHING_MAP is:\n");
