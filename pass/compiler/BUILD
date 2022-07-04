@@ -201,6 +201,7 @@ cc_library(
     "RegisterReadDecode",
     "RenameBusyTable",
     "RoundAnyRawFNToRecFN",
+    "INToRecFN"
 
     # FIXME:
     # issue-layer1
@@ -240,18 +241,16 @@ cc_library(
 
 
     # issue-layer2
-      # issue#1: the inst hierarchical output might be used directly to some primOp,
-      #          see ALUUnit.fir:1377. In this case, current fir_tolnast will assume it's
-      #          an wire and try to get the flattened name of alu.io.out ...
-      #          Solution: create a temporary wire-struct immediately after the module instantiation
-      #                    also flattened this new wire-struct, so the later parent module can use it 
-      #                    as normal.
-      # "ALUUnit"
+      # issue-n: non-LEC
+      # ALUUnit
+      # DivUnit
+      # FPToInt
+
+    # BoomCore passing layer2
+    # "INToRecFN"
 
 
-
-
-    # BoomCore passing submodules
+    # BoomCore passing layer1
     # "Arbiter_15"
     # "Arbiter_16"
     # "Arbiter_17"

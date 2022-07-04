@@ -745,6 +745,7 @@ void Lnast_tolg::process_ast_tuple_add_op(Lgraph *lg, const Lnast_nid &lnidx_ta)
       continue;
     } else if (child == lnast->get_last_child(lnidx_ta)) {
       val_dpin = setup_ref_node_dpin(lg, child, true);
+      I(!val_dpin.is_invalid());
     } else {
       if (lnast->get_type(child).is_ref()) {
         is_all_constant_key_ta = false;

@@ -677,11 +677,9 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
   
   const auto &module_name = inst.module_id();
   inst2module[inst.id()] = module_name;
-  fmt::print("DEBUG AAA InstanceName:{}, SubModuleName:{}\n", inst.id(), module_name);
   
   const auto &outputs_set = Inou_firrtl::glob_info.module2outputs[module_name];
   for (const auto &itr : outputs_set) {
-    fmt::print("DEBUG BBB output_name = {} {} {}\n", std::get<0>(itr), std::get<1>(itr), std::get<2>(itr));
     auto hier_name_r = absl::StrCat(inst.id(), ".", std::get<0>(itr));
     auto flattened_out_name = name_prefix_modifier_flattener(hier_name_r, false);
     create_tuple_get_for_instance_otup(lnast, parent_node, hier_name_r, flattened_out_name);
@@ -694,7 +692,6 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
  * as the first argument (the condition) of the mux. */
 void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string_view lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
-
 
 	// ori
   // std::string t_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().t_value());
@@ -1250,12 +1247,37 @@ void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_
   auto tup_merged_fields = std::string{lhs_full_name.substr(pos + 1)};
   std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
   std::replace(rhs_full_name.begin(), rhs_full_name.end(), '.', '_');
-  auto value_node = Lnast_node::create_ref(rhs_full_name);
+
+  auto first_char = rhs_full_name[0];
+  Lnast_node value_node;
+  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+    value_node = Lnast_node::create_const(rhs_full_name);
+  } else {
+    value_node = Lnast_node::create_ref(rhs_full_name);
+  }
+
   lnast.add_child(selc_node, Lnast_node::create_ref(absl::StrCat("itup_", tup_head)));
   lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
   lnast.add_child(selc_node, value_node);
+  create_wires_for_instance_itup(lnast, parent_node, lhs_full_name, rhs_full_name);
 }
 
+void Inou_firrtl_module::create_wires_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name) {
+  I(absl::StrContains(lhs_full_name, '.'));
+  auto lhs = name_prefix_modifier_flattener(lhs_full_name, false);
+  auto rhs = name_prefix_modifier_flattener(rhs_full_name, true);
+  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign());
+  lnast.add_child(asg_node, Lnast_node::create_ref(lhs));
+
+  auto first_char = rhs_full_name[0];
+  Lnast_node value_node;
+  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+    value_node = Lnast_node::create_const(rhs_full_name);
+  } else {
+    value_node = Lnast_node::create_ref(rhs_full_name);
+  }
+  lnast.add_child(asg_node, value_node);
+}
 
 void Inou_firrtl_module::create_tuple_get_for_instance_otup(Lnast& lnast, Lnast_nid& parent_node, std::string_view rhs_full_name, std::string lhs_full_name) {
   I(absl::StrContains(rhs_full_name, '.'));
@@ -2025,12 +2047,28 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // case-III: submodule instantiation IO connection     
       // note: submodule outputs has been handled during create_module_inst(),
       // where all the outputs hierarchy have been flattened as a wire through
-      // series of TupGet.  So here in kConnect we could connect with the
-      // flattened wires directly.
+      // series of TupGet.  So here we only need to handle sub inputs. 
       bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
       if (is_sub_inp_connection) {
+        // FIXME: know the hier_name_l's var2flip sets, flattened the hier wires and connect to a 
+        // corresponding rhs flattend wire with the head name of hier_name_r
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
-        create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, hier_name_r);
+
+        auto found = var2flip.find(hier_name_r);
+        if (found != var2flip.end()) {
+          auto &tup_r_sets = var2flip[hier_name_r];
+          for (const auto &it : tup_r_sets) {
+            // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
+            auto pos = it.first.find_first_of('.');
+            auto head_chopped_hier_name = it.first.substr(pos + 1);
+            // hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
+            auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
+            auto new_hier_name_r = absl::StrCat(hier_name_r, ".", head_chopped_hier_name);
+            create_tuple_add_for_instance_itup(lnast, parent_node, new_hier_name_l, new_hier_name_r);
+          }
+        } else {
+          create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, hier_name_r);
+        }
         return;
       }
       
@@ -2079,8 +2117,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         return;
       }
 
-
-       
       // case-VI: lhs == module_output && rhs == module_input
       // Pseudo Algorithm:
       // (1) get the tup_l_sets
@@ -2156,48 +2192,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
   // TODO: Attach source info into node creation (line #, col #).
 }
 
-
-bool Inou_firrtl_module::check_flipness(Lnast &lnast, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance) {
-  absl::btree_set<std::pair<std::string, bool>> *tup_sets;
-  if (is_sub_instance) { 
-    // example hier_name:  "sub_inst.io.a", need to chop sub_inst before hook
-    // with original fliptable interface
-    //
-    auto submodule_name = inst2module[tup_head];
-    I(absl::StrContains(hier_name, '.'));
-    auto chop_instance_hier_name = hier_name.substr(hier_name.find_first_of('.') + 1);
-    std::string new_tup_head;
-    auto found2 = chop_instance_hier_name.find_first_of('.');
-    if (found2 != std::string::npos) {
-      new_tup_head = chop_instance_hier_name.substr(0, found2);
-    } else {
-      new_tup_head = chop_instance_hier_name;
-    }
-
-    tup_sets = &Inou_firrtl::glob_info.var2flip[submodule_name][new_tup_head];
-    for (const auto &it : *tup_sets) {
-      if (absl::StrContains(it.first, chop_instance_hier_name)) {
-        return it.second;
-      }
-    }
-    I(false); // must hit the flipness table
-    return false;
-  } else if (input_names.find(tup_head) == input_names.end() && output_names.find(tup_head) == output_names.end()) {
-    // it's local variable or wire or register
-    tup_sets = &var2flip[tup_head];
-  } else {
-    // it's module io, check the global table
-    tup_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head];
-  }
-
-  for (const auto &it : *tup_sets) {
-    if (absl::StrContains(it.first, hier_name)) {
-      return it.second;
-    }
-  }
-  I(false); // must hit the flipness table
-  return false;
-}
 
 
 void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& parent_node) {
@@ -2301,7 +2295,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);
