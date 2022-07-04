@@ -599,8 +599,33 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         extracted_entry.key() = std::make_pair(randSet1,randSet2);
         v_map.insert(std::move(extracted_entry));
       }//end of for(auto it=v_map.begin(); it!=v_map.end();
-    }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth)
+    }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth) //map resolved
 
+    /*printing the resolved map*/
+    fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
+    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
+      for (auto& ip: ioval) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("\n");
+      
+      for(auto& [ioPair, n_list]: inMap) {
+        fmt::print("\t\t\t\t");
+        for (auto& ip: ioPair.first) {
+          fmt::print("{}\t",ip);
+        }
+        fmt::print("||| \t");
+        for (auto& op:ioPair.second) {
+          fmt::print("{}\t", op);
+        }
+        fmt::print("::: \t");
+        for (auto& n:n_list) {
+          fmt::print("{}\t", n.get_nid());
+        }
+        fmt::print("\n");
+      }
+      fmt::print("\n");
+    }
     /*Second: do the matching part*/
     for ( auto & [k,v_map]: IOtoNodeMap_synth) {
       //for (auto& [iov,n]:v_map) 
@@ -612,21 +637,21 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         bool foundFull = false;
         bool foundPartial = false;
         //for (auto [pairIO, nods]:full_orig_map) 
-        for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end();){
+        for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end(); ito++){
           auto pairIO = ito->first;
           auto nods = ito->second;
           if (iv == pairIO.first && ov==pairIO.second) {
             foundFull = true;
             //std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
             for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-            full_orig_map.erase(ito++);
+            //full_orig_map.erase(ito++);
             continue;
           } else if (iv == pairIO.first || ov==pairIO.second) {
             foundPartial = true;
             for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-            full_orig_map.erase(ito++);
+            //full_orig_map.erase(ito++);
             continue;
-          } else {++ito;}
+          } //else {++ito;}
         } 
         if (foundFull || foundPartial) {
           v_map.erase(it++);
