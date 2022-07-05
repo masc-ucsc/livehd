@@ -227,18 +227,6 @@ cc_library(
 
     # BoomCore passing layer2
 
-    # BoomCore passing layer1
-    # "Arbiter_15"
-    # "Arbiter_16"
-    # "Arbiter_17"
-    # "Arbiter_18"
-    # "FMADecoder_1"
-    # "FMADecoder_2"
-    # "Mul54"
-    # "PipelinedMultiplier"
-    # "RecFNToIN"
-    # "RecFNToIN_1"
-    # "PredRenameStage"
     
 ]]
 
@@ -292,6 +280,18 @@ sh_test(
     "MulAddRecFNToRaw_preMul",
     "DivSqrtRecF64ToRaw_mulAddZ31",
 ]]
+    # BoomCore passing layer1
+    # "Arbiter_15"
+    # "Arbiter_16"
+    # "Arbiter_17"
+    # "Arbiter_18"
+    # "FMADecoder_1"
+    # "FMADecoder_2"
+    # "Mul54"
+    # "PipelinedMultiplier"
+    # "RecFNToIN"
+    # "RecFNToIN_1"
+    # "PredRenameStage"
 
 # Intro
 # Related

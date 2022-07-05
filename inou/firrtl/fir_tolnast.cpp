@@ -682,6 +682,10 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
   const auto &module_name = inst.module_id();
   inst2module[inst.id()] = module_name;
   
+  // TODO: add instance inputs TAs and its flattened value here
+  // const auto &inputs_set = Inou_firrtl::glob_info.module2inputs[module_name];
+
+
   const auto &outputs_set = Inou_firrtl::glob_info.module2outputs[module_name];
   for (const auto &itr : outputs_set) {
     auto hier_name_r = absl::StrCat(inst.id(), ".", std::get<0>(itr));
@@ -1266,6 +1270,10 @@ void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_
   create_wires_for_instance_itup(lnast, parent_node, lhs_full_name, rhs_full_name);
 }
 
+// note: because firrtl could have ugly syntax that uses the inputs connection of an instance as
+// an RHS to connect to a node in parent module, so here we need to create the corresponding wires
+// at the arent module, most of them are useless, but in some extreme cases the parent module will
+// need them.
 void Inou_firrtl_module::create_wires_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name) {
   I(absl::StrContains(lhs_full_name, '.'));
   auto lhs = name_prefix_modifier_flattener(lhs_full_name, false);
@@ -2057,6 +2065,9 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // note: submodule outputs has been handled during create_module_inst(),
       // where all the outputs hierarchy have been flattened as a wire through
       // series of TupGet.  So here we only need to handle sub inputs. 
+
+      // FIXME: the is_sub_inp_connection flag is not necessary true. The sub-instance
+      // also have to consider flipness problem.
       bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
       if (is_sub_inp_connection) {
         // FIXME: know the hier_name_l's var2flip sets, flattened the hier wires and connect to a 
@@ -2072,7 +2083,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
             if (pos == std::string::npos)
               continue;
             auto head_chopped_hier_name = it.first.substr(pos + 1);
-            // hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
             auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
             auto new_hier_name_r = absl::StrCat(hier_name_r, ".", head_chopped_hier_name);
             create_tuple_add_for_instance_itup(lnast, parent_node, new_hier_name_l, new_hier_name_r);
@@ -2375,14 +2385,15 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
       uint64_t out_pos                 = 0;
       absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> empty_map;
       glob_info.var2flip.insert_or_assign(module_i_user_module_id, empty_map); 
-      auto empty_set = absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>{};
+      auto empty_set  = absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>{};
       glob_info.module2outputs.insert_or_assign(module_i_user_module_id, empty_set);
+      auto empty_set2 = absl::flat_hash_set<std::string>{};
+      glob_info.module2inputs.insert_or_assign(module_i_user_module_id, empty_set2);
 
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
         auto initial_set = absl::btree_set<std::pair<std::string, bool>>{};
         glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
-
         add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
       }
     } else {
@@ -2491,7 +2502,9 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     }
     case firrtl::FirrtlPB_Type::kUintType: {    // UInt type
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      if (dir == 2) {
+      if (dir == 1) {
+        glob_info.module2inputs[mod_id].insert({std::string{port_id}});
+      } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
         glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, false});
       }
@@ -2501,7 +2514,9 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     }
     case firrtl::FirrtlPB_Type::kSintType: {   // SInt type
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      if (dir == 2) {
+      if (dir == 1) {
+        glob_info.module2inputs[mod_id].insert({std::string{port_id}});
+      } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
         glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, true});
       }
@@ -2513,7 +2528,9 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Type::kAsyncResetType:   
     case firrtl::FirrtlPB_Type::kClockType: {  
       add_port_sub(sub, inp_pos, out_pos, port_id, dir);
-      if (dir == 2) {
+      if (dir == 1) {
+        glob_info.module2inputs[mod_id].insert({std::string{port_id}});
+      } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
         glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, false});
       }
@@ -2699,6 +2716,7 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, std::string_view file_name) {
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     Inou_firrtl::glob_info.module2outputs.clear();
+    Inou_firrtl::glob_info.module2inputs.clear();
     Inou_firrtl::glob_info.ext_module2param.clear();
     Inou_firrtl::glob_info.var2flip.clear();
 

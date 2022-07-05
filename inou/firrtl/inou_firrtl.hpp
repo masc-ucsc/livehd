@@ -25,12 +25,11 @@
 #include "pass.hpp"
 
 struct Global_module_info {
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>>    module2outputs; // <hier_name, bits, sign>
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>                              module2inputs;  // <hier_name>
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
   
-  // module_name to io_name to leaf_hierarchical_field_name's flip polarity(1st bool) and direction (3rd uint8).
-  // FIXME->sh: check and remove the third directional field if redundant 
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>>> var2flip; 
 };
 
