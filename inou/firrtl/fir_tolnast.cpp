@@ -5,6 +5,7 @@
 #include <iostream>
 #include <queue>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "absl/strings/match.h"
@@ -683,8 +684,12 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
   inst2module[inst.id()] = module_name;
   
   // TODO: add instance inputs TAs and its flattened value here
-  // const auto &inputs_set = Inou_firrtl::glob_info.module2inputs[module_name];
-
+  const auto &inputs_set = Inou_firrtl::glob_info.module2inputs[module_name];
+  for (const auto &itr : inputs_set) {
+    auto hier_name = absl::StrCat(inst.id(), ".", itr);
+    auto flattened_out_name = name_prefix_modifier_flattener(hier_name, false);
+    create_tuple_add_for_instance_itup(lnast, parent_node, hier_name, flattened_out_name);
+  }
 
   const auto &outputs_set = Inou_firrtl::glob_info.module2outputs[module_name];
   for (const auto &itr : outputs_set) {
@@ -1247,49 +1252,56 @@ void Inou_firrtl_module::direct_instances_connection(Lnast &lnast, Lnast_nid &pa
   return;
 }
 
-void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string rhs_full_name) {
-  I(absl::StrContains(lhs_full_name, '.'));
-  auto selc_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
-  auto pos = lhs_full_name.find('.');
-  auto tup_head = lhs_full_name.substr(0, pos);
-  auto tup_merged_fields = std::string{lhs_full_name.substr(pos + 1)};
-  std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
-  std::replace(rhs_full_name.begin(), rhs_full_name.end(), '.', '_');
+void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_hier_name, std::string rhs_flattened_name) {
+  auto attr_get_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
+  auto temp_var_str = create_tmp_var();
+  lnast.add_child(attr_get_node, Lnast_node::create_ref(temp_var_str));
+  lnast.add_child(attr_get_node, Lnast_node::create_ref(rhs_flattened_name));
+  lnast.add_child(attr_get_node, Lnast_node::create_const("__last_value"));
 
-  auto first_char = rhs_full_name[0];
-  Lnast_node value_node;
-  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
-    value_node = Lnast_node::create_const(rhs_full_name);
-  } else {
-    value_node = Lnast_node::create_ref(rhs_full_name);
-  }
+
+  I(absl::StrContains(lhs_hier_name, '.'));
+  auto selc_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
+  auto pos = lhs_hier_name.find('.');
+  auto tup_head = lhs_hier_name.substr(0, pos);
+  auto tup_merged_fields = std::string{lhs_hier_name.substr(pos + 1)};
+  std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
+  
+  // auto first_char = rhs_full_name[0];
+  // Lnast_node value_node;
+  // if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+  //   value_node = Lnast_node::create_const(rhs_full_name);
+  // } else {
+  //   value_node = Lnast_node::create_ref(rhs_full_name);
+  // }
 
   lnast.add_child(selc_node, Lnast_node::create_ref(absl::StrCat("itup_", tup_head)));
   lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
-  lnast.add_child(selc_node, value_node);
-  create_wires_for_instance_itup(lnast, parent_node, lhs_full_name, rhs_full_name);
+  lnast.add_child(selc_node, Lnast_node::create_ref(temp_var_str));
+  // create_wires_for_instance_itup(lnast, parent_node, lhs_hier_name, rhs_full_name);
 }
 
+// FIXME: should be able to be merged into the kInstance processing
 // note: because firrtl could have ugly syntax that uses the inputs connection of an instance as
 // an RHS to connect to a node in parent module, so here we need to create the corresponding wires
 // at the arent module, most of them are useless, but in some extreme cases the parent module will
 // need them.
-void Inou_firrtl_module::create_wires_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name) {
-  I(absl::StrContains(lhs_full_name, '.'));
-  auto lhs = name_prefix_modifier_flattener(lhs_full_name, false);
-  auto rhs = name_prefix_modifier_flattener(rhs_full_name, true);
-  auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign());
-  lnast.add_child(asg_node, Lnast_node::create_ref(lhs));
+// void Inou_firrtl_module::create_wires_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name) {
+//   I(absl::StrContains(lhs_full_name, '.'));
+//   auto lhs = name_prefix_modifier_flattener(lhs_full_name, false);
+//   auto rhs = name_prefix_modifier_flattener(rhs_full_name, true);
+//   auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign());
+//   lnast.add_child(asg_node, Lnast_node::create_ref(lhs));
 
-  auto first_char = rhs_full_name[0];
-  Lnast_node value_node;
-  if (isdigit(first_char) || first_char == '-' || first_char == '+') {
-    value_node = Lnast_node::create_const(rhs_full_name);
-  } else {
-    value_node = Lnast_node::create_ref(rhs_full_name);
-  }
-  lnast.add_child(asg_node, value_node);
-}
+//   auto first_char = rhs_full_name[0];
+//   Lnast_node value_node;
+//   if (isdigit(first_char) || first_char == '-' || first_char == '+') {
+//     value_node = Lnast_node::create_const(rhs_full_name);
+//   } else {
+//     value_node = Lnast_node::create_ref(rhs_full_name);
+//   }
+//   lnast.add_child(asg_node, value_node);
+// }
 
 void Inou_firrtl_module::create_tuple_get_for_instance_otup(Lnast& lnast, Lnast_nid& parent_node, std::string_view rhs_full_name, std::string lhs_full_name) {
   I(absl::StrContains(rhs_full_name, '.'));
@@ -1855,6 +1867,25 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
   }
 #endif
 }
+void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_input) {
+  if (lnast.get_top_module_name() == "XorSelfThread1")          
+    fmt::print("        AAA-2 hier_name_l_ori:{} \n              hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
+  // 0. swap lhs/rhs if needed
+  if (is_flipped && !is_input) {
+    auto tmp = hier_name_l_ori;
+    hier_name_l_ori = hier_name_r_ori;
+    hier_name_r_ori = tmp;
+  }
+
+  std::string hier_name_l, hier_name_r;
+  hier_name_l = name_prefix_modifier_flattener(hier_name_l_ori, false);
+  hier_name_r = name_prefix_modifier_flattener(hier_name_r_ori, true);
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+  lnast.add_child(idx_asg, Lnast_node::create_ref(hier_name_l));
+  attach_expr_str2node(lnast, hier_name_r, idx_asg);
+}
+
 
 // the sub-fields of lhs and rhs are the same, so we just pass the head of lhs
 // (tup_l), and we could avoid traversing the big var2flip table again to get
@@ -2066,33 +2097,37 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // where all the outputs hierarchy have been flattened as a wire through
       // series of TupGet.  So here we only need to handle sub inputs. 
 
-      // FIXME: the is_sub_inp_connection flag is not necessary true. The sub-instance
+      // FIXME-sh: the is_sub_inp_connection flag is not necessary true. The sub-instance
       // also have to consider flipness problem.
-      bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
-      if (is_sub_inp_connection) {
-        // FIXME: know the hier_name_l's var2flip sets, flattened the hier wires and connect to a 
-        // corresponding rhs flattend wire with the head name of hier_name_r
-        hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
 
-        auto found = var2flip.find(hier_name_r);
-        if (found != var2flip.end()) {
-          auto &tup_r_sets = var2flip[hier_name_r];
-          for (const auto &it : tup_r_sets) {
-            // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
-            auto pos = it.first.find_first_of('.');
-            if (pos == std::string::npos)
-              continue;
-            auto head_chopped_hier_name = it.first.substr(pos + 1);
-            auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
-            auto new_hier_name_r = absl::StrCat(hier_name_r, ".", head_chopped_hier_name);
-            create_tuple_add_for_instance_itup(lnast, parent_node, new_hier_name_l, new_hier_name_r);
-          }
-        } else {
-          create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, hier_name_r);
-        }
-        return;
-      }
+      // bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
+      // if (is_sub_inp_connection) {
+      //   // FIXME: know the hier_name_l's var2flip sets, flattened the hier wires and connect to a 
+      //   // corresponding rhs flattend wire with the head name of hier_name_r
+      //   hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
+
+      //   auto found = var2flip.find(hier_name_r);
+      //   if (found != var2flip.end()) {
+      //     auto &tup_r_sets = var2flip[hier_name_r];
+      //     for (const auto &it : tup_r_sets) {
+      //       // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
+      //       auto pos = it.first.find_first_of('.');
+      //       if (pos == std::string::npos)
+      //         continue;
+      //       auto head_chopped_hier_name = it.first.substr(pos + 1);
+      //       auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
+      //       auto new_hier_name_r = absl::StrCat(hier_name_r, ".", head_chopped_hier_name);
+      //       create_tuple_add_for_instance_itup(lnast, parent_node, new_hier_name_l, new_hier_name_r);
+      //     }
+      //   } else {
+      //     create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, hier_name_r);
+      //   }
+      //   return;
+      // }
       
+
+
+
       // case-IV: memory port connection
       bool is_wr_mport = mport2mem.find(tup_head_l) != mport2mem.end();
       bool is_rd_mport = mport2mem.find(tup_head_r) != mport2mem.end();
@@ -2130,7 +2165,8 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
                 node_names.find(hier_name_r) != node_names.end();
       bool c1 = reg2qpin.find(hier_name_l) == reg2qpin.end() && 
                 reg2qpin.find(hier_name_r) == reg2qpin.end();
-      bool c2 = !is_sub_inp_connection;
+      // bool c2 = !is_sub_inp_connection;
+      bool c2 = true;
       if (c0 && c1 && c2) {
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
@@ -2157,22 +2193,72 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         return;
       }
       
+      // case-VII: connections involves instances
+      auto is_instance_l = inst2module.find (tup_head_l)  != inst2module.end();
+      auto is_instance_r = inst2module.find (tup_head_r)  != inst2module.end();
 
+      if (is_instance_l) {
+        std::string_view inst_name = tup_head_l;
+        auto pos = hier_name_l.find_first_of('.');
+        auto tmp_str = hier_name_l.substr(pos + 1);
+        auto pos2 = tmp_str.find_first_of('.');
+        std::string tup_head_name = tmp_str;
+        if (pos2 != std::string::npos) {
+          tup_head_name = tmp_str.substr(0, pos2);
+        }
+        auto sub_module_name = inst2module[tup_head_l];
+        if (lnast.get_top_module_name() == "XorSelfThread1")
+          fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}, tup_head_name:{}, sub_module_name:{}\n", hier_name_l, hier_name_r, tup_head_name, sub_module_name);
+        auto tup_l_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][tup_head_name];
+        (void) tup_l_sets;
 
-      // case-VII: this is the normal case that involves firrtl kWire connection
-      // could be (1) wire <- module_input (2) wire <- wire 
-      // (3) module_output <- wire I(tup_head_l == tup_head_r);
+        for (const auto &it : *tup_l_sets) {
+          std::string tup_hier_name = it.first;
+          if (lnast.get_top_module_name() == "XorSelfThread1")          
+            fmt::print("        AAA-1 tup_hier_name:{}, is_flipped:{}\n", tup_hier_name, it.second);
+          
+          auto p = tup_hier_name.find(hier_name_r);
+          bool hit = false;
+          if (p != std::string::npos) {
+            I(p == 0);
+            auto p2 = hier_name_r.size();
+            if (tup_hier_name.size() > p2 && tup_hier_name.at(p2) == '.') {
+              hit = true;
+            }
+          }
+          
+          if (tup_hier_name == hier_name_r || hit) {
+            bool is_input = false;
+            if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name))
+              is_input = true;
+
+            tup_hier_name = absl::StrCat(inst_name, ".", tup_hier_name);
+            tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name, hier_name_r, it.second, is_input);
+          }
+        }
+        return;
+      } else if (is_instance_r) {
+        if (lnast.get_top_module_name() == "XorSelfThread1")
+          fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+      }
+
+      // case-VIII: this is the normal case that involves firrtl kWire connection
+      // could be (1) wire <- module_input (2) wire <- wire (3) module_output <- wire 
+      if (lnast.get_top_module_name() == "XorSelfThread1")
+        fmt::print("DEBUG GGG hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
       absl::btree_set<std::pair<std::string, bool>> *tup_l_sets;
-      auto cond0 = input_names.find(tup_head_l)  == input_names.end();
-      auto cond1 = output_names.find(tup_head_l) == output_names.end();
-      if (cond0 && cond1) {
+      auto is_input    = input_names.find (tup_head_l)  == input_names.end();
+      auto is_output   = output_names.find(tup_head_l)  == output_names.end();
+      // I(!is_instance_l);
+      // I(!is_instance_r);
+      if (is_input && is_output) {
         // it's local variable or wire or register
         tup_l_sets = &var2flip[tup_head_l];
       } else {
         // it's module io, check the global table
         tup_l_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head_l];
       }
-
+      
       for (const auto &it : *tup_l_sets) {
         auto pos = it.first.find(hier_name_l);
         bool hit = false;
@@ -2316,7 +2402,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);
@@ -2396,6 +2482,7 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
         glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
         add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
       }
+      Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
     } else {
       Pass::error("Module not set.");
     }
@@ -2496,7 +2583,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
       // fmt::print("DEBUG BBB vec id:{}, size:{}\n", port_id, type.vector_type().size());
       glob_info.module_var2vec_size.insert_or_assign(mod_id, var2vec_size);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
-        add_port_to_map(mod_id, type.vector_type().type(), dir, false, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
+        add_port_to_map(mod_id, type.vector_type().type(), dir, flipped_in, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);
       }
       break;
     }
