@@ -691,12 +691,12 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
     create_tuple_add_for_instance_itup(lnast, parent_node, hier_name, flattened_out_name);
   }
 
-  const auto &outputs_set = Inou_firrtl::glob_info.module2outputs[module_name];
-  for (const auto &itr : outputs_set) {
-    auto hier_name_r = absl::StrCat(inst.id(), ".", std::get<0>(itr));
+  const auto &outputs_map = Inou_firrtl::glob_info.module2outputs[module_name];
+  for (const auto &[key, val] : outputs_map) {
+    auto hier_name_r = absl::StrCat(inst.id(), ".", key);
     auto flattened_out_name = name_prefix_modifier_flattener(hier_name_r, false);
     create_tuple_get_for_instance_otup(lnast, parent_node, hier_name_r, flattened_out_name);
-    setup_scalar_bits(lnast, flattened_out_name, std::get<1>(itr),parent_node, std::get<2>(itr));
+    setup_scalar_bits(lnast, flattened_out_name, val.first,parent_node, val.second);
   }
 }
 
@@ -1867,8 +1867,10 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
   }
 #endif
 }
+
+
 void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_input) {
-  if (lnast.get_top_module_name() == "XorSelfThread1")          
+  if (lnast.get_top_module_name() == "Adder4")          
     fmt::print("        AAA-2 hier_name_l_ori:{} \n              hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
   // 0. swap lhs/rhs if needed
   if (is_flipped && !is_input) {
@@ -1886,6 +1888,24 @@ void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Ln
   attach_expr_str2node(lnast, hier_name_r, idx_asg);
 }
 
+void Inou_firrtl_module::tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_output) {
+  if (lnast.get_top_module_name() == "Adder4")          
+    fmt::print("        AAA-2 hier_name_l_ori:{} \n              hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
+  // 0. swap lhs/rhs if needed
+  if (is_flipped && !is_output) {
+    auto tmp = hier_name_l_ori;
+    hier_name_l_ori = hier_name_r_ori;
+    hier_name_r_ori = tmp;
+  }
+
+  std::string hier_name_l, hier_name_r;
+  hier_name_l = name_prefix_modifier_flattener(hier_name_l_ori, false);
+  hier_name_r = name_prefix_modifier_flattener(hier_name_r_ori, true);
+
+  auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+  lnast.add_child(idx_asg, Lnast_node::create_ref(hier_name_l));
+  attach_expr_str2node(lnast, hier_name_r, idx_asg);
+}
 
 // the sub-fields of lhs and rhs are the same, so we just pass the head of lhs
 // (tup_l), and we could avoid traversing the big var2flip table again to get
@@ -2092,40 +2112,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         tup_head_r = hier_name_r;
       }
 
-      // case-III: submodule instantiation IO connection     
-      // note: submodule outputs has been handled during create_module_inst(),
-      // where all the outputs hierarchy have been flattened as a wire through
-      // series of TupGet.  So here we only need to handle sub inputs. 
-
-      // FIXME-sh: the is_sub_inp_connection flag is not necessary true. The sub-instance
-      // also have to consider flipness problem.
-
-      // bool is_sub_inp_connection = inst2module.find(tup_head_l) != inst2module.end();
-      // if (is_sub_inp_connection) {
-      //   // FIXME: know the hier_name_l's var2flip sets, flattened the hier wires and connect to a 
-      //   // corresponding rhs flattend wire with the head name of hier_name_r
-      //   hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
-
-      //   auto found = var2flip.find(hier_name_r);
-      //   if (found != var2flip.end()) {
-      //     auto &tup_r_sets = var2flip[hier_name_r];
-      //     for (const auto &it : tup_r_sets) {
-      //       // tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
-      //       auto pos = it.first.find_first_of('.');
-      //       if (pos == std::string::npos)
-      //         continue;
-      //       auto head_chopped_hier_name = it.first.substr(pos + 1);
-      //       auto new_hier_name_l = absl::StrCat(hier_name_l, ".", head_chopped_hier_name);
-      //       auto new_hier_name_r = absl::StrCat(hier_name_r, ".", head_chopped_hier_name);
-      //       create_tuple_add_for_instance_itup(lnast, parent_node, new_hier_name_l, new_hier_name_r);
-      //     }
-      //   } else {
-      //     create_tuple_add_for_instance_itup(lnast, parent_node, hier_name_l, hier_name_r);
-      //   }
-      //   return;
-      // }
-      
-
 
 
       // case-IV: memory port connection
@@ -2165,9 +2151,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
                 node_names.find(hier_name_r) != node_names.end();
       bool c1 = reg2qpin.find(hier_name_l) == reg2qpin.end() && 
                 reg2qpin.find(hier_name_r) == reg2qpin.end();
-      // bool c2 = !is_sub_inp_connection;
-      bool c2 = true;
-      if (c0 && c1 && c2) {
+      if (c0 && c1) {
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
         add_lnast_assign(lnast, parent_node, hier_name_l, hier_name_r);
@@ -2175,17 +2159,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       }
 
       // case-VI: lhs == module_output && rhs == module_input
-      // Pseudo Algorithm:
-      // (1) get the tup_l_sets
-      // (2) get all the flattened fields, and base on that to get the
-      //     corresponding flattened io
-      // (3) check the leaf fields, if the leaf_field_name matched from both
-      //     flattened input and output, connect them together
-      // (4) no need to check flipness as you already know who is the
-      //     module-output and who is the module-input, it must be %foo.a <-
-      //     $bar.a, which also means you don't need to grep info from the var2flip
-      //     table!
-        
       if (tup_head_l == tup_head_r) {
         hier_name_l = name_prefix_modifier_flattener(hier_name_l, false);
         hier_name_r = name_prefix_modifier_flattener(hier_name_r, true);
@@ -2198,83 +2171,18 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       auto is_instance_r = inst2module.find (tup_head_r)  != inst2module.end();
 
       if (is_instance_l) {
-        std::string_view inst_name = tup_head_l;
-        auto pos = hier_name_l.find_first_of('.');
-        auto tmp_str = hier_name_l.substr(pos + 1);
-        auto pos2 = tmp_str.find_first_of('.');
-        std::string tup_head_name = tmp_str;
-        if (pos2 != std::string::npos) {
-          tup_head_name = tmp_str.substr(0, pos2);
-        }
-        auto sub_module_name = inst2module[tup_head_l];
-        if (lnast.get_top_module_name() == "XorSelfThread1")
-          fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}, tup_head_name:{}, sub_module_name:{}\n", hier_name_l, hier_name_r, tup_head_name, sub_module_name);
-        auto tup_l_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][tup_head_name];
-        (void) tup_l_sets;
-
-        for (const auto &it : *tup_l_sets) {
-          std::string tup_hier_name = it.first;
-          if (lnast.get_top_module_name() == "XorSelfThread1")          
-            fmt::print("        AAA-1 tup_hier_name:{}, is_flipped:{}\n", tup_hier_name, it.second);
-          
-          auto p = tup_hier_name.find(hier_name_r);
-          bool hit = false;
-          if (p != std::string::npos) {
-            I(p == 0);
-            auto p2 = hier_name_r.size();
-            if (tup_hier_name.size() > p2 && tup_hier_name.at(p2) == '.') {
-              hit = true;
-            }
-          }
-          
-          if (tup_hier_name == hier_name_r || hit) {
-            bool is_input = false;
-            if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name))
-              is_input = true;
-
-            tup_hier_name = absl::StrCat(inst_name, ".", tup_hier_name);
-            tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name, hier_name_r, it.second, is_input);
-          }
-        }
+        handle_lhs_instance_connections(lnast, parent_node, tup_head_l, hier_name_l, hier_name_r);
         return;
       } else if (is_instance_r) {
-        if (lnast.get_top_module_name() == "XorSelfThread1")
+        if (lnast.get_top_module_name() == "Adder4")
           fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+        handle_rhs_instance_connections(lnast, parent_node, tup_head_r, hier_name_l, hier_name_r);
+        return;
       }
 
       // case-VIII: this is the normal case that involves firrtl kWire connection
       // could be (1) wire <- module_input (2) wire <- wire (3) module_output <- wire 
-      if (lnast.get_top_module_name() == "XorSelfThread1")
-        fmt::print("DEBUG GGG hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
-      absl::btree_set<std::pair<std::string, bool>> *tup_l_sets;
-      auto is_input    = input_names.find (tup_head_l)  == input_names.end();
-      auto is_output   = output_names.find(tup_head_l)  == output_names.end();
-      // I(!is_instance_l);
-      // I(!is_instance_r);
-      if (is_input && is_output) {
-        // it's local variable or wire or register
-        tup_l_sets = &var2flip[tup_head_l];
-      } else {
-        // it's module io, check the global table
-        tup_l_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head_l];
-      }
-      
-      for (const auto &it : *tup_l_sets) {
-        auto pos = it.first.find(hier_name_l);
-        bool hit = false;
-        if (pos != std::string::npos) {
-          I(pos == 0);
-          auto pos2 = hier_name_l.size();
-          if (it.first.size() > pos2 && it.first.at(pos2) == '.') {
-            hit = true;
-          }
-        }
-        
-        if (it.first == hier_name_l || hit) {
-          tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
-        }
-      }
-      return;
+      handle_normal_caces_wire_connections(lnast, parent_node, tup_head_l, hier_name_l, hier_name_r);
     }
 
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
@@ -2299,6 +2207,102 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
   // TODO: Attach source info into node creation (line #, col #).
 }
 
+void Inou_firrtl_module::handle_normal_caces_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r) {
+  if (lnast.get_top_module_name() == "XorSelfThread1")
+    fmt::print("DEBUG GGG hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
+  absl::btree_set<std::pair<std::string, bool>> *tup_l_sets;
+  auto is_input    = input_names.find (tup_head_l)  == input_names.end();
+  auto is_output   = output_names.find(tup_head_l)  == output_names.end();
+  // I(!is_instance_l);
+  // I(!is_instance_r);
+  if (is_input && is_output) {
+    // it's local variable or wire or register
+    tup_l_sets = &var2flip[tup_head_l];
+  } else {
+    // it's module io, check the global table
+    tup_l_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head_l];
+  }
+  
+  for (const auto &it : *tup_l_sets) {
+    auto pos = it.first.find(hier_name_l);
+    bool hit = false;
+    if (pos != std::string::npos) {
+      I(pos == 0);
+      auto pos2 = hier_name_l.size();
+      if (it.first.size() > pos2 && it.first.at(pos2) == '.') {
+        hit = true;
+      }
+    }
+    
+    if (it.first == hier_name_l || hit) {
+      tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
+    }
+  }
+  return;
+}
+
+void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r){
+  auto sub_module_name = inst2module[tup_head_l];
+  auto pos = hier_name_l.find_first_of('.');
+  auto head_chopped_hier_name_l = hier_name_l.substr(pos + 1);
+  if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(head_chopped_hier_name_l)) {
+    tuple_flattened_connections_instance_l(lnast, parent_node, hier_name_l, hier_name_r, false, true);
+    return;
+  }
+
+  // rare cases:
+  // if the module2inputs table doesn't contains the head_chopped_hier_name_l,
+  // it means the connection is a tuple connection, you'll need to expand each
+  // of the field to connect lhs/rhs
+  // FIXME->sh: finish this case when you encounter the related pattern
+
+  std::string_view inst_name = tup_head_l;
+  auto pos2 = head_chopped_hier_name_l.find_first_of('.');
+  auto tup_head_name_l = head_chopped_hier_name_l;
+  if (pos2 != std::string::npos) {
+    tup_head_name_l = head_chopped_hier_name_l.substr(0, pos2);
+  }
+  if (lnast.get_top_module_name() == "Adder4")
+    fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}, tup_head_name_l:{}, sub_module_name:{}\n", hier_name_l, hier_name_r, tup_head_name_l, sub_module_name);
+  auto tup_l_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][tup_head_name_l];
+
+  for (const auto &it : *tup_l_sets) {
+    std::string tup_hier_name_l = it.first;
+    
+    auto p = tup_hier_name_l.find(hier_name_r);
+    bool hit = false;
+    if (p != std::string::npos) {
+      I(p == 0);
+      auto p2 = hier_name_r.size();
+      if (tup_hier_name_l.size() > p2 && tup_hier_name_l.at(p2) == '.') {
+        hit = true;
+      }
+    }
+    if (lnast.get_top_module_name() == "Adder4")          
+      fmt::print("      AAA-1 tup_hier_name:{}, is_flipped:{}, hit?:{}\n", tup_hier_name_l, it.second, hit);
+    
+    // if (tup_hier_name == hier_name_r || hit) {
+    bool is_input = false;
+    if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name_l))
+      is_input = true;
+
+    tup_hier_name_l = absl::StrCat(inst_name, ".", tup_hier_name_l);
+    tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, hier_name_r, it.second, is_input);
+    // }
+  }
+  return;
+}
+
+
+void Inou_firrtl_module::handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_r, std::string_view hier_name_l, std::string_view hier_name_r){
+  auto sub_module_name = inst2module[tup_head_r];
+  auto pos = hier_name_r.find_first_of('.');
+  auto head_chopped_hier_name_r = hier_name_r.substr(pos + 1);
+  if (Inou_firrtl::glob_info.module2outputs[sub_module_name].contains(head_chopped_hier_name_r)) {
+    tuple_flattened_connections_instance_r(lnast, parent_node, hier_name_l, hier_name_r, false, true);
+    return;
+  }
+}
 
 
 void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& parent_node) {
@@ -2471,10 +2475,10 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
       uint64_t out_pos                 = 0;
       absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> empty_map;
       glob_info.var2flip.insert_or_assign(module_i_user_module_id, empty_map); 
-      auto empty_set  = absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>{};
-      glob_info.module2outputs.insert_or_assign(module_i_user_module_id, empty_set);
-      auto empty_set2 = absl::flat_hash_set<std::string>{};
-      glob_info.module2inputs.insert_or_assign(module_i_user_module_id, empty_set2);
+      auto empty_map2  = absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>{};
+      glob_info.module2outputs.insert_or_assign(module_i_user_module_id, empty_map2);
+      auto empty_set = absl::flat_hash_set<std::string>{};
+      glob_info.module2inputs.insert_or_assign(module_i_user_module_id, empty_set);
 
       for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
         auto port = circuit.module(i).user_module().port(j);
@@ -2593,7 +2597,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
         glob_info.module2inputs[mod_id].insert({std::string{port_id}});
       } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
-        glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, false});
+        glob_info.module2outputs[mod_id].insert({std::string{port_id}, std::make_pair(bits, false)});
       }
       if (type.uint_type().width().value() != 0)
         add_global_io_flipness(mod_id, flipped_in, port_id);
@@ -2605,7 +2609,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
         glob_info.module2inputs[mod_id].insert({std::string{port_id}});
       } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
-        glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, true});
+        glob_info.module2outputs[mod_id].insert({std::string{port_id}, std::make_pair(bits, true)});
       }
       if (type.sint_type().width().value() != 0)
         add_global_io_flipness(mod_id, flipped_in, port_id);
@@ -2619,7 +2623,7 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
         glob_info.module2inputs[mod_id].insert({std::string{port_id}});
       } else if (dir == 2) {
         auto bits = type.uint_type().width().value();
-        glob_info.module2outputs[mod_id].insert({std::string{port_id}, bits, false});
+        glob_info.module2outputs[mod_id].insert({std::string{port_id}, std::make_pair(bits, false)});
       }
       add_global_io_flipness(mod_id, flipped_in, port_id);
       break;

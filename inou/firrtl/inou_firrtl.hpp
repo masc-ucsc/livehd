@@ -25,7 +25,7 @@
 #include "pass.hpp"
 
 struct Global_module_info {
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::tuple<std::string, uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>                              module2inputs;  // <hier_name>
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
@@ -210,7 +210,11 @@ protected:
   void attach_expr_str2node(Lnast &lnast, std::string_view access_str, Lnast_nid &parent_node);
   void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped);
   void tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_input);
-  void tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped, std::string_view inst_name);
+  void tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_output);
+  void handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
+  void handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
+  void handle_normal_caces_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
+  void handle_direct_inp_out_or_node_connection(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r);
 
   bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
 
