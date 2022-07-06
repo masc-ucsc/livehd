@@ -1868,10 +1868,7 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
 #endif
 }
 
-
 void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_input) {
-  if (lnast.get_top_module_name() == "Adder4")          
-    fmt::print("        AAA-2 hier_name_l_ori:{} \n              hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
   // 0. swap lhs/rhs if needed
   if (is_flipped && !is_input) {
     auto tmp = hier_name_l_ori;
@@ -1889,8 +1886,6 @@ void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Ln
 }
 
 void Inou_firrtl_module::tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_output) {
-  if (lnast.get_top_module_name() == "Adder4")          
-    fmt::print("        AAA-2 hier_name_l_ori:{} \n              hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
   // 0. swap lhs/rhs if needed
   if (is_flipped && !is_output) {
     auto tmp = hier_name_l_ori;
@@ -2174,8 +2169,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         handle_lhs_instance_connections(lnast, parent_node, tup_head_l, hier_name_l, hier_name_r);
         return;
       } else if (is_instance_r) {
-        if (lnast.get_top_module_name() == "Adder4")
-          fmt::print("DEBUG BBB hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         handle_rhs_instance_connections(lnast, parent_node, tup_head_r, hier_name_l, hier_name_r);
         return;
       }
@@ -2208,8 +2201,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
 }
 
 void Inou_firrtl_module::handle_normal_caces_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r) {
-  if (lnast.get_top_module_name() == "XorSelfThread1")
-    fmt::print("DEBUG GGG hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
   absl::btree_set<std::pair<std::string, bool>> *tup_l_sets;
   auto is_input    = input_names.find (tup_head_l)  == input_names.end();
   auto is_output   = output_names.find(tup_head_l)  == output_names.end();
@@ -2242,6 +2233,7 @@ void Inou_firrtl_module::handle_normal_caces_wire_connections(Lnast &lnast, Lnas
 }
 
 void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r){
+  // general cases: lhs/rhs are flattened, just connect
   auto sub_module_name = inst2module[tup_head_l];
   auto pos = hier_name_l.find_first_of('.');
   auto head_chopped_hier_name_l = hier_name_l.substr(pos + 1);
@@ -2254,53 +2246,101 @@ void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid
   // if the module2inputs table doesn't contains the head_chopped_hier_name_l,
   // it means the connection is a tuple connection, you'll need to expand each
   // of the field to connect lhs/rhs
-  // FIXME->sh: finish this case when you encounter the related pattern
 
   std::string_view inst_name = tup_head_l;
   auto pos2 = head_chopped_hier_name_l.find_first_of('.');
-  auto tup_head_name_l = head_chopped_hier_name_l;
+  std::string head_chopped_hier_name_l_2;
   if (pos2 != std::string::npos) {
-    tup_head_name_l = head_chopped_hier_name_l.substr(0, pos2);
+    head_chopped_hier_name_l_2 = head_chopped_hier_name_l.substr(0, pos2);
   }
-  if (lnast.get_top_module_name() == "Adder4")
-    fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}, tup_head_name_l:{}, sub_module_name:{}\n", hier_name_l, hier_name_r, tup_head_name_l, sub_module_name);
-  auto tup_l_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][tup_head_name_l];
 
+  const auto tup_l_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][head_chopped_hier_name_l_2];
   for (const auto &it : *tup_l_sets) {
     std::string tup_hier_name_l = it.first;
     
-    auto p = tup_hier_name_l.find(hier_name_r);
+    auto p = tup_hier_name_l.find(head_chopped_hier_name_l);
     bool hit = false;
+    std::string leaf_field;
     if (p != std::string::npos) {
       I(p == 0);
-      auto p2 = hier_name_r.size();
+      auto p2 = head_chopped_hier_name_l.size();
       if (tup_hier_name_l.size() > p2 && tup_hier_name_l.at(p2) == '.') {
         hit = true;
+        leaf_field = tup_hier_name_l.substr(p2);
       }
     }
-    if (lnast.get_top_module_name() == "Adder4")          
-      fmt::print("      AAA-1 tup_hier_name:{}, is_flipped:{}, hit?:{}\n", tup_hier_name_l, it.second, hit);
     
-    // if (tup_hier_name == hier_name_r || hit) {
     bool is_input = false;
     if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name_l))
       is_input = true;
 
-    tup_hier_name_l = absl::StrCat(inst_name, ".", tup_hier_name_l);
-    tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, hier_name_r, it.second, is_input);
-    // }
+    if (hit) {
+      tup_hier_name_l = absl::StrCat(inst_name, ".", tup_hier_name_l);
+      auto concated_hier_name_r = absl::StrCat(hier_name_r, leaf_field);
+      tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, concated_hier_name_r, it.second, is_input);
+    }
   }
   return;
 }
 
 
 void Inou_firrtl_module::handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_r, std::string_view hier_name_l, std::string_view hier_name_r){
+  // general cases: lhs/rhs are flattened, just connect
   auto sub_module_name = inst2module[tup_head_r];
   auto pos = hier_name_r.find_first_of('.');
   auto head_chopped_hier_name_r = hier_name_r.substr(pos + 1);
+
+  // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
+  //   fmt::print("DEBUG AAA hier_name_l: {}, hier_name_r: {}\n", hier_name_l, hier_name_r);
+  //   fmt::print("          head_chopped_hier_name_r: {}\n", head_chopped_hier_name_r);
+  //   fmt::print("          sub_module_name: {}\n", sub_module_name);
+  // }
+
   if (Inou_firrtl::glob_info.module2outputs[sub_module_name].contains(head_chopped_hier_name_r)) {
     tuple_flattened_connections_instance_r(lnast, parent_node, hier_name_l, hier_name_r, false, true);
     return;
+  }
+
+  // rare cases:
+  // if the module2outputs table doesn't contains the head_chopped_hier_name_r,
+  // it means the connection is a tuple connection, you'll need to expand each
+  // of the field to connect lhs/rhs
+
+  const auto tup_r_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][head_chopped_hier_name_r];
+  for (const auto &it : *tup_r_sets) {
+    std::string tup_hier_name_r = it.first;
+    // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
+    //   fmt::print("          AAA-1 tup_head_r:{}, tup_hier_name_r: {}\n", tup_head_r, tup_hier_name_r);
+    // }
+    // auto concated_hier_name_r = absl::StrCat(tup_head_r, ".", hier_name_r);
+    // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
+    //   fmt::print("          AAA-2 hier_name_l:{}, hier_name_r: {}\n", hier_name_l, hier_name_r);
+    // }
+
+    auto p = tup_hier_name_r.find(head_chopped_hier_name_r);
+    bool hit = false;
+    std::string leaf_field;
+    if (p != std::string::npos) {
+      I(p == 0);
+      auto p2 = head_chopped_hier_name_r.size();
+      if (tup_hier_name_r.size() > p2 && tup_hier_name_r.at(p2) == '.') {
+        hit = true;
+        leaf_field = tup_hier_name_r.substr(p2);
+      }
+    }
+
+    bool is_output = false;
+    if (Inou_firrtl::glob_info.module2outputs[sub_module_name].contains(tup_hier_name_r))
+      is_output = true;
+    
+    if (hit) {
+      auto concated_hier_name_l = absl::StrCat(hier_name_l, leaf_field);
+      auto concated_hier_name_r = absl::StrCat(hier_name_r, leaf_field); 
+      // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
+      //   fmt::print("          AAA-3 concated_hier_name_l:{}, concated_hier_name_r: {}\n", concated_hier_name_l, concated_hier_name_r);
+      // }
+      tuple_flattened_connections_instance_r(lnast, parent_node, concated_hier_name_l, concated_hier_name_r, it.second, is_output);
+    }
   }
 }
 
@@ -2406,7 +2446,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);
@@ -2584,7 +2624,6 @@ void Inou_firrtl::add_port_to_map(std::string_view mod_id, const firrtl::FirrtlP
     case firrtl::FirrtlPB_Type::kVectorType: {  // Vector type
       absl::flat_hash_map<std::string, uint16_t> var2vec_size;
       var2vec_size.insert_or_assign(port_id, type.vector_type().size());
-      // fmt::print("DEBUG BBB vec id:{}, size:{}\n", port_id, type.vector_type().size());
       glob_info.module_var2vec_size.insert_or_assign(mod_id, var2vec_size);
       for (uint32_t i = 0; i < type.vector_type().size(); i++) {
         add_port_to_map(mod_id, type.vector_type().type(), dir, flipped_in, absl::StrCat(port_id, ".", i), sub, inp_pos, out_pos);

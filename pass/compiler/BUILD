@@ -201,33 +201,7 @@ cc_library(
     "RegisterReadDecode",
     "RenameBusyTable",
     "RoundAnyRawFNToRecFN",
-    # "INToRecFN"
-
-    # FIXME:
-    # issue-layer1
-      # issue#1: memory
-      # "Smem",
-      # "SmemStruct",
-      # "MaskedSmem",
-      # "MaskedSmemStruct",
-      # issue#2: bitwidth mismatch on memory output *****
-      #          assertion it->second.get_sbits() <= addr_sbits *****
-      # "Rob" fitbits
-
-
-      # issue#4: non-of the TupAdds are solved after cprop because if
-      #          tuple_issues flag remains. And the reason is that the
-      #          n150_mux tries to use TGs to get result from Mem 
-      # "MemBranchSimplified"
-      # "BranchKillableQueue_3"
-      # "BranchKillableQueue_4"
-      # "BranchKillableQueue_5"
-
-    # issue-layer2
-
-    # BoomCore passing layer2
-
-    
+    "INToRecFN"
 ]]
 
 sh_test(
@@ -280,6 +254,36 @@ sh_test(
     "MulAddRecFNToRaw_preMul",
     "DivSqrtRecF64ToRaw_mulAddZ31",
 ]]
+
+
+    # FIXME:
+    # issue-layer1
+      # issue#1: memory
+      # "Smem",
+      # "SmemStruct",
+      # "MaskedSmem",
+      # "MaskedSmemStruct",
+      # issue#2: bitwidth mismatch on memory output *****
+      #          assertion it->second.get_sbits() <= addr_sbits *****
+      # "Rob" fitbits
+
+
+      # issue#4: non-of the TupAdds are solved after cprop because if
+      #          tuple_issues flag remains. And the reason is that the
+      #          n150_mux tries to use TGs to get result from Mem 
+      # "MemBranchSimplified"
+      # "BranchKillableQueue_3"
+      # "BranchKillableQueue_4"
+      # "BranchKillableQueue_5"
+
+    # issue-layer2
+      # issue #1: n322 const zero bit 0 at cgen_verilog
+      # IssueUnitCollapsing
+
+
+    # BoomCore passing layer2
+
+
     # BoomCore passing layer1
     # "Arbiter_15"
     # "Arbiter_16"
