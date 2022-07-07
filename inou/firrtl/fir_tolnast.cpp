@@ -2176,6 +2176,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       // case-VIII: this is the normal case that involves firrtl kWire connection
       // could be (1) wire <- module_input (2) wire <- wire (3) module_output <- wire 
       handle_normal_caces_wire_connections(lnast, parent_node, tup_head_l, hier_name_l, hier_name_r);
+      break;
     }
 
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
