@@ -1,5 +1,4 @@
 circuit MemAddrCalcUnit :
-
   module BreakpointUnit_4 : 
     input clock : Clock
     input reset : UInt<1>
@@ -11,8 +10,7 @@ circuit MemAddrCalcUnit :
     io.debug_if <= UInt<1>("h00") @[Breakpoint.scala 77:15]
     io.debug_ld <= UInt<1>("h00") @[Breakpoint.scala 78:15]
     io.debug_st <= UInt<1>("h00") @[Breakpoint.scala 79:15]
-
-
+    
   module MemAddrCalcUnit : 
     input clock : Clock
     input reset : UInt<1>
@@ -260,4 +258,4 @@ circuit MemAddrCalcUnit :
     io.resp.bits.sfence.bits.rs2 <= _T_84 @[functional-unit.scala 540:32]
     io.resp.bits.sfence.bits.addr <= io.req.bits.rs1_data @[functional-unit.scala 541:33]
     io.resp.bits.sfence.bits.asid <= io.req.bits.rs2_data @[functional-unit.scala 542:33]
-
+    

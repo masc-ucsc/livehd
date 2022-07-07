@@ -253,6 +253,7 @@ sh_test(
     "DivUnit",
     "MulAddRecFNToRaw_preMul",
     "DivSqrtRecF64ToRaw_mulAddZ31",
+    "MemAddrCalcUnit",
 ]]
 
 
@@ -277,7 +278,7 @@ sh_test(
       # "BranchKillableQueue_5"
 
     # issue-layer2
-      # issue #1: n322 const zero bit 0 at cgen_verilog
+      # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
       # IssueUnitCollapsing
 
 

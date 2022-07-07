@@ -2180,12 +2180,20 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     }
 
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
-      auto id = stmt.is_invalid().expression().reference().id();
+      // auto id = stmt.is_invalid().expression().reference().id();
+      auto id = get_expr_hier_name(lnast, parent_node, stmt.is_invalid().expression());
       auto it = wire_names.find(id);
       if (it != wire_names.end()) {
         is_invalid_table.insert(id);
       }
-
+      auto found = id.find('.');
+      if (found != std::string::npos) {
+        id = name_prefix_modifier_flattener(id, false);
+        auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
+        lnast.add_child(idx_asg, Lnast_node::create_ref(id));
+        lnast.add_child(idx_asg, Lnast_node::create_const(0));
+      }
+      fmt::print("DEBUG AAA invalid id:{}\n", id);
       break;
     }
     case firrtl::FirrtlPB_Statement::kAttach: {
