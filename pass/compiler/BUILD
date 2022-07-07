@@ -254,6 +254,9 @@ sh_test(
     "MulAddRecFNToRaw_preMul",
     "DivSqrtRecF64ToRaw_mulAddZ31",
     "MemAddrCalcUnit",
+    "PipelinedMulUnit",
+    "RecFNToRecFN",
+    "RegisterRead"
 ]]
 
 

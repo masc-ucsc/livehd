@@ -717,7 +717,6 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	// TODO: think about a better solution
 	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
 	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
-	// fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
 
 
 	// preparation: get head of the tuple name so you know entry for the var2flip table
@@ -732,19 +731,43 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	} else {
 		tup_head_t = t_str;
 	}
+	fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
+	fmt::print("          tup_head_t:{}\n", tup_head_t);
 
 	std::vector<std::string> head_chopped_hier_names;
 	auto const& module_var2flip = Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()];
-  for (auto &[var, set] : module_var2flip) {
-		if (var == tup_head_t) {
-			for (auto &[hier_name, flipped] : set) {
-				auto pos = hier_name.find(t_str);
-				if ( pos != std::string::npos && hier_name != t_str) {
-					head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
-				}
-			}
-		}
+  auto found = module_var2flip.find(tup_head_t) != module_var2flip.end();
+  if (found) {
+    for (auto &[var, set] : module_var2flip) {
+      fmt::print("          var:{}\n", var);
+      if (var == tup_head_t) {
+        for (auto &[hier_name, flipped] : set) {
+          auto pos = hier_name.find(t_str);
+          if ( pos != std::string::npos && hier_name != t_str) {
+            head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
+          }
+        }
+      }
+    }
   }
+
+  if (!found) {
+    auto found2 = var2flip.find(tup_head_t) != var2flip.end();
+    if (found2) {
+      for (auto &[var, set] : var2flip) {
+        fmt::print("          var:{}\n", var);
+        if (var == tup_head_t) {
+          for (auto &[hier_name, flipped] : set) {
+            auto pos = hier_name.find(t_str);
+            if ( pos != std::string::npos && hier_name != t_str) {
+              head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
+            }
+          }
+        }
+      }
+    }
+  }
+  
 	
 	// most cases
 	if (head_chopped_hier_names.size() == 0) {
@@ -2193,7 +2216,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         lnast.add_child(idx_asg, Lnast_node::create_ref(id));
         lnast.add_child(idx_asg, Lnast_node::create_const(0));
       }
-      fmt::print("DEBUG AAA invalid id:{}\n", id);
       break;
     }
     case firrtl::FirrtlPB_Statement::kAttach: {
@@ -2455,7 +2477,7 @@ void Inou_firrtl::user_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Mod
     firmod.list_statement_info(*lnast, stmt, idx_stmts);
   }
 
-  Inou_firrtl_module::dump_var2flip(firmod.var2flip);
+  // Inou_firrtl_module::dump_var2flip(firmod.var2flip);
   firmod.final_mem_interface_assign(*lnast, idx_stmts);
 
   std::lock_guard<std::mutex> guard(eprp_var_mutex);
@@ -2535,7 +2557,7 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
         glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
         add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
       }
-      Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
+      // Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
     } else {
       Pass::error("Module not set.");
     }
