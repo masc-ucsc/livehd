@@ -138,9 +138,28 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
     if (e.sink.get_pid() == 0)
       continue;  // Skip select
 
-
     auto it = fbmap.find(e.driver.get_compact_class_driver());
-    if (it != fbmap.end()) {
+    if (it == fbmap.end()) {
+      if (firbits_wait_flop == true)
+        return;
+
+      // driver is not from other sugraph, wait next iteration for Flop being solved
+      if (e.driver.get_type_op() == Ntype_op::Flop) {
+        firbits_wait_flop = true;
+        return;
+      }
+      it = get_fbits_from_hierarchy(e);
+
+      if (some_one_ready) {
+        max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
+        I(sign == it->second.get_sign());
+        continue;
+      }
+      max_bits       = it->second.get_bits();
+      sign           = it->second.get_sign();
+      no_one_ready   = false;
+      some_one_ready = true;
+    } else {
       if (some_one_ready) {
         max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
         I(sign == it->second.get_sign());
@@ -153,7 +172,27 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
     }
   }
 
+    // auto it = fbmap.find(e.driver.get_compact_class_driver());
+    // if (it != fbmap.end()) {
+    //   if (some_one_ready) {
+    //     max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
+    //     I(sign == it->second.get_sign());
+    //     continue;
+    //   }
+    //   max_bits       = it->second.get_bits();
+    //   sign           = it->second.get_sign();
+    //   no_one_ready   = false;
+    //   some_one_ready = true;
+    // }
+  // }
+
   if (no_one_ready) {
+    node.dump();
+    fmt::print("          driver 1\n");
+    node.get_sink_pin_raw(1).get_driver_node().dump();
+    fmt::print("          driver 2\n");
+    node.get_sink_pin_raw(2).get_driver_node().dump();
+
     // should wait till at least one of the inputs is ready
     firbits_issues = true;
     return;
@@ -217,8 +256,9 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   
   // original
   if (parent_dpin.is_graph_input()) {
-    for (auto out_dpin : node_attr.out_connected_pins()) 
+    for (auto out_dpin : node_attr.out_connected_pins()) {
       fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), fb);
+    }
   } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%'){
       fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   } else {

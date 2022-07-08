@@ -236,12 +236,12 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "FMADecoder_1",        #  LEC
-    "Mul54",
-    "PipelinedMultiplier", #  LEC
-    "RecFNToIN",           #  LEC 
-    "PredRenameStage",     #  LEC
-    "RenameMapTable",      # !LEC
+    "FMADecoder_1",        # LEC-o
+    "Mul54",               # LEC-?
+    "PipelinedMultiplier", # LEC-o
+    "RecFNToIN",           # LEC-o
+    "PredRenameStage",     # LEC-o
+    "RenameMapTable",      # LEC-x
     "MulDiv",
     "IssueSlot_1",
     "CSRFile",
@@ -301,9 +301,12 @@ sh_test(
   # "DivSqrtRecF64_mulAddZ31"
   # "FPU"
   # "FPUUnit"
-
-  # issue #4: ???
   # "FDivSqrtUnit"
+
+  # issue #4: intAsRawFloat is initialized twice?
+  # "IntToFPUnit"
+
+  # issue #5: ???
   # "FpPipeline"
 
 

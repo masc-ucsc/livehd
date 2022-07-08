@@ -654,13 +654,7 @@ void Inou_firrtl_module::init_mem_din(Lnast& lnast, std::string_view mem_name, s
   }
 }
 
-/* When a module instance is created in FIRRTL, we need to do the same
- * in LNAST. Note that the instance command in FIRRTL does not hook
- * any input or outputs. */
 void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB_Statement_Instance& inst, Lnast_nid& parent_node) {
-  /*            dot                       assign                      fn_call
-   *      /      |        \                / \                     /     |     \
-   * ___F0 itup_[inst_name] __last_value   F1 ___F0  otup_[inst_name] [mod_name]  F1 */
   auto temp_var_name2 = absl::StrCat("F", std::to_string(tmp_var_cnt));
   tmp_var_cnt++;
   auto inst_name = inst.id();
@@ -694,9 +688,9 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
   const auto &outputs_map = Inou_firrtl::glob_info.module2outputs[module_name];
   for (const auto &[key, val] : outputs_map) {
     auto hier_name_r = absl::StrCat(inst.id(), ".", key);
-    auto flattened_out_name = name_prefix_modifier_flattener(hier_name_r, false);
-    create_tuple_get_for_instance_otup(lnast, parent_node, hier_name_r, flattened_out_name);
-    setup_scalar_bits(lnast, flattened_out_name, val.first,parent_node, val.second);
+    auto flattened_inp_name = name_prefix_modifier_flattener(hier_name_r, false);
+    create_tuple_get_for_instance_otup(lnast, parent_node, hier_name_r, flattened_inp_name);
+    setup_scalar_bits(lnast, flattened_inp_name, val.first,parent_node, val.second);
   }
 }
 
@@ -710,14 +704,12 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
   // std::string t_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().t_value());
   // std::string f_rhs_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().f_value());
 	
-	
 	// FIXME:
 	// 此 solution 是可以 work, 缺點就是本來好端端直接 flatten extr_str 就了事, 但是現在
 	// 不能爽爽直接 flatten, 還要 check 一堆 table .....
 	// TODO: think about a better solution
 	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
 	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
-	fmt::print("DEBUG AAA module:{}, t_str:{}, f_str:{}\n", lnast.get_top_module_name(), t_str, f_str);
 
 
 	// preparation: get head of the tuple name so you know entry for the var2flip table
@@ -770,6 +762,9 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 		lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
 
 		auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
+    if (var2last_value.find(cond_str) != var2last_value.end()) {
+      cond_str = var2last_value[cond_str];
+    }
 
 		auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
 		attach_expr_str2node(lnast, cond_str, idx_mux_if);
@@ -780,6 +775,13 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 
 		t_str = name_prefix_modifier_flattener(t_str, true);
 		f_str = name_prefix_modifier_flattener(f_str, true);
+    if (var2last_value.find(t_str) != var2last_value.end()) {
+      t_str = var2last_value[t_str];
+    }
+    if (var2last_value.find(f_str) != var2last_value.end()) {
+      f_str = var2last_value[f_str];
+    }
+
 		add_lnast_assign(lnast, idx_stmt_t, lhs, t_str);
 		add_lnast_assign(lnast, idx_stmt_f, lhs, f_str);
 		return;
@@ -1275,6 +1277,7 @@ void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_
   lnast.add_child(attr_get_node, Lnast_node::create_ref(temp_var_str));
   lnast.add_child(attr_get_node, Lnast_node::create_ref(rhs_flattened_name));
   lnast.add_child(attr_get_node, Lnast_node::create_const("__last_value"));
+  var2last_value.insert_or_assign(rhs_flattened_name, temp_var_str);
 
 
   I(absl::StrContains(lhs_hier_name, '.'));
@@ -1284,41 +1287,10 @@ void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_
   auto tup_merged_fields = std::string{lhs_hier_name.substr(pos + 1)};
   std::replace(tup_merged_fields.begin(), tup_merged_fields.end(), '.', '_');
   
-  // auto first_char = rhs_full_name[0];
-  // Lnast_node value_node;
-  // if (isdigit(first_char) || first_char == '-' || first_char == '+') {
-  //   value_node = Lnast_node::create_const(rhs_full_name);
-  // } else {
-  //   value_node = Lnast_node::create_ref(rhs_full_name);
-  // }
-
   lnast.add_child(selc_node, Lnast_node::create_ref(absl::StrCat("itup_", tup_head)));
   lnast.add_child(selc_node, Lnast_node::create_const(tup_merged_fields));
   lnast.add_child(selc_node, Lnast_node::create_ref(temp_var_str));
-  // create_wires_for_instance_itup(lnast, parent_node, lhs_hier_name, rhs_full_name);
 }
-
-// FIXME: should be able to be merged into the kInstance processing
-// note: because firrtl could have ugly syntax that uses the inputs connection of an instance as
-// an RHS to connect to a node in parent module, so here we need to create the corresponding wires
-// at the arent module, most of them are useless, but in some extreme cases the parent module will
-// need them.
-// void Inou_firrtl_module::create_wires_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name) {
-//   I(absl::StrContains(lhs_full_name, '.'));
-//   auto lhs = name_prefix_modifier_flattener(lhs_full_name, false);
-//   auto rhs = name_prefix_modifier_flattener(rhs_full_name, true);
-//   auto asg_node = lnast.add_child(parent_node, Lnast_node::create_assign());
-//   lnast.add_child(asg_node, Lnast_node::create_ref(lhs));
-
-//   auto first_char = rhs_full_name[0];
-//   Lnast_node value_node;
-//   if (isdigit(first_char) || first_char == '-' || first_char == '+') {
-//     value_node = Lnast_node::create_const(rhs_full_name);
-//   } else {
-//     value_node = Lnast_node::create_ref(rhs_full_name);
-//   }
-//   lnast.add_child(asg_node, value_node);
-// }
 
 void Inou_firrtl_module::create_tuple_get_for_instance_otup(Lnast& lnast, Lnast_nid& parent_node, std::string_view rhs_full_name, std::string lhs_full_name) {
   I(absl::StrContains(rhs_full_name, '.'));

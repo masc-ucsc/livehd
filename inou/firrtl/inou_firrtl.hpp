@@ -263,6 +263,7 @@ private:
   absl::flat_hash_set<std::string> memory_names;
   absl::flat_hash_set<std::string> wire_names;
   absl::flat_hash_set<std::string> node_names;
+  absl::flat_hash_map<std::string, std::string> var2last_value;
   absl::flat_hash_set<std::string> is_invalid_table;
   absl::flat_hash_set<std::string> async_rst_names;
   absl::flat_hash_set<std::string> mport_usage_visited;
