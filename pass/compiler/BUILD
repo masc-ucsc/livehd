@@ -201,7 +201,7 @@ cc_library(
     "RegisterReadDecode",
     "RenameBusyTable",
     "RoundAnyRawFNToRecFN",
-    "INToRecFN"
+    "INToRecFN",
 ]]
 
 sh_test(
@@ -218,30 +218,30 @@ sh_test(
     ],
 )
 
+
+# note: patterns with tag of "firrtl_compile_compiles" are either compiles or long LEC time
 [sh_test(
-    name = "firrtl_compile-%s" % t,
+    name = "firrtl_compile_compiles-%s" % t,
     srcs = ["tests/firrtl_compile_compiles.sh"],
     args = ["$(location //inou/firrtl:tests/proto/%s.ch.pb)" % t],
     data = [
         "//inou/firrtl:tests/proto/%s.ch.pb" % t,
-        # "//inou/firrtl:tests/verilog_gld/%s.gld.v" % t,
         "//inou/firrtl:post_io_renaming.py",
         "//main:lgshell",
     ],
     tags = [
         "firrtl_compile",
-        "firrtl_compile_compiles-ch",
     ],
     deps = [
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "FMADecoder_1",
+    "FMADecoder_1",        #  LEC
     "Mul54",
-    "PipelinedMultiplier",
-    "RecFNToIN",
-    "PredRenameStage",
-    "RenameMapTable",
+    "PipelinedMultiplier", #  LEC
+    "RecFNToIN",           #  LEC 
+    "PredRenameStage",     #  LEC
+    "RenameMapTable",      # !LEC
     "MulDiv",
     "IssueSlot_1",
     "CSRFile",
@@ -256,50 +256,56 @@ sh_test(
     "MemAddrCalcUnit",
     "PipelinedMulUnit",
     "RecFNToRecFN",
-    "RegisterRead"
+    "RegisterRead",
+    "ALUExeUnit",  # ?LEC
+    "IntToFP",     # !LEC
+    "IntToFPUnit", #  LEC
+    "FPToFP",      #  LEC
+    
 ]]
 
-
-    # FIXME:
-    # issue-layer1
-      # issue#1: memory
-      # "Smem",
-      # "SmemStruct",
-      # "MaskedSmem",
-      # "MaskedSmemStruct",
-      # issue#2: bitwidth mismatch on memory output *****
-      #          assertion it->second.get_sbits() <= addr_sbits *****
-      # "Rob" fitbits
-
-
-      # issue#4: non-of the TupAdds are solved after cprop because if
-      #          tuple_issues flag remains. And the reason is that the
-      #          n150_mux tries to use TGs to get result from Mem 
-      # "MemBranchSimplified"
-      # "BranchKillableQueue_3"
-      # "BranchKillableQueue_4"
-      # "BranchKillableQueue_5"
-
-    # issue-layer2
-      # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
-      # IssueUnitCollapsing
+# FIXME:
+# issue-layer1
+  # issue#1: memory
+  # "Smem",
+  # "SmemStruct",
+  # "MaskedSmem",
+  # "MaskedSmemStruct",
+  # issue#2: bitwidth mismatch on memory output *****
+  #          assertion it->second.get_sbits() <= addr_sbits *****
+  # "Rob" 
+  # "FPUExeUnit"
 
 
-    # BoomCore passing layer2
+  # issue#4: non-of the TupAdds are solved after cprop because if
+  #          tuple_issues flag remains. And the reason is that the
+  #          n150_mux tries to use TGs to get result from Mem 
+  # "MemBranchSimplified"
+  # "BranchKillableQueue_3"
+  # "BranchKillableQueue_4"
+  # "BranchKillableQueue_5"
 
+# issue-layer2
+  # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
+  # "IssueUnitCollapsing"
 
-    # BoomCore passing layer1
-    # "Arbiter_15"
-    # "Arbiter_16"
-    # "Arbiter_17"
-    # "Arbiter_18"
-    # "FMADecoder_1"
-    # "FMADecoder_2"
-    # "Mul54"
-    # "PipelinedMultiplier"
-    # "RecFNToIN"
-    # "RecFNToIN_1"
-    # "PredRenameStage"
+  # issue #2: reg initialization comes from a __fir_not which is not
+  #           translated into a lgraph not
+  # "RenameFreeList"
+
+  # issue #3: sra bits 0 at code gen
+  # "FPUFMAPipe_1"
+  # "MulAddRecFNPipe_1"
+  # "MulAddRecFNToRaw_postMul_1"
+  # "DivSqrtRecF64"
+  # "DivSqrtRecF64_mulAddZ31"
+  # "FPU"
+  # "FPUUnit"
+
+  # issue #4: ???
+  # "FDivSqrtUnit"
+  # "FpPipeline"
+
 
 # Intro
 # Related

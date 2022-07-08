@@ -717,6 +717,7 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	// TODO: think about a better solution
 	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
 	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
+	fmt::print("DEBUG AAA module:{}, t_str:{}, f_str:{}\n", lnast.get_top_module_name(), t_str, f_str);
 
 
 	// preparation: get head of the tuple name so you know entry for the var2flip table
@@ -731,37 +732,30 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	} else {
 		tup_head_t = t_str;
 	}
-	fmt::print("DEBUG AAA t_str:{}, f_str:{}\n", t_str, f_str);
-	fmt::print("          tup_head_t:{}\n", tup_head_t);
 
 	std::vector<std::string> head_chopped_hier_names;
 	auto const& module_var2flip = Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()];
   auto found = module_var2flip.find(tup_head_t) != module_var2flip.end();
-  if (found) {
+  if (found) { // check global io flip table
     for (auto &[var, set] : module_var2flip) {
-      fmt::print("          var:{}\n", var);
       if (var == tup_head_t) {
         for (auto &[hier_name, flipped] : set) {
           auto pos = hier_name.find(t_str);
-          if ( pos != std::string::npos && hier_name != t_str) {
+          if ( pos != std::string::npos && hier_name != t_str && hier_name.at(t_str.size()) == '.') {
             head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
           }
         }
       }
     }
-  }
-
-  if (!found) {
+  } else { // check local wire flip table
     auto found2 = var2flip.find(tup_head_t) != var2flip.end();
     if (found2) {
       for (auto &[var, set] : var2flip) {
-        fmt::print("          var:{}\n", var);
         if (var == tup_head_t) {
           for (auto &[hier_name, flipped] : set) {
             auto pos = hier_name.find(t_str);
-            if ( pos != std::string::npos && hier_name != t_str) {
+            if ( pos != std::string::npos && hier_name != t_str && hier_name.at(t_str.size()) == '.') 
               head_chopped_hier_names.push_back(hier_name.substr(t_str.size() + 1));
-            }
           }
         }
       }

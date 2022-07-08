@@ -632,22 +632,20 @@ void Node::dump() const {
   }
 
   for (const auto &edge : inp_edges()) {
-    fmt::print("  inp bits: {:<3} pid: {:<2} name: {:<30} <- nid: {} idx: {} pid: {:<2} name: {}\n",
+    fmt::print("  inp bits:{:<3} pid:{:<2} name:{:<30} <- nid:{:<5} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.sink.get_pid(),
                edge.sink.debug_name(),
                edge.driver.get_node().nid,
-               edge.driver.get_idx(),
                edge.driver.get_pid(),
                edge.driver.debug_name());
   }
   for (const auto &edge : out_edges()) {
-    fmt::print("  out bits: {:<3} pid: {:<2} name: {:<30} -> nid: {} idx: {} pid: {:<2} name: {}\n",
+    fmt::print("  out bits:{:<3} pid:{:<2} name:{:<30} -> nid:{:<5} pid:{:<2} name:{}\n",
                edge.get_bits(),
                edge.driver.get_pid(),
                edge.driver.debug_name(),
                edge.sink.get_node().nid,
-               edge.sink.get_idx(),
                edge.sink.get_pid(),
                edge.sink.debug_name());
   }

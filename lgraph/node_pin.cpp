@@ -392,7 +392,7 @@ std::string Node_pin::debug_name() const {
                       "_",
                       name,
                       "_",
-                      sink ? "s" : "d",
+                      sink ? "S" : "D",
                       std::to_string(pid),
                       "_lg",
                       current_g->get_name());
