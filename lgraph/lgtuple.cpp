@@ -1587,10 +1587,15 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
 
       if (attr == "initial") {
         // use get_mask to get the bit that assigned to the corresponding individual flop
-        Lconst init_val   = it.second.get_type_const();
-        Lconst masked_val = init_val.get_mask_op(1 << i);
-        auto masked_node = lg->create_node_const(masked_val);
-        flop_spin.connect_driver(masked_node.setup_driver_pin());
+        if (it.second.is_type_const()) {
+          Lconst init_val   = it.second.get_type_const();
+          Lconst masked_val = init_val.get_mask_op(1 << i);
+          auto masked_node = lg->create_node_const(masked_val);
+          flop_spin.connect_driver(masked_node.setup_driver_pin());
+        } else {
+          I(i == 0); // if tuple expantion needs a get_mask_op()
+          flop_spin.connect_driver(it.second);
+        }
       } else {
         flop_spin.connect_driver(it.second);
       }

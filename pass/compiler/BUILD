@@ -242,6 +242,16 @@ sh_test(
     "RecFNToIN",           # LEC-o
     "PredRenameStage",     # LEC-o
     "RenameMapTable",      # LEC-x
+    "RenameFreeList",      # LEC-x
+    "IssueUnitCollapsing", # LEC-?
+    "FPUFMAPipe_1",
+    "MulAddRecFNPipe_1",
+    "MulAddRecFNToRaw_postMul_1",
+    "DivSqrtRecF64",
+    "DivSqrtRecF64_mulAddZ31",
+    "FPU",
+    "FPUUnit",
+    "FDivSqrtUnit",
     "MulDiv",
     "IssueSlot_1",
     "CSRFile",
@@ -286,22 +296,13 @@ sh_test(
   # "BranchKillableQueue_5"
 
 # issue-layer2
-  # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
-  # "IssueUnitCollapsing"
 
   # issue #2: reg initialization comes from a __fir_not which is not
   #           translated into a lgraph not
-  # "RenameFreeList"
+
+  # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
 
   # issue #3: sra bits 0 at code gen
-  # "FPUFMAPipe_1"
-  # "MulAddRecFNPipe_1"
-  # "MulAddRecFNToRaw_postMul_1"
-  # "DivSqrtRecF64"
-  # "DivSqrtRecF64_mulAddZ31"
-  # "FPU"
-  # "FPUUnit"
-  # "FDivSqrtUnit"
 
   # issue #4: intAsRawFloat is initialized twice?
   # "IntToFPUnit"

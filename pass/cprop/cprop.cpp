@@ -2107,7 +2107,6 @@ void Cprop::scalar_pass(Lgraph *lg) {
       tuple_found |= (op == Ntype_op::TupAdd || op == Ntype_op::TupGet);
       continue;
     }
-
     // fmt::print("scalar node:{}\n", node.debug_name());
 
     auto inp_edges_ordered = node.inp_edges_ordered();

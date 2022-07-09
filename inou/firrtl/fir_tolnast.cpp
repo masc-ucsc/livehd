@@ -762,9 +762,9 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 		lnast.add_child(idx_pre_asg, Lnast_node::create_const("0b?"));
 
 		auto cond_str = expr_str_flattened_or_tg(lnast, parent_node, expr.mux().condition());
-    if (var2last_value.find(cond_str) != var2last_value.end()) {
-      cond_str = var2last_value[cond_str];
-    }
+    // if (var2last_value.find(cond_str) != var2last_value.end()) {
+    //   cond_str = var2last_value[cond_str];
+    // }
 
 		auto idx_mux_if = lnast.add_child(parent_node, Lnast_node::create_if());
 		attach_expr_str2node(lnast, cond_str, idx_mux_if);
@@ -1726,6 +1726,10 @@ std::string Inou_firrtl_module::expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid
 	} else {
     expr_str = name_prefix_modifier_flattener(expr_str_tmp, true);
   }
+
+  if (var2last_value.find(expr_str) != var2last_value.end()) {
+    expr_str = var2last_value[expr_str];
+  }
   return expr_str;
 }
 
@@ -1859,7 +1863,7 @@ void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, ab
 
 void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, bool is_flipped, bool is_input) {
   // 0. swap lhs/rhs if needed
-  if (is_flipped && !is_input) {
+  if (/*is_flipped && */!is_input) {
     auto tmp = hier_name_l_ori;
     hier_name_l_ori = hier_name_r_ori;
     hier_name_r_ori = tmp;
@@ -1869,6 +1873,10 @@ void Inou_firrtl_module::tuple_flattened_connections_instance_l(Lnast& lnast, Ln
   hier_name_l = name_prefix_modifier_flattener(hier_name_l_ori, false);
   hier_name_r = name_prefix_modifier_flattener(hier_name_r_ori, true);
 
+  fmt::print("DEBUG AAA-2 hier_name_l:{}\n", hier_name_l);
+  fmt::print("            hier_name_r:{}\n", hier_name_r);
+  fmt::print("            is_flipped :{}\n", is_flipped);
+  fmt::print("            is_input   :{}\n", is_input);
   auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
   lnast.add_child(idx_asg, Lnast_node::create_ref(hier_name_l));
   attach_expr_str2node(lnast, hier_name_r, idx_asg);
@@ -2235,6 +2243,7 @@ void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid
   auto pos = hier_name_l.find_first_of('.');
   auto head_chopped_hier_name_l = hier_name_l.substr(pos + 1);
   if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(head_chopped_hier_name_l)) {
+    fmt::print("DEBUG AAA-0 hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
     tuple_flattened_connections_instance_l(lnast, parent_node, hier_name_l, hier_name_r, false, true);
     return;
   }
@@ -2274,6 +2283,7 @@ void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid
     if (hit) {
       tup_hier_name_l = absl::StrCat(inst_name, ".", tup_hier_name_l);
       auto concated_hier_name_r = absl::StrCat(hier_name_r, leaf_field);
+      fmt::print("DEBUG AAA-1 tup_hier_name_l:{}\n", tup_hier_name_l);
       tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, concated_hier_name_r, it.second, is_input);
     }
   }
@@ -2306,14 +2316,6 @@ void Inou_firrtl_module::handle_rhs_instance_connections(Lnast &lnast, Lnast_nid
   const auto tup_r_sets = &Inou_firrtl::glob_info.var2flip[sub_module_name][head_chopped_hier_name_r];
   for (const auto &it : *tup_r_sets) {
     std::string tup_hier_name_r = it.first;
-    // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
-    //   fmt::print("          AAA-1 tup_head_r:{}, tup_hier_name_r: {}\n", tup_head_r, tup_hier_name_r);
-    // }
-    // auto concated_hier_name_r = absl::StrCat(tup_head_r, ".", hier_name_r);
-    // if (lnast.get_top_module_name() == "IssueUnitCollapsing") {
-    //   fmt::print("          AAA-2 hier_name_l:{}, hier_name_r: {}\n", hier_name_l, hier_name_r);
-    // }
-
     auto p = tup_hier_name_r.find(head_chopped_hier_name_r);
     bool hit = false;
     std::string leaf_field;

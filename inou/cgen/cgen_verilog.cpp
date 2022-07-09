@@ -754,7 +754,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, Lgrap
     if (node.get_driver_pin().get_bits() == 0) {
       if (op != Ntype_op::Const && op != Ntype_op::AttrSet && op != Ntype_op::Mux) {
         node.dump();
-        Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
+        // Pass::error("node:{} does not have bits set. It needs bits to generate correct verilog", node.debug_name());
       }
     }
 
@@ -842,7 +842,8 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
 
     std::string reset_initial = "'h0";
     if (node.get_sink_pin("initial").is_connected()) {
-      reset_initial = node.get_sink_pin("initial").get_driver_pin().get_type_const().to_verilog();
+      auto initial_dpin = node.get_sink_pin("initial").get_driver_pin();
+      reset_initial = get_wire_or_const(initial_dpin);
     }
 
     fout->append("always @(", edge, " ", clock, reset_async, " ) begin\n");
