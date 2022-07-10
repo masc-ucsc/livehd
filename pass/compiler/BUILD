@@ -294,21 +294,11 @@ sh_test(
   # "BranchKillableQueue_3"
   # "BranchKillableQueue_4"
   # "BranchKillableQueue_5"
+  # "FpPipeline"
 
 # issue-layer2
-
-  # issue #2: reg initialization comes from a __fir_not which is not
-  #           translated into a lgraph not
-
-  # issue #1: n322 const zero bit 0 at cgen_verilog at sum_op
-
-  # issue #3: sra bits 0 at code gen
-
   # issue #4: intAsRawFloat is initialized twice?
   # "IntToFPUnit"
-
-  # issue #5: ???
-  # "FpPipeline"
 
 
 # Intro
