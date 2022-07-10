@@ -275,31 +275,24 @@ sh_test(
 ]]
 
 # FIXME:
-# issue-layer1
-  # issue#1: memory
-  # "Smem",
-  # "SmemStruct",
-  # "MaskedSmem",
-  # "MaskedSmemStruct",
-  # issue#2: bitwidth mismatch on memory output *****
-  #          assertion it->second.get_sbits() <= addr_sbits *****
-  # "Rob" 
-  # "FPUExeUnit"
+# issue#1: memory
+# "Smem",
+# "SmemStruct",
+# "MaskedSmem",
+# "MaskedSmemStruct",
+# issue#2: bitwidth mismatch on memory output *****
+#          assertion it->second.get_sbits() <= addr_sbits *****
+# "Rob" 
+# "FPUExeUnit"
 
-
-  # issue#4: non-of the TupAdds are solved after cprop because if
-  #          tuple_issues flag remains. And the reason is that the
-  #          n150_mux tries to use TGs to get result from Mem 
-  # "MemBranchSimplified"
-  # "BranchKillableQueue_3"
-  # "BranchKillableQueue_4"
-  # "BranchKillableQueue_5"
-  # "FpPipeline"
-
-# issue-layer2
-  # issue #4: intAsRawFloat is initialized twice?
-  # "IntToFPUnit"
-
+# issue#4: non-of the TupAdds are solved after cprop because if
+#          tuple_issues flag remains. And the reason is that the
+#          n150_mux tries to use TGs to get result from Mem 
+# "MemBranchSimplified"
+# "BranchKillableQueue_3"
+# "BranchKillableQueue_4"
+# "BranchKillableQueue_5"
+# "FpPipeline"
 
 # Intro
 # Related
