@@ -50,7 +50,7 @@ protected:
   void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
 
-  void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id);
+  void     add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir);
   void     add_port_sub(Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos, std::string_view port_id, uint8_t dir);
   void     grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalModule &emod);
 
@@ -213,7 +213,7 @@ protected:
   void tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_output);
   void handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
   void handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
-  void handle_normal_caces_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
+  void handle_normal_cases_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
   void handle_direct_inp_out_or_node_connection(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r);
 
   bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
@@ -261,7 +261,7 @@ private:
   absl::flat_hash_set<std::string> input_names;
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
-  absl::flat_hash_set<std::string> wire_names;
+  absl::flat_hash_set<std::string> wire_names; // it could contains flattened or un-flattened wires
   absl::flat_hash_set<std::string> node_names;
   absl::flat_hash_map<std::string, std::string> var2last_value;
   absl::flat_hash_set<std::string> is_invalid_table;
