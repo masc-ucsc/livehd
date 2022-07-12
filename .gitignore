@@ -34,3 +34,10 @@ node_modules
 coverage
 .vscode
 package-lock.json
+trace*
+lgcheck*
+livehd_regression
+*.lnast.txt
+*.lnast.raw.txt
+pp*
+

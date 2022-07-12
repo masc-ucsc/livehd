@@ -8,3 +8,4 @@ circuit HellaCacheArbiter :
     reset is invalid
     io is invalid
     io.mem <- io.requestor[0] @[HellaCacheArbiter.scala 17:12]
+    

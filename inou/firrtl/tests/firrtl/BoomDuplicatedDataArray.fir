@@ -114,3 +114,4 @@ circuit BoomDuplicatedDataArray :
     _T_52 <= _T_51[0] @[dcache.scala 292:31]
     io.resp[0][3] <= _T_52 @[dcache.scala 292:21]
     io.nacks[0] <= UInt<1>("h00") @[dcache.scala 294:17]
+    

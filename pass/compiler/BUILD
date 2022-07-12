@@ -202,6 +202,12 @@ cc_library(
     "RenameBusyTable",
     "RoundAnyRawFNToRecFN",
     "INToRecFN",
+    "ForwardingAgeLogic",
+    "PMPChecker_1",
+    "HellaCacheArbiter",
+    "NullPrefetcher",                                                                                                                                                                      
+    "NullLocalBranchPredictorBank",                                                                                                                                                        
+
 ]]
 
 sh_test(
@@ -236,15 +242,21 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "BoomIOMSHR",          # LEC-? (long)
-    "FMADecoder_1",        # LEC-o
-    "Mul54",               # LEC-?
-    "PipelinedMultiplier", # LEC-o
-    "RecFNToIN",           # LEC-o
-    "PredRenameStage",     # LEC-o
-    "RenameMapTable",      # LEC-x
-    "RenameFreeList",      # LEC-x
-    "IssueUnitCollapsing", # LEC-?
+    "FetchBuffer",                   # LEC-? (long)
+    "BranchDecode",                  # LEC-x (1st priority)
+    "RVCExpander_2",                 # LEC-o
+    "BoomProbeUnit",                 # LEC-? (long)
+    "BoomIOMSHR",                    # LEC-? (long)
+    "FMADecoder_1",                  # LEC-o
+    "Mul54",                         # LEC-?
+    "PipelinedMultiplier",           # LEC-o
+    "RecFNToIN",                     # LEC-o
+    "PredRenameStage",               # LEC-o
+    "RenameMapTable",                # LEC-x
+    "RenameFreeList",                # LEC-x
+    "IssueUnitCollapsing",           # LEC-?
+    "NBDTLB",                        # LEC-x (all leave pass!?)
+    "BoomDuplicatedDataArray",
     "FPUFMAPipe_1",
     "MulAddRecFNPipe_1",
     "MulAddRecFNToRaw_postMul_1",
@@ -268,10 +280,10 @@ sh_test(
     "PipelinedMulUnit",
     "RecFNToRecFN",
     "RegisterRead",
-    "ALUExeUnit",  # ?LEC
-    "IntToFP",     # !LEC
-    "IntToFPUnit", #  LEC
-    "FPToFP",      #  LEC
+    "ALUExeUnit",                    # ?LEC
+    "IntToFP",                       # !LEC
+    "IntToFPUnit",                   #  LEC
+    "FPToFP",                        #  LEC
     "Smem",
     "SmemStruct",
     "MaskedSmem",
@@ -303,24 +315,62 @@ sh_test(
 # Conclusion
 
 
+# BoomTile
+# - D1: BoomNonBlockingDCache ----------------------------------------- (x) // wait for mem                                                                                                                                                                       
+# - D1: IntSyncSyncCrossingSink --------------------------------------- (o)                                                                 
+# - D1: IntSyncAsyncCrossingSink -------------------------------------- (o)                                                                 
+#     - D2: SynchronizerShiftReg_w1_d3                                                           
+#         - D3: NonSyncResetSynchronizerPrimitiveShiftReg_d3
+# - D1: BundleBroadcast_2 --------------------------------------------- (o)                                          
+# - D1: LSU                                
+#     - D2: ForwardingAgeLogic ---------------------------------------- (o)                                                                   
+#     - D2: NBDTLB ---------------------------------------------------- (o)                                                                               
+#         - D3: package_Anon_43 --------------------------------------- (o)                                                                  
+#         - D3: PMPChecker_1 ------------------------------------------ (o)
+# - D1: HellaCacheArbiter --------------------------------------------- (o)
 
-
+# - D1: TLBuffer_11                                                                                                                                                                                 
+#     - D2: Queue_37 -------------------------------------------------- (x) // wait for mem                                                                                                                                                                                
+#     - D2: TLMonitor_59                                                                                                                                                                            
+#         - plusarg_reader_59 (*EXTERNAL) ----------------------------- (x) // wait for external                                                                                                                                                          
+# - D1: TLXbar_8                         
+#     - D2: TLMonitor_57                 
+#         - plusarg_reader_57 (*EXTERNAL) ----------------------------- (x) // wait for external
 # - D1: BoomNonBlockingDCache                                                                                                                                                                       
-#    - D2: Arbiter_9                                                                                                                                                                               
-#    - D2: BoomMSHRFile                                                                                                                                                                            
-#        - D3: BranchKillableQueue_2                                                                                                                                                               
-#        - D3: Arbiter                                                                                                                                                                             
-#        - D3: Arbiter_4                                                                                                                                                                           
-#        - D3: Arbiter_1                                                                                                                                                                           
-#        - D3: NullPrefetcher                                                                                                                                                                      
-#        - D3: Arbiter_2                                                                                                                                                                           
-#        - D3: BoomMSHR                                                                                                                                                                            
-#            - D4: BranchKillableQueue                                                                                                                                                             
-#        - D3: Arbiter_3                                                                                                                                                                           
-#        - D3: Arbiter_8                                                                                                                                                                           
-#        - D3: BoomMSHR_1                                                                                                                                                                          
-#            - D4: BranchKillableQueue_1                                                                                                                                                           
-#        - D3: Arbiter_7                                                                                                                                                                           
-#        - D3: Arbiter_5                                                                                                                                                                           
-#        - D3: BoomIOMSHR                                                                                                                                                                          
-#        - D3: Arbiter_6                                      
+#     - D2: BoomMSHRFile                                                                                                                                                                            
+#         - D3: NullPrefetcher ---------------------------------------- (o)                                                                                                                                                                      
+#         - D3: Arbiter ----------------------------------------------- (o)                                                                                                                                                                            
+#         - D3: BoomIOMSHR -------------------------------------------- (o)                                                                                                                                                                          
+#         - D3: BranchKillableQueue_2 --------------------------------- (x) // wait for mem                                                                                                                                                               
+#         - D3: BoomMSHR ---------------------------------------------- (x) // wait for mem                                                                                                                                                                           
+#             - D4: BranchKillableQueue ------------------------------- (x) // wait for mem                                                                                                                                                           
+#     - D2: AMOALU ---------------------------------------------------- (o)                                                                                                                                                                                  
+#     - D2: MaxPeriodFibonacciLFSR_1 ---------------------------------- (o)
+#     - D2: BoomWritebackUnit ----------------------------------------- (i) // TODO
+#     - D2: BoomDuplicatedDataArray ----------------------------------- (i) // TODO
+#     - D2: BoomProbeUnit --------------------------------------------- (o)   
+#     - D2: L1MetadataArray ------------------------------------------- (x) // wait for mem
+# - D1: BoomFrontend                                                                                                                                                                                
+#     - D2: RVCExpander_2 --------------------------------------------- (o)                                                                                                                                                                           
+#     - D2: Queue_30 -------------------------------------------------- (x)                                                                                                                                                                                   
+#     - D2: BranchPredictor                                                                                                                                                                         
+#         - D3: ComposedBranchPredictorBank                                                                                                                                                         
+#             - D4: TageBranchPredictorBank --------------------------- (?) // TODO: some inputs of __fir_cat is not ready                                                                                                                                                         
+#                 - D5: TageTable ------------------------------------- (?) // unknown IO bits                                                                                                                                                                  
+#             - D4: BTBBranchPredictorBank ---------------------------- (x) // TODO: fir2ln assignment issue, solvable                                                                                                                                                          
+#             - D4: BIMBranchPredictorBank ---------------------------- (x) // TODO: fir2ln assignment issue, solvable                                                                                                                           
+#             - D4: FAMicroBTBBranchPredictorBank --------------------- (x) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                 
+#             - D4: LoopBranchPredictorBank --------------------------- (x) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                          
+#                 - D5: LoopBranchPredictorColumn --------------------- (o) // no-bits register!!!?                                                                                                                                                 
+#         - D3: NullLocalBranchPredictorBank -------------------------- (o)                                                                                                                                                        
+#     - D2: TLB                                                                                                                                                                                     
+#         - D3: package_Anon_1 ---------------------------------------- (o) 
+#         - D3: PMPChecker -------------------------------------------- (o)
+#     - D2: BreakpointUnit_3 ------------------------------------------ (o)
+#     - D2: FetchBuffer
+#     - D2: ICache -----------------------------------------------------(i) // TODO: some inputs of __fir_eq is not ready
+#         - D3: MaxPeriodFibonacciLFSR_2 ------------------------------ (o)
+#     - D2: BoomRAS --------------------------------------------------- (i) // TODO: firbits cannot converge and it's not a mem?
+#     - D2: FetchTargetQueue ------------------------------------------ (i) // TODO: _T_170_2 <- pcs__T_166__0 ??
+#     - D2: BranchDecode ---------------------------------------------- (o) 
+
