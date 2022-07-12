@@ -271,15 +271,14 @@ sh_test(
     "IntToFP",     # !LEC
     "IntToFPUnit", #  LEC
     "FPToFP",      #  LEC
-    
+    "Smem",
+    "SmemStruct",
+    "MaskedSmem",
+    "MaskedSmemStruct",
 ]]
 
 # FIXME:
 # issue#1: memory
-# "Smem",
-# "SmemStruct",
-# "MaskedSmem",
-# "MaskedSmemStruct",
 # issue#2: bitwidth mismatch on memory output *****
 #          assertion it->second.get_sbits() <= addr_sbits *****
 # "Rob" 
@@ -293,6 +292,7 @@ sh_test(
 # "BranchKillableQueue_4"
 # "BranchKillableQueue_5"
 # "FpPipeline"
+# "PTW"
 
 # Intro
 # Related
@@ -300,3 +300,26 @@ sh_test(
 # LGrph + eval
 # Para + eval
 # Conclusion
+
+
+
+
+# - D1: BoomNonBlockingDCache                                                                                                                                                                       
+#    - D2: Arbiter_9                                                                                                                                                                               
+#    - D2: BoomMSHRFile                                                                                                                                                                            
+#        - D3: BranchKillableQueue_2                                                                                                                                                               
+#        - D3: Arbiter                                                                                                                                                                             
+#        - D3: Arbiter_4                                                                                                                                                                           
+#        - D3: Arbiter_1                                                                                                                                                                           
+#        - D3: NullPrefetcher                                                                                                                                                                      
+#        - D3: Arbiter_2                                                                                                                                                                           
+#        - D3: BoomMSHR                                                                                                                                                                            
+#            - D4: BranchKillableQueue                                                                                                                                                             
+#        - D3: Arbiter_3                                                                                                                                                                           
+#        - D3: Arbiter_8                                                                                                                                                                           
+#        - D3: BoomMSHR_1                                                                                                                                                                          
+#            - D4: BranchKillableQueue_1                                                                                                                                                           
+#        - D3: Arbiter_7                                                                                                                                                                           
+#        - D3: Arbiter_5                                                                                                                                                                           
+#        - D3: BoomIOMSHR                                                                                                                                                                          
+#        - D3: Arbiter_6                                      

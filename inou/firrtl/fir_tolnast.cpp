@@ -704,7 +704,6 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	// preparation: get head of the tuple name so you know entry for the var2flip table
 	auto p = t_str.find_first_of('.');
   bool is_instance = false;
-  
 	std::string tup_head_t;
 	std::string tup_rest_t;
   std::string instance_name;
@@ -712,7 +711,7 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	if (p != std::string::npos) {
 		tup_head_t = t_str.substr(0, p);
     tup_rest_t = t_str.substr(p + 1);
-    //TODO: get the sub-instance module_name, and use that to get the var2flip table
+    //note: get the sub-instance module_name, and use that to get the var2flip table
     if (inst2module.contains(tup_head_t)) { // it's an instance io
       instance_name = tup_head_t;
       module_name = inst2module[tup_head_t];
@@ -791,6 +790,7 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 	}
 
 	// rare cases
+
 	for (const auto &head_chopped_hier_name : head_chopped_hier_names) {
 		auto new_lhs = absl::StrCat(lhs, ".", head_chopped_hier_name);
 		new_lhs      = name_prefix_modifier_flattener(new_lhs, false);
@@ -820,6 +820,22 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 		add_lnast_assign(lnast, idx_stmt_t, new_lhs, new_t_str);
 		add_lnast_assign(lnast, idx_stmt_f, new_lhs, new_f_str);
 	}
+
+  if (!is_instance) {
+    auto lhs_str = std::string{lhs};
+    absl::btree_set<std::pair<std::string, bool>> *tup_set;
+    if (var2flip.find(lhs_str) != var2flip.end()) {
+      tup_set = &var2flip[lhs_str]; 
+    } else {
+      absl::btree_set<std::pair<std::string, bool>> empty_set;
+      var2flip.insert_or_assign(lhs_str, empty_set);
+      tup_set = &var2flip[lhs_str];
+    }
+
+    for (const auto &head_chopped_hier_name : head_chopped_hier_names) {
+      tup_set->insert(std::make_pair(absl::StrCat(lhs, ".", head_chopped_hier_name), false));
+    }
+  } 
 }
 
 /* ValidIfs get detected as the RHS of an assign statement and we can't have a child of
@@ -2144,8 +2160,6 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       auto is_instance_r = inst2module.find (tup_head_r)  != inst2module.end();
 
       if (is_instance_l) {
-        if (lnast.get_top_module_name() == "PTW")
-          fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
         handle_lhs_instance_connections(lnast, parent_node, tup_head_l, hier_name_l, hier_name_r);
         return;
       } else if (is_instance_r) {
@@ -2201,7 +2215,6 @@ void Inou_firrtl_module::handle_normal_cases_wire_connections(Lnast &lnast, Lnas
     tup_l_sets = &Inou_firrtl::glob_info.var2flip[lnast.get_top_module_name()][tup_head_l];
   }
   
-  // fmt::print("DEBUG AAA hier_name_l:{}, hier_name_r:{}\n", hier_name_l, hier_name_r);
   for (const auto &it : *tup_l_sets) {
     auto pos = it.first.find(hier_name_l);
     bool hit = false;
@@ -2431,9 +2444,7 @@ void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Modu
 #endif
 
   Inou_firrtl_module firmod;
-
   std::unique_ptr<Lnast> lnast = std::make_unique<Lnast>(fmodule.external_module().id(), file_name);
-
   const firrtl::FirrtlPB_Module_ExternalModule& ext_module = fmodule.external_module();
 
   lnast->set_root(Lnast_node::create_top());
