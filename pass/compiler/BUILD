@@ -236,6 +236,7 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in [
+    "BoomIOMSHR",          # LEC-? (long)
     "FMADecoder_1",        # LEC-o
     "Mul54",               # LEC-?
     "PipelinedMultiplier", # LEC-o
