@@ -244,6 +244,7 @@ sh_test(
 ) for t in [
     "FetchBuffer",                   # LEC-? (long)
     "BranchDecode",                  # LEC-x (1st priority)
+    "BoomRAS",                       # LEC-x (1st priority, no bits set on some mux!?)
     "RVCExpander_2",                 # LEC-o
     "BoomProbeUnit",                 # LEC-? (long)
     "BoomIOMSHR",                    # LEC-? (long)
@@ -370,7 +371,7 @@ sh_test(
 #     - D2: FetchBuffer
 #     - D2: ICache -----------------------------------------------------(i) // TODO: some inputs of __fir_eq is not ready
 #         - D3: MaxPeriodFibonacciLFSR_2 ------------------------------ (o)
-#     - D2: BoomRAS --------------------------------------------------- (i) // TODO: firbits cannot converge and it's not a mem?
+#     - D2: BoomRAS --------------------------------------------------- (o) 
 #     - D2: FetchTargetQueue ------------------------------------------ (i) // TODO: _T_170_2 <- pcs__T_166__0 ??
 #     - D2: BranchDecode ---------------------------------------------- (o) 
 

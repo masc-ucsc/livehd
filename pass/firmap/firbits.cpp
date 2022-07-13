@@ -159,6 +159,7 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
       sign           = it->second.get_sign();
       no_one_ready   = false;
       some_one_ready = true;
+      fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(max_bits, sign));
     } else {
       if (some_one_ready) {
         max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
@@ -169,22 +170,9 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
       sign           = it->second.get_sign();
       no_one_ready   = false;
       some_one_ready = true;
+      fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(max_bits, sign));
     }
   }
-
-    // auto it = fbmap.find(e.driver.get_compact_class_driver());
-    // if (it != fbmap.end()) {
-    //   if (some_one_ready) {
-    //     max_bits = (max_bits < it->second.get_bits()) ? it->second.get_bits() : max_bits;
-    //     I(sign == it->second.get_sign());
-    //     continue;
-    //   }
-    //   max_bits       = it->second.get_bits();
-    //   sign           = it->second.get_sign();
-    //   no_one_ready   = false;
-    //   some_one_ready = true;
-    // }
-  // }
 
   if (no_one_ready) {
     node.dump();
@@ -197,7 +185,7 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
     firbits_issues = true;
     return;
   }
-  fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(max_bits, sign));
+  // fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(max_bits, sign));
 }
 
 void Firmap::analysis_lg_const(Node &node, FBMap &fbmap) {
@@ -266,7 +254,6 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
       auto sink_node = e.sink.get_node();
       if (sink_node.is_type_flop()) { 
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
-        
         dpin_of_sink_node.set_bits(bits + 1); // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
         fbmap.insert_or_assign(dpin_of_sink_node.get_compact_class_driver(), fb);
       }
