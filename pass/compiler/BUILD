@@ -207,7 +207,6 @@ cc_library(
     "HellaCacheArbiter",
     "NullPrefetcher",                                                                                                                                                                      
     "NullLocalBranchPredictorBank",                                                                                                                                                        
-
 ]]
 
 sh_test(
