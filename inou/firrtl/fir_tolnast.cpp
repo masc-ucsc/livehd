@@ -696,10 +696,36 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
  * as the first argument (the condition) of the mux. */
 void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_Expression& expr, Lnast_nid& parent_node, std::string_view lhs) {
   I(lnast.get_data(parent_node).type.is_stmts());
+  
+  bool is_runtime_idx_t = false;
+  bool is_runtime_idx_f = false;
+  
+  const auto &expr_t = expr.mux().t_value();
+  const auto &expr_f = expr.mux().f_value();
+  std::string expr_str_tmp_t = get_expr_hier_name(expr_t, is_runtime_idx_t); //FIXME: can we get the is_runtime_idx more elegent?
+  std::string expr_str_tmp_f = get_expr_hier_name(expr_f, is_runtime_idx_f);
 
-	std::string t_str = get_expr_hier_name(lnast, parent_node, expr.mux().t_value());
-	std::string f_str = get_expr_hier_name(lnast, parent_node, expr.mux().f_value());
+	std::string t_str ;
+	std::string f_str ;
+  
+  if (is_runtime_idx_t) {
+    auto tmp_var = create_tmp_var();
+		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, expr_str_tmp_t, expr_t);
+    t_str = tmp_var;
+    ;
+  } else {
+    t_str = get_expr_hier_name(lnast, parent_node, expr_t);
+  }
 
+
+  if (is_runtime_idx_f) {
+    auto tmp_var = create_tmp_var();
+		handle_rhs_runtime_idx(lnast, parent_node, tmp_var, expr_str_tmp_f, expr_f);
+    f_str = tmp_var;
+    ;
+  } else {
+	  f_str = get_expr_hier_name(lnast, parent_node, expr_f);
+  }
 
 	// preparation: get head of the tuple name so you know entry for the var2flip table
 	auto p = t_str.find_first_of('.');

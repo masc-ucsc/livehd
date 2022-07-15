@@ -333,10 +333,10 @@ sh_test(
 # - D1: TLBuffer_11                                                                                                                                                                                 
 #     - D2: Queue_37 -------------------------------------------------- (x) // wait for mem                                                                                                                                                                                
 #     - D2: TLMonitor_59                                                                                                                                                                            
-#         - plusarg_reader_59 (*EXTERNAL) ----------------------------- (x) // wait for external                                                                                                                                                          
+#         - D3: plusarg_reader_59 (*EXTERNAL) ------------------------- (x) // wait for external                                                                                                                                                          
 # - D1: TLXbar_8                         
 #     - D2: TLMonitor_57                 
-#         - plusarg_reader_57 (*EXTERNAL) ----------------------------- (x) // wait for external
+#         - D3: plusarg_reader_57 (*EXTERNAL) ------------------------- (x) // wait for external
 # - D1: BoomNonBlockingDCache                                                                                                                                                                       
 #     - D2: BoomMSHRFile                                                                                                                                                                            
 #         - D3: NullPrefetcher ---------------------------------------- (o)                                                                                                                                                                      
@@ -353,15 +353,15 @@ sh_test(
 #     - D2: L1MetadataArray ------------------------------------------- (x) // wait for mem
 # - D1: BoomFrontend                                                                                                                                                                                
 #     - D2: RVCExpander_2 --------------------------------------------- (o)                                                                                                                                                                           
-#     - D2: Queue_30 -------------------------------------------------- (x)                                                                                                                                                                                   
+#     - D2: Queue_30 -------------------------------------------------- (x) // wait for mem                                                                                                                                                                                   
 #     - D2: BranchPredictor                                                                                                                                                                         
 #         - D3: ComposedBranchPredictorBank                                                                                                                                                         
-#             - D4: TageBranchPredictorBank --------------------------- (?) // TODO: some inputs of __fir_cat is not ready                                                                                                                                                         
-#                 - D5: TageTable ------------------------------------- (?) // unknown IO bits                                                                                                                                                                  
-#             - D4: BTBBranchPredictorBank ---------------------------- (x) // TODO: fir2ln assignment issue, solvable                                                                                                                                                          
-#             - D4: BIMBranchPredictorBank ---------------------------- (x) // TODO: fir2ln assignment issue, solvable                                                                                                                           
-#             - D4: FAMicroBTBBranchPredictorBank --------------------- (x) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                 
-#             - D4: LoopBranchPredictorBank --------------------------- (x) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                          
+#             - D4: TageBranchPredictorBank --------------------------- (x) // wait for mem: some inputs of __fir_cat is not ready                                                                                                                                                         
+#                 - D5: TageTable ------------------------------------- (x) // wait for mem and ""!!!unknown IO bits"
+#             - D4: BTBBranchPredictorBank ---------------------------- (i) // TODO: fir2ln assignment issue, solvable
+#             - D4: BIMBranchPredictorBank ---------------------------- (i) // TODO: fir2ln assignment issue, solvable
+#             - D4: FAMicroBTBBranchPredictorBank --------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                 
+#             - D4: LoopBranchPredictorBank --------------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                          
 #                 - D5: LoopBranchPredictorColumn --------------------- (o) // no-bits register!!!?                                                                                                                                                 
 #         - D3: NullLocalBranchPredictorBank -------------------------- (o)                                                                                                                                                        
 #     - D2: TLB                                                                                                                                                                                     
@@ -369,9 +369,36 @@ sh_test(
 #         - D3: PMPChecker -------------------------------------------- (o)
 #     - D2: BreakpointUnit_3 ------------------------------------------ (o)
 #     - D2: FetchBuffer
-#     - D2: ICache -----------------------------------------------------(i) // TODO: some inputs of __fir_eq is not ready
+#     - D2: ICache -----------------------------------------------------(x) // wait for mem: some inputs of __fir_eq is not ready
 #         - D3: MaxPeriodFibonacciLFSR_2 ------------------------------ (o)
 #     - D2: BoomRAS --------------------------------------------------- (o) 
-#     - D2: FetchTargetQueue ------------------------------------------ (i) // TODO: _T_170_2 <- pcs__T_166__0 ??
+#     - D2: FetchTargetQueue ------------------------------------------ (x) // wait for mem
 #     - D2: BranchDecode ---------------------------------------------- (o) 
+
+
+# - D0: DinoPipelinedBP
+#     - D1: PipelinedCPUBP
+#         - D2: HazardUnitBP ------------------------------------------ (o) // LEC-o
+#         - D2: Adder_1 ----------------------------------------------- (o) // LEC-o
+#         - D2: AlwaysNotTakenPredictor ------------------------------- (o) // LEC-o
+#         - D2: Control ----------------------------------------------- (o) // LEC-o
+#         - D2: RegisterFile ------------------------------------------ (i) // LEC-x
+#         - D2: ALUControl -------------------------------------------- (o) // LEC-o
+#         - D2: Adder ------------------------------------------------- (o) // LEC-o
+#         - D2: NextPC ------------------------------------------------ (i) // LEC-x
+#         - D2: ALU --------------------------------------------------- (i) // LEC-x
+#         - D2: ImmediateGenerator ------------------------------------ (o) // LEC-o
+#         - D2: StageReg ---------------------------------------------- (x) // firbit fb not found!?
+#         - D2: StageReg_1 -------------------------------------------- (x) // firbit fb not found!?
+#         - D2: StageReg_2 -------------------------------------------- (x) // firbit fb not found!?
+#         - D2: StageReg_3 -------------------------------------------- (i) // firbit fb not found!?
+#         - D2: StageReg_4 -------------------------------------------- (i) // firbit fb not found!?
+#         - D2: StageReg_5 -------------------------------------------- (i) // firbit fb not found!?
+#         - D2: StageReg_6 -------------------------------------------- (i) // firbit fb not found!? 
+#         - D2: ForwardingUnit ---------------------------------------- (o) // LEC-o
+#     - D1: DualPortedCombinMemory ------------------------------------ (x) // wait for mem
+#     - D1: DCombinMemPort -------------------------------------------- (i) // firbit fb not found!?
+#     - D1: ICombinMemPort -------------------------------------------- (i) // firbit fb not found!?
+
+
 

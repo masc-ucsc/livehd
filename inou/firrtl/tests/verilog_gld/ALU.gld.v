@@ -1,112 +1,36 @@
 module ALU(
   input         clock,
   input         reset,
-  input         io_dw,
-  input  [3:0]  io_fn,
-  input  [63:0] io_in2,
-  input  [63:0] io_in1,
-  output [63:0] io_out,
-  output [63:0] io_adder_out,
-  output        io_cmp_out
+  input  [3:0]  io_operation,
+  input  [31:0] io_inputx,
+  input  [31:0] io_inputy,
+  output [31:0] io_result
 );
-  wire [63:0] _T_1 = ~io_in2; // @[ALU.scala 62:35]
-  wire [63:0] in2_inv = io_fn[3] ? _T_1 : io_in2; // @[ALU.scala 62:20]
-  wire [63:0] in1_xor_in2 = io_in1 ^ in2_inv; // @[ALU.scala 63:28]
-  wire [63:0] _T_3 = io_in1 + in2_inv; // @[ALU.scala 64:26]
-  wire [63:0] _GEN_1 = {{63'd0}, io_fn[3]}; // @[ALU.scala 64:36]
-  wire  _T_14 = io_fn[1] ? io_in2[63] : io_in1[63]; // @[ALU.scala 69:8]
-  wire  slt = io_in1[63] == io_in2[63] ? io_adder_out[63] : _T_14; // @[ALU.scala 68:8]
-  wire  _T_17 = ~io_fn[3]; // @[ALU.scala 44:26]
-  wire  _T_19 = _T_17 ? in1_xor_in2 == 64'h0 : slt; // @[ALU.scala 70:41]
-  wire  _T_23 = io_fn[3] & io_in1[31]; // @[ALU.scala 77:46]
-  wire [31:0] _T_25 = _T_23 ? 32'hffffffff : 32'h0; // @[Bitwise.scala 72:12]
-  wire [31:0] _T_28 = io_dw ? io_in1[63:32] : _T_25; // @[ALU.scala 78:24]
-  wire  _T_31 = io_in2[5] & io_dw; // @[ALU.scala 79:33]
-  wire [5:0] shamt = {_T_31,io_in2[4:0]}; // @[Cat.scala 29:58]
-  wire [63:0] shin_r = {_T_28,io_in1[31:0]}; // @[Cat.scala 29:58]
-  wire  _T_36 = io_fn == 4'h5 | io_fn == 4'hb; // @[ALU.scala 82:35]
-  wire [63:0] _GEN_2 = {{32'd0}, shin_r[63:32]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_40 = _GEN_2 & 64'hffffffff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_42 = {shin_r[31:0], 32'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_44 = _T_42 & 64'hffffffff00000000; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_45 = _T_40 | _T_44; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_3 = {{16'd0}, _T_45[63:16]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_50 = _GEN_3 & 64'hffff0000ffff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_52 = {_T_45[47:0], 16'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_54 = _T_52 & 64'hffff0000ffff0000; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_55 = _T_50 | _T_54; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_4 = {{8'd0}, _T_55[63:8]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_60 = _GEN_4 & 64'hff00ff00ff00ff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_62 = {_T_55[55:0], 8'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_64 = _T_62 & 64'hff00ff00ff00ff00; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_65 = _T_60 | _T_64; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_5 = {{4'd0}, _T_65[63:4]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_70 = _GEN_5 & 64'hf0f0f0f0f0f0f0f; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_72 = {_T_65[59:0], 4'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_74 = _T_72 & 64'hf0f0f0f0f0f0f0f0; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_75 = _T_70 | _T_74; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_6 = {{2'd0}, _T_75[63:2]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_80 = _GEN_6 & 64'h3333333333333333; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_82 = {_T_75[61:0], 2'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_84 = _T_82 & 64'hcccccccccccccccc; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_85 = _T_80 | _T_84; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_7 = {{1'd0}, _T_85[63:1]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_90 = _GEN_7 & 64'h5555555555555555; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_92 = {_T_85[62:0], 1'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_94 = _T_92 & 64'haaaaaaaaaaaaaaaa; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_95 = _T_90 | _T_94; // @[Bitwise.scala 103:39]
-  wire [63:0] shin = io_fn == 4'h5 | io_fn == 4'hb ? shin_r : _T_95; // @[ALU.scala 82:17]
-  wire  _T_98 = io_fn[3] & shin[63]; // @[ALU.scala 83:35]
-  wire [64:0] _T_100 = {_T_98,shin}; // @[ALU.scala 83:57]
-  wire [64:0] _T_101 = $signed(_T_100) >>> shamt; // @[ALU.scala 83:64]
-  wire [63:0] shout_r = _T_101[63:0]; // @[ALU.scala 83:73]
-  wire [63:0] _GEN_8 = {{32'd0}, shout_r[63:32]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_105 = _GEN_8 & 64'hffffffff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_107 = {shout_r[31:0], 32'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_109 = _T_107 & 64'hffffffff00000000; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_110 = _T_105 | _T_109; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_9 = {{16'd0}, _T_110[63:16]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_115 = _GEN_9 & 64'hffff0000ffff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_117 = {_T_110[47:0], 16'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_119 = _T_117 & 64'hffff0000ffff0000; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_120 = _T_115 | _T_119; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_10 = {{8'd0}, _T_120[63:8]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_125 = _GEN_10 & 64'hff00ff00ff00ff; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_127 = {_T_120[55:0], 8'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_129 = _T_127 & 64'hff00ff00ff00ff00; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_130 = _T_125 | _T_129; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_11 = {{4'd0}, _T_130[63:4]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_135 = _GEN_11 & 64'hf0f0f0f0f0f0f0f; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_137 = {_T_130[59:0], 4'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_139 = _T_137 & 64'hf0f0f0f0f0f0f0f0; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_140 = _T_135 | _T_139; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_12 = {{2'd0}, _T_140[63:2]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_145 = _GEN_12 & 64'h3333333333333333; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_147 = {_T_140[61:0], 2'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_149 = _T_147 & 64'hcccccccccccccccc; // @[Bitwise.scala 103:75]
-  wire [63:0] _T_150 = _T_145 | _T_149; // @[Bitwise.scala 103:39]
-  wire [63:0] _GEN_13 = {{1'd0}, _T_150[63:1]}; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_155 = _GEN_13 & 64'h5555555555555555; // @[Bitwise.scala 103:31]
-  wire [63:0] _T_157 = {_T_150[62:0], 1'h0}; // @[Bitwise.scala 103:65]
-  wire [63:0] _T_159 = _T_157 & 64'haaaaaaaaaaaaaaaa; // @[Bitwise.scala 103:75]
-  wire [63:0] shout_l = _T_155 | _T_159; // @[Bitwise.scala 103:39]
-  wire [63:0] _T_163 = _T_36 ? shout_r : 64'h0; // @[ALU.scala 85:18]
-  wire [63:0] _T_165 = io_fn == 4'h1 ? shout_l : 64'h0; // @[ALU.scala 86:18]
-  wire [63:0] shout = _T_163 | _T_165; // @[ALU.scala 85:74]
-  wire  _T_167 = io_fn == 4'h6; // @[ALU.scala 89:45]
-  wire [63:0] _T_169 = io_fn == 4'h4 | io_fn == 4'h6 ? in1_xor_in2 : 64'h0; // @[ALU.scala 89:18]
-  wire [63:0] _T_173 = io_in1 & io_in2; // @[ALU.scala 90:63]
-  wire [63:0] _T_174 = _T_167 | io_fn == 4'h7 ? _T_173 : 64'h0; // @[ALU.scala 90:18]
-  wire [63:0] logic_ = _T_169 | _T_174; // @[ALU.scala 89:78]
-  wire  _T_175 = io_fn >= 4'hc; // @[ALU.scala 41:30]
-  wire  _T_176 = _T_175 & slt; // @[ALU.scala 91:35]
-  wire [63:0] _GEN_14 = {{63'd0}, _T_176}; // @[ALU.scala 91:43]
-  wire [63:0] _T_177 = _GEN_14 | logic_; // @[ALU.scala 91:43]
-  wire [63:0] shift_logic = _T_177 | shout; // @[ALU.scala 91:51]
-  wire [63:0] out = io_fn == 4'h0 | io_fn == 4'ha ? io_adder_out : shift_logic; // @[ALU.scala 92:16]
-  wire [31:0] _T_184 = out[31] ? 32'hffffffff : 32'h0; // @[Bitwise.scala 72:12]
-  wire [63:0] _T_186 = {_T_184,out[31:0]}; // @[Cat.scala 29:58]
-  assign io_out = ~io_dw ? _T_186 : out; // @[ALU.scala 94:10 97:{28,37}]
-  assign io_adder_out = _T_3 + _GEN_1; // @[ALU.scala 64:36]
-  assign io_cmp_out = io_fn[0] ^ _T_19; // @[ALU.scala 70:36]
+  wire [31:0] _T_1 = io_inputx & io_inputy;
+  wire [31:0] _T_3 = io_inputx | io_inputy;
+  wire [31:0] _T_6 = io_inputx + io_inputy;
+  wire [31:0] _T_9 = io_inputx - io_inputy;
+  wire [31:0] _T_11 = io_inputx;
+  wire [31:0] _T_14 = $signed(io_inputx) >>> io_inputy[4:0];
+  wire [31:0] _T_18 = io_inputx ^ io_inputy;
+  wire [31:0] _T_21 = io_inputx >> io_inputy[4:0];
+  wire [31:0] _T_24 = io_inputy;
+  wire [62:0] _GEN_15 = {{31'd0}, io_inputx};
+  wire [62:0] _T_28 = _GEN_15 << io_inputy[4:0];
+  wire [31:0] _T_31 = ~_T_3;
+  wire  _GEN_1 = io_operation == 4'hd ? io_inputx == io_inputy : io_operation == 4'he & io_inputx != io_inputy; // @[]
+  wire  _GEN_2 = io_operation == 4'hc ? io_inputx >= io_inputy : _GEN_1; // @[]
+  wire  _GEN_3 = io_operation == 4'hb ? $signed(io_inputx) >= $signed(io_inputy) : _GEN_2; // @[]
+  wire [31:0] _GEN_4 = io_operation == 4'ha ? _T_31 : {{31'd0}, _GEN_3}; // @[]
+  wire [62:0] _GEN_5 = io_operation == 4'h8 ? _T_28 : {{31'd0}, _GEN_4}; // @[]
+  wire [62:0] _GEN_6 = io_operation == 4'h9 ? {{62'd0}, $signed(_T_11) < $signed(_T_24)} : _GEN_5; // @[]
+  wire [62:0] _GEN_7 = io_operation == 4'h2 ? {{31'd0}, _T_21} : _GEN_6; // @[]
+  wire [62:0] _GEN_8 = io_operation == 4'h0 ? {{31'd0}, _T_18} : _GEN_7; // @[]
+  wire [62:0] _GEN_9 = io_operation == 4'h1 ? {{62'd0}, io_inputx < io_inputy} : _GEN_8; // @[]
+  wire [62:0] _GEN_10 = io_operation == 4'h3 ? {{31'd0}, _T_14} : _GEN_9; // @[]
+  wire [62:0] _GEN_11 = io_operation == 4'h4 ? {{31'd0}, _T_9} : _GEN_10; // @[]
+  wire [62:0] _GEN_12 = io_operation == 4'h7 ? {{31'd0}, _T_6} : _GEN_11; // @[]
+  wire [62:0] _GEN_13 = io_operation == 4'h5 ? {{31'd0}, _T_3} : _GEN_12; // @[]
+  wire [62:0] _GEN_14 = io_operation == 4'h6 ? {{31'd0}, _T_1} : _GEN_13; // @[]
+  assign io_result = _GEN_14[31:0];
 endmodule
