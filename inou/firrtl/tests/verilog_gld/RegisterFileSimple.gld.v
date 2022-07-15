@@ -1,4 +1,4 @@
-module RegisterFile(
+module RegisterFileSimple(
   input   clock,
   input   reset,
   input   io_readreg1,

@@ -207,6 +207,7 @@ cc_library(
     "HellaCacheArbiter",
     "NullPrefetcher",                                                                                                                                                                      
     "NullLocalBranchPredictorBank",                                                                                                                                                        
+    "RegisterFile",
 ]]
 
 sh_test(
@@ -377,16 +378,22 @@ sh_test(
 
 # - D0: DinoPipelinedBP
 #     - D1: PipelinedCPUBP
-#         - D2: HazardUnitBP ------------------------------------------ (o) // LEC-o
-#         - D2: Adder_1 ----------------------------------------------- (o) // LEC-o
-#         - D2: AlwaysNotTakenPredictor ------------------------------- (o) // LEC-o
-#         - D2: Control ----------------------------------------------- (o) // LEC-o
-#         - D2: RegisterFile ------------------------------------------ (i) // LEC-x
-#         - D2: ALUControl -------------------------------------------- (o) // LEC-o
-#         - D2: Adder ------------------------------------------------- (o) // LEC-o
-#         - D2: NextPC ------------------------------------------------ (i) // LEC-x
-#         - D2: ALU --------------------------------------------------- (i) // LEC-x
-#         - D2: ImmediateGenerator ------------------------------------ (o) // LEC-o
+#         - D2: HazardUnitBP ------------------------------------------ (o) # LEC-o
+#         - D2: Adder_1 ----------------------------------------------- (o) # LEC-o
+#         - D2: AlwaysNotTakenPredictor ------------------------------- (o) # LEC-o
+#         - D2: Control ----------------------------------------------- (o) # LEC-o
+#         - D2: ALUControl -------------------------------------------- (o) # LEC-o
+#         - D2: Adder ------------------------------------------------- (o) # LEC-o
+#         - D2: ImmediateGenerator ------------------------------------ (o) # LEC-o
+#         - D2: ForwardingUnit ---------------------------------------- (o) # LEC-o
+#         - D2: NextPC ------------------------------------------------ (i) # LEC-x
+#         - D2: ALU --------------------------------------------------- (i) # LEC-x
+#         - D2: RegisterFile ------------------------------------------ (o) # LEC-o: see below, discuss with Jose
+#         - D2: RegisterFileSimple------------------------------------- (o) # LEC-o: (1) n106_mux got visited twice at the same lg->forward()
+#                                                                                    (2) n119_mux disconnected from n106_mux and reconnected to a 0?
+#                                                                                        search FIXME->sh in lgtuple.cpp
+#                                                                                    (3) hacky patch, the problem should be solved at the lgtuple level
+#                                                                                                                                                       
 #         - D2: StageReg ---------------------------------------------- (x) // firbit fb not found!?
 #         - D2: StageReg_1 -------------------------------------------- (x) // firbit fb not found!?
 #         - D2: StageReg_2 -------------------------------------------- (x) // firbit fb not found!?
@@ -394,7 +401,6 @@ sh_test(
 #         - D2: StageReg_4 -------------------------------------------- (i) // firbit fb not found!?
 #         - D2: StageReg_5 -------------------------------------------- (i) // firbit fb not found!?
 #         - D2: StageReg_6 -------------------------------------------- (i) // firbit fb not found!? 
-#         - D2: ForwardingUnit ---------------------------------------- (o) // LEC-o
 #     - D1: DualPortedCombinMemory ------------------------------------ (x) // wait for mem
 #     - D1: DCombinMemPort -------------------------------------------- (i) // firbit fb not found!?
 #     - D1: ICombinMemPort -------------------------------------------- (i) // firbit fb not found!?

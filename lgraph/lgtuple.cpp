@@ -1196,14 +1196,10 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   I(tup_list.size() > 1);  // nothing to merge?
 
   // 1st
-  //
-  //  -Create a fixing_tup with all the entries in tup_list
-  //
-  //  -If all the tup_list keys point to the same dpin, do not create mux
-  //
-  //  -Each tuples may have diff name (:0:a, a, 0) which sould be unified/fixed
-  //
-  // Put the keys after learning (may collapse entries)
+  //  - Create a fixing_tup with all the entries in tup_list
+  //  - If all the tup_list keys point to the same dpin, do not create mux
+  //  - Each tuples may have diff name (:0:a, a, 0) which sould be unified/fixed
+  //    Put the keys after learning (may collapse entries)
   auto fixing_tup = std::make_shared<Lgtuple>(tup_list[0]->get_name());
 
   // find all the possible keys
@@ -1274,29 +1270,26 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
 
     for (const auto &tup : tup_list) {
       if (!tup->has_dpin(e.first)) {
-        return std::tuple(fixing_tup, true);  // No need to connect (still pending iterations)
+        return std::tuple{fixing_tup, true};  // No need to connect (still pending iterations)
       }
       auto dpin = tup->get_dpin(e.first);
       if (dpin.is_invalid()) {
-        return std::tuple(fixing_tup, true);  // No need to connect (still pending iterations)
+        return std::tuple{fixing_tup, true};  // No need to connect (still pending iterations)
       }
     }
   }
 
-  return std::tuple(fixing_tup, false);
+  return std::tuple{fixing_tup, false};
 }
 
 std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
                                              const std::vector<std::shared_ptr<Lgtuple const>> &tup_list) {
   I(is_correct());
 
-  // 2nd
-  //
+  //  2nd
   //  Create mux if needed, not needed when:
-  //
-  //  Same dpin in both sizes (e.second.invalid()
-  //
-  //  Reuse the original mux_node (must reconnect edges)
+  //  - Same dpin in both sizes (e.second.invalid()
+  //  - Reuse the original mux_node (must reconnect edges)
 
   std::vector<Node_pin> mux_input_dpins;
   mux_input_dpins.resize(tup_list.size() + 1);  // +1 for sel
@@ -1338,9 +1331,27 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       node = mux_node.create(Ntype_op::Mux);
       node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
     } else {
+      if (mux_node.get_nid() == 119) {
+        fmt::print("DEBUG BBB-before node: {}, driver_pin:{}\n", mux_node.debug_name(), e.second.debug_name());
+        mux_node.dump();
+      }
       for (auto &spin : mux_node.inp_connected_pins()) {
-        if (spin.get_pid())  // keep sel
+        // old design
+        // if (spin.get_pid())  // keep sel
+        //   spin.del();
+        // FIXME->sh: all n119_mux inputs got deleted here. One of the input got disconnected from n106_mux
+
+        // FIXME-sh: new design idea:
+        // if the mux input comes from another mux, then that mux must be handled before
+        // and is either an original scalar-dpin or a tuple-flattened-scalar-dpin
+        // we don't need to try to expand the tuple and create new mux here
+        if (spin.get_pid() && spin.get_driver_pin().get_type_op() != Ntype_op::Mux) {
           spin.del();
+        }
+      }
+      if (mux_node.get_nid() == 119) {
+        fmt::print("DEBUG BBB-after node: {}, driver_pin:{}\n", mux_node.debug_name(), e.second.debug_name());
+        mux_node.dump();
       }
 
       node            = mux_node;
@@ -1361,8 +1372,8 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
             if (Ntype::has_sink(Ntype_op::Flop, std::string(attr_it.first.substr(2))))
               continue;  // Do not create attr for flop config (handled in cprop directly)
 
-            fmt::print("adding attr:{}\n", attr_it.first);
-            attr_it.second.get_node().dump();
+            // fmt::print("adding attr:{}\n", attr_it.first);
+            // attr_it.second.get_node().dump();
 
             auto attr_node = dpin.create(Ntype_op::AttrSet);
             {
@@ -1378,7 +1389,16 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       } else {
         dpin = mux_input_dpins[i + 1];
       }
-      node.setup_sink_pin_raw(i + 1).connect_driver(dpin);
+
+      // old design
+      // node.setup_sink_pin_raw(i + 1).connect_driver(dpin);
+      
+      // FIXME->sh: a temporary hack patching, but we don't need this new
+      // design once the problem is solved at the lgtuple level
+      auto spin = node.setup_sink_pin_raw(i+1);
+      if (!spin.has_inputs()) {
+        spin.connect_driver(dpin);
+      }
     }
 
     e.second = node.setup_driver_pin();

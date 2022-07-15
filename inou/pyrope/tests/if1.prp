@@ -4,8 +4,10 @@ $inp.__sbits = 1   // 0 or -1
 x = 3    // 3bits sign
 if ($inp == 0) {
   x = 4  // max = 4sbits sign
+} elif ($inp == 1){
+  x = 5
 } else {
-  x = 5  // max = 4sbits sign
+  x = 6  // max = 4sbits sign
 }
 // x // (5,4) 
 %out = x  // out:(0,7) x:(4,5)

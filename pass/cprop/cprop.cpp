@@ -686,8 +686,9 @@ void Cprop::tuple_mux_mut(Node &node) {
     }
   }
 
-  if (!some_tuple_found)
+  if (!some_tuple_found) {
     return;
+  }
 
   if (some_pending) {
     for (auto i = 1u; i < inp_edges_ordered.size(); ++i) {
@@ -706,16 +707,17 @@ void Cprop::tuple_mux_mut(Node &node) {
   if (tup)
     node2tuple[node.get_compact()] = tup;
 
-  if (tup == nullptr && tuple_issues)
+  if (tup == nullptr && tuple_issues) {
     return;
+  }
 
   if (pending_iterations) {
 #ifndef NDEBUG
     Pass::info("mux:{} has pending iterations to get all inputs as tuple", node.debug_name());
-#endif
     if (tup) {
       tup->dump();
     }
+#endif
     tuple_issues = true;
     return;
   }
@@ -727,6 +729,9 @@ void Cprop::tuple_mux_mut(Node &node) {
   }
   I(tup->is_correct());
 
+  if (node.get_nid() == 119) {
+    fmt::print("DEBUG BBB-5 node: {}\n", node.debug_name());
+  }
   auto cmux_list                 = tup->make_mux(node, sel_dpin, tup_list);
   node2tuple[node.get_compact()] = tup;
   for (auto &cmux : cmux_list) {
@@ -2115,8 +2120,9 @@ void Cprop::scalar_pass(Lgraph *lg) {
       scalar_sext(node, inp_edges_ordered);
     } else if (op == Ntype_op::Mux) {
       bool del = scalar_mux(node, inp_edges_ordered);
-      if (del)
+      if (del) {
         continue;
+      }
     } else if (op == Ntype_op::Not) {
       // FIXME:
       //
@@ -2223,8 +2229,10 @@ void Cprop::tuple_pass(Lgraph *lg) {
     return;
 
   for (auto iter = 0; iter < 6; ++iter) {
+    fmt::print("DEBUG \n\n\n\n\nAAA iter:{}\n", iter);
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
+      // fmt::print("DEBUG AAA-0 node:{}\n", node.debug_name());
       if (tuple_done.contains(node.get_compact()))
         continue;
 
@@ -2242,6 +2250,10 @@ void Cprop::tuple_pass(Lgraph *lg) {
 
       if (op == Ntype_op::Mux) {
         tuple_mux_mut(node);
+        if (node.get_nid() == 119 || node.get_nid() == 106) {
+          fmt::print("DEBUG BBB-0 node: {}\n", node.debug_name(), iter);
+          node.dump();
+        }
       } else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
 #ifndef NDEBUG
         fmt::print("cprop FIXME node:{} (similar to flop)\n", node.debug_name());
@@ -2289,7 +2301,6 @@ void Cprop::tuple_pass(Lgraph *lg) {
   }
 
   if (tuple_issues) {
-    fmt::print("DEBUG AAA\n");
     return;
   }
 
