@@ -1182,7 +1182,6 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  fmt::print("DEBUG DDD node_attr_hier:{}\n", node_attr_hier.debug_name());
   I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field(), "__ubits"));
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy

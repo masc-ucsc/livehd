@@ -387,26 +387,26 @@ sh_test(
 #         - D2: ImmediateGenerator ------------------------------------ (o) # LEC-o
 #         - D2: ForwardingUnit ---------------------------------------- (o) # LEC-o
 #         - D2: NextPC ------------------------------------------------ (i) # LEC-x
-#         - D2: NextPCSimple ------------------------------------------ (i) # LEC-x: the fir_is_sint problem. 
+#         - D2: NextPCSimple ------------------------------------------ (i) # LEC-x: the fir_is_sint problem, discuss with Jose
 #                                                                                    (1) one firrtl lessThen op needs two operands, asSint(io.x) and asSint(io.y)
 #                                                                                    (2) after BW, the n111_attr_set is set with ubits, but the n79_lt needs signed comparasion.
-#         - D2: ALU --------------------------------------------------- (i) # LEC-x
+#                                                                                    (3) also mention bitwidth.cpp: 1201 to 1205 on how to avoid unnecessary tposs insertion
+#         - D2: ALU --------------------------------------------------- (i) # LEC-x: the same fir_is_sint issue as NextPC
 #         - D2: RegisterFile ------------------------------------------ (o) # LEC-o: see below, discuss with Jose
 #         - D2: RegisterFileSimple------------------------------------- (o) # LEC-o: (1) n106_mux got visited twice at the same lg->forward()
 #                                                                                    (2) n119_mux disconnected from n106_mux and reconnected to a 0?
 #                                                                                        search FIXME->sh in lgtuple.cpp
 #                                                                                    (3) hacky patch, the problem should be solved at the lgtuple level
-#                                                                                                                                                       
-#         - D2: StageReg ---------------------------------------------- (x) // firbit fb not found!?
-#         - D2: StageReg_1 -------------------------------------------- (x) // firbit fb not found!?
-#         - D2: StageReg_2 -------------------------------------------- (x) // firbit fb not found!?
-#         - D2: StageReg_3 -------------------------------------------- (i) // firbit fb not found!?
-#         - D2: StageReg_4 -------------------------------------------- (i) // firbit fb not found!?
-#         - D2: StageReg_5 -------------------------------------------- (i) // firbit fb not found!?
-#         - D2: StageReg_6 -------------------------------------------- (i) // firbit fb not found!? 
-#     - D1: DualPortedCombinMemory ------------------------------------ (x) // wait for mem
-#     - D1: DCombinMemPort -------------------------------------------- (i) // firbit fb not found!?
-#     - D1: ICombinMemPort -------------------------------------------- (i) // firbit fb not found!?
+#         - D2: StageReg ---------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_1 -------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_2 -------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_3 -------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_4 -------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_5 -------------------------------------------- (o) # LEC-o
+#         - D2: StageReg_6 -------------------------------------------- (o) # LEC-o 
+#     - D1: DualPortedCombinMemory ------------------------------------ (x) # wait for mem
+#     - D1: DCombinMemPort -------------------------------------------- (i) # firbit fb not found!?
+#     - D1: ICombinMemPort -------------------------------------------- (i) # firbit fb not found!?
 
 
 
