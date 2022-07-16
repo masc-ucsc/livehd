@@ -22,7 +22,7 @@ protected:
   absl::node_hash_map<Lgraph *, PinMap>  &pinmaps;  // pin maps center
   absl::node_hash_map<Lgraph *, XorrMap> &spinmaps_xorr;
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
-
+  
   static Attr     get_key_attr(std::string_view key);
   FBMap::iterator get_fbits_from_hierarchy(XEdge &e);
 

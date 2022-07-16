@@ -1110,23 +1110,6 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
     if (!parent_pending) {
       Bitwidth_range set_bw;
       set_bw.set_ubits_range(bits);
-
-      // Deprecated->sh: bw should just follow what attr_set says if the number bits of bw is larger then attr bits
-      // if (bw.get_max() > set_bw.get_max()) {
-      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}ubits\n",
-      //               node_attr.debug_name(),
-      //               attr_dpin.debug_name(),
-      //               bw.get_max(),
-      //               bits);
-      // }
-      // Deprecated->sh: bw should just follow what attr_set says if the number bits of bw is larger then attr bits
-      // if (bw.get_min() < 0) {
-      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}ubits\n",
-      //               node_attr.debug_name(),
-      //               attr_dpin.debug_name(),
-      //               bw.get_min(),
-      //               bits);
-      // }
     } else {
       bw.set_ubits_range(bits);
     }
@@ -1140,26 +1123,16 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
       for (auto &e : node_attr.out_edges()) {
         parent_dpin.connect(e.sink);
       }
-      
       node_attr.del_node();
     } else {
       insert_tposs_nodes(node_attr, bits, fwd_it);
     }
   } else if (attr == Attr::Set_sbits) {
-    Bits_t bits = val.to_i();
+    auto bits = static_cast<Bits_t>(val.to_i());
 
     if (!parent_pending) {
       Bitwidth_range set_bw;
       set_bw.set_sbits_range(bits);
-
-      // Deprecated->sh: bw should just follow what attr_set says if bw is larger then attr bits
-      // if (bw.get_max() > set_bw.get_max()) {
-      //   Pass::error("bitwidth mismatch at node {}. \nVariable {} max is {}, but constrained to {}sbits\n",
-      //               node_attr.debug_name(),
-      //               attr_dpin.debug_name(),
-      //               bw.get_max(),
-      //               bits);
-      // }
       if (bw.get_min() < set_bw.get_min()) {
         Pass::error("bitwidth mismatch at node {}. \nVariable {} min is {}, but constrained to {}sbits\n",
                     node_attr.debug_name(),
@@ -1204,10 +1177,13 @@ void Bitwidth::process_attr_set_bw(Node &node_attr, Bitwidth::Attr attr, Fwd_edg
   }
 }
 
+      // for (auto &e :node_attr.out_edges()) {
+      // }
 
 // insert tposs after attr node when ubits
 void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_iterator::Fwd_iter &fwd_it) {
-  I(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field().find("__ubits") != std::string::npos);
+  fmt::print("DEBUG DDD node_attr_hier:{}\n", node_attr_hier.debug_name());
+  I(absl::StrContains(node_attr_hier.get_sink_pin("field").get_driver_pin().get_type_const().to_field(), "__ubits"));
 
   auto node_attr = node_attr_hier.get_non_hierarchical();  // insert locally not through hierarchy
   auto name_dpin = node_attr.get_sink_pin("parent").get_driver_pin();
@@ -1220,16 +1196,21 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
   Node ntposs;
 
   for (auto &e : node_attr.out_edges()) {
-    if (e.driver.get_pin_name() == "chain")
+    I(e.driver.get_pid() == 0);  
+    auto sink_type = e.sink.get_type_op();                             
+
+    // this kind of assign_or comes from (1) fir_as_sint (2) fir_cvt (3) fir_as_clock (4) fir_as_async
+    // all of these types don't need a tposs convertion
+    if (sink_type == Ntype_op::Or && e.sink.get_node().out_edges().size() == 1) {
       continue;
+    }
 
-    I(e.driver.get_pid() == 0);  // chain has pid 1
-
-    if (e.sink.get_type_op() == Ntype_op::Get_mask) {
+    if (sink_type == Ntype_op::Get_mask) {
       auto m = e.sink.get_node().get_sink_pin("mask").get_driver_pin().get_type_const();
       if (m == mask)
         continue;
     }
+
     if (ntposs.is_invalid()) {
       ntposs = node_attr.create(Ntype_op::Get_mask);
       ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));

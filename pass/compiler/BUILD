@@ -387,6 +387,9 @@ sh_test(
 #         - D2: ImmediateGenerator ------------------------------------ (o) # LEC-o
 #         - D2: ForwardingUnit ---------------------------------------- (o) # LEC-o
 #         - D2: NextPC ------------------------------------------------ (i) # LEC-x
+#         - D2: NextPCSimple ------------------------------------------ (i) # LEC-x: the fir_is_sint problem. 
+#                                                                                    (1) one firrtl lessThen op needs two operands, asSint(io.x) and asSint(io.y)
+#                                                                                    (2) after BW, the n111_attr_set is set with ubits, but the n79_lt needs signed comparasion.
 #         - D2: ALU --------------------------------------------------- (i) # LEC-x
 #         - D2: RegisterFile ------------------------------------------ (o) # LEC-o: see below, discuss with Jose
 #         - D2: RegisterFileSimple------------------------------------- (o) # LEC-o: (1) n106_mux got visited twice at the same lg->forward()

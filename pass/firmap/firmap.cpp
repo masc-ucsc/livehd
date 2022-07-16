@@ -90,6 +90,7 @@ Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
     pinmap[out_driver].connect_sink(pinmap[dpin]);
   });
 
+
   pinmap.clear();
   return new_lg;
 }
