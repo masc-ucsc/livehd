@@ -2229,7 +2229,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
     return;
 
   for (auto iter = 0; iter < 6; ++iter) {
-    fmt::print("DEBUG \n\n\n\n\nAAA iter:{}\n", iter);
+    fmt::print("DEBUG AAA iter:{}\n", iter);
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
       // fmt::print("DEBUG AAA-0 node:{}\n", node.debug_name());

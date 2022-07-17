@@ -42,8 +42,6 @@ fi
 
 firrtl_test() {
   echo ""
-  echo ""
-  echo ""
   echo "======================================================================"
   echo "                         ${FIRRTL_LEVEL}FIRRTL Full Compilation"
   echo "======================================================================"
@@ -68,8 +66,6 @@ firrtl_test() {
   for pt in $1
   do
     echo ""
-    echo ""
-    echo ""
     echo "----------------------------------------------------"
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
@@ -93,8 +89,6 @@ firrtl_test() {
   # Logic Equivalence Check
   for pt in $1
   do
-    echo ""
-    echo ""
     echo ""
     echo "----------------------------------------------------"
     echo "Logic Equivalence Check"

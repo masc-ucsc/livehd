@@ -1932,18 +1932,12 @@ void Inou_firrtl_module::tuple_flattened_connections_instance_r(Lnast& lnast, Ln
 // lhs flattened element.  
 // e.g. tup_l == foo, rhs == bar.a.b.c, is_flipped == true
 // then: bar.a.b.c = foo.a.b.c
-void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, std::string_view flattened_element, bool is_flipped_in) {
-  fmt::print("DEBUG GGG-0 hier_name_l_ori:{}, hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
+void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view hier_name_l_ori, std::string_view hier_name_r_ori, std::string_view flattened_element, bool is_flipped) {
 
   // 0. swap lhs/rhs if needed
-  bool is_not_input = input_names.find(hier_name_r_ori) == input_names.end();
-  bool is_flipped = is_flipped_in && is_not_input;
   if (is_flipped) {
-    auto tmp = hier_name_l_ori;
-    hier_name_l_ori = hier_name_r_ori;
-    hier_name_r_ori = tmp;
+    std::swap(hier_name_l_ori, hier_name_r_ori);
   }
-  fmt::print("DEBUG GGG-1 hier_name_l_ori:{}, hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
   
   // 1. decorate io prefix
   std::string hier_name_r, hier_name_l;
@@ -1963,7 +1957,6 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     hier_name_l = hier_name_l_ori;
   }
 
-  fmt::print("DEBUG GGG-2 flattened_element:{}, hier_name_l_ori:{}, hier_name_r_ori:{}, is_flipped:{}\n", flattened_element, hier_name_l_ori, hier_name_r_ori, is_flipped);
   std::string_view chop_head_flattened_element;
   if (is_flipped) {
     chop_head_flattened_element = flattened_element.substr(hier_name_r_ori.length());
@@ -1984,7 +1977,10 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
   lhs_full_name = name_prefix_modifier_flattener(lhs_full_name, false);
   rhs_full_name = name_prefix_modifier_flattener(rhs_full_name, true);
 
-  fmt::print("DEBUG GGG-4 hier_name_l_ori:{}, hier_name_r_ori:{}\n", hier_name_l_ori, hier_name_r_ori);
+  // not trivial to prevent the unnecessary swap before, so swap again here if lhs is an module input
+  if (lhs_full_name.at(0) == '$') {
+    std::swap(lhs_full_name, rhs_full_name);
+  }
 
   auto it = wire_names.find(rhs_wire_name);
   bool rhs_is_wire_var = it != wire_names.end();
@@ -1995,7 +1991,6 @@ void Inou_firrtl_module::tuple_flattened_connections(Lnast& lnast, Lnast_nid& pa
     lnast.add_child(attr_get_node, Lnast_node::create_ref(rhs_full_name));
     lnast.add_child(attr_get_node, Lnast_node::create_const("__last_value"));
     wire_names.insert(temp_var_name);
-    fmt::print("DEBUG GGG-5 temp_var_name:{}, lhs_full_name:{}, rhs_wire_name:{}\n", temp_var_name, lhs_full_name, rhs_wire_name);
 
     auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
     lnast.add_child(idx_asg, Lnast_node::create_ref(lhs_full_name));
@@ -2260,7 +2255,6 @@ void Inou_firrtl_module::handle_normal_cases_wire_connections(Lnast &lnast, Lnas
       }
     }
 
-    
     if (it.first == hier_name_l || hit) {
       tuple_flattened_connections(lnast, parent_node, hier_name_l, hier_name_r, it.first, it.second);
     }

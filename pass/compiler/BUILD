@@ -208,6 +208,14 @@ cc_library(
     "NullPrefetcher",                                                                                                                                                                      
     "NullLocalBranchPredictorBank",                                                                                                                                                        
     "RegisterFile",
+    "StageReg", 
+    "HazardUnitBP",
+    "Adder",
+    "AlwaysNotTakenPredictor",
+    "Control",
+    "ALUControl",
+    "ImmediateGenerator",
+    "ForwardingUnit",
 ]]
 
 sh_test(
@@ -272,7 +280,6 @@ sh_test(
     "RegisterFileSynthesizable",
     "ALUUnit",
     "FPToInt",
-    "ALU",
     "DecodeUnit",
     "DivUnit",
     "MulAddRecFNToRaw_preMul",
@@ -289,6 +296,10 @@ sh_test(
     "SmemStruct",
     "MaskedSmem",
     "MaskedSmemStruct",
+    "NextPC",
+    "ALU",
+    "DCombinMemPort",
+    "ICombinMemPort",
 ]]
 
 # FIXME:
@@ -386,12 +397,12 @@ sh_test(
 #         - D2: Adder ------------------------------------------------- (o) # LEC-o
 #         - D2: ImmediateGenerator ------------------------------------ (o) # LEC-o
 #         - D2: ForwardingUnit ---------------------------------------- (o) # LEC-o
-#         - D2: NextPC ------------------------------------------------ (i) # LEC-x
-#         - D2: NextPCSimple ------------------------------------------ (i) # LEC-x: the fir_is_sint problem, discuss with Jose
+#         - D2: NextPC ------------------------------------------------ (o) # LEC-x
+#         - D2: NextPCSimple ------------------------------------------ (o) # LEC-x: the fir_is_sint problem, discuss with Jose
 #                                                                                    (1) one firrtl lessThen op needs two operands, asSint(io.x) and asSint(io.y)
 #                                                                                    (2) after BW, the n111_attr_set is set with ubits, but the n79_lt needs signed comparasion.
 #                                                                                    (3) also mention bitwidth.cpp: 1201 to 1205 on how to avoid unnecessary tposs insertion
-#         - D2: ALU --------------------------------------------------- (i) # LEC-x: the same fir_is_sint issue as NextPC
+#         - D2: ALU --------------------------------------------------- (o) # LEC-x: the same fir_is_sint issue as NextPC
 #         - D2: RegisterFile ------------------------------------------ (o) # LEC-o: see below, discuss with Jose
 #         - D2: RegisterFileSimple------------------------------------- (o) # LEC-o: (1) n106_mux got visited twice at the same lg->forward()
 #                                                                                    (2) n119_mux disconnected from n106_mux and reconnected to a 0?
@@ -405,8 +416,10 @@ sh_test(
 #         - D2: StageReg_5 -------------------------------------------- (o) # LEC-o
 #         - D2: StageReg_6 -------------------------------------------- (o) # LEC-o 
 #     - D1: DualPortedCombinMemory ------------------------------------ (x) # wait for mem
-#     - D1: DCombinMemPort -------------------------------------------- (i) # firbit fb not found!?
-#     - D1: ICombinMemPort -------------------------------------------- (i) # firbit fb not found!?
+#     - D1: DCombinMemPort -------------------------------------------- (o) # LEC-x: discuss with Jose 
+#                                                                             The golden verilog is apparently wrong, "io_bus_request_bits_address = io_pipeline_address" without 
+#                                                                             any condition in firrtl code??
+#     - D1: ICombinMemPort -------------------------------------------- (o) # LEC-x: same as above
 
 
 
