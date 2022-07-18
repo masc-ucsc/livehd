@@ -276,7 +276,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool do_matching=false; //for post syn graph, make map. do not match map!
   if (!nodeIOmap.empty()) {
     do_matching=true; //now we have pre-syn graph and post-syn map ready. 
-  }
+  } // if do_matching is false then the lg is post-syn-LG
+ 
+  bool req_flops_matched = false;
+  crit_flop_list={858,931};//FIXME will go away when opentimer will start to work
+  crit_cell_list={139};//FIXME will go away when opentimer will start to work
+
   for (const auto& node : lg->forward()) {
     // absl::btree_set<std::string> in_set;
     // absl::btree_set<std::string> out_set;
@@ -319,6 +324,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 //      }
 //    }
 
+    if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
+      continue;//do not keep such nodes in nodeIOmap
+    }
+    
     //print the set formed
     fmt::print("INPUTS:\n");
     for (const auto& i:in_set) {
@@ -333,10 +342,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\t{}\n",i);
     }
 
-    if (in_set.empty() && out_set.empty()) {//no i/ps as well as no o/ps
-      continue;//do not keep such nodes in nodeIOmap
-    }
-    
     if(!do_matching) {
       //insert in map
       const auto& nodeid = node.get_compact_flat();
@@ -374,7 +379,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     }
 
-    if(do_matching) {
+    if(do_matching && !req_flops_matched) {
       /*if orig graph IO-set pair is as-is found in the synth nodeIOmap, then it is direct match!*/
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
         matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)]; //FIXME: put this in matching_map. no need of matched_map then 
@@ -506,11 +511,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
   }
 
-  if(do_matching) {
-    /*doing the actual matching here*/
+  if(do_matching && !req_flops_matched) {
+    /*doing the actual matching here*/ //(pass_1)
     
     //for(const auto& [iov,fn]: IOtoNodeMap_orig) 
     for (absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> >::iterator it = IOtoNodeMap_orig.begin(); it!= IOtoNodeMap_orig.end();) {
+      if (req_flops_matched) {break;}
       auto iov = it->first;
       auto fn = it->second;
       if(fn.size()!=1) {
@@ -522,17 +528,25 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       if(IOtoNodeMap_synth.find(iov)!=IOtoNodeMap_synth.end()) {
         for (const auto& [k,synNodes]: IOtoNodeMap_synth[iov]) {
           for (const auto& synNode: synNodes) {
-          //std::vector<Node::Compact_flat> vc = synNode;
-          /*inserting in matching_map*/
-          //const auto& nodeid = node.get_compact_flat();
-          std::vector<Node::Compact_flat> tmpVec;
-          if(matching_map.find(synNode) != matching_map.end()) {
-            tmpVec.assign((matching_map[synNode]).begin() , (matching_map[synNode]).end() );
-            tmpVec.emplace_back(orig_node);
-          } else {
-            tmpVec.emplace_back(orig_node);
-          }
-          matching_map[synNode]=tmpVec;
+            //std::vector<Node::Compact_flat> vc = synNode;
+            /*inserting in matching_map*/
+            //const auto& nodeid = node.get_compact_flat();
+            std::vector<Node::Compact_flat> tmpVec;
+            if(matching_map.find(synNode) != matching_map.end()) {
+              tmpVec.assign((matching_map[synNode]).begin() , (matching_map[synNode]).end() );
+              tmpVec.emplace_back(orig_node);
+            } else {
+              tmpVec.emplace_back(orig_node);
+            }
+            matching_map[synNode]=tmpVec;
+            /*if synNode in crit_flop_list, remove from crit_flop_list;*/
+            for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+              if(*cfl_it == synNode.get_nid().value) {
+                crit_flop_list.erase(cfl_it); 
+                cfl_it--;
+              }
+            } 
+            if (crit_flop_list.empty()){ req_flops_matched = true;}
           }
         }
         IOtoNodeMap_orig.erase(it++);
@@ -631,8 +645,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
       /*Second: do the matching part*/
       for ( auto & [k,v_map]: IOtoNodeMap_synth) {
+        if (req_flops_matched) {break;}
         //for (auto& [iov,n]:v_map) 
         for(auto it=v_map.begin(); it!=v_map.end();){
+          if (req_flops_matched) {break;}
           auto& iv = (it->first).first;//this is i/p set for [n]
           auto& ov = (it->first).second;//this is o/p set for [n]
           auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
@@ -641,17 +657,38 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
           bool foundPartial = false;
           //for (auto [pairIO, nods]:full_orig_map) 
           for(auto ito=full_orig_map.begin(); ito!=full_orig_map.end(); ito++){
+            if (req_flops_matched) {break;}
             auto pairIO = ito->first;
             auto nods = ito->second;
             if (iv == pairIO.first && ov==pairIO.second) {
               foundFull = true;
               //std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
-              for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+              for (const auto & n1:n){
+                matching_map[n1]=nods;//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+                /*if synNode in crit_flop_list, remove from crit_flop_list;*/
+                for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+                  if(*cfl_it == n1.get_nid().value) {
+                    crit_flop_list.erase(cfl_it);
+                    cfl_it--;
+                  }
+                }
+                if (crit_flop_list.empty()){ req_flops_matched = true;}
+              }
               //full_orig_map.erase(ito++);
               continue;
             } else if (iv == pairIO.first || ov==pairIO.second) {
               foundPartial = true;
-              for (const auto & n1:n){matching_map[n1]=nods;}//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+              for (const auto & n1:n){
+                matching_map[n1]=nods;//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
+                /*if synNode in crit_flop_list, remove from crit_flop_list;*/
+                for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+                  if(*cfl_it == n1.get_nid().value) {
+                    crit_flop_list.erase(cfl_it);
+                    cfl_it--;
+                  }
+                }
+                if (crit_flop_list.empty()){ req_flops_matched = true;}
+              }
               //full_orig_map.erase(ito++);
               continue;
             } //else {++ito;}

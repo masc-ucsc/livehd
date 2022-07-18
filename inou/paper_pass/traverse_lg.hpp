@@ -35,6 +35,8 @@ private:
   absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> > IOtoNodeMap_orig;
   absl::node_hash_map<std::set<std::string>, setMap_pairKey > IOtoNodeMap_synth;
   absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> > matching_map;
+  std::vector<unsigned int> crit_flop_list;//FIXME: currently has node IDs(node.get_nid().value==unsigned int). to be converted to vector of Node::Compact_flat, once the opentimer starts to work.
+  std::vector<unsigned int> crit_cell_list;//FIXME: currently has node IDs. to be converted to vector of Node::Compact_flat, once the opentimer starts to work.
 /*
 #ifdef KEEP_DUP
   vecMap nodeIOmap;
