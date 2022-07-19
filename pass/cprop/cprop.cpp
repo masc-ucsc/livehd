@@ -97,6 +97,7 @@ void Cprop::collapse_forward_same_op(Node &node, XEdge_iterator &inp_edges_order
   }
   if (all_done) {
     I(!node.has_outputs());
+    //fmt::print("cprop: 3 del node:{}\n", node.debug_name());
     node.del_node();
   }
 }
@@ -221,6 +222,7 @@ void Cprop::try_collapse_forward(Node &node, XEdge_iterator &inp_edges_ordered) 
   } else if (op == Ntype_op::Mux) {
     // If all the options are the same. Collapse forward
     if (inp_edges_ordered.size() <= 1) {
+      //fmt::print("cprop: 4 del node:{}\n", node.debug_name());
       node.del_node();
       return;
     }
@@ -523,6 +525,7 @@ void Cprop::replace_node(Node &node, const Lconst &result) {
     }
   }
 
+  //fmt::print("cprop: 5 del node:{}\n", node.debug_name());
   node.del_node();
 }
 
@@ -536,6 +539,7 @@ void Cprop::replace_logic_node(Node &node, const Lconst &result) {
     dpin_0.connect_sink(out.sink);
   }
 
+  //fmt::print("cprop: 6 del node:{}\n", node.debug_name());
   node.del_node();
 }
 
@@ -702,6 +706,10 @@ void Cprop::tuple_mux_mut(Node &node) {
   }
 
   Node_pin &sel_dpin = inp_edges_ordered[0].driver;
+
+  if (node.get_nid() == 263) {
+    fmt::print("HERE\n");
+  }
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
   if (tup)
@@ -1303,6 +1311,7 @@ bool Cprop::handle_runtime_index(Node &ori_tg, const Node &field_node, const std
 
   // node2tuple[mux_node.get_compact()] = parent_tup;
   tuple_mux_mut(mux_node);
+  //fmt::print("cprop: 7 del node:{}\n", ori_tg.debug_name());
   ori_tg.del_node();
 
   return true;
@@ -1322,6 +1331,7 @@ bool Cprop::tuple_tuple_get(Node &node) {
       return false;
     }
   }
+
   if (key_name.empty()) {
     if (node.is_sink_connected("field") && node_tup) {
       auto field_node  = node.get_sink_pin("field").get_driver_node();
@@ -2483,6 +2493,7 @@ void Cprop::bwd_del_node(Node &node) {
     potential_set.insert(e.driver.get_node().get_compact());
   }
 
+  //fmt::print("cprop: 1 del node:{}\n", node.debug_name());
   node.del_node();
 
   while (!potential.empty()) {
@@ -2501,6 +2512,7 @@ void Cprop::bwd_del_node(Node &node) {
         potential.emplace_back(e.driver.get_node());
         potential_set.insert(d_node.get_compact());
       }
+      //fmt::print("cprop: 2 del node:{}\n", node.debug_name());
       n.del_node();
     }
   }

@@ -1365,7 +1365,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
         dpin = tup_list[i]->get_dpin(e.first);
         I(!dpin.is_invalid());
 
-        if (dpin.is_graph_io()) {
+        if (dpin.is_graph_io() || dpin.get_type_op() == Ntype_op::Sub) {
           // NOTE: all the pins but the IOs should have the constraints already.
           // This Attr could be set always but slower and redundant
           for (auto &attr_it : tup_list[i]->get_level_attributes(e.first)) {
