@@ -56,5 +56,5 @@ mem.rdport = (false, true) // port 0 rd, port 1 wr
 
 res.1.__ubits = 32
 
-%out = res.1
+%out = res.1 + 4
 

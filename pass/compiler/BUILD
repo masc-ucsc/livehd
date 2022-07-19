@@ -415,7 +415,7 @@ sh_test(
 #         - D2: StageReg_4 -------------------------------------------- (o) # LEC-o
 #         - D2: StageReg_5 -------------------------------------------- (o) # LEC-o
 #         - D2: StageReg_6 -------------------------------------------- (o) # LEC-o 
-#     - D1: DualPortedCombinMemory ------------------------------------ (x) # wait for mem
+#     - D1: DualPortedCombinMemory ------------------------------------ (x) # wait for mem: needs memory output bits for firbits propagation, but the mem_res attr_set nodes got cleared after cproped
 #     - D1: DCombinMemPort -------------------------------------------- (o) # LEC-x: discuss with Jose 
 #                                                                             The golden verilog is apparently wrong, "io_bus_request_bits_address = io_pipeline_address" without 
 #                                                                             any condition in firrtl code??

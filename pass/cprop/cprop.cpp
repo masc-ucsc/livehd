@@ -1514,7 +1514,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool false_path_one  = false;
   if (inp_edges_ordered[1].driver.is_type_const()) {
     auto v          = inp_edges_ordered[1].driver.get_type_const();
-    false_path_zero = (v == Lconst(0));
+    false_path_zero = (v == Lconst(0)); // FIXME-> put ? on the lnast cprop could collaps the mux 
     false_path_one  = (v == Lconst(1));
   }
 
@@ -1522,7 +1522,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool true_path_one  = false;
   if (inp_edges_ordered[2].driver.is_type_const()) {
     auto v         = inp_edges_ordered[2].driver.get_type_const();
-    true_path_zero = (v == Lconst(0));
+    true_path_zero = (v == Lconst(0)); // FIXME-> put ? on the lnast cprop could collaps the mux
     true_path_one  = (v == Lconst(1) || v == Lconst(-1));
   }
 

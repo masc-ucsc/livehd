@@ -26,6 +26,6 @@ mem.rdport  = (-1,1,0) // 0 WR, !=0 -> RD
 
 res = __memory(mem)
 
-%q0 = res.0
-%q1 = res.1
+%out0 = res.0 + 4
+%out1 = res.1 + 8
 

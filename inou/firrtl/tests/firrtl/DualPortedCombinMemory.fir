@@ -33,7 +33,6 @@ circuit DualPortedCombinMemory :
       node _T_4 = or(_T_2, _T_3) 
       node _T_5 = eq(_T_4, UInt<1>("h00")) 
       when _T_5 : 
-        printf(clock, UInt<1>(1), "Assertion failed\n    at memory.scala:30 assert(request.operation === Read)\n") 
         stop(clock, UInt<1>(1), 1) 
         skip 
       node _T_6 = lt(io.imem.request.bits.address, UInt<17>("h010000")) 
@@ -59,7 +58,6 @@ circuit DualPortedCombinMemory :
       node _T_12 = or(_T_10, _T_11) 
       node _T_13 = eq(_T_12, UInt<1>("h00")) 
       when _T_13 : 
-        printf(clock, UInt<1>(1), "Assertion failed\n    at memory.scala:56 assert (request.operation =/= Write)\n") 
         stop(clock, UInt<1>(1), 1) 
         skip 
       node _T_14 = lt(io.dmem.request.bits.address, UInt<17>("h010000")) 
@@ -67,7 +65,6 @@ circuit DualPortedCombinMemory :
       node _T_16 = or(_T_14, _T_15) 
       node _T_17 = eq(_T_16, UInt<1>("h00")) 
       when _T_17 : 
-        printf(clock, UInt<1>(1), "Assertion failed\n    at memory.scala:58 assert (request.address < size.U)\n") 
         stop(clock, UInt<1>(1), 1) 
         skip 
       node _T_18 = shr(io.dmem.request.bits.address, 2) 

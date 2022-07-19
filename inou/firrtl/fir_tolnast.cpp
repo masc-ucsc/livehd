@@ -2200,6 +2200,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
 
+
     case firrtl::FirrtlPB_Statement::kIsInvalid: {
       // auto id = stmt.is_invalid().expression().reference().id();
       auto id = get_expr_hier_name(lnast, parent_node, stmt.is_invalid().expression());
@@ -2213,7 +2214,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         if (id.at(0) != '$') {
           auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
           lnast.add_child(idx_asg, Lnast_node::create_ref(id));
-          lnast.add_child(idx_asg, Lnast_node::create_const(0));
+          lnast.add_child(idx_asg, Lnast_node::create_const(0)); // FIXME-> put ? then later cprop could collaps the mux 
           wire_names.insert(id);
         }
       }
