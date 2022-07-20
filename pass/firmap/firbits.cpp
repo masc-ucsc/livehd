@@ -81,8 +81,10 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
         analysis_lg_flop(node, fbmap);
       } else if (op == Ntype_op::Mux) {
         analysis_lg_mux(node, fbmap);
+      } else if (op == Ntype_op::Memory) {
+        continue;
       } else {
-        fmt::print("FIXME: node:{} still not handled by firrtl bits analysis\n", node.debug_name());
+        Pass::error("FIXME: node:{} still not handled by firrtl bits analysis\n", node.debug_name());
       }
     }  // end of lg->forward()
     firbits_iters++;
