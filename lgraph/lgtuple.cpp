@@ -1331,17 +1331,12 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
       node = mux_node.create(Ntype_op::Mux);
       node.setup_sink_pin_raw(0).connect_driver(sel_dpin);
     } else {
-      if (mux_node.get_nid() == 119) {
-        fmt::print("DEBUG BBB-before node: {}, driver_pin:{}\n", mux_node.debug_name(), e.second.debug_name());
-        mux_node.dump();
-      }
       for (auto &spin : mux_node.inp_connected_pins()) {
-        // old design
+        // deprecated:
         // if (spin.get_pid())  // keep sel
         //   spin.del();
-        // FIXME->sh: all n119_mux inputs got deleted here. One of the input got disconnected from n106_mux
 
-        // FIXME-sh: new design idea:
+        // note-sheng: new design idea:
         // if the mux input comes from another mux, then that mux must be handled before
         // and is either an original scalar-dpin or a tuple-flattened-scalar-dpin
         // we don't need to try to expand the tuple and create new mux here
@@ -1349,11 +1344,6 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
           spin.del();
         }
       }
-      if (mux_node.get_nid() == 119) {
-        fmt::print("DEBUG BBB-after node: {}, driver_pin:{}\n", mux_node.debug_name(), e.second.debug_name());
-        mux_node.dump();
-      }
-
       node            = mux_node;
       mux_node_reused = true;
     }

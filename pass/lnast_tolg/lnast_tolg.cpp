@@ -38,14 +38,11 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, cons
 
   top_stmts2lgraph(lg, top_stmts);
   lgs.emplace_back(lg);
-
   return lgs;
 }
 
 void Lnast_tolg::top_stmts2lgraph(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
-  // fmt::print("======== Phase-1: LNAST->Lgraph Start ================================\n");
   process_ast_stmts(lg, lnidx_stmts);
-  // fmt::print("======== Phase-2: Adding final Module IO/Reg and Final Dpin Name =====\n");
   setup_lgraph_ios_and_final_var_name(lg);
 }
 
@@ -89,10 +86,6 @@ void Lnast_tolg::process_ast_stmts(Lgraph *lg, const Lnast_nid &lnidx_stmts) {
     } else if (ntype.is_const()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;
-#if 0
-    } else if (ntype.is_select()) {
-      I(false);  // have been converted to tuple chain
-#endif
     } else if (ntype.is_err_flag()) {
       I(lnast->get_name(lnidx) == "err_var_undefined");
       continue;

@@ -737,9 +737,6 @@ void Cprop::tuple_mux_mut(Node &node) {
   }
   I(tup->is_correct());
 
-  if (node.get_nid() == 119) {
-    fmt::print("DEBUG BBB-5 node: {}\n", node.debug_name());
-  }
   auto cmux_list                 = tup->make_mux(node, sel_dpin, tup_list);
   node2tuple[node.get_compact()] = tup;
   for (auto &cmux : cmux_list) {
@@ -1524,7 +1521,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool false_path_one  = false;
   if (inp_edges_ordered[1].driver.is_type_const()) {
     auto v          = inp_edges_ordered[1].driver.get_type_const();
-    false_path_zero = (v == Lconst(0)); // FIXME-> put ? on the lnast cprop could collaps the mux 
+    false_path_zero = (v == Lconst(0) || v.to_firrtl() == "is_fir_invalid"); // FIXME-> put ? on the lnast cprop could collaps the mux 
     false_path_one  = (v == Lconst(1));
   }
 
@@ -1532,7 +1529,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool true_path_one  = false;
   if (inp_edges_ordered[2].driver.is_type_const()) {
     auto v         = inp_edges_ordered[2].driver.get_type_const();
-    true_path_zero = (v == Lconst(0)); // FIXME-> put ? on the lnast cprop could collaps the mux
+    true_path_zero = (v == Lconst(0) || v.to_firrtl() == "is_fir_invalid"); // FIXME-> put ? on the lnast cprop could collaps the mux
     true_path_one  = (v == Lconst(1) || v == Lconst(-1));
   }
 
@@ -2260,10 +2257,6 @@ void Cprop::tuple_pass(Lgraph *lg) {
 
       if (op == Ntype_op::Mux) {
         tuple_mux_mut(node);
-        if (node.get_nid() == 119 || node.get_nid() == 106) {
-          fmt::print("DEBUG BBB-0 node: {}\n", node.debug_name(), iter);
-          node.dump();
-        }
       } else if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
 #ifndef NDEBUG
         fmt::print("cprop FIXME node:{} (similar to flop)\n", node.debug_name());

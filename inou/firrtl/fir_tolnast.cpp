@@ -660,6 +660,8 @@ void Inou_firrtl_module::create_module_inst(Lnast& lnast, const firrtl::FirrtlPB
   auto inp_name = absl::StrCat("itup_", inst_name);
   auto out_name = absl::StrCat("otup_", inst_name);
 
+  // add_lnast_assign(lnast, parent_node, inp_name, "0"); // the sub-input might be assigned within if-else subscope, so need this trivial initialization for SSA to work
+
   auto idx_dot = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   lnast.add_child(idx_dot, Lnast_node::create_ref(temp_var_name2));
   lnast.add_child(idx_dot, Lnast_node::create_ref(inp_name));
@@ -1299,6 +1301,7 @@ void Inou_firrtl_module::direct_instances_connection(Lnast &lnast, Lnast_nid &pa
 }
 
 void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_hier_name, std::string rhs_flattened_name) {
+  add_lnast_assign(lnast, parent_node, rhs_flattened_name, "0"); // the sub-input might be assigned within if-else subscope, so need this trivial initialization for SSA to work
   auto attr_get_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   auto temp_var_str = create_tmp_var();
   lnast.add_child(attr_get_node, Lnast_node::create_ref(temp_var_str));
@@ -2214,7 +2217,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
         if (id.at(0) != '$') {
           auto idx_asg = lnast.add_child(parent_node, Lnast_node::create_assign());
           lnast.add_child(idx_asg, Lnast_node::create_ref(id));
-          lnast.add_child(idx_asg, Lnast_node::create_const(0)); // FIXME-> put ? then later cprop could collaps the mux 
+          lnast.add_child(idx_asg, Lnast_node::create_const("is_fir_invalid")); // FIXME-> put ? then later cprop could collaps the mux 
           wire_names.insert(id);
         }
       }

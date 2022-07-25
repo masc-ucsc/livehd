@@ -1,562 +1,3 @@
-module Control(
-  input  [6:0] io_opcode,
-  output       io_itype,
-  output       io_aluop,
-  output       io_xsrc,
-  output       io_ysrc,
-  output       io_branch,
-  output       io_jal,
-  output       io_jalr,
-  output       io_plus4,
-  output       io_resultselect,
-  output [1:0] io_memop,
-  output       io_toreg,
-  output       io_regwrite
-);
-  wire  _T_37 = 7'h37 == io_opcode ? 1'h0 : 7'h17 == io_opcode | (7'h6f == io_opcode | 7'h67 == io_opcode);
-  wire  _T_38 = 7'h63 == io_opcode ? 1'h0 : _T_37;
-  wire  _T_39 = 7'h23 == io_opcode ? 1'h0 : _T_38;
-  wire  _T_40 = 7'h3 == io_opcode ? 1'h0 : _T_39;
-  wire  _T_41 = 7'h13 == io_opcode ? 1'h0 : _T_40;
-  wire  _T_45 = 7'h37 == io_opcode ? 1'h0 : 7'h17 == io_opcode;
-  wire  _T_46 = 7'h63 == io_opcode ? 1'h0 : _T_45;
-  wire  _T_55 = 7'h23 == io_opcode ? 1'h0 : 7'h63 == io_opcode;
-  wire  _T_56 = 7'h3 == io_opcode ? 1'h0 : _T_55;
-  wire  _T_57 = 7'h13 == io_opcode ? 1'h0 : _T_56;
-  wire  _T_60 = 7'h17 == io_opcode ? 1'h0 : 7'h6f == io_opcode;
-  wire  _T_61 = 7'h37 == io_opcode ? 1'h0 : _T_60;
-  wire  _T_62 = 7'h63 == io_opcode ? 1'h0 : _T_61;
-  wire  _T_63 = 7'h23 == io_opcode ? 1'h0 : _T_62;
-  wire  _T_64 = 7'h3 == io_opcode ? 1'h0 : _T_63;
-  wire  _T_65 = 7'h13 == io_opcode ? 1'h0 : _T_64;
-  wire  _T_67 = 7'h6f == io_opcode ? 1'h0 : 7'h67 == io_opcode;
-  wire  _T_68 = 7'h17 == io_opcode ? 1'h0 : _T_67;
-  wire  _T_69 = 7'h37 == io_opcode ? 1'h0 : _T_68;
-  wire  _T_70 = 7'h63 == io_opcode ? 1'h0 : _T_69;
-  wire  _T_71 = 7'h23 == io_opcode ? 1'h0 : _T_70;
-  wire  _T_72 = 7'h3 == io_opcode ? 1'h0 : _T_71;
-  wire  _T_73 = 7'h13 == io_opcode ? 1'h0 : _T_72;
-  wire  _T_76 = 7'h17 == io_opcode ? 1'h0 : 7'h6f == io_opcode | 7'h67 == io_opcode;
-  wire  _T_77 = 7'h37 == io_opcode ? 1'h0 : _T_76;
-  wire  _T_78 = 7'h63 == io_opcode ? 1'h0 : _T_77;
-  wire  _T_79 = 7'h23 == io_opcode ? 1'h0 : _T_78;
-  wire  _T_80 = 7'h3 == io_opcode ? 1'h0 : _T_79;
-  wire  _T_81 = 7'h13 == io_opcode ? 1'h0 : _T_80;
-  wire  _T_86 = 7'h63 == io_opcode ? 1'h0 : 7'h37 == io_opcode;
-  wire  _T_87 = 7'h23 == io_opcode ? 1'h0 : _T_86;
-  wire  _T_88 = 7'h3 == io_opcode ? 1'h0 : _T_87;
-  wire  _T_89 = 7'h13 == io_opcode ? 1'h0 : _T_88;
-  wire [1:0] _T_95 = 7'h23 == io_opcode ? 2'h3 : 2'h0;
-  wire [1:0] _T_96 = 7'h3 == io_opcode ? 2'h2 : _T_95;
-  wire [1:0] _T_97 = 7'h13 == io_opcode ? 2'h0 : _T_96;
-  wire  _T_105 = 7'h13 == io_opcode ? 1'h0 : 7'h3 == io_opcode;
-  wire  _T_110 = 7'h63 == io_opcode ? 1'h0 : 7'h37 == io_opcode | (7'h17 == io_opcode | (7'h6f == io_opcode | 7'h67 ==
-    io_opcode));
-  wire  _T_111 = 7'h23 == io_opcode ? 1'h0 : _T_110;
-  assign io_itype = 7'h33 == io_opcode ? 1'h0 : 7'h13 == io_opcode;
-  assign io_aluop = 7'h33 == io_opcode | 7'h13 == io_opcode;
-  assign io_xsrc = 7'h33 == io_opcode ? 1'h0 : _T_41;
-  assign io_ysrc = 7'h33 == io_opcode ? 1'h0 : 7'h13 == io_opcode | (7'h3 == io_opcode | (7'h23 == io_opcode | _T_46));
-  assign io_branch = 7'h33 == io_opcode ? 1'h0 : _T_57;
-  assign io_jal = 7'h33 == io_opcode ? 1'h0 : _T_65;
-  assign io_jalr = 7'h33 == io_opcode ? 1'h0 : _T_73;
-  assign io_plus4 = 7'h33 == io_opcode ? 1'h0 : _T_81;
-  assign io_resultselect = 7'h33 == io_opcode ? 1'h0 : _T_89;
-  assign io_memop = 7'h33 == io_opcode ? 2'h0 : _T_97;
-  assign io_toreg = 7'h33 == io_opcode ? 1'h0 : _T_105;
-  assign io_regwrite = 7'h33 == io_opcode | (7'h13 == io_opcode | (7'h3 == io_opcode | _T_111));
-endmodule
-module ALU(
-  input  [3:0]  io_operation,
-  input  [31:0] io_inputx,
-  input  [31:0] io_inputy,
-  output [31:0] io_result
-);
-  wire [31:0] _T_1 = io_inputx & io_inputy;
-  wire [31:0] _T_3 = io_inputx | io_inputy;
-  wire [31:0] _T_6 = io_inputx + io_inputy;
-  wire [31:0] _T_9 = io_inputx - io_inputy;
-  wire [31:0] _T_11 = io_inputx;
-  wire [31:0] _T_14 = $signed(io_inputx) >>> io_inputy[4:0];
-  wire [31:0] _T_18 = io_inputx ^ io_inputy;
-  wire [31:0] _T_21 = io_inputx >> io_inputy[4:0];
-  wire [31:0] _T_24 = io_inputy;
-  wire [62:0] _GEN_15 = {{31'd0}, io_inputx};
-  wire [62:0] _T_28 = _GEN_15 << io_inputy[4:0];
-  wire [31:0] _T_31 = ~_T_3;
-  wire  _GEN_1 = io_operation == 4'hd ? io_inputx == io_inputy : io_operation == 4'he & io_inputx != io_inputy; // @[]
-  wire  _GEN_2 = io_operation == 4'hc ? io_inputx >= io_inputy : _GEN_1; // @[]
-  wire  _GEN_3 = io_operation == 4'hb ? $signed(io_inputx) >= $signed(io_inputy) : _GEN_2; // @[]
-  wire [31:0] _GEN_4 = io_operation == 4'ha ? _T_31 : {{31'd0}, _GEN_3}; // @[]
-  wire [62:0] _GEN_5 = io_operation == 4'h8 ? _T_28 : {{31'd0}, _GEN_4}; // @[]
-  wire [62:0] _GEN_6 = io_operation == 4'h9 ? {{62'd0}, $signed(_T_11) < $signed(_T_24)} : _GEN_5; // @[]
-  wire [62:0] _GEN_7 = io_operation == 4'h2 ? {{31'd0}, _T_21} : _GEN_6; // @[]
-  wire [62:0] _GEN_8 = io_operation == 4'h0 ? {{31'd0}, _T_18} : _GEN_7; // @[]
-  wire [62:0] _GEN_9 = io_operation == 4'h1 ? {{62'd0}, io_inputx < io_inputy} : _GEN_8; // @[]
-  wire [62:0] _GEN_10 = io_operation == 4'h3 ? {{31'd0}, _T_14} : _GEN_9; // @[]
-  wire [62:0] _GEN_11 = io_operation == 4'h4 ? {{31'd0}, _T_9} : _GEN_10; // @[]
-  wire [62:0] _GEN_12 = io_operation == 4'h7 ? {{31'd0}, _T_6} : _GEN_11; // @[]
-  wire [62:0] _GEN_13 = io_operation == 4'h5 ? {{31'd0}, _T_3} : _GEN_12; // @[]
-  wire [62:0] _GEN_14 = io_operation == 4'h6 ? {{31'd0}, _T_1} : _GEN_13; // @[]
-  assign io_result = _GEN_14[31:0];
-endmodule
-module ForwardingUnit(
-  input  [4:0] io_rs1,
-  input  [4:0] io_rs2,
-  input  [4:0] io_exmemrd,
-  input        io_exmemrw,
-  input  [4:0] io_memwbrd,
-  input        io_memwbrw,
-  output [1:0] io_forwardA,
-  output [1:0] io_forwardB
-);
-  wire [1:0] _GEN_0 = io_memwbrw & io_memwbrd == io_rs1 & io_memwbrd != 5'h0 ? 2'h2 : 2'h0; // @[]
-  wire [1:0] _GEN_2 = io_memwbrw & io_memwbrd == io_rs2 & io_memwbrd != 5'h0 ? 2'h2 : 2'h0; // @[]
-  assign io_forwardA = io_exmemrw & io_exmemrd == io_rs1 & io_exmemrd != 5'h0 ? 2'h1 : _GEN_0; // @[]
-  assign io_forwardB = io_exmemrw & io_exmemrd == io_rs2 & io_exmemrd != 5'h0 ? 2'h1 : _GEN_2; // @[]
-endmodule
-module StageReg_5(
-  input         clock,
-  input         reset,
-  input  [31:0] io_in_instruction,
-  input  [31:0] io_in_readdata,
-  input  [31:0] io_in_ex_result,
-  output [31:0] io_data_instruction,
-  output [31:0] io_data_readdata,
-  output [31:0] io_data_ex_result
-);
-`ifdef RANDOMIZE_REG_INIT
-  reg [31:0] _RAND_0;
-  reg [31:0] _RAND_1;
-  reg [31:0] _RAND_2;
-`endif // RANDOMIZE_REG_INIT
-  reg [31:0] reg_instruction;
-  reg [31:0] reg_readdata;
-  reg [31:0] reg_ex_result;
-  assign io_data_instruction = reg_instruction;
-  assign io_data_readdata = reg_readdata;
-  assign io_data_ex_result = reg_ex_result;
-  always @(posedge clock) begin
-    if (reset) begin
-      reg_instruction <= 32'h0;
-    end else begin
-      reg_instruction <= io_in_instruction;
-    end
-    if (reset) begin
-      reg_readdata <= 32'h0;
-    end else begin
-      reg_readdata <= io_in_readdata;
-    end
-    if (reset) begin
-      reg_ex_result <= 32'h0;
-    end else begin
-      reg_ex_result <= io_in_ex_result;
-    end
-  end
-// Register and memory initialization
-`ifdef RANDOMIZE_GARBAGE_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_INVALID_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_REG_INIT
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-`define RANDOMIZE
-`endif
-`ifndef RANDOM
-`define RANDOM $random
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-  integer initvar;
-`endif
-`ifndef SYNTHESIS
-`ifdef FIRRTL_BEFORE_INITIAL
-`FIRRTL_BEFORE_INITIAL
-`endif
-initial begin
-  `ifdef RANDOMIZE
-    `ifdef INIT_RANDOM
-      `INIT_RANDOM
-    `endif
-    `ifndef VERILATOR
-      `ifdef RANDOMIZE_DELAY
-        #`RANDOMIZE_DELAY begin end
-      `else
-        #0.002 begin end
-      `endif
-    `endif
-`ifdef RANDOMIZE_REG_INIT
-  _RAND_0 = {1{`RANDOM}};
-  reg_instruction = _RAND_0[31:0];
-  _RAND_1 = {1{`RANDOM}};
-  reg_readdata = _RAND_1[31:0];
-  _RAND_2 = {1{`RANDOM}};
-  reg_ex_result = _RAND_2[31:0];
-`endif // RANDOMIZE_REG_INIT
-  `endif // RANDOMIZE
-end // initial
-`ifdef FIRRTL_AFTER_INITIAL
-`FIRRTL_AFTER_INITIAL
-`endif
-`endif // SYNTHESIS
-endmodule
-module Adder_1(
-  input  [31:0] io_inputx,
-  input  [31:0] io_inputy,
-  output [31:0] io_result
-);
-  assign io_result = io_inputx + io_inputy;
-endmodule
-module HazardUnitBP(
-  input  [4:0] io_rs1,
-  input  [4:0] io_rs2,
-  input        io_idex_memread,
-  input  [4:0] io_idex_rd,
-  input        io_exmem_taken,
-  output [1:0] io_pcSel,
-  output       io_if_id_stall,
-  output       io_if_id_flush,
-  output       io_id_ex_flush,
-  output       io_ex_mem_flush
-);
-  wire [1:0] _GEN_3 = io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2) ? 2'h3 : 2'h0; // @[]
-  assign io_pcSel = io_exmem_taken ? 2'h1 : _GEN_3; // @[]
-  assign io_if_id_stall = io_exmem_taken ? 1'h0 : io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2); // @[]
-  assign io_if_id_flush = io_exmem_taken; // @[]
-  assign io_id_ex_flush = io_exmem_taken | io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2); // @[]
-  assign io_ex_mem_flush = io_exmem_taken; // @[]
-endmodule
-module StageReg_1(
-  input         clock,
-  input         reset,
-  input  [31:0] io_in_pc,
-  input  [31:0] io_in_instruction,
-  input  [31:0] io_in_sextImm,
-  input  [31:0] io_in_readdata1,
-  input  [31:0] io_in_readdata2,
-  input         io_flush,
-  output [31:0] io_data_pc,
-  output [31:0] io_data_instruction,
-  output [31:0] io_data_sextImm,
-  output [31:0] io_data_readdata1,
-  output [31:0] io_data_readdata2
-);
-`ifdef RANDOMIZE_REG_INIT
-  reg [31:0] _RAND_0;
-  reg [31:0] _RAND_1;
-  reg [31:0] _RAND_2;
-  reg [31:0] _RAND_3;
-  reg [31:0] _RAND_4;
-`endif // RANDOMIZE_REG_INIT
-  reg [31:0] reg_pc;
-  reg [31:0] reg_instruction;
-  reg [31:0] reg_sextImm;
-  reg [31:0] reg_readdata1;
-  reg [31:0] reg_readdata2;
-  assign io_data_pc = reg_pc;
-  assign io_data_instruction = reg_instruction;
-  assign io_data_sextImm = reg_sextImm;
-  assign io_data_readdata1 = reg_readdata1;
-  assign io_data_readdata2 = reg_readdata2;
-  always @(posedge clock) begin
-    if (reset) begin
-      reg_pc <= 32'h0;
-    end else if (io_flush) begin
-      reg_pc <= 32'h0;
-    end else begin
-      reg_pc <= io_in_pc;
-    end
-    if (reset) begin
-      reg_instruction <= 32'h0;
-    end else if (io_flush) begin
-      reg_instruction <= 32'h0;
-    end else begin
-      reg_instruction <= io_in_instruction;
-    end
-    if (reset) begin
-      reg_sextImm <= 32'h0;
-    end else if (io_flush) begin
-      reg_sextImm <= 32'h0;
-    end else begin
-      reg_sextImm <= io_in_sextImm;
-    end
-    if (reset) begin
-      reg_readdata1 <= 32'h0;
-    end else if (io_flush) begin
-      reg_readdata1 <= 32'h0;
-    end else begin
-      reg_readdata1 <= io_in_readdata1;
-    end
-    if (reset) begin
-      reg_readdata2 <= 32'h0;
-    end else if (io_flush) begin
-      reg_readdata2 <= 32'h0;
-    end else begin
-      reg_readdata2 <= io_in_readdata2;
-    end
-  end
-// Register and memory initialization
-`ifdef RANDOMIZE_GARBAGE_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_INVALID_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_REG_INIT
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-`define RANDOMIZE
-`endif
-`ifndef RANDOM
-`define RANDOM $random
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-  integer initvar;
-`endif
-`ifndef SYNTHESIS
-`ifdef FIRRTL_BEFORE_INITIAL
-`FIRRTL_BEFORE_INITIAL
-`endif
-initial begin
-  `ifdef RANDOMIZE
-    `ifdef INIT_RANDOM
-      `INIT_RANDOM
-    `endif
-    `ifndef VERILATOR
-      `ifdef RANDOMIZE_DELAY
-        #`RANDOMIZE_DELAY begin end
-      `else
-        #0.002 begin end
-      `endif
-    `endif
-`ifdef RANDOMIZE_REG_INIT
-  _RAND_0 = {1{`RANDOM}};
-  reg_pc = _RAND_0[31:0];
-  _RAND_1 = {1{`RANDOM}};
-  reg_instruction = _RAND_1[31:0];
-  _RAND_2 = {1{`RANDOM}};
-  reg_sextImm = _RAND_2[31:0];
-  _RAND_3 = {1{`RANDOM}};
-  reg_readdata1 = _RAND_3[31:0];
-  _RAND_4 = {1{`RANDOM}};
-  reg_readdata2 = _RAND_4[31:0];
-`endif // RANDOMIZE_REG_INIT
-  `endif // RANDOMIZE
-end // initial
-`ifdef FIRRTL_AFTER_INITIAL
-`FIRRTL_AFTER_INITIAL
-`endif
-`endif // SYNTHESIS
-endmodule
-module ImmediateGenerator(
-  input  [31:0] io_instruction,
-  output [31:0] io_sextImm
-);
-  wire [6:0] opcode = io_instruction[6:0];
-  wire [31:0] _T_3 = {io_instruction[31:12],12'h0};
-  wire [19:0] _T_15 = {io_instruction[31],io_instruction[19:12],io_instruction[20],io_instruction[30:21]};
-  wire [10:0] _T_18 = _T_15[19] ? 11'h7ff : 11'h0;
-  wire [31:0] _T_20 = {_T_18,io_instruction[31],io_instruction[19:12],io_instruction[20],io_instruction[30:21],1'h0};
-  wire [19:0] _T_25 = io_instruction[31] ? 20'hfffff : 20'h0;
-  wire [31:0] _T_26 = {_T_25,io_instruction[31:20]};
-  wire [11:0] _T_34 = {io_instruction[31],io_instruction[7],io_instruction[30:25],io_instruction[11:8]};
-  wire [18:0] _T_37 = _T_34[11] ? 19'h7ffff : 19'h0;
-  wire [31:0] _T_39 = {_T_37,io_instruction[31],io_instruction[7],io_instruction[30:25],io_instruction[11:8],1'h0};
-  wire [11:0] _T_49 = {io_instruction[31:25],io_instruction[11:7]};
-  wire [19:0] _T_52 = _T_49[11] ? 20'hfffff : 20'h0;
-  wire [31:0] _T_53 = {_T_52,io_instruction[31:25],io_instruction[11:7]};
-  wire [31:0] _T_63 = {27'h0,io_instruction[19:15]};
-  wire [31:0] _GEN_0 = 7'h73 == opcode ? _T_63 : 32'h0; // @[]
-  wire [31:0] _GEN_1 = 7'h13 == opcode ? _T_26 : _GEN_0; // @[]
-  wire [31:0] _GEN_2 = 7'h23 == opcode ? _T_53 : _GEN_1; // @[]
-  wire [31:0] _GEN_3 = 7'h3 == opcode ? _T_26 : _GEN_2; // @[]
-  wire [31:0] _GEN_4 = 7'h63 == opcode ? _T_39 : _GEN_3; // @[]
-  wire [31:0] _GEN_5 = 7'h67 == opcode ? _T_26 : _GEN_4; // @[]
-  wire [31:0] _GEN_6 = 7'h6f == opcode ? _T_20 : _GEN_5; // @[]
-  wire [31:0] _GEN_7 = 7'h17 == opcode ? _T_3 : _GEN_6; // @[]
-  assign io_sextImm = 7'h37 == opcode ? _T_3 : _GEN_7; // @[]
-endmodule
-module StageReg(
-  input         clock,
-  input         reset,
-  input  [31:0] io_in_instruction,
-  input  [31:0] io_in_pc,
-  input         io_flush,
-  input         io_valid,
-  output [31:0] io_data_instruction,
-  output [31:0] io_data_pc
-);
-`ifdef RANDOMIZE_REG_INIT
-  reg [31:0] _RAND_0;
-  reg [31:0] _RAND_1;
-`endif // RANDOMIZE_REG_INIT
-  reg [31:0] reg_instruction;
-  reg [31:0] reg_pc;
-  assign io_data_instruction = reg_instruction;
-  assign io_data_pc = reg_pc;
-  always @(posedge clock) begin
-    if (reset) begin
-      reg_instruction <= 32'h0;
-    end else if (io_flush) begin
-      reg_instruction <= 32'h0;
-    end else if (io_valid) begin
-      reg_instruction <= io_in_instruction;
-    end
-    if (reset) begin
-      reg_pc <= 32'h0;
-    end else if (io_flush) begin
-      reg_pc <= 32'h0;
-    end else if (io_valid) begin
-      reg_pc <= io_in_pc;
-    end
-  end
-// Register and memory initialization
-`ifdef RANDOMIZE_GARBAGE_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_INVALID_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_REG_INIT
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-`define RANDOMIZE
-`endif
-`ifndef RANDOM
-`define RANDOM $random
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-  integer initvar;
-`endif
-`ifndef SYNTHESIS
-`ifdef FIRRTL_BEFORE_INITIAL
-`FIRRTL_BEFORE_INITIAL
-`endif
-initial begin
-  `ifdef RANDOMIZE
-    `ifdef INIT_RANDOM
-      `INIT_RANDOM
-    `endif
-    `ifndef VERILATOR
-      `ifdef RANDOMIZE_DELAY
-        #`RANDOMIZE_DELAY begin end
-      `else
-        #0.002 begin end
-      `endif
-    `endif
-`ifdef RANDOMIZE_REG_INIT
-  _RAND_0 = {1{`RANDOM}};
-  reg_instruction = _RAND_0[31:0];
-  _RAND_1 = {1{`RANDOM}};
-  reg_pc = _RAND_1[31:0];
-`endif // RANDOMIZE_REG_INIT
-  `endif // RANDOMIZE
-end // initial
-`ifdef FIRRTL_AFTER_INITIAL
-`FIRRTL_AFTER_INITIAL
-`endif
-`endif // SYNTHESIS
-endmodule
-module StageReg_4(
-  input        clock,
-  input        reset,
-  input  [1:0] io_in_mem_ctrl_memop,
-  input        io_in_wb_ctrl_toreg,
-  input        io_in_wb_ctrl_regwrite,
-  input        io_flush,
-  output [1:0] io_data_mem_ctrl_memop,
-  output       io_data_wb_ctrl_toreg,
-  output       io_data_wb_ctrl_regwrite
-);
-`ifdef RANDOMIZE_REG_INIT
-  reg [31:0] _RAND_0;
-  reg [31:0] _RAND_1;
-  reg [31:0] _RAND_2;
-`endif // RANDOMIZE_REG_INIT
-  reg [1:0] reg_mem_ctrl_memop;
-  reg  reg_wb_ctrl_toreg;
-  reg  reg_wb_ctrl_regwrite;
-  assign io_data_mem_ctrl_memop = reg_mem_ctrl_memop;
-  assign io_data_wb_ctrl_toreg = reg_wb_ctrl_toreg;
-  assign io_data_wb_ctrl_regwrite = reg_wb_ctrl_regwrite;
-  always @(posedge clock) begin
-    if (reset) begin
-      reg_mem_ctrl_memop <= 2'h0;
-    end else if (io_flush) begin
-      reg_mem_ctrl_memop <= 2'h0;
-    end else begin
-      reg_mem_ctrl_memop <= io_in_mem_ctrl_memop;
-    end
-    if (reset) begin
-      reg_wb_ctrl_toreg <= 1'h0;
-    end else if (io_flush) begin
-      reg_wb_ctrl_toreg <= 1'h0;
-    end else begin
-      reg_wb_ctrl_toreg <= io_in_wb_ctrl_toreg;
-    end
-    if (reset) begin
-      reg_wb_ctrl_regwrite <= 1'h0;
-    end else if (io_flush) begin
-      reg_wb_ctrl_regwrite <= 1'h0;
-    end else begin
-      reg_wb_ctrl_regwrite <= io_in_wb_ctrl_regwrite;
-    end
-  end
-// Register and memory initialization
-`ifdef RANDOMIZE_GARBAGE_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_INVALID_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_REG_INIT
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-`define RANDOMIZE
-`endif
-`ifndef RANDOM
-`define RANDOM $random
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-  integer initvar;
-`endif
-`ifndef SYNTHESIS
-`ifdef FIRRTL_BEFORE_INITIAL
-`FIRRTL_BEFORE_INITIAL
-`endif
-initial begin
-  `ifdef RANDOMIZE
-    `ifdef INIT_RANDOM
-      `INIT_RANDOM
-    `endif
-    `ifndef VERILATOR
-      `ifdef RANDOMIZE_DELAY
-        #`RANDOMIZE_DELAY begin end
-      `else
-        #0.002 begin end
-      `endif
-    `endif
-`ifdef RANDOMIZE_REG_INIT
-  _RAND_0 = {1{`RANDOM}};
-  reg_mem_ctrl_memop = _RAND_0[1:0];
-  _RAND_1 = {1{`RANDOM}};
-  reg_wb_ctrl_toreg = _RAND_1[0:0];
-  _RAND_2 = {1{`RANDOM}};
-  reg_wb_ctrl_regwrite = _RAND_2[0:0];
-`endif // RANDOMIZE_REG_INIT
-  `endif // RANDOMIZE
-end // initial
-`ifdef FIRRTL_AFTER_INITIAL
-`FIRRTL_AFTER_INITIAL
-`endif
-`endif // SYNTHESIS
-endmodule
 module StageReg_2(
   input        clock,
   input        reset,
@@ -778,29 +219,46 @@ end // initial
 `endif
 `endif // SYNTHESIS
 endmodule
-module StageReg_6(
-  input   clock,
-  input   reset,
-  input   io_in_wb_ctrl_toreg,
-  input   io_in_wb_ctrl_regwrite,
-  output  io_data_wb_ctrl_toreg,
-  output  io_data_wb_ctrl_regwrite
+module StageReg_4(
+  input        clock,
+  input        reset,
+  input  [1:0] io_in_mem_ctrl_memop,
+  input        io_in_wb_ctrl_toreg,
+  input        io_in_wb_ctrl_regwrite,
+  input        io_flush,
+  output [1:0] io_data_mem_ctrl_memop,
+  output       io_data_wb_ctrl_toreg,
+  output       io_data_wb_ctrl_regwrite
 );
 `ifdef RANDOMIZE_REG_INIT
   reg [31:0] _RAND_0;
   reg [31:0] _RAND_1;
+  reg [31:0] _RAND_2;
 `endif // RANDOMIZE_REG_INIT
+  reg [1:0] reg_mem_ctrl_memop;
   reg  reg_wb_ctrl_toreg;
   reg  reg_wb_ctrl_regwrite;
+  assign io_data_mem_ctrl_memop = reg_mem_ctrl_memop;
   assign io_data_wb_ctrl_toreg = reg_wb_ctrl_toreg;
   assign io_data_wb_ctrl_regwrite = reg_wb_ctrl_regwrite;
   always @(posedge clock) begin
     if (reset) begin
+      reg_mem_ctrl_memop <= 2'h0;
+    end else if (io_flush) begin
+      reg_mem_ctrl_memop <= 2'h0;
+    end else begin
+      reg_mem_ctrl_memop <= io_in_mem_ctrl_memop;
+    end
+    if (reset) begin
+      reg_wb_ctrl_toreg <= 1'h0;
+    end else if (io_flush) begin
       reg_wb_ctrl_toreg <= 1'h0;
     end else begin
       reg_wb_ctrl_toreg <= io_in_wb_ctrl_toreg;
     end
     if (reset) begin
+      reg_wb_ctrl_regwrite <= 1'h0;
+    end else if (io_flush) begin
       reg_wb_ctrl_regwrite <= 1'h0;
     end else begin
       reg_wb_ctrl_regwrite <= io_in_wb_ctrl_regwrite;
@@ -843,132 +301,11 @@ initial begin
     `endif
 `ifdef RANDOMIZE_REG_INIT
   _RAND_0 = {1{`RANDOM}};
-  reg_wb_ctrl_toreg = _RAND_0[0:0];
+  reg_mem_ctrl_memop = _RAND_0[1:0];
   _RAND_1 = {1{`RANDOM}};
-  reg_wb_ctrl_regwrite = _RAND_1[0:0];
-`endif // RANDOMIZE_REG_INIT
-  `endif // RANDOMIZE
-end // initial
-`ifdef FIRRTL_AFTER_INITIAL
-`FIRRTL_AFTER_INITIAL
-`endif
-`endif // SYNTHESIS
-endmodule
-module StageReg_3(
-  input         clock,
-  input         reset,
-  input  [31:0] io_in_ex_result,
-  input  [31:0] io_in_mem_writedata,
-  input  [31:0] io_in_instruction,
-  input  [31:0] io_in_next_pc,
-  input         io_in_taken,
-  input         io_flush,
-  output [31:0] io_data_ex_result,
-  output [31:0] io_data_mem_writedata,
-  output [31:0] io_data_instruction,
-  output [31:0] io_data_next_pc,
-  output        io_data_taken
-);
-`ifdef RANDOMIZE_REG_INIT
-  reg [31:0] _RAND_0;
-  reg [31:0] _RAND_1;
-  reg [31:0] _RAND_2;
-  reg [31:0] _RAND_3;
-  reg [31:0] _RAND_4;
-`endif // RANDOMIZE_REG_INIT
-  reg [31:0] reg_ex_result;
-  reg [31:0] reg_mem_writedata;
-  reg [31:0] reg_instruction;
-  reg [31:0] reg_next_pc;
-  reg  reg_taken;
-  assign io_data_ex_result = reg_ex_result;
-  assign io_data_mem_writedata = reg_mem_writedata;
-  assign io_data_instruction = reg_instruction;
-  assign io_data_next_pc = reg_next_pc;
-  assign io_data_taken = reg_taken;
-  always @(posedge clock) begin
-    if (reset) begin
-      reg_ex_result <= 32'h0;
-    end else if (io_flush) begin
-      reg_ex_result <= 32'h0;
-    end else begin
-      reg_ex_result <= io_in_ex_result;
-    end
-    if (reset) begin
-      reg_mem_writedata <= 32'h0;
-    end else if (io_flush) begin
-      reg_mem_writedata <= 32'h0;
-    end else begin
-      reg_mem_writedata <= io_in_mem_writedata;
-    end
-    if (reset) begin
-      reg_instruction <= 32'h0;
-    end else if (io_flush) begin
-      reg_instruction <= 32'h0;
-    end else begin
-      reg_instruction <= io_in_instruction;
-    end
-    if (reset) begin
-      reg_next_pc <= 32'h0;
-    end else if (io_flush) begin
-      reg_next_pc <= 32'h0;
-    end else begin
-      reg_next_pc <= io_in_next_pc;
-    end
-    if (reset) begin
-      reg_taken <= 1'h0;
-    end else if (io_flush) begin
-      reg_taken <= 1'h0;
-    end else begin
-      reg_taken <= io_in_taken;
-    end
-  end
-// Register and memory initialization
-`ifdef RANDOMIZE_GARBAGE_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_INVALID_ASSIGN
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_REG_INIT
-`define RANDOMIZE
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-`define RANDOMIZE
-`endif
-`ifndef RANDOM
-`define RANDOM $random
-`endif
-`ifdef RANDOMIZE_MEM_INIT
-  integer initvar;
-`endif
-`ifndef SYNTHESIS
-`ifdef FIRRTL_BEFORE_INITIAL
-`FIRRTL_BEFORE_INITIAL
-`endif
-initial begin
-  `ifdef RANDOMIZE
-    `ifdef INIT_RANDOM
-      `INIT_RANDOM
-    `endif
-    `ifndef VERILATOR
-      `ifdef RANDOMIZE_DELAY
-        #`RANDOMIZE_DELAY begin end
-      `else
-        #0.002 begin end
-      `endif
-    `endif
-`ifdef RANDOMIZE_REG_INIT
-  _RAND_0 = {1{`RANDOM}};
-  reg_ex_result = _RAND_0[31:0];
-  _RAND_1 = {1{`RANDOM}};
-  reg_mem_writedata = _RAND_1[31:0];
+  reg_wb_ctrl_toreg = _RAND_1[0:0];
   _RAND_2 = {1{`RANDOM}};
-  reg_instruction = _RAND_2[31:0];
-  _RAND_3 = {1{`RANDOM}};
-  reg_next_pc = _RAND_3[31:0];
-  _RAND_4 = {1{`RANDOM}};
-  reg_taken = _RAND_4[0:0];
+  reg_wb_ctrl_regwrite = _RAND_2[0:0];
 `endif // RANDOMIZE_REG_INIT
   `endif // RANDOMIZE
 end // initial
@@ -977,23 +314,95 @@ end // initial
 `endif
 `endif // SYNTHESIS
 endmodule
-module ALUControl(
-  input        io_aluop,
-  input        io_itype,
-  input  [6:0] io_funct7,
-  input  [2:0] io_funct3,
-  output [3:0] io_operation
+module Control(
+  input  [6:0] io_opcode,
+  output       io_itype,
+  output       io_aluop,
+  output       io_xsrc,
+  output       io_ysrc,
+  output       io_branch,
+  output       io_jal,
+  output       io_jalr,
+  output       io_plus4,
+  output       io_resultselect,
+  output [1:0] io_memop,
+  output       io_toreg,
+  output       io_regwrite
 );
-  wire [2:0] _GEN_0 = io_itype | io_funct7 == 7'h0 ? 3'h7 : 3'h4; // @[]
-  wire [1:0] _GEN_1 = io_funct7 == 7'h0 ? 2'h2 : 2'h3; // @[]
-  wire [2:0] _GEN_2 = io_funct3 == 3'h6 ? 3'h5 : 3'h6; // @[]
-  wire [2:0] _GEN_3 = io_funct3 == 3'h5 ? {{1'd0}, _GEN_1} : _GEN_2; // @[]
-  wire [2:0] _GEN_4 = io_funct3 == 3'h4 ? 3'h0 : _GEN_3; // @[]
-  wire [2:0] _GEN_5 = io_funct3 == 3'h3 ? 3'h1 : _GEN_4; // @[]
-  wire [3:0] _GEN_6 = io_funct3 == 3'h2 ? 4'h9 : {{1'd0}, _GEN_5}; // @[]
-  wire [3:0] _GEN_7 = io_funct3 == 3'h1 ? 4'h8 : _GEN_6; // @[]
-  wire [3:0] _GEN_8 = io_funct3 == 3'h0 ? {{1'd0}, _GEN_0} : _GEN_7; // @[]
-  assign io_operation = io_aluop ? _GEN_8 : 4'h7; // @[]
+  wire  _T_37 = 7'h37 == io_opcode ? 1'h0 : 7'h17 == io_opcode | (7'h6f == io_opcode | 7'h67 == io_opcode);
+  wire  _T_38 = 7'h63 == io_opcode ? 1'h0 : _T_37;
+  wire  _T_39 = 7'h23 == io_opcode ? 1'h0 : _T_38;
+  wire  _T_40 = 7'h3 == io_opcode ? 1'h0 : _T_39;
+  wire  _T_41 = 7'h13 == io_opcode ? 1'h0 : _T_40;
+  wire  _T_45 = 7'h37 == io_opcode ? 1'h0 : 7'h17 == io_opcode;
+  wire  _T_46 = 7'h63 == io_opcode ? 1'h0 : _T_45;
+  wire  _T_55 = 7'h23 == io_opcode ? 1'h0 : 7'h63 == io_opcode;
+  wire  _T_56 = 7'h3 == io_opcode ? 1'h0 : _T_55;
+  wire  _T_57 = 7'h13 == io_opcode ? 1'h0 : _T_56;
+  wire  _T_60 = 7'h17 == io_opcode ? 1'h0 : 7'h6f == io_opcode;
+  wire  _T_61 = 7'h37 == io_opcode ? 1'h0 : _T_60;
+  wire  _T_62 = 7'h63 == io_opcode ? 1'h0 : _T_61;
+  wire  _T_63 = 7'h23 == io_opcode ? 1'h0 : _T_62;
+  wire  _T_64 = 7'h3 == io_opcode ? 1'h0 : _T_63;
+  wire  _T_65 = 7'h13 == io_opcode ? 1'h0 : _T_64;
+  wire  _T_67 = 7'h6f == io_opcode ? 1'h0 : 7'h67 == io_opcode;
+  wire  _T_68 = 7'h17 == io_opcode ? 1'h0 : _T_67;
+  wire  _T_69 = 7'h37 == io_opcode ? 1'h0 : _T_68;
+  wire  _T_70 = 7'h63 == io_opcode ? 1'h0 : _T_69;
+  wire  _T_71 = 7'h23 == io_opcode ? 1'h0 : _T_70;
+  wire  _T_72 = 7'h3 == io_opcode ? 1'h0 : _T_71;
+  wire  _T_73 = 7'h13 == io_opcode ? 1'h0 : _T_72;
+  wire  _T_76 = 7'h17 == io_opcode ? 1'h0 : 7'h6f == io_opcode | 7'h67 == io_opcode;
+  wire  _T_77 = 7'h37 == io_opcode ? 1'h0 : _T_76;
+  wire  _T_78 = 7'h63 == io_opcode ? 1'h0 : _T_77;
+  wire  _T_79 = 7'h23 == io_opcode ? 1'h0 : _T_78;
+  wire  _T_80 = 7'h3 == io_opcode ? 1'h0 : _T_79;
+  wire  _T_81 = 7'h13 == io_opcode ? 1'h0 : _T_80;
+  wire  _T_86 = 7'h63 == io_opcode ? 1'h0 : 7'h37 == io_opcode;
+  wire  _T_87 = 7'h23 == io_opcode ? 1'h0 : _T_86;
+  wire  _T_88 = 7'h3 == io_opcode ? 1'h0 : _T_87;
+  wire  _T_89 = 7'h13 == io_opcode ? 1'h0 : _T_88;
+  wire [1:0] _T_95 = 7'h23 == io_opcode ? 2'h3 : 2'h0;
+  wire [1:0] _T_96 = 7'h3 == io_opcode ? 2'h2 : _T_95;
+  wire [1:0] _T_97 = 7'h13 == io_opcode ? 2'h0 : _T_96;
+  wire  _T_105 = 7'h13 == io_opcode ? 1'h0 : 7'h3 == io_opcode;
+  wire  _T_110 = 7'h63 == io_opcode ? 1'h0 : 7'h37 == io_opcode | (7'h17 == io_opcode | (7'h6f == io_opcode | 7'h67 ==
+    io_opcode));
+  wire  _T_111 = 7'h23 == io_opcode ? 1'h0 : _T_110;
+  assign io_itype = 7'h33 == io_opcode ? 1'h0 : 7'h13 == io_opcode;
+  assign io_aluop = 7'h33 == io_opcode | 7'h13 == io_opcode;
+  assign io_xsrc = 7'h33 == io_opcode ? 1'h0 : _T_41;
+  assign io_ysrc = 7'h33 == io_opcode ? 1'h0 : 7'h13 == io_opcode | (7'h3 == io_opcode | (7'h23 == io_opcode | _T_46));
+  assign io_branch = 7'h33 == io_opcode ? 1'h0 : _T_57;
+  assign io_jal = 7'h33 == io_opcode ? 1'h0 : _T_65;
+  assign io_jalr = 7'h33 == io_opcode ? 1'h0 : _T_73;
+  assign io_plus4 = 7'h33 == io_opcode ? 1'h0 : _T_81;
+  assign io_resultselect = 7'h33 == io_opcode ? 1'h0 : _T_89;
+  assign io_memop = 7'h33 == io_opcode ? 2'h0 : _T_97;
+  assign io_toreg = 7'h33 == io_opcode ? 1'h0 : _T_105;
+  assign io_regwrite = 7'h33 == io_opcode | (7'h13 == io_opcode | (7'h3 == io_opcode | _T_111));
+endmodule
+module Adder(
+  input  [31:0] io_inputx,
+  input  [31:0] io_inputy,
+  output [31:0] io_result
+);
+  assign io_result = io_inputx + io_inputy;
+endmodule
+module ForwardingUnit(
+  input  [4:0] io_rs1,
+  input  [4:0] io_rs2,
+  input  [4:0] io_exmemrd,
+  input        io_exmemrw,
+  input  [4:0] io_memwbrd,
+  input        io_memwbrw,
+  output [1:0] io_forwardA,
+  output [1:0] io_forwardB
+);
+  wire [1:0] _GEN_0 = io_memwbrw & io_memwbrd == io_rs1 & io_memwbrd != 5'h0 ? 2'h2 : 2'h0; // @[]
+  wire [1:0] _GEN_2 = io_memwbrw & io_memwbrd == io_rs2 & io_memwbrd != 5'h0 ? 2'h2 : 2'h0; // @[]
+  assign io_forwardA = io_exmemrw & io_exmemrd == io_rs1 & io_exmemrd != 5'h0 ? 2'h1 : _GEN_0; // @[]
+  assign io_forwardB = io_exmemrw & io_exmemrd == io_rs2 & io_exmemrd != 5'h0 ? 2'h1 : _GEN_2; // @[]
 endmodule
 module NextPC(
   input         io_branch,
@@ -1432,6 +841,597 @@ end // initial
 `endif
 `endif // SYNTHESIS
 endmodule
+module StageReg_1(
+  input         clock,
+  input         reset,
+  input  [31:0] io_in_pc,
+  input  [31:0] io_in_instruction,
+  input  [31:0] io_in_sextImm,
+  input  [31:0] io_in_readdata1,
+  input  [31:0] io_in_readdata2,
+  input         io_flush,
+  output [31:0] io_data_pc,
+  output [31:0] io_data_instruction,
+  output [31:0] io_data_sextImm,
+  output [31:0] io_data_readdata1,
+  output [31:0] io_data_readdata2
+);
+`ifdef RANDOMIZE_REG_INIT
+  reg [31:0] _RAND_0;
+  reg [31:0] _RAND_1;
+  reg [31:0] _RAND_2;
+  reg [31:0] _RAND_3;
+  reg [31:0] _RAND_4;
+`endif // RANDOMIZE_REG_INIT
+  reg [31:0] reg_pc;
+  reg [31:0] reg_instruction;
+  reg [31:0] reg_sextImm;
+  reg [31:0] reg_readdata1;
+  reg [31:0] reg_readdata2;
+  assign io_data_pc = reg_pc;
+  assign io_data_instruction = reg_instruction;
+  assign io_data_sextImm = reg_sextImm;
+  assign io_data_readdata1 = reg_readdata1;
+  assign io_data_readdata2 = reg_readdata2;
+  always @(posedge clock) begin
+    if (reset) begin
+      reg_pc <= 32'h0;
+    end else if (io_flush) begin
+      reg_pc <= 32'h0;
+    end else begin
+      reg_pc <= io_in_pc;
+    end
+    if (reset) begin
+      reg_instruction <= 32'h0;
+    end else if (io_flush) begin
+      reg_instruction <= 32'h0;
+    end else begin
+      reg_instruction <= io_in_instruction;
+    end
+    if (reset) begin
+      reg_sextImm <= 32'h0;
+    end else if (io_flush) begin
+      reg_sextImm <= 32'h0;
+    end else begin
+      reg_sextImm <= io_in_sextImm;
+    end
+    if (reset) begin
+      reg_readdata1 <= 32'h0;
+    end else if (io_flush) begin
+      reg_readdata1 <= 32'h0;
+    end else begin
+      reg_readdata1 <= io_in_readdata1;
+    end
+    if (reset) begin
+      reg_readdata2 <= 32'h0;
+    end else if (io_flush) begin
+      reg_readdata2 <= 32'h0;
+    end else begin
+      reg_readdata2 <= io_in_readdata2;
+    end
+  end
+// Register and memory initialization
+`ifdef RANDOMIZE_GARBAGE_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_INVALID_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_REG_INIT
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+`define RANDOMIZE
+`endif
+`ifndef RANDOM
+`define RANDOM $random
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+  integer initvar;
+`endif
+`ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
+initial begin
+  `ifdef RANDOMIZE
+    `ifdef INIT_RANDOM
+      `INIT_RANDOM
+    `endif
+    `ifndef VERILATOR
+      `ifdef RANDOMIZE_DELAY
+        #`RANDOMIZE_DELAY begin end
+      `else
+        #0.002 begin end
+      `endif
+    `endif
+`ifdef RANDOMIZE_REG_INIT
+  _RAND_0 = {1{`RANDOM}};
+  reg_pc = _RAND_0[31:0];
+  _RAND_1 = {1{`RANDOM}};
+  reg_instruction = _RAND_1[31:0];
+  _RAND_2 = {1{`RANDOM}};
+  reg_sextImm = _RAND_2[31:0];
+  _RAND_3 = {1{`RANDOM}};
+  reg_readdata1 = _RAND_3[31:0];
+  _RAND_4 = {1{`RANDOM}};
+  reg_readdata2 = _RAND_4[31:0];
+`endif // RANDOMIZE_REG_INIT
+  `endif // RANDOMIZE
+end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
+`endif // SYNTHESIS
+endmodule
+module StageReg_5(
+  input         clock,
+  input         reset,
+  input  [31:0] io_in_instruction,
+  input  [31:0] io_in_readdata,
+  input  [31:0] io_in_ex_result,
+  output [31:0] io_data_instruction,
+  output [31:0] io_data_readdata,
+  output [31:0] io_data_ex_result
+);
+`ifdef RANDOMIZE_REG_INIT
+  reg [31:0] _RAND_0;
+  reg [31:0] _RAND_1;
+  reg [31:0] _RAND_2;
+`endif // RANDOMIZE_REG_INIT
+  reg [31:0] reg_instruction;
+  reg [31:0] reg_readdata;
+  reg [31:0] reg_ex_result;
+  assign io_data_instruction = reg_instruction;
+  assign io_data_readdata = reg_readdata;
+  assign io_data_ex_result = reg_ex_result;
+  always @(posedge clock) begin
+    if (reset) begin
+      reg_instruction <= 32'h0;
+    end else begin
+      reg_instruction <= io_in_instruction;
+    end
+    if (reset) begin
+      reg_readdata <= 32'h0;
+    end else begin
+      reg_readdata <= io_in_readdata;
+    end
+    if (reset) begin
+      reg_ex_result <= 32'h0;
+    end else begin
+      reg_ex_result <= io_in_ex_result;
+    end
+  end
+// Register and memory initialization
+`ifdef RANDOMIZE_GARBAGE_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_INVALID_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_REG_INIT
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+`define RANDOMIZE
+`endif
+`ifndef RANDOM
+`define RANDOM $random
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+  integer initvar;
+`endif
+`ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
+initial begin
+  `ifdef RANDOMIZE
+    `ifdef INIT_RANDOM
+      `INIT_RANDOM
+    `endif
+    `ifndef VERILATOR
+      `ifdef RANDOMIZE_DELAY
+        #`RANDOMIZE_DELAY begin end
+      `else
+        #0.002 begin end
+      `endif
+    `endif
+`ifdef RANDOMIZE_REG_INIT
+  _RAND_0 = {1{`RANDOM}};
+  reg_instruction = _RAND_0[31:0];
+  _RAND_1 = {1{`RANDOM}};
+  reg_readdata = _RAND_1[31:0];
+  _RAND_2 = {1{`RANDOM}};
+  reg_ex_result = _RAND_2[31:0];
+`endif // RANDOMIZE_REG_INIT
+  `endif // RANDOMIZE
+end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
+`endif // SYNTHESIS
+endmodule
+module StageReg_3(
+  input         clock,
+  input         reset,
+  input  [31:0] io_in_ex_result,
+  input  [31:0] io_in_mem_writedata,
+  input  [31:0] io_in_instruction,
+  input  [31:0] io_in_next_pc,
+  input         io_in_taken,
+  input         io_flush,
+  output [31:0] io_data_ex_result,
+  output [31:0] io_data_mem_writedata,
+  output [31:0] io_data_instruction,
+  output [31:0] io_data_next_pc,
+  output        io_data_taken
+);
+`ifdef RANDOMIZE_REG_INIT
+  reg [31:0] _RAND_0;
+  reg [31:0] _RAND_1;
+  reg [31:0] _RAND_2;
+  reg [31:0] _RAND_3;
+  reg [31:0] _RAND_4;
+`endif // RANDOMIZE_REG_INIT
+  reg [31:0] reg_ex_result;
+  reg [31:0] reg_mem_writedata;
+  reg [31:0] reg_instruction;
+  reg [31:0] reg_next_pc;
+  reg  reg_taken;
+  assign io_data_ex_result = reg_ex_result;
+  assign io_data_mem_writedata = reg_mem_writedata;
+  assign io_data_instruction = reg_instruction;
+  assign io_data_next_pc = reg_next_pc;
+  assign io_data_taken = reg_taken;
+  always @(posedge clock) begin
+    if (reset) begin
+      reg_ex_result <= 32'h0;
+    end else if (io_flush) begin
+      reg_ex_result <= 32'h0;
+    end else begin
+      reg_ex_result <= io_in_ex_result;
+    end
+    if (reset) begin
+      reg_mem_writedata <= 32'h0;
+    end else if (io_flush) begin
+      reg_mem_writedata <= 32'h0;
+    end else begin
+      reg_mem_writedata <= io_in_mem_writedata;
+    end
+    if (reset) begin
+      reg_instruction <= 32'h0;
+    end else if (io_flush) begin
+      reg_instruction <= 32'h0;
+    end else begin
+      reg_instruction <= io_in_instruction;
+    end
+    if (reset) begin
+      reg_next_pc <= 32'h0;
+    end else if (io_flush) begin
+      reg_next_pc <= 32'h0;
+    end else begin
+      reg_next_pc <= io_in_next_pc;
+    end
+    if (reset) begin
+      reg_taken <= 1'h0;
+    end else if (io_flush) begin
+      reg_taken <= 1'h0;
+    end else begin
+      reg_taken <= io_in_taken;
+    end
+  end
+// Register and memory initialization
+`ifdef RANDOMIZE_GARBAGE_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_INVALID_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_REG_INIT
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+`define RANDOMIZE
+`endif
+`ifndef RANDOM
+`define RANDOM $random
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+  integer initvar;
+`endif
+`ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
+initial begin
+  `ifdef RANDOMIZE
+    `ifdef INIT_RANDOM
+      `INIT_RANDOM
+    `endif
+    `ifndef VERILATOR
+      `ifdef RANDOMIZE_DELAY
+        #`RANDOMIZE_DELAY begin end
+      `else
+        #0.002 begin end
+      `endif
+    `endif
+`ifdef RANDOMIZE_REG_INIT
+  _RAND_0 = {1{`RANDOM}};
+  reg_ex_result = _RAND_0[31:0];
+  _RAND_1 = {1{`RANDOM}};
+  reg_mem_writedata = _RAND_1[31:0];
+  _RAND_2 = {1{`RANDOM}};
+  reg_instruction = _RAND_2[31:0];
+  _RAND_3 = {1{`RANDOM}};
+  reg_next_pc = _RAND_3[31:0];
+  _RAND_4 = {1{`RANDOM}};
+  reg_taken = _RAND_4[0:0];
+`endif // RANDOMIZE_REG_INIT
+  `endif // RANDOMIZE
+end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
+`endif // SYNTHESIS
+endmodule
+module StageReg_6(
+  input   clock,
+  input   reset,
+  input   io_in_wb_ctrl_toreg,
+  input   io_in_wb_ctrl_regwrite,
+  output  io_data_wb_ctrl_toreg,
+  output  io_data_wb_ctrl_regwrite
+);
+`ifdef RANDOMIZE_REG_INIT
+  reg [31:0] _RAND_0;
+  reg [31:0] _RAND_1;
+`endif // RANDOMIZE_REG_INIT
+  reg  reg_wb_ctrl_toreg;
+  reg  reg_wb_ctrl_regwrite;
+  assign io_data_wb_ctrl_toreg = reg_wb_ctrl_toreg;
+  assign io_data_wb_ctrl_regwrite = reg_wb_ctrl_regwrite;
+  always @(posedge clock) begin
+    if (reset) begin
+      reg_wb_ctrl_toreg <= 1'h0;
+    end else begin
+      reg_wb_ctrl_toreg <= io_in_wb_ctrl_toreg;
+    end
+    if (reset) begin
+      reg_wb_ctrl_regwrite <= 1'h0;
+    end else begin
+      reg_wb_ctrl_regwrite <= io_in_wb_ctrl_regwrite;
+    end
+  end
+// Register and memory initialization
+`ifdef RANDOMIZE_GARBAGE_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_INVALID_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_REG_INIT
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+`define RANDOMIZE
+`endif
+`ifndef RANDOM
+`define RANDOM $random
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+  integer initvar;
+`endif
+`ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
+initial begin
+  `ifdef RANDOMIZE
+    `ifdef INIT_RANDOM
+      `INIT_RANDOM
+    `endif
+    `ifndef VERILATOR
+      `ifdef RANDOMIZE_DELAY
+        #`RANDOMIZE_DELAY begin end
+      `else
+        #0.002 begin end
+      `endif
+    `endif
+`ifdef RANDOMIZE_REG_INIT
+  _RAND_0 = {1{`RANDOM}};
+  reg_wb_ctrl_toreg = _RAND_0[0:0];
+  _RAND_1 = {1{`RANDOM}};
+  reg_wb_ctrl_regwrite = _RAND_1[0:0];
+`endif // RANDOMIZE_REG_INIT
+  `endif // RANDOMIZE
+end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
+`endif // SYNTHESIS
+endmodule
+module ALU(
+  input  [3:0]  io_operation,
+  input  [31:0] io_inputx,
+  input  [31:0] io_inputy,
+  output [31:0] io_result
+);
+  wire [31:0] _T_1 = io_inputx & io_inputy;
+  wire [31:0] _T_3 = io_inputx | io_inputy;
+  wire [31:0] _T_6 = io_inputx + io_inputy;
+  wire [31:0] _T_9 = io_inputx - io_inputy;
+  wire [31:0] _T_11 = io_inputx;
+  wire [31:0] _T_14 = $signed(io_inputx) >>> io_inputy[4:0];
+  wire [31:0] _T_18 = io_inputx ^ io_inputy;
+  wire [31:0] _T_21 = io_inputx >> io_inputy[4:0];
+  wire [31:0] _T_24 = io_inputy;
+  wire [62:0] _GEN_15 = {{31'd0}, io_inputx};
+  wire [62:0] _T_28 = _GEN_15 << io_inputy[4:0];
+  wire [31:0] _T_31 = ~_T_3;
+  wire  _GEN_1 = io_operation == 4'hd ? io_inputx == io_inputy : io_operation == 4'he & io_inputx != io_inputy; // @[]
+  wire  _GEN_2 = io_operation == 4'hc ? io_inputx >= io_inputy : _GEN_1; // @[]
+  wire  _GEN_3 = io_operation == 4'hb ? $signed(io_inputx) >= $signed(io_inputy) : _GEN_2; // @[]
+  wire [31:0] _GEN_4 = io_operation == 4'ha ? _T_31 : {{31'd0}, _GEN_3}; // @[]
+  wire [62:0] _GEN_5 = io_operation == 4'h8 ? _T_28 : {{31'd0}, _GEN_4}; // @[]
+  wire [62:0] _GEN_6 = io_operation == 4'h9 ? {{62'd0}, $signed(_T_11) < $signed(_T_24)} : _GEN_5; // @[]
+  wire [62:0] _GEN_7 = io_operation == 4'h2 ? {{31'd0}, _T_21} : _GEN_6; // @[]
+  wire [62:0] _GEN_8 = io_operation == 4'h0 ? {{31'd0}, _T_18} : _GEN_7; // @[]
+  wire [62:0] _GEN_9 = io_operation == 4'h1 ? {{62'd0}, io_inputx < io_inputy} : _GEN_8; // @[]
+  wire [62:0] _GEN_10 = io_operation == 4'h3 ? {{31'd0}, _T_14} : _GEN_9; // @[]
+  wire [62:0] _GEN_11 = io_operation == 4'h4 ? {{31'd0}, _T_9} : _GEN_10; // @[]
+  wire [62:0] _GEN_12 = io_operation == 4'h7 ? {{31'd0}, _T_6} : _GEN_11; // @[]
+  wire [62:0] _GEN_13 = io_operation == 4'h5 ? {{31'd0}, _T_3} : _GEN_12; // @[]
+  wire [62:0] _GEN_14 = io_operation == 4'h6 ? {{31'd0}, _T_1} : _GEN_13; // @[]
+  assign io_result = _GEN_14[31:0];
+endmodule
+module ImmediateGenerator(
+  input  [31:0] io_instruction,
+  output [31:0] io_sextImm
+);
+  wire [6:0] opcode = io_instruction[6:0];
+  wire [31:0] _T_3 = {io_instruction[31:12],12'h0};
+  wire [19:0] _T_15 = {io_instruction[31],io_instruction[19:12],io_instruction[20],io_instruction[30:21]};
+  wire [10:0] _T_18 = _T_15[19] ? 11'h7ff : 11'h0;
+  wire [31:0] _T_20 = {_T_18,io_instruction[31],io_instruction[19:12],io_instruction[20],io_instruction[30:21],1'h0};
+  wire [19:0] _T_25 = io_instruction[31] ? 20'hfffff : 20'h0;
+  wire [31:0] _T_26 = {_T_25,io_instruction[31:20]};
+  wire [11:0] _T_34 = {io_instruction[31],io_instruction[7],io_instruction[30:25],io_instruction[11:8]};
+  wire [18:0] _T_37 = _T_34[11] ? 19'h7ffff : 19'h0;
+  wire [31:0] _T_39 = {_T_37,io_instruction[31],io_instruction[7],io_instruction[30:25],io_instruction[11:8],1'h0};
+  wire [11:0] _T_49 = {io_instruction[31:25],io_instruction[11:7]};
+  wire [19:0] _T_52 = _T_49[11] ? 20'hfffff : 20'h0;
+  wire [31:0] _T_53 = {_T_52,io_instruction[31:25],io_instruction[11:7]};
+  wire [31:0] _T_63 = {27'h0,io_instruction[19:15]};
+  wire [31:0] _GEN_0 = 7'h73 == opcode ? _T_63 : 32'h0; // @[]
+  wire [31:0] _GEN_1 = 7'h13 == opcode ? _T_26 : _GEN_0; // @[]
+  wire [31:0] _GEN_2 = 7'h23 == opcode ? _T_53 : _GEN_1; // @[]
+  wire [31:0] _GEN_3 = 7'h3 == opcode ? _T_26 : _GEN_2; // @[]
+  wire [31:0] _GEN_4 = 7'h63 == opcode ? _T_39 : _GEN_3; // @[]
+  wire [31:0] _GEN_5 = 7'h67 == opcode ? _T_26 : _GEN_4; // @[]
+  wire [31:0] _GEN_6 = 7'h6f == opcode ? _T_20 : _GEN_5; // @[]
+  wire [31:0] _GEN_7 = 7'h17 == opcode ? _T_3 : _GEN_6; // @[]
+  assign io_sextImm = 7'h37 == opcode ? _T_3 : _GEN_7; // @[]
+endmodule
+module HazardUnitBP(
+  input  [4:0] io_rs1,
+  input  [4:0] io_rs2,
+  input        io_idex_memread,
+  input  [4:0] io_idex_rd,
+  input        io_exmem_taken,
+  output [1:0] io_pcSel,
+  output       io_if_id_stall,
+  output       io_if_id_flush,
+  output       io_id_ex_flush,
+  output       io_ex_mem_flush
+);
+  wire [1:0] _GEN_3 = io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2) ? 2'h3 : 2'h0; // @[]
+  assign io_pcSel = io_exmem_taken ? 2'h1 : _GEN_3; // @[]
+  assign io_if_id_stall = io_exmem_taken ? 1'h0 : io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2); // @[]
+  assign io_if_id_flush = io_exmem_taken; // @[]
+  assign io_id_ex_flush = io_exmem_taken | io_idex_memread & (io_idex_rd == io_rs1 | io_idex_rd == io_rs2); // @[]
+  assign io_ex_mem_flush = io_exmem_taken; // @[]
+endmodule
+module StageReg(
+  input         clock,
+  input         reset,
+  input  [31:0] io_in_instruction,
+  input  [31:0] io_in_pc,
+  input         io_flush,
+  input         io_valid,
+  output [31:0] io_data_instruction,
+  output [31:0] io_data_pc
+);
+`ifdef RANDOMIZE_REG_INIT
+  reg [31:0] _RAND_0;
+  reg [31:0] _RAND_1;
+`endif // RANDOMIZE_REG_INIT
+  reg [31:0] reg_instruction;
+  reg [31:0] reg_pc;
+  assign io_data_instruction = reg_instruction;
+  assign io_data_pc = reg_pc;
+  always @(posedge clock) begin
+    if (reset) begin
+      reg_instruction <= 32'h0;
+    end else if (io_flush) begin
+      reg_instruction <= 32'h0;
+    end else if (io_valid) begin
+      reg_instruction <= io_in_instruction;
+    end
+    if (reset) begin
+      reg_pc <= 32'h0;
+    end else if (io_flush) begin
+      reg_pc <= 32'h0;
+    end else if (io_valid) begin
+      reg_pc <= io_in_pc;
+    end
+  end
+// Register and memory initialization
+`ifdef RANDOMIZE_GARBAGE_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_INVALID_ASSIGN
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_REG_INIT
+`define RANDOMIZE
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+`define RANDOMIZE
+`endif
+`ifndef RANDOM
+`define RANDOM $random
+`endif
+`ifdef RANDOMIZE_MEM_INIT
+  integer initvar;
+`endif
+`ifndef SYNTHESIS
+`ifdef FIRRTL_BEFORE_INITIAL
+`FIRRTL_BEFORE_INITIAL
+`endif
+initial begin
+  `ifdef RANDOMIZE
+    `ifdef INIT_RANDOM
+      `INIT_RANDOM
+    `endif
+    `ifndef VERILATOR
+      `ifdef RANDOMIZE_DELAY
+        #`RANDOMIZE_DELAY begin end
+      `else
+        #0.002 begin end
+      `endif
+    `endif
+`ifdef RANDOMIZE_REG_INIT
+  _RAND_0 = {1{`RANDOM}};
+  reg_instruction = _RAND_0[31:0];
+  _RAND_1 = {1{`RANDOM}};
+  reg_pc = _RAND_1[31:0];
+`endif // RANDOMIZE_REG_INIT
+  `endif // RANDOMIZE
+end // initial
+`ifdef FIRRTL_AFTER_INITIAL
+`FIRRTL_AFTER_INITIAL
+`endif
+`endif // SYNTHESIS
+endmodule
+module ALUControl(
+  input        io_aluop,
+  input        io_itype,
+  input  [6:0] io_funct7,
+  input  [2:0] io_funct3,
+  output [3:0] io_operation
+);
+  wire [2:0] _GEN_0 = io_itype | io_funct7 == 7'h0 ? 3'h7 : 3'h4; // @[]
+  wire [1:0] _GEN_1 = io_funct7 == 7'h0 ? 2'h2 : 2'h3; // @[]
+  wire [2:0] _GEN_2 = io_funct3 == 3'h6 ? 3'h5 : 3'h6; // @[]
+  wire [2:0] _GEN_3 = io_funct3 == 3'h5 ? {{1'd0}, _GEN_1} : _GEN_2; // @[]
+  wire [2:0] _GEN_4 = io_funct3 == 3'h4 ? 3'h0 : _GEN_3; // @[]
+  wire [2:0] _GEN_5 = io_funct3 == 3'h3 ? 3'h1 : _GEN_4; // @[]
+  wire [3:0] _GEN_6 = io_funct3 == 3'h2 ? 4'h9 : {{1'd0}, _GEN_5}; // @[]
+  wire [3:0] _GEN_7 = io_funct3 == 3'h1 ? 4'h8 : _GEN_6; // @[]
+  wire [3:0] _GEN_8 = io_funct3 == 3'h0 ? {{1'd0}, _GEN_0} : _GEN_7; // @[]
+  assign io_operation = io_aluop ? _GEN_8 : 4'h7; // @[]
+endmodule
 module PipelinedCPUBP(
   input         clock,
   input         reset,
@@ -1661,7 +1661,7 @@ module PipelinedCPUBP(
     .io_instruction(immGen_io_instruction),
     .io_sextImm(immGen_io_sextImm)
   );
-  Adder_1 pcPlusFour (
+  Adder pcPlusFour (
     .io_inputx(pcPlusFour_io_inputx),
     .io_inputy(pcPlusFour_io_inputy),
     .io_result(pcPlusFour_io_result)
@@ -1700,7 +1700,7 @@ module PipelinedCPUBP(
     .io_id_ex_flush(hazard_io_id_ex_flush),
     .io_ex_mem_flush(hazard_io_ex_mem_flush)
   );
-  Adder_1 branchAdd (
+  Adder branchAdd (
     .io_inputx(branchAdd_io_inputx),
     .io_inputy(branchAdd_io_inputy),
     .io_result(branchAdd_io_result)

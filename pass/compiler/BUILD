@@ -205,7 +205,6 @@ cc_library(
     "ForwardingAgeLogic",
     "PMPChecker_1",
     "HellaCacheArbiter",
-    "NullPrefetcher",                                                                                                                                                                      
     "NullLocalBranchPredictorBank",                                                                                                                                                        
     "RegisterFile",
     "StageReg", 
@@ -265,6 +264,7 @@ sh_test(
     "RenameFreeList",                # LEC-x
     "IssueUnitCollapsing",           # LEC-?
     "NBDTLB",                        # LEC-x (all leave pass!?)
+    "NullPrefetcher",                # LEC-x (FIXME: previous passing, talk to Jose on is_fir_invalid constant string)                                                                                                                                                               
     "BoomDuplicatedDataArray",
     "FPUFMAPipe_1",
     "MulAddRecFNPipe_1",
@@ -420,6 +420,7 @@ sh_test(
 #     - D1: DCombinMemPort -------------------------------------------- (o) # LEC-x: discuss with Jose 
 #                                                                             The golden verilog is apparently wrong, "io_bus_request_bits_address = io_pipeline_address" without 
 #                                                                             any condition in firrtl code??
+#                                                                             follow-up: still !LEC from the other places, the mux doesn't get simplified away in cprop.cpp:scalar_mux(). 
 #     - D1: ICombinMemPort -------------------------------------------- (o) # LEC-x: same as above
 
 
