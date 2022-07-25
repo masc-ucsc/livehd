@@ -1301,7 +1301,6 @@ void Inou_firrtl_module::direct_instances_connection(Lnast &lnast, Lnast_nid &pa
 }
 
 void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_hier_name, std::string rhs_flattened_name) {
-  add_lnast_assign(lnast, parent_node, rhs_flattened_name, "0"); // the sub-input might be assigned within if-else subscope, so need this trivial initialization for SSA to work
   auto attr_get_node = lnast.add_child(parent_node, Lnast_node::create_attr_get());
   auto temp_var_str = create_tmp_var();
   lnast.add_child(attr_get_node, Lnast_node::create_ref(temp_var_str));
@@ -1310,6 +1309,7 @@ void Inou_firrtl_module::create_tuple_add_for_instance_itup(Lnast& lnast, Lnast_
   var2last_value.insert_or_assign(rhs_flattened_name, temp_var_str);
   wire_names.insert(temp_var_str);
 
+  add_lnast_assign(lnast, parent_node, rhs_flattened_name, "0"); // the sub-input might be assigned within if-else subscope, so need this trivial initialization for SSA to work
 
   I(absl::StrContains(lhs_hier_name, '.'));
   auto selc_node = lnast.add_child(parent_node, Lnast_node::create_tuple_add());
