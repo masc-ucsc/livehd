@@ -86,30 +86,30 @@ firrtl_test() {
     fi
   done
 
-  # Logic Equivalence Check
-  for pt in $1
-  do
-    echo ""
-    echo "----------------------------------------------------"
-    echo "Logic Equivalence Check"
-    echo "----------------------------------------------------"
+  # # Logic Equivalence Check
+  # for pt in $1
+  # do
+  #   echo ""
+  #   echo "----------------------------------------------------"
+  #   echo "Logic Equivalence Check"
+  #   echo "----------------------------------------------------"
 
-    cp -f "./inou/firrtl/tests/verilog_gld/${pt}.gld.v" "tmp_firrtl/${pt}.gld.v"
-    if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
-        echo "Running python script to match IO names between LiveHD and FIRRTL compiler"
-        python3 ${POST_IO_RENAME} "tmp_firrtl/top_${pt}.v"  "tmp_firrtl/${pt}.gld.v"
-    fi
+  #   cp -f "./inou/firrtl/tests/verilog_gld/${pt}.gld.v" "tmp_firrtl/${pt}.gld.v"
+  #   if [ "${FIRRTL_LEVEL}" == "hi" ] || [ "${FIRRTL_LEVEL}" == "ch" ]; then
+  #       echo "Running python script to match IO names between LiveHD and FIRRTL compiler"
+  #       python3 ${POST_IO_RENAME} "tmp_firrtl/top_${pt}.v"  "tmp_firrtl/${pt}.gld.v"
+  #   fi
 
-    ${LGCHECK} --top ${pt} --implementation "tmp_firrtl/top_${pt}.v" --reference "tmp_firrtl/${pt}.gld.v"
-    ret_val=$?
-    if [ $ret_val -eq 0 ]; then
-      echo "Successfully pass LEC!"
-    else
-        echo "FAIL: ${pt}.v !== ${pt}.gld.v"
-        exit $ret_val
-    fi
-    # rm -rf lgdb_${pt}
-  done
+  #   ${LGCHECK} --top ${pt} --implementation "tmp_firrtl/top_${pt}.v" --reference "tmp_firrtl/${pt}.gld.v"
+  #   ret_val=$?
+  #   if [ $ret_val -eq 0 ]; then
+  #     echo "Successfully pass LEC!"
+  #   else
+  #       echo "FAIL: ${pt}.v !== ${pt}.gld.v"
+  #       exit $ret_val
+  #   fi
+  #   # rm -rf lgdb_${pt}
+  # done
 
   # rm -f *.v
   # rm -f *.dot

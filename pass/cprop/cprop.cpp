@@ -560,6 +560,7 @@ void Cprop::try_connect_tuple_to_sub(const std::shared_ptr<Lgtuple const> &tup, 
       auto sub_spin = sub_node.setup_sink_pin_raw(it.second);
       if (!sub_spin.is_connected()) {
         XEdge_iterator out_edges;  // Empty list
+        // auto dpin = expand_data_and_attributes(tup_node, it.first->name, out_edges, tup);
         auto dpin = tup->get_dpin(it.first->name);
         I(!dpin.is_invalid());
         sub_spin.connect_driver(dpin);
@@ -2236,7 +2237,7 @@ void Cprop::tuple_pass(Lgraph *lg) {
     return;
 
   for (auto iter = 0; iter < 6; ++iter) {
-    fmt::print("DEBUG AAA iter:{}\n", iter);
+    // fmt::print("DEBUG AAA iter:{}\n", iter);
     tuple_issues = iter == 0;  // First iter may not be correct if there are flops or subgraphs
     for (auto node : lg->forward(hier)) {
       // fmt::print("DEBUG AAA-0 node:{}\n", node.debug_name());
