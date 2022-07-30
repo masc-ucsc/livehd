@@ -424,4 +424,16 @@ sh_test(
 #     - D1: ICombinMemPort -------------------------------------------- (o) # LEC-x: same as above
 
 
+# Thesis Discussion:
+# (1) LGraph mmap?
+# (2) essential part of LNAST/LGraph specification?
+
+# TODO:
+# (1) termination flag for firbits, firmap, cprop, BW   ---> 20% ~ 30% improvement for DINO? (maybe)
+# (2) launch new thread for protobuffer object clean up ---> 5% improvement?
+# (3) 
+
+
+
+
 
