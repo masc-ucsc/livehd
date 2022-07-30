@@ -265,6 +265,15 @@ public:
     return child_index;
   }
 
+  size_t max_size() const {
+    size_t sz = 0;
+    for(const auto &ent:pointers_stack.size()) {
+      sz+=ent.size();
+    }
+
+    return sz*4; // WARNING: 4x because pointers stack has 4x pointer
+  }
+
   bool is_last_child(const Tree_index &self_index) const { return get_sibling_next(self_index) == invalid_index(); }
 
   bool is_first_child(const Tree_index &self_index) const { return get_first_child(get_parent(self_index)) == self_index; }

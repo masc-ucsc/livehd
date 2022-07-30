@@ -329,6 +329,11 @@ public:
   }
 
   void reset() {
+#if 0
+    bzero(this, sizeof(Node_internal));
+    state    = Last_node_state;
+    root     = 1;
+#else
     state    = Last_node_state;
     root     = 1;
     bits     = 0;
@@ -339,6 +344,7 @@ public:
     out_long = 0;
     nid      = 0;
     type     = 0;
+#endif
   }
 
   bool is_deleted() const {

@@ -47,12 +47,10 @@ void Lgraph_Base::emplace_back() {
   Node_internal xx;
   node_internal.emplace_back(xx);
 
-  // node_internal.ref_lock();
-
   Index_id nid = node_internal.size() - 1;
   auto    *ptr = &node_internal[nid];
 
-  if (ptr->is_page_align()) {
+  if (unlikely(ptr->is_page_align())) {
     auto *page = (Node_internal_Page *)ptr;
 
     page->set_page(nid);
@@ -67,10 +65,8 @@ void Lgraph_Base::emplace_back() {
   }
 
   I(!ptr->is_page_align());
-  new (ptr) Node_internal();  // call constructor
+  //new (ptr) Node_internal();  // call constructor
   ptr->set_nid(nid);          // self by default
-
-  // node_internal.ref_unlock();
 }
 
 Index_id Lgraph_Base::create_node_int() {
