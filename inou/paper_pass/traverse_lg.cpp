@@ -329,26 +329,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
     }
 
-
-//    if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
-//      continue; //do not keep such nodes in nodeIOmap
-//    }
-//
-//    if (node.has_inputs()){
-//      for (const auto& indr : node.inp_drivers()) {
-//        //auto inp_node = indr.get_node();
-//        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
-//        get_input_node(indr, in_set);
-//      }
-//    }
-//
-//    if (node.has_outputs()) {
-//      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
-//        //auto out_node = outdr.get_node();
-//        get_output_node(outdr, out_set);
-//      }
-//    }
-
     if (in_set.empty() && out_set.empty() && in_comb_set.empty() && out_comb_set.empty()) {//no i/ps as well as no o/ps
       continue;//do not keep such nodes in nodeIOmap or cellIOMap_synth
     }
