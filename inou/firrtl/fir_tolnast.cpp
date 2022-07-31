@@ -27,7 +27,7 @@ using google::protobuf::util::TimeUtil;
 
 void Inou_firrtl::to_lnast(Eprp_var& var) {
   TRACE_EVENT("inou", "fir_tolnast:all");
-  Lbench b("inou.fir_tolnast:all");
+  // Lbench b("inou.fir_tolnast:all");
 
   Inou_firrtl p(var);
 
@@ -42,7 +42,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
       // is it a bug in lbench?
       // static firrtl::FirrtlPB firrtl_input;
       auto *firrtl_input = new firrtl::FirrtlPB();
-      std::fstream     input(f.c_str(), std::ios::in | std::ios::binary);
+      std::fstream input(f.c_str(), std::ios::in | std::ios::binary);
       if (!firrtl_input->ParseFromIstream(&input)) {
         Pass::error("Failed to parse FIRRTL from protobuf format: {}", f);
         return;
@@ -50,7 +50,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
 
       p.iterate_circuits(var, *firrtl_input, f);
       thread_pool.wait_all();
-      //FIXME 
+      // FIXME 
       // schedule a delete obj here
       // delete firrtl_input;
     }
@@ -58,11 +58,8 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
     fmt::print("No file provided. This requires a file input.\n");
     return;
   }
-
-  // Optional:  Delete all global objects allocated by libprotobuf.
-  // FIXME: dispatch to a new thread to overlap with ln2lg
-  //        or defer to the end of lcompiler
 }
+
 
 //----------------Helper Functions--------------------------
 std::string Inou_firrtl_module::create_tmp_var() { return absl::StrCat("___F", ++tmp_var_cnt); }
@@ -2518,7 +2515,6 @@ void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Cir
       for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
         auto port = circuit.module(i).external_module().port(j);
         auto initial_set = absl::btree_set<std::pair<std::string, bool>>{};
-        // initial_set.insert(std::pair(port.id(), false));
         glob_info.var2flip[module_i_external_module_id].insert_or_assign(port.id(), initial_set); 
         add_port_to_map(module_i_external_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
       }
@@ -2725,11 +2721,6 @@ void Inou_firrtl::grab_ext_module_info(const firrtl::FirrtlPB_Module_ExternalMod
     }
     glob_info.ext_module2param[emod.defined_name()].insert({emod.parameter(j).id(), param_str});
   }
-
-  // Add them to the map to let us know what ports exist in this module.
-  // for (const auto& elem : port_list) {
-    // glob_info.module2outputs[std::pair(emod.defined_name(), std::get<0>(elem))] = std::get<1>(elem);
-  // }
 }
 
 /* This function is used for the following syntax rules in FIRRTL:
@@ -2845,13 +2836,13 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
     if (circuit.module(i).has_user_module()) {
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
         TRACE_EVENT("inou", "fir_tolnast:module");
-        Lbench b("inou.fir_tolnast:module");
+        // Lbench b("inou.fir_tolnast:module");
         this->user_module_to_lnast(var, circuit.module(i), file_name);
       });
     } else if (circuit.module(i).has_external_module()) {
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
         TRACE_EVENT("inou", "fir_tolnast:module");
-        Lbench b("inou.fir_tolnast:module");
+        // Lbench b("inou.fir_tolnast:module");
         this->ext_module_to_lnast(var, circuit.module(i), file_name);
       });
     } else {

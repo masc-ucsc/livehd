@@ -16,7 +16,7 @@ Bitwidth::Bitwidth(bool _hier, int _max_iterations) : max_iterations(_max_iterat
 
 void Bitwidth::do_trans(Lgraph *lg) {
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("bitwidth." + lg->get_name()); });
-  Lbench b("pass.bitwidth." + lg->get_name());
+  // Lbench b("pass.bitwidth." + lg->get_name());
   bw_pass(lg);
 }
 

@@ -708,9 +708,6 @@ void Cprop::tuple_mux_mut(Node &node) {
 
   Node_pin &sel_dpin = inp_edges_ordered[0].driver;
 
-  if (node.get_nid() == 263) {
-    fmt::print("HERE\n");
-  }
 
   auto [tup, pending_iterations] = Lgtuple::get_mux_tup(tup_list);  // it can handle tuples with issues
   if (tup)
@@ -1028,7 +1025,9 @@ void Cprop::tuple_subgraph(const Node &node) {
             node_tup->set_issue();
             tuple_issues = true;
           } else {
+#ifndef NDEBUG
             fmt::print("found a memory {} with {} rd ports at ", node.debug_name(), n_rd_ports);
+#endif
 
             node.dump();
             node_tup->dump();
@@ -2389,7 +2388,7 @@ void Cprop::clean_io(Lgraph *lg) {
 
 void Cprop::do_trans(Lgraph *lg) {
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("cprop." + lg->get_name()); });
-  Lbench b("pass.cprop." + lg->get_name());
+  // Lbench b("pass.cprop." + lg->get_name());
 
   scalar_pass(lg);
   tuple_pass(lg);

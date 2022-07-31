@@ -16,7 +16,7 @@ Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : 
 
 std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts) {
   TRACE_EVENT("pass", "lnast_tolg");
-  Lbench b("pass.lnast_tolg");
+  // Lbench b("pass.lnast_tolg");
 
   lnast    = ln;
   auto src = ln->get_source();

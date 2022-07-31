@@ -16,7 +16,7 @@ Lnast::~Lnast() {}
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
   TRACE_EVENT("pass", "lnast_ssa");
-  Lbench    b("pass.lnast_ssa");
+  // Lbench    b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
     /* fmt::print("Step-0: Handle Inline Function Definition\n"); */

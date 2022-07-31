@@ -16,7 +16,7 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firmap." + lg->get_name()); });
-  Lbench b("pass.firmap." + lg->get_name());
+  // Lbench b("pass.firmap." + lg->get_name());
 
   auto    lg_name   = lg->get_name();
   auto    lg_source = lg->get_library().get_source(lg->get_lgid());

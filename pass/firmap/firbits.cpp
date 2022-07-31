@@ -34,11 +34,10 @@ void Firmap::add_map_entry(Lgraph *lg) {  // single-thread
 
 void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
   TRACE_EVENT("pass", "firbits");
-  Lbench b("pass.firbits");
+  // Lbench b("pass.firbits");
 
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;
-
 
   int firbits_iters = 0;
   do {

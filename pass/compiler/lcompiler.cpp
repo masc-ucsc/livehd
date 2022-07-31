@@ -18,19 +18,13 @@ void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &l
 
 void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   gviz == true ? gv.do_from_lnast(ln, "raw") : void();
-
-  // fmt::print("---------------- Pyrope -> LNAST-SSA ({})------------------- \n", ln->get_top_module_name());
   ln->ssa_trans();
-
   gviz == true ? gv.do_from_lnast(ln) : void();
-
-  // fmt::print("---------------- LNAST -> Lgraph ({})----------------------- \n", ln->get_top_module_name());
 
   auto mod_name = ln->get_top_module_name();
   Lnast_tolg ln2lg(mod_name, path);
   const auto top_stmts = ln->get_first_child(lh::Tree_index::root());
   auto local_lgs = ln2lg.do_tolg(ln, top_stmts);
-  // Lbench foo("pass.wierd");
 
   if (gviz) {
     for (const auto &lg : local_lgs) {
