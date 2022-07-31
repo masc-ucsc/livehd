@@ -431,7 +431,6 @@ sh_test(
 # TODO:
 # (1) termination flag for firbits, firmap, cprop, BW   ---> 20% ~ 30% improvement for DINO? (maybe)
 # (2) launch new thread for protobuffer object clean up ---> 5% improvement?
-# (3) 
 
 
 

@@ -114,8 +114,12 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 
 // ----------------------- FIRRTL compilation functions start ----------------------------
 
-void Lcompiler::do_fir_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &lnasts) {
+void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &lnasts) {
   TRACE_EVENT("pass", "compile.lnast2lg");
+
+  std::sort(lnasts.begin(), lnasts.end(), [](const std::shared_ptr<Lnast> &a, const std::shared_ptr<Lnast> &b) 
+    { return a->max_size() > b->max_size(); }
+  );
 
   for (const auto &ln : lnasts) {
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);

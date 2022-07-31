@@ -267,8 +267,8 @@ public:
 
   size_t max_size() const {
     size_t sz = 0;
-    for(const auto &ent:pointers_stack.size()) {
-      sz+=ent.size();
+    for(const auto &ent : pointers_stack) {
+      sz += ent.size();
     }
 
     return sz*4; // WARNING: 4x because pointers stack has 4x pointer

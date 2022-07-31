@@ -52,9 +52,10 @@ firrtl_test() {
         exit 1
     fi
     rm -rf ./lgdb_${pt}
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> lnast.dump " > ${pt}.lnast.raw.txt
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
-    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:true top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+    # ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> lnast.dump " > ${pt}.lnast.raw.txt
+    # ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
+    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+    # ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt}"
     ret_val=$?
     if [ $ret_val -ne 0 ]; then
       echo "ERROR: could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
@@ -70,15 +71,15 @@ firrtl_test() {
     echo "LGraph -> Verilog"
     echo "----------------------------------------------------"
 
-    rm -rf tmp_firrtl
-    ${LGSHELL} "lgraph.open path:lgdb_${pt} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_firrtl"
+    rm -rf tmp_fir
+    ${LGSHELL} "lgraph.open path:lgdb_${pt} name:${pt} hier:true |> inou.cgen.verilog odir:tmp_fir"
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.cgen.verilog odir:tmp_firrtl"
-    cat tmp_firrtl/*.v >tmp_firrtl/top_${pt}.v
+    cat tmp_fir/*.v >tmp_fir/top_${pt}.v
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg hier:true"
     ret_val=$?
     # ${LGSHELL} "lgraph.open name:${pt} |> inou.yosys.fromlg"
-    if [ $ret_val -eq 0 ] && [ -f "tmp_firrtl/top_${pt}.v" ]; then
-        echo "Successfully generate Verilog: tmp_firrtl/top_${pt}.v"
+    if [ $ret_val -eq 0 ] && [ -f "tmp_fir/top_${pt}.v" ]; then
+        echo "Successfully generate Verilog: tmp_fir/top_${pt}.v"
         rm -f  yosys_script.*
     else
         echo "ERROR: Firrtl compiler failed: verilog generation, testcase: ${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb"
