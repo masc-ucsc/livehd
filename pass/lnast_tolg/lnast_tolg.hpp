@@ -101,8 +101,6 @@ protected:
     return false;
   }
 
-  bool subgraph_outp_is_tuple(Sub_node *sub);
-
   // tuple related
   Node_pin    setup_tuple_ref(Lgraph *lg, std::string_view tup_name);
   Node_pin    setup_ta_ref_previous_ssa(std::string_view tup_name, int16_t);

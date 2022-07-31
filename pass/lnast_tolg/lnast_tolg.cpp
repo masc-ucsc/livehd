@@ -1310,17 +1310,6 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
   }
 }
 
-bool Lnast_tolg::subgraph_outp_is_tuple(Sub_node *sub) {
-  uint16_t outp_cnt = 0;
-  for (const auto &io_pin : sub->get_io_pins()) {
-    if (io_pin.is_output()) {
-      outp_cnt++;
-      if (outp_cnt > 1)
-        return true;
-    }
-  }
-  return false;
-}
 
 void Lnast_tolg::process_firrtl_op_connection(Lgraph *lg, const Lnast_nid &lnidx_fc) {
   Node fc_node;

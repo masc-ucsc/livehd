@@ -41,14 +41,18 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
       // to_lnast() pass. The lbench still last untill the PB object really destroied,
       // is it a bug in lbench?
       // static firrtl::FirrtlPB firrtl_input;
-      firrtl::FirrtlPB firrtl_input;
+      auto *firrtl_input = new firrtl::FirrtlPB();
       std::fstream     input(f.c_str(), std::ios::in | std::ios::binary);
-      if (!firrtl_input.ParseFromIstream(&input)) {
+      if (!firrtl_input->ParseFromIstream(&input)) {
         Pass::error("Failed to parse FIRRTL from protobuf format: {}", f);
         return;
       }
 
-      p.iterate_circuits(var, firrtl_input, f);
+      p.iterate_circuits(var, *firrtl_input, f);
+      thread_pool.wait_all();
+      //FIXME 
+      // schedule a delete obj here
+      // delete firrtl_input;
     }
   } else {
     fmt::print("No file provided. This requires a file input.\n");
@@ -58,7 +62,6 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
   // Optional:  Delete all global objects allocated by libprotobuf.
   // FIXME: dispatch to a new thread to overlap with ln2lg
   //        or defer to the end of lcompiler
-  google::protobuf::ShutdownProtobufLibrary();
 }
 
 //----------------Helper Functions--------------------------
@@ -2855,7 +2858,6 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
       Pass::error("Module not set.");
     }
   }
-  thread_pool.wait_all();
 }
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.

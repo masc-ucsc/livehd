@@ -26,7 +26,7 @@
 
 struct Global_module_info {
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>                              module2inputs;  // <hier_name>
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>                             module2inputs;  // <hier_name>
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
   

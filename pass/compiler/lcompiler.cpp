@@ -175,7 +175,6 @@ void Lcompiler::do_fir_cprop() {
   // hierarchical traversal
   for (auto &lg : lgs) {
     ++lgcnt;
-    // bottom up approach to parallelly analyze the firbits
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
       lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
@@ -260,31 +259,13 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       Firmap   fm(fbmaps, pinmaps, spinmaps_xorr);
       Bitwidth bw(false, 3);
 
-      // fmt::print("-------- {:<28} ({:<30}) -------- (F-2)\n", "Firrtl Op Mapping", lg_sub->get_name());
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
       if (lg_sub == lg)
         new_lg = new_lg_sub;
 
       // FIXME->sh: bw.is_finished() malfunction
-      // int n_iters = 0;
-      // while (true) {
-      //   fmt::print("-------- {:<28} ({:<30}) -------- (B-{})\n", "Local Bitwidth-Inference", new_lg_sub->get_name(), n_iters);
-      //   bw.do_trans(new_lg_sub);
-      //   gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
-
-      //   if (bw.is_finished()) {
-      //     break;
-      //   }
-      //   n_iters++;
-      //   if (n_iters > 4) {
-      //     Pass::error("graph {} could not converge bw in {} iterations", new_lg_sub->get_name(), n_iters);
-      //   }
-      // }
-
-      // fmt::print("-------- {:<28} ({:<30}) -------- (B-0)\n", "Local Bitwidth-Inference", new_lg_sub->get_name());
       bw.do_trans(new_lg_sub);
-      //bw.do_trans(new_lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "") : void();
 
       {
@@ -327,10 +308,6 @@ void Lcompiler::do_fir_firbits() {
       lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
         Firmap fm(fbmaps, pinmaps, spinmaps_xorr);
 
-        // fmt::print("-------- {:<28} ({:<30}) -------- (F-0)\n", "Firrtl Bits Analysis", lg_sub->get_name());
-        // fm.do_firbits_analysis(lg_sub);
-
-        // fmt::print("-------- {:<28} ({:<30}) -------- (F-1)\n", "Firrtl Bits Analysis", lg_sub->get_name());
         fm.do_firbits_analysis(lg_sub);
         gviz == true ? gv.do_from_lgraph(lg_sub, "firbits-ed") : void();
       });
