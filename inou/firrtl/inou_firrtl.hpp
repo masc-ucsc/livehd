@@ -49,6 +49,7 @@ protected:
   void     populate_all_modules_io(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
   void     populate_module_io(int i, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name, Graph_library *lib);
 
+  void     para_modules_to_lnasts(const firrtl::FirrtlPB_Circuit &circuit, Eprp_var &var, std::string_view file_name);
   void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
 

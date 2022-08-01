@@ -2831,8 +2831,29 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   }
   // so far you collect all global table informations
 
+  para_modules_to_lnasts(circuit, var, file_name);
+  // // parallelize the rest of firrtl modules -> lnasts
+  // for (int i = circuit.module_size() - 1; i >= 0; i--) {
+  //   if (circuit.module(i).has_user_module()) {
+  //     thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
+  //       TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
+  //       this->user_module_to_lnast(var, circuit.module(i), file_name);
+  //     });
+  //   } else if (circuit.module(i).has_external_module()) {
+  //     thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
+  //       TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
+  //       this->ext_module_to_lnast(var, circuit.module(i), file_name);
+  //     });
+  //   } else {
+  //     Pass::error("Module not set.");
+  //   }
+  // }
+  // thread_pool.wait_all();
+}
+
+void Inou_firrtl::para_modules_to_lnasts(const firrtl::FirrtlPB_Circuit &circuit, Eprp_var &var, std::string_view file_name) {
+  TRACE_EVENT("inou", "para_modules_to_lnasts");
   // parallelize the rest of firrtl modules -> lnasts
-  // for (int i = 0; i < circuit.module_size(); i++) {
   for (int i = circuit.module_size() - 1; i >= 0; i--) {
     if (circuit.module(i).has_user_module()) {
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
@@ -2849,11 +2870,12 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
     }
   }
   thread_pool.wait_all();
+
 }
+
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, std::string_view file_name) {
-  TRACE_EVENT("inou", "iterate_circuits");
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     Inou_firrtl::glob_info.module2outputs.clear();
     Inou_firrtl::glob_info.module2inputs.clear();
