@@ -27,7 +27,6 @@ using google::protobuf::util::TimeUtil;
 
 void Inou_firrtl::to_lnast(Eprp_var& var) {
   TRACE_EVENT("inou", "inou.fir_tolnast");
-
   Inou_firrtl p(var);
 
   if (var.has_label("files")) {
@@ -37,6 +36,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
 
       fmt::print("FILE: {}\n", f);
       // firrtl::FirrtlPB firrtl_input;
+      
       auto *firrtl_input = new firrtl::FirrtlPB();
       std::fstream input(f.c_str(), std::ios::in | std::ios::binary);
       if (!firrtl_input->ParseFromIstream(&input)) {
@@ -846,11 +846,11 @@ void Inou_firrtl_module::handle_mux_assign(Lnast& lnast, const firrtl::FirrtlPB_
 
   if (!is_instance) {
     auto lhs_str = std::string{lhs};
-    absl::btree_set<std::pair<std::string, bool>> *tup_set;
+    absl::flat_hash_set<std::pair<std::string, bool>> *tup_set;
     if (var2flip.find(lhs_str) != var2flip.end()) {
       tup_set = &var2flip[lhs_str]; 
     } else {
-      absl::btree_set<std::pair<std::string, bool>> empty_set;
+      absl::flat_hash_set<std::pair<std::string, bool>> empty_set;
       var2flip.insert_or_assign(lhs_str, empty_set);
       tup_set = &var2flip[lhs_str];
     }
@@ -1876,7 +1876,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
     create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__initial"), initial_node);
 }
 
-void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_var2flip) {
+void Inou_firrtl_module::dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> &module_var2flip) {
   (void)module_var2flip;
 #ifndef NDEBUG  
   for (auto &[var, set] : module_var2flip) {
@@ -2233,7 +2233,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
 
 
 void Inou_firrtl_module::handle_normal_cases_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r) {
-  absl::btree_set<std::pair<std::string, bool>> *tup_l_sets;
+  absl::flat_hash_set<std::pair<std::string, bool>> *tup_l_sets;
   auto is_input    = input_names.find (tup_head_l)  != input_names.end();
   auto is_output   = output_names.find(tup_head_l)  != output_names.end();
 
@@ -2299,14 +2299,14 @@ void Inou_firrtl_module::handle_lhs_instance_connections(Lnast &lnast, Lnast_nid
       }
     }
     
-    bool is_input = false;
-    if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name_l))
-      is_input = true;
+    // bool is_input = false;
+    // if (Inou_firrtl::glob_info.module2inputs[sub_module_name].contains(tup_hier_name_l))
+    //   is_input = true;
 
     if (hit) {
       tup_hier_name_l = absl::StrCat(inst_name, ".", tup_hier_name_l);
       auto concated_hier_name_r = absl::StrCat(hier_name_r, leaf_field);
-      tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, concated_hier_name_r, it.second, is_input);
+      tuple_flattened_connections_instance_l(lnast, parent_node, tup_hier_name_l, concated_hier_name_r, it.second, true);
     }
   }
   return;
@@ -2344,14 +2344,14 @@ void Inou_firrtl_module::handle_rhs_instance_connections(Lnast &lnast, Lnast_nid
       }
     }
 
-    bool is_output = false;
-    if (Inou_firrtl::glob_info.module2outputs[sub_module_name].contains(tup_hier_name_r))
-      is_output = true;
+    // bool is_output = false;
+    // if (Inou_firrtl::glob_info.module2outputs[sub_module_name].contains(tup_hier_name_r))
+    //   is_output = true;
     
     if (hit) {
       auto concated_hier_name_l = absl::StrCat(hier_name_l, leaf_field);
       auto concated_hier_name_r = absl::StrCat(hier_name_r, leaf_field); 
-      tuple_flattened_connections_instance_r(lnast, parent_node, concated_hier_name_l, concated_hier_name_r, it.second, is_output);
+      tuple_flattened_connections_instance_r(lnast, parent_node, concated_hier_name_l, concated_hier_name_r, it.second, true);
     }
   }
 }
@@ -2491,54 +2491,54 @@ void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Modu
 }
 
 
-void Inou_firrtl::populate_all_mods_io(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name) {
-
+void Inou_firrtl::populate_all_modules_io(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name) {
+  TRACE_EVENT("inou", "populate_all_modules_io");
   Graph_library *lib = Graph_library::instance(var.get("path", "lgdb"));
 
   for (int i = 0; i < circuit.module_size(); i++) {
-    // std::vector<std::pair<std::string, uint8_t>> vec;
-    if (circuit.module(i).has_external_module()) {
-      /* NOTE->hunter: This is a Verilog blackbox. If we want to link it, it'd have to go through either V->LG
-       * or V->LN->LG. I will create a Sub_Node in case the Verilog isn't provided. */
-      auto     module_i_external_module_id = circuit.module(i).external_module().id();
-      auto     *sub                        = lib->create_sub(module_i_external_module_id, file_name);
-      uint64_t inp_pos                     = 0;
-      uint64_t out_pos                     = 0;
-      absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> empty_map;
-      glob_info.var2flip.insert_or_assign(module_i_external_module_id, empty_map); 
+    if (circuit.module(i).has_user_module()) {
+      // populate_module_io(i, circuit, file_name, lib);
+      thread_pool.add([this, &circuit, i, &file_name, &lib]() -> void {
+        TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:sub_module_io:" + circuit.module(i).user_module().id()); });
+        this->populate_module_io(i, circuit, file_name, lib);
+      });
 
-      for (int j = 0; j < circuit.module(i).external_module().port_size(); j++) {
-        auto port = circuit.module(i).external_module().port(j);
-        auto initial_set = absl::btree_set<std::pair<std::string, bool>>{};
-        // initial_set.insert(std::pair(port.id(), false));
-        glob_info.var2flip[module_i_external_module_id].insert_or_assign(port.id(), initial_set); 
-        add_port_to_map(module_i_external_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
-      }
-      continue;
-    } else if (circuit.module(i).has_user_module()) {
-      auto     module_i_user_module_id = circuit.module(i).user_module().id();
-      auto     *sub                    = lib->create_sub(module_i_user_module_id, file_name);
-      uint64_t inp_pos                 = 0;
-      uint64_t out_pos                 = 0;
-      absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> empty_map;
-      glob_info.var2flip.insert_or_assign(module_i_user_module_id, empty_map); 
-      auto empty_map2  = absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>{};
-      glob_info.module2outputs.insert_or_assign(module_i_user_module_id, empty_map2);
-      auto empty_set = absl::flat_hash_set<std::string>{};
-      glob_info.module2inputs.insert_or_assign(module_i_user_module_id, empty_set);
-
-      for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
-        auto port = circuit.module(i).user_module().port(j);
-        auto initial_set = absl::btree_set<std::pair<std::string, bool>>{};
-        glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
-        add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
-      }
-      // Inou_firrtl_module::dump_var2flip(glob_info.var2flip[module_i_user_module_id]);
+    } else if (circuit.module(i).has_external_module()) {
+      Pass::error("ext_module have not implemented");
     } else {
       Pass::error("Module not set.");
     }
   }
+  thread_pool.wait_all();
 }
+
+
+void Inou_firrtl::populate_module_io(int i, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name, Graph_library *lib) {
+  auto     module_i_user_module_id = circuit.module(i).user_module().id();
+  auto     *sub                    = lib->create_sub(module_i_user_module_id, file_name);
+  uint64_t inp_pos                 = 0;
+  uint64_t out_pos                 = 0;
+
+  for (int j = 0; j < circuit.module(i).user_module().port_size(); j++) {
+    auto port = circuit.module(i).user_module().port(j);
+    auto initial_set = absl::flat_hash_set<std::pair<std::string, bool>>{};
+    glob_info.var2flip[module_i_user_module_id].insert_or_assign(port.id(), initial_set); 
+    add_port_to_map(module_i_user_module_id, port.type(), port.direction(), false, port.id(), *sub, inp_pos, out_pos);
+  }
+}
+
+void Inou_firrtl::initialize_global_tables(const firrtl::FirrtlPB_Circuit &circuit) {
+  for (int i = 0; i < circuit.module_size(); i++) {
+    auto module_i_user_module_id = circuit.module(i).user_module().id();
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> empty_map;
+    glob_info.var2flip.insert_or_assign(module_i_user_module_id, empty_map); 
+    auto empty_map2  = absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>{};
+    glob_info.module2outputs.insert_or_assign(module_i_user_module_id, empty_map2);
+    auto empty_set = absl::flat_hash_set<std::string>{};
+    glob_info.module2inputs.insert_or_assign(module_i_user_module_id, empty_set);
+  }
+}
+
 
 /* Used to populate Sub_Nodes so that when Lgraphs are constructed,
  * all the Lgraphs will be able to populate regardless of order. */
@@ -2559,7 +2559,7 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view i
     auto pair = std::make_pair(std::string(id), flipped_in);
     I(var2flip.find(id) == var2flip.end());
 
-    auto new_set = absl::btree_set<std::pair<std::string, bool>>{};
+    auto new_set = absl::flat_hash_set<std::pair<std::string, bool>>{};
     new_set.insert(pair);
     var2flip.insert_or_assign(id, new_set);
     return;
@@ -2572,7 +2572,7 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view i
   auto pair = std::make_pair(std::string(id), flipped_in);
   auto set_itr = var2flip.find(lnast_tupname);
   if (set_itr == var2flip.end()) {
-    auto new_set = absl::btree_set<std::pair<std::string, bool>>{};
+    auto new_set = absl::flat_hash_set<std::pair<std::string, bool>>{};
     new_set.insert(pair);
     var2flip.insert_or_assign(lnast_tupname, new_set);
   } else {
@@ -2583,13 +2583,10 @@ void Inou_firrtl_module::add_local_flip_info(bool flipped_in, std::string_view i
 
 void Inou_firrtl::add_global_io_flipness(std::string_view mod_id, bool flipped_in, std::string_view port_id, uint8_t dir) {
   (void) dir;
-  // if (dir == 1) {
-  //   flipped_in = false; // it's input, recorded as non-flip at the rhs
-  // }
   auto found = port_id.find_first_of('.');
   if (found == std::string::npos) {
     auto pair = std::make_pair(std::string(port_id), flipped_in);
-    auto new_set = absl::btree_set<std::pair<std::string, bool>>{};
+    auto new_set = absl::flat_hash_set<std::pair<std::string, bool>>{};
 
     new_set.insert(pair);
     glob_info.var2flip[mod_id].insert_or_assign(port_id, new_set);
@@ -2600,7 +2597,7 @@ void Inou_firrtl::add_global_io_flipness(std::string_view mod_id, bool flipped_i
   auto pair = std::make_pair(std::string(port_id), flipped_in);
   auto set_itr = glob_info.var2flip[mod_id].find(lnast_tupname);
   if (set_itr == glob_info.var2flip[mod_id].end()) {
-    auto new_set = absl::btree_set<std::pair<std::string, bool>>{};
+    auto new_set = absl::flat_hash_set<std::pair<std::string, bool>>{};
     new_set.insert(pair);
     glob_info.var2flip[mod_id].insert_or_assign(lnast_tupname, new_set);
   } else {
@@ -2822,7 +2819,9 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   }
 
   // Create ModuleName to I/O Pair List
-  populate_all_mods_io(var, circuit, file_name);
+  
+  initialize_global_tables(circuit);
+  populate_all_modules_io(var, circuit, file_name);
 
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.module(i).has_external_module()) {
@@ -2854,6 +2853,7 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, std::string_view file_name) {
+  TRACE_EVENT("inou", "iterate_circuits");
   for (int i = 0; i < firrtl_input.circuit_size(); i++) {
     Inou_firrtl::glob_info.module2outputs.clear();
     Inou_firrtl::glob_info.module2inputs.clear();

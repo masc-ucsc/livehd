@@ -13,7 +13,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "absl/container/btree_set.h"
+#include "absl/container/node_hash_map.h"
 #include "firrtl.pb.h"
 
 #pragma GCC diagnostic pop
@@ -25,12 +25,11 @@
 #include "pass.hpp"
 
 struct Global_module_info {
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>                             module2inputs;  // <hier_name>
-  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
-  
-  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>>> var2flip; 
+  absl::node_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
+  absl::node_hash_map<std::string, absl::flat_hash_set<std::string>>                             module2inputs;  // <hier_name>
+  absl::node_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, std::string>>> ext_module2param;
+  absl::node_hash_map<std::string, absl::flat_hash_map<std::string, uint16_t>>               module_var2vec_size;
+  absl::node_hash_map<std::string, absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>>> var2flip; 
 };
 
 class Inou_firrtl : public Pass {
@@ -46,7 +45,10 @@ protected:
 
   void     iterate_circuits(Eprp_var &var, const firrtl::FirrtlPB &firrtl_input, std::string_view file_name);
   void     iterate_modules(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
-  void     populate_all_mods_io(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
+  void     initialize_global_tables(const firrtl::FirrtlPB_Circuit &circuit);
+  void     populate_all_modules_io(Eprp_var &var, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name);
+  void     populate_module_io(int i, const firrtl::FirrtlPB_Circuit &circuit, std::string_view file_name, Graph_library *lib);
+
   void     add_port_to_map(std::string_view mod_id, const firrtl::FirrtlPB_Type &type, uint8_t dir, bool flipped, std::string_view port_id,
                            Sub_node &sub, uint64_t &inp_pos, uint64_t &out_pos);
 
@@ -166,7 +168,7 @@ protected:
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
   void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node);
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
-  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> &module_table);
+  static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
   void     setup_scalar_bits(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
   void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
@@ -277,7 +279,7 @@ private:
 	absl::flat_hash_map<std::string, uint16_t> var2vec_size;
 
   // FIXME->sh: check and remove the third directional field if redundant 
-  absl::flat_hash_map<std::string, absl::btree_set<std::pair<std::string, bool>>> var2flip;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> var2flip;
 
   absl::flat_hash_map<std::string, uint8_t>     mem2port_cnt;
   absl::flat_hash_map<std::string, uint8_t>     mem2wensize;
