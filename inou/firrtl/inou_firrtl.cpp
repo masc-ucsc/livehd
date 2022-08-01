@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "inou_firrtl.hpp"
+#include "perf_tracing.hpp"
 
 /* For help understanding FIRRTL/Protobuf:
  * 1) Semantics regarding FIRRTL language:
