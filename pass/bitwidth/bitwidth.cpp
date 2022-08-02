@@ -1341,7 +1341,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       if (op == Ntype_op::Const) {
         process_const(node);
         continue;
-      }else if (!Ntype::is_multi_driver(op)) {
+      } else if (!Ntype::is_multi_driver(op)) {
         auto dpin = node.get_driver_pin();
         auto bits = dpin.get_bits();
         if (bits) {
@@ -1603,7 +1603,7 @@ void Bitwidth::set_subgraph_boundary_bw(Node &node) {
 
       // No error because sometimes we could infer backwards the size of outputs
       Pass::info("Global IO connection pass cannot find existing subgraph {} in lgdb\n", sub_name);
-    }else{
+    } else {
 
       for(const auto &iopin:sub_node->get_io_pins()) {
         if (!iopin.is_output())

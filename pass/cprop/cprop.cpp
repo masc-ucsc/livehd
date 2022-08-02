@@ -2396,7 +2396,6 @@ void Cprop::do_trans(Lgraph *lg) {
     scalar_pass(lg);
     tuple_pass(lg);
   }
-  // clean_io(lg);
 }
 
 // original
