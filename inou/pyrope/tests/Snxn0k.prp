@@ -1,0 +1,126 @@
+// total modules: 10
+// design tree depth: 3
+// design size: 42
+// avg module size: 4
+
+
+SnxnLv1Inst0 = || {
+    t0    = $a + $b
+    inv0  = ~t0
+    x0    = t0 ^ inv0
+    invx0 = ~x0
+
+    SnxnLv2Inst0 = || {
+        t0    = $a + $b
+        inv0  = ~t0
+        x0    = t0 ^ inv0
+        invx0 = ~x0
+        t1    = x0 + invx0
+        inv1  = ~t1
+        x1    = t1 ^ inv1
+        invx1 = ~x1
+        %z = invx1
+    }
+
+
+    SnxnLv2Inst1 = || {
+        t0    = $a + $b
+        inv0  = ~t0
+        x0    = t0 ^ inv0
+        invx0 = ~x0
+        t1    = x0 + invx0
+        inv1  = ~t1
+        x1    = t1 ^ inv1
+        invx1 = ~x1
+        %z = invx1
+    }
+
+
+    SnxnLv2Inst2 = || {
+        t0    = $a + $b
+        inv0  = ~t0
+        x0    = t0 ^ inv0
+        invx0 = ~x0
+        t1    = x0 + invx0
+        inv1  = ~t1
+        x1    = t1 ^ inv1
+        invx1 = ~x1
+        %z = invx1
+    }
+
+
+    SnxnLv2Inst3 = || {
+        t0    = $a + $b
+        inv0  = ~t0
+        x0    = t0 ^ inv0
+        invx0 = ~x0
+        t1    = x0 + invx0
+        inv1  = ~t1
+        x1    = t1 ^ inv1
+        invx1 = ~x1
+        %z = invx1
+    }
+
+    res_SnxnLv2Inst0 = SnxnLv2Inst0(a = $a, b = $b)
+    res_SnxnLv2Inst1 = SnxnLv2Inst1(a = $a, b = $b)
+    res_SnxnLv2Inst2 = SnxnLv2Inst2(a = $a, b = $b)
+    res_SnxnLv2Inst3 = SnxnLv2Inst3(a = $a, b = $b)
+
+    sum = res_SnxnLv2Inst0.z + res_SnxnLv2Inst1.z + res_SnxnLv2Inst2.z + res_SnxnLv2Inst3.z
+    %z = sum ^ $a
+}
+
+
+SnxnLv1Inst1 = || {
+    t0    = $a + $b
+    inv0  = ~t0
+    x0    = t0 ^ inv0
+    invx0 = ~x0
+
+    SnxnLv2Inst4 = || {
+        t0    = $a + $b
+        inv0  = ~t0
+        x0    = t0 ^ inv0
+        invx0 = ~x0
+        t1    = x0 + invx0
+        inv1  = ~t1
+        x1    = t1 ^ inv1
+        invx1 = ~x1
+        %z = invx1
+    }
+
+    res_SnxnLv2Inst4 = SnxnLv2Inst4(a = $a, b = $b)
+
+    sum = res_SnxnLv2Inst4.z
+    %z = sum ^ $a
+}
+
+
+SnxnLv1Inst2 = || {
+    t0    = $a + $b
+    inv0  = ~t0
+    x0    = t0 ^ inv0
+    invx0 = ~x0
+    t1    = x0 + invx0
+    inv1  = ~t1
+    x1    = t1 ^ inv1
+    invx1 = ~x1
+    %z = invx1
+}
+
+
+SnxnLv1Inst3 = || {
+    t0    = $a + $b
+    inv0  = ~t0
+    x0    = t0 ^ inv0
+    invx0 = ~x0
+    %z = invx0
+}
+
+res_SnxnLv1Inst0 = SnxnLv1Inst0(a = $a, b = $b)
+res_SnxnLv1Inst1 = SnxnLv1Inst1(a = $a, b = $b)
+res_SnxnLv1Inst2 = SnxnLv1Inst2(a = $a, b = $b)
+res_SnxnLv1Inst3 = SnxnLv1Inst3(a = $a, b = $b)
+
+sum = res_SnxnLv1Inst0.z + res_SnxnLv1Inst1.z + res_SnxnLv1Inst2.z + res_SnxnLv1Inst3.z
+%z = sum ^ $a

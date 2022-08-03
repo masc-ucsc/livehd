@@ -1403,12 +1403,12 @@ void Lnast_tolg::process_ast_func_def_op(Lgraph *lg, const Lnast_nid &lnidx) {
   auto        subg_module_name = absl::StrCat(module_name, ".", func_vname);
   Lnast_tolg  p(subg_module_name, path);
 
-  fmt::print("============================= Sub-module: LNAST->Lgraph Start ({}) ==============================================\n",
-             subg_module_name);
+  // fmt::print("============================= Sub-module: LNAST->Lgraph Start ({}) ==============================================\n",
+  //            subg_module_name);
 
   p.do_tolg(lnast, func_stmts);
-  fmt::print("============================= Sub-module: LNAST->Lgraph End   ({}) ==============================================\n",
-             subg_module_name);
+  // fmt::print("============================= Sub-module: LNAST->Lgraph End   ({}) ==============================================\n",
+  //            subg_module_name);
 
   // TODO: We should have a TupAdd so that the function can be passed, but this
   // code is wrong because there is no SSA at the function definition
