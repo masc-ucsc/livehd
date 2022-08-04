@@ -397,7 +397,7 @@ void Elab_scanner::unregister_memblock() {
   //
   //  int ok = munmap((void *)memblock, memblock_size);
   //  I(ok == 0);
-  //  close(memblock_fd);
+  close(memblock_fd);
 
   memblock      = 0;
   memblock_size = 0;
