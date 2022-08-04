@@ -25,23 +25,24 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
   TRACE_EVENT("inou", "pyrope");
   Inou_pyrope p(var);
 
+  std::mutex              var_add_mutex;
+
   for (auto f : absl::StrSplit(p.files, ',')) {
 
-    std::mutex              var_add_mutex;
+    std::string fname{f};
 
-    thread_pool.add([&var, &var_add_mutex, &f]() -> void {
-      std::string fname{f};
+    thread_pool.add([&var, &var_add_mutex, fname]() -> void {
       TRACE_EVENT("inou", perfetto::DynamicString{fname});
 
       Prp_lnast converter;
-      converter.parse_file(f);
+      converter.parse_file(fname);
 
-      auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
+      auto basename       = str_tools::get_str_after_last_if_exists(fname, '/');
       auto basename_noext = str_tools::get_str_before_first(basename, '.');
 
       auto lnast = converter.prp_ast_to_lnast(basename_noext);
       {
-        std::lock_guard<std::mutex> guard(var_add_mutex);
+        const std::lock_guard<std::mutex> guard(var_add_mutex);
         var.add(std::move(lnast));
       }
     });
