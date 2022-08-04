@@ -1875,8 +1875,6 @@ void Prp::elaborate() {
     fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     err_tracker::err_logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
-  } else {
-    fmt::print("\nParsing SUCCESSFUL!\n");
   }
 
   PRINT_DBG_AST("\nAST Call List\n\n");

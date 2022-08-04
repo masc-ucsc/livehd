@@ -8,6 +8,7 @@
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "prp_lnast.hpp"
+#include "thread_pool.hpp"
 
 void setup_inou_pyrope() { Inou_pyrope::setup(); }
 
@@ -21,18 +22,30 @@ void Inou_pyrope::setup() {
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
 void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
-  TRACE_EVENT("inou", "PYROPE_parse_to_lnast");
-  Lbench      b("inou.PYROPE_parse_to_lnast");
+  TRACE_EVENT("inou", "pyrope");
   Inou_pyrope p(var);
 
   for (auto f : absl::StrSplit(p.files, ',')) {
-    Prp_lnast converter;
-    converter.parse_file(f);
 
-    auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
-    auto basename_noext = str_tools::get_str_before_first(basename, '.');
+    std::mutex              var_add_mutex;
 
-    auto lnast = converter.prp_ast_to_lnast(basename_noext);
-    var.add(std::move(lnast));
+    thread_pool.add([&var, &var_add_mutex, &f]() -> void {
+      std::string fname{f};
+      TRACE_EVENT("inou", perfetto::DynamicString{fname});
+
+      Prp_lnast converter;
+      converter.parse_file(f);
+
+      auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
+      auto basename_noext = str_tools::get_str_before_first(basename, '.');
+
+      auto lnast = converter.prp_ast_to_lnast(basename_noext);
+      {
+        std::lock_guard<std::mutex> guard(var_add_mutex);
+        var.add(std::move(lnast));
+      }
+    });
   }
+
+  thread_pool.wait_all();
 }
