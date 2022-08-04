@@ -701,8 +701,8 @@ void Bundle::set(std::string_view key, const std::shared_ptr<Bundle const> &tup)
 void Bundle::set(std::string_view key, const Entry &&entry) {
   I(!key.empty());
 
-  fmt::print("sz:{} {}\n", key_map.size(), key);
-  dump();
+  //fmt::print("sz:{} {}\n", key_map.size(), key);
+  //dump();
 
   std::string uncanonical_key{key};
   bool        pending_adjust = false;

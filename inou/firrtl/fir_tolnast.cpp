@@ -2870,9 +2870,7 @@ void Inou_firrtl::para_modules_to_lnasts(const firrtl::FirrtlPB_Circuit &circuit
     }
   }
   thread_pool.wait_all();
-
 }
-
 
 // Iterate over every FIRRTL circuit (design), each circuit can contain multiple modules.
 void Inou_firrtl::iterate_circuits(Eprp_var& var, const firrtl::FirrtlPB& firrtl_input, std::string_view file_name) {

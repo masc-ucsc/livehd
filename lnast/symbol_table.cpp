@@ -21,6 +21,8 @@ bool Symbol_table::var(std::string_view key) {
 }
 
 bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
+  I(bundle);
+
   auto [var, field] = get_var_field(key);
 
   const auto it = stack.back().varmap.find(var);
