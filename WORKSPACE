@@ -30,9 +30,9 @@ http_archive(
 #)
 http_archive(
     name = "rules_hdl",
-    sha256 = "2875e32a875e2da2ca1d2ac58dfaa7a0067a62943ea68adcc10ba7b4bc2b5ff6",
-    strip_prefix = "bazel_rules_hdl-4c613e74f6588879123967c6f3a489a3fe519705",
-    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c613e74f6588879123967c6f3a489a3fe519705.zip",
+    sha256 = "9b3ef2d8e0603de6c689077b75b1fbfa42a24b1410423dd69271130586e2d8ee",
+    strip_prefix = "bazel_rules_hdl-4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb",
+    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/4c634c7d2b026870ecbc2fb3c4d463b6bd5c2ceb.zip",
 )
 
 load("@rules_hdl//dependency_support:dependency_support.bzl", "dependency_support")
