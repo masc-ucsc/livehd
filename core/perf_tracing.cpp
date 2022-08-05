@@ -21,7 +21,19 @@ void start_tracing() {
 
   cfg.add_buffers()->set_size_kb(32768);
   auto* ds_cfg = cfg.add_data_sources()->mutable_config();
+#if 1
   ds_cfg->set_name("track_event");
+#else
+  ds_cfg->set_name("linux.ftrace");
+  ds_cfg->set_target_buffer(0);
+
+  perfetto::protos::gen::FtraceConfig ftrace_config;
+  ftrace_config.add_ftrace_events("power/cpu_frequency");
+  ftrace_config.add_ftrace_events("power/cpu_idle");
+  ftrace_config.add_ftrace_events("power/suspend_resume");
+
+  ds_cfg->set_ftrace_config_raw(ftrace_config.SerializeAsString());
+#endif
 
   tracing_session = perfetto::Tracing::NewTrace();
   tracing_fd      = open(trace_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
