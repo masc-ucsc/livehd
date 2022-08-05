@@ -25,8 +25,10 @@ using google::protobuf::util::TimeUtil;
  * 2) Structure of FIRRTL Protobuf file:
  * github.com/freechipsproject/firrtl/blob/master/src/main/proto/firrtl.proto */
 
+
+
 void Inou_firrtl::to_lnast(Eprp_var& var) {
-  TRACE_EVENT("inou", "inou.fir_tolnast");
+  TRACE_EVENT("inou", "source_tolnast");
   Inou_firrtl p(var);
 
   if (var.has_label("files")) {

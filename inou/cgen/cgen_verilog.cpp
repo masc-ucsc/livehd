@@ -1010,7 +1010,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, Lgraph *lg) 
 
 void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
   TRACE_EVENT("inou", perfetto::DynamicString(lg->get_name()));
-  Lbench b("inou.cgen.verilog");
+  // Lbench b("inou.cgen.verilog");
   // nrunning!=0 -> incorrect multithread API. Create a Cgen_verilog per thread
   // instance, and then call one do_from_lgraph at a time per object
   assert(nrunning == 0);

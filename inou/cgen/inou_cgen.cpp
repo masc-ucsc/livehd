@@ -22,7 +22,7 @@ void Inou_cgen::setup() {
 }
 
 void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
-  TRACE_EVENT("inou", "cgen");
+  TRACE_EVENT("inou", "verilog_gen");
 
   Inou_cgen pp(var);
 

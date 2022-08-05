@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <climits>
 #include <cstdlib>
+#include <memory>
 #include <sys/stat.h>
 #ifdef __APPLE__
 #include <copyfile.h>
@@ -480,7 +481,9 @@ Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
 
   auto &attr = attributes[lgid];
 
-  auto hif = Hif_read::open(absl::StrCat(path, "/", name));
+  std::shared_ptr<Hif_read> hif;
+  if (name.substr(0,2) != "__")
+    hif = Hif_read::open(absl::StrCat(path, "/", name));
   if (hif == nullptr) {
     attr.lg            = nullptr;
     attr.tried_to_load = true;

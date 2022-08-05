@@ -40,7 +40,7 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Lcompiler::do_prp_local_cprop_bitwidth() {
-  TRACE_EVENT("pass", "compile.local_cprop");
+  TRACE_EVENT("pass", "cprop + bitwidth");
 
   I(lgs.size());
   auto *top_lg = lgs[0];
@@ -109,7 +109,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 // ----------------------- FIRRTL compilation functions start ----------------------------
 
 void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &lnasts) {
-  TRACE_EVENT("pass", "compile.lnast2lg");
+  TRACE_EVENT("pass", "lnast_ssa + lnast2lg");
 
   std::sort(lnasts.begin(), lnasts.end(), [](const std::shared_ptr<Lnast> &a, const std::shared_ptr<Lnast> &b) 
     { return a->max_size() > b->max_size(); }
@@ -160,7 +160,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Lcompiler::do_fir_cprop() {
-  TRACE_EVENT("pass", "compile.fir_cprop");
+  TRACE_EVENT("pass", "cprop");
 
   auto lgcnt                   = 0;
   auto hit                     = false;
@@ -212,7 +212,7 @@ void Lcompiler::setup_maps() {  // single-thread
 }
 
 void Lcompiler::do_fir_firmap_bitwidth() {
-  TRACE_EVENT("pass", "compile.fir_firmap_bw");
+  TRACE_EVENT("pass", "firmap + bitwidth");
 
   auto lgcnt                  = 0;
   auto hit                    = false;
@@ -285,7 +285,7 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 }
 
 void Lcompiler::do_fir_firbits() {
-  TRACE_EVENT("pass", "compile.fir_firbits");
+  TRACE_EVENT("pass", "firbits");
 
   auto lgcnt                   = 0;
   auto hit                     = false;

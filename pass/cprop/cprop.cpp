@@ -1034,11 +1034,11 @@ void Cprop::tuple_subgraph(const Node &node) {
 
             for (auto i = 0u; i < read_map.size(); ++i) {
               if (read_map[i]) {
-                fmt::print(" {}", i);
+                // fmt::print(" {}", i);
                 node_tup->add(std::to_string(i), node.setup_driver_pin_raw(i));
               }
             }
-            fmt::print("\n");
+            // fmt::print("\n");
           }
         } else {
           node_tup->add(node.setup_driver_pin_raw(0));

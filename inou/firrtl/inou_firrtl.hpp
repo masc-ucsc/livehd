@@ -11,6 +11,7 @@
 #include <string>
 #include <tuple>
 
+#include "google/protobuf/util/time_util.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
@@ -24,6 +25,7 @@
 #include "lnast.hpp"
 #include "pass.hpp"
 
+using google::protobuf::util::TimeUtil;
 struct Global_module_info {
   absl::node_hash_map<std::string, absl::flat_hash_map<std::string, std::pair<uint16_t, bool>>>  module2outputs; // <hier_name, bits, sign>
   absl::node_hash_map<std::string, absl::flat_hash_set<std::string>>                             module2inputs;  // <hier_name>
