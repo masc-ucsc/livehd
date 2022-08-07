@@ -42,18 +42,18 @@ void Inou_liveparse::do_tolg(Eprp_var &var) {
     }
   }
 
-  std::string files;
+  std::string files2;
   for(const auto &f:chunker_v.get_generated_files()) {
-    if (files.empty())
-      files = f;
+    if (files2.empty())
+      files2 = f;
     else
-      absl::StrAppend(&files, ",", f);
+      absl::StrAppend(&files2, ",", f);
   }
 
-  if (files.empty()) {
+  if (files2.empty()) {
     var.delete_label("files");
   }else{
-    var.add("files", files);
+    var.add("files", files2);
   }
 }
 

@@ -41,10 +41,10 @@ Chunkify_verilog::Chunkify_verilog(std::string_view _path, bool _incremental_mod
   }
 }
 
-int Chunkify_verilog::open_write_file(std::string_view filename) const {
-  std::string fname(filename);
+int Chunkify_verilog::open_write_file(std::string_view fname) const {
+  std::string f(fname);
 
-  int fd = open(fname.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  int fd = open(f.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
   if (fd < 0) {
     throw scan_error(*this, "could not open {} for output", fname);
   }
@@ -87,8 +87,8 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
   return n == 0;  // same file if n==0
 }
 
-void Chunkify_verilog::write_file(std::string_view filename, std::string_view text1, std::string_view text2) const {
-  int fd = open_write_file(filename);
+void Chunkify_verilog::write_file(std::string_view fname, std::string_view text1, std::string_view text2) const {
+  int fd = open_write_file(fname);
   if (fd < 0)
     return;
 
@@ -104,8 +104,8 @@ void Chunkify_verilog::write_file(std::string_view filename, std::string_view te
   close(fd);
 }
 
-void Chunkify_verilog::write_file(std::string_view filename, std::string_view text) const {
-  auto fd = open_write_file(filename);
+void Chunkify_verilog::write_file(std::string_view fname, std::string_view text) const {
+  auto fd = open_write_file(fname);
   if (fd < 0)
     return;
 
