@@ -30,7 +30,7 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
 
     std::string fname{f};
 
-    thread_pool.add([&var, &var_add_mutex, fname]() -> void {
+    thread_pool.add([=, &var, &var_add_mutex]() -> void {
       TRACE_EVENT("pyrope", perfetto::DynamicString{fname});
 
       Prp_lnast converter;

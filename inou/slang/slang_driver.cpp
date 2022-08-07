@@ -432,7 +432,7 @@ bool runSim(Compilation& compilation) {
 #endif
 
 template<typename TArgs>
-int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressColorsStderr) try {
+int driverMain(int argc, TArgs argv, Slang_tree &tree, bool suppressColorsStdout, bool suppressColorsStderr) try {
     CommandLine cmdLine;
 
     // General
@@ -855,7 +855,7 @@ int driverMain(int argc, TArgs argv, bool suppressColorsStdout, bool suppressCol
             }
 
             if (!anyErrors) {
-                Slang_tree::process_root(compilation.getRoot());
+                tree.process_root(compilation.getRoot());
             }
 
 #if defined(INCLUDE_SIM)
@@ -946,8 +946,8 @@ void writeToFile(string_view fileName, string_view contents) {
 }
 
 #    ifndef FUZZ_TARGET
-int slang_main(int argc, char** argv) {
-    return driverMain(argc, argv, false, false);
+int slang_main(int argc, char** argv, Slang_tree &tree) {
+    return driverMain(argc, argv, tree, false, false);
 }
 #    endif
 

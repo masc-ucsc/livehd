@@ -14,19 +14,18 @@ class Slang_tree {
 public:
   Slang_tree();
 
-  static void setup();
-  static void process_root(const slang::RootSymbol& root);
+  void process_root(const slang::RootSymbol& root);
 
-  static std::vector<std::shared_ptr<Lnast>> pick_lnast();
+  std::vector<std::shared_ptr<Lnast>> pick_lnast();
 
 protected:
   Lnast_create lnast_create_obj;
 
-  static inline absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> parsed_lnasts;
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>> parsed_lnasts;
 
   enum class Net_attr { Input, Output, Register, Local };
 
-  static bool has_lnast(std::string_view name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
+  bool has_lnast(std::string_view name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
   bool        process_top_instance(const slang::InstanceSymbol& symbol);
   bool        process(const slang::AssignmentExpression& expr);

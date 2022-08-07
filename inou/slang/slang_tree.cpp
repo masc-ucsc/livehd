@@ -15,18 +15,19 @@
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/types/Type.h"
 
-Slang_tree::Slang_tree() {}
+Slang_tree::Slang_tree() {
 
-void Slang_tree::setup() { parsed_lnasts.clear(); }
+  parsed_lnasts.clear();
+
+}
 
 void Slang_tree::process_root(const slang::RootSymbol &root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
     fmt::print("slang_tree top:{}\n", inst->name);
 
-    Slang_tree tree;
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
-    auto ok = tree.process_top_instance(*inst);
+    auto ok = process_top_instance(*inst);
     if (!ok) {
       Pass::info("unable to process top module:{}\n", inst->name);
     }

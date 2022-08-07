@@ -10,10 +10,11 @@
 #include "lbench.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
+#include "thread_pool.hpp"
 
 // clang-format on
 
-extern int slang_main(int argc, char **argv);  // in slang_driver.cpp
+extern int slang_main(int argc, char **argv, Slang_tree &tree);  // in slang_driver.cpp
 
 static Pass_plugin sample("inou.verilog", Inou_slang::setup);
 
@@ -64,31 +65,44 @@ void Inou_slang::work(Eprp_var &var) {
     }
   }
 
+  std::mutex              var_add_mutex;
+
   for (const auto f : absl::StrSplit(p.files, ',')) {
     std::string fname{f};
-    TRACE_EVENT("verilog", perfetto::DynamicString{fname});
 
-    std::vector<char *> argv_final{argv};
+    thread_pool.add([=, &var, &argv, &var_add_mutex]() -> void {
+      //const std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
-    char *ptr_fname = strdup(fname.c_str());
+      TRACE_EVENT("verilog", perfetto::DynamicString{fname});
 
-    argv_final.emplace_back(ptr_fname);
+      Slang_tree tree;
 
-    argv_final.emplace_back(nullptr);
+      std::vector<char *> argv_final{argv};
 
-    Slang_tree::setup();  // setup
+      char *ptr_fname = strdup(fname.c_str());
 
-    slang_main(argv_final.size() - 1, argv_final.data());  // compile to lnasts
+      argv_final.emplace_back(ptr_fname);
+      argv_final.emplace_back(nullptr);
 
-    for (auto &ln : Slang_tree::pick_lnast()) {
-      var.add(ln);
-    }
+      fmt::print("1.fname:{} {}\n", fname, ptr_fname);
+      slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+      fmt::print("2.fname:{} {}\n", fname, ptr_fname);
 
-    free(ptr_fname);
+      {
+        const std::lock_guard<std::mutex> guard(var_add_mutex);
+        for (auto &ln : tree.pick_lnast()) {
+          var.add(ln);
+        }
+      }
+
+      free(ptr_fname);
+    });
   }
+  thread_pool.wait_all();
 
   for (char *ptr : argv) {
     if (ptr)
       free(ptr);
   }
+
 }
