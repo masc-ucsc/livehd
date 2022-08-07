@@ -24,7 +24,7 @@ Slang_tree::Slang_tree() {
 void Slang_tree::process_root(const slang::RootSymbol &root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
-    fmt::print("slang_tree top:{}\n", inst->name);
+    //fmt::print("slang_tree top:{}\n", inst->name);
 
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
     auto ok = process_top_instance(*inst);

@@ -189,7 +189,7 @@ Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view s
     attributes[it->second].version = max_next_version++;
     if (attributes[it->second].source != source) {
       if (source == "-") {
-        Lgraph::warn("keeping Lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
+        //Lgraph::warn("keeping Lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
       } else if (attributes[it->second].source.empty()) {
         // Blackbox with a newly populated. OK
         attributes[it->second].source = source;

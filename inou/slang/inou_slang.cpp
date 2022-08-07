@@ -38,6 +38,10 @@ void Inou_slang::work(Eprp_var &var) {
 
   argv.push_back(strdup("lgshell"));
 
+#ifdef NDEBUG
+  argv.push_back(strdup("--quiet"));
+#endif
+
   argv.push_back(strdup("--ignore-unknown-modules"));
   argv.push_back(strdup("--single-unit"));
 
@@ -84,9 +88,7 @@ void Inou_slang::work(Eprp_var &var) {
       argv_final.emplace_back(ptr_fname);
       argv_final.emplace_back(nullptr);
 
-      fmt::print("1.fname:{} {}\n", fname, ptr_fname);
       slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
-      fmt::print("2.fname:{} {}\n", fname, ptr_fname);
 
       {
         const std::lock_guard<std::mutex> guard(var_add_mutex);
