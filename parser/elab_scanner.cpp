@@ -176,14 +176,14 @@ void Elab_scanner::patch_pass(const absl::flat_hash_map<std::string, Token_id> &
   }
 }
 
-void Elab_scanner::parse_setup(std::string_view filename) {
+void Elab_scanner::parse_setup(std::string_view fname) {
   if (memblock_fd == -1) {
     unregister_memblock();
   }
 
-  std::string fname(filename);
+  filename = std::string(fname);
 
-  memblock_fd = open(fname.c_str(), O_RDONLY);
+  memblock_fd = open(filename.c_str(), O_RDONLY);
   if (memblock_fd < 0) {
     throw parser_error(*this, "::parse could not open file {}", filename);
   }
@@ -192,7 +192,6 @@ void Elab_scanner::parse_setup(std::string_view filename) {
   fstat(memblock_fd, &sb);
 
   token_list.clear();
-  buffer_name = filename;
 
   if (sb.st_size == 0) {
     memblock      = 0;
@@ -217,7 +216,7 @@ void Elab_scanner::parse_setup() {
   }
 
   memblock_fd = -1;
-  buffer_name = "inline";
+  filename = "inline";
 
   token_list.clear();
 }
@@ -311,7 +310,7 @@ void Elab_scanner::parse_step() {
 
       in_multiline_comment--;
       if (in_multiline_comment < 0) {
-        throw scan_error(*this, "{}:{} found end of comment without matching beginning of comment", buffer_name, nlines);
+        throw scan_error(*this, "{}:{} found end of comment without matching beginning of comment", filename, nlines);
       } else if (in_multiline_comment == 0) {
         in_singleline_comment = false;
         in_comment            = false;
@@ -470,7 +469,7 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
   // err_tracker::err_logger( text);
   if (token_list.size() <= 1) {
-    fmt::print("{}:{}:{} {}: {}\n", buffer_name, 0, 0, cat, text);
+    fmt::print("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
     return;
   }
 
@@ -512,7 +511,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
   col += xtra_col;
 
-  fmt::print("{}:{}:{} {}: ", buffer_name, line, col, cat);
+  fmt::print("{}:{}:{} {}: ", filename, line, col, cat);
   std::cout << text;  // NOTE: no fmt::print because it can contain {}
 
   if (!is_newline(memblock[line_pos_start]))

@@ -9,13 +9,26 @@ void setup_inou_liveparse() { Inou_liveparse::setup(); }
 
 void Inou_liveparse::setup() {
   Eprp_method m1("inou.liveparse", "liveparse and chunkify verilog/pyrope files", &Inou_liveparse::tolg);
+
+  m1.add_label_optional("incr", "Incremental mode", "false");
+
   register_inou("liveparse", m1);
 }
 
 Inou_liveparse::Inou_liveparse(const Eprp_var &var) : Pass("inou.liveparse", var) {}
 
-void Inou_liveparse::do_tolg() {
-  Chunkify_verilog chunker_v(path);
+void Inou_liveparse::do_tolg(Eprp_var &var) {
+
+  bool incremental_mode = false;
+
+  if (var.has_label("incr")) {
+    auto l = var.get("incr");
+    if (l != "false") {
+      incremental_mode = true;
+    }
+  }
+
+  Chunkify_verilog chunker_v(path, incremental_mode);
 
   for (const auto &f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".v") || str_tools::ends_with(f, ".sv")) {
@@ -28,10 +41,24 @@ void Inou_liveparse::do_tolg() {
       return;
     }
   }
+
+  std::string files;
+  for(const auto &f:chunker_v.get_generated_files()) {
+    if (files.empty())
+      files = f;
+    else
+      absl::StrAppend(&files, ",", f);
+  }
+
+  if (files.empty()) {
+    var.delete_label("files");
+  }else{
+    var.add("files", files);
+  }
 }
 
 void Inou_liveparse::tolg(Eprp_var &var) {
   Inou_liveparse lp(var);
 
-  lp.do_tolg();
+  lp.do_tolg(var);
 }

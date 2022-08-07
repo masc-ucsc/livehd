@@ -31,8 +31,6 @@ void Inou_slang::setup() {
 Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Inou_slang::work(Eprp_var &var) {
-  TRACE_EVENT("inou", "SLANG_verilog");
-  Lbench     b("inou.SLANG_verilog");
   Inou_slang p(var);
 
   std::vector<char *> argv;
@@ -67,20 +65,26 @@ void Inou_slang::work(Eprp_var &var) {
   }
 
   for (const auto f : absl::StrSplit(p.files, ',')) {
-    argv.push_back(strdup(std::string(f).c_str()));
-  }
+    std::string fname{f};
+    TRACE_EVENT("verilog", perfetto::DynamicString{fname});
 
-  // --top if top: provided
-  // add includes
+    std::vector<char *> argv_final{argv};
 
-  argv.push_back(nullptr);
+    char *ptr_fname = strdup(fname.c_str());
 
-  Slang_tree::setup();  // setup
+    argv_final.emplace_back(ptr_fname);
 
-  slang_main(argv.size() - 1, argv.data());  // compile to lnasts
+    argv_final.emplace_back(nullptr);
 
-  for (auto &ln : Slang_tree::pick_lnast()) {
-    var.add(ln);
+    Slang_tree::setup();  // setup
+
+    slang_main(argv_final.size() - 1, argv_final.data());  // compile to lnasts
+
+    for (auto &ln : Slang_tree::pick_lnast()) {
+      var.add(ln);
+    }
+
+    free(ptr_fname);
   }
 
   for (char *ptr : argv) {

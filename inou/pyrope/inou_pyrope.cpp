@@ -22,7 +22,6 @@ void Inou_pyrope::setup() {
 Inou_pyrope::Inou_pyrope(const Eprp_var &var) : Pass("inou.pyrope", var) {}
 
 void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
-  TRACE_EVENT("inou", "pyrope");
   Inou_pyrope p(var);
 
   std::mutex              var_add_mutex;
@@ -32,7 +31,7 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
     std::string fname{f};
 
     thread_pool.add([&var, &var_add_mutex, fname]() -> void {
-      TRACE_EVENT("inou", perfetto::DynamicString{fname});
+      TRACE_EVENT("pyrope", perfetto::DynamicString{fname});
 
       Prp_lnast converter;
       converter.parse_file(fname);

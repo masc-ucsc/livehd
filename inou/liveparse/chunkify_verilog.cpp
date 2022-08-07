@@ -20,7 +20,26 @@
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 
-Chunkify_verilog::Chunkify_verilog(std::string_view _path) : path(_path) { library = Graph_library::instance(path); }
+Chunkify_verilog::Chunkify_verilog(std::string_view _path, bool _incremental_mode)
+  :path(_path)
+  ,incremental_mode(_incremental_mode) {
+
+  library = Graph_library::instance(path);
+
+  chunk_dir = absl::StrCat(path, "/liverparse");
+  if (access(chunk_dir.c_str(), F_OK) != 0) {
+    std::string spath(path);
+    int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if (err < 0 && errno != EEXIST) {
+      throw scan_error(*this, "could not create {} directory", path);
+    }
+
+    err = mkdir(chunk_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if (err < 0 && errno != EEXIST) {
+      throw scan_error(*this, "could not create {}/{} directory", path, "liverparse");
+    }
+  }
+}
 
 int Chunkify_verilog::open_write_file(std::string_view filename) const {
   std::string fname(filename);
@@ -34,10 +53,9 @@ int Chunkify_verilog::open_write_file(std::string_view filename) const {
 }
 
 bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_view text1, std::string_view text2) const {
-  if (elab_path.empty())
-    return false;
+  I(incremental_mode);
 
-  const std::string elab_filename = absl::StrCat(elab_chunk_dir, "/", module_name, ".v");
+  const std::string elab_filename = absl::StrCat(chunk_dir, "/", module_name, ".v");
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
   if (fd < 0)
     return false;
@@ -112,48 +130,8 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 }
 
 void Chunkify_verilog::elaborate() {
-  auto parse_path = absl::StrCat(path, "/parse/");  // Keep trailing /
-  if (access(parse_path.c_str(), F_OK) != 0) {
-    std::string spath(path);
-    int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (err < 0 && errno != EEXIST) {
-      throw scan_error(*this, "could not create {} directory", path);
-    }
-
-    err = mkdir(parse_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (err < 0 && errno != EEXIST) {
-      throw scan_error(*this, "could not create {}/{} directory", path, "parse");
-    }
-  }
-
-  std::string format_name;
-
-  if (is_parse_inline()) {
-    format_name = "inline";
-  } else {
-    std::string fname(get_filename());
-
-    for (char &c : fname) {
-      if (c == '/')
-        c = '.';
-    }
-  }
-
-  const std::string &bench_name = "LIVEPARSE_" + path + "_" + std::to_string(get_token_pos()) + "_" + format_name;
-  TRACE_EVENT("inou", nullptr, [&bench_name](perfetto::EventContext ctx) { ctx.event()->set_name(bench_name); });
-  Lbench bench("inou." + bench_name);
-
-  auto source = absl::StrCat(parse_path, "file_", format_name);
-
-  write_file(source, get_memblock());
-
-  chunk_dir = absl::StrCat(parse_path, "chunk_", format_name);
-  file_utils::clean_dir(chunk_dir);
-
-  elab_chunk_dir = "";
-  if (!elab_path.empty()) {
-    elab_chunk_dir = absl::StrCat(elab_path, "/parse/chunk_", format_name);
-  }
+  std::string fname{get_filename()};
+  TRACE_EVENT("liveparse", perfetto::DynamicString{fname.c_str()});
 
   bool in_module   = false;
   bool last_input  = false;
@@ -190,7 +168,7 @@ void Chunkify_verilog::elaborate() {
         module_io_pos = 1;
         in_module     = true;
 
-        sub = library->create_sub(module_name, source);
+        sub = library->create_sub(module_name, get_filename());
         I(sub);
 
       } else if (txt == "input") {
@@ -242,10 +220,11 @@ void Chunkify_verilog::elaborate() {
     } else {
       format_append(in_module_text);
       if (endmodule_found) {
-        bool same = is_same_file(module_name, not_in_module_text, in_module_text);
+        bool same = incremental_mode && is_same_file(module_name, not_in_module_text, in_module_text);
         if (!same) {
           auto outfile = absl::StrCat(chunk_dir, "/", module_name, ".v");
           write_file(outfile, not_in_module_text, in_module_text);
+          generated_files.emplace_back(outfile);
         }
         module_name = "";
         in_module_text.clear();

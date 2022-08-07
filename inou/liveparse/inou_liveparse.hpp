@@ -6,7 +6,7 @@
 
 class Inou_liveparse : public Pass {
 protected:
-  void do_tolg();
+  void do_tolg(Eprp_var &var);
 
   // eprp callbacks
   static void tolg(Eprp_var &var);

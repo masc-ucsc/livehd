@@ -10,10 +10,11 @@ class Sub_node;
 class Chunkify_verilog : public Elab_scanner {
 protected:
   std::string path;
-  std::string elab_path;
-
   std::string chunk_dir;
-  std::string elab_chunk_dir;
+
+  bool incremental_mode;
+
+  std::vector<std::string> generated_files;
 
   Graph_library *library;
 
@@ -42,6 +43,10 @@ protected:
   void add_io(Sub_node *sub, bool input, std::string_view io_name, Port_ID pos);
 
 public:
-  Chunkify_verilog(std::string_view outd);
-  void elaborate();
+  Chunkify_verilog(std::string_view path, bool incremental_mode);
+  void elaborate() final;
+
+  const std::vector<std::string> &get_generated_files() const {
+    return generated_files;
+  }
 };

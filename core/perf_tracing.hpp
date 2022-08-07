@@ -6,6 +6,10 @@
 
 PERFETTO_DEFINE_CATEGORIES(perfetto::Category("core").SetDescription("Core functions"),
                            perfetto::Category("inou").SetDescription("In and out"),
+                           perfetto::Category("liveparse").SetDescription("liveparse parsing"),
+                           perfetto::Category("verilog").SetDescription("verilog parsing"),
+                           perfetto::Category("pyrope").SetDescription("pyrope parsing"),
+                           perfetto::Category("cgen").SetDescription("verilog code generation"),
                            perfetto::Category("pass").SetDescription("Passes"));
 
 void start_tracing();

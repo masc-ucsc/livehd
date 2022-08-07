@@ -204,7 +204,7 @@ public:
 protected:
   Token_list token_list;
 
-  std::string buffer_name;
+  std::string filename;
 
   const char *memblock;
   size_t      memblock_size;
@@ -261,7 +261,7 @@ protected:
   }
   std::string_view get_filename() const {
     I(memblock_fd != -1);
-    return buffer_name;
+    return filename;
   }
   bool is_parse_inline() const { return memblock_fd == -1; }
 
@@ -403,8 +403,8 @@ public:
     patch_pass(no_keywords);
   }
 
-  void parse_file(std::string_view filename) {
-    parse_setup(filename);
+  void parse_file(std::string_view _filename) {
+    parse_setup(_filename);
     parse_step();
   }
 
