@@ -15,8 +15,14 @@ Lnast_tolg::Lnast_tolg(std::string_view _module_name, std::string_view _path) : 
 }
 
 std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, const Lnast_nid &top_stmts) {
-  TRACE_EVENT("pass", "lnast_tolg");
+  // TRACE_EVENT("pass", "lnast_tolg");
   // Lbench b("pass.lnast_tolg");
+  //
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("pass", nullptr, [&ln](perfetto::EventContext ctx) { 
+      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+      ctx.event()->set_name(converted_str + std::string{ln->get_top_module_name()}); 
+      });
 
   lnast    = ln;
   auto src = ln->get_source();

@@ -33,8 +33,14 @@ void Firmap::add_map_entry(Lgraph *lg) {  // single-thread
 }
 
 void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
-  TRACE_EVENT("pass", "firbits");
+  // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firbits." + lg->get_name()); });
   // Lbench b("pass.firbits");
+  //
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 
+      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+      ctx.event()->set_name(converted_str + lg->get_name()); 
+      });
 
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;

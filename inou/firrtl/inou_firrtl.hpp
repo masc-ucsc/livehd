@@ -41,6 +41,9 @@ public:
                                     std::vector<std::tuple<std::string, uint8_t, uint32_t, bool>> &vec);
   static inline absl::flat_hash_map<firrtl::FirrtlPB_Expression_PrimOp_Op, std::string> op2firsub;
   inline static Global_module_info                                                      glob_info;
+  Inou_firrtl(const Eprp_var &var);
+
+  static void setup();
 
 protected:
   inline static std::mutex eprp_var_mutex;
@@ -137,10 +140,8 @@ private:
   // This map tracks all of the ports associated with a specific memory.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> mem_to_ports_lists;
 
-public:
-  Inou_firrtl(const Eprp_var &var);
+  static inline int trace_module_cnt = 0;
 
-  static void setup();
 };
 
 class Inou_firrtl_module {

@@ -13,6 +13,7 @@ private:
   bool hier;
   bool tuple_issues;
   bool tuple_found;  // set during scalar_pass
+  static inline int trace_module_cnt = 0;
 
   inline static Node_pin invalid_pin;  // just for speed
 

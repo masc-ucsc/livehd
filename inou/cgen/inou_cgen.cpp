@@ -29,6 +29,11 @@ void Inou_cgen::to_cgen_verilog(Eprp_var &var) {
   auto dir     = pp.get_odir(var);
   auto verbose = pp.verbose;
 
+
+  std::sort(var.lgs.begin(), var.lgs.end(), [](Lgraph *a, Lgraph *b) 
+    { return a->size() > b->size(); }
+  );
+
   for (auto *lg : var.lgs) {
     thread_pool.add([lg, verbose, dir]() -> void {
       Cgen_verilog p(verbose, dir);

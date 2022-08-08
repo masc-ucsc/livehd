@@ -70,6 +70,7 @@ private:
   std::string source_filename;
   Lnast_nid   undefined_var_nid;
   uint32_t    tmp_var_cnt = 0;
+  static inline int trace_module_cnt = 0;
 
   void      do_ssa_trans(const Lnast_nid &top_nid);
   void      ssa_lhs_handle_a_statement(const Lnast_nid &psts_nid, const Lnast_nid &opr_nid);
@@ -147,7 +148,9 @@ public:
   explicit Lnast(std::string_view _module_name, std::string_view _file_name)
       : top_module_name(_module_name), source_filename(_file_name) {}
 
-  void ssa_trans() { do_ssa_trans(lh::Tree_index::root()); };
+  void ssa_trans() { 
+    do_ssa_trans(lh::Tree_index::root()); 
+  };
 
   std::string_view get_top_module_name() const { return top_module_name; }
   std::string_view get_source() const { return source_filename; }

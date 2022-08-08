@@ -15,8 +15,14 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
     : fbmaps(_fbmaps), pinmaps(_pinmaps), spinmaps_xorr(_spinmaps_xorr) {}
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firmap." + lg->get_name()); });
+  // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firmap." + lg->get_name()); });
   // Lbench b("pass.firmap." + lg->get_name());
+  //
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 
+      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+      ctx.event()->set_name(converted_str + lg->get_name()); 
+      });
 
   auto    lg_name   = lg->get_name();
   auto    lg_source = lg->get_library().get_source(lg->get_lgid());

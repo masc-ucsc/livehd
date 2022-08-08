@@ -15,7 +15,14 @@ void Lnast_node::dump() const {
 Lnast::~Lnast() {}
 
 void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
-  TRACE_EVENT("pass", "lnast_ssa");
+  // TRACE_EVENT("pass", "lnast_ssa");
+  // TRACE_EVENT("pass", nullptr, [this](perfetto::EventContext ctx) { ctx.event()->set_name("lnast_ssa:" + top_module_name); });
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("pass", nullptr, [this](perfetto::EventContext ctx) { 
+      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+      auto str = "lnast_ssa:" + converted_str;
+      ctx.event()->set_name(str + top_module_name); 
+      });
   // Lbench    b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {

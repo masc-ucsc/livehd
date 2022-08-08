@@ -13,6 +13,8 @@ using PinMap  = absl::flat_hash_map<Node_pin, Node_pin>;                        
 using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;              // special case for xorr one old spin -> multi newspin
 
 class Firmap {
+private:
+static inline int trace_module_cnt = 0;    
 protected:
   bool firbits_issues    = false;
   bool firmap_issues     = false;
@@ -107,6 +109,5 @@ public:
   Lgraph *do_firrtl_mapping(Lgraph *orig);
 
   void add_map_entry(Lgraph *lg);
-
   void dump() const;
 };

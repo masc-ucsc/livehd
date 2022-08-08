@@ -2494,14 +2494,14 @@ void Inou_firrtl::ext_module_to_lnast(Eprp_var& var, const firrtl::FirrtlPB_Modu
 
 
 void Inou_firrtl::populate_all_modules_io(Eprp_var& var, const firrtl::FirrtlPB_Circuit& circuit, std::string_view file_name) {
-  TRACE_EVENT("inou", "populate_all_modules_io");
+  // TRACE_EVENT("inou", "populate_all_modules_io");
   Graph_library *lib = Graph_library::instance(var.get("path", "lgdb"));
 
   for (int i = 0; i < circuit.module_size(); i++) {
     if (circuit.module(i).has_user_module()) {
       // populate_module_io(i, circuit, file_name, lib);
       thread_pool.add([this, &circuit, i, &file_name, &lib]() -> void {
-        TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:sub_module_io:" + circuit.module(i).user_module().id()); });
+        // TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:sub_module_io:" + circuit.module(i).user_module().id()); });
         this->populate_module_io(i, circuit, file_name, lib);
       });
 
@@ -2834,32 +2834,24 @@ void Inou_firrtl::iterate_modules(Eprp_var& var, const firrtl::FirrtlPB_Circuit&
   // so far you collect all global table informations
 
   para_modules_to_lnasts(circuit, var, file_name);
-  // // parallelize the rest of firrtl modules -> lnasts
-  // for (int i = circuit.module_size() - 1; i >= 0; i--) {
-  //   if (circuit.module(i).has_user_module()) {
-  //     thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
-  //       TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
-  //       this->user_module_to_lnast(var, circuit.module(i), file_name);
-  //     });
-  //   } else if (circuit.module(i).has_external_module()) {
-  //     thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
-  //       TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
-  //       this->ext_module_to_lnast(var, circuit.module(i), file_name);
-  //     });
-  //   } else {
-  //     Pass::error("Module not set.");
-  //   }
-  // }
-  // thread_pool.wait_all();
 }
 
 void Inou_firrtl::para_modules_to_lnasts(const firrtl::FirrtlPB_Circuit &circuit, Eprp_var &var, std::string_view file_name) {
-  TRACE_EVENT("inou", "para_modules_to_lnasts");
+  // TRACE_EVENT("inou", "para_modules_to_lnasts");
   // parallelize the rest of firrtl modules -> lnasts
   for (int i = circuit.module_size() - 1; i >= 0; i--) {
     if (circuit.module(i).has_user_module()) {
       thread_pool.add([this, &var, &circuit, i, &file_name]() -> void {
-        TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
+        // TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { ctx.event()->set_name("fir_tolnast:module:" + circuit.module(i).user_module().id()); });
+
+        TRACE_EVENT("inou", nullptr, [&i, &circuit](perfetto::EventContext ctx) { 
+            std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+            auto str = "fir_tlnast:module:" + converted_str;
+            ctx.event()->set_name(str + circuit.module(i).user_module().id()); 
+            });
+
+
+
         this->user_module_to_lnast(var, circuit.module(i), file_name);
       });
     } else if (circuit.module(i).has_external_module()) {

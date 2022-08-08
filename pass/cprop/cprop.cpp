@@ -2387,7 +2387,11 @@ void Cprop::clean_io(Lgraph *lg) {
 }
 
 void Cprop::do_trans(Lgraph *lg) {
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("cprop." + lg->get_name()); });
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 
+      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+      ctx.event()->set_name(converted_str + lg->get_name()); 
+      });
   // Lbench b("pass.cprop." + lg->get_name());
 
   scalar_pass(lg);
