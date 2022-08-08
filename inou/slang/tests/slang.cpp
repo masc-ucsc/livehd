@@ -1,4 +1,9 @@
 
-extern int slang_main(int argc, char** argv);  // in slang_driver.cpp
+#include "slang_tree.hpp"
 
-int main(int argc, char** argv) { return slang_main(argc, argv); }
+extern int slang_main(int argc, char** argv, Slang_tree &tree);  // in slang_driver.cpp
+
+int main(int argc, char** argv) {
+  Slang_tree tree;
+  return slang_main(argc, argv, tree);
+}
