@@ -22,7 +22,7 @@ std::vector<Lgraph *> Lnast_tolg::do_tolg(const std::shared_ptr<Lnast> &ln, cons
   TRACE_EVENT("pass", nullptr, [&ln](perfetto::EventContext ctx) { 
       std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
       ctx.event()->set_name(converted_str + std::string{ln->get_top_module_name()}); 
-      });
+  });
 
   lnast    = ln;
   auto src = ln->get_source();

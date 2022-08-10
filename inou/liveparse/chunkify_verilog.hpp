@@ -8,6 +8,8 @@ class Graph_library;
 class Sub_node;
 
 class Chunkify_verilog : public Elab_scanner {
+private:
+  static inline int trace_module_cnt = 0;
 protected:
   std::string path;
   std::string chunk_dir;

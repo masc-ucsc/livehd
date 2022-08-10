@@ -28,7 +28,7 @@ using google::protobuf::util::TimeUtil;
 
 
 void Inou_firrtl::to_lnast(Eprp_var& var) {
-  TRACE_EVENT("inou", "source_tolnast");
+  TRACE_EVENT("inou", "firrtl_tolnast");
   Inou_firrtl p(var);
 
   if (var.has_label("files")) {

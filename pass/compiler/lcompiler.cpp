@@ -10,6 +10,7 @@ Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string
     : path(_path), odir(_odir), top(_top), gviz(_gviz), gv(true, false, _odir) {}
 
 void Lcompiler::do_prp_lnast2lgraph(const std::vector<std::shared_ptr<Lnast>> &lnasts) {
+  TRACE_EVENT("pass", "lnast_ssa + lnast_tolg");
   for (const auto &ln : lnasts) {
     thread_pool.add(&Lcompiler::prp_thread_ln2lg, this, ln);
   }
@@ -109,7 +110,7 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 // ----------------------- FIRRTL compilation functions start ----------------------------
 
 void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &lnasts) {
-  TRACE_EVENT("pass", "lnast_ssa + lnast2lg");
+  TRACE_EVENT("pass", "lnast_ssa + lnast_tolg");
 
   std::sort(lnasts.begin(), lnasts.end(), [](const std::shared_ptr<Lnast> &a, const std::shared_ptr<Lnast> &b) 
     { return a->max_size() > b->max_size(); }

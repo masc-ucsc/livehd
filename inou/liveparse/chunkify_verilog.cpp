@@ -131,7 +131,13 @@ void Chunkify_verilog::add_io(Sub_node *sub, bool input, std::string_view io_nam
 
 void Chunkify_verilog::elaborate() {
   std::string fname{get_filename()};
-  TRACE_EVENT("liveparse", perfetto::DynamicString{fname.c_str()});
+  // TRACE_EVENT("liveparse", perfetto::DynamicString{fname.c_str()});
+  // note: tricks to make perfetto display different color on sub-modules
+  TRACE_EVENT("liveparse", "chunfigy_verilog");
+  // TRACE_EVENT("liveparse", nullptr, [&fname](perfetto::EventContext ctx) { 
+  //     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+  //     ctx.event()->set_name(converted_str + fname.c_str()); 
+  //     });
 
   bool in_module   = false;
   bool last_input  = false;

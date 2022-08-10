@@ -32,6 +32,7 @@ void Inou_slang::setup() {
 Inou_slang::Inou_slang(const Eprp_var &var) : Pass("pass.lec", var) {}
 
 void Inou_slang::work(Eprp_var &var) {
+  TRACE_EVENT("verilog", "verilog_tolnast");
   Inou_slang p(var);
 
   std::vector<char *> argv;
@@ -77,7 +78,11 @@ void Inou_slang::work(Eprp_var &var) {
     thread_pool.add([=, &var, &argv, &var_add_mutex]() -> void {
       //const std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
-      TRACE_EVENT("verilog", perfetto::DynamicString{fname});
+      // TRACE_EVENT("verilog", perfetto::DynamicString{fname});
+      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { 
+          std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+          ctx.event()->set_name(converted_str + fname.c_str()); 
+      });
 
       Slang_tree tree;
 
