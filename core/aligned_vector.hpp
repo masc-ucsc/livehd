@@ -31,7 +31,7 @@ inline void* align(size_t __align, size_t __size, void*& __ptr, size_t& __space)
 template <typename T, size_t A>
 class aligned_vector {
 public:
-  explicit aligned_vector() noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) {}
+  explicit aligned_vector() noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) { }
 
   explicit aligned_vector(size_t n) noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) { resize(n); }
 
@@ -78,7 +78,7 @@ public:
 
   void push_back(T& t) {
     if (size_ >= capacity_) {
-      reserve((capacity_ == 0) ? (1) : (capacity_ * 2));
+      reserve((capacity_ == 0) ? (1) : (capacity_ * 4));
     }
     data_[size_] = t;
     size_ += 1;
@@ -86,7 +86,7 @@ public:
 
   void push_back(const T& t) {
     if (size_ >= capacity_) {
-      reserve((capacity_ == 0) ? (1) : (capacity_ * 2));
+      reserve((capacity_ == 0) ? (1) : (capacity_ * 4));
     }
     data_[size_] = t;
     size_ += 1;
