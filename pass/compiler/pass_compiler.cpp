@@ -62,7 +62,6 @@ void Pass_compiler::compile(Eprp_var &var) {
 
   auto lgs = compiler.wait_all();
   var.add(lgs);
-  return;
 }
 
 void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {

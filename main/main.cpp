@@ -21,6 +21,7 @@
 #include "main_api.hpp"
 #include "meta_api.hpp"
 #include "replxx.hxx"
+#include "perf_tracing.hpp"
 
 using Replxx = replxx::Replxx;
 
@@ -288,6 +289,8 @@ constexpr unsigned long minor_version = 0;
 void dummy_call_to_preserve_methods_useful_for_debugging() { std::cout << "dummy_called\n"; }
 
 int main(int argc, char** argv) {
+  TRACE_EVENT("pass", "main");
+
   I_setup();
 
   bool option_quiet = false;

@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 void Eprp::eat_comments() {
   while (scan_is_token(Token_id_comment) && !scan_is_end()) scan_next();
@@ -209,6 +210,7 @@ bool Eprp::rule_top() {
 
 // top = parse_top+
 void Eprp::elaborate() {
+
   pipe.clear();
 
   ast = std::make_unique<Ast_parser>(get_memblock(), Eprp_rule);
@@ -231,7 +233,7 @@ void Eprp::elaborate() {
   ast = nullptr;
 
   pipe.run();
-};
+}
 
 void Eprp::process_ast_handler(const lh::Tree_index &self, const Ast_parser_node &node) {
   auto txt = scan_text(node.token_entry);

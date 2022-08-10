@@ -4,6 +4,7 @@
 
 #include "eprp.hpp"
 #include "lbench.hpp"
+#include "perf_tracing.hpp"
 
 void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) { steps.emplace_back(method, var); }
 
@@ -39,6 +40,8 @@ void Eprp_pipe::run() {
       assert(steps[i].next_step == nullptr);
   }
 
-  Eprp_var last_cmd_var;
+  static Eprp_var last_cmd_var;
+  last_cmd_var.clear(); // weird but better for benchmarkng
+
   steps[0].run(last_cmd_var);
 }
