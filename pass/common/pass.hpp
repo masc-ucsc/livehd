@@ -23,14 +23,14 @@ protected:
   const std::string path;
   const std::string odir;
 
-  std::string get_files(const Eprp_var &var) const;
-  std::string get_path(const Eprp_var &var) const;
-  std::string get_odir(const Eprp_var &var) const;
+  [[nodiscard]] std::string get_files(const Eprp_var &var) const;
+  [[nodiscard]] std::string get_path(const Eprp_var &var) const;
+  [[nodiscard]] std::string get_odir(const Eprp_var &var) const;
 
   static void register_pass(Eprp_method &method);
   static void register_inou(std::string_view pname, Eprp_method &method);
 
-  bool setup_directory(std::string_view dir) const;
+  [[nodiscard]] bool setup_directory(std::string_view dir) const;
 
   Pass(std::string_view _pass_name, const Eprp_var &var);
 
@@ -38,7 +38,7 @@ public:
   static inline Eprp eprp;
 
   static void error(std::string_view msg) {
-    Graph_library::sync_all();
+    //Graph_library::sync_all();
     throw Eprp::parser_error(eprp, msg);
   }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }
@@ -76,8 +76,8 @@ public:
 #endif
   }
 
-  virtual bool is_done() const { return true; }
-  virtual bool has_made_progress() const { return true; }
+  [[nodiscard]] virtual bool is_done() const { return true; }
+  [[nodiscard]] virtual bool has_made_progress() const { return true; }
 };
 
 class Pass_plugin {
@@ -89,7 +89,7 @@ protected:
   static inline Map_setup registry;
 
 public:
-  Pass_plugin(const std::string &name, Setup_fn setup_fn) {
+  Pass_plugin(const std::string &name, const Setup_fn &setup_fn) {
     if (registry.find(name) != registry.end()) {
       Pass::error("Pass_plugin: {} is already registered", name);
       return;

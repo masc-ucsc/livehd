@@ -215,17 +215,9 @@ bool Graph_library::exists_int(std::string_view name) const {
 }
 
 bool Graph_library::exists_int(Lg_type_id lgid) const {
-  if (attributes.size() <= lgid || lgid.is_invalid())
+  if (sub_nodes.size() <= lgid || lgid.is_invalid())
     return false;
   I(attributes.size() > lgid);
-  I(sub_nodes.size() > lgid);
-
-#if 0
-  // Modules that start with __ are internal (like __fir_add and not saved as module/lgraph)
-  auto name =  sub_nodes[lgid]->get_name();
-  if (name.size()>2 && name[0] == '_' && name[1] == '_')
-    return false;
-#endif
 
   return sub_nodes[lgid]->get_lgid() == lgid;
 }
@@ -265,15 +257,18 @@ Sub_node *Graph_library::create_sub_int(std::string_view name, std::string_view 
   return sub_nodes[lgid];
 }
 
-Sub_node *Graph_library::ref_or_create_sub_int(std::string_view name) { return ref_or_create_sub_int(name, "-"); }
+Sub_node *Graph_library::ref_or_create_sub(std::string_view name, std::string_view source) {
+  Lg_type_id lgid;
 
-Sub_node *Graph_library::ref_or_create_sub_int(std::string_view name, std::string_view source) {
-  Lg_type_id lgid = get_lgid_int(name);
-  if (lgid) {
-    return sub_nodes[lgid];
+  {
+    absl::ReaderMutexLock guard(&lgs_mutex);
+    lgid = get_lgid_int(name);
+    if (lgid) {
+      return sub_nodes[lgid];
+    }
   }
+  lgid = add_name(name, source); // This acquires a WriterMutexLock
 
-  lgid = add_name_int(name, source);
   I(lgid);
   return sub_nodes[lgid];
 }
@@ -504,7 +499,8 @@ Lgraph *Graph_library::open_or_create_lgraph(std::string_view name, std::string_
   Lgraph *lg=nullptr;
   bool pending_load;
   {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    absl::WriterMutexLock guard(&lgs_mutex);
+    //std::lock_guard<std::mutex> guard(lgs_mutex);
     std::tie(lg, pending_load) =  open_or_create_lgraph_int(name, source);
   }
   if (pending_load) { // out of the lock because it can be slow and call graph library
@@ -519,7 +515,8 @@ Lgraph *Graph_library::open_lgraph(std::string_view name, std::string_view sourc
   Lgraph *lg=nullptr;
   bool pending_load;
   {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    absl::WriterMutexLock guard(&lgs_mutex);
+    //std::lock_guard<std::mutex> guard(lgs_mutex);
     std::tie(lg, pending_load) =  open_lgraph_int(name, source);
   }
   if (pending_load) { // out of the lock because it can be slow and call graph library
@@ -534,7 +531,8 @@ Lgraph *Graph_library::open_lgraph(Lg_id_t lgid) {
   Lgraph *lg=nullptr;
   bool pending_load;
   {
-    std::lock_guard<std::mutex> guard(lgs_mutex);
+    absl::WriterMutexLock guard(&lgs_mutex);
+    //std::lock_guard<std::mutex> guard(lgs_mutex);
     std::tie(lg, pending_load) =  open_lgraph_int(lgid);
   }
   if (pending_load) { // out of the lock because it can be slow and call graph library
