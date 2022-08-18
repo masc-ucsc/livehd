@@ -47,16 +47,20 @@ TEST_F(VTest1, interface) {
 
   chunker.parse_inline(test1_verilog);
 
-  EXPECT_EQ(access("tbase/parse/liveparse/test1_moda.v", R_OK), F_OK);
-  EXPECT_EQ(access("tbase/parse/liveparse/test1_modb.v", R_OK), F_OK);
+  EXPECT_EQ(access("tbase/liveparse/test1_moda.v", R_OK), F_OK);
+  EXPECT_EQ(access("tbase/liveparse/test1_modb.v", R_OK), F_OK);
 
   // No code change delta
   Chunkify_verilog chunker2("tdelta", true);
-  EXPECT_NE(access("tdelta/parse/liveparse/test1_moda.v", R_OK), F_OK);
-  EXPECT_NE(access("tdelta/parse/liveparse/test1_modb.v", R_OK), F_OK);
+  EXPECT_NE(access("tdelta/liveparse/test1_moda.v", R_OK), F_OK);
+  EXPECT_NE(access("tdelta/liveparse/test1_modb.v", R_OK), F_OK);
+
   chunker2.parse_inline(test1_verilog);
-  EXPECT_EQ(access("tdelta/parse/liveparse/test1_moda.v", R_OK), F_OK);
-  EXPECT_EQ(access("tdelta/parse/liveparse/test1_modb.v", R_OK), F_OK);
+  EXPECT_EQ(access("tdelta/liveparse/test1_moda.v", R_OK), F_OK);
+  EXPECT_EQ(access("tdelta/liveparse/test1_modb.v", R_OK), F_OK);
+
+  auto v1 = chunker2.get_generated_files();
+  EXPECT_EQ(v1.size(), 2);
 
   std::string test2_verilog
       = "  "
@@ -65,8 +69,13 @@ TEST_F(VTest1, interface) {
         ");\n endmodule\n";
   // test1_moda different
   chunker2.parse_inline(test2_verilog);
-  EXPECT_EQ(access("tdelta/parse/liveparse/test1_moda.v", R_OK), F_OK);
-  EXPECT_NE(access("tdelta/parse/liveparse/test1_modb.v", R_OK), F_OK);
+
+  EXPECT_EQ(access("tdelta/liveparse/test1_moda.v", R_OK), F_OK);
+  EXPECT_EQ(access("tdelta/liveparse/test1_modb.v", R_OK), F_OK);
+
+  auto v = chunker2.get_generated_files();
+  EXPECT_EQ(v.size(), 1);
+  EXPECT_EQ(v[0], "tdelta/liveparse/test1_moda.v");
 }
 
 void test_throw() {

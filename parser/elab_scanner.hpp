@@ -260,7 +260,7 @@ protected:
     return std::string_view(memblock, memblock_size);
   }
   std::string_view get_filename() const {
-    I(memblock_fd != -1);
+    I(memblock_fd != -1 || filename == "inline");;
     return filename;
   }
   bool is_parse_inline() const { return memblock_fd == -1; }

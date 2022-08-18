@@ -26,7 +26,7 @@ Chunkify_verilog::Chunkify_verilog(std::string_view _path, bool _incremental_mod
 
   library = Graph_library::instance(path);
 
-  chunk_dir = absl::StrCat(path, "/liverparse");
+  chunk_dir = absl::StrCat(path, "/liveparse");
   if (access(chunk_dir.c_str(), F_OK) != 0) {
     std::string spath(path);
     int         err = mkdir(spath.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -36,7 +36,7 @@ Chunkify_verilog::Chunkify_verilog(std::string_view _path, bool _incremental_mod
 
     err = mkdir(chunk_dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (err < 0 && errno != EEXIST) {
-      throw scan_error(*this, "could not create {}/{} directory", path, "liverparse");
+      throw scan_error(*this, "could not create {}/{} directory", path, "liveparse");
     }
   }
 }
@@ -138,6 +138,8 @@ void Chunkify_verilog::elaborate() {
   //     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
   //     ctx.event()->set_name(converted_str + fname.c_str()); 
   //     });
+
+  generated_files.clear();
 
   bool in_module   = false;
   bool last_input  = false;

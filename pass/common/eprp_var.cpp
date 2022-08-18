@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "graph_library.hpp"
+
 #include "absl/strings/str_split.h"
 
 void Eprp_var::add(const Eprp_dict &_dict) {
@@ -58,7 +60,12 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
         fmt::print("ERROR: path {} is not accessible (skipping)\n", path);
         throw std::runtime_error("not valid file");
       }
-    }
+    } 
+
+    // WARNING: THis is needed because the global_instance is NOT lock
+    // protected (the path must be set/created before the threads span)
+    auto *ptr = Graph_library::instance(path); 
+    I(ptr);
   }
 
   dict[name] = value;
