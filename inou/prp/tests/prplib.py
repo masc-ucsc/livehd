@@ -5,7 +5,6 @@ import os
 import re
 import subprocess
 import sys
-import yaml
 
 class PrpTest:
     """
@@ -28,10 +27,10 @@ class PrpTest:
                     param = re.search(r'^:([a-zA-Z_-]+):\s*(.+)', line)
                     if param == None:
                         continue
-                    
+
                     param_name = param[1]
                     param_value = param[2]
-                    
+
                     self.params[param_name] = param_value
         except Exception as e:
             print('Failed to process "{}"'.format(prp_file))
@@ -46,23 +45,15 @@ class PrpRunner:
     """
     LiveHD Pyrope Compilation Runner
     """
-    config : {}
 
-    def __init__(self, config_file):
-        try:
-            with open(config_file) as f:
-                self.config = yaml.load(f.read(), yaml.Loader)
-        except Exception as e:
-            print(e)
-            print('Failed to process config file "{}"'.format(config_file))
-            sys.exit(1)
+    #def __init__(self, config_file):
 
     def lgshell_parse(self, test):
         lg_cmd = []
-        
+
         lg_cmd.append('inou.prp')
         lg_cmd.append('files:{}'.format(','.join(test.params['files'])))
-        
+
         return lg_cmd
 
     def lgshell_lgraph(self, test):
@@ -95,7 +86,7 @@ class PrpRunner:
         }
 
         cmd = []
-        cmd.append(self.config['lgshell']['bin'])
+        cmd.append("./main/lgshell")
         cmd.append(' '.join(gen_lg_cmd[mode](test)))
 
         return cmd
@@ -104,7 +95,7 @@ class PrpRunner:
 
         for mode in test.params['type']:
             cmd = []
-            
+
             if mode == 'simulation':
                 pass
             else:
@@ -116,7 +107,7 @@ class PrpRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT
             )
-            
+
             try:
                 log, _ = proc.communicate()
                 rc = proc.returncode
