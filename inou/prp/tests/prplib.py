@@ -46,7 +46,14 @@ class PrpRunner:
     LiveHD Pyrope Compilation Runner
     """
 
-    #def __init__(self, config_file):
+    def __init__(self):
+        if os.path.exists("./bazel-bin/main/lgshell"):
+            self.lgshell = "./bazel-bin/main/lgshell"
+        elif os.path.exists("./main/lgshell"):
+            self.lgshell = "./main/lgshell"
+        else:
+            print('Failed to find lgshell binary')
+            sys.exit(3)
 
     def lgshell_parse(self, test):
         lg_cmd = []
@@ -86,7 +93,7 @@ class PrpRunner:
         }
 
         cmd = []
-        cmd.append("./main/lgshell")
+        cmd.append(self.lgshell)
         cmd.append(' '.join(gen_lg_cmd[mode](test)))
 
         return cmd
