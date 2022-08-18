@@ -1521,16 +1521,16 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   bool false_path_one  = false;
   if (inp_edges_ordered[1].driver.is_type_const()) {
     auto v          = inp_edges_ordered[1].driver.get_type_const();
-    false_path_zero = (v == Lconst(0) || v.to_firrtl() == "is_fir_invalid"); // FIXME-> put ? on the lnast cprop could collaps the mux 
-    false_path_one  = (v == Lconst(1));
+    false_path_zero = v == Lconst(0) || v.is_string();
+    false_path_one  = v == Lconst(1);
   }
 
   bool true_path_zero = false;
   bool true_path_one  = false;
   if (inp_edges_ordered[2].driver.is_type_const()) {
     auto v         = inp_edges_ordered[2].driver.get_type_const();
-    true_path_zero = (v == Lconst(0) || v.to_firrtl() == "is_fir_invalid"); // FIXME-> put ? on the lnast cprop could collaps the mux
-    true_path_one  = (v == Lconst(1) || v == Lconst(-1));
+    true_path_zero = v == Lconst(0) || v.is_string();
+    true_path_one  = v == Lconst(1) || v == Lconst(-1);
   }
 
   bool false_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[1].driver;
