@@ -11,7 +11,7 @@
 #include <string>
 #include <algorithm>
 
-
+#define VISITED_COLORED 401
 static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
 
 void Traverse_lg::setup() {
@@ -820,6 +820,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
   }//if(do_matching) closes here
 
+  bool cellIOMap_synth_resolved = false;
   if(do_matching && req_flops_matched && !cellIOMap_synth.empty() ){
     /*resolve cellIOMap_synth with help of matching_map*/
     for(auto it=cellIOMap_synth.begin(); it!=cellIOMap_synth.end();){
@@ -881,8 +882,120 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
       fmt::print("\n\n");
     }
+    cellIOMap_synth_resolved=true;
   }//if(do_matching && req_flops_matched && !cellIOMap_synth.empty()) ends here
 
+  fmt::print("\n\n\n");
+  if(do_matching && cellIOMap_synth_resolved){
+    /*matching of combo part happens here with help of pre-synth LG!
+     * 1. take LGorig and go to the SP for 1st cell in cellIOMap_synth*/
+    for (auto [k,v]: cellIOMap_synth){
+      auto allSPs = k.first;
+      auto allEPs = k.second;
+      
+      for (auto sp:allSPs) fmt::print("{} ", sp);
+      fmt::print("\n-\n");
+      for (auto ep:allEPs) fmt::print("{}\n", ep);
+      fmt::print("\n\n\n");
+
+      /*go to 1st SP of allSPs for 1st entry
+       * and start iterating from there*/
+      const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
+      for (const auto& startPoint_node : lg->fast()) {
+        if(std::to_string(startPoint_node.get_nid().value)==required_node){
+          fmt::print("Found node {}\n", startPoint_node.get_nid());
+          //keep traversing forward until you hit an EP
+          path_traversal(startPoint_node);
+
+        }
+      }//end of for (const auto& startPoint_node : lg->forward())
+
+    }//for (auto [k,v]: cellIOMap_synth) ends here
+    /*Printing "matching map"*/             
+    fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
+    for (const auto& [k,v]:matching_map) {  
+      fmt::print("\n{}\t:::\t",k.get_nid());
+      for (auto& v1:v) {
+        fmt::print("{}\t", v1.get_nid());   
+      }
+    }
+      fmt::print("\n");                     
+  }//if(cellIOMap_synth_resolved) ends here
+
+}
+
+void Traverse_lg::path_traversal(const Node &start_node){
+  Node this_node = start_node;
+  for(auto s : this_node.out_sinks()){
+    this_node = s.get_node();
+    if ( (this_node.has_color()?(this_node.get_color()!=VISITED_COLORED):true) && (!is_endpoint(this_node)) ) {
+      /*it is unvisited combinational cell*/
+      this_node.set_color(VISITED_COLORED);
+      
+      std::set<std::string> nodes_in_set;
+      std::set<std::string> nodes_out_set;
+      std::set<std::string> nodes_io_set;
+      get_input_node(s, nodes_in_set, nodes_io_set);
+      get_output_node(s, nodes_out_set, nodes_io_set) ;
+
+      auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
+
+      if (val) {
+        path_traversal(this_node);
+      }
+    } else if ( this_node.has_color()?(this_node.get_color()==VISITED_COLORED):false) {
+      return;
+    } else if (is_endpoint(this_node)) {
+      return;
+    } else {
+      I(false,"\nISSUE TO DEBUG!\n" );
+    }
+  }
+}
+
+bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node) {
+  /*if (this node is NOT a subset of any entry in cellIOMap_synth) return false
+   *  -currently a complete match is considered; subset is a future FIXME-
+   * returning F because : stop iterating for its sink pins as this path is not going anywhere in criticality
+   * else return T 
+   * Also: put the data in matching_map? or some other map to reflect matched combo cells?
+   * */  
+  //make io pair of the 2 sets from LGorig
+  auto pair_to_find = std::make_pair(in_set, out_set); 
+  //find the pair in keys of the cellIOMap_synth
+  if(cellIOMap_synth.find(pair_to_find) != cellIOMap_synth.end()) {
+    //if found, put this start_node of LGorig against value from cellIOMap_synth for LGsynth to matching_map AND return T
+    auto found_synth_cell_vals = cellIOMap_synth[pair_to_find];
+    for(auto n:found_synth_cell_vals) {
+      std::vector<Node::Compact_flat> tmpVec;
+      if(matching_map.find(n) != matching_map.end()) {
+        tmpVec.assign((matching_map[n]).begin() , (matching_map[n]).end() );
+        tmpVec.emplace_back(start_node.get_compact_flat());
+      } else {
+        tmpVec.emplace_back(start_node.get_compact_flat());
+      }
+      matching_map[n]=tmpVec;
+    }
+    
+    return true;
+  }
+  //if not found, return F
+  return false;
+}
+
+bool Traverse_lg::is_startpoint(Node node_to_eval ){
+  /*if (node is flop or graph input) return true else return false*/
+  if(node_to_eval.is_type_flop() || (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_input()){
+    return true;
+  } 
+  return false;
+}
+bool Traverse_lg::is_endpoint(Node node_to_eval){
+  /*if (node is flop or graph output) return true else return false*/
+  if(node_to_eval.is_type_flop() ||  (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_output()){
+    return true;
+  } 
+  return false;
 
 }
 

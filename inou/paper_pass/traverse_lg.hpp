@@ -62,6 +62,10 @@ protected:
   void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set);
   void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set);
   std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
+  void path_traversal(const Node &startPoint_node);
+  bool check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node);
+  bool is_startpoint(Node node_to_eval);
+  bool is_endpoint(Node node_to_eval);
 
 public:
   static void travers(Eprp_var& var);
