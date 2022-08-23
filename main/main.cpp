@@ -289,7 +289,7 @@ constexpr unsigned long minor_version = 0;
 void dummy_call_to_preserve_methods_useful_for_debugging() { std::cout << "dummy_called\n"; }
 
 int main(int argc, char** argv) {
-  TRACE_EVENT("pass", "main");
+  // TRACE_EVENT("pass", "main");
 
   I_setup();
 
