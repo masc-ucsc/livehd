@@ -75,6 +75,8 @@ protected:
 
   bool scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered);
   void scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
+  Node_pin try_find_single_driver_pin(Node &node, int pos);
+  bool scalar_get_mask(Node &node);
 
   // io construction
   void try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup);

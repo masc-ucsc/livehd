@@ -598,7 +598,7 @@ void Bitwidth::process_set_mask(Node &node) {
       not_finished = true;
       return;
     } else {
-      Pass::info("bw pin:{} is not constrained but constraining to mask size", value_dpin.debug_name());
+      //Pass::info("bw pin:{} is not constrained but constraining to mask size", value_dpin.debug_name());
       bw.set_wider_range(Lconst(0), mask);
       adjust_bw(node.get_driver_pin(), bw);
       return;
@@ -1470,7 +1470,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     }
   }
 
-  if (false && !hier && !not_finished) {
+  if (!hier && !not_finished) {
     // delete all the attr_set/get for bitwidth
     for (auto node : lg->fast()) {  // Non-hierarchical erase attr
       auto op = node.get_type_op();

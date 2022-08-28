@@ -100,6 +100,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
         overwrite_dpin2net.insert_or_assign(node.get_driver_pin().get_compact_driver(), a_dpin.get_name());
         continue;
       }
+      node.dump();
       I(false);
       // FIXME: in get_mask goes to input, pick the expanded bit name directly (set the name in get_mask.dpin??)
       // FIXME: create a cell (buffer ?) to pick wire
@@ -110,6 +111,8 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       if (dpin.is_graph_io()) {
         continue;
       }
+      node.dump();
+      continue;
       I(false);
       // FIXME: in get_mask goes to input, pick the expanded bit name directly (set the name in get_mask.dpin??)
       // FIXME: create a cell (buffer ?) to pick wire

@@ -275,8 +275,11 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
     lnast_create_obj.create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
     if (dest_var_sign)
       lnast_create_obj.create_assign_stmts(var_name, "0sb?");
-    else
-      lnast_create_obj.create_assign_stmts(var_name, "0b?");  // mark with x so that potential use is poison if needed
+    else {
+      std::string qmarks(dest_var_bits,'?');
+
+      lnast_create_obj.create_assign_stmts(var_name, absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
+    }
   }
 
   if (dest_min_bit.empty() && dest_max_bit.empty()) {

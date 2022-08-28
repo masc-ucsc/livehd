@@ -823,6 +823,8 @@ void Cprop::tuple_get_mask_mut(Node &node) {
   }
 
   if (a_it == node2tuple.end() && mask_it == node2tuple.end()) {
+    // CPROP without tuple
+
     return;
   }
 
@@ -1999,7 +2001,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
       expand_data_and_attributes(node, "", pending_out_edges, node_tup);
     } else {
 #ifndef NDEBUG
-      Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
+      // Pass::info("some pins:{} did not connect (may be fine)", pending_out_edges[0].sink.debug_name());
 #endif
     }
   }
@@ -2110,6 +2112,100 @@ Node_pin Cprop::expand_data_and_attributes(Node &node, std::string_view key_name
   return value_dpin;
 }
 
+// FIXME:
+//
+// 1- get_mask(get_mask(X,a),b)) == get_mask(X, set_mask(a=a,val=-1,mask=b))
+//
+// 2- get_mask(0,b) == 0
+//
+// 3- get_mask(-1,b) && b>0 == b
+//
+// 4- get_mask(a,-1) && a>0 == a
+//
+// 5- get_mask(a,0) == 0
+//
+// 6- set_mask(a=0,val=X,mask=b) == get_mask(X,b)
+//
+// 7- set_mask(a=X,val=Y,mask=-1) == Y
+//
+// 8- set_mask(a=X,val=Y,mask=0) == X
+//
+// 9- Since set_mask(a=X,val=-1,mask=b) == X | b
+// 9.1- get_mask(or(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=-1,mask=b),c) -> get_mask(-1,c) (if c>0 -> c)
+//
+// 10- Since set_mask(a=X,val=0,mask=b) == X & b
+// 10.1- get_mask(and(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=0,mask=b),c) -> get_mask(0,c) -> c
+//
+// 13- set_mask(a=get_mask(Y,a),val=X,mask=b) && popcount(a) < popcount(b) -> get_mask(X,b)
+//
+// 14- eq(get_mask(X,b), c) and b bit_implies c == ror(get_mask(X,b))
+//
+// 11- get_mask(set_mask(a=Y,val=X,mask=a),b) && a bit_implies b -> get_mask(X,b)
+//
+// 12- get_mask(set_mask(a=Y,val=X,mask=a),b) && ~a bit_implies b -> get_mask(Y,b)
+
+Node_pin Cprop::try_find_single_driver_pin(Node &node, int pos) {
+  I(node.is_type(Ntype_op::Set_mask));
+
+  auto a_spin = node.get_sink_pin("a");
+  auto mask_spin = node.get_sink_pin("mask");
+  if (!a_spin.is_connected() || !mask_spin.is_connected()) {
+    return invalid_pin;
+  }
+  auto mask_node = mask_spin.get_driver_node();
+  if (!mask_node.is_type_const())
+    return invalid_pin;
+
+  auto [range_begin, range_end] = mask_node.get_type_const().get_mask_range();
+  if (pos >= range_end || pos < range_begin) {
+    auto a_node = a_spin.get_driver_node();
+    if (a_node.is_type_const()) {
+      auto v = a_node.get_type_const().get_mask_op(Lconst::get_mask_value(pos));
+      return node.create_const(v).get_driver_pin();
+    }
+    if (!a_node.is_type(Ntype_op::Set_mask))
+      return invalid_pin;
+    return try_find_single_driver_pin(a_node, pos);
+  }
+  if (range_begin == pos && range_end == (pos+1)) { // SHORT-CUT found
+    return node.get_sink_pin("value").get_driver_pin();
+  }
+
+  return invalid_pin;
+}
+
+bool Cprop::scalar_get_mask(Node &node) {
+
+  auto a_spin = node.get_sink_pin("a");
+  auto mask_spin = node.get_sink_pin("mask");
+  if (!a_spin.is_connected() || !mask_spin.is_connected()) {
+    node.del_node();
+    return true;
+  }
+  auto mask_node = mask_spin.get_driver_node();
+  if (!mask_node.is_type_const())
+    return false;
+  auto a_node = a_spin.get_driver_node();
+  if (!a_node.is_type(Ntype_op::Set_mask))
+    return false;
+
+  auto [range_begin, range_end] = mask_node.get_type_const().get_mask_range();
+
+  if ((range_begin+1) != range_end)
+    return false;
+
+  auto dpin = try_find_single_driver_pin(a_node, range_begin);
+  if (!dpin.is_invalid()) {
+    fmt::print("HIT-----[{},{}]\n", range_begin, range_end);
+    node.dump();
+    collapse_forward_for_pin(node, dpin);
+    return true;
+  }
+
+  return false;
+}
+
+
 void Cprop::scalar_pass(Lgraph *lg) {
   tuple_found = false;
 
@@ -2146,38 +2242,10 @@ void Cprop::scalar_pass(Lgraph *lg) {
       // BW: ror(X) and X.__sbits==1 -> X
 
     } else if (op == Ntype_op::Get_mask) {
-      // FIXME:
-      //
-      // 1- get_mask(get_mask(X,a),b)) == get_mask(X, set_mask(a=a,val=-1,mask=b))
-      //
-      // 2- get_mask(0,b) == 0
-      //
-      // 3- get_mask(-1,b) && b>0 == b
-      //
-      // 4- get_mask(a,-1) && a>0 == a
-      //
-      // 5- get_mask(a,0) == 0
-      //
-      // 6- set_mask(a=0,val=X,mask=b) == get_mask(X,b)
-      //
-      // 7- set_mask(a=X,val=Y,mask=-1) == Y
-      //
-      // 8- set_mask(a=X,val=Y,mask=0) == X
-      //
-      // 9- Since set_mask(a=X,val=-1,mask=b) == X | b
-      // 9.1- get_mask(or(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=-1,mask=b),c) -> get_mask(-1,c) (if c>0 -> c)
-      //
-      // 10- Since set_mask(a=X,val=0,mask=b) == X & b
-      // 10.1- get_mask(and(X,b),c) && b bit_implies c == get_mask(set_mask(a=X,val=0,mask=b),c) -> get_mask(0,c) -> c
-      //
-      // 11- get_mask(set_mask(a=Y,val=X,mask=a),b) && a bit_implies b -> get_mask(X,b)
-      //
-      // 12- get_mask(set_mask(a=Y,val=X,mask=a),b) && ~a bit_implies b -> get_mask(Y,b)
-      //
-      // 13- set_mask(a=get_mask(Y,a),val=X,mask=b) && popcount(a) < popcount(b) -> get_mask(X,b)
-      //
-      // 14- eq(get_mask(X,b), c) and b bit_implies c == ror(get_mask(X,b))
-      //
+      bool del = scalar_get_mask(node);
+      if (del)
+        continue;
+
     } else if (!node.has_outputs()) {
       bwd_del_node(node);
       continue;

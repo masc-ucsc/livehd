@@ -1037,6 +1037,8 @@ void Cgen_verilog::do_from_lgraph(Lgraph *lg) {
 
   auto fout = std::make_shared<File_output>(filename);
 
+  fout->append("/* verilator lint_off WIDTH */\n");
+
   fout->append("module ", get_scaped_name(lg->get_name()), "(\n");
 
   create_module_io(fout, lg);  // pin2var adds
