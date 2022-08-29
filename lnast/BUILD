@@ -129,3 +129,13 @@ cc_test(
     ],
     timeout="short", # to avoid infinite loops
 )
+
+cc_binary(
+    name = "bench",
+    srcs = ["tests/bench.cpp"],
+    deps = [
+      ":lnast",
+      "@hif//hif",
+      "@com_google_benchmark//:benchmark",
+    ],
+)

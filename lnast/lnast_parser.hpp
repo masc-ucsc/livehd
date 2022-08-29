@@ -31,7 +31,7 @@ protected:
   void read_all_tokens() {
     do {
       token_array.push_back(lexer->lex_token());
-      fmt::print("{}\n", token_array.back().get_string());
+      // fmt::print("{}\n", token_array.back().get_string());
     } while (token_array.back().get_kind() != Lnast_token::eof);
   }
 

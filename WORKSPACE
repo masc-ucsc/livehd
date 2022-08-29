@@ -88,10 +88,10 @@ http_archive(
 http_archive(
     name = "tree-sitter-pyrope",
     build_file = "tree-sitter-pyrope.BUILD",
-    sha256 = "463f9f58db02f7b14e83e46f0aedfb8b8495b3de0ef09e9f5878ac84d4b72891",
-    strip_prefix = "tree-sitter-pyrope-7a5edc94b750ec7be8dd32eecb4354a7f919f0a7",
+    # sha256 = "463f9f58db02f7b14e83e46f0aedfb8b8495b3de0ef09e9f5878ac84d4b72891",
+    strip_prefix = "tree-sitter-pyrope-6ef5d7cbab655942b3e1feb4e2265494b9189440",
     urls = [
-        "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/7a5edc94b750ec7be8dd32eecb4354a7f919f0a7.zip",
+        "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/6ef5d7cbab655942b3e1feb4e2265494b9189440.zip",
     ],
 )
 
@@ -128,9 +128,9 @@ http_archive(
 http_archive(
     name = "hif",
     # sha256 = "9eee32fcb0ec4bbe9ed945de55c7161e294e76958af2461c8544ea5c1e484d02",
-    strip_prefix = "hif-ad84f39c2717648f17e73649c57ba27a42b018b1",
+    strip_prefix = "hif-af1c31029448fab89805ab9cc170f1b97e9f91be",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/ad84f39c2717648f17e73649c57ba27a42b018b1.zip",
+        "https://github.com/masc-ucsc/hif/archive/af1c31029448fab89805ab9cc170f1b97e9f91be.zip",
     ],
 )
 
