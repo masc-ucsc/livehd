@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
@@ -17,10 +18,10 @@ using Node_iterator = std::vector<Node>;
 
 class Node {
 protected:
-  Lgraph         *top_g;
-  mutable Lgraph *current_g;
-  Hierarchy_index hidx;
-  Index_id        nid;
+  Lgraph         *top_g{nullptr};
+  mutable Lgraph *current_g{nullptr};
+  Hierarchy_index hidx{-1};
+  Index_id        nid{0};
 
   friend class Lgraph;
   friend class Lgraph_attributes;
@@ -47,8 +48,8 @@ protected:
 public:
   class __attribute__((packed)) Compact {
   protected:
-    Hierarchy_index hidx;              // 4 bytes
-    uint64_t        nid : Index_bits;  // 4 bytes
+    Hierarchy_index hidx{-1};          // 4 bytes
+    uint32_t        nid : Index_bits;  // 4 bytes
 
     friend class Lgraph;
     friend class Lgraph_attributes;
@@ -62,19 +63,19 @@ public:
 
   public:
     constexpr Compact(Hierarchy_index _hidx, Index_id _nid) : hidx(_hidx), nid(_nid) { assert(nid); };
-    constexpr Compact() : hidx(-1), nid(0){};
+    constexpr Compact() : nid(0){};
 
-    constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
+    [[nodiscard]] constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
-    constexpr Hierarchy_index get_hidx() const {
+    [[nodiscard]] constexpr Hierarchy_index get_hidx() const {
       I(!Hierarchy::is_invalid(hidx));
       return hidx;
     }
 
     // Can not be constexpr find current_g
-    Node get_node(Lgraph *lg) const { return Node(lg, *this); }
+    Node get_node(Lgraph *lg) const { return {lg, *this}; }
 
-    constexpr bool is_invalid() const { return nid == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return nid == 0u; }
 
     constexpr bool operator==(const Compact &other) const {
       return nid == other.nid && (hidx == other.hidx || Hierarchy::is_invalid(hidx) || Hierarchy::is_invalid(other.hidx));
@@ -89,8 +90,8 @@ public:
 
   class __attribute__((packed)) Compact_flat {
   protected:
-    uint32_t lgid;
-    uint64_t nid : Index_bits;
+    uint32_t lgid{0};
+    uint32_t nid : Index_bits;
 
     friend class Lgraph;
     friend class Lgraph_attributes;
@@ -105,14 +106,14 @@ public:
   public:
     Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), nid(obj.nid) {}
     constexpr Compact_flat(const Lg_type_id &_lgid, Index_id _nid) : lgid(_lgid.value), nid(_nid) { assert(nid); };
-    constexpr Compact_flat() : lgid(0), nid(0){};
+    constexpr Compact_flat() : nid(0){};
 
-    constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
+    [[nodiscard]] constexpr Index_id get_nid() const { return nid; }  // Mostly for debugging or to know order
 
     // Can not be constexpr find current_g
-    Node get_node(std::string_view path) const { return Node(path, *this); }
+    [[nodiscard]] Node get_node(std::string_view path) const { return {path, *this}; }
 
-    constexpr bool is_invalid() const { return nid == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return nid == 0u; }
 
     constexpr bool operator==(const Compact_flat &other) const { return nid == other.nid && lgid == other.lgid; }
     constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
@@ -125,7 +126,7 @@ public:
 
   class __attribute__((packed)) Compact_class {
   protected:
-    uint64_t nid : Index_bits;
+    uint32_t nid : Index_bits;
 
     friend class Lgraph;
     friend class Lgraph_attributes;
@@ -144,10 +145,10 @@ public:
 
     constexpr Compact_class(const Index_id &_nid) : nid(_nid){};
 
-    Node get_node(Lgraph *lg) const { return Node(lg, *this); }
+    Node get_node(Lgraph *lg) const { return {lg, *this}; }
 
-    constexpr Index_id get_nid() const { return nid; }
-    constexpr bool     is_invalid() const { return nid == 0; }
+    [[nodiscard]] constexpr Index_id get_nid() const { return nid; }
+    [[nodiscard]] constexpr bool     is_invalid() const { return nid == 0u; }
 
     constexpr bool operator==(const Compact_class &other) const { return nid == other.nid; }
     constexpr bool operator!=(const Compact_class &other) const { return nid != other.nid; }
@@ -170,14 +171,14 @@ public:
   void update(const Node::Compact &comp);
   void update(const Node &node);
 
-  constexpr Node() : top_g(nullptr), current_g(nullptr), hidx(-1), nid(0) {}
+  constexpr Node() = default;
 
   Node(Lgraph *_g, const Compact &comp) { update(_g, comp); }
   Node(std::string_view path, const Compact_flat &comp);
   Node(Lgraph *_g, const Compact_flat &comp);
   Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp);
   constexpr Node(Lgraph *_g, const Compact_class &comp)
-      : top_g(_g), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+      : top_g(_g), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
@@ -195,12 +196,12 @@ public:
   };
 #endif
 
-  inline Compact get_compact() const { return Compact(hidx, nid); }
+  inline Compact get_compact() const { return {hidx, nid}; }
 
   Compact_flat         get_compact_flat() const;
   inline Compact_class get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
-    return Compact_class(nid);
+    return {nid};
   }
 
   Lgraph        *get_top_lgraph() const { return top_g; }
@@ -218,7 +219,7 @@ public:
   }
   Node_pin get_sink_pin() const {
     I(!Ntype::is_multi_sink(get_type_op()));
-    return Node_pin(top_g, current_g, hidx, nid, 0, true);
+    return {top_g, current_g, hidx, nid, 0, true};
   }
 
   Node_pin get_driver_pin_raw(Port_ID pid) const;
@@ -231,7 +232,7 @@ public:
       return get_driver_pin_slow(pname);
     }
     I(!Ntype::is_multi_driver(get_type_op()));               // Use direct pid for multidriver
-    return Node_pin(top_g, current_g, hidx, nid, 0, false);  // could be invalid if not setup
+    return {top_g, current_g, hidx, nid, 0, false};  // could be invalid if not setup
   }
   Node_pin get_sink_pin_slow(std::string_view pname) const;
   Node_pin get_sink_pin(std::string_view pname) const {
@@ -242,7 +243,7 @@ public:
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return get_sink_pin_raw(pid);
-    return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
+    return {top_g, current_g, hidx, nid, 0, true};  // could be invalid if not setup
   }
 
   Node_pin setup_driver_pin(std::string_view pname) const;
@@ -259,7 +260,7 @@ public:
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     if (pid)
       return setup_sink_pin_raw(pid);
-    return Node_pin(top_g, current_g, hidx, nid, 0, true);  // could be invalid if not setup
+    return {top_g, current_g, hidx, nid, 0, true};  // could be invalid if not setup
   }
 
   Node_pin setup_sink_pin_raw(Port_ID pid);
@@ -361,7 +362,8 @@ public:
   // non-hierarchical node name (1 for all nodes)
   void        set_name(std::string_view iname);
   std::string get_name() const;
-  std::string create_name() const;
+  [[nodiscard]] std::string_view get_hier_name() const;
+  std::string get_or_create_name() const;
   bool        has_name() const;
 
   void            set_place(const Ann_place &p);

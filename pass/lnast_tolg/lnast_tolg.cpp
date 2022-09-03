@@ -1377,7 +1377,8 @@ void Lnast_tolg::process_ast_func_call_op(Lgraph *lg, const Lnast_nid &lnidx_fc)
 
   auto ret_name  = lnast->get_sname(c0_fc);
   auto subg_node = lg->create_node_sub(func_name);
-  subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
+  // OLD STYLE: subg_node.set_name(absl::StrCat(arg_tup_name, ":", ret_name, ":", func_name));
+  subg_node.set_name(lnast->get_vname(c0_fc));
 
   auto subg_spin = subg_node.setup_sink_pin("$");
   auto subg_dpin = subg_node.setup_driver_pin("%");

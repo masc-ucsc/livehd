@@ -37,8 +37,8 @@ protected:
 
   Port_ID recompute_io_ports(const Index_id track_nid);
 
-  Index_id find_idx_from_pid_int(const Index_id nid, const Port_ID pid) const;
-  Index_id find_idx_from_pid(const Index_id nid, const Port_ID pid) const {
+  [[nodiscard]] Index_id find_idx_from_pid_int(const Index_id nid, const Port_ID pid) const;
+  [[nodiscard]] Index_id find_idx_from_pid(const Index_id nid, const Port_ID pid) const {
     if (likely(node_internal[nid].get_dst_pid() == pid)) {  // Common case
       return nid;
     }
@@ -47,9 +47,9 @@ protected:
 
   Index_id setup_idx_from_pid(const Index_id nid, const Port_ID pid);
 
-  Index_id get_master_nid(Index_id idx) const { return node_internal[idx].get_master_root_nid(); }
+  [[nodiscard]] Index_id get_master_nid(Index_id idx) const { return node_internal[idx].get_master_root_nid(); }
 
-  uint32_t get_bits(Index_id idx) const {
+  [[nodiscard]] Bits_t get_bits(Index_id idx) const {
     I(idx < node_internal.size());
     return node_internal[idx].get_bits();
   }
@@ -83,7 +83,7 @@ public:
 
   void print_stats() const;
 
-  bool is_valid_node(Index_id nid) const {
+  [[nodiscard]] bool is_valid_node(Index_id nid) const {
     if (nid >= node_internal.size())
       return false;
 
@@ -95,7 +95,7 @@ public:
     return ret;
   }
 
-  bool is_valid_node_pin(Index_id idx) const {
+  [[nodiscard]] bool is_valid_node_pin(Index_id idx) const {
     if (idx >= node_internal.size())
       return false;
 
@@ -107,12 +107,12 @@ public:
     return ret;
   }
 
-  Port_ID get_dst_pid(Index_id idx) const {
+  [[nodiscard]] Port_ID get_dst_pid(Index_id idx) const {
     I(static_cast<Index_id>(node_internal.size()) > idx);
     return node_internal[idx].get_dst_pid();
   }
 
-  bool is_root(Index_id idx) const {
+  [[nodiscard]] bool is_root(Index_id idx) const {
     I(static_cast<Index_id>(node_internal.size()) > idx);
 
     // node_internal.ref_lock();
@@ -124,15 +124,15 @@ public:
   }
 
   static size_t max_size() { return (((size_t)1) << Index_bits) - 1; }
-  size_t        size() const { return node_internal.size(); }
+  [[nodiscard]] size_t        size() const { return node_internal.size(); }
 
   class _init {
   public:
     _init();
   } _static_initializer;
 
-  const Graph_library &get_library() const { return *library; }
-  Graph_library       *ref_library() const { return library; }
+  [[nodiscard]] const Graph_library &get_library() const { return *library; }
+  [[nodiscard]] Graph_library       *ref_library() const { return library; }
 
   static void error_int(std::string_view text);
   static void warn_int(std::string_view text);

@@ -24,7 +24,7 @@ void pass_submatch::setup() {
 pass_submatch::pass_submatch(const Eprp_var &var) : Pass("pass.submatch", var) {}
 
 void pass_submatch::do_work(Lgraph *g) {
-  Lbench b("pass.submatch." + g->get_name());
+  Lbench b(absl::StrCat("pass.submatch.", g->get_name()));
   find_mffc_group(g);
   find_subs(g);
 }

@@ -183,6 +183,7 @@ public:
 
   class __attribute__((packed)) Compact_class {
   protected:
+  public:
     uint32_t idx : Index_bits;
     uint32_t sink : 1;
 
@@ -394,6 +395,7 @@ public:
   // BEGIN ATTRIBUTE ACCESSORS
   [[nodiscard]] std::string debug_name() const;
   [[nodiscard]] std::string get_wire_name() const;
+  [[nodiscard]] std::string_view get_hier_name() const;
 
   void                          set_name(std::string_view wname);
   void                          reset_name(std::string_view wname);

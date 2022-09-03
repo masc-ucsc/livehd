@@ -75,17 +75,18 @@ protected:
   const std::string long_name;
   const Lg_type_id  lgid;
 
-  Lgraph_base_core() = delete;
   explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
-  virtual ~Lgraph_base_core(){};
+  virtual ~Lgraph_base_core() = default;
 
 public:
+  Lgraph_base_core() = delete;
+
   virtual void clear();
 
-  [[nodiscard]] std::string get_unique_name() const { return unique_name; }
-  [[nodiscard]] std::string get_name() const { return name; }
-  [[nodiscard]] std::string get_path() const { return path; }
+  [[nodiscard]] std::string_view get_unique_name() const { return unique_name; }
+  [[nodiscard]] std::string_view get_name() const { return name; }
+  [[nodiscard]] std::string_view get_path() const { return path; }
   [[nodiscard]] std::string get_save_filename() const { return absl::StrCat(path, "/", name); }
 
-  const Lg_type_id get_lgid() const { return lgid; }
+  [[nodiscard]] const Lg_type_id get_lgid() const { return lgid; }
 };

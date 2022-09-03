@@ -13,11 +13,16 @@
 static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
 
 void Pass_opentimer::setup() {
-  Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::work);
+  Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::time_work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
 
   register_pass(m1);
+
+  Eprp_method m2("pass.opentimer.power", "Power analysis on lgraph", &Pass_opentimer::power_work);
+  m2.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
+
+  register_pass(m2);
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var) {

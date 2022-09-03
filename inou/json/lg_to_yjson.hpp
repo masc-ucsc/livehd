@@ -43,7 +43,7 @@ private:
 
   void              process_multi_driver_node(Node* node, Ntype_op op);
   void              import_module(Lgraph* lg);
-  yjson::Module*    add_new_module(yjson::StrTyp name);
+  yjson::Module*    add_new_module(std::string_view name);
   yjson::Module*    find_module(std::string_view target_name);
   yjson::Prototype* find_node_prototype(Node* node, Ntype_op op);
   Prototype*        find_primitive(Ntype_op op);

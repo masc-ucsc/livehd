@@ -80,7 +80,7 @@ void Node::update(const Node::Compact &comp) {
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g(_g), current_g(0), hidx(_hidx), nid(comp.nid) {
+Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g(_g), hidx(_hidx), nid(comp.nid) {
   I(nid);
   I(top_g);
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
@@ -90,7 +90,7 @@ Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g
 }
 
 Node::Node(Lgraph *_g, const Compact_flat &comp)
-    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+    : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = _g->ref_library();
   top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
@@ -102,7 +102,7 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
 }
 
 Node::Node(std::string_view path, const Compact_flat &comp)
-    : top_g(nullptr), current_g(nullptr), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+    : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = Graph_library::instance(path);
   top_g = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
@@ -115,7 +115,7 @@ Node::Node(std::string_view path, const Compact_flat &comp)
 
 Node::Compact_flat Node::get_compact_flat() const {
   I(!is_invalid());
-  return Compact_flat(current_g->get_lgid(), nid);
+  return {current_g->get_lgid(), nid};
 }
 
 Graph_library *Node::ref_library() const { return current_g->ref_library(); }
@@ -125,7 +125,7 @@ Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
   I(Ntype::has_driver(get_type_op(), pid));
   Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
-  return Node_pin(top_g, current_g, hidx, idx, pid, false);
+  return {top_g, current_g, hidx, idx, pid, false};
 }
 
 Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
@@ -133,7 +133,7 @@ Node_pin Node::get_sink_pin_raw(Port_ID pid) const {
   I(Ntype::has_sink(get_type_op(), pid));
   Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
-  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+  return {top_g, current_g, hidx, idx, pid, true};
 }
 
 Node_pin Node::setup_driver_pin(std::string_view pname) const {
@@ -141,13 +141,13 @@ Node_pin Node::setup_driver_pin(std::string_view pname) const {
   if (std::isdigit(pname.front())) {
     Port_ID  pid = str_tools::to_i(pname);
     Index_id idx = current_g->setup_idx_from_pid(nid, pid);
-    return Node_pin(top_g, current_g, hidx, idx, pid, false);
+    return {top_g, current_g, hidx, idx, pid, false};
   }
   if (unlikely(is_type_sub() && pname != "%")) {
     return setup_driver_pin_slow(pname);
   }
   GI(pname != "%", !Ntype::is_multi_driver(get_type_op()));  // Use direct pid for multidriver
-  return Node_pin(top_g, current_g, hidx, nid, 0, false);
+  return {top_g, current_g, hidx, nid, 0, false};
 }
 
 Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
@@ -165,7 +165,7 @@ Node_pin Node::get_driver_pin_slow(std::string_view pname) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
-  return Node_pin(top_g, current_g, hidx, idx, pid, false);
+  return {top_g, current_g, hidx, idx, pid, false};
 }
 
 Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
@@ -183,7 +183,7 @@ Node_pin Node::get_sink_pin_slow(std::string_view pname) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);  // WARNING: setup because Sub can delay the connection
-  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+  return {top_g, current_g, hidx, idx, pid, true};
 }
 
 Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
@@ -201,7 +201,7 @@ Node_pin Node::setup_driver_pin_slow(std::string_view name) const {
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);
-  return Node_pin(top_g, current_g, hidx, idx, pid, false);
+  return {top_g, current_g, hidx, idx, pid, false};
 }
 
 bool Node::is_sink_connected(std::string_view pname) const {
@@ -268,7 +268,7 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
   const auto &sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(name));  // maybe you forgot an add_graph_input/output in the sub?
   if (sub.is_output(name))
-    return Node_pin();
+    return {};
 
   Port_ID pid;
 
@@ -276,24 +276,24 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
     int pos = str_tools::to_i(name);
 
     if (!sub.has_instance_pin(pos))
-      return Node_pin();  // invalid pin
+      return {};  // invalid pin
 
     auto io_pin = sub.get_io_pin_from_graph_pos(pos);
     if (io_pin.dir == Sub_node::Direction::Output) {
-      return Node_pin();  // invalid pin
+      return {};  // invalid pin
     }
 
     pid = sub.get_instance_pid(io_pin.name);
   } else {
     pid = sub.get_instance_pid(name);
     if (pid == Port_invalid)
-      return Node_pin();
+      return {};
   }
 
   I(pid != Port_invalid);  // graph_pos must be valid if connected
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);
-  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+  return {top_g, current_g, hidx, idx, pid, true};
 }
 
 Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
@@ -308,12 +308,12 @@ Node_pin Node::setup_sink_pin_raw(Port_ID pid) {
 #endif
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);
-  return Node_pin(top_g, current_g, hidx, idx, pid, true);
+  return {top_g, current_g, hidx, idx, pid, true};
 }
 
 Node_pin Node::setup_sink_pin() const {
   I(!Ntype::is_multi_sink(get_type_op()));
-  return Node_pin(top_g, current_g, hidx, nid, 0, true);
+  return {top_g, current_g, hidx, nid, 0, true};
 }
 
 bool Node::has_inputs() const { return current_g->has_inputs(*this); }
@@ -323,7 +323,7 @@ int Node::get_num_inp_edges() const { return current_g->get_num_inp_edges(*this)
 int Node::get_num_out_edges() const { return current_g->get_num_out_edges(*this); }
 int Node::get_num_edges() const { return current_g->get_num_edges(*this); }
 
-Node Node::get_non_hierarchical() const { return Node(current_g, current_g, Hierarchy::non_hierarchical(), nid); }
+Node Node::get_non_hierarchical() const { return {current_g, current_g, Hierarchy::non_hierarchical(), nid}; }
 
 Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 #ifndef NDEBUG
@@ -340,12 +340,12 @@ Node_pin Node::setup_driver_pin_raw(Port_ID pid) const {
 #endif
 
   Index_id idx = current_g->setup_idx_from_pid(nid, pid);
-  return Node_pin(top_g, current_g, hidx, idx, pid, false);
+  return {top_g, current_g, hidx, idx, pid, false};
 }
 
 Node_pin Node::setup_driver_pin() const {
   I(!Ntype::is_multi_driver(get_type_op()));
-  return Node_pin(top_g, current_g, hidx, nid, 0, false);
+  return {top_g, current_g, hidx, nid, 0, false};
 }
 
 Ntype_op         Node::get_type_op() const { return current_g->get_type_op(nid); }
@@ -522,16 +522,32 @@ std::string Node::default_instance_name() const {
   return absl::StrCat(name, "_nid", std::to_string(nid.value));
 }
 
-std::string Node::create_name() const {
+std::string_view Node::get_hier_name() const {
+
+  if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
+    return top_g->ref_htree()->get_name(hidx);
+  }
+
+  return top_g->get_name();
+}
+
+std::string Node::get_or_create_name() const {
+  std::string root_name;
+  if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
+    root_name = top_g->ref_htree()->get_name(hidx);
+  }
+
   auto      *ref = current_g->ref_node_name_map();
   const auto it  = ref->find(get_compact_class());
-  if (it != ref->end())
-    return it->second;
+  if (it != ref->end()) {
+    if (root_name.empty())
+      return it->second;
+
+    return absl::StrCat(root_name, ",", it->second);
+  }
 
   auto cell_name = Ntype::get_name(get_type_op());
-  auto sig       = absl::StrCat("lg_", cell_name, std::to_string(nid));
-  ref->insert_or_assign(get_compact_class(), sig);
-  return sig;
+  return absl::StrCat("_", root_name, ",", std::to_string(nid), cell_name);
 }
 
 std::string Node::get_name() const {

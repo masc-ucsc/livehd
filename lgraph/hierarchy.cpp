@@ -45,7 +45,7 @@ Node Hierarchy::get_instance_up_node(const Hierarchy_index hidx) const {
 
   auto [up_hidx, up_lg, up_nid] = get_instance_up(hidx);
 
-  return Node(top, up_lg, up_hidx, up_nid);
+  return {top, up_lg, up_hidx, up_nid};
 }
 
 Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) const {
@@ -57,6 +57,27 @@ Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) const {
   const auto &h_entry = up_vector[hidx];
 
   return h_entry.parent_hidx;
+}
+
+std::string_view Hierarchy::get_name(const Hierarchy_index hidx) const {
+
+  if (hidx<=0)
+    return "";
+
+  I(hidx < up_vector.size());  // invalid hierarchy hidx
+  if (!up_vector[hidx].name.empty())
+    return up_vector[hidx].name;
+
+  auto i = up_vector[hidx].parent_hidx;
+  std::string name{up_vector[hidx].parent_lg->get_name()};
+  while (i>0) {
+    name = absl::StrCat(up_vector[hidx].parent_lg->get_name(), ",", name);
+    i = up_vector[hidx].parent_hidx;
+  }
+
+  up_vector[hidx].name = name;
+
+  return up_vector[hidx].name;
 }
 
 Hierarchy_index Hierarchy::go_up(const Node &node) const { return go_up(node.get_hidx()); }

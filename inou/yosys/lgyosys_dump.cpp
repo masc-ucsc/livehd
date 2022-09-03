@@ -153,7 +153,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   assert(node.get_type_op() == Ntype_op::Memory);
 
-  RTLIL::Cell *memory = mod->addCell(absl::StrCat("\\", node.create_name()), RTLIL::IdString("$mem"));
+  RTLIL::Cell *memory = mod->addCell(absl::StrCat("\\", node.get_or_create_name()), RTLIL::IdString("$mem"));
 
   RTLIL::SigSpec wr_addr;
   RTLIL::SigSpec wr_data;
@@ -306,7 +306,7 @@ void Lgyosys_dump::create_subgraph(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   create_blackbox(sub, mod->design);
 
-  RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.create_name()), absl::StrCat("\\", sub.get_name()));
+  RTLIL::Cell *new_cell = mod->addCell(absl::StrCat("\\", node.get_or_create_name()), absl::StrCat("\\", sub.get_name()));
 
   fmt::print("inou_yosys instance_name:{}, subgraph->get_name():{}\n", node.get_name(), sub.get_name());
   for (const auto &e : node.inp_edges_ordered()) {

@@ -106,7 +106,8 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
   // include a font name to get graph to render properly with kgraphviewer
   std::string data = "digraph {\n node [fontname = \"Source Code Pro\"];\n";
 
-  absl::flat_hash_set<std::pair<std::string, std::string>> added;
+  // WARNING: string_view is fine because lgraph keep the std::string and it is unique per lgraph
+  absl::flat_hash_set<std::pair<std::string_view, std::string_view>> added;
 
   lg->each_hier_unique_sub_bottom_up([&added, &data](Lgraph *g) {
     fmt::print("visiting node:{}\n", g->get_name());

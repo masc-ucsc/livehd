@@ -21,9 +21,10 @@ protected:
   Lgraph *top;
 
   struct up_entry_t {
-    Lgraph         *parent_lg;
-    Index_id        parent_nid;
-    Hierarchy_index parent_hidx;
+    Lgraph          *parent_lg;
+    Index_id         parent_nid;
+    Hierarchy_index  parent_hidx;
+    mutable std::string name; // lazy populated (only on get_name)
   };
 
   struct key_entry_t {
@@ -44,21 +45,23 @@ protected:
   std::vector<up_entry_t>                           up_vector;
   absl::flat_hash_map<key_entry_t, Hierarchy_index> down_map;
 
-  Hierarchy_index                                 go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id nid);
-  std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
+  [[nodiscard]] Hierarchy_index                                 go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id nid);
+  [[nodiscard]] std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
 
 public:
   Hierarchy(Lgraph *top);
 
-  Lgraph *ref_lgraph(const Hierarchy_index hidx) const;
+  [[nodiscard]] Lgraph *ref_lgraph(const Hierarchy_index hidx) const;
 
-  Node get_instance_up_node(const Hierarchy_index hidx) const;
+  [[nodiscard]] std::string_view get_name(const Hierarchy_index hidx) const;
 
-  Hierarchy_index go_up(const Hierarchy_index hidx) const;
-  Hierarchy_index go_down(const Node &node);
-  Hierarchy_index go_up(const Node &node) const;
+  [[nodiscard]] Node get_instance_up_node(const Hierarchy_index hidx) const;
 
-  std::tuple<Hierarchy_index, Lgraph *> get_next(const Hierarchy_index hidx) const;
+  [[nodiscard]] Hierarchy_index go_up(const Hierarchy_index hidx) const;
+  [[nodiscard]] Hierarchy_index go_down(const Node &node);
+  [[nodiscard]] Hierarchy_index go_up(const Node &node) const;
+
+  [[nodiscard]] std::tuple<Hierarchy_index, Lgraph *> get_next(const Hierarchy_index hidx) const;
 
   static constexpr Hierarchy_index hierarchical_root() { return 0; }
   static constexpr Hierarchy_index non_hierarchical() { return -1; }

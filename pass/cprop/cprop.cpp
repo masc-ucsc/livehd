@@ -2196,8 +2196,8 @@ bool Cprop::scalar_get_mask(Node &node) {
 
   auto dpin = try_find_single_driver_pin(a_node, range_begin);
   if (!dpin.is_invalid()) {
-    fmt::print("HIT-----[{},{}]\n", range_begin, range_end);
-    node.dump();
+    //fmt::print("HIT-----[{},{}]\n", range_begin, range_end);
+    //node.dump();
     collapse_forward_for_pin(node, dpin);
     return true;
   }

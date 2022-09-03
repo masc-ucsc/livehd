@@ -167,8 +167,8 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
   }
 }
 
-yjson::Module* LGtoYJson::add_new_module(yjson::StrTyp name) {
-  _modules.push_back(new yjson::Module(name));
+yjson::Module* LGtoYJson::add_new_module(std::string_view name) {  //yjson::StrTyp name)
+  _modules.push_back(new yjson::Module(std::string(name)));
   return _modules.back();
 }
 
@@ -231,8 +231,7 @@ yjson::Prototype* LGtoYJson::find_node_prototype(Node* node, Ntype_op op) {
     const auto& sub = node->get_type_sub_node();
     cell_type       = find_module(sub.get_name());
     if (cell_type == NULL) {  // Module not found
-      std::string sub_name(sub.get_name());
-      cell_type = add_new_module(sub_name);
+      cell_type = add_new_module(sub.get_name());
       for (auto& io_pin : sub.get_sorted_io_pins()) {  // add module ports
         cell_type->add_port(io_pin.name, io_pin.is_input() ? pdInput : pdOutput, NULL);
       }

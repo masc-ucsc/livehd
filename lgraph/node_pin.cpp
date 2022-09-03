@@ -69,8 +69,8 @@ Node_pin::Compact_flat Node_pin::get_compact_flat() const {
 Node_pin::Compact_driver Node_pin::get_compact_driver() const {
   I(!sink);
   if (Hierarchy::is_invalid(hidx))
-    return Compact_driver(Hierarchy::hierarchical_root(), get_root_idx());
-  return Compact_driver(hidx, get_root_idx());
+    return {Hierarchy::hierarchical_root(), get_root_idx()};
+  return {hidx, get_root_idx()};
 }
 
 bool Node_pin::has_inputs() const { return current_g->has_inputs(*this); }
@@ -406,13 +406,31 @@ std::string Node_pin::get_wire_name() const {
     return dpin.get_wire_name();
   }
 
-  if (has_name()) {
-    if (is_hierarchical())
-      return absl::StrCat(hidx, "_", get_name());
-    return get_name();
+  std::string root_name;
+  if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
+    root_name = top_g->ref_htree()->get_name(hidx);
   }
 
-  return absl::StrCat("__p", get_root_idx().value, "_", pid);
+  const auto *ref = current_g->ref_node_pin_name_map();
+  const auto it = ref->find(get_compact_class_driver());
+  if (it != ref->end()) {
+    if (root_name.empty())
+      return it->second;
+
+    return absl::StrCat(root_name, ",", it->second);
+  }
+
+  // WARNING: Must start with "_" to indicate temp name
+  return absl::StrCat("_", root_name, ",p", get_root_idx().value, "_", pid);
+}
+
+std::string_view Node_pin::get_hier_name() const {
+
+  if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
+    return top_g->ref_htree()->get_name(hidx);
+  }
+
+  return top_g->get_name();
 }
 
 std::string Node_pin::get_name() const {

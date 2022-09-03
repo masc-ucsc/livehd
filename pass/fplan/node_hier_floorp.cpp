@@ -19,8 +19,6 @@ FPContainer* Node_hier_floorp::load_lg_nodes(const absl::flat_hash_map<Node::Com
 
   FPContainer* l = makeNode(hint_map, tidx, lg->size());
 
-  const auto path = root_lg->get_path();
-
   // count instances of leaves and subnodes for later use
   absl::flat_hash_map<Lgraph*, unsigned int>  sub_lg_count;
   absl::flat_hash_map<Ntype_op, unsigned int> grid_count;

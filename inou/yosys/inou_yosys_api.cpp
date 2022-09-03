@@ -298,7 +298,7 @@ void Inou_yosys_api::fromlg(Eprp_var &var) {
 
     auto file = absl::StrCat(p.odir, "/", lg->get_name(), ".v");
     vars.set("file", file);
-    vars.set("name", lg->get_name());
+    vars.set("name", std::string(lg->get_name()));
 
     auto hier = var.get("hier");
     if (!hier.empty() && (hier == "1" || hier == "true")) {

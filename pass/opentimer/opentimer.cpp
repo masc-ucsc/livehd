@@ -10,7 +10,7 @@
 #undef has_member
 #include "perf_tracing.hpp"
 
-void Pass_opentimer::work(Eprp_var &var) {
+void Pass_opentimer::time_work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
@@ -24,9 +24,23 @@ void Pass_opentimer::work(Eprp_var &var) {
   }
 }
 
+void Pass_opentimer::power_work(Eprp_var &var) {
+  Pass_opentimer pass(var);
+
+  TRACE_EVENT("pass", "OPENTIMER_work");
+  Lbench b("pass.OPENTIMER_work");
+
+  for (const auto &g : var.lgs) {
+    pass.build_circuit(g);
+    pass.read_sdc_spef();
+    pass.compute_power(g);
+  }
+}
+
 std::string Pass_opentimer::get_driver_net_name(const Node_pin &dpin) const {
   auto it = overwrite_dpin2net.find(dpin.get_compact_driver());
   if (it != overwrite_dpin2net.end()) {
+    I(it->second == dpin.get_wire_name()); // FIXME: code to be deprecated
     return it->second;
   }
 
@@ -88,7 +102,8 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
   }
 
-  for (const auto node : g->forward()) {  // TODO: Do we really need a slow forward. Why not just fast??
+  // 3rd: populate the cells (since all the names are populated, any order is fine)
+  for (const auto node : g->fast(false)) {
     auto op = node.get_type_op();
 
     if (op == Ntype_op::Const)
@@ -127,7 +142,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
 
     auto       &sub_node      = node.get_type_sub_node();
-    auto        instance_name = node.create_name();
+    auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
     fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
@@ -177,7 +192,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
 }
 
 void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compute timing information
-                                                  //  Lbench b("pass.OPENTIMER_compute_timing");
+  //  Lbench b("pass.OPENTIMER_compute_timing");
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
   timer.update_timing();
@@ -217,7 +232,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       continue;
 
     auto       &sub_node      = node.get_type_sub_node();
-    auto        instance_name = node.create_name();
+    auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
     //fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
@@ -242,7 +257,8 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       if (delay>0) {
         dpin.set_delay(delay);
 
-        fmt::print(" pin {} {}\n", pin_name, delay);
+        auto wire_name = get_driver_net_name(dpin);
+        fmt::print(" pin {} {} wname:{}\n", pin_name, delay, wire_name);
 
         if (delay > max_delay) {
           max_delay = delay;
@@ -252,6 +268,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
         dpin.del_delay();
       }
     }
+
   }
 
   if (!max_pin.empty()) {
@@ -262,6 +279,48 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       fmt::print("slowest delay:{} pin:{} NO MARGIN selected\n", max_delay, max_pin);
     }
   }
+}
+
+void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to compute timing information
+  TRACE_EVENT("pass", "OPENTIMER_compute_power");
+
+  timer.update_timing();
+
+  const auto &pins = timer.pins();
+
+  double total_cap  = 0;
+  double total_ipwr = 0;
+
+  for (const auto node : g->fast()) {
+    auto op = node.get_type_op();
+    if (op != Ntype_op::Sub)
+      continue;
+
+    auto       &sub_node      = node.get_type_sub_node();
+    auto        instance_name = node.get_or_create_name();
+    std::string type_name{sub_node.get_name()};  // OT needs std::string
+
+    timer.insert_gate(instance_name, type_name);
+
+    for (auto &e:node.inp_edges()) {
+
+      auto pin_name = absl::StrCat(instance_name, ":", e.sink.get_pin_name());
+      auto it = pins.find(pin_name);
+      if (it == pins.end())
+        continue;
+
+      auto [cap, ipwr] = it->second.power();
+
+      total_cap += cap;
+      total_ipwr += ipwr;
+
+      auto wire_name = get_driver_net_name(e.driver);
+      auto hier_name = e.driver.get_hier_name();
+      auto node_name = node.get_name();
+      fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
+    }
+  }
+  fmt::print("power TOTAL cap:{} ipwr:{}\n", total_cap, total_ipwr);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {

@@ -81,6 +81,7 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
           I(io.rhs_cat == Hif_base::ID_cat::String_cat);
           auto spin = get_graph_output(io.lhs);
 
+          // WARNING: temp_name can not be populated back (nid may change and create alias)
           bool     temp_name = !io.rhs.empty() && io.rhs[0] == '_';
           Node_pin dpin;
           if (temp_name) {
@@ -119,6 +120,7 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
     }
 
     for (const auto &io : stmt.io) {
+      // WARNING: temp_name can not be populated back (nid may change and create alias)
       bool temp_name = !io.rhs.empty() && io.rhs[0] == '_';
       I(io.lhs_cat == Hif_base::ID_cat::String_cat);
       I(io.rhs_cat == Hif_base::ID_cat::String_cat);
@@ -167,6 +169,7 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
   });
 
   for (const auto &p : pending) {
+    // WARNING: temp_name can not be populated back (nid may change and create alias)
     bool     temp_name = p.second.front() == '_';
     Node_pin dpin;
 

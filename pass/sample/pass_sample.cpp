@@ -175,16 +175,16 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 
   for (auto node : g->fast()) {
     const auto &place = node.get_place();
-    fmt::print("1.cell {} placed at x:{}\n", node.create_name(), place.get_x());
+    fmt::print("1.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
   for (auto node : g->forward()) {
     auto place = node.get_place();
-    fmt::print("2.cell {} placed at x:{}\n", node.create_name(), place.get_x());
+    fmt::print("2.cell {} placed at x:{}\n", node.get_or_create_name(), place.get_x());
   }
 }
 
 void Pass_sample::create_sample_graph(Lgraph *g) {
-  auto lg_path = g->get_path();
+  //auto lg_path = g->get_path();
 
   auto *lg = g->ref_library()->create_lgraph("pass_sample","-");
 
