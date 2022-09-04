@@ -30,21 +30,36 @@ void Pass_opentimer::power_work(Eprp_var &var) {
   TRACE_EVENT("pass", "OPENTIMER_work");
   Lbench b("pass.OPENTIMER_work");
 
+  // FIXME: build_circuit can overlap with read_vcd (thread_pool task)
   for (const auto &g : var.lgs) {
     pass.build_circuit(g);
     pass.read_sdc_spef();
+    pass.read_vcd();
     pass.compute_power(g);
   }
 }
 
+// TODO: The IO pins have a separate name. Can we avoid this just for them?
 std::string Pass_opentimer::get_driver_net_name(const Node_pin &dpin) const {
   auto it = overwrite_dpin2net.find(dpin.get_compact_driver());
   if (it != overwrite_dpin2net.end()) {
-    I(it->second == dpin.get_wire_name()); // FIXME: code to be deprecated
     return it->second;
   }
 
   return dpin.get_wire_name();
+}
+
+void Pass_opentimer::read_vcd() {
+  vcd_list.resize(vcd_file_list.size());
+
+  for(auto i=0u;i<vcd_file_list.size();++i) {
+    const auto &f=vcd_file_list[i];
+
+    bool ok = vcd_list[i].open(f); // FIXME: multithread?
+    if (!ok) {
+      Pass::error("could not read vcd {} file",f);
+    }
+  }
 }
 
 // SDC and SPEF must be read after the circuit is created
@@ -68,7 +83,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   g->each_graph_input([this](const Node_pin &pin) {
     std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
 
-    fmt::print("Graph Input Driver Name {}\n", driver_name);
+    //fmt::print("Graph Input Driver Name {}\n", driver_name);
     timer.insert_primary_input(driver_name);
     timer.insert_net(driver_name);
   });
@@ -76,7 +91,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   g->each_graph_output([this](const Node_pin &pin) {
     std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
 
-    fmt::print("Graph Output Driver Name {}\n", driver_name);
+    //fmt::print("Graph Output Driver Name {}\n", driver_name);
     timer.insert_primary_output(driver_name);
     timer.insert_net(driver_name);
 
@@ -145,25 +160,26 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
-    fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
+    //fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
     timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
     for (const auto &dpin : node.out_connected_pins()) {
-      auto wire_name = get_driver_net_name(dpin);
       auto pin_name  = absl::StrCat(instance_name, ":", dpin.get_pin_name());
+      auto wire_name = get_driver_net_name(dpin);
 
       timer.connect_pin(pin_name, wire_name);
-      fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
+      //fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
     }
 
     // connect input pins
     for (const auto &e : node.inp_edges()) {
-      auto wire_name = get_driver_net_name(e.driver);
+      I(get_driver_net_name(e.driver) == e.driver.get_wire_name());
+      auto wire_name = e.driver.get_wire_name();
       auto pin_name  = absl::StrCat(instance_name, ":", e.sink.get_pin_name());
 
       timer.connect_pin(pin_name, wire_name);
-      fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
+      //fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
     }
   }
 
@@ -257,8 +273,8 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       if (delay>0) {
         dpin.set_delay(delay);
 
-        auto wire_name = get_driver_net_name(dpin);
-        fmt::print(" pin {} {} wname:{}\n", pin_name, delay, wire_name);
+        //auto wire_name = get_driver_net_name(dpin);
+        //fmt::print(" pin {} {} wname:{}\n", pin_name, delay, wire_name);
 
         if (delay > max_delay) {
           max_delay = delay;
@@ -291,6 +307,12 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
   double total_cap  = 0;
   double total_ipwr = 0;
 
+  float voltage = 1;
+  auto x = timer.cell_voltage();
+  if (x) {
+    voltage = *x;
+  }
+
   for (const auto node : g->fast()) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub)
@@ -314,13 +336,28 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       total_cap += cap;
       total_ipwr += ipwr;
 
-      auto wire_name = get_driver_net_name(e.driver);
+      //auto wire_name = get_driver_net_name(e.driver);
       auto hier_name = e.driver.get_hier_name();
       auto node_name = node.get_name();
-      fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
+
+      auto vcd_name = absl::StrCat(hier_name,",", node_name, ",", e.sink.get_pin_name());
+
+      double power = ipwr + cap*voltage*voltage;
+      //double power = ipwr; // FIXME
+      for(auto &pvcd:vcd_list) {
+        pvcd.add(vcd_name, power);
+      }
+
+      // fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
+      //fmt::print("power {} cap:{} ipwr:{}\n", vcd_name, cap, ipwr);
     }
   }
-  fmt::print("power TOTAL cap:{} ipwr:{}\n", total_cap, total_ipwr);
+
+  for(auto &pvcd:vcd_list) {
+    pvcd.compute(odir);
+  }
+
+  fmt::print("power TOTAL cap:{} ipwr:{} voltage:{}\n", total_cap, total_ipwr, voltage);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {

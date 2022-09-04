@@ -30,7 +30,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 
   for (const auto f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".lib")) {
-      fmt::print("opentimer using liberty file '{}'", f);
+      fmt::print("opentimer using liberty file '{}'\n", f);
       if (n_lib_read == 0)
         timer.read_celllib(f);
       else
@@ -39,6 +39,8 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
       n_lib_read++;
     } else if (str_tools::ends_with(f, ".spef")) {
       spef_file_list.emplace_back(f);
+    } else if (str_tools::ends_with(f, ".vcd")) {
+      vcd_file_list.emplace_back(f);
     } else if (str_tools::ends_with(f, ".sdc")) {
       sdc_file_list.emplace_back(f);
     } else {

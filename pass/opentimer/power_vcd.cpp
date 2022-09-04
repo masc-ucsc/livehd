@@ -1,6 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "power_vcd.hpp"
+#include "pass.hpp"
+
+#include "absl/strings/str_split.h"
+#include "absl/strings/str_cat.h"
 
 //#define bithack_haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
 //#define bithack_hasvalue(x,n) (haszero((x) ^ (~0UL/255 * (n))))
@@ -105,7 +109,7 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     }
     id2channel[std::string(var_id)].hier_name.emplace_back(hier_name);
 
-    fmt::print("hier_name:{} var_id:{}\n", hier_name, var_id);
+    //fmt::print("hier_name:{} var_id:{}\n", hier_name, var_id);
 
   } else if (strncmp("scope", ptr, 5) == 0) {
     ptr += 5;
@@ -239,13 +243,75 @@ void Power_vcd::dump() const {
   }
 }
 
-#if 0
-int main(int argc, char **argv) {
+void Power_vcd::compute(std::string_view odir) const {
 
-  Power_vcd v;
+  absl::node_hash_map<std::string, std::vector<double>> module_trace;
 
-  v.open(argv[1]);
+  double transitions=0;
+  double max_transitions=1;
 
-  v.dump();
+  for (const auto &e : id2channel) {
+    std::vector<double> trace_step;
+
+    for (const auto &hier_name : e.second.hier_name) {
+      auto it = hier_name2power.find(hier_name);
+      if (it == hier_name2power.end())
+        continue;
+
+      if (trace_step.empty()) {
+        trace_step.reserve(e.second.transitions.size());
+
+        for (const auto &v : e.second.transitions) {
+          transitions += v;
+          trace_step.emplace_back(v * it->second);
+        }
+        max_transitions += max_timestamp;
+      }
+
+      const std::vector<std::string> m = absl::StrSplit(hier_name, ',');
+      // top_1,imm1,imm2,lib,pin  // top_1 + imm1 + imm2 traces
+
+      std::string hier_path;
+
+      for(int i=0;i<static_cast<int>(m.size()-2);++i) {
+        if (hier_path.empty())
+          hier_path = m[i];
+        else
+          absl::StrAppend(&hier_path, ":", m[i]); // : is easier for file names
+
+        auto it2 = module_trace.find(hier_path);
+        if (it2 == module_trace.end()) {
+          module_trace[hier_path] = trace_step;
+        }else{
+          for(auto j=0u;j<trace_step.size();++j) {
+            module_trace[hier_path][j] += trace_step[j];
+          }
+        }
+      }
+    }
+  }
+
+  double step = max_timestamp/n_buckets;
+  for(const auto &e:module_trace) {
+
+    auto out_fname = absl::StrCat(odir,"/", fname, "_", e.first, ".power.trace");
+
+    std::FILE *f = std::fopen(out_fname.c_str(), "w");
+    if (f == nullptr) {
+      Pass::error("could not create {} output power trace", out_fname);
+      return;
+    }
+
+    double x = 0;
+    for(double v:e.second) {
+      fmt::print(f,"{} {}\n", x, v/max_timestamp);
+      x += step;
+    }
+
+    std::fclose(f);
+  }
+
+  // NOTE: 2x because clock does 2x transitions (max_timestamp)
+  fmt::print("average activity rate {}\n", 2*transitions/max_transitions);
 }
-#endif
+
