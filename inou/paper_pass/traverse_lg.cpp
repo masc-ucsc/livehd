@@ -636,6 +636,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
               if(!(OflopID).empty()){
                 std::string i_r="flop:"+OflopID[0];
                 randSet1.emplace(i_r);//resolved entry in randSet1
+                //change_done=true;//SG:test (for a bug)
                 //iv.erase(*set_it);
               } else {
                 randSet1.emplace(*set_it);
@@ -653,6 +654,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
               if(!(OflopID).empty()){
                 std::string o_r="flop:"+OflopID[0];
                 randSet2.emplace(o_r);//resolved entry in randSet2
+                //change_done=true;//SG:test (for a bug)
                 //ov.erase(*set_it);
               } else {
                 randSet2.emplace(*set_it);
@@ -701,7 +703,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
           if (req_flops_matched) {break;}
           auto& iv = (it->first).first;//this is i/p set for [n]
           auto& ov = (it->first).second;//this is o/p set for [n]
-          auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
+          auto& n = it->second; 
           /*start finding and matching in the resolved map!!:*/
           bool foundFull = false;
           bool foundPartial = false;
@@ -1016,8 +1018,11 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
 void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set) {
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_type_const() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
-    if(node.is_graph_io()) {
+  if(node.is_type_flop() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+    if (node.is_type_const()) {
+      //do not keep const for future reference
+      return;
+    } else if (node.is_graph_io()) {
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
     } else {
