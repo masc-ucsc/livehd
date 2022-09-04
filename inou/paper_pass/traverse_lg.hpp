@@ -22,7 +22,6 @@
 
 class Traverse_lg : public Pass {
 public:
-  typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::vector<std::string>, std::vector<std::string>>> vecMap;
   // typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> setMap_nodeKey;
   // typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
@@ -39,9 +38,6 @@ private:
   std::vector<unsigned int> crit_cell_list;//FIXME: currently has node IDs. to be converted to vector of Node::Compact_flat, once the opentimer starts to work.
   setMap_pairKey cellIOMap_synth;
 /*
-#ifdef KEEP_DUP
-  vecMap nodeIOmap;
-#endif
 #ifdef DE_DUP
   setMap nodeIOmap;
 #endif
@@ -51,10 +47,6 @@ protected:
   void do_travers(Lgraph* g);
   void get_input_node(const Node_pin &pin, std::ofstream& ofs);
   void get_output_node(const Node_pin &pin, std::ofstream& ofs);
-  //FOR VECT PART:
-  void do_travers(Lgraph* g, Traverse_lg::vecMap &nodeIOmap);
-  void get_input_node(const Node_pin &pin, std::vector<std::string>& in_vec);
-  void get_output_node(const Node_pin &pin, std::vector<std::string>& out_vec);
   //FOR SET PART:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);

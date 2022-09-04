@@ -32,13 +32,6 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("\nLGs : {}\n",var.lgs.size());
   I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide exactly 2 lgraphs to inou.traverse_lg. CHECK: The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
 
-#ifdef KEEP_DUP
-  Traverse_lg::vecMap map_pre_synth;
-  Traverse_lg::vecMap map_post_synth;
-  p.do_travers(var.lgs.front(), map_pre_synth);
-  p.do_travers(var.lgs.back(), map_post_synth);
-#endif
-
 #ifdef DE_DUP
   //Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
@@ -137,134 +130,6 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
       for (const auto& outdr : node.out_sinks() ) {
         //auto out_node = outdr.get_node();
         get_output_node(outdr,ofs);
-      }
-  }
-}
-
-//FOR VECTOR:
-void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::vecMap &nodeIOmap) {
-
-  for (const auto& node : lg->forward()) {
-    std::vector<std::string> in_vec;
-    std::vector<std::string> out_vec;
-    fmt::print("{}\n", node.debug_name());
-    if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
-      continue; //do not keep such nodes in nodeIOmap
-    }
-
-    
-    if (node.has_inputs()){
-      for (const auto& indr : node.inp_drivers()) {
-        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
-        //auto inp_node = indr.get_node();
-        get_input_node(indr, in_vec);
-      }
-    }
-
-    if (node.has_outputs()) {
-      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
-        //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_vec);
-      }
-    }
-
-    //print the vectors formed
-    fmt::print("INPUTS:\n");
-    for (const auto& i:in_vec) {
-      fmt::print("\t{}\n",i);
-    }
-    fmt::print("OUTPUTS:\n");
-    for (const auto& i:out_vec) {
-      fmt::print("\t{}\n",i);
-    }
-
-    if (in_vec.empty() && out_vec.empty()) {//no i/ps as well as no o/ps
-      continue;//do not keep such nodes in nodeIOmap
-    }
-    //insert in map
-    const auto& nodeid = node.get_compact_flat();
-    nodeIOmap[nodeid]= std::make_pair(in_vec,out_vec);//FIXME: make hash of vectors and change datatype accordingly
-  }//enf of for lg-> traversal
-
-  //print the map
-  fmt::print("\n\nMAP FORMED IS:\n");
-  for(auto& [n, ioPair]: nodeIOmap) {
-    fmt::print("{} has INPUTS:  \t",n.get_nid());
-    for (auto& ip: ioPair.first) {
-      fmt::print("{}\t",ip);
-    }
-    fmt::print("\nand OUTPUTS: \t");
-    for (auto& op:ioPair.second) {
-      fmt::print("{}\t", op);
-    }
-    fmt::print("\n");
-  }
-  fmt::print("\n\n\n");
-
-}
-
-
-void Traverse_lg::get_input_node(const Node_pin &node_pin, std::vector<std::string>& in_vec) {
-  auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
-    if(node.is_graph_io()) {
-      in_vec.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
-    } else {
-      std::string temp_str (node.get_type_name());
-      //if(node.is_type_const()){ 
-      //  temp_str+=":"; 
-      //  temp_str+=node.get_type_const().to_pyrope();
-      //}
-      //else 
-      if(node.is_type_flop()){ 
-        temp_str+=":";
-        temp_str+=node_pin.get_pin_name();
-        temp_str+="->";
-        //temp_str+=node.get_driver_pin().get_pin_name();
-        //temp_str+="(";
-        temp_str+=(node.get_driver_pin().get_wire_name());
-        //temp_str+=")";
-      }
-      in_vec.emplace_back(temp_str);
-    }
-    return;
-  } else {
-      for (const auto& indr : node.inp_drivers()) {
-        //auto inp_node = indr.get_node();
-        get_input_node(indr, in_vec);
-      }
-  }
-}
-
-void Traverse_lg::get_output_node(const Node_pin &node_pin, std::vector<std::string>& out_vec) {
-  auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_graph_output() ) {
-    if(node.is_graph_io()) {
-      //out_vec.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
-      out_vec.emplace_back(node_pin.get_pin_name());
-    } else {
-      std::string temp_str(node.get_type_name());
-      //if(node.is_type_const()){ 
-      //  temp_str+=":"; 
-      //  temp_str+=node.get_type_const().to_pyrope();
-      //}
-      //else 
-      if(node.is_type_flop()){ 
-        temp_str+=":";
-        temp_str+=node_pin.get_pin_name();
-        temp_str+="->";
-        //temp_str+=node.get_driver_pin().get_pin_name();
-        //temp_str+="(";
-        temp_str+=(node.get_driver_pin().get_wire_name());
-        //temp_str+=")";
-      }
-      out_vec.emplace_back(temp_str);
-    }
-    return;
-  } else {
-      for (const auto& outdr : node.out_sinks() ) {
-        //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_vec);
       }
   }
 }
@@ -1023,8 +888,12 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
       //do not keep const for future reference
       return;
     } else if (node.is_graph_io()) {
+      /*minor testin ghack iwth removing the unwanted reset from creating combo matching issues! (vsrp-after_map1map2_4sep_resetManualHack.log) */
+      //auto tmp_x = node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name();
+      //if (tmp_x!="reset") 
       in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+      //end of if tmp_x
     } else {
       bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
       std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
