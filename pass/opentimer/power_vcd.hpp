@@ -1,14 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fcntl.h>
-#include <fmt/format.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "absl/container/node_hash_map.h"
 #include "absl/container/flat_hash_map.h"
 
+#include <cassert>
 #include <charconv>
 #include <cstdio>
 #include <functional>
@@ -41,7 +37,7 @@ protected:
 
   absl::flat_hash_map<std::string, double> hier_name2power;
 
-  size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
+  [[nodiscard]] size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
 
   bool                                      find_max_time();
   const char                               *skip_command(const char *ptr) const;

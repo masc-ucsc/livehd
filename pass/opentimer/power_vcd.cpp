@@ -1,5 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <fcntl.h>
+#include <fmt/format.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "power_vcd.hpp"
 #include "pass.hpp"
 
