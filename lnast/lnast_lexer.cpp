@@ -52,10 +52,7 @@ Lnast_token Lnast_lexer::lex_token() {
       case '"':
         return lex_string();
       default:
-        if (std::isalpha(ch)) {
-          return lex_keyword_or_function(ch);
-        }
-        return form_token(Lnast_token::invalid);
+        return lex_keyword_or_function_or_identifier(ch);
     }
   }
 }
@@ -103,10 +100,10 @@ Lnast_token Lnast_lexer::lex_type() {
   if (str == #SPELLING)                         \
     return form_token(Lnast_token::ty_##SPELLING);
 #include "lnast_tokens.def"
-  return form_token(Lnast_token::invalid);
+  return form_token(Lnast_token::id_var, str);
 }
 
-Lnast_token Lnast_lexer::lex_keyword_or_function(char first) {
+Lnast_token Lnast_lexer::lex_keyword_or_function_or_identifier(char first) {
   std::string str(1, first);
   while (true) {
     char ch = get_char();
@@ -123,7 +120,7 @@ Lnast_token Lnast_lexer::lex_keyword_or_function(char first) {
   if (str == #SPELLING)                            \
     return form_token(Lnast_token::fn_##NAME);
 #include "lnast_tokens.def"
-  return form_token(Lnast_token::invalid);
+  return form_token(Lnast_token::id_var, str);
 }
 
 Lnast_token Lnast_lexer::lex_number(char first) {
@@ -131,7 +128,7 @@ Lnast_token Lnast_lexer::lex_number(char first) {
   std::string str(1, first);
   while (true) {
     char ch = get_char();
-    if (!isdigit(ch)) {
+    if (!(isalnum(ch) || ch == '?')) {
       put_char(ch);
       break;
     }
@@ -141,12 +138,12 @@ Lnast_token Lnast_lexer::lex_number(char first) {
 }
 
 Lnast_token Lnast_lexer::lex_string() {
-  std::string str = "\"";
+  std::string str = "";
   while (true) {
     char ch = get_char();
     switch (ch) {
       case '"':
-        str += '"';
+        // str += '"';
         return form_token(Lnast_token::string, str);
       case 0:
         continue;

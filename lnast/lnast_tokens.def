@@ -47,6 +47,7 @@ TOKEN_PN(rparen,')')
 TOKEN_PN(equal,'=')
 TOKEN_PN(colon,':')
 TOKEN_PN(comma,',')
+TOKEN_PN(dot,'.')
 
 // Identifiers
 TOKEN_ID(var)   // %{...}

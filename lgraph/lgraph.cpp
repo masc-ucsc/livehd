@@ -1474,14 +1474,15 @@ Bwd_edge_iterator Lgraph::backward(bool visit_sub) { return Bwd_edge_iterator(th
 // Skip after 1, but first may be deleted, so fast_next
 Fast_edge_iterator Lgraph::fast(bool visit_sub) { return Fast_edge_iterator(this, visit_sub); }
 
-void Lgraph::save() {
+void Lgraph::save(std::string filename) {
 #ifndef NDEBUG
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 #endif
+  if (filename == "") filename = get_save_filename();
 
-  auto wr = Hif_write::create(get_save_filename(), "lgraph", Lgraph::version);
+  auto wr = Hif_write::create(filename, "lgraph", Lgraph::version);
   if (wr == nullptr) {
-    error("cannot save {} in {}", name, get_save_filename());
+    error("cannot save {} in {}", name, filename);
     return;
   }
 

@@ -53,7 +53,7 @@ protected:
 
   void error() {
     // TODO: Populate error handling/diagnostic code
-    fmt::print("ERROR!");
+    fmt::print("ERROR!\n");
     forward_token();
   }
 
@@ -68,6 +68,7 @@ protected:
   void parse_list();
   void parse_type_list();
   void parse_selects();
+  void parse_attr();
   void parse_prim();
   void parse_type();
 };

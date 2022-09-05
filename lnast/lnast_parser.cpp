@@ -78,6 +78,11 @@ void Lnast_parser::parse_var_stmt() {
             add_leaf(rhs_node);
             parse_selects();
             end_tree();
+          } else if (cur_kind() == Lnast_token::dot) {
+            start_tree(Lnast_node::create_attr_get());
+            add_leaf(lhs_node);
+            add_leaf(rhs_node);
+            parse_attr();
           } else {
             // LNAST - assign
             start_tree(Lnast_node::create_assign());
@@ -85,6 +90,7 @@ void Lnast_parser::parse_var_stmt() {
             add_leaf(rhs_node);
             end_tree();
           }
+          // TODO: add attr_set
           break;
         }
         case Lnast_token::id_fun: {
@@ -219,6 +225,11 @@ void Lnast_parser::parse_selects() {
     parse_prim();    // ref or const ->
     forward_token();       // ']' ->
   } while (cur_kind() == Lnast_token::lbrack);
+}
+
+void Lnast_parser::parse_attr() {
+  forward_token(); // '.'
+  parse_prim();
 }
 
 void Lnast_parser::parse_prim() {

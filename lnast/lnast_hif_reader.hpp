@@ -39,8 +39,8 @@ protected:
   void process_header_stmts() {
     // NOTE: Skip first header (HIF version & tool name/version)
     rd->next_stmt();
-    auto cur_stmt = rd->get_current_stmt();
-    for (const auto &te : cur_stmt.attr) {
+    auto stmt = rd->get_current_stmt();
+    for (const auto &te : stmt.attr) {
       if (te.lhs == "module_name") {
         lnast->set_top_module_name(te.rhs);
       }

@@ -188,7 +188,10 @@ void Lnast_writer::write_ref() {
 }
 
 void Lnast_writer::write_const() {
-  print(fmt::fg(fmt::color::light_blue), "{}", current_text());
+  if (current_text().size() != 0 && isdigit(current_text()[0]))
+    print(fmt::fg(fmt::color::light_blue), "{}", current_text());
+  else
+    print(fmt::fg(fmt::color::light_blue), "\"{}\"", current_text());
 }
 
 void Lnast_writer::write_range() { write_n_ary("range"); }
@@ -351,9 +354,29 @@ void Lnast_writer::write_tuple_set() {
   move_to_parent();
 }
 
-void Lnast_writer::write_attr_set() {}
+void Lnast_writer::write_attr_set() {
+  move_to_child();
+  write_lnast();
+  print(".");
+  move_to_sibling();
+  write_lnast();
+  print(" = ");
+  move_to_sibling();
+  write_lnast();
+  move_to_parent();  
+}
 
-void Lnast_writer::write_attr_get() { }
+void Lnast_writer::write_attr_get() {
+  move_to_child();
+  write_lnast();
+  print(" = ");
+  move_to_sibling();
+  write_lnast();
+  print(".");
+  move_to_sibling();
+  write_lnast();
+  move_to_parent();
+}
 
 void Lnast_writer::write_err_flag() { }
 void Lnast_writer::write_phi() { }

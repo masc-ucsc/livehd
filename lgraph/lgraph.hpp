@@ -230,7 +230,7 @@ public:
   [[nodiscard]] const Sub_node &get_self_sub_node() const;  // Access all input/outputs
   Sub_node                     *ref_self_sub_node();        // Access all input/outputs
 
-  void save();
+  void save(std::string filename = "");
   void dump();
   void dump_down_nodes();
 

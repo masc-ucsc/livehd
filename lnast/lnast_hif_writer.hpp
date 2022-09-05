@@ -106,6 +106,7 @@ protected:
       CASE_LNAST_NTYPE( gt               , tree       )
       CASE_LNAST_NTYPE( ge               , tree       )
       CASE_LNAST_NTYPE( range            , tree       )
+      CASE_LNAST_NTYPE( type_def         , tree       )
       CASE_LNAST_NTYPE( type_spec        , tree       )
       CASE_LNAST_NTYPE( none_type        , leaf       )
       CASE_LNAST_NTYPE( prim_type_uint   , tree       )
@@ -115,6 +116,7 @@ protected:
       CASE_LNAST_NTYPE( prim_type_boolean, leaf       )
       CASE_LNAST_NTYPE( prim_type_type   , leaf       )
       CASE_LNAST_NTYPE( prim_type_ref    , leaf       )
+      CASE_LNAST_NTYPE( comp_type_enum   , tree       )
       CASE_LNAST_NTYPE( comp_type_tuple  , tree       )
       CASE_LNAST_NTYPE( comp_type_array  , tree       )
       CASE_LNAST_NTYPE( comp_type_mixin  , tree       )
@@ -132,6 +134,7 @@ protected:
       CASE_LNAST_NTYPE( hot_phi          , leaf       )
       CASE_LNAST_NTYPE( ref              , named_leaf )
       CASE_LNAST_NTYPE( const            , named_leaf )
+      default: break;
     }
   }
 
