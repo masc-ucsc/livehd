@@ -43,9 +43,9 @@ TEST_F(Lnast_lexer_test, strings) {
   ss << "\"abc\"";
   ss << "\"abc\\ndef\"";
   ss << "\"abc\\\"def\"";
-  check("string, \"abc\"");
-  check("string, \"abc\\ndef\"");
-  check("string, \"abc\\\"def\"");
+  check("string, abc");
+  check("string, abc\\ndef");
+  check("string, abc\\\"def");
 }
 
 TEST_F(Lnast_lexer_test, mixed) {
