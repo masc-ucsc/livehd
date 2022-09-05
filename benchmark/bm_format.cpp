@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -25,51 +26,61 @@ class LgraphTestFixture : public benchmark::Fixture {
 public:
 };
 
-std::shared_ptr<Lnast> read_ln(std::string filename) {
-  std::ifstream fs;
-  fs.open(filename);
-  Lnast_parser parser(fs);
-  return parser.parse_all();
+std::unordered_map<std::string, std::shared_ptr<Lnast>> read_lns() {
+  std::unordered_map<std::string, std::shared_ptr<Lnast>> lns;
+  for (const auto& entry : std::filesystem::directory_iterator("benchmark/ln/")) {
+    auto path = entry.path();
+    std::ifstream fs;
+    fs.open(path);
+    Lnast_parser parser(fs);
+    auto ln = parser.parse_all();
+    lns[path.stem()] = ln;
+  }
+  return lns;
 }
 
 BENCHMARK_F(LnastTestFixture, LNAST_HIF)(benchmark::State& st) {
-  auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
-  Lnast_hif_writer writer("BM_LNAST_HIF", lnast);
+  std::filesystem::create_directory("BM_LNAST_HIF");
+  auto lns = read_lns();
   for (auto _ : st) {
-    writer.write_all();
+    for (const auto &p : lns) {
+      Lnast_hif_writer writer("BM_LNAST_HIF/" + p.first, p.second);
+      writer.write_all();
+    }
   }
 }
 
 BENCHMARK_F(LnastTestFixture, HIF_LNAST)(benchmark::State& st) {
-  auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
-  Lnast_hif_writer writer("BM_LNAST_HIF", lnast);
-  writer.write_all();
+  auto lns = read_lns();
+  for (const auto &p : lns) {
+    Lnast_hif_writer writer("BM_LNAST_HIF/" + p.first, p.second);
+    writer.write_all();
+  }
   for (auto _ : st) {
-    Lnast_hif_reader reader("BM_LNAST_HIF");
-    reader.read_all();
+    for (const auto &p : lns) {
+      Lnast_hif_reader reader("BM_LNAST_HIF/" + p.first);
+      reader.read_all();
+    }
   }
 }
 
 BENCHMARK_F(LnastTestFixture, LNAST_LN)(benchmark::State& st) {
-  auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
-  std::ofstream ofs;
+  std::filesystem::create_directory("BM_LNAST_LN");
+  auto lns = read_lns();
   for (auto _ : st) {
-    ofs.open("BM_LNAST_LN.ln", std::ofstream::out | std::ofstream::trunc);
-    Lnast_writer writer(ofs, lnast);
-    writer.write_all();
+    for (const auto &p : lns) {
+      std::ofstream ofs("BM_LNAST_LN/" + p.first, std::ofstream::out | std::ofstream::trunc);
+      Lnast_writer writer(ofs, p.second);
+      writer.write_all();
+      ofs.close();
+    }
   }
-  ofs.close();
 }
 
 BENCHMARK_F(LnastTestFixture, LN_LNAST)(benchmark::State& st) {
-  std::ifstream ifs("benchmark/ln/iwls_adder.ln");
   for (auto _ : st) {
-    Lnast_parser parser(ifs);
-    parser.parse_all();
-    ifs.clear();
-    ifs.seekg(0);
+    auto lns = read_lns();
   }
-  ifs.close();
 }
 
 /*
@@ -81,6 +92,7 @@ BENCHMARK_F(LnastTestFixture, LNAST_FIRRTL)(benchmark::State& st) {
 }
 */
 
+/*
 BENCHMARK_F(LgraphTestFixture, LGRAPH_HIF)(benchmark::State& st) {
   auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
   auto ln_to_lg = Lnast_tolg("benchmark", "");
@@ -89,6 +101,7 @@ BENCHMARK_F(LgraphTestFixture, LGRAPH_HIF)(benchmark::State& st) {
     lgs[0]->save("BM_LGRAPH_HIF");
   }
 }
+*/
 
 // Run the benchmark
 BENCHMARK_MAIN();

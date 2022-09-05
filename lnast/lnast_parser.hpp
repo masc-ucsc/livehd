@@ -35,12 +35,15 @@ protected:
     } while (token_array.back().get_kind() != Lnast_token::eof);
   }
 
-  inline void forward_token() { ++token_index; }
-  inline void rewind_token() { --token_index; }
-
   inline auto cur_token() { return token_array[token_index]; }
   inline auto cur_kind() { return token_array[token_index].get_kind(); }
   inline auto cur_text() { return token_array[token_index].get_text(); }
+
+  inline void forward_token() {
+    I(cur_kind() != Lnast_token::eof);
+    ++token_index;
+  }
+  inline void rewind_token() { --token_index; }
 
   void add_leaf(Lnast_node n) { lnast->add_child(tree_index.top(), n); }
 

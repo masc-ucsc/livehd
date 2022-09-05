@@ -98,8 +98,10 @@ void Lnast_writer::write_func_call() {
   write_lnast();
   is_func_name = false;
   print("(");
-  move_to_sibling();
-  write_lnast();
+  while (move_to_sibling()) {
+    write_lnast();
+    if (!is_last_child()) print(", ");
+  }
   print(")");
   move_to_parent();
 }

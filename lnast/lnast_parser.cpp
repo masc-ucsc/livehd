@@ -106,11 +106,22 @@ void Lnast_parser::parse_var_stmt() {
         }
         case Lnast_token::number:
         case Lnast_token::string: {
-          // LNAST - assign
-          start_tree(Lnast_node::create_assign());
-          add_leaf(lhs_node);
-          parse_prim();
-          end_tree();
+          auto rhs_node = Lnast_node::create_const(cur_text());
+          forward_token();
+          if (cur_kind() == Lnast_token::lparen) {
+            // LNAST - func_call
+            start_tree(Lnast_node::create_func_call());
+            add_leaf(lhs_node);
+            add_leaf(rhs_node);
+            parse_list();
+            end_tree();
+          } else {
+            // LNAST - assign
+            start_tree(Lnast_node::create_assign());
+            add_leaf(lhs_node);
+            add_leaf(rhs_node);
+            end_tree();
+          }
           break;
         }
 #define TOKEN_FN(NAME, SPELLING)               \
