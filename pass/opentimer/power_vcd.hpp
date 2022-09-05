@@ -1,15 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fcntl.h>
-#include <fmt/format.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
+#include "absl/container/node_hash_map.h"
+#include "absl/container/flat_hash_map.h"
+
+#include <cassert>
 #include <charconv>
 #include <cstdio>
 #include <functional>
-#include <map>  // FIXME: replace for node_flat_map
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,9 +33,11 @@ protected:
     std::vector<size_t>      transitions;
   };
 
-  std::map<std::string, Channel> id2channel;
+  absl::node_hash_map<std::string, Channel> id2channel;
 
-  size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
+  absl::flat_hash_map<std::string, double> hier_name2power;
+
+  [[nodiscard]] size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
 
   bool                                      find_max_time();
   const char                               *skip_command(const char *ptr) const;
@@ -63,4 +63,13 @@ public:
   bool open(std::string_view file_name);
 
   void dump() const;
+
+  void clear_power() {
+    hier_name2power.clear();
+  }
+  void add(std::string_view hier_name, double power) {
+    hier_name2power[hier_name] = power;
+  }
+
+  void compute(std::string_view odir) const;
 };

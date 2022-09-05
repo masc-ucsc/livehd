@@ -4,6 +4,7 @@
 #include "node_pin.hpp"
 #include "ot/timer/timer.hpp"
 #include "pass.hpp"
+#include "power_vcd.hpp"
 
 class Pass_opentimer : public Pass {
 protected:
@@ -17,6 +18,8 @@ protected:
 
   std::vector<std::string> sdc_file_list;
   std::vector<std::string> spef_file_list;
+  std::vector<std::string> vcd_file_list;
+  std::vector<Power_vcd>   vcd_list;
 
   static void liberty_open(Eprp_var &var);
   static void time_work(Eprp_var &var);
@@ -24,6 +27,7 @@ protected:
 
   void read_files();
   void build_circuit(Lgraph *lg);
+  void read_vcd();
   void read_sdc_spef();
   void read_sdc(std::string_view sdc_file);
   void compute_timing(Lgraph *lg);

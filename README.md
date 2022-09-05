@@ -59,79 +59,13 @@ You can also
 to the LiveHD project. The funds will be used to provide food for meetings,
 equipment, and support to students/faculty at UCSC working on this project.
 
-## Building
-Read [Installation](./docs/Installation.md) for installation instructions.
 
-## LiveHD Data Structures
+The instructions for installation and internal LiveHD passes can be found at
+[Documentation](https://masc-ucsc.github.io/docs/livehd/00-intro/)
 
-LiveHD has several custom data structures, the two more important are
-[LGraph](docs/lgraph.md) and [LNAST](https://masc.soe.ucsc.edu/lnast-doc).
-
-LGraph (Live hardware Graph) is the graph-like data structure and associated
-API inside LiveHD. LNAST (Language Neutral AST) is the tree-like structure and
-associated API to easily create new input languages to LiveHD.
-
-## InOu
-
-InOus are inputs and/or outputs to/from LiveHD. An input will create a LGraph,
-e.g., from a verilog description, an json representation, or randomly.
-Similarly, an output will read an existing LGraph and generate an alternative
-representation, eg., verilog or json.
-
-Examples of inou can be found in inou/yosys (for verilog handling) and inou/json.
-
-## Passes
-
-Passes are transformations over an existing LGraph. In the future, there may be
-passes over LNAST, but for the moment, we just have LGraph passes. A pass will
-read an LGraph and make changes to it. Usually this is done for optimizations.
-Examples of passes can be found in `pass/sample`, which compute the histogram
-and count wire numbers of a LGraph.
-
-## Style
-
-For coding, please follow the coding styles from [Style.md](docs/Style.md). To contribute,
-check [policy](docs/CONTRIBUTING.md) document that explains how to create pull requests
-and more details about license and copyrights. Also, contributors to LiveHD are
-expected to adhere to the [Code of Conduct](docs/CODE_OF_CONDUCT.md).
-
-## Code Organization
-
-The code is organized as:
-
-- [`core/`](./core) - All the core classes of LGraph (nodes, edges, iterators, field tables, ...)
-- [`meta/`](./meta) - All the additional fields added to the nodes
-- [`inou/`](./inou) - All the inputs and outputs to and from LGraph
-- [`pass/`](./pass) - Transformations over LGraph
-- [`cops/`](./cops) - Combine operations, ie. take N graphs and creates another graph
-- [`misc/`](./misc) - External libraries and other misc code
-- [`test/`](./test) - Testing code, scripts, cases and infrastructure (Note: unit tests
-  should be placed inside the corresponding subfolder)
-- [`docs/`](./docs) - Documentation of LiveHD
-
-## Git Policies
-
-Before pushing your code, make sure:
-
-* The code builds `bazel build //...`
-* The testbenches pass `bazel test //...`
-
-Push frequently, if your code still has problems, use macros to turn parts of it
-off:
-
-```cpp
-#if 0
-//...
-#endif
-```
-
-Pull at least once a day when working, LiveHD is in active development.
-
-Always target warning free compilation. It is okay to commit code that triggers
-warning during development, but remember to clean up afterwards.
 
 If you are not one of the code owners, you need to create a pull request as
-indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [GitHub-use.md](docs/GitHub-use.md).
+indicated in [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 
 # Publications
