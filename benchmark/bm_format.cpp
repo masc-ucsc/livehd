@@ -52,8 +52,9 @@ BENCHMARK_F(LnastTestFixture, HIF_LNAST)(benchmark::State& st) {
 
 BENCHMARK_F(LnastTestFixture, LNAST_LN)(benchmark::State& st) {
   auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
-  std::ofstream ofs("BM_LNAST_LN.ln");
+  std::ofstream ofs;
   for (auto _ : st) {
+    ofs.open("BM_LNAST_LN.ln", std::ofstream::out | std::ofstream::trunc);
     Lnast_writer writer(ofs, lnast);
     writer.write_all();
   }

@@ -83,6 +83,7 @@ void Lnast_parser::parse_var_stmt() {
             add_leaf(lhs_node);
             add_leaf(rhs_node);
             parse_attr();
+            end_tree();
           } else {
             // LNAST - assign
             start_tree(Lnast_node::create_assign());
