@@ -11,7 +11,7 @@ cc_binary(
       "//core",
       "//lnast",
       "//lgraph",
-      # "//inou/firrtl",
+      "//inou/firrtl:inou_firrtl_cpp",
       "//pass/lnast_tolg:pass_lnast_tolg",
       "@hif//hif",
       "@com_google_benchmark//:benchmark",

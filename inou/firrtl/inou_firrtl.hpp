@@ -65,8 +65,10 @@ protected:
   void user_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);
   void ext_module_to_lnast(Eprp_var &var, const firrtl::FirrtlPB_Module &fmodule, std::string_view file_name);
 
+public:
   static void to_lnast(Eprp_var &var);
 
+protected:
   //----------- FOR toFIRRTL ----------
   // FIXME: change function name to livehd coding style
   static void toFIRRTL(Eprp_var &var);

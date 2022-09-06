@@ -9,6 +9,7 @@
 #include "benchmark/benchmark.h"
 
 #include "core/lhtree.hpp"
+#include "eprp_var.hpp"
 
 #include "lnast/lnast_writer.hpp"
 #include "lnast/lnast_parser.hpp"
@@ -17,6 +18,7 @@
 
 #include "lgraph/lgraph.hpp"
 #include "pass/lnast_tolg/lnast_tolg.hpp"
+#include "inou/firrtl/inou_firrtl.hpp"
 
 class LnastTestFixture : public benchmark::Fixture {
 public:
@@ -83,14 +85,13 @@ BENCHMARK_F(LnastTestFixture, LN_LNAST)(benchmark::State& st) {
   }
 }
 
-/*
-BENCHMARK_F(LnastTestFixture, LNAST_FIRRTL)(benchmark::State& st) {
-  auto lnast = read_ln("lnast/tests/ln/benchmark.ln");
-  for (auto _ : st) {
-    
+BENCHMARK_F(LnastTestFixture, FIRRTL_LNAST)(benchmark::State& st) {
+  for (auto _ : st) {  
+    Eprp_var var;
+    var.add("files", "benchmark/firrtl/test.pb");
+    Inou_firrtl::to_lnast(var);
   }
 }
-*/
 
 /*
 BENCHMARK_F(LgraphTestFixture, LGRAPH_HIF)(benchmark::State& st) {

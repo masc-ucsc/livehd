@@ -36,7 +36,7 @@ void Inou_firrtl::to_lnast(Eprp_var& var) {
     for (const auto& f_sv : absl::StrSplit(files, ',')) {
       std::string f(f_sv);
 
-      fmt::print("FILE: {}\n", f);
+      // fmt::print("FILE: {}\n", f);
       // firrtl::FirrtlPB firrtl_input;
       
       auto *firrtl_input = new firrtl::FirrtlPB();

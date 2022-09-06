@@ -4,11 +4,15 @@ FIRRTL=./inou/firrtl/tests/proto/Snxn100k.ch.pb
 LGSHELL=./bazel-bin/main/lgshell
 bazel build -c dbg //main:all
 
+mkdir -p benchmark/firrtl/
+mkdir -p benchmark/ln/
+
+cp -f $FIRRTL benchmark/firrtl/test.pb
+
 if [ ! -f $LGSHELL ]; then
   echo "could not find $LGSHELL"
   exit
 else
-  mkdir -p benchmark/ln/
   $LGSHELL "inou.firrtl.tolnast files:$FIRRTL |> pass.lnast_print odir:benchmark/ln/"
 fi
 
@@ -26,4 +30,5 @@ else
   rm -rf BM_LNAST_HIF
   rm -rf BM_LNAST_LN
   rm -rf benchmark/ln/
+  rm -rf benchmark/firrtl/
 fi
