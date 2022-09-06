@@ -144,8 +144,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   } // if do_matching is false then the lg is post-syn-LG
  
   bool req_flops_matched = false;
-  crit_flop_list={858,931};//FIXME will go away when opentimer will start to work
-  crit_cell_list={139};//FIXME will go away when opentimer will start to work
+  //for vsrp:
+  //crit_flop_list={858,931};//FIXME will go away when opentimer will start to work
+  //crit_cell_list={139};//FIXME will go away when opentimer will start to work
+  //for counter_nested_if:(per OT margin:10)
+  //crit_flop_list={};//FIXME will go away when opentimer will start to work
+  //crit_cell_list={330,359,418,439,567,588};//FIXME will go away when opentimer will start to work
+
 
   bool dealing_flop=false;
   bool dealing_comb=false;
@@ -174,12 +179,29 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         //auto out_node = outdr.get_node();
         get_output_node(outdr, out_set, io_set);
       }
+
+      /*add to crit_flop_list if !do_matching and flop node is colored*/
+      if (!do_matching ) {
+        auto colr = node.has_color()?node.get_color():0;
+        if (colr>0) {
+          crit_flop_list.emplace_back(node.get_nid().value);
+        }
+        fmt::print("\t{}\n",colr); 
+      }
       
     } else { /*else if node is in crit_cell_list then keep its IO in cellIOMap_synth*/
       dealing_comb=true;
       auto node_val = node.get_nid().value;
-      for (auto itr = crit_cell_list.begin(); itr!=crit_cell_list.end(); itr++){
-        if (node_val==*itr){//cell_val) 
+
+      /*add to crit_cell_list if !do_matching and cell node is colored*/
+      if (!do_matching ) { 
+        auto colr = node.has_color()?node.get_color():0;
+        if (colr>0) {
+          crit_cell_list.emplace_back(node_val);
+        }
+        fmt::print("\t{}\n",colr); 
+      
+        if (colr>0){//cell_val) 
           //calc node's IO
           for (const auto& indr : node.inp_drivers()) {
             get_input_node(indr, in_comb_set, io_comb_set);
@@ -686,6 +708,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
 
   }//if(do_matching) closes here
+
+  //FIXME: put some assertion to check if req_flops_matched is still false (when the function completes).
+  //coz if it still false at completion, then the combo match will not enter even at the end!
+  //Atleast flag it!!
 
   bool cellIOMap_synth_resolved = false;
   if(do_matching && req_flops_matched && !cellIOMap_synth.empty() ){
