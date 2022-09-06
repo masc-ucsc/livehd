@@ -43,6 +43,8 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
       vcd_file_list.emplace_back(f);
     } else if (str_tools::ends_with(f, ".sdc")) {
       sdc_file_list.emplace_back(f);
+    } else if (str_tools::ends_with(f, ".v")) { // Nothing to do
+    } else if (str_tools::ends_with(f, ".prp")) { // Nothing to do
     } else {
       Pass::error("pass.opentimer unknown file extension '{}'", f);
     }
