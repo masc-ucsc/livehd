@@ -184,20 +184,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       if (!do_matching ) {
         auto colr = node.has_color()?node.get_color():0;
         if (colr>0) {
-          crit_flop_list.emplace_back(node.get_nid().value);
+          crit_flop_list.emplace_back(node.get_compact_flat());//FIXME: remove this list?
+          crit_flop_map[node.get_compact_flat()] = colr;
         }
         fmt::print("\t{}\n",colr); 
       }
       
     } else { /*else if node is in crit_cell_list then keep its IO in cellIOMap_synth*/
       dealing_comb=true;
-      auto node_val = node.get_nid().value;
+      auto node_val = node.get_compact_flat();
 
       /*add to crit_cell_list if !do_matching and cell node is colored*/
       if (!do_matching ) { 
         auto colr = node.has_color()?node.get_color():0;
         if (colr>0) {
-          crit_cell_list.emplace_back(node_val);
+          crit_cell_list.emplace_back(node_val);//FIXME: remove this list?
+          crit_cell_map[node.get_compact_flat()] = colr;
         }
         fmt::print("\t{}\n",colr); 
       
@@ -478,11 +480,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
             matching_map[synNode]=tmpVec;
             /*if synNode in crit_flop_list, remove from crit_flop_list;*/
             for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-              if(*cfl_it == synNode.get_nid().value) {
+              if(*cfl_it == synNode) {
                 crit_flop_list.erase(cfl_it); 
                 cfl_it--;
               }
-            } 
+            }
+            /*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
             if (crit_flop_list.empty()){ req_flops_matched = true;}
           }
         }
@@ -606,7 +609,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
                 matching_map[n1]=nods;//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
                 /*if synNode in crit_flop_list, remove from crit_flop_list;*/
                 for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-                  if(*cfl_it == n1.get_nid().value) {
+                  if(*cfl_it == n1) {
                     crit_flop_list.erase(cfl_it);
                     cfl_it--;
                   }
@@ -621,7 +624,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
                 matching_map[n1]=nods;//FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
                 /*if synNode in crit_flop_list, remove from crit_flop_list;*/
                 for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-                  if(*cfl_it == n1.get_nid().value) {
+                  if(*cfl_it == n1) {
                     crit_flop_list.erase(cfl_it);
                     cfl_it--;
                   }
