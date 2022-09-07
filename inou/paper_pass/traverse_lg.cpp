@@ -181,12 +181,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       }
 
       /*add to crit_flop_list if !do_matching and flop node is colored*/
-      if (!do_matching ) {
-        auto colr = node.has_color()?node.get_color():0;
-        if (colr>0) {
-          crit_flop_list.emplace_back(node.get_compact_flat());//FIXME: remove this list?
-          crit_flop_map[node.get_compact_flat()] = colr;
-        }
+      if (!do_matching && node.has_color() ) {
+        auto colr = node.get_color();
+        crit_flop_list.emplace_back(node.get_compact_flat());//FIXME: remove this list?
+        crit_flop_map[node.get_compact_flat()] = colr;
         fmt::print("\t{}\n",colr); 
       }
       
@@ -195,26 +193,21 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       auto node_val = node.get_compact_flat();
 
       /*add to crit_cell_list if !do_matching and cell node is colored*/
-      if (!do_matching ) { 
-        auto colr = node.has_color()?node.get_color():0;
-        if (colr>0) {
-          crit_cell_list.emplace_back(node_val);//FIXME: remove this list?
-          crit_cell_map[node.get_compact_flat()] = colr;
-        }
+      if (!do_matching && node.has_color()) { 
+        auto colr = node.get_color();
+        crit_cell_list.emplace_back(node_val);//FIXME: remove this list?
+        crit_cell_map[node.get_compact_flat()] = colr;
         fmt::print("\t{}\n",colr); 
       
-        if (colr>0){//cell_val) 
-          //calc node's IO
-          for (const auto& indr : node.inp_drivers()) {
-            get_input_node(indr, in_comb_set, io_comb_set);
-          }
-          for (const auto& outdr : node.out_sinks() ) {
-            get_output_node(outdr, out_comb_set, io_comb_set);
-          }
-          
-          //insert this node IO in the map
-          
+        //calc node's IO
+        for (const auto& indr : node.inp_drivers()) {
+          get_input_node(indr, in_comb_set, io_comb_set);
         }
+        for (const auto& outdr : node.out_sinks() ) {
+          get_output_node(outdr, out_comb_set, io_comb_set);
+        }
+        
+        //insert this node IO in the map
       }
     }
 
