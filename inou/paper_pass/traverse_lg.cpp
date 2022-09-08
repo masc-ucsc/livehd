@@ -183,7 +183,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*add to crit_flop_list if !do_matching and flop node is colored*/
       if (!do_matching && node.has_color() ) {
         auto colr = node.get_color();
-        crit_flop_list.emplace_back(node.get_compact_flat());//FIXME: remove this list?
+        crit_flop_list.emplace_back(node.get_compact_flat());
         crit_flop_map[node.get_compact_flat()] = colr;
         fmt::print("\t{}\n",colr); 
       }
@@ -195,7 +195,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*add to crit_cell_list if !do_matching and cell node is colored*/
       if (!do_matching && node.has_color()) { 
         auto colr = node.get_color();
-        crit_cell_list.emplace_back(node_val);//FIXME: remove this list?
+        crit_cell_list.emplace_back(node_val);
         crit_cell_map[node.get_compact_flat()] = colr;
         fmt::print("\t{}\n",colr); 
       
@@ -480,6 +480,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
             }
             /*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
             if (crit_flop_list.empty()){ req_flops_matched = true;}
+            if (crit_flop_map.find(synNode)!=crit_flop_map.end()) {
+              //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
+              for (const auto & o_n: matching_map[synNode]) {
+                //need o_n_node to be of type Node (not compact/compact_flat)
+                //Node o_n_node(lg,o_n);//points to the node in orig LG
+                //o_n_node.set_color(crit_flop_map[synNode]);//FIXME: o_n is compact_flat here. we need it of Node type?
+                matched_color_map[o_n]=crit_flop_map[synNode];
+              }
+            }
           }
         }
         IOtoNodeMap_orig.erase(it++);
@@ -608,6 +617,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
                   }
                 }
                 if (crit_flop_list.empty()){ req_flops_matched = true;}
+                if (crit_flop_map.find(n1)!=crit_flop_map.end()) {
+                  //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
+                  for (const auto & o_n: matching_map[n1]) {
+                    //o_n.set_color(crit_flop_map[n1]);//FIXME: o_n is compact_flat here. we need it of Node type?
+                    matched_color_map[o_n]=crit_flop_map[n1];
+                  }
+                }
               }
               //full_orig_map.erase(ito++);
               continue;
@@ -623,6 +639,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
                   }
                 }
                 if (crit_flop_list.empty()){ req_flops_matched = true;}
+                if (crit_flop_map.find(n1)!=crit_flop_map.end()) {
+                  //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
+                  for (const auto & o_n: matching_map[n1]) {
+                    //o_n.set_color(crit_flop_map[n1]);//FIXME: o_n is compact_flat here. we need it of Node type?
+                    matched_color_map[o_n]=crit_flop_map[n1];
+                  }
+                }
               }
               //full_orig_map.erase(ito++);
               continue;
@@ -810,6 +833,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
       fmt::print("\n");                     
   }//if(cellIOMap_synth_resolved) ends here
+
+  /*Printing "matched_color_map"*/
+  fmt::print("\n THE matched_color_map is:\n");
+  for (const auto& [k,v]:matched_color_map) {
+    fmt::print("\t{}\t:::\t{}\n",k.get_nid(), v);
+  }
+  fmt::print("\n");
 
 }
 

@@ -34,6 +34,7 @@ private:
   absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> > IOtoNodeMap_orig;
   absl::node_hash_map<std::set<std::string>, setMap_pairKey > IOtoNodeMap_synth;
   absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> > matching_map;
+  absl::node_hash_map<Node::Compact_flat, int> matched_color_map;
   std::vector<Node::Compact_flat> crit_flop_list;
   std::vector<Node::Compact_flat> crit_cell_list;
   absl::node_hash_map<Node::Compact_flat, int> crit_flop_map;
