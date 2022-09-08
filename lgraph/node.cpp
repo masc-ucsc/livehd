@@ -613,17 +613,17 @@ void Node::del_color() {
   current_g->ref_node_color_map()->erase(get_compact());
 }
 
-void Node::set_color(int new_color) { current_g->ref_node_color_map()->insert_or_assign(get_compact(), new_color); }
+void Node::set_color(int new_color) { top_g->ref_node_color_map()->insert_or_assign(get_compact(), new_color); }
 
 int Node::get_color() const {
-  const auto &ptr = current_g->get_node_color_map();
+  const auto &ptr = top_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact());
   I(it != ptr.end());
   return it->second;
 }
 
 bool Node::has_color() const {
-  const auto &ptr = current_g->get_node_color_map();
+  const auto &ptr = top_g->get_node_color_map();
   const auto  it  = ptr.find(get_compact());
   return it != ptr.end();
 }
