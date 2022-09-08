@@ -369,7 +369,7 @@ void Pass_opentimer::populate_table(Lgraph *lg) {
 
   lg->ref_node_color_map()->clear(); // Delete all the colors
 
-  for(auto node:lg->fast()) {
+  for(auto node:lg->fast(true)) {
     for (auto &dpin:node.out_connected_pins()) {
       if (!dpin.has_delay())
         continue;
