@@ -58,7 +58,7 @@ void Traverse_lg::do_travers(Lgraph* lg) {
   }
   ofs<<std::endl<<std::endl<<lg->get_name()<<std::endl<<std::endl<<std::endl;
 
-  for (const auto& node : lg->forward()) {
+  for (const auto& node : lg->forward(true)) {
     ofs<<"===============================\n";
     ofs<<node.debug_name()<<std::endl; //this is the main node for which we will record IO
     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
@@ -144,18 +144,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   } // if do_matching is false then the lg is post-syn-LG
  
   bool req_flops_matched = false;
-  //for vsrp:
-  //crit_flop_list={858,931};//FIXME will go away when opentimer will start to work
-  //crit_cell_list={139};//FIXME will go away when opentimer will start to work
-  //for counter_nested_if:(per OT margin:10)
-  //crit_flop_list={};//FIXME will go away when opentimer will start to work
-  //crit_cell_list={330,359,418,439,567,588};//FIXME will go away when opentimer will start to work
-
-
   bool dealing_flop=false;
   bool dealing_comb=false;
 
-  for (const auto& node : lg->forward()) {
+  for (const auto& node : lg->forward(true)) {
     dealing_flop=false;
     dealing_comb=false;
     // absl::btree_set<std::string> in_set;
@@ -326,7 +318,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
   }//enf of for lg-> traversal
 
-  if(!do_matching && dealing_flop) {
+  if(!do_matching) {
+    /*for the sequential part:*/ 
     I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
     //print the map
     fmt::print("\n\nMAP FORMED IS:\n");
@@ -371,7 +364,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     }
     fmt::print("\n\n\n");
-  } else if (!do_matching && dealing_comb) {
+    /*for the combo part:*/ 
     //print the cellIOMap_synth
     fmt::print("\n\nthe cellIOMap_synth FORMED IS:\n");
     for(auto& [ioPair, n_list]: cellIOMap_synth) {
@@ -813,7 +806,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
       const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
-      for (const auto& startPoint_node : lg->fast()) {
+      for (const auto& startPoint_node : lg->fast(true)) {
         if(std::to_string(startPoint_node.get_nid().value)==required_node){
           fmt::print("Found node {}\n", startPoint_node.get_nid());
           //keep traversing forward until you hit an EP
@@ -834,12 +827,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n");                     
   }//if(cellIOMap_synth_resolved) ends here
 
-  /*Printing "matched_color_map"*/
-  fmt::print("\n THE matched_color_map is:\n");
-  for (const auto& [k,v]:matched_color_map) {
-    fmt::print("\t{}\t:::\t{}\n",k.get_nid(), v);
+  if(!matched_color_map.is_empty()) {
+    /*Printing "matched_color_map"*/
+    fmt::print("\n THE matched_color_map is:\n");
+    for (const auto& [k,v]:matched_color_map) {
+      fmt::print("\t{}\t:::\t{}\n",k.get_nid(), v);
+    }
+    fmt::print("\n");
   }
-  fmt::print("\n");
 
 }
 
