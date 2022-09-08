@@ -332,7 +332,9 @@ int main(int argc, char** argv) {
 
   if (!cmd.empty()) {
     fmt::print("livehd cmd {}\n", cmd);
-    Main_api::parse_inline(cmd);
+    for(const auto line:absl::StrSplit(cmd,'\n')) {
+      Main_api::parse_inline(line);
+    }
     return 0;
   }
 
