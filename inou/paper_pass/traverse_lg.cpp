@@ -827,7 +827,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n");                     
   }//if(cellIOMap_synth_resolved) ends here
 
-  if(!matched_color_map.is_empty()) {
+  if(!matched_color_map.empty()) {
     /*Printing "matched_color_map"*/
     fmt::print("\n THE matched_color_map is:\n");
     for (const auto& [k,v]:matched_color_map) {
