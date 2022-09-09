@@ -754,6 +754,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool cellIOMap_synth_resolved = false;
   if(do_matching && req_flops_matched && !cellIOMap_synth.empty() ){
     /*resolve cellIOMap_synth with help of matching_map*/
+    std::set<std::pair<std::set<std::string>, std::set<std::string>> > noOverwrite_in_cellIOMapSynth;
     for(auto it=cellIOMap_synth.begin(); it!=cellIOMap_synth.end();){
       auto& iv = (it->first).first;//this is i/p set for [n]
       auto& ov = (it->first).second;//this is o/p set for [n]
@@ -794,6 +795,18 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*make pair<randSet1,randSet2> and replace <iv,ov> with it:*/
       auto extracted_entry = cellIOMap_synth.extract(it++);
       extracted_entry.key() = std::make_pair(randSet1,randSet2);
+      /*if key already in noOverwrite-Set, then take extracted_entry.mapped() and append to map.find(extracted_entry.key()). 
+       * else just store this key in noOverwrite_in_cellIOMapSynth.*/
+      if (noOverwrite_in_cellIOMapSynth.find(extracted_entry.key())!=noOverwrite_in_cellIOMapSynth.end()) {
+        //auto tempVec = cellIOMap_synth[extracted_entry.key()];
+        for (const auto &m:cellIOMap_synth[extracted_entry.key()]){
+          (extracted_entry.mapped()).emplace_back(m);
+        }
+        cellIOMap_synth.erase(extracted_entry.key());
+      } else {
+        noOverwrite_in_cellIOMapSynth.insert(extracted_entry.key());
+      }
+       /*... and insertion to cellIOMap_synth remains same in both cases.*/
       cellIOMap_synth.insert(std::move(extracted_entry));
     }//end of for(auto it=cellIOMap_synth.begin(); it!=cellIOMap_synth.end();
 
@@ -834,9 +847,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       //const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
       const auto required_node = *(allSPs.begin());
       //Node startPoint_node(lg, required_node );
-      for (const auto & lg_n: lg->fast(true)){
-        fmt::print("Node: {} has name \"{}\" \t {} ans is {} graphIO\n", lg_n.get_nid(), lg_n.has_name(), lg_n.has_name()?lg_n.get_name():"-", lg_n.is_graph_io()?"true":"False");
-      }
       for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
         if(std::to_string(startPoint_node.get_nid().value)==required_node){//FIXME:REM
           fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
