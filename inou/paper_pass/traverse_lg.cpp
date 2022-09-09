@@ -289,11 +289,37 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     if(do_matching && !req_flops_matched) {
       /*if orig graph IO-set pair is as-is found in the synth nodeIOmap, then it is direct match!*/
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-        matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)]; //FIXME: put this in matching_map. no need of matched_map then 
+        //put this in matching_map.
+        matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];//FIXME:put this in matching_map. no need of matched_map then
+        //const auto & synNode = nodeIOmap[std::make_pair(in_set, out_set)];
+        //std::vector<Node::Compact_flat> tmpVec;
+        //if(matching_map.find(synNode) != matching_map.end()) {
+        //  tmpVec.assign((matching_map[synNode]).begin() , (matching_map[synNode]).end() );
+        //  tmpVec.emplace_back(node.get_compact_flat());
+        //} else {
+        //  tmpVec.emplace_back(node.get_compact_flat());
+        //}
+        //matching_map[synNode]=tmpVec;
+        ///*if synNode in crit_flop_list, remove from crit_flop_list;*/
+        //for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+        //  if(*cfl_it == synNode) {
+        //    crit_flop_list.erase(cfl_it); 
+        //    cfl_it--;
+        //  }
+        //}
+        ///*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
+        //if (crit_flop_list.empty()){ req_flops_matched = true;}
+        //if (crit_flop_map.find(synNode)!=crit_flop_map.end()) {
+        //  //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
+        //  for (const auto & o_n: matching_map[synNode]) {
+        //    matched_color_map[o_n]=crit_flop_map[synNode];
+        //  }
+        //}
+
       } else {
-        unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);//FIXME: this won't be needed once matched map is removed and entries put in matching_map are erased from the main maps!
+        unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);//FIXME: (no more needed; kept for debug purposes) (old fixme msg: this won't be needed once matched map is removed and entries put in matching_map are erased from the main maps!
       }
-      /*insert in full_orig_map*/
+      /*insert in full_orig_map (against same set of IOs)*/
       const auto& nodeid = node.get_compact_flat();
       std::vector<Node::Compact_flat> tmpVec;
       if(full_orig_map.find(std::make_pair(in_set, out_set)) != full_orig_map.end()) {
@@ -805,15 +831,20 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
-      const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
-      for (const auto& startPoint_node : lg->fast(true)) {
-        if(std::to_string(startPoint_node.get_nid().value)==required_node){
-          fmt::print("Found node {}\n", startPoint_node.get_nid());
+      //const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
+      const auto required_node = *(allSPs.begin());
+      //Node startPoint_node(lg, required_node );
+      for (const auto & lg_n: lg->fast(true)){
+        fmt::print("Node: {} has name \"{}\" \t {} ans is {} graphIO\n", lg_n.get_nid(), lg_n.has_name(), lg_n.has_name()?lg_n.get_name():"-", lg_n.is_graph_io()?"true":"False");
+      }
+      for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
+        if(std::to_string(startPoint_node.get_nid().value)==required_node){//FIXME:REM
+          fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
           //keep traversing forward until you hit an EP
           path_traversal(startPoint_node);
 
-        }
-      }//end of for (const auto& startPoint_node : lg->forward())
+        }//FIXME:REM
+      }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
 
     }//for (auto [k,v]: cellIOMap_synth) ends here
     /*Printing "matching map"*/             
