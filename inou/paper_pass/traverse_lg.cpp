@@ -182,10 +182,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       
     } else { /*else if node is in crit_cell_list then keep its IO in cellIOMap_synth*/
       dealing_comb=true;
-      auto node_val = node.get_compact_flat();
-
       /*add to crit_cell_list if !do_matching and cell node is colored*/
       if (!do_matching && node.has_color()) { 
+        auto node_val = node.get_compact_flat();
         auto colr = node.get_color();
         crit_cell_list.emplace_back(node_val);
         crit_cell_map[node.get_compact_flat()] = colr;
@@ -193,10 +192,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       
         //calc node's IO
         for (const auto& indr : node.inp_drivers()) {
-          get_input_node(indr, in_comb_set, io_comb_set);
+          get_input_node(indr, in_comb_set, io_comb_set, true);
         }
         for (const auto& outdr : node.out_sinks() ) {
-          get_output_node(outdr, out_comb_set, io_comb_set);
+          get_output_node(outdr, out_comb_set, io_comb_set, true);
         }
         
         //insert this node IO in the map
@@ -798,11 +797,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*if key already in noOverwrite-Set, then take extracted_entry.mapped() and append to map.find(extracted_entry.key()). 
        * else just store this key in noOverwrite_in_cellIOMapSynth.*/
       if (noOverwrite_in_cellIOMapSynth.find(extracted_entry.key())!=noOverwrite_in_cellIOMapSynth.end()) {
-        //auto tempVec = cellIOMap_synth[extracted_entry.key()];
         for (const auto &m:cellIOMap_synth[extracted_entry.key()]){
           (extracted_entry.mapped()).emplace_back(m);
         }
-        cellIOMap_synth.erase(extracted_entry.key());
+        cellIOMap_synth.erase(extracted_entry.key());//won't overwrite the same key value!
       } else {
         noOverwrite_in_cellIOMapSynth.insert(extracted_entry.key());
       }
@@ -846,16 +844,25 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
        * and start iterating from there*/
       //const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
       const auto required_node = *(allSPs.begin());
-      //Node startPoint_node(lg, required_node );
-      for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
-        if(std::to_string(startPoint_node.get_nid().value)==required_node){//FIXME:REM
-          fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
-          //keep traversing forward until you hit an EP
-          path_traversal(startPoint_node);
+      if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
+        //Node startPoint_node(lg, required_node );
+        lg->each_graph_input([required_node,this](Node_pin &dpin) {
+          const auto & in_node = dpin.get_node();
+          fmt::print("is_graph_io: {}, {}\n", in_node.is_graph_io()?"true":"false",dpin.has_name()?dpin.get_name():dpin.get_pin_name() );
+          if(std::to_string(in_node.get_compact_flat().get_nid().value)==required_node){
+            path_traversal(in_node);
+          }
+          });
+      } else {
+        for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
+          if(std::to_string(startPoint_node.get_nid().value)==required_node){//FIXME:REM
+            fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
+            //keep traversing forward until you hit an EP
+            path_traversal(startPoint_node);
 
-        }//FIXME:REM
-      }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
-
+          }//FIXME:REM
+        }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
+      }
     }//for (auto [k,v]: cellIOMap_synth) ends here
     /*Printing "matching map"*/             
     fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
@@ -969,7 +976,7 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
-void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set) {
+void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if (node.is_type_const()) {
@@ -996,6 +1003,10 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         //temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());//FIXME:changed to line below temporarily for debugging. revert back!
         temp_str+=std::to_string(node.get_compact_flat().get_nid());
         //temp_str+=")";
+        if(addToCFL && (std::find(crit_flop_list.begin(), crit_flop_list.end(),(node.get_compact_flat()))==crit_flop_list.end())) {
+          crit_flop_list.emplace_back(node.get_compact_flat());
+          crit_flop_map[node.get_compact_flat()] = node.has_color()?node.get_color():0;//keeping here 0 for no color. for now.
+        }
       }
       in_set.insert(temp_str);
       if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
@@ -1004,13 +1015,13 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
   } else {
       for (const auto& indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
-        get_input_node(indr, in_set, io_set);
+        get_input_node(indr, in_set, io_set, addToCFL);
       }
   }
 }
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
-void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set) {
+void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL) {
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_output()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
@@ -1031,6 +1042,10 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         //temp_str+=(node.has_name()?node.get_name():node.out_connected_pins()[0].get_wire_name());//FIXME:changed to line below temporarily for debugging. revert back!
         temp_str+=std::to_string(node.get_compact_flat().get_nid());
         //temp_str+=")";
+        if(addToCFL && (std::find(crit_flop_list.begin(), crit_flop_list.end(),(node.get_compact_flat()))==crit_flop_list.end())) {
+          crit_flop_list.emplace_back(node.get_compact_flat());
+          crit_flop_map[node.get_compact_flat()] = node.has_color()?node.get_color():0;//keeping here 0 for no color. for now.
+        }
       }
       out_set.insert(temp_str);
       if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
@@ -1039,7 +1054,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
   } else {
       for (const auto& outdr : node.out_sinks() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_set, io_set);
+        get_output_node(outdr, out_set, io_set, addToCFL);
       }
   }
 }

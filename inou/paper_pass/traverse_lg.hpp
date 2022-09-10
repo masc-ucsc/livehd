@@ -55,8 +55,8 @@ protected:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
-  void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set);
-  void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set);
+  void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
+  void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL = false);
   std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
   void path_traversal(const Node &startPoint_node);
   bool check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node);
