@@ -608,6 +608,16 @@ Bits_t Node::get_bits() const {
 
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
+void Node::set_loc(const std::pair<uint64_t, uint64_t> &pos) {top_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos); }
+
+const std::pair<uint64_t,uint64_t> Node::get_loc() const {
+  const auto &ptr = top_g->get_node_loc_map();
+  const auto it = ptr.find(get_compact_class());
+  I(it != ptr.end());
+  return it->second;
+}
+
+bool Node::has_loc() const {return top_g->get_node_loc_map().contains(get_compact_class()); }
 //----- Subject to changes in the future:
 void Node::del_color() {
   current_g->ref_node_color_map()->erase(get_compact());
@@ -634,6 +644,10 @@ void Node::dump() const {
   fmt::print("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
   if (has_color()) {
     fmt::print(" color:{} ", get_color());
+  }
+  if (has_loc()) {
+    std::pair<uint64_t,uint64_t> loc = get_loc(); 
+    fmt::print(" loc:[{},{}] ", loc.first, loc.second);
   }
   if (get_type_op() == Ntype_op::LUT) {
     fmt::print(" lut:{}\n", get_type_lut().to_pyrope());

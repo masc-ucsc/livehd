@@ -371,6 +371,10 @@ public:
   bool            has_place() const;
 
   Bits_t get_bits() const;
+  
+  void                                set_loc(const std::pair<uint64_t, uint64_t> &pos);
+  const std::pair<uint64_t, uint64_t> get_loc() const;
+  bool                                has_loc() const;
 
   void set_color(int color);
   void del_color();
