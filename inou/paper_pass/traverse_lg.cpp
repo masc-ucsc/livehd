@@ -147,7 +147,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool dealing_flop=false;
   bool dealing_comb=false;
 
-  for (const auto& node : lg->forward(true)) {
+  for (const auto & node : lg->forward(true)) {
     dealing_flop=false;
     dealing_comb=false;
     // absl::btree_set<std::string> in_set;
@@ -163,11 +163,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
     if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
       dealing_flop=true;
-      for (const auto& indr : node.inp_drivers()) {
+      for (const auto & indr : node.inp_drivers()) {
         //auto inp_node = indr.get_node();
         get_input_node(indr, in_set, io_set);
       }
-      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+      for (const auto & outdr : node.out_sinks() ) {//outdr is the pin of the output node.
         //auto out_node = outdr.get_node();
         get_output_node(outdr, out_set, io_set);
       }
@@ -191,10 +191,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
-        for (const auto& indr : node.inp_drivers()) {
+        for (const auto & indr : node.inp_drivers()) {
           get_input_node(indr, in_comb_set, io_comb_set, true);
         }
-        for (const auto& outdr : node.out_sinks() ) {
+        for (const auto & outdr : node.out_sinks() ) {
           get_output_node(outdr, out_comb_set, io_comb_set, true);
         }
         
@@ -209,31 +209,31 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     //print the set formed
     fmt::print("INPUTS:\n");
     if (dealing_flop) {
-      for (const auto& i:in_set) {
+      for (const auto & i:in_set) {
         fmt::print("\t{}\n",i);
       } 
     } else {
-      for (const auto& i:in_comb_set) {
+      for (const auto & i:in_comb_set) {
         fmt::print("\t{}\n",i);
       } 
     }
     fmt::print("OUTPUTS:\n");
     if (dealing_flop) {
-      for (const auto& i:out_set) {
+      for (const auto & i:out_set) {
         fmt::print("\t{}\n",i);
       }
     } else {
-      for (const auto& i:out_comb_set) {
+      for (const auto & i:out_comb_set) {
         fmt::print("\t{}\n",i);
       }
     }
     fmt::print("IOs:\n");
     if (dealing_flop) {
-      for (const auto& i:io_set) {
+      for (const auto & i:io_set) {
         fmt::print("\t{}\n",i);
       }
     } else {
-      for (const auto& i:io_comb_set) {
+      for (const auto & i:io_comb_set) {
         fmt::print("\t{}\n",i);
       }
     }
@@ -348,16 +348,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
     //print the map
     fmt::print("\n\nMAP FORMED IS:\n");
-    for(auto& [ioPair, n_list]: nodeIOmap) {
-      for (auto& ip: ioPair.first) {
+    for(const auto & [ioPair, n_list]: nodeIOmap) {
+      for (const auto & ip: ioPair.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:ioPair.second) {
+      for (const auto & op:ioPair.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("::: \t");
-      for (auto& n:n_list) {
+      for (const auto & n:n_list) {
         fmt::print("{}\t", n.get_nid());
       }
       fmt::print("\n\n");
@@ -365,22 +365,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nIOtoNodeMap_synth MAP FORMED IS:\n");
     for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-      for (auto& ip: ioval) {
+      for (const auto & ip: ioval) {
         fmt::print("{}\t",ip);
       }
       fmt::print("\n");
       
-      for(auto& [ioPair, n_list]: inMap) {
+      for(const auto & [ioPair, n_list]: inMap) {
         fmt::print("\t\t\t\t");
-        for (auto& ip: ioPair.first) {
+        for (const auto & ip: ioPair.first) {
           fmt::print("{}\t",ip);
         }
         fmt::print("||| \t");
-        for (auto& op:ioPair.second) {
+        for (const auto & op:ioPair.second) {
           fmt::print("{}\t", op);
         }
         fmt::print("::: \t");
-        for (auto& n:n_list) {
+        for (const auto & n:n_list) {
           fmt::print("{}\t", n.get_nid());
         }
         fmt::print("\n");
@@ -392,16 +392,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /*for the combo part:*/ 
     //print the cellIOMap_synth
     fmt::print("\n\nthe cellIOMap_synth FORMED IS:\n");
-    for(auto& [ioPair, n_list]: cellIOMap_synth) {
-      for (auto& ip: ioPair.first) {
+    for(const auto& [ioPair, n_list]: cellIOMap_synth) {
+      for (const auto & ip: ioPair.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:ioPair.second) {
+      for (const auto& op:ioPair.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("::: \t");
-      for (auto& n:n_list) {
+      for (const auto & n:n_list) {
         fmt::print("{}\t", n.get_nid());
       }
       fmt::print("\n\n");
@@ -409,11 +409,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   } else if(do_matching) { //do_matching
     fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
     for(const auto& [iov,fn]: IOtoNodeMap_orig) {
-      for (auto& ip: iov) {
+      for (const auto & ip: iov) {
         fmt::print("{}\t",ip);
       }
       fmt::print("::: \t");
-      for (auto& op:fn) {
+      for (const auto & op:fn) {
         fmt::print("{}\t", op.get_nid());
       }
       fmt::print("\n\n");
@@ -421,15 +421,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nThe complete orig map is:\n");
     for(const auto& [iov,fn]: full_orig_map) {
-      for (auto& ip: iov.first) {
+      for (const auto& ip: iov.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:iov.second) {
+      for (const auto& op:iov.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("::: \t");
-      for (auto& op:fn) {
+      for (const auto& op:fn) {
         fmt::print("{}\t", op.get_nid());
       }
       fmt::print("\n\n");
@@ -439,21 +439,21 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n The unmatched flops are:\n");
     for(const auto& [fn,iov]: unmatched_map) {
       fmt::print("{}\n",fn.get_nid());
-      for (auto& ip: iov.first) {
+      for (const auto& ip: iov.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:iov.second) {
+      for (const auto& op:iov.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("\n\n");
     }
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nmatched_map (matching done is):\n");
-    for(auto& [k, n_list]: matched_map) {
+    for(const auto& [k, n_list]: matched_map) {
       fmt::print("{}\t", k.get_nid());
       fmt::print("::: \t");
-      for (auto& n:n_list) {
+      for (const auto& n:n_list) {
         fmt::print("{}\t", n.get_nid());
       }
       fmt::print("\n");
@@ -583,22 +583,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*printing the resolved map*/
       fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
       for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-        for (auto& ip: ioval) {
+        for (const auto& ip: ioval) {
           fmt::print("{}\t",ip);
         }
         fmt::print("\n");
         
-        for(auto& [ioPair, n_list]: inMap) {
+        for(const auto& [ioPair, n_list]: inMap) {
           fmt::print("\t\t\t\t");
-          for (auto& ip: ioPair.first) {
+          for (const auto& ip: ioPair.first) {
             fmt::print("{}\t",ip);
           }
           fmt::print("||| \t");
-          for (auto& op:ioPair.second) {
+          for (const auto& op:ioPair.second) {
             fmt::print("{}\t", op);
           }
           fmt::print("::: \t");
-          for (auto& n:n_list) {
+          for (const auto& n:n_list) {
             fmt::print("{}\t", n.get_nid());
           }
           fmt::print("\n");
@@ -682,7 +682,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n THE MATCHING_MAP is:\n");
     for (const auto& [k,v]:matching_map) {
       fmt::print("\n{}\t:::\t",k.get_nid());
-      for (auto& v1:v) {
+      for (const auto& v1:v) {
         fmt::print("{}\t", v1.get_nid());
       }
     }
@@ -692,15 +692,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nThe complete orig map ALTERED is:\n");
     for(const auto& [iov,fn]: full_orig_map) {
-      for (auto& ip: iov.first) {
+      for (const auto& ip: iov.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:iov.second) {
+      for (const auto& op:iov.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("::: \t");
-      for (auto& op:fn) {
+      for (const auto& op:fn) {
         fmt::print("{}\t", op.get_nid());
       }
       fmt::print("\n\n");
@@ -708,11 +708,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nThe IOtoNodeMap_orig map ALTERED is:\n");
     for(const auto& [iov,fn]: IOtoNodeMap_orig) {
-      for (auto& ip: iov) {
+      for (const auto& ip: iov) {
         fmt::print("{}\t",ip);
       }
       fmt::print("::: \t");
-      for (auto& op:fn) {
+      for (const auto& op:fn) {
         fmt::print("{}\t", op.get_nid());
       }
       fmt::print("\n\n");
@@ -721,22 +721,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     fmt::print("\n\nIOtoNodeMap_synth MAP ALTERED IS:\n");
     for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-      for (auto& ip: ioval) {
+      for (const auto& ip: ioval) {
         fmt::print("{}\t",ip);
       }
       fmt::print("\n");
       
-      for(auto& [ioPair, n_list]: inMap) {
+      for(const auto& [ioPair, n_list]: inMap) {
         fmt::print("\t\t\t\t");
-        for (auto& ip: ioPair.first) {
+        for (const auto& ip: ioPair.first) {
           fmt::print("{}\t",ip);
         }
         fmt::print("||| \t");
-        for (auto& op:ioPair.second) {
+        for (const auto& op:ioPair.second) {
           fmt::print("{}\t", op);
         }
         fmt::print("::: \t");
-        for (auto& n:n_list) {
+        for (const auto& n:n_list) {
           fmt::print("{}\t", n.get_nid());
         }
         fmt::print("\n");
@@ -810,16 +810,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     //print the cellIOMap_synth
     fmt::print("\n\nthe cellIOMap_synth RESOLVED IS:\n");
-    for(auto& [ioPair, n_list]: cellIOMap_synth) {
-      for (auto& ip: ioPair.first) {
+    for(const auto& [ioPair, n_list]: cellIOMap_synth) {
+      for (const auto& ip: ioPair.first) {
         fmt::print("{}\t",ip);
       }
       fmt::print("||| \t");
-      for (auto& op:ioPair.second) {
+      for (const auto& op:ioPair.second) {
         fmt::print("{}\t", op);
       }
       fmt::print("::: \t");
-      for (auto& n:n_list) {
+      for (const auto& n:n_list) {
         fmt::print("{}\t", n.get_nid());
       }
       fmt::print("\n\n");
@@ -836,13 +836,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   if(do_matching && cellIOMap_synth_resolved){
     /*matching of combo part happens here with help of pre-synth LG!
      * 1. take LGorig and go to the SP for 1st cell in cellIOMap_synth*/
-    for (auto [k,v]: cellIOMap_synth){
-      auto allSPs = k.first;
-      auto allEPs = k.second;
+    for (const auto & [k,v]: cellIOMap_synth){
+      auto & allSPs = k.first;
+      auto & allEPs = k.second;
       
-      for (auto sp:allSPs) fmt::print("{} ", sp);
+      for (const auto & sp:allSPs) fmt::print("{} ", sp);
       fmt::print("\n-\n");
-      for (auto ep:allEPs) fmt::print("{}\n", ep);
+      for (const auto & ep:allEPs) fmt::print("{}\n", ep);
       fmt::print("\n\n\n");
 
       /*go to 1st SP of allSPs for 1st entry
@@ -872,7 +872,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
     for (const auto& [k,v]:matching_map) {  
       fmt::print("\n{}\t:::\t",k.get_nid());
-      for (auto& v1:v) {
+      for (const auto& v1:v) {
         fmt::print("{}\t", v1.get_nid());   
       }
     }
@@ -971,6 +971,7 @@ bool Traverse_lg::is_startpoint(Node node_to_eval ){
   } 
   return false;
 }
+
 bool Traverse_lg::is_endpoint(Node node_to_eval){
   /*if (node is flop or graph output) return true else return false*/
   if(node_to_eval.is_type_flop() ||  (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_output()){
@@ -1077,24 +1078,8 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
       }
   }
 }
-// p node.inp_connected_pins().front().get_pin_name()
-// void Traverse_lg::do_travers(Lgraph* lg, std::string_view module_name) {
-//   std::cout<<module_name<<std::endl;
-//   for (const auto& node : lg->fast()) {
-//     std::cout<<node.debug_name()<<std::endl;
-//     node.dump();
-//     for (const auto& dpin : node.out_connected_pins()) {
-//       auto dpin_editable = dpin;
-//       //auto ntype         = dpin.get_node().get_type_op();
-//       //node.get_type_const().to_pyrope()
-//       if (!dpin_editable.has_name() ){//&& !((ntype == Ntype_op::IO) || (ntype == Ntype_op::Const))) {
-//            std::cout<<"no name"<<std::endl;
-//       } else {
-//         std::cout<<"name"<<std::endl;
-//       }
-//     }
-// 
-//   }
-// 
-// }
+
+
+
+
 
