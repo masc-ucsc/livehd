@@ -825,6 +825,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n\n");
     }
     cellIOMap_synth_resolved=true;
+    //print crit_cell_list
+    fmt::print("\n crit_cell_list at this point: \n");
+    for (auto & n:crit_cell_list){
+      fmt::print("{}\t", n.get_nid());
+    }
   }//if(do_matching && req_flops_matched && !cellIOMap_synth.empty()) ends here
 
   fmt::print("\n\n\n");
@@ -842,14 +847,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
-      //const auto required_node = "163"; //FIXME: currently hardcoded required_node but it should be calculated from IOs in cellIOMap_synth
       const auto required_node = *(allSPs.begin());
       if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
         //Node startPoint_node(lg, required_node );
         lg->each_graph_input([required_node,this](Node_pin &dpin) {
           const auto & in_node = dpin.get_node();
-          fmt::print("is_graph_io: {}, {}\n", in_node.is_graph_io()?"true":"false",dpin.has_name()?dpin.get_name():dpin.get_pin_name() );
-          if(std::to_string(in_node.get_compact_flat().get_nid().value)==required_node){
+          std::string comp_name = (dpin.has_name()?dpin.get_name():dpin.get_pin_name());
+          if(comp_name==required_node){
             path_traversal(in_node);
           }
           });
@@ -891,7 +895,7 @@ void Traverse_lg::path_traversal(const Node &start_node){
   for(auto s : this_node.out_sinks()){
     this_node = s.get_node();
     if ( (this_node.has_color()?(this_node.get_color()!=VISITED_COLORED):true) && (!is_endpoint(this_node)) ) {
-      /*it is unvisited combinational cell*/
+      /*it is unvisited combinational cell in orig graph*/
       this_node.set_color(VISITED_COLORED);
       
       std::set<std::string> nodes_in_set;
@@ -900,6 +904,17 @@ void Traverse_lg::path_traversal(const Node &start_node){
       get_input_node(s, nodes_in_set, nodes_io_set);
       get_output_node(s, nodes_out_set, nodes_io_set) ;
 
+
+      fmt::print("\n -- Entering check_in_cellIOMap_synth( {} ) with: --\n", this_node.get_nid());
+      fmt::print("\t in_set:\n");
+      for( const auto & i: nodes_in_set){
+        fmt::print("\t\t{}, ", i);
+      }
+      fmt::print("\n\t out_set:\n");
+      for( const auto & i: nodes_out_set){
+        fmt::print("\t\t{}, ", i);
+      }
+  
       auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
 
       if (val) {
@@ -921,14 +936,15 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::s
    * returning F because : stop iterating for its sink pins as this path is not going anywhere in criticality
    * else return T 
    * Also: put the data in matching_map? or some other map to reflect matched combo cells?
-   * */  
+   * */ 
+
   //make io pair of the 2 sets from LGorig
   auto pair_to_find = std::make_pair(in_set, out_set); 
   //find the pair in keys of the cellIOMap_synth
   if(cellIOMap_synth.find(pair_to_find) != cellIOMap_synth.end()) {
     //if found, put this start_node of LGorig against value from cellIOMap_synth for LGsynth to matching_map AND return T
     auto found_synth_cell_vals = cellIOMap_synth[pair_to_find];
-    for(auto n:found_synth_cell_vals) {
+    for(const auto & n:found_synth_cell_vals) {
       std::vector<Node::Compact_flat> tmpVec;
       if(matching_map.find(n) != matching_map.end()) {
         tmpVec.assign((matching_map[n]).begin() , (matching_map[n]).end() );
@@ -937,6 +953,9 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::s
         tmpVec.emplace_back(start_node.get_compact_flat());
       }
       matching_map[n]=tmpVec;
+      //FIXME: remove from crit_cell_list; better still: remove crit_cell_list (not required)
+      //put orig combo node in matched_color_map. color value will be crit_cell_map[n]:
+      matched_color_map[start_node.get_compact_flat()] = crit_cell_map[n];
     }
     
     return true;
