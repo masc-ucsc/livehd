@@ -326,7 +326,6 @@ void Lnast_tolg::nary_node_rhs_connections(Lgraph *lg, Node &opr_node, const std
 Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign) {
   auto c0 = lnast->get_first_child(lnidx_assign);
   auto c1 = lnast->get_sibling_next(c0);
-  // fmt::print("DEBUG CCC c0:{}, c1:{}\n", lnast->get_name(c0), lnast->get_name(c1));
 
   bool is_tup_asg = lnast->get_name(lnidx_assign) == tuple_assign_str;
   auto opd1       = setup_ref_node_dpin(lg, c1, is_tup_asg);
@@ -1300,12 +1299,17 @@ void Lnast_tolg::process_ast_attr_get_op(Lgraph *lg, const Lnast_nid &lnidx_aget
     wire_node = lg->create_node(Ntype_op::Or);  // might need to change to other type according to the real driver
     auto wire_dpin = wire_node.setup_driver_pin();
     wire_dpin.set_name(hier_fields_cat_name);
+
+
     name2dpin[c0_aget_name] = wire_dpin;
 
     if (!is_tmp_var(c0_aget_vname))
       setup_dpin_ssa(name2dpin[c0_aget_name], c0_aget_vname, lnast->get_subs(c0_aget));
 
-    auto driver_vname = lnast->get_vname(c1_aget);
+    std::string driver_vname;
+    driver_vname = lnast->get_vname(c1_aget);
+
+
     driver_vname2wire_nodes[driver_vname].emplace_back(wire_node);
 
     it_aset = lnast->get_sibling_next(it_aset);
@@ -1593,12 +1597,13 @@ void Lnast_tolg::setup_lgraph_ios_and_final_var_name(Lgraph *lg) {
       auto edible_dpin = dpin_largest_ssa;
       I(vname.front() == '%');
       create_out_ta(lg, Lgtuple::get_all_but_first_level(vname), edible_dpin);  // don't pass first char % as the key name
-      continue;
+      // continue;
     }
 
     auto it = driver_vname2wire_nodes.find(vname);
-    if (it == driver_vname2wire_nodes.end())
+    if (it == driver_vname2wire_nodes.end()) {
       continue;
+    }
 
     auto driver_ntype = dpin_largest_ssa.get_node().get_type_op();
     for (auto &wire_node : it->second) {
