@@ -966,6 +966,12 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::s
       }
       matching_map[n]=tmpVec;
       //FIXME: remove from crit_cell_list; better still: remove crit_cell_list (not required)
+      for (auto cfl_it = crit_cell_list.begin(); cfl_it != crit_cell_list.end(); cfl_it++) {
+        if(*cfl_it == n) {
+          crit_cell_list.erase(cfl_it); 
+          cfl_it--;
+        }
+      }
       //put orig combo node in matched_color_map. color value will be crit_cell_map[n]:
       matched_color_map[start_node.get_compact_flat()] = crit_cell_map[n];
     }
