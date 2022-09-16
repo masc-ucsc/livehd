@@ -854,25 +854,27 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
-      const auto required_node = *(allSPs.begin());
-      if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
-        //Node startPoint_node(lg, required_node );
-        lg->each_graph_input([required_node,this](Node_pin &dpin) {
-          const auto & in_node = dpin.get_node();
-          std::string comp_name = (dpin.has_name()?dpin.get_name():dpin.get_pin_name());
-          if(comp_name==required_node){
-            path_traversal(in_node);
-          }
-          });
-      } else {
-        for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
-          if(std::to_string(startPoint_node.get_nid().value)==required_node){//FIXME:REM
-            fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
-            //keep traversing forward until you hit an EP
-            path_traversal(startPoint_node);
+      //const auto required_node = *(allSPs.begin());
+      for (const auto &required_node : allSPs) {
+        if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
+          //Node startPoint_node(lg, required_node );
+          lg->each_graph_input([required_node,this](Node_pin &dpin) {
+            const auto & in_node = dpin.get_node();
+            std::string comp_name = (dpin.has_name()?dpin.get_name():dpin.get_pin_name());
+            if(comp_name==required_node){
+              path_traversal(in_node);
+            }
+            });
+        } else {
+          for (const auto& startPoint_node : lg->fast(true)) {//FIXME:REM
+            if(std::to_string(startPoint_node.get_nid().value)==required_node.substr(5)){//FIXME:REM
+              fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
+              //keep traversing forward until you hit an EP
+              path_traversal(startPoint_node);
 
-          }//FIXME:REM
-        }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
+            }//FIXME:REM
+          }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
+        }
       }
     }//for (auto [k,v]: cellIOMap_synth) ends here
     /*Printing "matching map"*/             
@@ -933,13 +935,14 @@ void Traverse_lg::path_traversal(const Node &start_node){
         path_traversal(this_node);
       }
     } else if ( this_node.has_color()?(this_node.get_color()==VISITED_COLORED):false) {
-      return;
+      continue;
     } else if (is_endpoint(this_node)) {
-      return;
+      continue;
     } else {
       I(false,"\nISSUE TO DEBUG!\n" );
     }
   }
+  return;
 }
 
 bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node) {
