@@ -749,9 +749,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   //FIXME: put some assertion to check if req_flops_matched is still false (when the function completes).
   //coz if it still false at completion, then the combo match will not enter even at the end!
   //Atleast flag it!!
-
+  if (do_matching) {
+    if(!req_flops_matched) { fmt::print("\nMESSAGE: crit_flop_list is not empty. Should have been empty by now.");}
+    
+    fmt::print("\n crit_flop_list at this point: \n");
+    for (auto & n:crit_flop_list){
+      fmt::print("{}\t", n.get_nid());
+    }
+  }
   bool cellIOMap_synth_resolved = false;
-  if(do_matching && req_flops_matched && !cellIOMap_synth.empty() ){
+  if(do_matching && !cellIOMap_synth.empty() ){
     /*resolve cellIOMap_synth with help of matching_map*/
     std::set<std::pair<std::set<std::string>, std::set<std::string>> > noOverwrite_in_cellIOMapSynth;
     for(auto it=cellIOMap_synth.begin(); it!=cellIOMap_synth.end();){
@@ -886,6 +893,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\t{}\t:::\t{}\n",k.get_nid(), v);
     }
     fmt::print("\n");
+    //print crit_cell_list
+    fmt::print("\n crit_cell_list at this point: \n");
+    for (auto & n:crit_cell_list){
+      fmt::print("{}\t", n.get_nid());
+    }
   }
 
 }
