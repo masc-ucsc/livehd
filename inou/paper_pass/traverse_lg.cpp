@@ -1024,12 +1024,11 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
       //do not keep const for future reference
       return;
     } else if (node.is_graph_io()) {
-      /*minor testin ghack iwth removing the unwanted reset from creating combo matching issues! (vsrp-after_map1map2_4sep_resetManualHack.log) */
-      //auto tmp_x = node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name();
-      //if (tmp_x!="reset") 
-      in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
-      io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
-      //end of if tmp_x
+      auto tmp_x = node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name();
+      if (tmp_x!="reset" && tmp_x!="clock") {
+        in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+        io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+      }
     } else {
       bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
       std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
