@@ -364,48 +364,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nIOtoNodeMap_synth MAP FORMED IS:\n");
-    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-      for (const auto & ip: ioval) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("\n");
-      
-      for(const auto & [ioPair, n_list]: inMap) {
-        fmt::print("\t\t\t\t");
-        for (const auto & ip: ioPair.first) {
-          fmt::print("{}\t",ip);
-        }
-        fmt::print("||| \t");
-        for (const auto & op:ioPair.second) {
-          fmt::print("{}\t", op);
-        }
-        fmt::print("::: \t");
-        for (const auto & n:n_list) {
-          fmt::print("{}\t", n.get_nid());
-        }
-        fmt::print("\n");
-      }
-      fmt::print("\n");
-
-    }
+    print_IOtoNodeMap_synth(IOtoNodeMap_synth);
     fmt::print("\n\n\n");
     /*for the combo part:*/ 
     //print the cellIOMap_synth
     fmt::print("\n\nthe cellIOMap_synth FORMED IS:\n");
-    for(const auto& [ioPair, n_list]: cellIOMap_synth) {
-      for (const auto & ip: ioPair.first) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op:ioPair.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("::: \t");
-      for (const auto & n:n_list) {
-        fmt::print("{}\t", n.get_nid());
-      }
-      fmt::print("\n\n");
-    }
+    print_MapOf_SetPairAndVec(cellIOMap_synth);
   } else if(do_matching) { //do_matching
     fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
     for(const auto& [iov,fn]: IOtoNodeMap_orig) {
@@ -419,21 +383,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       fmt::print("\n\n");
     }
     fmt::print("\n\n===============================\n");
-    fmt::print("\n\nThe complete orig map is:\n");
-    for(const auto& [iov,fn]: full_orig_map) {
-      for (const auto& ip: iov.first) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op:iov.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("::: \t");
-      for (const auto& op:fn) {
-        fmt::print("{}\t", op.get_nid());
-      }
-      fmt::print("\n\n");
-    }
+    fmt::print("\n\nThe complete orig map (full_orig_map) is:\n");
+    print_MapOf_SetPairAndVec(full_orig_map) ;
     fmt::print("\n\n===============================\n");
 
     fmt::print("\n\n The unmatched flops are:\n");
@@ -511,12 +462,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         }
         IOtoNodeMap_orig.erase(it++);
         IOtoNodeMap_synth.erase(iov);
-        //erase the node from full_orig_map  - value has nodes.
-        for (auto it_o = full_orig_map.begin(); it_o!= full_orig_map.end();) {
-          if (std::find( (it_o->second).begin(), (it_o->second).end(), orig_node) != (it_o->second).end() ) {
-            full_orig_map.erase(it_o++);
-          } else ++it_o;
-        }
+        // req. for pass_3 //erase the node from full_orig_map  - value has nodes.
+        // req. for pass_3 for (auto it_o = full_orig_map.begin(); it_o!= full_orig_map.end();) {
+        // req. for pass_3   if (std::find( (it_o->second).begin(), (it_o->second).end(), orig_node) != (it_o->second).end() ) {
+        // req. for pass_3     full_orig_map.erase(it_o++);
+        // req. for pass_3   } else ++it_o;
+        // req. for pass_3 }
       } else {
         ++it;
       }
@@ -582,30 +533,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   
       /*printing the resolved map*/
       fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
-      for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-        for (const auto& ip: ioval) {
-          fmt::print("{}\t",ip);
-        }
-        fmt::print("\n");
-        
-        for(const auto& [ioPair, n_list]: inMap) {
-          fmt::print("\t\t\t\t");
-          for (const auto& ip: ioPair.first) {
-            fmt::print("{}\t",ip);
-          }
-          fmt::print("||| \t");
-          for (const auto& op:ioPair.second) {
-            fmt::print("{}\t", op);
-          }
-          fmt::print("::: \t");
-          for (const auto& n:n_list) {
-            fmt::print("{}\t", n.get_nid());
-          }
-          fmt::print("\n");
-        }
-        fmt::print("\n");
-      }
-      /*Second: do the matching part*/
+      print_IOtoNodeMap_synth(IOtoNodeMap_synth); 
+      /*Second: do the matching part post resolution*/
       for ( auto & [k,v_map]: IOtoNodeMap_synth) {
         if (req_flops_matched) {break;}
         //for (auto& [iov,n]:v_map) 
@@ -690,21 +619,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     /*printing changed map*/
     fmt::print("\n\n===============================\n");
-    fmt::print("\n\nThe complete orig map ALTERED is:\n");
-    for(const auto& [iov,fn]: full_orig_map) {
-      for (const auto& ip: iov.first) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op:iov.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("::: \t");
-      for (const auto& op:fn) {
-        fmt::print("{}\t", op.get_nid());
-      }
-      fmt::print("\n\n");
-    }
+    fmt::print("\n\nThe complete orig map (full_orig_map) ALTERED is:\n");
+    print_MapOf_SetPairAndVec(full_orig_map);
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nThe IOtoNodeMap_orig map ALTERED is:\n");
     for(const auto& [iov,fn]: IOtoNodeMap_orig) {
@@ -720,29 +636,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
 
     fmt::print("\n\nIOtoNodeMap_synth MAP ALTERED IS:\n");
-    for(const auto& [ioval,inMap]: IOtoNodeMap_synth) {
-      for (const auto& ip: ioval) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("\n");
-      
-      for(const auto& [ioPair, n_list]: inMap) {
-        fmt::print("\t\t\t\t");
-        for (const auto& ip: ioPair.first) {
-          fmt::print("{}\t",ip);
-        }
-        fmt::print("||| \t");
-        for (const auto& op:ioPair.second) {
-          fmt::print("{}\t", op);
-        }
-        fmt::print("::: \t");
-        for (const auto& n:n_list) {
-          fmt::print("{}\t", n.get_nid());
-        }
-        fmt::print("\n");
-      }
-      fmt::print("\n");
-    }
+    print_IOtoNodeMap_synth(IOtoNodeMap_synth);
 
   }//if(do_matching) closes here
 
@@ -817,20 +711,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
     //print the cellIOMap_synth
     fmt::print("\n\nthe cellIOMap_synth RESOLVED IS:\n");
-    for(const auto& [ioPair, n_list]: cellIOMap_synth) {
-      for (const auto& ip: ioPair.first) {
-        fmt::print("{}\t",ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op:ioPair.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("::: \t");
-      for (const auto& n:n_list) {
-        fmt::print("{}\t", n.get_nid());
-      }
-      fmt::print("\n\n");
-    }
+    print_MapOf_SetPairAndVec(cellIOMap_synth);
     cellIOMap_synth_resolved=true;
     //print crit_cell_list
     fmt::print("\n crit_cell_list at this point: \n");
@@ -1102,4 +983,45 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
 
 
 
+void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std::string>, setMap_pairKey > &mapInMap ){
 
+    for(const auto& [ioval,inMap]: mapInMap) {
+      for (const auto& ip: ioval) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("\n");
+      
+      for(const auto& [ioPair, n_list]: inMap) {
+        fmt::print("\t\t\t\t");
+        for (const auto& ip: ioPair.first) {
+          fmt::print("{}\t",ip);
+        }
+        fmt::print("||| \t");
+        for (const auto& op:ioPair.second) {
+          fmt::print("{}\t", op);
+        }
+        fmt::print("::: \t");
+        for (const auto& n:n_list) {
+          fmt::print("{}\t", n.get_nid());
+        }
+        fmt::print("\n");
+      }
+      fmt::print("\n");
+    }
+}
+ void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey &MapOf_SetPairAndVec){
+    for(const auto& [iov,fn]: MapOf_SetPairAndVec) {
+      for (const auto& ip: iov.first) {
+        fmt::print("{}\t",ip);
+      }
+      fmt::print("||| \t");
+      for (const auto& op:iov.second) {
+        fmt::print("{}\t", op);
+      }
+      fmt::print("::: \t");
+      for (const auto& op:fn) {
+        fmt::print("{}\t", op.get_nid());
+      }
+      fmt::print("\n\n");
+    }
+ }
