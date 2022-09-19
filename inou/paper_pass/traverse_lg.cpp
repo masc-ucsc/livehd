@@ -750,12 +750,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   //coz if it still false at completion, then the combo match will not enter even at the end!
   //Atleast flag it!!
   if (do_matching) {
-    if(!req_flops_matched) { fmt::print("\nMESSAGE: crit_flop_list is not empty. Should have been empty by now.");}
-    
+    //if(!req_flops_matched) { fmt::print("\nMESSAGE: crit_flop_list is not empty. Should have been empty by now.");}
     fmt::print("\n crit_flop_list at this point: \n");
     for (auto & n:crit_flop_list){
       fmt::print("{}\t", n.get_nid());
     }
+    I(req_flops_matched,"\n crit_flop_list is not empty. Should have been empty by now.\n");
   }
   bool cellIOMap_synth_resolved = false;
   if(do_matching && !cellIOMap_synth.empty() ){
