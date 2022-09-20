@@ -31,9 +31,11 @@ private:
   absl::node_hash_map<Node::Compact_flat , std::vector<Node::Compact_flat> > matched_map;
   //absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> unmatched_map;
   absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> unmatched_map;
-  absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat> > full_orig_map;
+  setMap_pairKey full_orig_map;
   absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat> > IOtoNodeMap_orig;
   absl::node_hash_map<std::set<std::string>, setMap_pairKey > IOtoNodeMap_synth;
+  void print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std::string>, setMap_pairKey > &mapInMap );
+  void print_MapOf_SetPairAndVec(const setMap_pairKey &MapOf_SetPairAndVec);
   absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> > matching_map;
   absl::node_hash_map<Node::Compact_flat, int> matched_color_map;
   std::vector<Node::Compact_flat> crit_flop_list;
@@ -41,7 +43,16 @@ private:
   absl::node_hash_map<Node::Compact_flat, int> crit_flop_map;
   absl::node_hash_map<Node::Compact_flat, int> crit_cell_map;
   setMap_pairKey cellIOMap_synth;
-/*
+  bool probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map); 
+
+  template <typename T>
+  std::set<T> getUnion(const std::set<T>& a, const std::set<T>& b)
+  {
+    std::set<T> result = a;
+    result.insert(b.begin(), b.end());
+    return result;
+  }
+  /*
 #ifdef DE_DUP
   setMap nodeIOmap;
 #endif

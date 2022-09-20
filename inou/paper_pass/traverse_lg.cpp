@@ -534,6 +534,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*printing the resolved map*/
       fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
       print_IOtoNodeMap_synth(IOtoNodeMap_synth); 
+
       /*Second: do the matching part post resolution*/
       for ( auto & [k,v_map]: IOtoNodeMap_synth) {
         if (req_flops_matched) {break;}
@@ -605,7 +606,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
                               
         }//end of for(auto it=v_map.begin(); it!=v_map.end();
       }// end of for ( auto & [k,v_map]: IOtoNodeMap_synth)
-    }
+
+      /*if no change_done, i.e. nothing happened in pass_2
+       * try pass_3 and then see if some change possible? */
+      if(!change_done && !crit_flop_list.empty()) {//start pass_3
+        for (auto & [k,v_map]: IOtoNodeMap_synth) {
+          for (auto it=v_map.begin(); it!=v_map.end();) {
+            change_done = probabilistic_match(it, full_orig_map);
+            if (crit_flop_list.empty()){ req_flops_matched = true;}
+            if (change_done ){ 
+              v_map.erase(it++);
+            } else {++it;}
+          }
+        }
+      }//end of if(!change_done && !crit_flop_list.empty()) 
+      
+    }//end of while (change_done)
 
     /*Printing "matching map"*/
     fmt::print("\n THE MATCHING_MAP is:\n");
@@ -1009,7 +1025,8 @@ void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std
       fmt::print("\n");
     }
 }
- void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey &MapOf_SetPairAndVec){
+
+void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey &MapOf_SetPairAndVec){
     for(const auto& [iov,fn]: MapOf_SetPairAndVec) {
       for (const auto& ip: iov.first) {
         fmt::print("{}\t",ip);
@@ -1024,4 +1041,76 @@ void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std
       }
       fmt::print("\n\n");
     }
- }
+}
+
+bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map) {
+
+  auto map_entry = *map_it;
+
+  auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);
+  int match_count = 0;
+  //auto mismatch_count = synth_set.size(); mismatch_count = 0;
+  unsigned long mismatch_count = 0;
+  std::vector<Node::Compact_flat> orig_nodes_matched;
+  
+  for (auto &[k,v]:orig_map){
+    auto orig_set = getUnion(k.first, k.second);
+    
+    std::vector<std::string> setIntersectionVec (synth_set.size()+orig_set.size());
+    std::vector<std::string>::iterator ls;
+    ls = std::set_intersection(synth_set.begin(), synth_set.end(), orig_set.begin(), orig_set.end(), setIntersectionVec.begin());
+    auto intersectionVal = ls-setIntersectionVec.begin();//(v3.resize(ls-v3.begin())).size()
+    
+    auto unionSet = getUnion(synth_set,orig_set);
+    auto unionVal = unionSet.size();
+
+    auto new_match_count = intersectionVal;
+    auto new_mismatch_count = unionVal-intersectionVal;
+
+    if(new_match_count>match_count) {
+      /*this is a better match. keep "v" in orig_nodes_matched. update match_count=new_match_count*/
+      orig_nodes_matched = v;
+      match_count = new_match_count;
+    } else if (new_match_count==match_count){
+      if (new_mismatch_count < mismatch_count){
+        /*this is a better match. keep "v" in orig_nodes_matched. update match_count=new_match_count*/
+        orig_nodes_matched = v;
+        mismatch_count = new_mismatch_count;
+      }
+    } //else keep iterating
+
+  }//end of iterating orig_map
+  if(orig_nodes_matched.size()>0){
+    /*put in matching_map and matched_color_map*/
+    for (auto &n: map_entry.second) {
+      for (const auto &orig_node: orig_nodes_matched) {
+        std::vector<Node::Compact_flat> tmpVec;
+        if(matching_map.find(n) != matching_map.end()) {
+          tmpVec.assign((matching_map[n]).begin() , (matching_map[n]).end() );
+          tmpVec.emplace_back(orig_node);
+        } else {
+          tmpVec.emplace_back(orig_node);
+        }
+        matching_map[n]=tmpVec;
+      }
+
+      if (crit_flop_map.find(n)!=crit_flop_map.end()) {
+        /*if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color*/
+        for (const auto & o_n: matching_map[n]) {
+          matched_color_map[o_n]=crit_flop_map[n];
+        }
+      }
+      /*if synNode in crit_flop_list, remove from crit_flop_list;*/
+      for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+        if(*cfl_it == n) {
+          crit_flop_list.erase(cfl_it); 
+          cfl_it--;
+        }
+      }
+      
+    }
+    return true;
+  } else return false;
+}
+
+
