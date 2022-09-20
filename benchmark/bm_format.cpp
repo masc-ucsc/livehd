@@ -94,6 +94,17 @@ BENCHMARK_F(LnastTestFixture, FIRRTL_LNAST)(benchmark::State& st) {
 }
 
 /*
+BENCHMARK_F(LnastTestFixture, LNAST_FIRRTL)(benchmark::State& st) {
+  Eprp_var var;
+  var.add("files", "benchmark/firrtl/test.pb");
+  Inou_firrtl::to_lnast(var);
+  for (auto _ : st) {  
+    Inou_firrtl::toFIRRTL(var);
+  }
+}
+*/
+
+/*
 BENCHMARK_F(LgraphTestFixture, LGRAPH_HIF)(benchmark::State& st) {
   auto lnast = read_ln("benchmark/ln/iwls_adder.ln");
   auto ln_to_lg = Lnast_tolg("benchmark", "");

@@ -67,11 +67,11 @@ protected:
 
 public:
   static void to_lnast(Eprp_var &var);
+  static void toFIRRTL(Eprp_var &var);
 
 protected:
   //----------- FOR toFIRRTL ----------
   // FIXME: change function name to livehd coding style
-  static void toFIRRTL(Eprp_var &var);
   void        do_tofirrtl(const std::shared_ptr<Lnast> &ln, firrtl::FirrtlPB_Circuit *circuit);
   void        process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Module_UserModule *umod);
   void        process_ln_stmt(Lnast &ln, const Lnast_nid &lnidx_smts, firrtl::FirrtlPB_Statement_When *when, uint8_t pos_to_add_to);

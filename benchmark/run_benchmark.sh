@@ -1,9 +1,14 @@
 #/bin/bash
 
-FIRRTL=./inou/firrtl/tests/proto/Snxn100k.ch.pb
+FIRRTL=$1
 LGSHELL=./bazel-bin/main/lgshell
 bazel build -c dbg //main:all
 
+rm -rf BM_LNAST_HIF
+rm -rf BM_LNAST_LN
+rm -rf benchmark/ln/*
+rm -rf benchmark/firrtl/*
+ 
 mkdir -p benchmark/firrtl/
 mkdir -p benchmark/ln/
 
@@ -22,13 +27,13 @@ if [ ! -f $BENCH ]; then
   echo "could not find $BENCH"
   exit
 else
-  $BENCH
+ $BENCH
   echo "Size comparison"
   du -sh $FIRRTL
   du -sh BM_LNAST_HIF
   du -sh BM_LNAST_LN
   rm -rf BM_LNAST_HIF
   rm -rf BM_LNAST_LN
-  rm -rf benchmark/ln/
-  rm -rf benchmark/firrtl/
+  # rm -rf benchmark/ln/
+  # rm -rf benchmark/firrtl/
 fi
