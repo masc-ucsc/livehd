@@ -751,8 +751,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
-      //const auto required_node = *(allSPs.begin());
-      for (const auto &required_node : allSPs) {
+      const auto required_node = *(allSPs.begin());
+      //for (const auto &required_node : allSPs) {
         if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
           //Node startPoint_node(lg, required_node );
           lg->each_graph_input([required_node,this](Node_pin &dpin) {
@@ -772,7 +772,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
             }//FIXME:REM
           }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
         }
-      }
+      //}
     }//for (auto [k,v]: cellIOMap_synth) ends here
     /*Printing "matching map"*/             
     fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
@@ -828,9 +828,10 @@ void Traverse_lg::path_traversal(const Node &start_node){
   
       auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
 
-      if (val) {
+      //if (val) {
+      fmt::print("Found the match for {} node?: {}", this_node.get_compact_flat().get_nid(), val);
         path_traversal(this_node);
-      }
+      //}
     } else if ( this_node.has_color()?(this_node.get_color()==VISITED_COLORED):false) {
       continue;
     } else if (is_endpoint(this_node)) {
@@ -1065,7 +1066,7 @@ bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_p
     auto unionVal = unionSet.size();
 
     auto new_match_count = intersectionVal;
-    auto new_mismatch_count = unionVal-intersectionVal;
+    auto new_mismatch_count = 3*(unionVal-intersectionVal);//3 is the penalty number. coz mismatch is worse than less matches. (i.e we want a subset rather than the synth node with added inputs)
 
     if(new_match_count>match_count) {
       /*this is a better match. keep "v" in orig_nodes_matched. update match_count=new_match_count*/
