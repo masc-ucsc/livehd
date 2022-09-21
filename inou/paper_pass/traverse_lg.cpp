@@ -874,7 +874,7 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::s
         }
       }
       //put orig combo node in matched_color_map. color value will be crit_cell_map[n]:
-      matched_color_map[start_node.get_compact_flat()] = crit_cell_map[n];
+      matched_color_map[start_node.get_compact_flat()] = crit_cell_map[n];//FIXME: check if node in map already then add to the color or keep larger color. do not just overwrite
     }
     
     return true;
