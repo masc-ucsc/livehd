@@ -608,16 +608,19 @@ Bits_t Node::get_bits() const {
 
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
-void Node::set_loc(const std::pair<uint64_t, uint64_t> &pos) {top_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos); }
+void Node::set_loc(const uint64_t &pos1, const uint64_t &pos2) {
+	const auto &pos = std::make_pair(pos1,pos2);
+	current_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos); 
+}
 
 const std::pair<uint64_t,uint64_t> Node::get_loc() const {
-  const auto &ptr = top_g->get_node_loc_map();
+  const auto &ptr = current_g->get_node_loc_map();
   const auto it = ptr.find(get_compact_class());
   I(it != ptr.end());
   return it->second;
 }
 
-bool Node::has_loc() const {return top_g->get_node_loc_map().contains(get_compact_class()); }
+bool Node::has_loc() const {return current_g->get_node_loc_map().contains(get_compact_class()); }
 //----- Subject to changes in the future:
 void Node::del_color() {
   current_g->ref_node_color_map()->erase(get_compact());

@@ -372,7 +372,7 @@ public:
 
   Bits_t get_bits() const;
   
-  void                                set_loc(const std::pair<uint64_t, uint64_t> &pos);
+  void                                set_loc(const uint64_t &pos1, const uint64_t &pos2);
   const std::pair<uint64_t, uint64_t> get_loc() const;
   bool                                has_loc() const;
 
