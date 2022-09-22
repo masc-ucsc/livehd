@@ -11,7 +11,7 @@
 #include <string>
 #include <algorithm>
 
-#define VISITED_COLORED 401
+int VISITED_COLORED = 401;
 static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
 
 void Traverse_lg::setup() {
@@ -757,6 +757,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
       const auto required_node = *(allSPs.begin());
+      VISITED_COLORED++;
       //for (const auto &required_node : allSPs) {
         if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
           //Node startPoint_node(lg, required_node );
