@@ -612,7 +612,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       if(!change_done && !crit_flop_list.empty()) {//start pass_3
         for (auto & [k,v_map]: IOtoNodeMap_synth) {
           for (auto it=v_map.begin(); it!=v_map.end();) {
-            change_done = probabilistic_match(it, full_orig_map);
+            auto &map_entry = *it;
+            auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);
+            auto &synth_val = map_entry.second;
+            change_done = probabilistic_match(synth_set, synth_val, full_orig_map);
             if (crit_flop_list.empty()){ req_flops_matched = true;}
             if (change_done ){ 
               v_map.erase(it++);
@@ -749,17 +752,20 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       for (const auto & ep:allEPs) fmt::print("{}\n", ep);
       fmt::print("\n\n\n");
 
+      auto synth_set = getUnion(allSPs, allEPs);
+      auto &synth_val = v;
       /*go to 1st SP of allSPs for 1st entry
        * and start iterating from there*/
       const auto required_node = *(allSPs.begin());
       //for (const auto &required_node : allSPs) {
         if ((required_node).substr(0,4)!= "flop") {//then it is graph IO
           //Node startPoint_node(lg, required_node );
-          lg->each_graph_input([required_node,this](Node_pin &dpin) {
+          lg->each_graph_input([required_node,synth_set,synth_val,this](Node_pin &dpin) {
             const auto & in_node = dpin.get_node();
             std::string comp_name = (dpin.has_name()?dpin.get_name():dpin.get_pin_name());
             if(comp_name==required_node){
-              path_traversal(in_node);
+              Traverse_lg::setMap_pairKey cellIOMap_orig;
+              path_traversal(in_node, synth_set, synth_val, cellIOMap_orig);
             }
             });
         } else {
@@ -767,7 +773,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
             if(std::to_string(startPoint_node.get_nid().value)==required_node.substr(5)){//FIXME:REM
               fmt::print("Found node {}\n", startPoint_node.get_nid());//FIXME:REM
               //keep traversing forward until you hit an EP
-              path_traversal(startPoint_node);
+              Traverse_lg::setMap_pairKey cellIOMap_orig;
+              path_traversal(startPoint_node, synth_set, synth_val, cellIOMap_orig);
 
             }//FIXME:REM
           }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
@@ -801,7 +808,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
 }
 
-void Traverse_lg::path_traversal(const Node &start_node){
+void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig){
   Node this_node = start_node;
   for(auto s : this_node.out_sinks()){
     this_node = s.get_node();
@@ -826,12 +833,38 @@ void Traverse_lg::path_traversal(const Node &start_node){
         fmt::print("\t\t{}, ", i);
       }
       fmt::print("\n") ;
-      auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
 
-      //if (val) {
+      //insert to cellIOMap_orig
+      const auto& nodeid = this_node.get_compact_flat();
+      std::vector<Node::Compact_flat> tmpVec;
+      if(cellIOMap_orig.find(std::make_pair(nodes_in_set, nodes_out_set)) != cellIOMap_orig.end()) {
+        tmpVec.assign((cellIOMap_orig[std::make_pair(nodes_in_set, nodes_out_set)]).begin() , (cellIOMap_orig[std::make_pair(nodes_in_set, nodes_out_set)]).end() );
+        tmpVec.emplace_back(nodeid);
+      } else {
+        tmpVec.emplace_back(nodeid);
+      }
+      cellIOMap_orig[std::make_pair(nodes_in_set,nodes_out_set)] = tmpVec;
+
+      
+      auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
       fmt::print("Found the match for {} node?: {}", this_node.get_compact_flat().get_nid(), val);
-      path_traversal(this_node);
-      //}
+      //recursively go to this_node's sinks now (moving fwd in the path)
+      path_traversal(this_node,synth_set, synth_val, cellIOMap_orig);
+      
+      //if this_node is now in matching_map, (so node resolved), delete cellIOMap_orig and move on
+      if(matching_map.find(this_node.get_compact_flat()) != matching_map.end() /*&& !cellIOMap_orig.empty()*/ ){
+        fmt::print("\ncellIOMap_orig for resolved node is:\n");
+        print_MapOf_SetPairAndVec(cellIOMap_orig);
+        //cellIOMap_orig.clear();
+      } else {
+      //  probabilistic_match(iterator to cellIOMap_synth.this entry , cellIOMap_orig)
+        probabilistic_match(synth_set, synth_val, cellIOMap_orig);
+        fmt::print("\ncellIOMap_orig for unresolved node is:\n");
+        print_MapOf_SetPairAndVec(cellIOMap_orig);
+        //cellIOMap_orig.clear();
+      }
+      
+
     } else if ( this_node.has_color()?(this_node.get_color()==VISITED_COLORED):false) {
       continue;
     } else if (is_endpoint(this_node)) {
@@ -1044,11 +1077,11 @@ void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey &MapOf_SetPairA
     }
 }
 
-bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map) {
+//bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map) 
+bool Traverse_lg::probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, setMap_pairKey &orig_map) {
 
-  auto map_entry = *map_it;
-
-  auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);
+  //auto map_entry = *map_it;
+  //auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);
   int match_count = 0;
   //auto mismatch_count = synth_set.size(); mismatch_count = 0;
   unsigned long mismatch_count = 0;
@@ -1083,7 +1116,7 @@ bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_p
   }//end of iterating orig_map
   if(orig_nodes_matched.size()>0){
     /*put in matching_map and matched_color_map*/
-    for (auto &n: map_entry.second) {
+    for (auto &n: synth_val) {
       for (const auto &orig_node: orig_nodes_matched) {
         std::vector<Node::Compact_flat> tmpVec;
         if(matching_map.find(n) != matching_map.end()) {
@@ -1105,6 +1138,19 @@ bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_p
       for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
         if(*cfl_it == n) {
           crit_flop_list.erase(cfl_it); 
+          cfl_it--;
+        }
+      }
+      if (crit_cell_map.find(n)!=crit_cell_map.end()) {
+        /*if synnode in crit_cell_map, color corresponding orig nodes with this synnode's color*/
+        for (const auto & o_n: matching_map[n]) {
+          matched_color_map[o_n]=crit_cell_map[n];
+        }
+      }
+      /*if synNode in crit_cell_list, remove from crit_cell_list;*/
+      for (auto cfl_it = crit_cell_list.begin(); cfl_it != crit_cell_list.end(); cfl_it++) {
+        if(*cfl_it == n) {
+          crit_cell_list.erase(cfl_it); 
           cfl_it--;
         }
       }

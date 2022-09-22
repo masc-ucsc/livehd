@@ -43,7 +43,7 @@ private:
   absl::node_hash_map<Node::Compact_flat, int> crit_flop_map;
   absl::node_hash_map<Node::Compact_flat, int> crit_cell_map;
   setMap_pairKey cellIOMap_synth;
-  bool probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map); 
+  bool probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, setMap_pairKey &orig_map); 
 
   template <typename T>
   std::set<T> getUnion(const std::set<T>& a, const std::set<T>& b)
@@ -69,7 +69,7 @@ protected:
   void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
   void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL = false);
   std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
-  void path_traversal(const Node &startPoint_node);
+  void path_traversal(const Node &startPoint_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig);
   bool check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node);
   bool is_startpoint(Node node_to_eval);
   bool is_endpoint(Node node_to_eval);
