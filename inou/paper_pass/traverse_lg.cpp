@@ -817,20 +817,20 @@ void Traverse_lg::path_traversal(const Node &start_node){
 
 
       fmt::print("\n -- Entering check_in_cellIOMap_synth( {} ) with: --\n", this_node.get_nid());
-      fmt::print("\t in_set:\n");
+      fmt::print("\t in_set:");
       for( const auto & i: nodes_in_set){
         fmt::print("\t\t{}, ", i);
       }
-      fmt::print("\n\t out_set:\n");
+      fmt::print("\n\t out_set:");
       for( const auto & i: nodes_out_set){
         fmt::print("\t\t{}, ", i);
       }
-  
+      fmt::print("\n") ;
       auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
 
       //if (val) {
       fmt::print("Found the match for {} node?: {}", this_node.get_compact_flat().get_nid(), val);
-        path_traversal(this_node);
+      path_traversal(this_node);
       //}
     } else if ( this_node.has_color()?(this_node.get_color()==VISITED_COLORED):false) {
       continue;
