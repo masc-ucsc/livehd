@@ -813,7 +813,9 @@ void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::str
   Node this_node = start_node;
   for(auto s : this_node.out_sinks()){
     this_node = s.get_node();
-    if ( (this_node.has_color()?(this_node.get_color()!=VISITED_COLORED):true) && (!is_endpoint(this_node)) ) {
+    if(matched_color_map.find(this_node.get_compact_flat()) != matched_color_map.end() ) {
+      continue;
+    } else if ( (this_node.has_color()?(this_node.get_color()!=VISITED_COLORED):true) && (!is_endpoint(this_node)) ) {
       /*it is unvisited combinational cell in orig graph*/
       this_node.set_color(VISITED_COLORED);
       
@@ -853,7 +855,7 @@ void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::str
       path_traversal(this_node,synth_set, synth_val, cellIOMap_orig);
       
       //if this_node is now in matching_map, (so node resolved), delete cellIOMap_orig and move on
-      if(matching_map.find(this_node.get_compact_flat()) != matching_map.end() /*&& !cellIOMap_orig.empty()*/ ){
+      if(matched_color_map.find(this_node.get_compact_flat()) != matched_color_map.end() /*&& !cellIOMap_orig.empty()*/ ){
         fmt::print("\ncellIOMap_orig for resolved node is:\n");
         print_MapOf_SetPairAndVec(cellIOMap_orig);
         //cellIOMap_orig.clear();
