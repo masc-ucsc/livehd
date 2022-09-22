@@ -1201,7 +1201,8 @@ void Lnast::dump(const Lnast_nid &root_nid) const {
     const auto &node = get_data(it);
     std::string indent;
     indent = indent.append(it.level * 4 + 4, ' ');
-    const auto &tok = get_token(root_nid);
+    //const auto &tok = get_token(root_nid);
+    const auto &tok = node.token;
     fmt::print("{}-{} ", tok.pos1, tok.pos2);
 
     if (node.type.is_ref() && node.token.get_text().substr(0, 3) != "___") {  // only ref need/have ssa info, exclude tmp variable case

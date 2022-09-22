@@ -1055,7 +1055,7 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
       exit_node   = lg->create_node(lg_ntype_op);
       const auto &tok2 = lnast->get_token(lnidx_opr);    
       exit_node.set_loc(tok2.pos1,tok2.pos2);
-      //fmt::print("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  );
+      //fmt::print("Hello2!! {} {} {}",tok2.pos1, tok2.pos2, exit_node.get_nid()  ); // here is the sum node location!!
       
     }
   }
