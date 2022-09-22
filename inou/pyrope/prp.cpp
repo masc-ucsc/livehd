@@ -1972,9 +1972,11 @@ void Prp::ast_handler() {
     auto node       = ast->get_data(it);
     auto rule_name  = rule_id_to_string(node.rule_id);
     auto token_text = scan_text(node.token_entry);
+    auto token      = scan_get_token(node.token_entry);
     (void)token_text;
     (void)rule_name;
-    PRINT_AST("Rule name: {}, token text: {}, Tree level: {}\n", rule_name, token_text, it.level);
+    (void)token;
+    PRINT_AST("Rule name: {}, token text: {}, Tree level: {} pos:{}-{}\n", rule_name, token_text, it.level, token.pos1, token.pos2);
   }
 }
 

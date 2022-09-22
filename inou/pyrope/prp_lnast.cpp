@@ -1872,7 +1872,9 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
           *skip_sibs = 1;
           return Lnast_node::create_tuple_concat();
         }
-        return Lnast_node::create_plus();
+        //fmt::print("HERE {}\n",get_token(ast->get_data(idx).token_entry).pos1);
+
+        return Lnast_node::create_plus( get_token(ast->get_data(idx).token_entry));
       case '-': return Lnast_node::create_minus();
       default:  // unimplemented operator
         Pass::error("Operator {} is not yet supported.", tid);
