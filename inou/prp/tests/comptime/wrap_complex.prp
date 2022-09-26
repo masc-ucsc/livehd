@@ -1,0 +1,24 @@
+
+var x::[sbits=8] = 0
+var z::[ubits=8] = 0
+
+x::[wrap] = 0sb1001_0111_1111
+cassert x == 0sb0111_1111
+y::[wrap] = 0sb1001_0111_1111
+cassert y == 0sb0111_1111
+
+x::[wrap] = 0sb1001_1101_0011
+cassert x == 0sb1101_0011
+y::[wrap] = 0sb1001_1101_0011
+cassert y == 0sb01101_0011        // DIFF
+
+x::[saturate] = 0sb1001_1101_0011
+cassert x == 0sb1000_0000
+y::[saturate] = 0sb1001_1101_0011
+cassert y == 0                     // DIFF
+
+x::[saturate] = 0sb0001_1101_0011
+cassert x == 0sb0111_1111
+y::[saturate] = 0sb0001_1101_0011
+cassert y == 0sb0111_1111
+

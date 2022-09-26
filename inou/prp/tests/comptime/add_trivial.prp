@@ -1,0 +1,8 @@
+
+let x = 1
+let y = 2
+
+var c = x + y
+
+cassert c == 3
+
