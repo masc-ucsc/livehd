@@ -17,8 +17,11 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl };
+  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl, Attr };
   std::stack<Expression_state> expr_state_stack;
+
+  using attr_map_t = std::vector<std::pair<Lnast_node, Lnast_node>>;
+  std::stack<attr_map_t> attribute_stack;
 
   // FIXME: Temporary fix for generating input/output refs
   bool                                          is_function_input;
@@ -32,7 +35,7 @@ protected:
   void process_description();
 
   // Statements
-  void process_statement(TSTreeCursor *);
+  void process_statement(TSNode);
 
   // Non-terminal rules
   void process_node(TSNode);
@@ -43,6 +46,11 @@ protected:
   void process_for_statement(TSNode);
   void process_while_statement(TSNode);
 
+  // Functions
+  void process_function_call_statement(TSNode);
+  void process_simple_function_call(TSNode);
+  void process_function_definition(TSNode);
+
   // Assignment/Declaration
   void process_assignment_or_declaration(TSNode);
 
@@ -50,7 +58,6 @@ protected:
   void process_binary_expression(TSNode);
   void process_dot_expression(TSNode);
   void process_member_selection(TSNode);
-  void process_function_definition(TSNode);
 
   // Type
   void process_type_specification(TSNode);
@@ -67,6 +74,9 @@ protected:
   void process_select(TSNode);
   void process_member_select(TSNode);
 
+  // Attributes
+  void process_attributes(TSNode);
+
   // Basics
   void process_tuple(TSNode);
   void process_tuple_or_expression_list(TSNode);
@@ -74,6 +84,7 @@ protected:
   void process_rvalue_list(TSNode);
   void process_tuple_type_list(TSNode);
   void process_declaration_list(TSNode);
+  void process_attribute_list(TSNode);
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
 
@@ -92,6 +103,9 @@ protected:
   int               tmp_ref_count;
   std::string       get_tmp_name();
   inline Lnast_node get_tmp_ref();
+  
+  void enter_scope(Expression_state);
+  void leave_scope();
 
   // TS API Helpers
   std::string_view get_text(const TSNode &node) const;

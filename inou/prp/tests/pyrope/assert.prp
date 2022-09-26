@@ -1,0 +1,11 @@
+/*
+:name: assert
+:type: parsing
+*/
+
+let top = fun() -> () {
+  var a = 1
+  var b = 2
+  $(comptime) assert a == b
+}
+
