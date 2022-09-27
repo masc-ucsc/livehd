@@ -1,0 +1,79 @@
+
+let m1 = (a=1,b=0)
+let m2 = (a=2,b=0)
+var m3 = (b=2,a=0)
+let m4 = (c=2,b=0)
+let m5 = (a=2,b=20,c=100)
+
+cassert m1 does m2
+cassert m2 does m1
+cassert m3 does m1  // order has no impact in does
+cassert m1 does m3
+
+cassert m4 !does m1
+cassert m4 !does m2
+cassert m4 !does m3
+
+cassert m5 does m1
+cassert m5 does m2
+cassert m5 does m3  // order has no impact in does
+cassert m5 does m4  // order has no impact in does
+
+cassert m1 !does m5
+cassert m2 !does m5
+cassert m3 !does m5
+cassert m4 !does m5
+
+let b1 = true
+var b2 = 100<30
+
+casset b1 does true
+casset b2 does true
+casset b1 does b2
+casset b1 !does m1
+
+var i1 = 10
+let i2 = 0
+var i3 = -1
+cassert i1 does i2
+cassert i1 does i3
+cassert i3 does 100
+cassert i3 !does b1
+cassert b1 !does i2
+
+cassert 100 !does m1
+cassert m1 !does 100  // one of the fields is integer, but not named
+
+// L does R, If any field in L is unnamed, true iff structure L == R (equals)
+cassert (100,30) !does 30
+cassert 30 !does (30,200)
+cassert (a=3) does (30,a=200)
+cassert (a=3) does (a=30,200)
+cassert (3) !does (30,a=200)
+cassert (3) !does (a=30,200)
+
+var hit=0
+
+match m1 {
+ does (a:u32=333,b=0) { hit = 1 }
+ else { hit = 0 }
+}
+cassert hit==1  // structural match, value independent in does
+
+match m1 {
+ does m2 { hit = 30 }
+ does m4 { hit = 10 }
+ does 33 { hit = 20 }
+ else { hit = 0 }
+}
+cassert hit==30  // structural match, value independent in does
+
+match m1 {
+ does m4 { hit = 10 }
+ does m3 { hit = 40 }
+ does (c=1,b=0,e=3) { hit = 100 }
+ else { hit = 0 }
+}
+cassert hit==40  // structural match, value independent in does
+
+
