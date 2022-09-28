@@ -165,19 +165,19 @@ protected:
 
   std::string create_tmp_var();
   std::string create_tmp_mut_var();
-  void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
-  void        declare_register(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name);
+  void        setup_register_q_pin(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name, const firrtl::FirrtlPB_Statement& stmt);
+  void        declare_register(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_name, const firrtl::FirrtlPB_Statement& stmt);
   void        setup_register_reset_init(Lnast &lnast, Lnast_nid &parent_node, std::string_view reg_raw_name, const firrtl::FirrtlPB_Expression &resete,
-                                        const firrtl::FirrtlPB_Expression &inite, std::string_view head_chopped_hier_name, bool bits_set_done);
+                                        const firrtl::FirrtlPB_Expression &inite, std::string_view head_chopped_hier_name, bool bits_set_done, const firrtl::FirrtlPB_Statement& stmt);
 
   // Helper Functions (for handling specific cases)
   int32_t  get_bit_count(const firrtl::FirrtlPB_Type &type);
-  void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node);
+  void     wire_init_flip_handling(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, bool flipped, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   void     handle_register(Lnast &lnast, const firrtl::FirrtlPB_Type &type, std::string id, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement &stmt);
   static void  dump_var2flip(const absl::flat_hash_map<std::string, absl::flat_hash_set<std::pair<std::string, bool>>> &module_table);
   void     add_local_flip_info(bool flipped_in, std::string_view port_id);
-  void     setup_scalar_bits(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign);
-  void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node);
+  void     setup_scalar_bits(Lnast &lnast, std::string_view id, uint32_t bitwidth, Lnast_nid &parent_node, bool sign, const firrtl::FirrtlPB_Statement& stmt);
+  void     create_module_inst(Lnast &lnast, const firrtl::FirrtlPB_Statement_Instance &inst, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement& stmt);
   void     split_hier_name(std::string_view                                                    hier_name,
                            std::vector<std::pair<std::string, Inou_firrtl_module::Leaf_type>> &hier_subnames);
   void     split_hier_name(std::string_view full_name, std::vector<std::string> &hier_subnames);
@@ -186,42 +186,42 @@ protected:
   void     collect_memory_data_struct_hierarchy(std::string_view mem_name, const firrtl::FirrtlPB_Type &type_in,
                                                 std::string_view hier_fields_concats);
   void     handle_mux_assign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
-                             std::string_view lhs_of_asg);
+                             std::string_view lhs_of_asg, const firrtl::FirrtlPB_Statement& stmt);
   void     handle_valid_if_assign(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node,
-                                  std::string_view lhs_of_asg);
-  void     add_lnast_assign (Lnast &lnast, Lnast_nid &parent_node, std::string_view lhs_str, std::string_view rhs_str);
+                                  std::string_view lhs_of_asg, const firrtl::FirrtlPB_Statement& stmt);
+  void     add_lnast_assign (Lnast &lnast, Lnast_nid &parent_node, std::string_view lhs_str, std::string_view rhs_str, const firrtl::FirrtlPB_Statement& stmt);
 
   void handle_neq_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_unary_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
+  void handle_unary_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs,  const firrtl::FirrtlPB_Statement& stmt);
   void handle_and_reduce_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                            std::string_view lhs);
+                            std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
   void handle_or_reduce_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                           std::string_view lhs);
+                           std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
   void handle_xor_reduce_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                            std::string_view lhs);
-  void handle_negate_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_conv_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
+                            std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_negate_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_conv_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
   void handle_extract_bits_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                              std::string_view lhs);
-  void handle_head_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_tail_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_concat_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void handle_pad_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
+                              std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_head_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_tail_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_concat_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_pad_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
   void handle_binary_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                                std::string_view lhs);
+                                std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
 
   void handle_static_shift_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                              std::string_view lhs);
+                              std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
   void handle_type_conv_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node,
-                           std::string_view lhs);
-  void handle_as_usint_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void attach_expr_str2node(Lnast &lnast, std::string_view access_str, Lnast_nid &parent_node);
-  void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped);
-  void tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_input);
-  void tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_output);
-  void handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
-  void handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
-  void handle_normal_cases_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r);
+                           std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_as_usint_op(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void attach_expr_str2node(Lnast &lnast, std::string_view access_str, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement& stmt);
+  void tuple_flattened_connections(Lnast& lnast, Lnast_nid& parent_node, std::string_view lhs_head, std::string_view rhs_head, std::string_view flattened_element, bool is_flipped, const firrtl::FirrtlPB_Statement& stmt);
+  void tuple_flattened_connections_instance_l(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_input, const firrtl::FirrtlPB_Statement& stmt);
+  void tuple_flattened_connections_instance_r(Lnast& lnast, Lnast_nid& parent_node, std::string_view tup_hier_name, std::string_view hier_name_r, bool is_flipped, bool is_output, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_lhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_rhs_instance_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r,  const firrtl::FirrtlPB_Statement& stmt);
+  void handle_normal_cases_wire_connections(Lnast &lnast, Lnast_nid &parent_node, std::string_view tup_head_l, std::string_view hier_name_l, std::string_view hier_name_r,  const firrtl::FirrtlPB_Statement& stmt);
   void handle_direct_inp_out_or_node_connection(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r);
 
   bool check_submodule_io_flipness(Lnast& lnast, std::string_view submodule_name, std::string_view tup_head, std::string_view hier_name, bool is_sub_instance = false);
@@ -229,19 +229,21 @@ protected:
   // void handle_bundle_vec_acc(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, const bool is_rhs,
   //                            const Lnast_node &value_node);
   void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node);
-  void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &target_node);
-  void create_tuple_add_for_instance_itup(Lnast &ln, Lnast_nid &parent_node, std::string_view lhs_full_name, std::string rhs_full_name);
+  void create_tuple_add_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &value_node, const firrtl::FirrtlPB_Statement& stmt);
+  void create_tuple_get_from_str(Lnast &ln, Lnast_nid &parent_node, std::string_view flattened_str, const Lnast_node &target_node, const firrtl::FirrtlPB_Statement& stmt);
+  void create_tuple_add_for_instance_itup(Lnast &ln, Lnast_nid &parent_node, std::string_view lhs_full_name, std::string rhs_full_name, const firrtl::FirrtlPB_Statement& stmt);
   void create_wires_for_instance_itup(Lnast &ln, Lnast_nid &parent_node, std::string_view lhs_full_name, std::string_view rhs_full_name);
-  void create_tuple_get_for_instance_otup(Lnast &ln, Lnast_nid &parent_node, std::string_view rhs_full_name, std::string lhs_full_name);
-  void direct_instances_connection(Lnast &ln, Lnast_nid &parent_node, std::string lhs_full_name, std::string rhs_full_name);
+  void create_tuple_get_for_instance_otup(Lnast &ln, Lnast_nid &parent_node, std::string_view rhs_full_name, std::string lhs_full_name, const firrtl::FirrtlPB_Statement& stmt);
+  void direct_instances_connection(Lnast &ln, Lnast_nid &parent_node, std::string lhs_full_name, std::string rhs_full_name, const firrtl::FirrtlPB_Statement& stmt);
   void create_default_value_for_scalar_var(Lnast &ln, Lnast_nid &parent_node, std::string_view sv, const Lnast_node &value_node);
+  void create_default_value_for_scalar_var(Lnast &ln, Lnast_nid &parent_node, std::string_view sv, const Lnast_node &value_node, const firrtl::FirrtlPB_Statement& stmt);
 
-  void init_cmemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem);
-  void handle_mport_declaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport);
-  void initialize_rd_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
-  void initialize_wr_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name);
-  void init_mem_din(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str);
-  void init_mem_res(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str);
+  void init_cmemory(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_CMemory &cmem, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_mport_declaration(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Statement_MemoryPort &mport, const firrtl::FirrtlPB_Statement& stmt);
+  void initialize_rd_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name, const firrtl::FirrtlPB_Statement& stmt);
+  void initialize_wr_mport_from_usage(Lnast &lnast, Lnast_nid &parent_node, std::string_view mport_name, const firrtl::FirrtlPB_Statement& stmt);
+  void init_mem_din(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str, const firrtl::FirrtlPB_Statement& stmt);
+  void init_mem_res(Lnast &lnast, std::string_view mem_name, std::string_view port_cnt_str, const firrtl::FirrtlPB_Statement& stmt);
 
   // void RegResetInitialization(Lnast &lnast, Lnast_nid &parent_node);
 
@@ -250,17 +252,17 @@ protected:
   void record_all_input_hierarchy(std::string_view port_name);
   void record_all_output_hierarchy(std::string_view port_name);
 
-  void list_prime_op_info(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs);
-  void init_expr_add(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, std::string_view lhs_unalt);
-  std::string expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& expr);
+  void list_prime_op_info(Lnast &lnast, const firrtl::FirrtlPB_Expression_PrimOp &op, Lnast_nid &parent_node, std::string_view lhs, const firrtl::FirrtlPB_Statement& stmt);
+  void init_expr_add(Lnast &lnast, const firrtl::FirrtlPB_Expression &expr, Lnast_nid &parent_node, std::string_view lhs_unalt, const firrtl::FirrtlPB_Statement& stmt);
+  std::string expr_str_flattened_or_tg(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression& expr, const firrtl::FirrtlPB_Statement& stmt);
 
   void list_statement_info(Lnast &lnast, const firrtl::FirrtlPB_Statement &stmt, Lnast_nid &parent_node);
   std::string get_expr_hier_name(const firrtl::FirrtlPB_Expression &expr, bool &is_runtime_idx);
-  std::string get_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr);
+  std::string get_expr_hier_name(Lnast &lnast, Lnast_nid &parent_node, const firrtl::FirrtlPB_Expression &expr, const firrtl::FirrtlPB_Statement& stmt);
   std::string get_runtime_idx_field_name(const firrtl::FirrtlPB_Expression &expr);
   std::string name_prefix_modifier_flattener(std::string_view term, const bool is_rhs);
-  void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
-  void handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr);
+  void handle_rhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr, const firrtl::FirrtlPB_Statement& stmt);
+  void handle_lhs_runtime_idx(Lnast &lnast, Lnast_nid &parent_node, std::string_view hier_name_l, std::string_view hier_name_r, const firrtl::FirrtlPB_Expression &rhs_expr, const firrtl::FirrtlPB_Statement& stmt);
   uint16_t get_vector_size(const Lnast &lnast, std::string_view vec_name);
   void final_mem_interface_assign(Lnast &lnast, Lnast_nid &parent_node);
 
