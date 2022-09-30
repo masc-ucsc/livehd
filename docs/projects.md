@@ -15,10 +15,161 @@ possible to provide 1 quarter GSR in the last quarter for master students.
 At the end of the document there is a list of finished projects as example, and
 small tasks that are not enough for a thesis/project, but great to help.
 
+# Open Small/Intro Projects 
 
-# Open Projects
+Those are simpler than MS thesis but useful for LiveHD.
+
+## lgshell autocompletion
+
+Upgrade lgshell to latest version. Fix auto-completion for path: files: src_path: odir:....
+
+## Fix lnast_fromlg 
+
+Add unit tests (more) and make sure that it is working. LNAST is a super-set of
+Lgraph, so nodes are fine, but the idea is to create a bit nicer LNAST (it has
+more operators and allows nesting ifs...)
+
+## LNAST Fuzzer
+
+Randomly create valid LNAST statements. No matter the LNAST (as long as it is
+valid), it should not crash/fail.
+
+
+## Remove inou.code_gen.verilog
+
+No longer needed, we use inou.cgen.verilog
+
+
+## Tree class
+
+Build a C++17 Tree class without pointers optimized for LNAST operations.
+
+core/lhtree.hpp has several comments.
+
+## Graph core iterator
+
+Finish Graph_core class to have efficient fast/forward/backward iterators.
+
+core/graph_core.???
+
+## Large HIF files
+
+Not much testing on large HIF files that require multiple IDs (0.??, 1.??). It
+may not be even supported (unclear about the status). If not supported, fix it.
+
+## Parallel HIF read
+
+HIF is designed to have a parallel read (0.??, 1.??....) but it is not implemented.
+
+## Cleanup post online neovim tree-sitter pyrope
+
+We have a tree-sitter pyrope grammar. We use neovim, we should have a clean
+setup and populate most packages on github to include Pyrope by default. 
+
+## https://github.com/chubin/cheat.sh
+
+Populate it for Pyrope basic examples. E.g: get msb, find leading zero, compute checksum....
+
+## Rust chunmky parser
+
+Create a https://github.com/zesterer/chumsky for Pyrope. The reason is to
+allow/test RUST integration in LiveHD flow, but more importantly to leverage
+the "super nice" error format system for compile errors and leverage chumsky
+for the lexer/parser errors.
+
+This is NOT to replace the tree-sitter parser, but to run in parallel. It will allow to
+generate a much cleaner error for lexer/parser syntax errors.
+
+Since it is for errors, it can have a more strict grammar than tree-sitter
+which relies in passes to detect errors.
+
+The error reporting should be exposed to the C++17 API.
+
+## Improve the iassert
+
+(C++17 skills)
+
+Make iassert (I) to be constexpr. Now constexpr methods can not have I()
+
+```
+constexpr int add1(const int i) {
+   I(i>0); // compile error
+   assert(i>0); // OK
+}
+```
+
+Extend iassert class to have debug break code from:
+https://github.com/scottt/debugbreak
+
+Integrate with this?
+https://github.com/bombela/backward-cpp
+
+## WASM LiveHD
+
+Try https://github.com/emscripten-core/emsdk/tree/main/bazel with LiveHD and mark blocks/subsections
+that need to be rewritten.
+
+Some parts may be easy to patch and be compatible (no need to rewrite like
+lgedge.cpp that uses weird pointer arithmetic). If so, patch to allow enscripten.
+
+## Dynamic Power Model
+
+Add clock gating efficiency for registers (If clock switches and values do not
+switch. If valid exists and data switches,.... )
+
+
+## Prp to LNAST LoC
+
+LNAST tokens can have line of code (pos1 pos2 in characters. Make sure that inou.prp generates LoC.
+
+Create some script to test simple files match the pos1/pos2 in LNAST? (must have this as part of the unit test)
+
+## Loc/Col to pos1/pos2
+
+Compilers can report lines with Line of Code (LoC) and Column or with start/end
+(pos1/pos2) position in bytes. Both are useful. The idea is to keep pos1/pos2 in LNAST (and Lgraph)
+but to have an efficient C++ class that allows to translate back and forth.
+
+```
+Class Source_info {
+  Source_info * create(std::string_view filename);
+
+  std::pair<int,int> get_loc_col(int pos1, int po2) const;
+  std::pair<int,int> get_position(int loc, int col) const;
+};
+```
+
+## Termwave (https://github.com/masc-ucsc/termwave)
+
+Evolve improve termwave to be a separate project but allow future integration with LiveHD.
+LiveHD has a vcd reader that handles many more cases than termwave (pass/opentimer/power_vcd.???). Maybe
+extract the code and make it part of termwave and fix issues.
+
+A C++ library that can display short waveforms in text. A bit like pyRTL
+waveforms
+https://raw.githubusercontent.com/UCSBarchlab/PyRTL/master/docs/screenshots/pyrtl-statemachine.png?raw=true
+
+A console may use a C++ API has things like:
+
+* add_monitor("var")
+* del_monitor("var")
+* show(from, totime)
+* Read a vcd file
+* update("var", time, value)
+* get("var", time) // returns value
+
+# Open Medium/Large Size Projects
 
 Open projects are potential MS thesis/projects.
+
+## LNAST to Javascript
+
+Once jops is done (or done at the same time of MS thesis), we should be able to translate from
+LNAST to javascript. All the file "test" blocks could be tested in a browser client as the program
+executes/edits the code.
+
+The LNAST javascript does not need the bitwidth, it should be able to work with just generated LNAST from
+passes like inou.prp/inou.verilog (not inou.chisel because it needs translation steps)
 
 ## Package Manager
 
@@ -154,7 +305,6 @@ designs too.  It may be interesting to output ACT.
 
 (https://avlsi.csl.yale.edu/act/doku.php) to interface with AVLSI flow.
 
-
 ## Verilog input with a slang 2 LNAST pass
 
 slang (https://github.com/MikePopoloski/slang) is an open source System Verilog parser/compiler.
@@ -236,7 +386,6 @@ operations.
 The goal is to have to track nodes not in topological order. The load/save does
 not need to keep it just during runtime.
 
-
 ## Parallel and Hierarchical Synthesis with Mockturtle
 
 Mockturtle is integrated with LiveHD. The goal of this task is to iron out bugs
@@ -289,36 +438,11 @@ Main features:
 * Copy propagation and Dead-code elimination in LGRAPH with and without hierarchy
 * Check Lgraph consistency. E.g: NOT should have same bits input/output edges
 
-## Dynamic Power Model
+## SMT Solver for LEC
 
-Performance is important, but dynamic power consumption it is too. The goal is to generate power consumption results.
+Finish pass/lec. Capable of doing a SMT LEC.
 
-Dependence: Hot Reload
-
-Main features:
-
-* Estimate power statically and dynamically
-    * Statically: Use activity rates (could be imported from previous run)
-    * Dynamically: generate power consumption trace
-    * Dynamic power should be a switch from simulation. Not a VCD/LXT2 dump process. This will allow feedback on simulation.
-    * Clock gating efficiency/static can be off-line
-* Estimate clock gating efficiency, recommend clock gating points after dynamic run
-* Read liberty for power and have some approximate model for interconnect. The idea is good average out, not exact per cell.
-
-## Liberty
-
-Liberty is de-factor industry standards. The goal is to parse them and populate the graph library accordingly.
-
-Dependence: none
-
-Main features:
-
-* Liberty. We have some "read" pass in lgraph
-* Create an object to hide the interface with a C++17 iterator
-* Capacity to merge many files in the same object (inou_liberty)
-* Multithread ready (infrequent update, frequent read)
-* Unit tests for correctness and performance
-* Wrapper to get timing for cells considering load
+Maybe good to avoid LEC when structural traversal is the same (remove those nodes from inputs).
 
 ## FPGA Legalization
 
@@ -639,11 +763,6 @@ be nice to have. Maybe based on https://github.com/VLSIDA/openram-vagrant-image
 * Intercept the CTRL+C and finish the current command. Do not kill/terminate the lgshell
 * This may require to spawn the commands as threads and kill them for ctrl+c
 
-## lgshell perf summary
-
-* Record the time (and perf stats) for each lgshell command executed.
-* Print the statistics when closing the lgshell
-
 ## Query shell (not lgshell) to query graphs
 
 * Based on replxx (like lgshell)
@@ -806,42 +925,13 @@ from the leave nodes. If all the bits can be inferred given the inputs, the
 module should have no bitwidth. In that case the bitwidth can be inferred from
 outside.
 
-## LNAST Opt
-
-In LiveHD, LGraph has the cprop pass that performs constant folding, copy
-propagation, strength reduction... and many other optimizations.
-
-
-It may be useful to have a copy propagation, constant folding, and dead code
-elimination in LNAST. There are several reasons:
-
-* Doing code simplification early (LNAST is the earliest) reduces workload/steps in successive passes.
-* The simulation saves checkpoints, a LNAST Opt without dead code elimination would be useful to create the intermediate values for debugging.
 
 # Other non critical projects
 
-## C++ Text Waveform viewer
-
-A C++ library that can display short waveforms in text. A bit like pyRTL
-waveforms
-https://raw.githubusercontent.com/UCSBarchlab/PyRTL/master/docs/screenshots/pyrtl-statemachine.png?raw=true
-
-The C++ API has things like
-
-* add_monitor("var")
-* del_monitor("var")
-* show(from, totime)
-* Read a vcd file
-* update("var", time, value)
-* get("var", time) // returns value
 
 ## Zoom drom viewer
 
  Help with https://github.com/wavedrom/zoom
-
-## HIDE drom
-
- Add Pyrope to https://github.com/drom/atom-hide
 
 ## C++ Cell library with static bit sizes
 
@@ -924,25 +1014,6 @@ There are 2 parts of this project. Interface LiveHD with inspect and to create
 a C++ version with terminal output (so that we can interface with future
 terminal C++ wave).
 
-## Improve the iassert
-
-(C++17 skills)
-
-Make iassert (I) to be constexpr. Now constexpr methods can not have I()
-
-```
-constexpr int add1(const int i) {
-   I(i>0); // compile error
-   assert(i>0); // OK
-}
-```
-
-Extend iassert class to have debug break code from:
-https://github.com/scottt/debugbreak
-
-Integrate with this?
-https://github.com/bombela/backward-cpp
-
 ## Aligned code generation
 
 Read pyrope, and indent/align code.
@@ -964,4 +1035,19 @@ Non-alnum values have a higher weight in the alignment constrains. Space have no
 The idea is to align only adjacent lines.
 
 If a line is "too different", a newline may be added.
+
+## Fix inou.code_gen
+
+### inou.code_gen.prp
+
+It has the old Pyrope syntax, and it seg-faults in many configurations/tests.
+It should be able to handle any LNAST input.
+
+Add unit tests (more) and make sure that it is working
+
+## inou.code_gen.verilog
+
+We need to have sops working first. Then, translate to have sops generate for each module.
+
+
 
