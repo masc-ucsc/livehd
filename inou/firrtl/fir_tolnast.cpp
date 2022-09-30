@@ -1366,6 +1366,7 @@ void Inou_firrtl_module::initialize_rd_mport_from_usage(Lnast& lnast, Lnast_nid&
     } else {
       mem2rd_mports[mem_name].emplace_back(std::pair(mport_name, mem2port_cnt[mem_name]));
     }
+    mem2rd_mport_loc.insert({std::string(mport_name), std::make_pair(line_pos, col_pos)});
 
     // note: I defer the handling of rd_mport = mem_res[rd_port] to the interface connection phase.
     //       the reason is we need to do tuple field recovering mem_din, like
@@ -2461,6 +2462,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
     }
     case firrtl::FirrtlPB_Statement::kCmemory: {
       memory_names.insert(stmt.cmemory().id());
+      memory_loc.insert({stmt.cmemory().id(), std::make_pair(line_pos, col_pos)});
       init_cmemory(lnast, parent_node, stmt.cmemory(), stmt);
       break;
     }
@@ -2791,64 +2793,68 @@ void Inou_firrtl_module::final_mem_interface_assign(Lnast& lnast, Lnast_nid& par
     for (auto& it : mem2rd_mports[mem_name]) {
       auto mport_name          = it.first;
       auto cnt_of_rd_mport     = it.second;
+      
+      auto &line_pos = mem2rd_mport_loc[mport_name].first;
+      auto &col_pos = mem2rd_mport_loc[mport_name].second;
 
-      auto idx_tg2        = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get(/*"", 0, line_pos, col_pos*/));
+      auto idx_tg2        = lnast.add_child(idx_initialize_stmts, Lnast_node::create_tuple_get("", 0, line_pos, col_pos));
       auto temp_var_name2 = create_tmp_var();
-      lnast.add_child(idx_tg2, Lnast_node::create_ref(temp_var_name2));
-      lnast.add_child(idx_tg2, Lnast_node::create_ref(absl::StrCat(mem_name, "_res")));
+      lnast.add_child(idx_tg2, Lnast_node::create_ref(temp_var_name2, 0, line_pos, col_pos));
+      lnast.add_child(idx_tg2, Lnast_node::create_ref(absl::StrCat(mem_name, "_res"), 0, line_pos, col_pos));
       lnast.add_child(idx_tg2, Lnast_node::create_const(cnt_of_rd_mport));
 
-      auto idx_asg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-      lnast.add_child(idx_asg2, Lnast_node::create_ref(mport_name));
-      lnast.add_child(idx_asg2, Lnast_node::create_ref(temp_var_name2));
+      auto idx_asg2 = lnast.add_child(idx_initialize_stmts, Lnast_node::create_assign("", 0, line_pos, col_pos));
+      lnast.add_child(idx_asg2, Lnast_node::create_ref(mport_name, 0, line_pos, col_pos));
+      lnast.add_child(idx_asg2, Lnast_node::create_ref(temp_var_name2, 0, line_pos, col_pos));
     }
 
     std::vector<std::string> tmp_flattened_fields_per_port;
-
-    auto idx_ta_margs = lnast.add_child(parent_node, Lnast_node::create_tuple_add(/*"", 0, line_pos, col_pos*/));
+    auto &line_pos = memory_loc[mem_name].first;
+    auto &col_pos = memory_loc[mem_name].second;
+    auto idx_ta_margs = lnast.add_child(parent_node, Lnast_node::create_tuple_add("", 0, line_pos, col_pos));
     auto temp_var_str = create_tmp_var();
-    lnast.add_child(idx_ta_margs, Lnast_node::create_ref(temp_var_str));
+    lnast.add_child(idx_ta_margs, Lnast_node::create_ref(temp_var_str, 0, line_pos, col_pos));
 
-    auto idx_asg_addr = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_addr, Lnast_node::create_const("addr"));
-    lnast.add_child(idx_asg_addr, Lnast_node::create_ref(absl::StrCat(mem_name, "_addr")));
+    auto idx_asg_addr = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_addr, Lnast_node::create_const("addr", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_addr, Lnast_node::create_ref(absl::StrCat(mem_name, "_addr"), 0, line_pos, col_pos));
 
-    auto idx_asg_clock = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_clock, Lnast_node::create_const("clock"));
-    lnast.add_child(idx_asg_clock, Lnast_node::create_ref(absl::StrCat(mem_name, "_clock")));
+    auto idx_asg_clock = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_clock, Lnast_node::create_const("clock", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_clock, Lnast_node::create_ref(absl::StrCat(mem_name, "_clock"), 0, line_pos, col_pos));
 
 
-    auto idx_asg_din = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_din, Lnast_node::create_const("din"));
-    lnast.add_child(idx_asg_din, Lnast_node::create_ref(absl::StrCat(mem_name, "_din")));
+    auto idx_asg_din = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_din, Lnast_node::create_const("din", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_din, Lnast_node::create_ref(absl::StrCat(mem_name, "_din"), 0, line_pos, col_pos));
 
-    auto idx_asg_enable = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_enable, Lnast_node::create_const("enable"));
-    lnast.add_child(idx_asg_enable, Lnast_node::create_ref(absl::StrCat(mem_name, "_enable")));
+    auto idx_asg_enable = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_enable, Lnast_node::create_const("enable", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_enable, Lnast_node::create_ref(absl::StrCat(mem_name, "_enable"), 0, line_pos, col_pos));
 
-    auto idx_asg_fwd = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_fwd, Lnast_node::create_const("fwd"));
-    lnast.add_child(idx_asg_fwd, Lnast_node::create_ref(absl::StrCat(mem_name, "_fwd")));
+    auto idx_asg_fwd = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_fwd, Lnast_node::create_const("fwd", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_fwd, Lnast_node::create_ref(absl::StrCat(mem_name, "_fwd"), 0, line_pos, col_pos));
 
-    auto idx_asg_lat = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_lat, Lnast_node::create_const("type"));
-    lnast.add_child(idx_asg_lat, Lnast_node::create_ref(absl::StrCat(mem_name, "_type")));
+    auto idx_asg_lat = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_const("type", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_lat, Lnast_node::create_ref(absl::StrCat(mem_name, "_type"), 0, line_pos, col_pos));
 
-    auto idx_asg_wensize = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_wensize, Lnast_node::create_const("wensize"));
-    lnast.add_child(idx_asg_wensize, Lnast_node::create_ref(absl::StrCat(mem_name, "_wensize")));
+    auto idx_asg_wensize = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_wensize, Lnast_node::create_const("wensize", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_wensize, Lnast_node::create_ref(absl::StrCat(mem_name, "_wensize"), 0, line_pos, col_pos));
 
-    auto idx_asg_size = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_size, Lnast_node::create_const("size"));
-    lnast.add_child(idx_asg_size, Lnast_node::create_ref(absl::StrCat(mem_name, "_size")));
+    auto idx_asg_size = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_size, Lnast_node::create_const("size", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_size, Lnast_node::create_ref(absl::StrCat(mem_name, "_size"), 0, line_pos, col_pos));
 
-    auto idx_asg_rdport = lnast.add_child(idx_ta_margs, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_rdport, Lnast_node::create_const("rdport"));
-    lnast.add_child(idx_asg_rdport, Lnast_node::create_ref(absl::StrCat(mem_name, "_rdport")));
+    auto idx_asg_rdport = lnast.add_child(idx_ta_margs, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_rdport, Lnast_node::create_const("rdport", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_rdport, Lnast_node::create_ref(absl::StrCat(mem_name, "_rdport"), 0, line_pos, col_pos));
 
-    auto idx_asg_margs = lnast.add_child(parent_node, Lnast_node::create_assign(/*"", 0, line_pos, col_pos*/));
-    lnast.add_child(idx_asg_margs, Lnast_node::create_ref(absl::StrCat(mem_name, "_interface_args")));
-    lnast.add_child(idx_asg_margs, Lnast_node::create_ref(temp_var_str));
+    auto idx_asg_margs = lnast.add_child(parent_node, Lnast_node::create_assign("", 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_margs, Lnast_node::create_ref(absl::StrCat(mem_name, "_interface_args"), 0, line_pos, col_pos));
+    lnast.add_child(idx_asg_margs, Lnast_node::create_ref(temp_var_str, 0, line_pos, col_pos));
   }
 }
 
