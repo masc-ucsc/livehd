@@ -3,6 +3,7 @@
 #include "node.hpp"
 
 #include <charconv>
+#include <string>
 
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -621,6 +622,20 @@ const std::pair<uint64_t,uint64_t> Node::get_loc() const {
 }
 
 bool Node::has_loc() const {return current_g->get_node_loc_map().contains(get_compact_class()); }
+
+void Node::set_fname(const std::string &fname) {
+	current_g->ref_node_fname_map()->insert_or_assign(get_compact_class(), fname); 
+}
+
+const std::string Node::get_fname() const {
+  const auto &ptr = current_g->get_node_fname_map();
+  const auto it = ptr.find(get_compact_class());
+  I(it != ptr.end());
+  return it->second;
+}
+
+bool Node::has_fname() const {return current_g->get_node_fname_map().contains(get_compact_class()); }
+
 //----- Subject to changes in the future:
 void Node::del_color() {
   current_g->ref_node_color_map()->erase(get_compact());
@@ -651,6 +666,9 @@ void Node::dump() const {
   if (has_loc()) {
     std::pair<uint64_t,uint64_t> loc = get_loc(); 
     fmt::print(" loc:[{},{}] ", loc.first, loc.second);
+  }
+  if (has_fname()) {
+    fmt::print(" fname:{} ", get_fname());
   }
   if (get_type_op() == Ntype_op::LUT) {
     fmt::print(" lut:{}\n", get_type_lut().to_pyrope());

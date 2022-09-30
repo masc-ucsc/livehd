@@ -27,6 +27,7 @@ void Lgraph_attributes::clear() {
   node_color_map.clear();
   node_place_map.clear();
   node_loc_map.clear();
+  node_fname_map.clear();
 
   Lgraph_Base::clear();  // last. Removes lock at the end
 }

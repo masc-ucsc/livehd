@@ -64,6 +64,10 @@ public:
   [[nodiscard]] const Node_loc_map &get_node_loc_map() const { return node_loc_map; };
   [[nodiscard]] Node_loc_map       *ref_node_loc_map() { return &node_loc_map; };
 
+  using Node_fname_map = absl::flat_hash_map<Node::Compact_class, std::string>;//source file name from LN
+  [[nodiscard]] const Node_fname_map &get_node_fname_map() const { return node_fname_map; };
+  [[nodiscard]] Node_fname_map       *ref_node_fname_map() { return &node_fname_map; };
+
 protected:
   using Node_value_map = absl::flat_hash_map<Node::Compact_class, std::string>;
   using Node_lut_map   = absl::flat_hash_map<Node::Compact_class, std::string>;
@@ -84,6 +88,7 @@ protected:
   Node_color_map node_color_map;
   Node_place_map node_place_map;
   Node_loc_map node_loc_map;
+  Node_fname_map node_fname_map;
 
   void clear() override;
 

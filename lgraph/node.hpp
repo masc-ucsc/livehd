@@ -376,6 +376,10 @@ public:
   const std::pair<uint64_t, uint64_t> get_loc() const;
   bool                                has_loc() const;
 
+  void              set_fname(const std::string &fname);
+  const std::string get_fname() const;
+  bool              has_fname() const;
+
   void set_color(int color);
   void del_color();
   int  get_color() const;
