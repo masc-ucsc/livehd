@@ -1,3 +1,7 @@
+/*
+:name: case_test1
+:type: parsing
+*/
 
 let m1 = (a=1,b=50)
 let m2 = (a=2,b=60)

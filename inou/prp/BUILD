@@ -37,39 +37,15 @@ cc_binary(
         name = "prp-%s" % prp_file.split("/")[-1].split(".")[0],
         srcs = ["tests/pyrope_test.py"],
         args = [
-    #        "-c",
-    #        "$(location //inou/prp:tests/pyrope_test_bazel.yml)",
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
-            # "//inou/prp:tests/pyrope_test_bazel.yml",
             "//inou/prp:%s" % prp_file,
             "//main:lgshell",
         ],
     )
-    for prp_file in glob(["tests/pyrope/*.prp"])
-]
-
-[
-sh_test(
-    name = "prp-%s" % prp_file.split('/')[-1].split('.')[0],
-    tags = ["fixme"],
-    srcs = ["tests/pyrope_test.py"],
-    args = [
-   #     "-c",
-   #     "$(location //inou/prp:tests/pyrope_test_bazel.yml)",
-        "-i",
-        "$(location //inou/prp:%s)" % prp_file,
-    ],
-    data = [
-        "//inou/prp:tests/pyrope_test.py",
-        "//inou/prp:tests/prplib.py",
-        #"//inou/prp:tests/pyrope_test_bazel.yml",
-        "//inou/prp:%s" % prp_file,
-        "//main:lgshell",
-    ],
-) for prp_file in glob(["tests/pyrope/wip/*.prp"])
+    for prp_file in glob(["tests/pyrope/*.prp", "tests/comptime/*.prp"])
 ]

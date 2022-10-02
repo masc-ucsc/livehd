@@ -56,6 +56,7 @@ protected:
 
   // Expressions
   void process_binary_expression(TSNode);
+  void process_unary_expression(TSNode);
   void process_dot_expression(TSNode);
   void process_member_selection(TSNode);
 

@@ -127,6 +127,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_statement(node);
   else if (node_type == "binary_expression")
     process_binary_expression(node);
+  else if (node_type == "unary_expression")
+    process_unary_expression(node);
   else if (node_type == "dot_expression")
     process_dot_expression(node);
   else if (node_type == "member_selection")
@@ -706,6 +708,45 @@ void Prp2lnast::process_binary_expression(TSNode node) {
     lnast->add_child(range_index, ref);
     lnast->add_child(range_index, lhs);
     lnast->add_child(range_index, rhs);
+
+    primary_node_stack.push(ref);
+    return;
+  }
+}
+
+void Prp2lnast::process_unary_expression(TSNode node) {
+  auto op_node = get_child(node, "operator");
+  auto arg_node = get_child(node, "argument");
+
+  fmt::print("{} `{}`\n", get_text(op_node), get_text(arg_node));
+
+  auto op = get_text(op_node);
+  Lnast_node lnast_node;
+
+  // Regular math operators
+  if (op == "!" || op == "not")
+    lnast_node = Lnast_node::create_logical_not();
+  else if (op == "~")
+    lnast_node = Lnast_node::create_bit_not();
+  else if (op == "-")
+    lnast_node = Lnast_node::create_minus();
+  else
+    lnast_node = Lnast_node::create_invalid();
+
+  // TODO: Merge to child node if
+  //  (1) same op as the child node
+  //  (2) op takes n arguments
+  //
+  if (!lnast_node.is_invalid()) {
+    process_node(arg_node);
+    auto arg = primary_node_stack.top();
+    primary_node_stack.pop();
+
+    auto expr_index = lnast->add_child(stmts_index, lnast_node);
+    auto ref        = get_tmp_ref();
+    
+    lnast->add_child(expr_index, ref);
+    lnast->add_child(expr_index, arg);
 
     primary_node_stack.push(ref);
     return;

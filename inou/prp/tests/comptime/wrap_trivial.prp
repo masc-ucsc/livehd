@@ -1,4 +1,7 @@
-
+/*
+:name: wrap_trivial
+:type: parsing
+*/
 
 var x::[ubits=12] = 0
 
