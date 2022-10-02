@@ -33,6 +33,9 @@ protected:
     std::vector<size_t>      transitions;
   };
 
+  size_t deepest_vcd_hier_name_level{0};
+  std::string deepest_vcd_hier_name;
+
   absl::node_hash_map<std::string, Channel> id2channel;
 
   absl::flat_hash_map<std::string, double> hier_name2power;
@@ -67,8 +70,9 @@ public:
   void clear_power() {
     hier_name2power.clear();
   }
+
   void add(std::string_view hier_name, double power) {
-    hier_name2power[hier_name] = power;
+    hier_name2power.insert_or_assign(hier_name, power);
   }
 
   void compute(std::string_view odir) const;

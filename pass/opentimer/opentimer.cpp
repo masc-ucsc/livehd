@@ -174,8 +174,8 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
 
     // connect input pins
     for (const auto &e : node.inp_edges()) {
-      I(get_driver_net_name(e.driver) == e.driver.get_wire_name());
-      auto wire_name = e.driver.get_wire_name();
+      //I(get_driver_net_name(e.driver) == e.driver.get_wire_name());
+      auto wire_name = get_driver_net_name(e.driver);
       auto pin_name  = absl::StrCat(instance_name, ":", e.sink.get_pin_name());
 
       timer.connect_pin(pin_name, wire_name);
@@ -357,7 +357,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     pvcd.compute(odir);
   }
 
-  fmt::print("power TOTAL cap:{} ipwr:{} voltage:{}\n", total_cap, total_ipwr, voltage);
+  fmt::print("power TOTAL switch:{} internal:{} voltage:{}\n", total_cap, total_ipwr, voltage);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {

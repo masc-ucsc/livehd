@@ -125,8 +125,17 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     ptr                     = ptr2;
 
     // fmt::print("scope:{}\n", scope_name);
-    if (scope_name != "TOP")
-      scope_stack.emplace_back(scope_name);
+    scope_stack.emplace_back(scope_name);
+
+    if (scope_stack.size()>deepest_vcd_hier_name_level) {
+      std::string hier_name;
+      for (auto &str : scope_stack) {
+        hier_name.append(str);
+        hier_name.append(",");
+      }
+      deepest_vcd_hier_name_level = scope_stack.size();
+      deepest_vcd_hier_name = hier_name;
+    }
 
   } else if (strncmp("date", ptr, 4) == 0) {
     ptr += 4;
@@ -251,6 +260,69 @@ void Power_vcd::dump() const {
 
 void Power_vcd::compute(std::string_view odir) const {
 
+  // FIXME:
+  //
+  // Now the VCD (id2channel) and hierarchy (hier_name2power) match. This is
+  // because the "TOP" is dropped, and there is no weird hierarchy in the
+  // synthesis.
+  //
+  // A better approach is to find "what to drop" from
+  // id2channel.second.hier_name In the default is to drop TOP, if the
+  // testbench has more things it can drop more. It should always be a constant
+  // part
+
+
+  // Pick a random hier_name2power and decide how much from the deepest_vcd_hier_name must be dropped
+  size_t n_skip = 0;
+  {
+    absl::flat_hash_map<std::string, size_t> drop_count;
+
+    for (const auto &hname : hier_name2power) {
+      const char *top_level_end = strchr(hname.first.c_str(), ',');
+      if (top_level_end==nullptr)
+        continue;
+
+      auto top_str = hname.first.substr(0,top_level_end-hname.first.c_str());
+
+      const char *match_str = strstr(deepest_vcd_hier_name.c_str(), top_str.c_str());
+
+      if (match_str == nullptr)
+        continue;
+
+      n_skip = match_str - deepest_vcd_hier_name.c_str();
+
+      // fmt::print("n_skip:{} hier_name:{} deepest_vcd_hier_name:{}\n", n_skip, hname.first, deepest_vcd_hier_name);
+      break;
+    }
+  }
+
+  #if 1
+  {
+    // This is to debug if there are not matching names in VCD and hier
+    for (const auto &hname : hier_name2power) {
+      auto hier_name = hname.first;
+      bool found = false;
+      for (const auto &e : id2channel) {
+        for(const auto &e2: e.second.hier_name) {
+          auto vcd_hier_name = e2.substr(n_skip);
+          if (vcd_hier_name == hier_name) {
+            found = true;
+            break;
+          }
+        }
+        if (found)
+          break;
+      }
+      if (!found) {
+        // WARNING: This may be OK if the VCD is partial, but not nice because the power
+        // is not representative of the whole, just the sampled parts. It also
+        // makes it hard to know if it is a bug in VCD or not.
+        fmt::print("pin with power not found in vcd trace v_hier:{}\n", hier_name);
+      }
+    }
+  }
+  #endif
+
   absl::node_hash_map<std::string, std::vector<double>> module_trace;
 
   double transitions=0;
@@ -259,7 +331,9 @@ void Power_vcd::compute(std::string_view odir) const {
   for (const auto &e : id2channel) {
     std::vector<double> trace_step;
 
-    for (const auto &hier_name : e.second.hier_name) {
+    for (const auto &hname : e.second.hier_name) {
+      auto hier_name = hname.substr(n_skip);
+
       auto it = hier_name2power.find(hier_name);
       if (it == hier_name2power.end())
         continue;

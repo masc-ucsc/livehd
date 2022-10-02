@@ -164,18 +164,53 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
     } else if (member.kind == slang::SymbolKind::UnknownModule) {
       const auto &mod = member.as<slang::UnknownModuleSymbol>();
 
-      auto *library = Graph_library::instance("lgdb"); // FIXME: no hardcode path
-
-      auto lgid = library->get_lgid(mod.moduleName);
-      if (lgid == 0) {
-        Pass::error("FIXME: handle unknown (not cell) module ({}). Maybe try in-order (sequential)\n", mod.moduleName);
-      }
-      Sub_node *sub = library->ref_sub(lgid);
-      I(sub);
-
       const auto &plist = mod.getPortConnections();
       const auto &nlist = mod.getPortNames();
       I(plist.size() == nlist.size());
+
+      auto *library = Graph_library::instance("lgdb"); // FIXME: no hardcode path
+
+      auto lgid = library->get_lgid(mod.moduleName);
+      Sub_node *sub = nullptr;
+      if (lgid != 0) {
+        sub = library->ref_sub(lgid);
+        I(sub);
+      }else{
+        // If the cell only has PWD/GND, it may be a filler/decap or related. Skip it
+        for(auto i=0u; i<plist.size(); ++i) {
+          const auto &n = nlist[i];
+          std::string str(n);
+
+          if (strcasestr(str.c_str(),"PWR")!=0)
+            continue;
+          if (strcasestr(str.c_str(),"GND")!=0)
+            continue;
+          if (strcasestr(str.c_str(),"clock")!=0)
+            continue;
+          if (strcasestr(str.c_str(),"reset")!=0)
+            continue;
+
+          const auto &p = plist[i];
+          I(p->kind == slang::AssertionExprKind::Simple);
+          const auto &expr = p->as<slang::SimpleAssertionExpr>();
+          if (expr.expr.kind == slang::ExpressionKind::NamedValue) {
+            const auto &nv = expr.expr.as<slang::NamedValueExpression>();
+            std::string str2(nv.symbol.name);
+            if (strcasestr(str2.c_str(),"PWR")!=0)
+              continue;
+            if (strcasestr(str2.c_str(),"GND")!=0)
+              continue;
+          }else if (expr.expr.kind == slang::ExpressionKind::IntegerLiteral) {
+            continue;
+          }
+
+          Pass::error("Unable to figure unknown cell:{} direction for pin:{} (add to liberty?)",mod.moduleName, n);
+        }
+
+        continue;
+      }
+
+      I(sub);
 
       // 1st- create input tuple
       std::vector<std::pair<std::string, std::string>> inp_tup;
@@ -183,8 +218,9 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       for(auto i=0u; i<plist.size(); ++i) {
         const auto &n = nlist[i];
 
-        if (sub->is_output(n))
+        if (sub->is_output(n)) {
           continue;
+        }
 
         const auto &p = plist[i];
         I(p->kind == slang::AssertionExprKind::Simple);
