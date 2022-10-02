@@ -271,7 +271,7 @@ private:
   absl::flat_hash_set<std::string> input_names;
   absl::flat_hash_set<std::string> output_names;
   absl::flat_hash_set<std::string> memory_names;
-  absl::flat_hash_map<std::string, std::pair<uint64_t, uint64_t> > memory_loc;
+  absl::flat_hash_map<std::string, std::string > memory_loc;
   absl::flat_hash_set<std::string> wire_names; // it could contains flattened or un-flattened wires
   absl::flat_hash_set<std::string> node_names;
   absl::flat_hash_map<std::string, std::string> var2last_value;
@@ -301,5 +301,5 @@ private:
   absl::flat_hash_map<std::string, std::vector<std::string>> mem2din_fields;
   // mem -> <(rd_port_name1,1), (rd_port_name_foo, 7)>
   absl::flat_hash_map<std::string, std::vector<std::pair<std::string, uint8_t>>> mem2rd_mports;
-  absl::flat_hash_map<std::string, std::pair<uint64_t, uint64_t> > mem2rd_mport_loc;
+  absl::flat_hash_map<std::string, std::string > mem2rd_mport_loc;
 };

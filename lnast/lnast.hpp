@@ -27,7 +27,15 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid
   static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2) {            \
     return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str));                       \
   }                                                                                                                   \
-  static Lnast_node create_##type(const State_token &new_token) { return Lnast_node(Lnast_ntype::create_##type(), new_token); }
+  static Lnast_node create_##type(const State_token &new_token) { \
+    return Lnast_node(Lnast_ntype::create_##type(), new_token);  \
+  } \
+  static Lnast_node create_##type(std::string_view str, uint32_t line_num, uint64_t pos1, uint64_t pos2, std::string fname) { \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, str, fname));            \
+  }                           \
+  static Lnast_node create_##type(std::string_view str, uint64_t pos1, uint64_t pos2, std::string fname) { \
+    return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, 0, str, fname));            \
+  }
 
 #define CREATE_LNAST_NODE_sv(type)                                                                           \
   static Lnast_node create_##type(std::string_view sview) {                                                  \
@@ -38,7 +46,7 @@ using Tuple_var_1st_scope_ssa_table = absl::flat_hash_map<std::string, Lnast_nid
   }                                                                                                          \
   static Lnast_node create_##type(std::string_view sview, uint32_t line_num, uint64_t pos1, uint64_t pos2) { \
     return Lnast_node(Lnast_ntype::create_##type(), State_token(0, pos1, pos2, line_num, sview));            \
-  }
+  } 
 
 struct Lnast_node {
   Lnast_ntype type;

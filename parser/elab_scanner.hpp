@@ -154,23 +154,26 @@ protected:
 
 public:
   struct Tracker {
-    Token_id tok;   // Token (identifier, if, while...)
-    uint64_t pos1;  // start position in original memblock
-    uint64_t pos2;  // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
-    uint32_t line;  // line of code
-    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
+    Token_id tok;      // Token (identifier, if, while...)
+    uint64_t pos1;     // start position in original memblock
+    uint64_t pos2;     // end position in original memblock (pos2 NOT included. pos1==pos2 -> empty)
+    uint32_t line;     // line of code
+    //std::string fname; // source file name
+    constexpr Tracker() : tok(Token_id_nop), pos1(0), pos2(0), line(0)/*, fname(0)*/ {}
 
     void reset(Token_id _tok, uint64_t _pos1, uint32_t _line) {
-      tok  = _tok;
-      pos1 = _pos1;
-      pos2 = _pos1;
-      line = _line;
+      tok   = _tok;
+      pos1  = _pos1;
+      pos2  = _pos1;
+      line  = _line;
+     // fname = "";
     }
     void clear(uint64_t _pos1, uint32_t _line) {
-      tok  = Token_id_nop;
-      pos1 = _pos1;
-      pos2 = _pos1;
-      line = _line;
+      tok   = Token_id_nop;
+      pos1  = _pos1;
+      pos2  = _pos1;
+      line  = _line;
+     // fname = "";
     }
 
     void adjust_token_size(uint64_t end_pos) {
@@ -179,20 +182,30 @@ public:
     }
   };
 
-  State_token() : tok(Token_id_nop), pos1(0), pos2(0), line(0) {}
+  State_token() : tok(Token_id_nop), pos1(0), pos2(0), line(0), fname("") {}
   State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text) {
     tok  = _tok;
     pos1 = _pos1;
     pos2 = _pos2;
     line = _line;
     text = _text;
+		fname = "";
+  }
+  State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text, std::string _fname) {
+    tok  = _tok;
+    pos1 = _pos1;
+    pos2 = _pos2;
+    line = _line;
+    text = _text;
+		fname = _fname;
   }
   State_token(const Ref_token &r) : text(r.get_text()), tok(r.tok), pos1(r.pos1), pos2(r.pos2), line(r.line) {}
 
-  Token_id tok;   // Token (identifier, if, while...)
-  uint64_t pos1;  // start position in original memblock for debugging
-  uint64_t pos2;  // end position in original memblock for debugging
-  uint32_t line;  // line of code
+  Token_id tok;      // Token (identifier, if, while...)
+  uint64_t pos1;     // start position in original memblock for debugging
+  uint64_t pos2;     // end position in original memblock for debugging
+  uint32_t line;     // line of code
+  std::string fname; // source file name
 
   std::string_view get_text() const { return text; }
 };
