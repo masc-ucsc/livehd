@@ -53,6 +53,7 @@ protected:
 
   // Assignment/Declaration
   void process_assignment_or_declaration(TSNode);
+  void process_attribute_declaration(TSNode);
 
   // Expressions
   void process_binary_expression(TSNode);
@@ -88,6 +89,7 @@ protected:
   void process_attribute_list(TSNode);
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
+  void process_hex_number(TSNode);
 
   // Lnast Tree Helpers
   std::unique_ptr<Lnast>              lnast;
