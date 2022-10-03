@@ -1,0 +1,17 @@
+
+var t = (1,2)
+
+t ++= (b=3,44)
+
+cassert t.0 == 1 and t.1==2 and t.b==3 and t.3==4
+
+cassert t == (1,2,b=3,44)
+
+var x = ()
+
+x = (1,2,3,7)
+
+x[3] = 44
+
+cassert x == t and x.3 == 44
+

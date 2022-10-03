@@ -1,0 +1,73 @@
+// case I
+var a = 2        // a0 =
+let foo = a + 1  // = a0
+a.0 = 3          // a0 =, TA
+let bar = a + 1  // = a0, TG
+
+cassert (foo+bar) == 7
+
+
+// case II
+var b = 2           // b0 =
+let cat = b + 1     // = b0
+b.0 = 3             // b0 =, TA
+b = 4               // b1 =
+let dog = b + 1     // = b1
+
+cassert cat+dog == 3+5 == 8
+
+
+// case III
+var c = 2           // c0 =
+let eagle = c + 1   // = c0
+c = 3               // c1 =
+c.0 = 5             // c1 =, TA
+let fox = c + 1     // = c1, TG
+
+cassert eagle + fox == 3 + 6 == 9
+
+
+// case IV
+var d = 2            // d0 =
+let goat = d + 1     // = d0
+d = 3            // d1 =
+d.0 = 5          // d1 =
+d = d ++ 6       // d1 = d1
+d = d.0 + 1      // d2 = d1.0 + 1 = 6
+let horse = d + 1    // = d2
+
+cassert goat + horse  == 3 + 7 == 10
+
+// case V
+var e = 1
+e = e ++ 3
+let f = e.1 + 4
+
+cassert f
+    == 7
+
+// case VI
+let t1 = (1,2)
+var t2 = (3,4)
+let g  = t1 ++ t2
+
+cassert g.1 + g.3 == 6
+
+
+// case VII
+var h = 2
+h.0 = 3       // scalar -> tuple
+cassert h     == 3
+cassert h.0   == 3
+
+
+// case VIII
+var i = 2
+i.0 = 3       // scalar -> tuple
+i.1 = 4
+cassert i.0 + i.1  == 7
+
+
+// case IX
+let j = 2 + 3
+cassert j.0 == 5 // no newline after last statement which finishes in comment

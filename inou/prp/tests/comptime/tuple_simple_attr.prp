@@ -1,0 +1,12 @@
+
+
+var foo = (a=-1)
+
+foo ++= (b::[potato=4]=1)
+
+foo ++= (c::[ubits=5]=2)
+
+cassert foo == (0,1,2)
+cassert foo.c::[ubits] == 5
+cassert foo.b::[potato] == 4
+

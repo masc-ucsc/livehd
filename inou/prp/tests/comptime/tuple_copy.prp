@@ -1,0 +1,19 @@
+
+
+var foo = (a=40,b=50)
+var bar = (c=60)
+var xxx = (60)
+
+foo.a = 2
+foo.b = 3
+bar.c = 6
+
+cassert foo   == (a=2,b=3) == (2,3)
+cassert bar.c ==  6
+cassert xxx.0 == 60        == xxx
+
+bar = foo
+
+cassert foo == bar == (2,3)
+
+
