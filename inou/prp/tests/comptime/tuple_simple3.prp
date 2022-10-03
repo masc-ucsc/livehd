@@ -1,0 +1,22 @@
+
+// Cases when the tuple has a single entry
+
+let x = 1
+
+cassert x == x.0 == 1
+
+let y = (foo=3)
+
+// single entry tuples do not need to use the subfield to get value (this is
+// because function returns may allocate names, and it is annoying to require
+// to know all the subfields)
+
+cassert y.foo == y == 3 == ((((3))))
+
+let z = (4,bar=true)
+
+cassert z.0 == 4 == (((4)))
+cassert z == (4,true)
+
+// useless cassert at the end (without newline). Testing parsing
+cassert true
