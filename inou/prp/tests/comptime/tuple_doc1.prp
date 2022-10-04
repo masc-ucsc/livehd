@@ -1,0 +1,60 @@
+
+{
+var a = (
+  ,r1 = (b=1,c=2)
+  ,r2 = (3,4)
+)
+// tuple position is from left to right
+cassert a.r1 == (1,2) and a.r2 == (3,4)
+cassert a.0  == (1,2) and a[1] == (3,4)
+
+// different ways to access the same field
+cassert a.r1.c    == 2
+cassert a['r1'].c == 2
+cassert a.r1.1    == 2
+cassert a.r1[1]   == 2
+cassert a[0][1]   == 2
+cassert a[0]['c'] == 2
+cassert a['r1.c'] == 2
+cassert a['r1.1'] == 2
+cassert a['0.c']  == 2
+cassert a['0.1']  == 2
+cassert a.0.c     == 2
+cassert a.0.1     == 2
+}
+
+
+{
+var a = (foo = 3)
+cassert a has 'foo'
+cassert !(a has 'bar')
+cassert a !has 'bar' // "has no" is the opposite of "has"
+cassert a has 0
+cassert a !has 1
+cassert a !has 1
+}
+
+{
+
+  let xx = 3
+
+  var a = (
+    ,xx
+    ,xx=44
+    ,foo=55
+  )
+  cassert a == (3,44,55) == (3,xx=44,foo=55)
+  cassert xx = 3
+}
+
+{
+  var a = (1,2)   // tuple of 2 entries, 1 and 2
+  var b = (1)     // tuple of 1 entry, 1
+  var c = 1       // tuple of 1 entry, 1
+  var d = (,,1,,) // tuple of 1 entry, 1
+
+  cassert a.0 == b.0 == c.0 == d.0
+  cassert a!=b
+  cassert b == c == d
+}
+

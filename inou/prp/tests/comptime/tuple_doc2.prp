@@ -1,0 +1,87 @@
+
+// https://masc-ucsc.github.io/docs/pyrope/03-bundle/#tuple-mutability
+{
+var c=(x=1,let b = 2, var d=3)
+c.x   = 3  // OK
+x.foo = 2  // compile error, tuple 'x' does not have field 'foo'
+c.b   = 10 // compile error, 'c.b' is immutable
+c.d   = 30 // OK, d was already mutable type
+
+let d=(x=1, let y=2, var z=3)
+d.x   = 2  // OK
+d.foo = 3  // compile error, tuple 'd' does not have field foo'
+d.z   = 4  // compile error, 'd' is immutable
+
+var e:d = _
+cassert e.x==1 and e.y==2 and e.z==3
+e.x = 30   // OK
+e.y = 30   // compile error, 'e.y' is immutable
+e.z = 30   // OK
+}
+
+{
+var b = 100
+var a = (b:u8, b, b:u8 = _, let c=4) // a.0 and a.1 are unnamed, a.2==a.b
+a.b = 200
+cassert a == (100, 100, 200, 4)
+
+var f = (b=3, let e=5)
+f.b = 4                 // OK
+f.e = 10                // compile error, `f.e` is immutable
+
+let x = (1,2)
+x[0] = 3                // compile error, 'x' is immutable
+var y = (1, let _ = 3)  // 2nd field is unnamed (only let allows that)
+y[0] = 100              // OK
+y[1] = 101              // compile error, `y[1]` is immutable
+}
+
+{
+var a=(a=1,b=2)
+let b=(c=3)
+
+let ccat1 = a ++ b
+cassert ccat1 == (a=1,b=2,c=3)
+cassert ccat1 == (1,2,3)
+
+var ccat2 = a                // mutable tuple
+a = a ++ (b=20)
+cassert ccat2 == (a=1,b=(2,20),c=3)
+cassert ccat2 == (1,(2,20),3)
+
+var join1 = (...a,...b)
+cassert join1 == (a=1,b=2,c=3)
+cassert join1 == (1,2,3)
+
+var join2 = (...a,...(b=20)) // compile error, 'b' already exists
+}
+
+{
+cassert(((1,a=2,c=3) ++ (a=20,33,c=30,4)) == (1,a=(2,20),c=(3,30),33,4))
+}
+
+// https://masc-ucsc.github.io/docs/pyrope/03-bundle/#field-access
+
+{
+let x = (first=(second=3))
+
+cassert x.first.second == 3
+cassert x.first        == 3
+cassert x              == 3
+cassert x.0.second     == 3
+cassert x.first.0      == 3
+cassert x.0            == 3
+}
+
+{
+var bund1 = (0,1,2,3,4) // ordered and can be used as an array
+
+var bund2 = (bund1,bund1,((10,20),30))
+cassert bund2[0][1] == 1
+cassert bund2[1][1] == 1
+cassert bund2[2][0] == (10,20)
+cassert bund2[2][0][1] == 20
+cassert bund2[2][1] == 30
+}
+
+

@@ -1,0 +1,35 @@
+
+// Tuple value construction
+
+// https://masc-ucsc.github.io/docs/pyrope/06-functions/#arguments
+
+var tup0 = (
+  ,0
+  ,y = 1
+)
+
+tup0 = (33,y=44)
+cassert tup0.0==33 and tup0.y==44 and tup0.1==44
+tup0 = (55,66)
+cassert tup0.0==55 and tup0.y==66 and tup0.1==66
+
+var tup1 = (
+  ,0
+  ,foo = 1 // longer ID
+)
+
+tup1 = (33,foo=44)
+cassert tup1.0==33 and tup1.foo==44
+cassert tup1 == (33,44)
+
+tup1 = (33,44) // compile error, "foo" is longer than 1 character, name needed
+
+
+var tup2 = (
+  ,true
+  ,foo=0
+)
+
+tup2 = (false, 44) // OK different fields have different types
+cassert tup2 == (false, 44)
+
