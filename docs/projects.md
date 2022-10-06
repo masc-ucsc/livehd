@@ -15,17 +15,17 @@ possible to provide 1 quarter GSR in the last quarter for master students.
 At the end of the document there is a list of finished projects as example, and
 small tasks that are not enough for a thesis/project, but great to help.
 
-[](docs/projects_small.md) has a list of small projects with different degree
+[Small project list](docs/projects_small.md) has a list of small projects with different degree
 of complexity, but they should require less than a quarter to implement. These
 are better projects for starting students.
 
 
-[](docs/projects_large.md) has a list of larger projects that are good
+[Large project list](docs/projects_large.md) has a list of larger projects that are good
 candidates for MS thesis. Those are more significant contributions that require
 over one quarter to implement.
 
 
-[](docs/projects_deprecated.md) has a list of projects that were tried and/or
+[Deprecated project list](docs/projects_deprecated.md) has a list of projects that were tried and/or
 discarded but no longer trying to implement or already implemented.
 
 
