@@ -366,37 +366,12 @@ Main features:
 * Create a bridge to/from Lgraph and nextpntr (json)
 
 
-## (medium) HIF Yosys/nextpnr
-
-Use HIF for Yosys read/write, and read in nextpnr. This should allow a faster
-and more compact interaction between Yosys/nextpnr. Also, simplify the
-structure in nextpnr allowing other tools to interface more easily.
-
 
 ## (medium) Zoom drom viewer
 
  Help with https://github.com/wavedrom/zoom
 
  This can become a nice viewer for LiveHD simulations (verdi substitute goal)
-
-## (hard) ACT (Async) output
-
-Once pyrope with Fluid is in the flow, we could use Pyrope to program async
-designs too.  It may be interesting to output ACT.
-
-(https://avlsi.csl.yale.edu/act/doku.php) to interface with AVLSI flow.
-
-## (medium) HIF CIRCT 
-
-HIF (https://github.com/masc-ucsc/hif) stands for Hardware Interchange Format.
-It is designed to be a efficient binary representation with simple API that
-allows to have generic graph and tree representations commonly used by hardware
-tools. It is not designer to be a universal format, but rather a storate and
-traversal format for hardware tools.
-
-The goal of this project is to create a HIF read/write interface with different
-MLIR levels in CIRCT. This allows to have several tools/passes for simple
-queries without requiring the whole compiler.
 
 ## (hard) Lgraph to/from XLS IR
 
@@ -411,20 +386,6 @@ Main features:
 * Bridge to allow runs of DSLX to LiveHD
 * Bridge to allow from XLS IR to LiveHD
 * Bridge to allow from Lgraph to XLS IR
-
-
-## (hard) UHDM 2 LNAST
-
-UHDM is able to interface with several tools like Verilator/yosys. It may be interesting to create a bridge
-between LNAST and UHDM.
-
-Dependence: none
-
-Main features:
-
-* UHDM2LNAST
-* LNAST2UHDM
-* Support structs/bundles and most UHDM features
 
 ## (very hard) FPGA Placer
 
@@ -465,6 +426,4 @@ Some characteristics/thoughts to consider:
     * Close by (add anchor)
 * benchmark against:
     * https://github.com/YosysHQ/nextpnr-bench
-
-
 
