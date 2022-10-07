@@ -29,7 +29,11 @@ protected:
         absl::StrAppend(&text, "\n", txt);
         return;
       }
-      absl::StrAppend(&text, " ", txt);
+      if (token_list[scanner_pos - 1].pos2 == token_list[scanner_pos].pos1) {
+        absl::StrAppend(&text, txt);
+      }else{
+        absl::StrAppend(&text, " ", txt);
+      }
       return;
     }
     absl::StrAppend(&text, txt);

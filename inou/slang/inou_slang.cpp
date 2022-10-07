@@ -44,7 +44,7 @@ void Inou_slang::work(Eprp_var &var) {
 #endif
 
   argv.push_back(strdup("--ignore-unknown-modules"));
-  argv.push_back(strdup("--single-unit"));
+  //argv.push_back(strdup("--single-unit"));
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
