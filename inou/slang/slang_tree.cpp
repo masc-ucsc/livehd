@@ -353,12 +353,18 @@ std::string Slang_tree::process_expression(const slang::Expression &expr, bool l
     const auto                       &il    = expr.as<slang::IntegerLiteral>();
     auto                              svint = il.getValue();
     slang::SmallVectorSized<char, 32> buffer;
-    if (!svint.hasUnknown() && svint.getMinRepresentedBits() < 8) {
+
+    if (svint.hasUnknown()) { // unknowns in binary
+      svint.writeTo(buffer, slang::LiteralBase::Binary, false);
+      return absl::StrCat("0b", std::string_view(buffer.data(), buffer.size()));
+    }
+
+    if (svint.getMinRepresentedBits() < 8) { // small numbers in decimal (easier to read)
       svint.writeTo(buffer, slang::LiteralBase::Decimal, false);
       return std::string(buffer.data(), buffer.size());
     }
 
-    svint.writeTo(buffer, slang::LiteralBase::Hex, false);
+    svint.writeTo(buffer, slang::LiteralBase::Hex, false); // larger numbers in hexa
     return absl::StrCat("0x", std::string_view(buffer.data(), buffer.size()));
   }
 

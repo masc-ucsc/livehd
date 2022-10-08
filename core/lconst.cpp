@@ -134,10 +134,10 @@ Lconst Lconst::from_binary(std::string_view txt, bool unsigned_result) {
     if (ch2 == '_')
       continue;
 
-    if (ch2 == '?' || ch2 == 'x') {
+    if (ch2 == '?' || ch2 == 'x' || ch2 == 'X') {
       bin.append(1, '?');
       unknown_found = true;
-    } else if (ch2 == 'z') {
+    } else if (ch2 == 'z' || ch2=='Z') {
       bin.append(1, 'z');
       unknown_found = true;
     } else if (ch2 == '0') {
