@@ -192,10 +192,12 @@ void Meta_api::spef(Eprp_var &var) {
 }
 
 void Meta_api::lgdump(Eprp_var &var) {
+  //auto odir = var.get("odir");
+  auto hier = var.get("hier") == "true"? true:false;
   fmt::print("lgraph.dump lgraphs:\n");
   for (const auto &l : var.lgs) {
     fmt::print("  {}/{}\n", l->get_path(), l->get_name());
-    l->dump();
+    l->dump(hier);
   }
 }
 
@@ -236,6 +238,8 @@ void Meta_api::setup(Eprp &eprp) {
   //---------------------
   Eprp_method m4a("lnast.dump", "verbose LNAST dump ", &Meta_api::lnastdump);
   Eprp_method m4b("lgraph.dump", "verbose lgraph dump ", &Meta_api::lgdump);
+  m4b.add_label_optional("hier", "hierarchical traversal", "false");
+  m4b.add_label_optional("odir", "directory to dump (not screen)", "");
 
   eprp.register_method(m4a);
   eprp.register_method(m4b);

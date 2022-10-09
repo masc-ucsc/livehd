@@ -1471,6 +1471,38 @@ void Bitwidth::bw_pass(Lgraph *lg) {
   }
 
   if (!hier && !not_finished) {
+    auto *ref_sub = lg->ref_self_sub_node();
+
+    // set bits for graph input and output
+    lg->each_graph_input(
+        [this,ref_sub](Node_pin &dpin) {
+          if (dpin.get_name() == "$")
+            return;
+          auto b = dpin.get_bits();
+          if (b && ref_sub->is_input(dpin.get_name())) {
+            ref_sub->set_bits(dpin.get_name(), dpin.get_bits()); // TODO: Sign?
+          }
+        },
+        hier);
+
+    lg->each_graph_output(
+        [this,ref_sub](Node_pin &dpin) {
+          if (dpin.get_name() == "%")
+            return;
+          auto spin       = dpin.change_to_sink_from_graph_out_driver();
+          auto out_driver = spin.get_driver_pin();
+
+          if (out_driver.is_invalid())  // not driven output pin
+            return;
+
+          auto b = dpin.get_bits();
+          if (b && ref_sub->is_output(dpin.get_name())) {
+            ref_sub->set_bits(dpin.get_name(), dpin.get_bits()); // TODO: Sign?
+          }
+
+        },
+        hier);
+
     // delete all the attr_set/get for bitwidth
     for (auto node : lg->fast()) {  // Non-hierarchical erase attr
       auto op = node.get_type_op();

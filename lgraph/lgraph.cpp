@@ -1593,7 +1593,8 @@ void Lgraph::save(std::string filename) {
     wr->add(n);
 }
 
-void Lgraph::dump() {
+void Lgraph::dump(bool hier) {
+
   fmt::print("lgraph name: {}, size: {}\n", name, node_internal.size());
 
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
@@ -1608,17 +1609,9 @@ void Lgraph::dump() {
 
   fmt::print("\n");
 
-  // node_internal.ref_lock();
-  for (size_t i = 0; i < node_internal.size(); ++i) {
-    if (!node_internal[i].is_node_state())
-      continue;
-    if (!node_internal[i].is_master_root())
-      continue;
-    auto node = Node(this, Node::Compact_class(i));  // NOTE: To remove once new iterators are finished
-
+  for (auto node:fast(hier)) {
     node.dump();
   }
-  // node_internal.ref_unlock();
 
   fmt::print("\n");
   each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {

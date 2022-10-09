@@ -231,7 +231,7 @@ public:
   Sub_node                     *ref_self_sub_node();        // Access all input/outputs
 
   void save(std::string filename = "");
-  void dump();
+  void dump(bool hier=false);
   void dump_down_nodes();
 
   Node get_graph_input_node(bool hier = false);
