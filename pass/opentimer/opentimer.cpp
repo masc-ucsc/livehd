@@ -149,6 +149,10 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       continue;
     }
 
+    if (op == Ntype_op::AttrSet) {
+      continue; // Some may be left but it is not affecting synthesis
+    }
+
     if (op != Ntype_op::Sub) {
       Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
                   node.debug_name(),

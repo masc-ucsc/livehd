@@ -72,8 +72,8 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
 
     // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
     // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
-    cp.do_trans(lg_sub);
-    gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+    //cp.do_trans(lg_sub);
+    //gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
   });
 }
 

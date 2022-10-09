@@ -593,8 +593,10 @@ void Bitwidth::process_set_mask(Node &node) {
   }
 
   if (!mask_dpin.is_type_const()) {
-    node.dump();
-    Pass::info("set_mask can not have a non-constant mask");
+    if (!not_finished) {
+      node.dump();
+      Pass::info("set_mask can not have a non-constant mask");
+    }
     not_finished = true;
     return;
   }
@@ -705,7 +707,13 @@ void Bitwidth::process_get_mask(Node &node) {
   Lconst  a_max = it->second.get_max();
   Lconst  a_min = it->second.get_min();
 
-  Lconst res_max = a_max.get_mask_value().get_mask_op(mask_val);
+  Lconst res_max;
+  if (a_max == a_min) {
+    res_max = a_max.get_mask_op(mask_val);
+  }else{
+    res_max = a_max.get_mask_value().get_mask_op(mask_val);
+  }
+
   Lconst res_min = res_max;
 
   if (a_min < 0) { //2s complement usual
@@ -1241,19 +1249,17 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
       ntposs = node_attr.create(Ntype_op::Get_mask);
       ntposs.setup_sink_pin("mask").connect_driver(node_attr.create_const(mask));
       ntposs.setup_sink_pin("a").connect_driver(name_dpin);
-      Bitwidth_range bw;
-      bw.set_ubits_range(ubits);
-      adjust_bw(ntposs.setup_driver_pin(), bw);
-      if (ntposs.get_nid() == 6921)
-        ntposs.dump();
     }
 
     ntposs.setup_driver_pin().connect_sink(e.sink);
     e.del_edge();
   }
 
-  if (!ntposs.is_invalid())
+  if (!ntposs.is_invalid()) {
+    process_get_mask(ntposs);
+
     fwd_it.add_node(ntposs);  // add once the edges are added
+  }
 }
 
 
@@ -1556,6 +1562,8 @@ void Bitwidth::bw_pass(Lgraph *lg) {
 #endif
     }
   }
+
+#if 0
   if (not_finished) {
     for(auto node:lg->fast(hier)) {
       if (node.is_type_const())
@@ -1569,6 +1577,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       }
     }
   }
+#endif
 
   // note: only enable for detailed bitwidth debug
   // dump(lg);
