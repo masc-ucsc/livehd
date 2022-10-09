@@ -1,0 +1,8 @@
+/*
+:name: named_tuple
+:type: parsing
+*/
+
+let top = fun {
+  x = (a=1, var b=(c=1))
+}

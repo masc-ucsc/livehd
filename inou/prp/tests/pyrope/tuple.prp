@@ -3,7 +3,7 @@
 :type: parsing
 */
 
-pub let top = fun {
+let top = fun {
   x = (1, (2, 0), (4, (0, 6)), 7)
   x[1][1] = 3
   x[2][1][0] = 5

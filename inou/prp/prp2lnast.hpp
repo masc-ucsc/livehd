@@ -24,8 +24,8 @@ protected:
   std::stack<attr_map_t> attribute_stack;
 
   // FIXME: Temporary fix for generating input/output refs
-  bool                                          is_function_input;
-  bool                                          is_function_output;
+  bool is_function_input;
+  bool is_function_output;
   absl::flat_hash_map<std::string, std::string> ref_name_map;
 
   // TODO: Replace this with Prp_type
@@ -42,6 +42,7 @@ protected:
 
   // Statements
   void process_scope_statement(TSNode);
+  void process_expression_statement(TSNode);
   void process_if_statement(TSNode);
   void process_for_statement(TSNode);
   void process_while_statement(TSNode);
@@ -53,7 +54,7 @@ protected:
 
   // Assignment/Declaration
   void process_assignment_or_declaration(TSNode);
-  void process_attribute_declaration(TSNode);
+  void process_simple_assignment(TSNode);
 
   // Expressions
   void process_binary_expression(TSNode);
@@ -90,14 +91,16 @@ protected:
   void process_identifier(TSNode);
   void process_simple_number(TSNode);
   void process_hex_number(TSNode);
+  void process_binary_number(TSNode);
 
   // Lnast Tree Helpers
   std::unique_ptr<Lnast>              lnast;
   lh::Tree_index                      stmts_index;
   lh::Tree_index                      type_index;
   std::stack<Lnast_node>              rvalue_node_stack;
+  std::stack<Lnast_node>              lvalue_node_stack;
   std::vector<int>                    tuple_lvalue_positions;
-  std::stack<std::vector<Lnast_node>> tuple_rvalue_stack;
+  std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
   std::stack<Lnast_node>              primary_node_stack;
   std::stack<std::vector<Lnast_node>> select_stack;
 
@@ -109,6 +112,7 @@ protected:
   
   void enter_scope(Expression_state);
   void leave_scope();
+  std::string str(Expression_state);
 
   // TS API Helpers
   std::string_view get_text(const TSNode &node) const;
