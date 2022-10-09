@@ -83,6 +83,12 @@ bool Node_pin::is_graph_input() const { return current_g->has_graph_input(idx); 
 
 bool Node_pin::is_graph_output() const { return current_g->has_graph_output(idx); }
 
+bool Node_pin::is_type_single_driver() const {
+  auto nid = current_g->get_node_nid(idx);
+  auto op  = current_g->get_type_op(nid);
+  return !Ntype::is_multi_driver(op);
+}
+
 bool Node_pin::is_type_const() const {
   auto nid = current_g->get_node_nid(idx);
   return current_g->is_type_const(nid);

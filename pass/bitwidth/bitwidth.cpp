@@ -18,9 +18,9 @@ void Bitwidth::do_trans(Lgraph *lg) {
   // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("bitwidth." + lg->get_name()); });
 
   // note: tricks to make perfetto display different color on sub-modules
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
       std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-      ctx.event()->set_name(converted_str + lg->get_name()); 
+      ctx.event()->set_name(converted_str + lg->get_name());
       });
 
 
@@ -52,6 +52,21 @@ void Bitwidth::set_bits_sign(Node_pin &dpin, const Bitwidth_range &bw)  {
 }
 
 void Bitwidth::adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw) {
+  if (!not_finished && !bw.is_overflow() && dpin.is_type_single_driver()) {
+    if (bw.get_min() == bw.get_max()) {
+      auto node = dpin.get_node();
+
+      for (auto pin : node.inp_connected_pins()) {
+        pin.del();
+      }
+      node.set_type_const(bw.get_min());
+      auto [it, inserted] = bwmap.insert_or_assign(dpin.get_compact_class(), bw);
+      if (inserted)
+        set_bits_sign(dpin, it->second);
+      return;
+    }
+  }
+
   auto [it, inserted] = bwmap.insert({dpin.get_compact_class(), bw});  // not use insert_or_assign because it could a bw update
   if (inserted) {
     set_bits_sign(dpin, bw);
@@ -77,8 +92,8 @@ void Bitwidth::process_const(Node &node) {
   auto dpin = node.get_driver_pin();
 
   auto [it, inserted] = bwmap.insert_or_assign(dpin.get_compact_class(), Bitwidth_range(node.get_type_const()));
-
-  set_bits_sign(dpin, it->second);
+  if (inserted)
+    set_bits_sign(dpin, it->second);
 }
 
 void Bitwidth::process_flop(Node &node) {
@@ -253,12 +268,16 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
     node.del_node();
     return;
   }
+  if (!n_bw.is_always_positive()) {
+    not_finished = true;
+    return;
+  }
 
   auto           max     = a_bw.get_max();
   auto           min     = a_bw.get_min();
-  auto           amount  = n_bw.get_max();
-  auto           max_val = max << amount;
-  auto           min_val = min << amount;
+  auto           max_val = max << n_bw.get_max();
+  auto           min_val = min << n_bw.get_min();
+
   Bitwidth_range bw(min_val, max_val);
 
   adjust_bw(node.get_driver_pin(), bw);
@@ -1203,8 +1222,8 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
   Node ntposs;
 
   for (auto &e : node_attr.out_edges()) {
-    I(e.driver.get_pid() == 0);  
-    auto sink_type = e.sink.get_type_op();                             
+    I(e.driver.get_pid() == 0);
+    auto sink_type = e.sink.get_type_op();
 
     // this kind of assign_or comes from (1) fir_as_sint (2) fir_cvt (3) fir_as_clock (4) fir_as_async
     // all of these types don't need a tposs convertion
@@ -1225,6 +1244,8 @@ void Bitwidth::insert_tposs_nodes(Node &node_attr_hier, Bits_t ubits, Fwd_edge_i
       Bitwidth_range bw;
       bw.set_ubits_range(ubits);
       adjust_bw(ntposs.setup_driver_pin(), bw);
+      if (ntposs.get_nid() == 6921)
+        ntposs.dump();
     }
 
     ntposs.setup_driver_pin().connect_sink(e.sink);
@@ -1283,12 +1304,14 @@ void Bitwidth::set_graph_boundary(const Node_pin &dpin, Node_pin &spin) {
 void Bitwidth::debug_unconstrained_msg(Node &node, Node_pin &dpin) {
   (void)node;
   (void)dpin;
+#if 0 // ENABLE ONLY FOR TRACING BW
 #ifndef NDEBUG
   if (dpin.has_name()) {
-    fmt::print("BW-> gate:{} has input pin:{} unconstrained\n", node.debug_name(), dpin.debug_name());
+    fmt::print("BW-> gate:{} has input pin:{} unconstrained (lg:{})\n", node.debug_name(), dpin.debug_name(), node.get_top_lgraph()->get_name());
   } else {
-    fmt::print("BW-> gate:{} has some inputs unconstrained\n", node.debug_name());
+    fmt::print("BW-> gate:{} has some inputs unconstrained (lg:{})\n", node.debug_name(), node.get_top_lgraph()->get_name());
   }
+#endif
 #endif
 }
 
@@ -1531,6 +1554,19 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         dpin.del();
       }
 #endif
+    }
+  }
+  if (not_finished) {
+    for(auto node:lg->fast(hier)) {
+      if (node.is_type_const())
+        continue; // 0 constant has 0 bits :)
+      for(auto dpin:node.out_connected_pins()) {
+        if (dpin.get_bits()==0) {
+          node.dump();
+          Pass::info("BW failed to constraint pin:{}", dpin.debug_name());
+          break;
+        }
+      }
     }
   }
 
