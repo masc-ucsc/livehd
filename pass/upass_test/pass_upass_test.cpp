@@ -18,7 +18,7 @@ Pass_upass_test::Pass_upass_test(const Eprp_var &var) : Pass("pass.upass_test", 
 void Pass_upass_test::work(Eprp_var &var) {
   for (const auto &ln : var.lnasts) {
     auto lm = std::make_shared<upass::Lnast_manager>(ln);
-    auto runner = uPass_runner(lm, {"verifier", "constprop"});
+    auto runner = uPass_runner(lm, {"verifier", "constprop", "assert"});
     runner.run();
     (void)ln;
   }

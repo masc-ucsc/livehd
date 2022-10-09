@@ -4,9 +4,10 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_upass_test",
+    name = "upass_assert",
     srcs = glob(
         ["*.cpp"],
+        exclude = ["*test*.cpp"],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -14,12 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
-        "//pass/common:pass",
         "//upass/core:upass",
-        "//upass/runner:upass_runner",
-        "//upass/verifier:upass_verifier",
-        "//upass/constprop:upass_constprop",
-        "//upass/assert:upass_assert",
     ],
-    alwayslink = True,  # Needed to have constructor called
+    alwayslink = True,
 )

@@ -64,6 +64,9 @@ public:
   PROCESS_NODE(gt)
   PROCESS_NODE(ge)
 
+  // Function Call
+  PROCESS_NODE(func_call)
+
   // Structure
   PROCESS_NODE(top)
   PROCESS_NODE(stmts)

@@ -63,6 +63,10 @@ void uPass_runner::process_lnast() {
     PROCESS_NODE(le)
     PROCESS_NODE(gt)
     PROCESS_NODE(ge)
+
+    // Function Call
+    PROCESS_NODE(func_call)
+
     default: break;
   }
 #undef PROCESS_BLOCK
