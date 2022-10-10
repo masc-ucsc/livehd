@@ -1382,7 +1382,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
       // old design
       // node.setup_sink_pin_raw(i + 1).connect_driver(dpin);
-      
+
       // FIXME->sh: a temporary hack patching, but we don't need this new
       // design once the problem is solved at the lgtuple level
       auto spin = node.setup_sink_pin_raw(i+1);
@@ -1723,7 +1723,7 @@ bool Lgtuple::has_just_attributes() const {
 }
 
 void Lgtuple::dump() const {
-#ifndef NDEBUG  
+#ifndef NDEBUG
   fmt::print("tuple_name:{} {}\n", name, correct ? "" : " ISSUES");
   for (const auto &it : key_map) {
     fmt::print("  key:{} dpin:{}\n", it.first, it.second.debug_name());

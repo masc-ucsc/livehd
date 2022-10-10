@@ -1976,7 +1976,7 @@ void Cprop::reconnect_tuple_add(Node &node) {
   for (auto &e : node.out_edges()) {
     auto sink_type = e.sink.get_type_op();
     if (e.sink.is_graph_output() && e.sink.get_pin_name() == "%") {
-      node_tup->dump();
+      //node_tup->dump();
       try_create_graph_output(node, node_tup);  // first add outputs
     } else if (e.sink.get_node().is_type_sub_present() && e.sink.get_pin_name() == "$") {
       auto sub_node = e.sink.get_node();

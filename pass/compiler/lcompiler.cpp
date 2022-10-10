@@ -70,10 +70,13 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     bw.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "bitwidth-ed") : void();
 
-    // only hier_tuple2 capricious_bits capricious_bits2 capricious_bits4 need this extra cprop
     // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-1)\n", lg_sub->get_name());
-    //cp.do_trans(lg_sub);
-    //gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+
+    // FIXME: This is needed because bitwidth has OVERFLOW, and can not perform
+    // all the constant propagation operations. Change to non-overflow (share
+    // code with LNAST BW pass)
+    cp.do_trans(lg_sub);
+    gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
   });
 }
 

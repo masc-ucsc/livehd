@@ -61,8 +61,7 @@ void Bitwidth::adjust_bw(Node_pin &&dpin, const Bitwidth_range &bw) {
       }
       node.set_type_const(bw.get_min());
       auto [it, inserted] = bwmap.insert_or_assign(dpin.get_compact_class(), bw);
-      if (inserted)
-        set_bits_sign(dpin, it->second);
+      set_bits_sign(dpin, it->second);
       return;
     }
   }
@@ -241,6 +240,7 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
   }
 
   Bitwidth_range n_bw(0);
+  bool n_bw_initialized = false;
 
   for (auto &n_dpin : node.get_sink_pin("B").inp_drivers()) {
     auto n_it = bwmap.find(n_dpin.get_compact_class());
@@ -257,7 +257,12 @@ void Bitwidth::process_shl(Node &node, XEdge_iterator &inp_edges) {
       Pass::error("node {} can be negative and feeds a SHL (only positive allowed)", n_dpin.get_node().debug_name());
     }
 
-    n_bw.set_wider_range(n_it->second);
+    if (n_bw_initialized) {
+      n_bw.set_wider_range(n_it->second);
+    }else{
+      n_bw = n_it->second;
+      n_bw_initialized = true;
+    }
   }
 
   if (n_bw.get_sbits()==0 || a_bw.get_sbits()==0) { // zero shift or zero amount to shift
@@ -593,10 +598,12 @@ void Bitwidth::process_set_mask(Node &node) {
   }
 
   if (!mask_dpin.is_type_const()) {
+#if 0
     if (!not_finished) {
       node.dump();
       Pass::info("set_mask can not have a non-constant mask");
     }
+#endif
     not_finished = true;
     return;
   }
