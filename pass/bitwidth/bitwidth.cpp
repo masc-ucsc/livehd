@@ -1511,7 +1511,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
 
     // set bits for graph input and output
     lg->each_graph_input(
-        [this,ref_sub](Node_pin &dpin) {
+        [ref_sub](Node_pin &dpin) {
           if (dpin.get_name() == "$")
             return;
           auto b = dpin.get_bits();
@@ -1522,7 +1522,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
         hier);
 
     lg->each_graph_output(
-        [this,ref_sub](Node_pin &dpin) {
+        [ref_sub](Node_pin &dpin) {
           if (dpin.get_name() == "%")
             return;
           auto spin       = dpin.change_to_sink_from_graph_out_driver();
