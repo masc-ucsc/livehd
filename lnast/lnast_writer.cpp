@@ -187,6 +187,18 @@ void Lnast_writer::write_ref() {
   } else {
     print("%{{{}}}", current_text());
   }
+  if (move_to_child()) {
+    print("::[");
+    while (!is_invalid()) {
+      write_attr();
+      if (!is_last_child()) {
+        print(",");
+      }
+      move_to_sibling();
+    }
+    print("]");
+  }
+  move_to_parent();
 }
 
 void Lnast_writer::write_const() {
@@ -194,6 +206,15 @@ void Lnast_writer::write_const() {
     print(fmt::fg(fmt::color::light_blue), "{}", current_text());
   else
     print(fmt::fg(fmt::color::light_blue), "\"{}\"", current_text());
+}
+
+void Lnast_writer::write_attr() {
+  print(fmt::fg(fmt::color::light_blue), "{}", current_text());
+  if (move_to_child()) {
+    print("=");
+    write_lnast();
+  }
+  move_to_parent();
 }
 
 void Lnast_writer::write_range() { write_n_ary("range"); }

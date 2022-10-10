@@ -4,5 +4,5 @@
 */
 
 let top = fun {
-  x = (a=1, var b=(c=1))
+  x = (a=1, var b=(c=1), var c)
 }

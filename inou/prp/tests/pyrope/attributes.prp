@@ -1,0 +1,9 @@
+/*
+:name: attributes
+:type: parsing
+*/
+
+let top = fun {
+  reg a::[clk=gclk] = 1
+  reg c = b::[clk=gclk] + c::[clk=gclk]
+}

@@ -21,7 +21,7 @@ protected:
   std::stack<Expression_state> expr_state_stack;
 
   using attr_map_t = std::vector<std::pair<Lnast_node, Lnast_node>>;
-  std::stack<attr_map_t> attribute_stack;
+  using node_attr_t = std::pair<Lnast_node, attr_map_t>;
 
   // FIXME: Temporary fix for generating input/output refs
   bool is_function_input;
@@ -55,6 +55,7 @@ protected:
   // Assignment/Declaration
   void process_assignment_or_declaration(TSNode);
   void process_simple_assignment(TSNode);
+  void process_simple_declaration(TSNode);
 
   // Expressions
   void process_binary_expression(TSNode);
@@ -93,16 +94,28 @@ protected:
   void process_hex_number(TSNode);
   void process_binary_number(TSNode);
 
+  // Ref-Attribute Helpers
+  // NOTE: This function adds `ref_node` with all attributes `parent` index
+  void add_ref_child(lh::Tree_index parent, node_attr_t ref_node);
+  void add_ref_child(lh::Tree_index parent); // NOTE: add `primary_node_stack.top()`
+  // NOTE: add `primary_node_stack.top()` if it has any attribute
+  void add_ref_child_conditional(lh::Tree_index parent);
+
   // Lnast Tree Helpers
   std::unique_ptr<Lnast>              lnast;
   lh::Tree_index                      stmts_index;
+
+  lh::Tree_index                      prev_stmt_index;
+  std::stack<lh::Tree_index>          tuple_index_stack;
+
   lh::Tree_index                      type_index;
-  std::stack<Lnast_node>              rvalue_node_stack;
-  std::stack<Lnast_node>              lvalue_node_stack;
   std::vector<int>                    tuple_lvalue_positions;
-  std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
-  std::stack<Lnast_node>              primary_node_stack;
-  std::stack<std::vector<Lnast_node>> select_stack;
+  // NOTE: suboptimal - copying the whole attribute vector
+  std::stack<node_attr_t> rvalue_node_stack;
+  std::stack<node_attr_t> lvalue_node_stack;
+  std::stack<node_attr_t> primary_node_stack;
+  std::stack<std::vector<node_attr_t>> select_stack;
+  std::stack<std::vector<std::pair<node_attr_t, node_attr_t>>> tuple_rvalue_stack;
 
   // Lnast_node Helpers
   // TODO: Forward location to Lnast_node

@@ -76,6 +76,7 @@ LNAST_NODE( tuple_get, tuple_get )
 LNAST_NODE( tuple_set, tuple_set )
 
 // Attribute Statements
+LNAST_NODE( attr, attr )
 LNAST_NODE( attr_set, attr_set )
 LNAST_NODE( attr_get, attr_get )
 
