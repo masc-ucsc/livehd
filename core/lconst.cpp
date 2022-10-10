@@ -1226,6 +1226,18 @@ std::string Lconst::to_pyrope() const {
   return ss.str();
 }
 
+bool Lconst::bit_test(size_t i) const {
+  return boost::multiprecision::bit_test(num, i) != 0;
+}
+
+size_t Lconst::get_first_bit_set() const {
+  return boost::multiprecision::lsb(num);
+}
+
+size_t Lconst::get_last_bit_set() const {
+  return boost::multiprecision::msb(num);
+}
+
 size_t Lconst::popcount() const {
   I(!is_string());
 

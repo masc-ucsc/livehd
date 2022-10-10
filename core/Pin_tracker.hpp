@@ -7,22 +7,36 @@
 template<class Pin>
 class Pin_tracker {
 public:
-  Pin_tracker(Pin invalid);
+  using Pin_map_entry=std::vector<std::pair<Pin,size_t>>;
 
-  void get_mask(Pin dst_pin, Pin a_pin, Lconst mask);
-  void set_mask(Pin dst_pin, Pin a_pin, Lconst mask, Pin value_pin);
+  Pin_tracker(Pin invalid, Pin zero) : invalid_pin(invalid), zero_pin(zero) {}
 
-  const std::vector<Pin> &get_pin(Pin dst_pin) const {
+  void do_get_mask(Pin dst_pin, Pin a_pin, Lconst mask) {
+    auto it = map.find(a_pin);
+    if (it == map.end())
+      return; // nothing to do
+
+
+
+  }
+  void do_set_mask(Pin dst_pin, Pin a_pin, Lconst mask, Pin value_pin);
+  void do_shl(Pin dst_pin, Pin a_pin, Lconst amount);
+  void do_shr(Pin dst_pin, Pin a_pin, Lconst amount);
+  void do_and(Pin dst_pin, Pin a_pin, Lconst amount);
+
+  const Pin_map_entry &get_pin(Pin dst_pin) const {
     auto it = map.find(dst_pin);
     if (it == map.end()) {
-      static std::vector<Pin> empty;
+      static Pin_map_entry empty;
       return empty;
     }
     return it->second;
   }
 
 protected:
+  Pin invalid_pin;
+  Pin zero_pin;
 
-  absl::node_hash_map<Pin, std::vector<Pin>> map;
+  absl::node_hash_map<Pin, Pin_map_entry> map;
 private:
 };

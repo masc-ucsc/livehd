@@ -1698,6 +1698,27 @@ TEST_F(Lconst_test, get_set_mask_equivalence) {
 #endif
 }
 
+TEST_F(Lconst_test, bit_test) {
+  Lconst a(0xF0);
+
+  EXPECT_EQ(a.get_first_bit_set(), 4);
+  EXPECT_EQ(a.get_last_bit_set(), 7);
+
+  EXPECT_FALSE(a.bit_test(0));
+  EXPECT_FALSE(a.bit_test(1));
+  EXPECT_FALSE(a.bit_test(2));
+  EXPECT_FALSE(a.bit_test(3));
+
+  EXPECT_TRUE(a.bit_test(4));
+  EXPECT_TRUE(a.bit_test(5));
+  EXPECT_TRUE(a.bit_test(6));
+  EXPECT_TRUE(a.bit_test(7));
+
+  EXPECT_FALSE(a.bit_test(8));
+
+  EXPECT_FALSE(a.bit_test(103));
+}
+
 TEST_F(Lconst_test, debug_console) {
   auto a = UInt<130>("0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");  // 129 ones
   auto b = UInt<130>("0x100000000000000000000000000000001");  // 1, 127 zeroes, 1 one

@@ -164,6 +164,11 @@ public:
   std::pair<int, int> get_mask_range() const;
 
   Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
+
+  bool bit_test(size_t p) const;
+  size_t get_first_bit_set() const;
+  size_t get_last_bit_set() const;
+
   size_t popcount() const;
 
   bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
