@@ -1,0 +1,27 @@
+
+let animal = ::enum(
+  ,mammal = (
+    ,rat
+    ,human
+  )
+  ,bird = (
+    ,parroket
+    ,flinch
+  )
+)
+
+let r = animal.mammal.rat
+let h = animal.mammal.human
+
+let p = animal.bird.parroket
+
+cassert r != h
+cassert r in animal.mammal
+cassert h in animal.mammal
+
+cassert p !in animal.mammal
+cassert p in animal.bird
+cassert p != animal.bird
+cassert p in animal.bird.parroket
+cassert p == animal.bird.parroket
+

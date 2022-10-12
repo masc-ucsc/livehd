@@ -1,0 +1,10 @@
+
+let e = ::enum(
+  ,v0
+  ,v3=3
+  ,v4
+)
+
+// Explicit enum with integer type follow traditional (C/C++) enumeration order
+
+

@@ -32,7 +32,7 @@ cassert nourish(:Potato=_) == "person consume" // structural typing
 
 // Pyrope opt2
 
-let Eater = :enum(
+let Eater = ::enum(
  ,person = :Person
  ,robot  = :Robot
  ,cyborg = :Cyborg
