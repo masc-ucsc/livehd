@@ -1,0 +1,59 @@
+
+// Pyrope opt1
+
+let Robot = (
+  ,charge = fun() { ret "robot charge" }
+)
+let Person = (
+  ,consume = fun() { ret "person consume" }
+)
+
+let Cyborg = (
+  ,consume = fun() { ret "cyborg consume" }
+  ,charge = fun() { ret "cyborg charge" }
+)
+
+let Potato = (
+  ,consume = fun() { ret "potato consume" }
+  ,something_else = fun() { ret "not called" }
+)
+
+let nourish = fun(x) where (x does Person) or (x does Robot) { // if Person and Robot it is already a Cyborg
+  ret match x {
+    does Person { x.consume() }
+    does Robot  { x.charge()  }
+  }
+}
+
+cassert nourish(:Person=_) == "person consume"
+cassert nourish(:Robot=_) == "robot charge"
+cassert nourish(:Potato=_) == "person consume" // structural typing
+//cassert nourish(:Cyborg=_) == "XX"             // compile error, two match entry options at once
+
+// Pyrope opt2
+
+let Eater = :enum(
+ ,person = :Person
+ ,robot  = :Robot
+ ,cyborg = :Cyborg
+)
+
+let nourish = fun(x:Eater) -> (:string) {
+  ret match x {
+    == Eater.person { x.consume() }
+    == Eater.robot  { x.charge()  }
+    == Eater.cyborg  { x.charge() ++ x.consume()  }
+  }
+}
+
+let p:Eaters.Person = _
+let r:Eaters.Robot = _
+let c:Eaters.Cyborg = _
+
+cassert nourish(p) == "person consume"
+cassert nourish(r) == "robot charge"
+cassert nourish(c) == "cyborg charge cyborg consume"
+
+//cassert nourish(:Person) != ""  // compile error, not Eater entry
+//cassert nourish(:Potato) != ""  // compile error, not Eater entry
+
