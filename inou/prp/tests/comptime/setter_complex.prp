@@ -1,0 +1,23 @@
+
+let fint:int = _
+cassert fint == 0
+
+var fbool:bool = _
+cassert fbool == 0
+
+let Tup = (
+  ,v:string = _  // default to empty
+  ,setter = fun(ref self) { // no args
+     cassert self.v == ""
+     self.v = "empty"
+  } ++ fun(ref self, v) {
+     self.v = v
+  }
+)
+
+var x:Tup = _
+cassert x.v == "empty"
+
+x = "Padua"
+cassert x.v == "Padua"
+

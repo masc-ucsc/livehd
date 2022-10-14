@@ -1,0 +1,14 @@
+
+var x = 2
+
+var y = if var z=1 ; (x+z) == 3 {
+  4
+}else{
+  5
+}
+
+cassert y == 4
+
+var z = 33 // OK, z was out of scope before
+cassert z==33
+
