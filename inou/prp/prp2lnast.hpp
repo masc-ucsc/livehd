@@ -90,9 +90,7 @@ protected:
   void process_declaration_list(TSNode);
   void process_attribute_list(TSNode);
   void process_identifier(TSNode);
-  void process_simple_number(TSNode);
-  void process_hex_number(TSNode);
-  void process_binary_number(TSNode);
+  void process_constant(TSNode);
 
   // Ref-Attribute Helpers
   // NOTE: This function adds `ref_node` with all attributes `parent` index

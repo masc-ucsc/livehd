@@ -183,12 +183,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_tuple_or_expression_list(node);
   else if (node_type == "identifier")
     process_identifier(node);
-  else if (node_type == "simple_number")
-    process_simple_number(node);
-  else if (node_type == "hex_number")
-    process_hex_number(node);
-  else if (node_type == "binary_number")
-    process_binary_number(node);
+  else if (node_type == "constant")
+    process_constant(node);
   else if (node_type == "attributes")
     process_attributes(node);
   else
@@ -959,19 +955,9 @@ void Prp2lnast::process_identifier(TSNode node) {
   }
 }
 
-void Prp2lnast::process_simple_number(TSNode node) {
+void Prp2lnast::process_constant(TSNode node) {
   auto text = get_text(node);
   primary_node_stack.push({Lnast_node::create_const(text), {}});
-}
-
-void Prp2lnast::process_hex_number(TSNode node) {
-  auto text = get_text(node);
-  primary_node_stack.push({Lnast_node::create_const(text), {}}); // TODO: parse the number?
-}
-
-void Prp2lnast::process_binary_number(TSNode node) {
-  auto text = get_text(node);
-  primary_node_stack.push({Lnast_node::create_const(text), {}}); // TODO: parse the number?
 }
 
 void Prp2lnast::process_attributes(TSNode node) {
