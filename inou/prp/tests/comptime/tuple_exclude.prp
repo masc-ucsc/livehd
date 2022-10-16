@@ -1,0 +1,27 @@
+
+
+let t1 = (a=1,b=2,c=3)
+
+let t2 = ()
+for e,idx,key in o {
+  let sing_tup = ()
+  sing_tup[key] = e
+  t2 ++= sing_tup
+}
+
+cassert t1 == t2  // since fully named, does not check position
+cassert t1[0] == t2[0] == t1.a == t2.a
+cassert t1[1] == t2[1] == t1.b == t2.b
+cassert t1[2] == t2[2] == t1.c == t2.c
+
+let t3 = ()
+for e,idx,key in o {
+  let sing_tup = ()
+  sing_tup[key] = e
+  t3 ++= sing_tup unless key == "b"
+}
+
+cassert t1 != t3
+cassert t1[0] == t3[0] == t1.a == t2.a
+cassert t1[2] == t3[1] == t1.c == t2.c
+
