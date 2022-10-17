@@ -308,6 +308,24 @@ void Prp2lnast::process_while_statement(TSNode node) {
   stmts_index = original_stmts_index;
 }
 
+void Prp2lnast::process_match_statement(TSNode node) {
+	fmt::print("{}\n", get_text(node));
+	/*
+	// TODO: process stmt_list
+	auto value = primary_node_stack.top();
+	primary_node_stack.pop();
+	auto match_list_node = get_child(node, 3);
+	if (ts_node_is_null(match_list_node)) return;
+	auto match_item_node = get_child(match_list_node);
+	while (!ts_node_is_null(match_item_node)) {
+		auto cond_node = get_child(match_item_node, "cond");
+		auto code_node = get_child(match_item_node, "code");
+
+		match_item_node = get_sibling(match_item_node);
+	}
+	*/
+}
+
 void Prp2lnast::process_function_call_statement(TSNode node) {
   auto fcall = get_child(node);
   process_node(fcall);
@@ -656,7 +674,9 @@ void Prp2lnast::process_rvalue_list(TSNode node) {
         tuple_rvalue_stack.top().push_back({Lnast_node::create_invalid(), primary_node_stack.top()});
         primary_node_stack.pop();
       }
-      scope_node_stack.top().pop_back();
+      if (node_type != "simple_assignment") {
+      	scope_node_stack.top().pop_back();
+			}
       node = get_named_sibling(node);
       ++tuple_position;
     }
@@ -715,7 +735,9 @@ void Prp2lnast::process_declaration_list(TSNode node) {
 void Prp2lnast::process_attribute_entry(TSNode node) {
   // TODO: Process enum entry
   node = get_child(node, 1);
+	expr_state_stack.push(Expression_state::Lvalue);
   process_node(node);
+	expr_state_stack.pop();
 }
 
 void Prp2lnast::process_attr_list(TSNode node) {
@@ -922,9 +944,9 @@ void Prp2lnast::process_member_selection(TSNode node) {
   auto lhs = primary_node_stack.top();
   primary_node_stack.pop();
 
-  expr_state_stack.push(Expression_state::Rvalue);
+  enter_scope(Expression_state::Rvalue);
   process_node(rnode);
-  expr_state_stack.pop();
+  leave_scope();
 
   switch (expr_state_stack.top()) {
     case Expression_state::Rvalue: {

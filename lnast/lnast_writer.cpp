@@ -381,8 +381,6 @@ void Lnast_writer::write_attr_get() {
   move_to_parent();
 }
 
-void Lnast_writer::write_attr_check() { }
-
 void Lnast_writer::write_cassert() {
   move_to_child();
   print("cassert(");

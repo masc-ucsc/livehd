@@ -21,10 +21,9 @@ protected:
   std::stack<Expression_state> expr_state_stack;
 
   // a::[b] = c::[d = f::[g]]
-  // \___________0__________/   <-- 
-  //    \1/      \____1_____/   <--
-  //                 \0/ \1/    <--
-  // 
+  // \___________0__________/
+  //    \1/      \____1_____/
+  //                 \0/ \1/
   std::stack<bool> attr_scope_stack;
 
   using attr_map_t = std::vector<std::pair<Lnast_node, Lnast_node>>;
@@ -53,6 +52,7 @@ protected:
   void process_if_statement(TSNode);
   void process_for_statement(TSNode);
   void process_while_statement(TSNode);
+	void process_match_statement(TSNode);
 
   // Functions
   void process_function_call_statement(TSNode);

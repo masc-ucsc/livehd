@@ -68,7 +68,6 @@ LNAST_NODE( ref, ref )
 LNAST_NODE( const, const )
 LNAST_NODE( range, range )
 
-
 // Tuple Statements
 LNAST_NODE( tuple_concat, tuple_concat )
 LNAST_NODE( tuple_add, tuple_add )
@@ -78,7 +77,6 @@ LNAST_NODE( tuple_set, tuple_set )
 // Attribute Statements
 LNAST_NODE( attr_set, attr_set )
 LNAST_NODE( attr_get, attr_get )
-LNAST_NODE( attr_check, attr_check )
 
 // Compiler Internals
 LNAST_NODE( cassert, cassert )

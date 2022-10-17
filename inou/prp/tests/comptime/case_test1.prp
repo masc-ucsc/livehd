@@ -12,7 +12,7 @@ let m5 = (a=2,b=90,c=100)
 var hit=0
 
 let b=300
-
+/*
 match let t = m1 ; t {
  case (a=33,b=_)   { hit = 300 + t.a + t.b }
  case (a=2,b=_)    { hit = t.a + m1.b ; cassert m1 == t }
@@ -36,4 +36,4 @@ cassert (b=2) !case (b=2,a=1)
 cassert (b=2) !case (b=2,1)
 cassert (b=2) !case (b=2,_)
 cassert (b=2) !case (b=2,c=_)
-
+*/
