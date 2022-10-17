@@ -3,6 +3,7 @@
 workspace(name = "livehd")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
 http_archive(
     name = "rules_foreign_cc",
@@ -85,15 +86,11 @@ http_archive(
 )
 
 # tree-sitter-pyrope
-http_archive(
+new_git_repository(
     name = "tree-sitter-pyrope",
+    branch = "main",
     build_file = "tree-sitter-pyrope.BUILD",
-    #strip_prefix = "tree-sitter-pyrope-main",
-    strip_prefix = "tree-sitter-pyrope-18198696444ef3a7005d40f70c73e3b937ffd9e4",
-    urls = [
-        # "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/refs/heads/main.zip",
-        "https://github.com/masc-ucsc/tree-sitter-pyrope/archive/18198696444ef3a7005d40f70c73e3b937ffd9e4.zip",
-    ],
+    remote = "https://github.com/masc-ucsc/tree-sitter-pyrope",
 )
 
 # tree sitter
@@ -229,10 +226,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "rules_proto",
-    sha256 = "80d3a4ec17354cccc898bfe32118edd934f851b03029d63ef3fc7c8663a7415c",
-    strip_prefix = "rules_proto-5.3.0-21.5",
+    sha256 = "e017528fd1c91c5a33f15493e3a398181a9e821a804eb7ff5acdd1d2d6c2b18d",
+    strip_prefix = "rules_proto-4.0.0-3.20.0",
     urls = [
-        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/5.3.0-21.5.tar.gz",
+        "https://github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0-3.20.0.tar.gz",
     ],
 )
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")

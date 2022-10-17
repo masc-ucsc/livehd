@@ -3,7 +3,8 @@
 :type: parsing
 */
 
-let top = fun {
-  reg a::[clk=gclk] = 1
-  reg c = b::[clk=gclk] + c::[clk=gclk]
+let top = fun(a::[comptime], b::[comptime], c) {
+	x::[attr=(1,2)] = _
+  c = (a::[comptime] = 1, b::[comptime], c)
+	cassert c::[comptime=0]
 }

@@ -17,8 +17,15 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl, Attr };
+  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl };
   std::stack<Expression_state> expr_state_stack;
+
+  // a::[b] = c::[d = f::[g]]
+  // \___________0__________/   <-- 
+  //    \1/      \____1_____/   <--
+  //                 \0/ \1/    <--
+  // 
+  std::stack<bool> attr_scope_stack;
 
   using attr_map_t = std::vector<std::pair<Lnast_node, Lnast_node>>;
   using node_attr_t = std::pair<Lnast_node, attr_map_t>;
@@ -79,7 +86,8 @@ protected:
   void process_member_select(TSNode);
 
   // Attributes
-  void process_attributes(TSNode);
+  void process_attribute_entry(TSNode);
+  void process_attr_list(TSNode);
 
   // Basics
   void process_tuple(TSNode);
@@ -88,7 +96,6 @@ protected:
   void process_rvalue_list(TSNode);
   void process_tuple_type_list(TSNode);
   void process_declaration_list(TSNode);
-  void process_attribute_list(TSNode);
   void process_identifier(TSNode);
   void process_constant(TSNode);
 
@@ -109,11 +116,17 @@ protected:
   lh::Tree_index                      type_index;
   std::vector<int>                    tuple_lvalue_positions;
   // NOTE: suboptimal - copying the whole attribute vector
-  std::stack<node_attr_t> rvalue_node_stack;
-  std::stack<node_attr_t> lvalue_node_stack;
-  std::stack<node_attr_t> primary_node_stack;
-  std::stack<std::vector<node_attr_t>> select_stack;
-  std::stack<std::vector<std::pair<node_attr_t, node_attr_t>>> tuple_rvalue_stack;
+  std::stack<Lnast_node> rvalue_node_stack;
+  std::stack<Lnast_node> lvalue_node_stack;
+  std::stack<Lnast_node> primary_node_stack;
+  std::stack<std::vector<Lnast_node>> select_stack;
+  std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
+
+  std::stack<std::vector<Lnast_node>> scope_node_stack;
+
+  void add_attr_set(const Lnast_node key, const Lnast_node value);
+  Lnast_node add_attr_get(const Lnast_node key);
+  void add_attr_check(const Lnast_node key);
 
   // Lnast_node Helpers
   // TODO: Forward location to Lnast_node

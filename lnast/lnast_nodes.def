@@ -76,11 +76,12 @@ LNAST_NODE( tuple_get, tuple_get )
 LNAST_NODE( tuple_set, tuple_set )
 
 // Attribute Statements
-LNAST_NODE( attr, attr )
 LNAST_NODE( attr_set, attr_set )
 LNAST_NODE( attr_get, attr_get )
+LNAST_NODE( attr_check, attr_check )
 
 // Compiler Internals
+LNAST_NODE( cassert, cassert )
 LNAST_NODE( err_flag, err_flag )
 LNAST_NODE( phi, phi )
 LNAST_NODE( hot_phi, hot_phi )
