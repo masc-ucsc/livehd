@@ -31,8 +31,6 @@ class Inou_attr : public Pass {
 private:
   absl::flat_hash_map<std::string, double> node2color;
 protected:
-  //std::vector<Sub_node *>       sub_nodes;
-
   static void set_color_to_lg(Eprp_var &var);
   static void get_color_from_lg(Eprp_var &var);
 

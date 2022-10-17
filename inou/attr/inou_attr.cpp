@@ -95,41 +95,6 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
     }
   }
   
-  //for (const auto &class_entry : document[]) {}
-  //I(entry["class"].IsString());
-  //
-  // const rapidjson::Value &Lgraph_array = document["color"];
-  // I(Lgraph_array.IsArray());
-  // for (const auto &lg_entry : Lgraph_array.GetArray()) {
-  //   I(lg_entry.IsObject());
-  //   I(lg_entry.HasMember(top_name));
-  //   const rapidjson::Value &node_color_array = lg_entry["MaxPeriodFibonacciLFSR_NL"];
-    //auto color_entries = lg_entry["MaxPeriodFibonacciLFSR_NL"];
-    //for(const auto& elem :color_entries){
-    //  fmt::print("{}:{}\n",elem.first, elem.second);
-    //}
-    // for (rapidjson::SizeType i = 0; i < node_color_array.Size(); i++) {
-    //   auto x = node_color_array[i];
-    //   fmt::print("{}",x["_13_"].GetUint64());
-    // }
-    //uint64_t id = lg_entry["lgid"].GetUint64();
-    //auto increase_size = id - sub_nodes.size() + 1;
-    //if (increase_size > 0) {
-    //  for (std::string::size_type i = 0; i < increase_size; i++) {
-    //    auto ptr = new Sub_node();
-    //    sub_nodes.emplace_back(ptr);
-    //  }
-    //}
-
-    //I(lg_entry.HasMember("source"));
-    //sub_nodes[id]->from_json(lg_entry);
-    //fmt::print("DEBUG21, sub_nodes size:{}, sub_nodes[{}]->get_lgid():{}, name:{}\n\n", sub_nodes.size(), id,
-    //sub_nodes[id]->get_lgid(), sub_nodes[id]->get_name());
-
-    //node2color[sub_nodes[id]->get_name()] = id;
-    //I(sub_nodes[id]->get_lgid() == id);  // for consistency
-  //}
-
 }
 
 void Inou_attr::color_lg (Lgraph *lg) {
@@ -201,11 +166,3 @@ void Inou_attr::get_color_from_lg(Eprp_var &var){
 
 }
 
-//void SubGraph_color::from_json(const rapidjson::Value &entry, std::string top_name){
-//  const rapidjson::Value &node_color_values = entry[top_name]; 
-//
-//  for (const auto &node_color_value : node_color_values.GetArray()) {
-//
-//  }
-//
-//}
