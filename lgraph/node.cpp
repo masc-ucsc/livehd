@@ -507,11 +507,11 @@ Node Node::create_const(const Lconst &value) const {
 void Node::set_name(std::string_view iname) { current_g->ref_node_name_map()->insert_or_assign(get_compact_class(), iname); }
 
 std::string Node::default_instance_name() const {
-  std::string name{"i"};
+  std::string name{""};
 
-  if (is_hierarchical()) {
-    name = absl::StrCat("i_lg", current_g->get_name(), "_hidx", hidx);
-  }
+  //if (is_hierarchical()) {
+  //  name = absl::StrCat("i_lg", current_g->get_name(), "_hidx", hidx);
+  //}
 
   if (has_name()) {
     if (name.empty())

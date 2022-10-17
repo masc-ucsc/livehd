@@ -44,6 +44,7 @@ cc_library(
         "//lgraph",
         "//inou/cgen:inou_cgen",
         "//inou/code_gen:inou_code_gen",
+        "//inou/attr:inou_attr",
         "//inou/paper_pass:traverse_lg",
         "//inou/firrtl:inou_firrtl_cpp",
         "//inou/graphviz:inou_graphviz",
