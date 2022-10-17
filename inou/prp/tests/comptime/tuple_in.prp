@@ -1,0 +1,13 @@
+
+cassert (1,2) in (0,1,3,2,4)
+cassert (1,2) in (a=0,b=1,c=3,2,e=4)
+cassert (a=2) !in (1,2,3)
+cassert (a=2) in (1,a=2,c=3)
+cassert (a=1,2) in (3,2,4,a=1)
+cassert (a=1,2) !in (1,2,4,a=4)
+
+cassert (a=1) !in (a=(1,2))
+cassert (x=nil,c=3) in (x=3,c=3)
+cassert (x=nil,c=3) in (x=nil,c=3,d=4)
+cassert (c=3)      !in (c=nil,d=4)
+
