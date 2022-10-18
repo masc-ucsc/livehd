@@ -2,7 +2,6 @@
 
 #include "lcompiler.hpp"
 
-#include "lbench.hpp"
 
 // FIXME: todo: the top should always specified so that the bottom-up mechanism works
 

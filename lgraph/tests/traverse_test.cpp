@@ -5,7 +5,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
+
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lhtree.hpp"
@@ -17,7 +17,6 @@ class Setup_traverse : public Tree_lgdb_setup {
 protected:
   void check_lgraph_fwd() {
     TRACE_EVENT("core", "TRAVERSE_check_lgraph_fwd");
-    Lbench bench("core.TRAVERSE_check_lgraph_fwd");
 
     I(lg_root);
 

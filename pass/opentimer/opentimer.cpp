@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
@@ -14,7 +13,6 @@ void Pass_opentimer::time_work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
-  Lbench b("pass.OPENTIMER_work");
 
   for (const auto &g : var.lgs) {
     pass.build_circuit(g);   // Task2: Traverse the lgraph and build the equivalent circuit (No dependencies) | Status: 50% done
@@ -28,7 +26,6 @@ void Pass_opentimer::power_work(Eprp_var &var) {
   Pass_opentimer pass(var);
 
   TRACE_EVENT("pass", "OPENTIMER_work");
-  Lbench b("pass.OPENTIMER_work");
 
   // FIXME: build_circuit can overlap with read_vcd (thread_pool task)
   for (const auto &g : var.lgs) {
@@ -75,7 +72,6 @@ void Pass_opentimer::read_sdc_spef() {
 
 void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
   TRACE_EVENT("pass", "OPENTIMER_build_circuit");
-  //  Lbench b("pass.OPENTIMER_build_circuit");
 
   overwrite_dpin2net.clear();
   // FIXME: Add one net for each bit (expand multiple bits)
@@ -212,7 +208,6 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
 }
 
 void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compute timing information
-  //  Lbench b("pass.OPENTIMER_compute_timing");
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
   timer.update_timing();
@@ -366,7 +361,6 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
 
 void Pass_opentimer::populate_table(Lgraph *lg) {
   TRACE_EVENT("pass", "OPENTIMER_populate_table");
-  //  Lbench b("pass.OPENTIMER_populate_table");
 
   if (margin_delay<=0 || max_delay<=0)
     return; // Nothing to do

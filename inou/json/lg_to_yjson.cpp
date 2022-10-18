@@ -2,7 +2,6 @@
 /*
 Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 */
-#include "lg_to_yjson.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -12,8 +11,8 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <iostream>
 #include <map>
 
+#include "lg_to_yjson.hpp"
 #include "lgraph.hpp"
-#include "lbench.hpp"
 #include "edge.hpp"
 #include "lgraph.hpp"
 #include "node_pin.hpp"

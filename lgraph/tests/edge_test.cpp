@@ -5,7 +5,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
@@ -373,15 +372,11 @@ TEST_F(Edge_test, overflow_delete_del_edge_bench) {
 
   {
     TRACE_EVENT("core", "EDGE_overflow_delete_del_edge");
-    Lbench bench("core.EDGE_overflow_delete_del_edge");
 
     for (auto &e : all_edges) {
       XEdge edge(g, e);
       edge.del_edge();
     }
-
-    double secs = bench.get_secs();
-    fmt::print("del_edge size:{} {}Kdels/sec\n", all_edges.size(), (all_edges.size() / 1000.0) / secs);
   }
 
   EXPECT_EQ(n1.out_edges().size(), 0);
@@ -411,12 +406,8 @@ TEST_F(Edge_test, overflow_delete_del_node_bench) {
 
   {
     TRACE_EVENT("core", "EDGE_overflow_delete_del_node");
-    Lbench bench("core.EDGE_overflow_delete_del_node");
 
     s1.del_node();
-
-    double secs = bench.get_secs();
-    fmt::print("del_edge size:{} {}Kdels/sec\n", all_edges, (all_edges / 1000.0) / secs);
   }
 
   EXPECT_EQ(n1.out_edges().size(), 0);

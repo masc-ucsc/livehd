@@ -5,7 +5,6 @@
 #include <string>
 
 #include "elab_scanner.hpp"
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 void Lnast_node::dump() const {
@@ -23,7 +22,6 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
       auto str = "lnast_ssa:" + converted_str;
       ctx.event()->set_name(str + top_module_name); 
       });
-  // Lbench    b("pass.lnast_ssa");
   Lnast_nid top_sts_nid;
   if (get_type(top_nid).is_func_def()) {
     /* fmt::print("Step-0: Handle Inline Function Definition\n"); */

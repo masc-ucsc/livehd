@@ -3,7 +3,6 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
 #include "lrand.hpp"
 
 class Symbol_table_test : public ::testing::Test {

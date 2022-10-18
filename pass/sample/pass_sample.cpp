@@ -1,10 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "pass_sample.hpp"
 
 #include <string>
 
+#include "pass_sample.hpp"
 #include "cell.hpp"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
@@ -40,7 +39,6 @@ void Pass_sample::work(Eprp_var &var) {
 
 void Pass_sample::wirecount(Eprp_var &var) {
   TRACE_EVENT("pass", "SAMPLE_wirecount");
-  Lbench      b("pass.SAMPLE_wirecount");
   Pass_sample p(var);
 
   for (const auto &g : var.lgs) {
@@ -119,7 +117,6 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
 
 void Pass_sample::compute_histogram(Lgraph *g) {
   TRACE_EVENT("pass", "SAMPLE_compute_histogram");
-  Lbench b("pass.SAMPLE_compute_histogram");
 
   std::map<Ntype_op, int> histogram;
 
@@ -140,7 +137,6 @@ void Pass_sample::compute_histogram(Lgraph *g) {
 
 void Pass_sample::compute_max_depth(Lgraph *g) {
   TRACE_EVENT("pass", "SAMPLE_max_depth");
-  Lbench b("pass.SAMPLE_max_depth");
 
   absl::flat_hash_map<Node::Compact, int> depth;
 
@@ -161,7 +157,6 @@ void Pass_sample::compute_max_depth(Lgraph *g) {
 
 void Pass_sample::annotate_placement(Lgraph *g) {
   TRACE_EVENT("pass", "SAMPLE_replace_inline");
-  Lbench b("pass.SAMPLE_replace_inline");
 
   int x_pos = 0;
 

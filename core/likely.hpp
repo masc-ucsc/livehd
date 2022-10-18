@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
 
 #ifndef likely
 #define likely(x) __builtin_expect((x), 1)

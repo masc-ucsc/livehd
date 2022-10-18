@@ -20,7 +20,6 @@
 #include <mockturtle/views/mapping_view.hpp>
 #include <sstream>
 
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 using namespace mockturtle;
@@ -62,9 +61,7 @@ void mock_test_or(int net_size) {
   TRACE_EVENT("pass", nullptr, [net_size](perfetto::EventContext ctx) {
     ctx.event()->set_name("MOCKTURTLE_mock_test_or" + std::to_string(net_size));
   });
-  Lbench b("pass.MOCKTURTLE_mock_test_or" + std::to_string(net_size));
 
-  b.sample("setup");
   mig_network net;
 
   std::vector<mig_network::signal> array;
@@ -81,10 +78,8 @@ void mock_test_or(int net_size) {
 
   net.create_po(array2[net_size - 1]);
 
-  b.sample("synthesis");
   synthesize(net);
 
-  b.sample("tmap");
   int sz = tmap(net);
   (void)sz;
   assert(sz == 1);
@@ -94,9 +89,7 @@ void mock_test_xor(int net_size) {
   TRACE_EVENT("pass", nullptr, [net_size](perfetto::EventContext ctx) {
     ctx.event()->set_name("MOCKTURTLE_mock_test_xor" + std::to_string(net_size));
   });
-  Lbench b("pass.MOCKTURTLE_mock_test_xor" + std::to_string(net_size));
 
-  b.sample("setup");
   mig_network net;
 
   std::vector<mig_network::signal> array;
@@ -114,10 +107,8 @@ void mock_test_xor(int net_size) {
   net.create_po(array2[net_size - 1]);
   // net.create_po( net.create_nary_xor(array) );
 
-  b.sample("synthesis");
   synthesize(net);
 
-  b.sample("tmap");
   int sz = tmap(net);
   (void)sz;
   assert(sz > 1 && sz < net_size / 2);

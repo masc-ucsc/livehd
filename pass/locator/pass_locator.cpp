@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_locator.hpp"
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 static Pass_plugin sample("pass_locator", Pass_locator::setup);
@@ -20,7 +19,6 @@ Pass_locator::Pass_locator(const Eprp_var &var) : Pass("pass.locator", var) {
 void Pass_locator::begin_pass(Eprp_var& var) {
   fmt::print("beginning locator pass\n");
   TRACE_EVENT("pass", "locator");
-  Lbench b("pass.locator");
 
   Pass_locator p(var);
 

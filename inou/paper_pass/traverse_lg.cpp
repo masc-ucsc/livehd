@@ -3,7 +3,6 @@
 #include "traverse_lg.hpp"
 
 #include <iostream>
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "perf_tracing.hpp"
 #include <fstream>
@@ -25,7 +24,6 @@ Traverse_lg::Traverse_lg(const Eprp_var& var) : Pass("inou.traverse_lg", var) {}
 void Traverse_lg::travers(Eprp_var& var) {
   //TRACE_EVENT("inou", "LNAST_FROMLG_trans");
   TRACE_EVENT("inou","traverse_lg");
-  Lbench b("traverse_lg");
 
   Traverse_lg p(var);
 

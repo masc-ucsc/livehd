@@ -1,9 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "eprp_pipe.hpp"
-
 #include "eprp.hpp"
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 void Eprp_pipe::add_command(const Eprp_method &method, const Eprp_var &var) { steps.emplace_back(method, var); }

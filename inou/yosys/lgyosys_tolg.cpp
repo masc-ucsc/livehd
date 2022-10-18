@@ -17,7 +17,6 @@
 
 // LiveHD includes
 #include "inou.hpp"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
@@ -2289,7 +2288,6 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 #endif
 
         TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) { ctx.event()->set_name("YOSYS_tolg_" + mod_name); });
-        Lbench b("inou.YOSYS_tolg_" + mod_name);
 
         for (const auto &port : mod->ports) {
           RTLIL::Wire *wire = mod->wire(port);

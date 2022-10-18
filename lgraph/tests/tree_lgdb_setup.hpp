@@ -41,7 +41,6 @@ protected:
     TRACE_EVENT("core", nullptr, [&test_name](perfetto::EventContext ctx) {
       ctx.event()->set_name(test_name + "_map_tree_to_lgraph");
     });
-    Lbench bench(test_name + "_map_tree_to_lgraph");
 
     std::vector<lh::Tree_index> index_order;
 

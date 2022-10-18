@@ -8,8 +8,8 @@
 #include "fmt/format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+
 #include "label_mincut.hpp"
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
 

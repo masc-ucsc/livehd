@@ -7,7 +7,6 @@
 #include "slang_tree.hpp"
 #include "inou_slang.hpp"
 
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "thread_pool.hpp"

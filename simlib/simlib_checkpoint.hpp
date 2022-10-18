@@ -11,7 +11,6 @@
 #include <iterator>
 #include <vector>
 
-#include "lbench.hpp"
 #include "likely.hpp"
 #include "simlib_signature.hpp"
 #include "vcd_writer.hpp"
@@ -28,7 +27,6 @@ class Simlib_checkpoint {
   Top_struct        top;
   Simlib_signature  signature;
 
-  Lbench perf;
 #ifdef SIMLIB_VCD
   void advance_reset(uint64_t n = 1) {
     for (auto i = 0; i < n; ++i) {
@@ -50,7 +48,7 @@ public:
 #ifdef SIMLIB_VCD
   Simlib_checkpoint(std::string_view _name, std::string parent_name = "TOP",
                     vcd::VCDWriter* initializer_obj = vcd::initialize_vcd_writer(), uint64_t _reset_ncycles = 10000)
-      : name(_name), top(0, parent_name, initializer_obj), perf(name), reset_ncycles(_reset_ncycles) {
+      : name(_name), top(0, parent_name, initializer_obj), reset_ncycles(_reset_ncycles) {
     ncycles                 = 0;
     checkpoint_ncycles      = -1;  // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
@@ -62,7 +60,7 @@ public:
   };
 #else
   Simlib_checkpoint(std::string_view _name, uint64_t _reset_ncycles = 10000)
-      : name(_name), top(0), perf(name), reset_ncycles(_reset_ncycles) {
+      : name(_name), top(0), reset_ncycles(_reset_ncycles) {
     ncycles                 = 0;
     checkpoint_ncycles      = -1;  // Disable checkpoint by default
     next_checkpoint_ncycles = 1000000000;
@@ -76,7 +74,9 @@ public:
 
   ~Simlib_checkpoint() {
     std::string ext;
-    double      speed = static_cast<double>(ncycles) / perf.get_secs();
+    I(false); // FIXME: get syscall to get number of secs/cycles
+    int usecs=1;
+    double      speed = static_cast<double>(ncycles) / usecs;
     if (speed > 1e6) {
       speed /= 1e6;
       ext = "MHz";
@@ -309,11 +309,16 @@ public:
 
   void handle_checkpoint() {
 #ifdef SIMLIB_TRACE
-    auto delta_secs = perf.get_secs() - last_checkpoint_sec;  // delta_secs is of type double
+    I(false);
+    int usecs = 1;
+    auto delta_secs = usecs - last_checkpoint_sec;  // delta_secs is of type double
     if (delta_secs > 0.1)
       save_checkpoint();
-    else
-      last_checkpoint_sec = perf.get_secs();
+    else {
+      I(false); // get_usecs
+
+      last_checkpoint_sec = usecs;
+    }
 
     if (delta_secs < 1) {
       set_checkpoint_cycles(4 * checkpoint_ncycles);

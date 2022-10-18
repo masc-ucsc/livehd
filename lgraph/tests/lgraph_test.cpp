@@ -8,7 +8,6 @@
 #include "file_utils.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lrand.hpp"
 #include "perf_tracing.hpp"
@@ -179,7 +178,6 @@ protected:
 
 TEST_F(Setup_lgraph, add_remove_inputs) {
   TRACE_EVENT("core", "LgRAPH_add_remove_inputs");
-  Lbench b("core.LgRAPH_add_remove_inputs");
 
   std::string lgdb("lgdb_lgraph_test");
 

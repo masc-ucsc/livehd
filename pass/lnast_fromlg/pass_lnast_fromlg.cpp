@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_lnast_fromlg.hpp"
 
 #include <queue>
 #include <stack>
@@ -10,7 +9,8 @@
 #include <vector>
 
 #include "absl/strings/match.h"
-#include "lbench.hpp"
+
+#include "pass_lnast_fromlg.hpp"
 #include "lgedgeiter.hpp"
 #include "perf_tracing.hpp"
 
@@ -32,7 +32,6 @@ Pass_lnast_fromlg::Pass_lnast_fromlg(const Eprp_var& var) : Pass("pass.lnast_fro
 
 void Pass_lnast_fromlg::trans(Eprp_var& var) {
   TRACE_EVENT("pass", "LNAST_FROMLG_trans");
-  Lbench b("pass.LNAST_FROMLG_trans");
 
   Pass_lnast_fromlg p(var);
 

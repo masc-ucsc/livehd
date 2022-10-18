@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "firmap.hpp"
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "str_tools.hpp"
@@ -34,7 +33,6 @@ void Firmap::add_map_entry(Lgraph *lg) {  // single-thread
 
 void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
   // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firbits." + lg->get_name()); });
-  // Lbench b("pass.firbits");
   //
   // note: tricks to make perfetto display different color on sub-modules
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 

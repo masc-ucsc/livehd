@@ -3,8 +3,6 @@
 #include "ot/timer/timer.hpp"
 
 #include "inou_liberty.hpp"
-
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -27,7 +25,6 @@ Inou_liberty::Inou_liberty(const Eprp_var &var) : Pass("pass.opentimer", var) {
 void Inou_liberty::liberty_open(Eprp_var &var) {
 
   TRACE_EVENT("inou", "INOUT_liberty");
-  Lbench b("inou.liberty");
 
   Inou_liberty p(var);
 

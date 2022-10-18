@@ -2,7 +2,6 @@
 
 #include <set>
 
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "lhtree.hpp"
@@ -70,7 +69,6 @@ void check_test_order(Lgraph *top) {
 void do_fwd_traversal(Lgraph *lg, const std::string &name) {
   {
     TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) { ctx.event()->set_name("ITER_" + name + "_fast"); });
-    Lbench b("core.ITER_" + name + "_fast");
 
     setup_test_order();
     for (auto node : lg->fast(true)) {
@@ -83,7 +81,6 @@ void do_fwd_traversal(Lgraph *lg, const std::string &name) {
   }
   {
     TRACE_EVENT("core", nullptr, [&name](perfetto::EventContext ctx) { ctx.event()->set_name("ITER_" + name + "_fwd"); });
-    Lbench b("core.ITER_" + name + "_fwd");
 
     setup_test_order();
     for (auto node : lg->forward(true)) {
@@ -624,7 +621,6 @@ int main(int argc, char **argv) {
     }
 
     TRACE_EVENT("core", "fwd.custom");
-    Lbench bench("fwd.custom");
     int    total = 0;
 //#define ITER_MMAP 1
 #define ITER_DIRECT 1

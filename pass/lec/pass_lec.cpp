@@ -14,7 +14,6 @@
 
 #include "boolector.h"
 #include "cell.hpp"
-#include "lbench.hpp"
 #include "lezminisat.hpp"
 #include "lezsat.hpp"
 #include "lgedgeiter.hpp"

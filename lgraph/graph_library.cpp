@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <memory>
 #include <sys/stat.h>
+#include <fcntl.h>
+
 #ifdef __APPLE__
 #include <copyfile.h>
 #else

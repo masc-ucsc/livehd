@@ -4,8 +4,6 @@
 #include <string>
 
 #include "pass_opentimer.hpp"
-
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "str_tools.hpp"

@@ -1,11 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "dlop.hpp"
-
 #include <cstdlib>
 
 #include "fmt/format.h"
-#include "lbench.hpp"
+
+#include "likely.hpp"
+#include "dlop.hpp"
 #include "str_tools.hpp"
 
 void Dlop::free(size_t sz, int64_t *ptr) {

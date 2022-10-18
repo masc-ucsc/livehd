@@ -1,10 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "graphviz.hpp"
+#include <fcntl.h>
 
 #include <fstream>
 #include <regex>
 
+#include "graphviz.hpp"
 #include "RGB.hpp"
 #include "cell.hpp"
 #include "pass.hpp"

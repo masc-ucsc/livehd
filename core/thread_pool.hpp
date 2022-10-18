@@ -21,7 +21,6 @@
 #include "spmc.hpp"
 #endif
 
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 // #define DISABLE_THREAD_POOL
@@ -101,8 +100,6 @@ class Thread_pool {
   std::function<void(void)> next_job() {
     std::function<void(void)>    res;
     std::unique_lock<std::mutex> job_lock(queue_mutex);
-
-    Lbench b("idle");
 
     // Wait for a job if we don't have any.
     job_available_var.wait(job_lock, [this]() -> bool { return !queue.empty() || finishing; });
@@ -231,10 +228,6 @@ public:
       if (has_work) {
         res();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
-        /* } else { */
-        /*   Lbench b("waiting"); */
-        /*   while (jobs_left > 0) */
-        /*     ; */
       }
     }
   }

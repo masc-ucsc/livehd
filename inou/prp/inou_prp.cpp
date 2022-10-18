@@ -1,9 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "inou_prp.hpp"
-
 #include "absl/strings/str_split.h"
-#include "lbench.hpp"
+
+#include "inou_prp.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
@@ -22,7 +21,7 @@ Inou_prp::Inou_prp(const Eprp_var &var) : Pass("inou.prp", var) {}
 
 void Inou_prp::parse_to_lnast(Eprp_var &var) {
   TRACE_EVENT("inou", "PRP_parse_to_lnast");
-  Lbench   b("inou.PRP_parse_to_lnast");
+
   Inou_prp p(var);
 
   for (const auto &f : absl::StrSplit(p.files, ',')) {

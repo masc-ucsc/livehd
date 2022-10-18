@@ -1,14 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "thread_pool.hpp"
-
 #include <atomic>
 #include <iostream>
 
-#include "concurrentqueue.hpp"
 #include "fmt/format.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
+
+#include "thread_pool.hpp"
+#include "concurrentqueue.hpp"
 #include "mpmc.hpp"
 #include "spmc.hpp"
 
@@ -82,7 +81,6 @@ TEST_F(GTest1, mpmc_thread) {
     Test2 t2;
     t2.total = 0;
 
-    Lbench    bb("task.THREAD_POOL_pool" + std::to_string(n));
     const int JOB_COUNT = 20;
 
     for (int i = 0; i < JOB_COUNT; ++i) {
@@ -117,7 +115,6 @@ TEST_F(GTest1, interface) {
   for (int n = 1; n < 5; n = n + 2) {
     total = 0;
 
-    Lbench      bb("task.THREAD_POOL_pool" + std::to_string(n));
     Thread_pool pool(n);
     const int   JOB_COUNT = 2000000;
 
@@ -141,8 +138,6 @@ TEST_F(GTest1, interface) {
 
 TEST_F(GTest1, bench) {
   {
-    Lbench bb("task.THREAD_POOL_mpmc");
-
     mpmc<int> queue(256);
 
     for (int i = 0; i < 10000000; ++i) {
@@ -153,8 +148,6 @@ TEST_F(GTest1, bench) {
     }
   }
   {
-    Lbench bb("task.THREAD_POOL_spmc");
-
     spmc256<int> queue;
 
     for (int i = 0; i < 10000000; ++i) {
@@ -165,7 +158,6 @@ TEST_F(GTest1, bench) {
     }
   }
   {
-    Lbench                           bb("task.THREAD_POOL_concurrentqueue");
     moodycamel::ConcurrentQueue<int> queue(256);
 
     for (int i = 0; i < 10000000; ++i) {

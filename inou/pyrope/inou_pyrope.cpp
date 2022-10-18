@@ -3,7 +3,6 @@
 #include "inou_pyrope.hpp"
 
 #include "absl/strings/str_split.h"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"

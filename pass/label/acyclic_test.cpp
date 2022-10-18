@@ -9,7 +9,6 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "label_acyclic.hpp"
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
 

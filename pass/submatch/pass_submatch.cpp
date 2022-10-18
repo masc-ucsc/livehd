@@ -1,11 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_submatch.hpp"
 
 #include <queue>
 #include <string>
 
-#include "lbench.hpp"
+#include "pass_submatch.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
@@ -24,7 +23,6 @@ void pass_submatch::setup() {
 pass_submatch::pass_submatch(const Eprp_var &var) : Pass("pass.submatch", var) {}
 
 void pass_submatch::do_work(Lgraph *g) {
-  Lbench b(absl::StrCat("pass.submatch.", g->get_name()));
   find_mffc_group(g);
   find_subs(g);
 }

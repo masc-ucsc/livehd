@@ -1,6 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "pass_lnastfmt.hpp"
 
 #include <memory>
 #include <string>
@@ -8,7 +7,8 @@
 #include <utility>
 
 #include "absl/strings/match.h"
-#include "lbench.hpp"
+
+#include "pass_lnastfmt.hpp"
 #include "perf_tracing.hpp"
 
 static Pass_plugin sample("Pass_lnastfmt", Pass_lnastfmt::setup);
@@ -24,7 +24,6 @@ void Pass_lnastfmt::setup() {
 void Pass_lnastfmt::fmt_begin(Eprp_var& var) {
   fmt::print("beginning LNAST formatting pass\n");
   TRACE_EVENT("pass", "lnastfmt");
-  Lbench b("pass.lnastfmt");
 
   Pass_lnastfmt p(var);
 

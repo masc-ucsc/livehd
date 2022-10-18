@@ -1,13 +1,13 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "bitwidth.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
 #include "absl/strings/match.h"
+
+#include "bitwidth.hpp"
 #include "bitwidth_range.hpp"
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "pass_bitwidth.hpp"
 #include "perf_tracing.hpp"
@@ -24,7 +24,6 @@ void Bitwidth::do_trans(Lgraph *lg) {
       });
 
 
-  // Lbench b("pass.bitwidth." + lg->get_name());
   bw_pass(lg);
 }
 

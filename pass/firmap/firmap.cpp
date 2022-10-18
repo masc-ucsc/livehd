@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "firmap.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
-#include "lbench.hpp"
+#include "firmap.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 
@@ -16,7 +15,6 @@ Firmap::Firmap(absl::node_hash_map<Lgraph *, FBMap> &_fbmaps, absl::node_hash_ma
 
 Lgraph *Firmap::do_firrtl_mapping(Lgraph *lg) {
   // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firmap." + lg->get_name()); });
-  // Lbench b("pass.firmap." + lg->get_name());
   //
   // note: tricks to make perfetto display different color on sub-modules
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {

@@ -1,5 +1,4 @@
 
-#include "semantic_check.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -9,7 +8,8 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include "fmt/printf.h"
-#include "lbench.hpp"
+
+#include "semantic_check.hpp"
 #include "lnast_ntype.hpp"
 #include "pass.hpp"
 #include "prp_lnast.hpp"

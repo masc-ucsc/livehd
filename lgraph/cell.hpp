@@ -8,7 +8,6 @@
 #include <string_view>
 
 #include "absl/container/flat_hash_map.h"
-#include "lbench.hpp"
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 

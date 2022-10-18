@@ -3,7 +3,6 @@
 #include "pass_punch.hpp"
 
 #include "iassert.hpp"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 
@@ -53,7 +52,6 @@ void Pass_punch::work(Eprp_var &var) {
 
 void Pass_punch::punch(LGraph *g, std::string_view src, std::string_view dst) {
   TRACE_EVENT("pass", "punch");
-  Lbench b("pass.punch");
 
   /////////////////////////////////////
   // find the level of common hierarchy between src and dst

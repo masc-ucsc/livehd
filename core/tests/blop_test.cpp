@@ -12,7 +12,7 @@
 #include "dlop.hpp"
 #include "fmt/format.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
+
 #include "lconst.hpp"
 #include "lrand.hpp"
 

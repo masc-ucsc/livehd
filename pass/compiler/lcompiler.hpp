@@ -10,7 +10,6 @@
 #include "cprop.hpp"
 #include "firmap.hpp"
 #include "inou_graphviz.hpp"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "likely.hpp"

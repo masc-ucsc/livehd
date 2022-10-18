@@ -1,12 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "cprop.hpp"
 
 #include <cctype>
 #include <deque>
 #include <string>
 
-#include "lbench.hpp"
+#include "cprop.hpp"
 #include "lgcpp_plugin.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -2460,7 +2459,6 @@ void Cprop::do_trans(Lgraph *lg) {
       std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
       ctx.event()->set_name(converted_str + lg->get_name()); 
       });
-  // Lbench b("pass.cprop." + lg->get_name());
 
   scalar_pass(lg);
   tuple_pass(lg);

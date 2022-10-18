@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_sat_opt.hpp"
-
-#include "lbench.hpp"
 #include "lezminisat.hpp"
 #include "lezsat.hpp"
 #include "lgedgeiter.hpp"

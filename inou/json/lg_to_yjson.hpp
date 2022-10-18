@@ -9,7 +9,6 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <vector>
 
 #include "lgraph.hpp"
-#include "lbench.hpp"
 #include "edge.hpp"
 #include "lgraph.hpp"
 #include "node_pin.hpp"

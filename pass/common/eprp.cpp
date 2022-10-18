@@ -1,12 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "eprp.hpp"
-
 #include <ctype.h>
-
 #include <algorithm>
 
-#include "lbench.hpp"
+#include "eprp.hpp"
 #include "perf_tracing.hpp"
 
 void Eprp::eat_comments() {

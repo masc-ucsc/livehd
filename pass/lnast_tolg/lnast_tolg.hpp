@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "cell.hpp"
-#include "lbench.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "likely.hpp"

@@ -11,7 +11,6 @@
 #include "absl/container/flat_hash_map.h"
 #include "fmt/format.h"
 #include "gtest/gtest.h"
-#include "lbench.hpp"
 #include "lrand.hpp"
 #include "sint.hpp"
 #include "str_tools.hpp"
@@ -805,7 +804,6 @@ TEST_F(Lconst_test, mixed_mul_operator) {
 }
 
 TEST_F(Lconst_test, Trivial) {
-  Lbench bench("lemu.LCONST_trivial");
 
   constexpr auto v_10  = 10_uint;
   constexpr auto v_10b = 0xa_uint;
@@ -949,8 +947,6 @@ TEST_F(Lconst_test, hexa_check) {
 }
 
 TEST_F(Lconst_test, hexa_check_long) {
-  Lbench b("lemu.LCONST_const_attr");
-
   absl::flat_hash_map<uint32_t, std::string> c_map;
 
   Lrand<size_t> rnd;

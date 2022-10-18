@@ -16,7 +16,6 @@
 #include "file_utils.hpp"
 #include "graph_library.hpp"
 #include "inou_liveparse.hpp"
-#include "lbench.hpp"
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 

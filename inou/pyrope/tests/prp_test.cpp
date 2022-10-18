@@ -3,8 +3,6 @@
 #include <cstdio>
 
 #include "prp.hpp"
-
-#include "lbench.hpp"
 #include "perf_tracing.hpp"
 
 int main(int argc, char **argv) {
@@ -14,7 +12,6 @@ int main(int argc, char **argv) {
   }
 
   TRACE_EVENT("inou", "PYROPE_prp");
-  Lbench bench("inou.PYROPE_prp");
 
   Prp scanner;
 
