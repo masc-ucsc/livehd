@@ -29,8 +29,7 @@ void Inou_attr::set_color_to_lg(Eprp_var &var){
   
   auto filename = p.get_files(var);
   for (const auto &lg : var.lgs) {
-    //FIXME: node2color.clear();//clear the map for current LG only
-    fmt::print("\n\n---> current module: {}\n\n", lg->get_name());
+    //fmt::print("\n\n---> current module: {}\n\n", lg->get_name());
     p.read_json(filename, lg);
     p.color_lg(lg);
   }
@@ -44,7 +43,7 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
   FILE *pFile = fopen(filename.c_str(), "rb");
   if (pFile == 0) {
     Pass::error("Could not open file {}", filename);
-    exit(2);
+    return;
   }
   char                      buffer[65536];
   rapidjson::FileReadStream is(pFile, buffer, sizeof(buffer));
@@ -98,8 +97,8 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
 }
 
 void Inou_attr::color_lg (Lgraph *lg) {
-  auto lg_name = lg->get_name();
-  fmt::print("{}",lg_name);
+  //auto lg_name = lg->get_name();
+  //fmt::print("{}",lg_name);
 
   //since map is formed with nodes and color, set_color to this lg using this map.
   for ( auto node : lg->fast(true)) {

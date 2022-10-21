@@ -16,6 +16,8 @@ static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
 void Traverse_lg::setup() {
   Eprp_method m1("inou.traverse_lg", "Prints all nodes (and each of their IOs) of LG", &Traverse_lg::travers);
   //m1.add_label_optional("odir", "path to print the text to", ".");
+	m1.add_label_required("LGorig", "LG name of the original or pre-synth LG.");
+	m1.add_label_required("LGsynth", "LG name of synthesized or post-synth LG.");
   register_pass(m1);
 }
 
@@ -24,17 +26,34 @@ Traverse_lg::Traverse_lg(const Eprp_var& var) : Pass("inou.traverse_lg", var) {}
 void Traverse_lg::travers(Eprp_var& var) {
   //TRACE_EVENT("inou", "LNAST_FROMLG_trans");
   TRACE_EVENT("inou","traverse_lg");
-
+  
+	auto lg_orig = var.get("LGorig");
+	auto lg_synth = var.get("LGsynth");
+	fmt::print("{} {}", lg_orig, lg_synth);
   Traverse_lg p(var);
 
   fmt::print("\nLGs : {}\n",var.lgs.size());
-  I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide exactly 2 lgraphs to inou.traverse_lg. CHECK: The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
+  //I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide exactly 2 lgraphs to inou.traverse_lg. CHECK: The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
 
 #ifdef DE_DUP
   //Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
-  p.do_travers(var.lgs.back(), map_post_synth);//synth LG
-  p.do_travers(var.lgs.front(), map_post_synth);//original LG (pre-syn LG)
+	bool first_done = false;
+	for (const auto& l : var.lgs) {
+		if (l->get_name()==lg_synth) {
+			p.do_travers(l, map_post_synth);//synth LG
+      first_done = true;
+		}
+	}
+	I(first_done,"\nERROR:\n Synth LG not provided??\n");
+	bool sec_done = false;
+	for (const auto& l : var.lgs) {
+		if (l->get_name()==lg_orig) {
+		  p.do_travers(l, map_post_synth);//original LG (pre-syn LG)
+	    sec_done = true;
+	  }
+  }
+	I(sec_done,"\nERROR:\n original LG not provided??\n");
 #endif
 
 #ifdef DEBUG

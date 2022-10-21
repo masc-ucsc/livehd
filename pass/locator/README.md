@@ -39,11 +39,6 @@ To remove old data, remove the following:
 
 ================================================================
 
-TO DO
-2. complete get_nodes.py to get rpt.txt
-
-================================================================
-
 FROM DISCUSSION.TXT:
 
 
