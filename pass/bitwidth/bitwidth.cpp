@@ -1500,7 +1500,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
     }
     ++n_iterations;
     if (n_iterations > max_iterations) {
-      Pass::info("BW aborting after {} iterations", max_iterations);
+      Pass::info("BW aborting after {} iterations (may require a cprop pass)", max_iterations);
       break;
     }
   }
