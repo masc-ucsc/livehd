@@ -61,7 +61,8 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
   top_lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
     Bitwidth bw(false, 10);
     Cprop    cp(false);
-    // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+
+    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
     cp.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
@@ -75,7 +76,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     // all the constant propagation operations. Change to non-overflow (share
     // code with LNAST BW pass)
     cp.do_trans(lg_sub);
-    gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
+    bw.do_trans(lg_sub);
   });
 }
 
