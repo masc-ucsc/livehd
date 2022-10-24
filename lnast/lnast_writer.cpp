@@ -183,7 +183,7 @@ void Lnast_writer::write_mask_xor() { }
 
 void Lnast_writer::write_ref() {
   if (is_func_name) {
-    print("@{{{}}}", current_text());
+    print("!{{{}}}", current_text());
   } else {
     print("%{{{}}}", current_text());
   }
@@ -359,12 +359,14 @@ void Lnast_writer::write_tuple_set() {
 void Lnast_writer::write_attr_set() {
   move_to_child();
   write_lnast();
-  print(".");
-  move_to_sibling();
-  write_lnast();
-  print(" = ");
-  move_to_sibling();
-  write_lnast();
+  while (move_to_sibling()) {
+    if (!is_last_child()) {
+      print(".");
+    } else {
+      print(" = ");
+    }
+    write_lnast();
+  }
   move_to_parent();  
 }
 

@@ -54,7 +54,7 @@ TEST_F(Lnast_lexer_test, mixed) {
   ss << "%{a} = (2, 0)\n";
   ss << "%{a}[0] = %{b}\n";
   ss << "%{c} = add(%{a}, %{b})\n";
-  ss << "@{multiply}(12345, 67890)\n";
+  ss << "!{multiply}(12345, 67890)\n";
 
   check("id_var, a");
   check("equal");

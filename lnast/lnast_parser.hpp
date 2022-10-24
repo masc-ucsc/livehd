@@ -71,6 +71,7 @@ protected:
   void parse_list();
   void parse_type_list();
   void parse_selects();
+  void parse_dot_selects();
   void parse_attr();
   void parse_prim();
   void parse_type();

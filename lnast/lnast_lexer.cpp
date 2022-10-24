@@ -34,7 +34,7 @@ Lnast_token Lnast_lexer::lex_token() {
         return form_token(Lnast_token::NAME);
 #include "lnast_tokens.def"
       case '%':
-      case '@':
+      case '!':
         return lex_identifier(ch);
       case '#':
         return lex_type();

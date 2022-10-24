@@ -51,7 +51,7 @@ TOKEN_PN(dot,'.')
 
 // Identifiers
 TOKEN_ID(var)   // %{...}
-TOKEN_ID(fun)   // @{...}
+TOKEN_ID(fun)   // !{...}
 
 // Literals
 TOKEN_LT(number)     // 123
