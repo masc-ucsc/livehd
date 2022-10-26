@@ -88,16 +88,13 @@ void Traverse_lg::do_travers(Lgraph* lg) {
     ofs<<"INPUTS:\n";
       for (const auto& indr : node.inp_drivers()) {
         if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
-        //auto inp_node = indr.get_node();
         get_input_node(indr, ofs);
       }
     }
 
     if (node.has_outputs()) {
     ofs<<"OUTPUTS:\n";
-      //for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
 		  for (const auto& oute : node.out_edges() ) {
-        //auto out_node = outdr.get_node();
         get_output_node(oute.sink,ofs);
       }
     }
@@ -125,7 +122,6 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
     return;
   } else {
       for (const auto& indr : node.inp_drivers()) {
-        //auto inp_node = indr.get_node();
         get_input_node(indr,ofs);
       }
   }
@@ -145,9 +141,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
     }
     return;
   } else {
-      //for (const auto& outdr : node.out_sinks() ) {
 		  for (const auto& oute : node.out_edges() ) {
-        //auto out_node = outdr.get_node();
         get_output_node(oute.sink,ofs);
       }
   }
@@ -165,6 +159,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool req_flops_matched = false;
   bool dealing_flop=false;
   bool dealing_comb=false;
+	get_input_node_count=0;
+	get_output_node_count=0;
 
   for (const auto & node : lg->fast(true)) {
     dealing_flop=false;
@@ -182,14 +178,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
     if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
       dealing_flop=true;
-      //for (const auto & indr : node.inp_drivers()) {
 			for (const auto & ine : node.inp_edges()) {
-        //auto inp_node = indr.get_node();
         get_input_node(ine.driver, in_set, io_set);
       }
-      //for (const auto & outdr : node.out_sinks() ) {//outdr is the pin of the output node.
 			for (const auto& oute : node.out_edges() ) {
-        //auto out_node = outdr.get_node();
         get_output_node(oute.sink, out_set, io_set);
       }
 
@@ -214,11 +206,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
-        //for (const auto & indr : node.inp_drivers()) {
 			  for (const auto & ine : node.inp_edges()) {
           get_input_node(ine.driver, in_comb_set, io_comb_set, true);
         }
-        //for (const auto & outdr : node.out_sinks() ) {
 			  for (const auto& oute : node.out_edges() ) {
           get_output_node(oute.sink, out_comb_set, io_comb_set, true);
         }
@@ -232,36 +222,37 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     
     //print the set formed
-    // fmt::print("INPUTS:\n");
-    // if (dealing_flop) {
-    //   for (const auto & i:in_set) {
-    //     fmt::print("\t{}\n",i);
-    //   } 
-    // } else {
-    //   for (const auto & i:in_comb_set) {
-    //     fmt::print("\t{}\n",i);
-    //   } 
-    // }
-    // fmt::print("OUTPUTS:\n");
-    // if (dealing_flop) {
-    //   for (const auto & i:out_set) {
-    //     fmt::print("\t{}\n",i);
-    //   }
-    // } else {
-    //   for (const auto & i:out_comb_set) {
-    //     fmt::print("\t{}\n",i);
-    //   }
-    // }
-    // fmt::print("IOs:\n");
-    // if (dealing_flop) {
-    //   for (const auto & i:io_set) {
-    //     fmt::print("\t{}\n",i);
-    //   }
-    // } else {
-    //   for (const auto & i:io_comb_set) {
-    //     fmt::print("\t{}\n",i);
-    //   }
-    // }
+    fmt::print("INPUTS:");
+    if (dealing_flop) {
+      for (const auto & i:in_set) {
+        fmt::print("\t{}",i);
+      } 
+    } else {
+      for (const auto & i:in_comb_set) {
+        fmt::print("\t{}",i);
+      } 
+    }
+    fmt::print("\nOUTPUTS:");
+    if (dealing_flop) {
+      for (const auto & i:out_set) {
+        fmt::print("\t{}",i);
+      }
+    } else {
+      for (const auto & i:out_comb_set) {
+        fmt::print("\t{}",i);
+      }
+    }
+    fmt::print("\nIOs:");
+    if (dealing_flop) {
+      for (const auto & i:io_set) {
+        fmt::print("\t{}",i);
+      }
+    } else {
+      for (const auto & i:io_comb_set) {
+        fmt::print("\t{}",i);
+      }
+    }
+		fmt::print("\n");
 
     if(!do_matching) {
       //insert in map
@@ -367,7 +358,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }//end of if(do_matching)
 
   }//enf of for lg-> traversal
-
+  fmt::print("**get_input_node_count: {}\n",get_input_node_count);
+	fmt::print("**get_output_node_count: {}\n\n",get_output_node_count);
   if(!do_matching) {
     /*for the sequential part:*/ 
     I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
@@ -836,7 +828,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
 void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig){
   Node this_node = start_node;
-  //for(auto s : this_node.out_sinks()){
 	for (const auto& oute : this_node.out_edges() ) {
 		const auto s = oute.sink;
     this_node = s.get_node();
@@ -979,6 +970,7 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
 void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
+	get_input_node_count++;
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if (node.is_type_const()) {
@@ -1007,6 +999,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
         if(addToCFL && (std::find(crit_flop_list.begin(), crit_flop_list.end(),(node.get_compact_flat()))==crit_flop_list.end())) {
           crit_flop_list.emplace_back(node.get_compact_flat());
           crit_flop_map[node.get_compact_flat()] = node.has_color()?node.get_color():0;//keeping here 0 for no color. for now.
+					//node.set_color(0);//setting color to this flop node so that it gets capture as colored node and IO is calculated for this now so-called-crit-flop.
         }
       }
       in_set.insert(temp_str);
@@ -1014,9 +1007,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
     }
     return;
   } else {
-      //for (const auto& indr : node.inp_drivers()) {
 			for (const auto & ine : node.inp_edges()) {
-        //auto inp_node = indr.get_node();
         get_input_node(ine.driver, in_set, io_set, addToCFL);
       }
   }
@@ -1024,6 +1015,7 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
 void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL) {
+	get_output_node_count++;
   auto node = node_pin.get_node();
   if(node.is_type_flop() || node.is_graph_output()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
@@ -1047,6 +1039,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
         if(addToCFL && (std::find(crit_flop_list.begin(), crit_flop_list.end(),(node.get_compact_flat()))==crit_flop_list.end())) {
           crit_flop_list.emplace_back(node.get_compact_flat());
           crit_flop_map[node.get_compact_flat()] = node.has_color()?node.get_color():0;//keeping here 0 for no color. for now.
+					//node.set_color(0);//setting color to this flop node so that it gets capture as colored node and IO is calculated for this now so-called-crit-flop.
         }
       }
       out_set.insert(temp_str);
@@ -1054,9 +1047,7 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
     }
     return;
   } else {
-      //for (const auto& outdr : node.out_sinks() ) {
 				for (const auto& oute : node.out_edges() ) {
-        //auto out_node = outdr.get_node();
         get_output_node(oute.sink, out_set, io_set, addToCFL);
       }
   }
