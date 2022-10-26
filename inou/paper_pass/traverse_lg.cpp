@@ -95,9 +95,10 @@ void Traverse_lg::do_travers(Lgraph* lg) {
 
     if (node.has_outputs()) {
     ofs<<"OUTPUTS:\n";
-      for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+      //for (const auto& outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+		  for (const auto& oute : node.out_edges() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr,ofs);
+        get_output_node(oute.sink,ofs);
       }
     }
 
@@ -144,9 +145,10 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) 
     }
     return;
   } else {
-      for (const auto& outdr : node.out_sinks() ) {
+      //for (const auto& outdr : node.out_sinks() ) {
+		  for (const auto& oute : node.out_edges() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr,ofs);
+        get_output_node(oute.sink,ofs);
       }
   }
 }
@@ -175,7 +177,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     std::set<std::string> in_comb_set;
     std::set<std::string> out_comb_set;
     std::set<std::string> io_comb_set;
-    fmt::print("{}\n", node.debug_name());
+    // fmt::print("{}\n", node.debug_name());
     
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
     if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
@@ -184,9 +186,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         //auto inp_node = indr.get_node();
         get_input_node(indr, in_set, io_set);
       }
-      for (const auto & outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+      //for (const auto & outdr : node.out_sinks() ) {//outdr is the pin of the output node.
+			for (const auto& oute : node.out_edges() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_set, io_set);
+        get_output_node(oute.sink, out_set, io_set);
       }
 
       /*add to crit_flop_list if !do_matching and flop node is colored*/
@@ -194,6 +197,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         auto colr = node.get_color();
         crit_flop_list.emplace_back(node.get_compact_flat());
         crit_flop_map[node.get_compact_flat()] = colr;
+				fmt::print("Flop color:\n");
         fmt::print("\t{}\n",colr); 
       }
       
@@ -205,14 +209,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         auto colr = node.get_color();
         crit_cell_list.emplace_back(node_val);
         crit_cell_map[node.get_compact_flat()] = colr;
+				fmt::print("combo color:\n");
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
         for (const auto & indr : node.inp_drivers()) {
           get_input_node(indr, in_comb_set, io_comb_set, true);
         }
-        for (const auto & outdr : node.out_sinks() ) {
-          get_output_node(outdr, out_comb_set, io_comb_set, true);
+        //for (const auto & outdr : node.out_sinks() ) {
+			  for (const auto& oute : node.out_edges() ) {
+          get_output_node(oute.sink, out_comb_set, io_comb_set, true);
         }
         
         //insert this node IO in the map
@@ -224,36 +230,36 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }
     
     //print the set formed
-    fmt::print("INPUTS:\n");
-    if (dealing_flop) {
-      for (const auto & i:in_set) {
-        fmt::print("\t{}\n",i);
-      } 
-    } else {
-      for (const auto & i:in_comb_set) {
-        fmt::print("\t{}\n",i);
-      } 
-    }
-    fmt::print("OUTPUTS:\n");
-    if (dealing_flop) {
-      for (const auto & i:out_set) {
-        fmt::print("\t{}\n",i);
-      }
-    } else {
-      for (const auto & i:out_comb_set) {
-        fmt::print("\t{}\n",i);
-      }
-    }
-    fmt::print("IOs:\n");
-    if (dealing_flop) {
-      for (const auto & i:io_set) {
-        fmt::print("\t{}\n",i);
-      }
-    } else {
-      for (const auto & i:io_comb_set) {
-        fmt::print("\t{}\n",i);
-      }
-    }
+    // fmt::print("INPUTS:\n");
+    // if (dealing_flop) {
+    //   for (const auto & i:in_set) {
+    //     fmt::print("\t{}\n",i);
+    //   } 
+    // } else {
+    //   for (const auto & i:in_comb_set) {
+    //     fmt::print("\t{}\n",i);
+    //   } 
+    // }
+    // fmt::print("OUTPUTS:\n");
+    // if (dealing_flop) {
+    //   for (const auto & i:out_set) {
+    //     fmt::print("\t{}\n",i);
+    //   }
+    // } else {
+    //   for (const auto & i:out_comb_set) {
+    //     fmt::print("\t{}\n",i);
+    //   }
+    // }
+    // fmt::print("IOs:\n");
+    // if (dealing_flop) {
+    //   for (const auto & i:io_set) {
+    //     fmt::print("\t{}\n",i);
+    //   }
+    // } else {
+    //   for (const auto & i:io_comb_set) {
+    //     fmt::print("\t{}\n",i);
+    //   }
+    // }
 
     if(!do_matching) {
       //insert in map
@@ -828,7 +834,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
 void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig){
   Node this_node = start_node;
-  for(auto s : this_node.out_sinks()){
+  //for(auto s : this_node.out_sinks()){
+	for (const auto& oute : this_node.out_edges() ) {
+		const auto s = oute.sink;
     this_node = s.get_node();
     if(matched_color_map.find(this_node.get_compact_flat()) != matched_color_map.end() ) {
       continue;
@@ -1043,9 +1051,10 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
     }
     return;
   } else {
-      for (const auto& outdr : node.out_sinks() ) {
+      //for (const auto& outdr : node.out_sinks() ) {
+				for (const auto& oute : node.out_edges() ) {
         //auto out_node = outdr.get_node();
-        get_output_node(outdr, out_set, io_set, addToCFL);
+        get_output_node(oute.sink, out_set, io_set, addToCFL);
       }
   }
 }
