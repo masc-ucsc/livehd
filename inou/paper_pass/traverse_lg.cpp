@@ -166,7 +166,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool dealing_flop=false;
   bool dealing_comb=false;
 
-  for (const auto & node : lg->forward(true)) {
+  for (const auto & node : lg->fast(true)) {
     dealing_flop=false;
     dealing_comb=false;
     // absl::btree_set<std::string> in_set;
@@ -182,9 +182,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
     if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
       dealing_flop=true;
-      for (const auto & indr : node.inp_drivers()) {
+      //for (const auto & indr : node.inp_drivers()) {
+			for (const auto & ine : node.inp_edges()) {
         //auto inp_node = indr.get_node();
-        get_input_node(indr, in_set, io_set);
+        get_input_node(ine.driver, in_set, io_set);
       }
       //for (const auto & outdr : node.out_sinks() ) {//outdr is the pin of the output node.
 			for (const auto& oute : node.out_edges() ) {
@@ -213,8 +214,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
-        for (const auto & indr : node.inp_drivers()) {
-          get_input_node(indr, in_comb_set, io_comb_set, true);
+        //for (const auto & indr : node.inp_drivers()) {
+			  for (const auto & ine : node.inp_edges()) {
+          get_input_node(ine.driver, in_comb_set, io_comb_set, true);
         }
         //for (const auto & outdr : node.out_sinks() ) {
 			  for (const auto& oute : node.out_edges() ) {
@@ -801,7 +803,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
               path_traversal(startPoint_node, synth_set, synth_val, cellIOMap_orig);
 
             }//FIXME:REM
-          }//end of for (const auto& startPoint_node : lg->forward())//FIXME:REM
+          }//end of for (const auto& startPoint_node : lg->fast())//FIXME:REM
         }
       //}
     }//for (auto [k,v]: cellIOMap_synth) ends here
@@ -1012,9 +1014,10 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
     }
     return;
   } else {
-      for (const auto& indr : node.inp_drivers()) {
+      //for (const auto& indr : node.inp_drivers()) {
+			for (const auto & ine : node.inp_edges()) {
         //auto inp_node = indr.get_node();
-        get_input_node(indr, in_set, io_set, addToCFL);
+        get_input_node(ine.driver, in_set, io_set, addToCFL);
       }
   }
 }
