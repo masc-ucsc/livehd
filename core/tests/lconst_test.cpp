@@ -1749,3 +1749,52 @@ TEST_F(Lconst_test, ref_const_string) {
   EXPECT_TRUE(res2.is_invalid());
 
 }
+
+TEST_F(Lconst_test, mask_range_pairs) {
+
+  Lconst zero(0);
+  auto zero_pv = zero.get_mask_range_pairs();
+  EXPECT_EQ(zero_pv.size(), 0);
+
+  EXPECT_EQ(Lconst(1).get_mask_range_pairs().size(),    1);
+  EXPECT_EQ(Lconst(1).get_mask_range_pairs()[0].first,  0);
+  EXPECT_EQ(Lconst(1).get_mask_range_pairs()[0].second, 1);
+
+  EXPECT_EQ(Lconst(2).get_mask_range_pairs().size(),    1);
+  EXPECT_EQ(Lconst(2).get_mask_range_pairs()[0].first,  1);
+  EXPECT_EQ(Lconst(2).get_mask_range_pairs()[0].second, 1);
+
+  EXPECT_EQ(Lconst(0x30).get_mask_range_pairs().size(),    1);
+  EXPECT_EQ(Lconst(0x30).get_mask_range_pairs()[0].first,  4);
+  EXPECT_EQ(Lconst(0x30).get_mask_range_pairs()[0].second, 2);
+
+  EXPECT_EQ(Lconst(0xF030).get_mask_range_pairs().size(),    2);
+  EXPECT_EQ(Lconst(0xF030).get_mask_range_pairs()[0].first,  4);
+  EXPECT_EQ(Lconst(0xF030).get_mask_range_pairs()[0].second, 2);
+  EXPECT_EQ(Lconst(0xF030).get_mask_range_pairs()[1].first,  12);
+  EXPECT_EQ(Lconst(0xF030).get_mask_range_pairs()[1].second, 4);
+
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs().size(),    3);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[0].first,  4);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[0].second, 2);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[1].first,  12);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[1].second, 4);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[2].first,  20);
+  EXPECT_EQ(Lconst(0x10F030).get_mask_range_pairs()[2].second, 1);
+
+  EXPECT_EQ(Lconst(-1).get_mask_range_pairs().size(),    1);
+  EXPECT_EQ(Lconst(-1).get_mask_range_pairs()[0].first,  0);
+  EXPECT_EQ(Lconst(-1).get_mask_range_pairs()[0].second, 1);
+
+  EXPECT_EQ(Lconst(-2).get_mask_range_pairs().size(),    1);
+  EXPECT_EQ(Lconst(-2).get_mask_range_pairs()[0].first,  1);
+  EXPECT_EQ(Lconst(-2).get_mask_range_pairs()[0].second, 1);
+
+  auto neg1 = Lconst::from_pyrope("0sb1_0110");
+  EXPECT_EQ(neg1.get_mask_range_pairs().size(),    2);
+  EXPECT_EQ(neg1.get_mask_range_pairs()[0].first,  1);
+  EXPECT_EQ(neg1.get_mask_range_pairs()[0].second, 2);
+  EXPECT_EQ(neg1.get_mask_range_pairs()[1].first,  4);
+  EXPECT_EQ(neg1.get_mask_range_pairs()[1].second, 1);
+}
+

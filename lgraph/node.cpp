@@ -686,7 +686,7 @@ void Node::dump() const {
   } else if (get_type_op() == Ntype_op::Sub) {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);
-    fmt::print(" sub:{} (lgid:{})\n", sub_name, sub_lgid);
+    fmt::print(" sub:{} (lgid:{}) (inst:{})\n", sub_name, sub_lgid, get_or_create_name());
   } else {
     fmt::print("\n");
   }

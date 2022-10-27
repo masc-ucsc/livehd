@@ -9,14 +9,12 @@
 [![codecov](https://codecov.io/gh/masc-ucsc/livehd/branch/master/graph/badge.svg)](https://codecov.io/gh/masc-ucsc/livehd)
 [![CI](https://github.com/masc-ucsc/livehd/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/masc-ucsc/livehd/actions/workflows/ubuntu.yml)
 
-LiveHD is an infrastructure designed for Live Hardware Development. By live, we
-mean that small changes in the design should have the synthesis and simulation
-results in a few seconds.
 
-As the goal of "seconds," we do not need to perform too fine grain incremental
-work. Notice that this is a different goal from having an typical incremental
-synthesis, where many edges are added and removed in the order of thousands of
-nodes/edges.
+LiveHD is a "compiler" infrastructure for hardware design optimized for
+synthesis and simulation. The goals is to enable a more productive flow where
+the ASIC/FPGA designer can work with multiple hardware description languages
+like CHISEL, Pyrope, or Verilog.
+
 
 ## Goal
 
@@ -33,6 +31,17 @@ To "trust", LiveHD has CI and many random tests with logic equivalence tests (LE
 
 
 ## LiveHD Framework
+
+
+LiveHD stands for Live Hardware Development. By live, we mean that small
+changes in the design should have the synthesis and simulation results in a few
+seconds.
+
+As the goal of "seconds," we do not need to perform too fine grain incremental
+work. Notice that this is a different goal from having an typical incremental
+synthesis, where many edges are added and removed in the order of thousands of
+nodes/edges.
+
 LiveHD is optimized for synthesis and simulation. The main components of LiveHD
 includes LGraph, LNAST, integrated 3rd-party tools, code generation, and "live"
 techniques. The core of LiveHD is a graph structure called LGraph (Live Graph).

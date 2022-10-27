@@ -155,24 +155,25 @@ public:
   bool has_unknown_sign() const { return has_unknowns() && static_cast<uint8_t>(num) == '?'; }
   bool is_fully_unkown() const { return explicit_str && bits == 8 && static_cast<uint8_t>(num) == '?'; }
 
-  bool is_known_false() const { return num == 0; }
-  bool is_known_true() const;
-  bool is_string() const { return explicit_str && !has_unknowns(); }
-  bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
-  bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
+  [[nodiscard]] bool is_known_false() const { return num == 0; }
+  [[nodiscard]] bool is_known_true() const;
+  [[nodiscard]] bool is_string() const { return explicit_str && !has_unknowns(); }
+  [[nodiscard]] bool is_mask() const { return !explicit_str && ((num + 1) & (num)) == 0; }
+  [[nodiscard]] bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
 
-  std::pair<int, int> get_mask_range() const;
+  [[nodiscard]] std::vector<std::pair<int, int>> get_mask_range_pairs() const;
+  [[nodiscard]] std::pair<int, int> get_mask_range() const;
 
-  Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
+  [[nodiscard]] Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
 
-  bool bit_test(size_t p) const;
-  size_t get_first_bit_set() const;
-  size_t get_last_bit_set() const;
+  [[nodiscard]] bool bit_test(size_t p) const;
+  [[nodiscard]] size_t get_first_bit_set() const;
+  [[nodiscard]] size_t get_last_bit_set() const;
 
-  size_t popcount() const;
+  [[nodiscard]] size_t popcount() const;
 
-  bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
-  int64_t to_i() const;                                         // must fit in int or exception raised
+  [[nodiscard]] bool    is_i() const { return !explicit_str && bits <= 62; }  // 62 to handle sign (int)
+  [[nodiscard]] int64_t to_i() const;                                         // must fit in int or exception raised
 
   // Operator list
   [[nodiscard]] const Lconst operator+(const Lconst &other) const { return add_op(other); }

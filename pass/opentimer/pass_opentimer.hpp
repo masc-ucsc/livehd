@@ -26,7 +26,11 @@ protected:
   static void power_work(Eprp_var &var);
 
   void read_files();
+
+  void set_input_delays(const std::string &pname);
+  void set_output_delays(const std::string &pname);
   void build_circuit(Lgraph *lg);
+
   void read_vcd();
   void read_sdc_spef();
   void read_sdc(std::string_view sdc_file);

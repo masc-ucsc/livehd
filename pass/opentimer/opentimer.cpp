@@ -3,6 +3,7 @@
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
+#include "Pin_tracker.hpp"
 #include "str_tools.hpp"
 
 // WARNING: opentimer has a nasty "define has_member" that overlaps with perfetto methods
@@ -70,97 +71,162 @@ void Pass_opentimer::read_sdc_spef() {
   }
 }
 
+void Pass_opentimer::set_input_delays(const std::string &pname) {
+  timer.set_at(pname, ot::MIN, ot::FALL, 0.0);
+  timer.set_at(pname, ot::MIN, ot::RISE, 0.0);
+  timer.set_at(pname, ot::MAX, ot::FALL, 0.0);
+  timer.set_at(pname, ot::MAX, ot::RISE, 0.0);
+
+  timer.set_slew(pname, ot::MAX, ot::FALL, 0.0);
+  timer.set_slew(pname, ot::MAX, ot::RISE, 0.0);
+  timer.set_slew(pname, ot::MIN, ot::FALL, 0.0);
+  timer.set_slew(pname, ot::MIN, ot::RISE, 0.0);
+}
+
+void Pass_opentimer::set_output_delays(const std::string &pname) {
+  timer.set_rat(pname, ot::MIN, ot::FALL, 0.0);
+  timer.set_rat(pname, ot::MIN, ot::RISE, 0.0);
+  timer.set_rat(pname, ot::MAX, ot::FALL, 0.0);
+  timer.set_rat(pname, ot::MAX, ot::RISE, 0.0);
+}
+
 void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circuit
   TRACE_EVENT("pass", "OPENTIMER_build_circuit");
 
   overwrite_dpin2net.clear();
-  // FIXME: Add one net for each bit (expand multiple bits)
 
-  g->each_graph_input([this](const Node_pin &pin) {
-    std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
+  Pin_tracker<std::string> pin_tracker;
 
-    //fmt::print("Graph Input Driver Name {}\n", driver_name);
+  g->each_graph_input([this,&pin_tracker](const Node_pin &pin) {
+    std::string driver_name(pin.get_hierarchical().get_wire_name());  // OT needs std::string, not string_view support
+
+    //fmt::print("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
     timer.insert_primary_input(driver_name);
     timer.insert_net(driver_name);
+    for(auto i=1;i<pin.get_bits();++i) {
+      auto bus_bit_name = absl::StrCat(driver_name, ".", str_tools::to_s(i));
+      timer.insert_primary_input(bus_bit_name);
+      timer.insert_net(bus_bit_name);
+    }
+    pin_tracker.add_input(driver_name, pin.get_bits());
   });
 
   g->each_graph_output([this](const Node_pin &pin) {
-    std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
 
-    //fmt::print("Graph Output Driver Name {}\n", driver_name);
-    timer.insert_primary_output(driver_name);
-    timer.insert_net(driver_name);
-
-    auto driver_dpin = pin.change_to_sink_from_graph_out_driver().get_driver_pin();
-
+    auto driver_dpin = pin.change_to_sink_from_graph_out_driver().get_driver_pin().get_hierarchical();
     if (!driver_dpin.is_invalid()) {  // It could be disconnected
+      std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
+
+      //fmt::print("OT: top output:{} bits:{}\n", driver_name, pin.get_bits());
+
+      timer.insert_primary_output(driver_name);
+      timer.insert_net(driver_name);
+      for(auto i=1;i<driver_dpin.get_bits();++i) {
+        auto bus_bit_name = absl::StrCat(driver_name, ".", str_tools::to_s(i));
+        timer.insert_primary_output(bus_bit_name);
+        timer.insert_net(bus_bit_name);
+      }
       // WARNING: not good if the same dpin is connected to multiple outputs (legal) but inclear how to do in opentimer
       overwrite_dpin2net.insert_or_assign(driver_dpin.get_compact_driver(), driver_name);
     }
   });
 
   // 2nd: populate all the net names
-  for (const auto node : g->fast()) {
+  for (const auto node : g->forward(true)) {
     auto op = node.get_type_op();
-    if (op != Ntype_op::Sub)
+    if (op == Ntype_op::Const || op==Ntype_op::AttrSet)
       continue;
+
+    bool root_track = Ntype::is_pin_trackable(op);
+    if (root_track) {
+      auto wname = node.get_driver_pin().get_wire_name();
+      if (op == Ntype_op::Set_mask) {
+        auto a_dpin     = node.get_sink_pin_driver("a");
+        auto mask_dpin  = node.get_sink_pin_driver("mask");
+        auto value_dpin = node.get_sink_pin_driver("value");
+        if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
+          node.dump();
+          Pass::error("Invalid corrupt set_mask node (cprop should have delete it)");
+          return;
+        }
+        if (!mask_dpin.is_type_const()) {
+          node.dump();
+          Pass::error("opentimer can not handle non-constant masks (cprop/tmap first)");
+          return;
+        }
+        auto mask_const = mask_dpin.get_type_const();
+        pin_tracker.add_set_mask(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), mask_const, value_dpin.get_wire_name());
+      }else if (op == Ntype_op::Get_mask) {
+        auto a_dpin     = node.get_sink_pin_driver("a");
+        auto mask_dpin  = node.get_sink_pin_driver("mask");
+        if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
+          node.dump();
+          Pass::error("Invalid corrupt set_mask node (cprop should have delete it)");
+          return;
+        }
+        if (!mask_dpin.is_type_const()) {
+          node.dump();
+          Pass::error("opentimer can not handle non-constant masks (cprop/tmap first)");
+          return;
+        }
+        auto mask_const = mask_dpin.get_type_const();
+        pin_tracker.add_get_mask(wname, a_dpin.get_wire_name(), mask_const);
+      }else{
+        node.dump();
+        Pass::error("opentimer needs a tmap/synthesized netlist");
+        return;
+      }
+    }
 
     // setup driver pins and nets
     for (const auto &dpin : node.out_connected_pins()) {
-      if (dpin.is_graph_io())
+      I(dpin.is_hierarchical());
+      if (dpin.is_graph_io()) {
+        I(!root_track);
         continue;
-      timer.insert_net(dpin.get_wire_name());
+      }
+      auto wname = dpin.get_wire_name();
+
+      if (root_track) {
+        const auto &pv = pin_tracker.get_pin_vector(wname);
+
+        if (pv.size()==1) { // single bit tracking result
+          auto dpin_cd = dpin.get_compact_driver();
+
+          if (pv[0].pos) {
+            auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
+            overwrite_dpin2net.insert_or_assign(dpin_cd, bus_bit_name);
+          }else{
+            overwrite_dpin2net.insert_or_assign(dpin_cd, pv[0].id);
+          }
+        }
+      }else{
+        timer.insert_net(wname);
+      }
     }
   }
 
-  // 3rd: populate the cells (since all the names are populated, any order is fine)
-  for (const auto node : g->fast(false)) {
+  // 3rd: populate the cells
+  for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
-
-    if (op == Ntype_op::Const)
-      continue;  // may be used later when connecting sub/getmask
-
-    if (op == Ntype_op::Get_mask) {
-      auto a_dpin = node.get_sink_pin("a").get_driver_pin();
-      if (a_dpin.is_graph_io()) {
-        overwrite_dpin2net.insert_or_assign(node.get_driver_pin().get_compact_driver(), a_dpin.get_name());
-        continue;
-      }
-      node.dump();
-      I(false);
-      // FIXME: in get_mask goes to input, pick the expanded bit name directly (set the name in get_mask.dpin??)
-      // FIXME: create a cell (buffer ?) to pick wire
+    if (op == Ntype_op::Const || op==Ntype_op::AttrSet)
       continue;
-    }
-    if (op == Ntype_op::Set_mask) {
-      auto dpin = node.get_driver_pin();
-      if (dpin.is_graph_io()) {
-        continue;
-      }
-      node.dump();
-      continue;
-      I(false);
-      // FIXME: in get_mask goes to input, pick the expanded bit name directly (set the name in get_mask.dpin??)
-      // FIXME: create a cell (buffer ?) to pick wire
-      continue;
-    }
 
-    if (op == Ntype_op::AttrSet) {
-      continue; // Some may be left but it is not affecting synthesis
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) { // mask handled in previous loop
+      continue;
     }
 
     if (op != Ntype_op::Sub) {
       Pass::error("opentimer pass needs the lgraph to be tmap, found cell {} with type {}\n",
                   node.debug_name(),
                   Ntype::get_name(op));
-      continue;
+      return;
     }
 
     auto       &sub_node      = node.get_type_sub_node();
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
-    //fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
     timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
@@ -169,17 +235,19 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       auto wire_name = get_driver_net_name(dpin);
 
       timer.connect_pin(pin_name, wire_name);
-      //fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
     }
 
     // connect input pins
     for (const auto &e : node.inp_edges()) {
+      // Any input with multiple bits should connect with a get_mask (no busses allowed)
+      // 2bits because a signal can be signed case
+      I(!(e.driver.is_graph_input() && e.driver.get_bits()>2));
+
       //I(get_driver_net_name(e.driver) == e.driver.get_wire_name());
       auto wire_name = get_driver_net_name(e.driver);
       auto pin_name  = absl::StrCat(instance_name, ":", e.sink.get_pin_name());
 
       timer.connect_pin(pin_name, wire_name);
-      //fmt::print("   pin_name:{} wire_name:{}\n", pin_name, wire_name);
     }
   }
 
@@ -187,23 +255,21 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   g->each_graph_input([this](Node_pin &dpin) {
     auto pname = dpin.get_name();
 
-    timer.set_at(pname, ot::MIN, ot::FALL, 0.0);
-    timer.set_at(pname, ot::MIN, ot::RISE, 0.0);
-    timer.set_at(pname, ot::MAX, ot::FALL, 0.0);
-    timer.set_at(pname, ot::MAX, ot::RISE, 0.0);
-
-    timer.set_slew(pname, ot::MAX, ot::FALL, 0.0);
-    timer.set_slew(pname, ot::MAX, ot::RISE, 0.0);
-    timer.set_slew(pname, ot::MIN, ot::FALL, 0.0);
-    timer.set_slew(pname, ot::MIN, ot::RISE, 0.0);
+    set_input_delays(pname);
+    for(auto i=1;i<dpin.get_bits();++i) {
+      auto bus_bit_name = absl::StrCat(pname, ".", str_tools::to_s(i));
+      set_input_delays(bus_bit_name);
+    }
   });
+
   g->each_graph_output([this](Node_pin &dpin) {
     auto pname = dpin.get_name();
 
-    timer.set_rat(pname, ot::MIN, ot::FALL, 0.0);
-    timer.set_rat(pname, ot::MIN, ot::RISE, 0.0);
-    timer.set_rat(pname, ot::MAX, ot::FALL, 0.0);
-    timer.set_rat(pname, ot::MAX, ot::RISE, 0.0);
+    set_output_delays(pname);
+    for(auto i=1;i<dpin.get_bits();++i) {
+      auto bus_bit_name = absl::StrCat(pname, ".", str_tools::to_s(i));
+      set_output_delays(bus_bit_name);
+    }
   });
 }
 
@@ -241,7 +307,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
 
   const auto &pins = timer.pins();
 
-  for (const auto node : g->fast()) {
+  for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub)
       continue;
@@ -250,12 +316,13 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
-    //fmt::print("CELL: instance_name:{} type_name:{}\n", instance_name, type_name);
     timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
     for (auto &dpin : node.out_connected_pins()) {
+
       auto pin_name = absl::StrCat(instance_name, ":", dpin.get_pin_name());
+
       auto it = pins.find(pin_name);
       I(it != pins.end()); // just inserted before
 
@@ -312,7 +379,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     voltage = *x;
   }
 
-  for (const auto node : g->fast()) {
+  for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub)
       continue;
@@ -375,9 +442,6 @@ void Pass_opentimer::populate_table(Lgraph *lg) {
       auto delay = dpin.get_delay();
       if (delay < margin_delay)
         continue;
-
-      fmt::print("---------FAST delay:{}\n", delay);
-      node.dump();
 
       int color = 100 * ((delay - margin_delay)/(max_delay - margin_delay));
 

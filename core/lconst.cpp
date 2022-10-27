@@ -438,6 +438,42 @@ bool Lconst::is_known_true() const {
   return true;  // plain string
 }
 
+std::vector<std::pair<int, int>> Lconst::get_mask_range_pairs() const {
+  std::vector<std::pair<int, int>> pairs;
+
+  if (num==0)
+    return pairs;
+
+  Number tmp_num = num;
+  if (num<0) {
+    tmp_num = -num - 1;
+    // There is no NOT in boost
+    for(auto i=0;i<get_bits();++i) {
+      tmp_num = boost::multiprecision::bit_flip(tmp_num, i);
+    }
+  }
+
+  auto start_pos = 0u;
+
+  while(tmp_num) {
+    auto delta_pos = boost::multiprecision::lsb(tmp_num);
+    start_pos += delta_pos;
+    tmp_num >>= delta_pos;
+    size_t nones = 0;
+    while (true) {
+      if (!boost::multiprecision::bit_test(tmp_num, nones))
+        break;
+      ++nones;
+    }
+    tmp_num >>= nones;
+    pairs.emplace_back(std::pair<int,int>(start_pos,nones));
+
+    start_pos += nones;
+  }
+
+  return pairs;
+}
+
 std::pair<int, int> Lconst::get_mask_range() const {
   if (num == 0)
     return std::make_pair(-1, -1);  // No continuous range

@@ -457,6 +457,7 @@ int main(int argc, char** argv) {
       } while ((cinput == nullptr) && (errno == EAGAIN));
 
       if (cinput == nullptr) {
+        fmt::print("errno:{}\n",errno);
         break;
       }
       if (cinput[0] == 0) {

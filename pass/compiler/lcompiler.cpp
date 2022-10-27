@@ -59,10 +59,10 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
   }
 
   top_lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
-    Bitwidth bw(false, 10);
+    Bitwidth bw(false, 11);
     Cprop    cp(false);
 
-    fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+    //fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
     cp.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 

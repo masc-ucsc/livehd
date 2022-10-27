@@ -225,6 +225,10 @@ public:
   Node_pin get_driver_pin_raw(Port_ID pid) const;
   Node_pin get_sink_pin_raw(Port_ID pid) const;
 
+  Node_pin get_sink_pin_driver(std::string_view pname) const {
+    return get_sink_pin(pname).get_driver_pin();
+  }
+
   Node_pin get_driver_pin_slow(std::string_view pname) const;
   Node_pin get_driver_pin(std::string_view pname) const {
     assert(pname.size());

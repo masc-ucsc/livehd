@@ -415,6 +415,7 @@ std::string Node_pin::get_wire_name() const {
   std::string root_name;
   if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
     root_name = top_g->ref_htree()->get_name(hidx);
+    root_name.append(1,',');
   }
 
   const auto *ref = current_g->ref_node_pin_name_map();
@@ -423,11 +424,11 @@ std::string Node_pin::get_wire_name() const {
     if (root_name.empty())
       return it->second;
 
-    return absl::StrCat(root_name, ",", it->second);
+    return absl::StrCat(root_name, it->second);
   }
 
   // WARNING: Must start with "_" to indicate temp name
-  return absl::StrCat("_", root_name, ",p", get_root_idx().value, "_", pid);
+  return absl::StrCat("_", root_name, "p", get_root_idx().value, "_", pid);
 }
 
 std::string_view Node_pin::get_hier_name() const {
