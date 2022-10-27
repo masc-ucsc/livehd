@@ -68,6 +68,9 @@ public:
       auto end   = p.first + p.second; // [start,end)
       auto pos   = start;
 
+      if (pv.size()<=end)
+        pv.resize(end);
+
       while(pos<end) {
         if (v_pv.size()<=pick_v_pos) {
           pv[pos] = v_pv.back();
