@@ -879,11 +879,12 @@ void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
   }
 
   Lconst max_val(0);
+  Lconst min_val(0);
   if (!any_negative) {
     max_val = (Lconst(1UL) << Lconst(max_bits - 1)) - 1;
+  }else{
+    min_val = ((Lconst(1UL) << Lconst(max_bits - 1)) - Lconst(1)).not_op();
   }
-
-  auto min_val = ((Lconst(1UL) << Lconst(max_bits - 1)) - Lconst(1)).not_op();
 
   adjust_bw(node.get_driver_pin(), Bitwidth_range(min_val, max_val));
 }
@@ -1586,7 +1587,7 @@ void Bitwidth::bw_pass(Lgraph *lg) {
 #endif
 
   // note: only enable for detailed bitwidth debug
-  // dump(lg);
+  //dump(lg);
 }
 
 void Bitwidth::dump(Lgraph *lg) {
