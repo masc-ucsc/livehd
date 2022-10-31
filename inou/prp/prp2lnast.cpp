@@ -126,6 +126,8 @@ void Prp2lnast::process_node(TSNode node) {
 
   if (node_type == "statement")
     process_statement(node);
+  else if (node_type == "match_expression")
+    process_match_expression(node);
   else if (node_type == "binary_expression")
     process_binary_expression(node);
   else if (node_type == "unary_expression")
@@ -148,10 +150,10 @@ void Prp2lnast::process_node(TSNode node) {
     process_scope_statement(node);
   else if (node_type == "expression_statement")
     process_expression_statement(node);
-  else if (node_type == "if_statement")
-    process_if_statement(node);
-  else if (node_type == "for_statement")
-    process_for_statement(node);
+  else if (node_type == "if_expression")
+    process_if_expression(node);
+  else if (node_type == "for_expression")
+    process_for_expression(node);
   else if (node_type == "while_statement")
     process_while_statement(node);
   else if (node_type == "function_call_statement")
@@ -213,84 +215,22 @@ void Prp2lnast::process_scope_statement(TSNode node) {
   }
 }
 
+void Prp2lnast::process_stmt_list(TSNode node) {
+  node = get_named_child(node);
+  while (!ts_node_is_null(node)) {
+    fmt::print("{}\n", get_text(node));
+    process_node(node);
+    ret_node = primary_node_stack.top();
+    primary_node_stack.pop();
+    node = get_named_sibling(node);
+  }
+}
+
 void Prp2lnast::process_expression_statement(TSNode node) {
   node = get_child(node);
   process_node(node);
   // TODO: Consider expression statement as function return statement
   primary_node_stack.pop();
-}
-
-void Prp2lnast::process_if_statement(TSNode node) {
-  node = get_named_child(node);
-
-  // TODO: Handle unique if
-  std::vector<Lnast_node> cond_refs;
-  std::vector<TSNode>     code_blocks;
-  
-  enter_scope(Expression_state::Rvalue);
-  process_node(node);
-  cond_refs.push_back(primary_node_stack.top());
-  primary_node_stack.pop();
-  node = get_sibling(node);
-  code_blocks.push_back(node);
-
-  node = get_sibling(node);
-  while (!ts_node_is_null(node)) {
-    if (get_text(node) == "elif") {
-      node = get_sibling(node);
-      process_node(node);
-      cond_refs.push_back(primary_node_stack.top());
-      primary_node_stack.pop();
-      node = get_sibling(node);
-      code_blocks.push_back(node);
-    } else if (get_text(node) == "else") {
-      node = get_sibling(node);
-      code_blocks.push_back(node);
-    }
-    node = get_sibling(node);
-  }
-  leave_scope();
-
-  auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
-  for (size_t i = 0; i < cond_refs.size(); ++i) {
-    enter_scope(Expression_state::Rvalue);
-    lnast->add_child(if_index, cond_refs[i]);
-    auto original_stmts_index = stmts_index;
-    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
-    process_node(code_blocks[i]);
-    stmts_index = original_stmts_index;
-    leave_scope();
-  }
-  if (code_blocks.size() > cond_refs.size()) {
-    enter_scope(Expression_state::Rvalue);
-    auto original_stmts_index = stmts_index;
-    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
-    process_node(code_blocks.back());
-    stmts_index = original_stmts_index;
-    leave_scope();
-  }
-}
-
-void Prp2lnast::process_for_statement(TSNode node) {
-  auto inode = get_child(node, "index");
-  auto dnode = get_child(node, "data");
-  auto cnode = get_child(node, "code");
-
-  enter_scope(Expression_state::Rvalue);
-  process_node(inode);
-  auto index = primary_node_stack.top();
-  primary_node_stack.pop();
-  process_node(dnode);
-  auto data = primary_node_stack.top();
-  primary_node_stack.pop();
-  auto for_index = lnast->add_child(stmts_index, Lnast_node::create_for());
-  lnast->add_child(for_index, index);
-  lnast->add_child(for_index, data);
-  auto original_stmts_index = stmts_index;
-  stmts_index = lnast->add_child(for_index, Lnast_node::create_stmts());
-  process_node(cnode);
-  stmts_index = original_stmts_index;
-  leave_scope();
 }
 
 void Prp2lnast::process_while_statement(TSNode node) {
@@ -306,24 +246,6 @@ void Prp2lnast::process_while_statement(TSNode node) {
   stmts_index = lnast->add_child(while_index, Lnast_node::create_stmts());
   process_node(code);
   stmts_index = original_stmts_index;
-}
-
-void Prp2lnast::process_match_statement(TSNode node) {
-	fmt::print("{}\n", get_text(node));
-	/*
-	// TODO: process stmt_list
-	auto value = primary_node_stack.top();
-	primary_node_stack.pop();
-	auto match_list_node = get_child(node, 3);
-	if (ts_node_is_null(match_list_node)) return;
-	auto match_item_node = get_child(match_list_node);
-	while (!ts_node_is_null(match_item_node)) {
-		auto cond_node = get_child(match_item_node, "cond");
-		auto code_node = get_child(match_item_node, "code");
-
-		match_item_node = get_sibling(match_item_node);
-	}
-	*/
 }
 
 void Prp2lnast::process_function_call_statement(TSNode node) {
@@ -755,6 +677,165 @@ void Prp2lnast::process_attr_list(TSNode node) {
     }
     node = get_named_sibling(node);
   }
+}
+
+void Prp2lnast::process_if_expression(TSNode node) {
+  node = get_named_child(node);
+
+  // TODO: Handle unique if
+  std::vector<Lnast_node> cond_refs;
+  std::vector<TSNode>     code_blocks;
+  
+  enter_scope(Expression_state::Rvalue);
+  process_node(node);
+  cond_refs.push_back(primary_node_stack.top());
+  primary_node_stack.pop();
+  node = get_sibling(node);
+  code_blocks.push_back(node);
+
+  node = get_sibling(node);
+  while (!ts_node_is_null(node)) {
+    if (get_text(node) == "elif") {
+      node = get_sibling(node);
+      process_node(node);
+      cond_refs.push_back(primary_node_stack.top());
+      primary_node_stack.pop();
+      node = get_sibling(node);
+      code_blocks.push_back(node);
+    } else if (get_text(node) == "else") {
+      node = get_sibling(node);
+      code_blocks.push_back(node);
+    }
+    node = get_sibling(node);
+  }
+  leave_scope();
+
+  auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
+  for (size_t i = 0; i < cond_refs.size(); ++i) {
+    enter_scope(Expression_state::Rvalue);
+    lnast->add_child(if_index, cond_refs[i]);
+    auto original_stmts_index = stmts_index;
+    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+    process_node(code_blocks[i]);
+    stmts_index = original_stmts_index;
+    leave_scope();
+  }
+  if (code_blocks.size() > cond_refs.size()) {
+    enter_scope(Expression_state::Rvalue);
+    auto original_stmts_index = stmts_index;
+    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+    process_node(code_blocks.back());
+    stmts_index = original_stmts_index;
+    leave_scope();
+  }
+  // FIXME: dummy ref for expression statement
+  primary_node_stack.push(get_tmp_ref());
+}
+
+
+
+void Prp2lnast::process_for_expression(TSNode node) {
+  auto inode = get_child(node, "index");
+  auto dnode = get_child(node, "data");
+  auto cnode = get_child(node, "code");
+
+  enter_scope(Expression_state::Rvalue);
+  process_node(inode);
+  auto index = primary_node_stack.top();
+  primary_node_stack.pop();
+  process_node(dnode);
+  auto data = primary_node_stack.top();
+  primary_node_stack.pop();
+  auto for_index = lnast->add_child(stmts_index, Lnast_node::create_for());
+  lnast->add_child(for_index, index);
+  lnast->add_child(for_index, data);
+  auto original_stmts_index = stmts_index;
+  stmts_index = lnast->add_child(for_index, Lnast_node::create_stmts());
+  process_node(cnode);
+  stmts_index = original_stmts_index;
+  leave_scope();
+  // FIXME: dummy ref for expression statement
+  primary_node_stack.push(get_tmp_ref());
+}
+
+
+void Prp2lnast::process_match_expression(TSNode node) {
+  std::vector<Lnast_node> cond_refs;
+  std::vector<TSNode>     code_blocks;
+
+  auto stmt_list_node = get_child(node, "stmt_list");
+  process_stmt_list(stmt_list_node);
+  auto lhs = ret_node;
+	auto match_list_node = get_child(node, "match_list");
+	if (ts_node_is_null(match_list_node)) return;
+  // Step 1: gather all conditions
+	auto match_item_node = get_child(match_list_node);
+	while (!ts_node_is_null(match_item_node)) {
+    std::string node_type(ts_node_type(match_item_node));
+    if (node_type == "match_operator") {
+	  	auto op = get_text(match_item_node);
+      Lnast_node op_node;
+      if (op == "<")
+        op_node = Lnast_node::create_lt();
+      else if (op == "<=")
+        op_node = Lnast_node::create_le();
+      else if (op == ">")
+        op_node = Lnast_node::create_gt();
+      else if (op == ">=")
+        op_node = Lnast_node::create_ge();
+      else if (op == "==")
+        op_node = Lnast_node::create_eq();
+      else if (op == "!=")
+        op_node = Lnast_node::create_ne();
+      auto rhs_node = get_sibling(match_item_node);
+      process_node(rhs_node);
+      auto rhs = primary_node_stack.top();
+      primary_node_stack.pop();
+      auto expr_index = lnast->add_child(stmts_index, op_node);
+      auto ref = get_tmp_ref();
+      lnast->add_child(expr_index, ref);
+      lnast->add_child(expr_index, lhs);
+      lnast->add_child(expr_index, rhs);
+      cond_refs.push_back(ref);
+      match_item_node = get_sibling(rhs_node);
+    } else if (get_text(match_item_node) != "else") {
+      auto rhs_node = match_item_node;
+      process_node(rhs_node);
+      auto rhs = primary_node_stack.top();
+      primary_node_stack.pop();
+      auto expr_index = lnast->add_child(stmts_index, Lnast_node::create_eq());
+      auto ref = get_tmp_ref();
+      lnast->add_child(expr_index, ref);
+      lnast->add_child(expr_index, lhs);
+      lnast->add_child(expr_index, rhs);
+      cond_refs.push_back(ref);
+      match_item_node = get_sibling(rhs_node);
+    } else {
+      // TODO: put else branch to the end of code_blocks
+    }
+		code_blocks.push_back(match_item_node);
+		match_item_node = get_sibling(match_item_node);
+	}
+  auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
+  for (size_t i = 0; i < cond_refs.size(); ++i) {
+    enter_scope(Expression_state::Rvalue);
+    lnast->add_child(if_index, cond_refs[i]);
+    auto original_stmts_index = stmts_index;
+    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+    process_node(code_blocks[i]);
+    stmts_index = original_stmts_index;
+    leave_scope();
+  }
+  if (code_blocks.size() > cond_refs.size()) {
+    enter_scope(Expression_state::Rvalue);
+    auto original_stmts_index = stmts_index;
+    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+    process_node(code_blocks.back());
+    stmts_index = original_stmts_index;
+    leave_scope();
+  }
+  // FIXME: dummy ref for expression statement
+  primary_node_stack.push(get_tmp_ref());
 }
 
 void Prp2lnast::process_binary_expression(TSNode node) {

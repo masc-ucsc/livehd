@@ -63,12 +63,14 @@ void Lnast_writer::write_top() {
 }
 
 void Lnast_writer::write_stmts() {
-  if (!move_to_child()) return;
-  do {
-    print_line("");
-    write_lnast();
-    print("\n");
-  } while (move_to_sibling());
+  if (move_to_child()) {
+    do {
+      print_line("");
+      write_lnast();
+      print("\n");
+    } while (move_to_sibling());
+  }
+  move_to_parent();
 }
 
 void Lnast_writer::write_if() {
@@ -82,6 +84,38 @@ void Lnast_writer::write_if() {
   write_lnast();
   --depth;
   print_line("}}");
+  if (move_to_sibling()) {
+    if (is_last_child()) {
+      print("else {{\n");
+      ++depth;
+      write_lnast();
+      --depth;
+      print_line("}}");
+    } else {
+      while (!is_last_child()) {
+        print(" ");
+        print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+        print(" (");
+        write_lnast();
+        move_to_sibling();
+        print(") {{\n");
+        ++depth;
+        write_lnast();
+        --depth;
+        print_line("}}");
+        if (!move_to_sibling()) break;
+        if (is_last_child()) {
+          print(" ");
+          print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+          print(" {{\n");
+          ++depth;
+          write_lnast();
+          --depth;
+          print_line("}}");
+        }
+      }
+    }
+  }
   move_to_parent();
 }
 
