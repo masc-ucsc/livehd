@@ -1,6 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+// Not same, but similar idea and different representation:
+//
+// Meyerovich, Leo A., Todd Mytkowicz, and Wolfram Schulte. "Data parallel programming for irregular tree computations." (2011).
+
 // TODO: Decide order and fields. Best order:
 // 01: ?? | 1
 // 02: ?? -── 1.1
