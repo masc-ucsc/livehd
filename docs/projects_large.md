@@ -387,6 +387,22 @@ Main features:
 * Bridge to allow from XLS IR to LiveHD
 * Bridge to allow from Lgraph to XLS IR
 
+## (hard) Google Circuit-Training Floorplanner
+
+The circuit training (https://github.com/google-research/circuit_training) provide a mechanism to floorplan
+some blocks. It uses a placer and AI, but the code is quite messy. Namely:
+
+-It uses hmetis (license is not open)
+-Several python scripts (not easy to deploy or automatic)
+-To estimate time, it would be nicer to use opentimer/livehd.
+
+The idea would be something more automatic. E.g:
+
+> lgraph.open X |> pass.compiler |> pass.synth |> pass.circuit_training 
+
+
+It would be good if the project is tested also with FPGAs and check with something like nextpnr/vivado
+
 ## (very hard) FPGA Placer
 
 Build an analytical placer for FPGAs based on Ripple-FPGA.
