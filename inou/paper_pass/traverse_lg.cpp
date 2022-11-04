@@ -57,95 +57,95 @@ void Traverse_lg::travers(Eprp_var& var) {
 #endif
 
 #ifdef DEBUG
-  for (const auto& l : var.lgs) {
-    p.do_travers(l);
-  }
+//   for (const auto& l : var.lgs) {
+//     p.do_travers(l);
+//   }
 #endif
 
 }
 
 //FOR DEBUG:
-void Traverse_lg::do_travers(Lgraph* lg) {
-  //std::string_view module_name = lg->get_name();
-  std::ofstream ofs;
-  ofs.open(std::string(lg->get_name()), std::ofstream::out | std::ofstream::trunc);
-  if(!ofs.is_open()) {
-    fmt::print("unable to open file {}.txt\n",lg->get_name());
-    return ;
-  }
-  ofs<<std::endl<<std::endl<<lg->get_name()<<std::endl<<std::endl<<std::endl;
-
-  for (const auto& node : lg->forward(true)) {
-    ofs<<"===============================\n";
-    ofs<<node.debug_name()<<std::endl; //this is the main node for which we will record IO
-    if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
-      ofs<<"---------------\n";
-      continue; //do not keep such nodes in nodeIOmap
-    }
-
-    
-    if (node.has_inputs()){
-    ofs<<"INPUTS:\n";
-      for (const auto& indr : node.inp_drivers()) {
-        if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
-        get_input_node(indr, ofs);
-      }
-    }
-
-    if (node.has_outputs()) {
-    ofs<<"OUTPUTS:\n";
-		  for (const auto& oute : node.out_edges() ) {
-        get_output_node(oute.sink,ofs);
-      }
-    }
-
-  }//enf of for lg-> traversal
-
-  if(ofs.is_open()) {
-    ofs.close();
-  }
-}
-
-
-void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
-  auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
-    if(node.is_graph_io()) {
-      ofs<<node_pin.get_pin_name()<<std::endl;
-    } else {
-      ofs<<node.get_type_name();
-      //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      //else 
-      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
-      ofs<<std::endl;
-    }
-    return;
-  } else {
-      for (const auto& indr : node.inp_drivers()) {
-        get_input_node(indr,ofs);
-      }
-  }
-}
-
-void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) {
-  auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_graph_output() ) {
-    if(node.is_graph_io()) {
-      ofs<<node_pin.get_pin_name()<<std::endl;
-    } else {
-      ofs<<node.get_type_name();
-      //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-      //else 
-      if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
-      ofs<<std::endl;
-    }
-    return;
-  } else {
-		  for (const auto& oute : node.out_edges() ) {
-        get_output_node(oute.sink,ofs);
-      }
-  }
-}
+// void Traverse_lg::do_travers(Lgraph* lg) {
+//   //std::string_view module_name = lg->get_name();
+//   std::ofstream ofs;
+//   ofs.open(std::string(lg->get_name()), std::ofstream::out | std::ofstream::trunc);
+//   if(!ofs.is_open()) {
+//     fmt::print("unable to open file {}.txt\n",lg->get_name());
+//     return ;
+//   }
+//   ofs<<std::endl<<std::endl<<lg->get_name()<<std::endl<<std::endl<<std::endl;
+// 
+//   for (const auto& node : lg->forward(true)) {
+//     ofs<<"===============================\n";
+//     ofs<<node.debug_name()<<std::endl; //this is the main node for which we will record IO
+//     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
+//       ofs<<"---------------\n";
+//       continue; //do not keep such nodes in nodeIOmap
+//     }
+// 
+//     
+//     if (node.has_inputs()){
+//     ofs<<"INPUTS:\n";
+//       for (const auto& indr : node.inp_drivers()) {
+//         if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
+//         get_input_node(indr, ofs);
+//       }
+//     }
+// 
+//     if (node.has_outputs()) {
+//     ofs<<"OUTPUTS:\n";
+// 		  for (const auto& oute : node.out_edges() ) {
+//         get_output_node(oute.sink,ofs);
+//       }
+//     }
+// 
+//   }//enf of for lg-> traversal
+// 
+//   if(ofs.is_open()) {
+//     ofs.close();
+//   }
+// }
+// 
+// 
+// void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
+//   auto node = node_pin.get_node();
+//   if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
+//     if(node.is_graph_io()) {
+//       ofs<<node_pin.get_pin_name()<<std::endl;
+//     } else {
+//       ofs<<node.get_type_name();
+//       //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+//       //else 
+//       if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
+//       ofs<<std::endl;
+//     }
+//     return;
+//   } else {
+//       for (const auto& indr : node.inp_drivers()) {
+//         get_input_node(indr,ofs);
+//       }
+//   }
+// }
+// 
+// void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) {
+//   auto node = node_pin.get_node();
+//   if(node.is_type_flop() || node.is_graph_output() ) {
+//     if(node.is_graph_io()) {
+//       ofs<<node_pin.get_pin_name()<<std::endl;
+//     } else {
+//       ofs<<node.get_type_name();
+//       //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
+//       //else 
+//       if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
+//       ofs<<std::endl;
+//     }
+//     return;
+//   } else {
+// 		  for (const auto& oute : node.out_edges() ) {
+//         get_output_node(oute.sink,ofs);
+//       }
+//   }
+// }
 
 //FOR SET:
 //DE_DUP
@@ -206,8 +206,35 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
-			  for (const auto & ine : node.inp_edges()) {
-          get_input_node(ine.driver, in_comb_set, io_comb_set, true);
+        if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
+          auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
+          for(auto in_node: vec_from_map) {
+            in_comb_set.insert( std::to_string(in_node.get_nid()) );
+            io_comb_set.insert( std::to_string(in_node.get_nid()) );
+          }
+        } else {
+			    for (const auto & ine : node.inp_edges()) {
+            auto v = get_input_node(ine.driver, in_comb_set, io_comb_set, true);
+            //if(v.get_nid().value!=0) {
+              if (intermediate_inputs_map.find(v)!=intermediate_inputs_map.end()) {
+                //node already in map
+                for (auto v_ins: intermediate_inputs_map[v].inputs_of_node) {
+                  (intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v_ins);
+                }
+              } else {
+                (intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v);
+              }
+            //}
+          }        
+          intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
+          fmt::print("The intermediate_inputs_map:\n");
+          for(const auto & [k,v]:intermediate_inputs_map){
+            fmt::print("{} ::: \t",k.get_nid());
+            for (const auto & v_val: v.inputs_of_node) {
+              fmt::print("{}\t", v_val.get_nid());
+            }
+            fmt::print("{} \n", v.ins_calc_completed);
+          }
         }
 			  for (const auto& oute : node.out_edges() ) {
           get_output_node(oute.sink, out_comb_set, io_comb_set, true);
@@ -969,19 +996,30 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
-void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
+Node::Compact_flat Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
 	get_input_node_count++;
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_graph_input()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+
+  if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
+    auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
+    for(auto in_node: vec_from_map) {//FIXME: all IO get nid will put "1" in the in_set
+      in_set.insert( std::to_string(in_node.get_nid()) );
+      io_set.insert( std::to_string(in_node.get_nid()) );
+    }
+    return node.get_compact_flat();
+  }
+  if(node.is_type_flop() || (!node.has_inputs()) || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if (node.is_type_const()) {
       //do not keep const for future reference
-      return;
+      //return Node::Compact_flat();
     } else if (node.is_graph_io()) {
       auto tmp_x = node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name();
       if (tmp_x!="reset" && tmp_x!="clock") {
         in_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
         io_set.insert(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
+        //return node.get_compact_flat();
       }
+      //return Node::Compact_flat();
     } else {
       bool isFlop = (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false));
       std::string temp_str (isFlop?"flop":(node.is_type_sub()?(std::string(node.get_type_sub_node().get_name())) : node.get_type_name()));//if it is a flop, write "flop" else evaluate
@@ -1005,19 +1043,28 @@ void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>
       in_set.insert(temp_str);
       if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
     }
-    return;
+    return node.get_compact_flat();
   } else {
-			for (const auto & ine : node.inp_edges()) {
-        get_input_node(ine.driver, in_set, io_set, addToCFL);
-      }
-  }
-}
+
+    for (const auto & ine : node.inp_edges()) {
+      auto inter_node_IO_captured = get_input_node(ine.driver, in_set, io_set, addToCFL);
+      /*For saving the inputs of all nodes traversed so that re-computation can be avoided. Potential speedup.*/ 
+      //if(inter_node_IO_captured.get_nid().value!=0) {
+        (intermediate_inputs_map[node.get_compact_flat()].inputs_of_node).emplace_back(inter_node_IO_captured);
+      //}
+
+    }//end of for inp_edges
+    intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
+  }//end of else
+  
+  return node.get_compact_flat();
+}//end of get_input_node
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
 void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL) {
 	get_output_node_count++;
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || node.is_graph_output()  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+  if(node.is_type_flop() || (!node.has_outputs())  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
     if(node.is_graph_io()) {
       //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       out_set.insert(node_pin.get_pin_name());

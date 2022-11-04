@@ -22,6 +22,8 @@
 
 class Traverse_lg : public Pass {
 public:
+  int get_input_node_count;
+  int get_output_node_count;
   // typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> setMap_nodeKey;
   // typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
@@ -52,6 +54,18 @@ private:
     result.insert(b.begin(), b.end());
     return result;
   }
+  struct intermediate_inputs {
+    std::vector<Node::Compact_flat> inputs_of_node;
+    bool ins_calc_completed;//inputs_of_node calculated for this node?
+  };
+  struct intermediate_outputs {
+    std::vector<Node::Compact_flat> outputs_of_node;
+    bool outs_calc_completed;//inputs_of_node calculated for this node?
+  };
+  typedef struct intermediate_inputs intermediateInp;
+  typedef struct intermediate_outputs intermediateOut;
+  absl::node_hash_map<Node::Compact_flat, intermediateInp> intermediate_inputs_map;
+  absl::node_hash_map<Node::Compact_flat, intermediateOut> intermediate_outputs_map;
   /*
 #ifdef DE_DUP
   setMap nodeIOmap;
@@ -59,14 +73,14 @@ private:
 */
 protected:
   //FOR DEBUG:
-  void do_travers(Lgraph* g);
-  void get_input_node(const Node_pin &pin, std::ofstream& ofs);
-  void get_output_node(const Node_pin &pin, std::ofstream& ofs);
+  // void do_travers(Lgraph* g);
+  // void get_input_node(const Node_pin &pin, std::ofstream& ofs);
+  // void get_output_node(const Node_pin &pin, std::ofstream& ofs);
   //FOR SET PART:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
-  void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
+  Node::Compact_flat get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
   void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL = false);
   std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
   void path_traversal(const Node &startPoint_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig);
