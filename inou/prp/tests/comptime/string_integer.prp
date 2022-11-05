@@ -1,0 +1,18 @@
+
+// String <-> Integer conversions
+
+cassert 3 == int("3")
+cassert "-4".int() == -4
+
+cassert (1+2) |> string == "3"
+let v = "33" |> u32
+cassert v == 33
+
+cassert "0b010101".uint() == 0b10101
+
+cassert "-1".uint() == nil
+
+cassert string("hello", " world ", 4) == string("hello") ++ string (" world ") ++ string(4) == "hello world 4"
+
+cassert uint("0xFF") == 255
+
