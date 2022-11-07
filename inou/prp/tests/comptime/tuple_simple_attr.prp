@@ -1,4 +1,7 @@
-
+/*
+:name: tuple_simple
+:type: parsing
+*/
 
 var foo = (a=-1)
 

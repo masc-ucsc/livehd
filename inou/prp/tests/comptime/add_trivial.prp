@@ -1,6 +1,6 @@
 /*
 :name: add_trivial
-:type: parsing
+:type: parsing lnast
 */
 
 let x = 1

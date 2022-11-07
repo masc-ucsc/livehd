@@ -1,3 +1,7 @@
+/*
+:name: setter_complex
+:type: parsing
+*/
 
 let fint:int = _
 cassert fint == 0

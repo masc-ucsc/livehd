@@ -1,6 +1,6 @@
 /*
 :name: attributes
-:type: parsing
+:type: parsing lnast
 */
 
 let top = fun(a::[comptime], b::[comptime], c) {

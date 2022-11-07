@@ -1,3 +1,7 @@
+/*
+:name: enum_hier
+:type: parsing
+*/
 
 let animal = ::enum(
   ,mammal = (

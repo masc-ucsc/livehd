@@ -1,3 +1,7 @@
+/*
+:name: tuple_simple3
+:type: parsing lnast
+*/
 
 // Cases when the tuple has a single entry
 

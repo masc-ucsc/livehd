@@ -1,6 +1,6 @@
 /*
 :name: add_complex
-:type: parsing
+:type: parsing lnast
 */
 
 let c = 1 - -3

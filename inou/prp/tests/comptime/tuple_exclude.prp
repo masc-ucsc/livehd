@@ -1,4 +1,7 @@
-
+/*
+:name: tuple_exclude
+:type: parsing
+*/
 
 let t1 = (a=1,b=2,c=3)
 

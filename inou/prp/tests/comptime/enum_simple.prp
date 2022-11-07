@@ -1,3 +1,7 @@
+/*
+:name: enum_simple
+:type: parsing
+*/
 
 let X = ::enum(
   ,l0

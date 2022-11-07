@@ -1,3 +1,7 @@
+/*
+:name: tuple_simple2
+:type: parsing
+*/
 
 var t = (1,2)
 

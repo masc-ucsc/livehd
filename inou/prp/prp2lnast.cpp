@@ -13,7 +13,7 @@
 
 extern "C" TSLanguage *tree_sitter_pyrope();
 
-Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name) {
+Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only = false) {
   lnast = std::make_unique<Lnast>(module_name);
 
   lnast->set_root(Lnast_node(Lnast_ntype::create_top()));
@@ -33,6 +33,8 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name) {
   ts_root_node     = ts_tree_root_node(tst_tree);
 
   dump();
+
+  if (parse_only) return;
 
   tmp_ref_count = 0;
   is_function_input = false;
@@ -875,6 +877,10 @@ void Prp2lnast::process_binary_expression(TSNode node) {
     lnast_node = Lnast_node::create_eq();
   else if (op == "!=")
     lnast_node = Lnast_node::create_ne();
+  else if (op == "and")
+    lnast_node = Lnast_node::create_logical_and();
+  else if (op == "or")
+    lnast_node = Lnast_node::create_logical_or();
   else
     lnast_node = Lnast_node::create_invalid();
 

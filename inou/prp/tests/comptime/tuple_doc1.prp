@@ -1,3 +1,7 @@
+/*
+:name: tuple_doc1
+:type: parsing
+*/
 
 {
 var a = (

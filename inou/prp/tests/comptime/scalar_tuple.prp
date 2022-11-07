@@ -1,3 +1,8 @@
+/*
+:name: scalar_tuple
+:type: parsing
+*/
+
 // case I
 var a = 2        // a0 =
 let foo = a + 1  // = a0

@@ -1,3 +1,7 @@
+/*
+:name: string_simple
+:type: parsing
+*/
 
 var hello = "hello"
 

@@ -150,7 +150,7 @@ protected:
   inline TSNode    get_named_sibling(const TSNode &) const;
 
 public:
-  Prp2lnast(std::string_view filename, std::string_view module_name);
+  Prp2lnast(std::string_view filename, std::string_view module_name, bool parse_only);
 
   ~Prp2lnast();
 

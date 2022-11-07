@@ -13,6 +13,7 @@ static Pass_plugin sample("inou_prp", Inou_prp::setup);
 void Inou_prp::setup() {
   Eprp_method m1("inou.prp", "Parse the input file and convert to an LNAST", &Inou_prp::parse_to_lnast);
   m1.add_label_required("files", "prp files to process (comma separated)");
+  m1.add_label_optional("parse_only", "skip LNAST translation", "false");
 
   register_pass(m1);
 }
@@ -23,12 +24,13 @@ void Inou_prp::parse_to_lnast(Eprp_var &var) {
   TRACE_EVENT("inou", "PRP_parse_to_lnast");
 
   Inou_prp p(var);
+  bool parse_only = (var.get("parse_only") == "true");
 
   for (const auto &f : absl::StrSplit(p.files, ',')) {
     auto basename       = str_tools::get_str_after_last_if_exists(f, '/');
     auto basename_noext = str_tools::get_str_before_first(basename, '.');
 
-    Prp2lnast converter(f, basename_noext);
+    Prp2lnast converter(f, basename_noext, parse_only);
 
     auto lnast = converter.get_lnast();
 

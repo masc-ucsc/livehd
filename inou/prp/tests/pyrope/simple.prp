@@ -1,6 +1,6 @@
 /*
 :name: simple
-:type: parsing
+:type: parsing lnast
 */
 
 let top = fun(a, b) -> (c, d) {

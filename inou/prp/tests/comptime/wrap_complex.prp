@@ -1,6 +1,6 @@
 /*
 :name: wrap_complex
-:type: parsing
+:type: parsing lnast
 */
 
 var x::[sbits=8] = 0

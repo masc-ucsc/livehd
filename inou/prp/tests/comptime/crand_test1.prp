@@ -1,3 +1,7 @@
+/*
+:name: crand_test
+:type: parsing
+*/
 
 let a=false // boolean type inferred
 

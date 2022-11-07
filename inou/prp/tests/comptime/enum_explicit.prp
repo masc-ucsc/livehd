@@ -1,3 +1,7 @@
+/*
+:name: enum_explicit
+:type: parsing
+*/
 
 let e = ::enum(
   ,v0

@@ -1,6 +1,6 @@
 /*
 :name: wrap_trivial
-:type: parsing
+:type: parsing lnast
 */
 
 var x::[ubits=12] = 0

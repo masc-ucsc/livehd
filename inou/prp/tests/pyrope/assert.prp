@@ -1,6 +1,6 @@
 /*
 :name: assert
-:type: parsing
+:type: parsing lnast
 */
 
 let top = fun {

@@ -1,4 +1,7 @@
-
+/*
+:name: tuple_copy
+:type: parsing
+*/
 
 var foo = (a=40,b=50)
 var bar = (c=60)

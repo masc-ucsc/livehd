@@ -1,3 +1,7 @@
+/*
+:name: scalar_arith1
+:type: parsing
+*/
 
 var x = (((123123+232
         +(0x1322-111+0b111)

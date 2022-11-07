@@ -1,6 +1,6 @@
 /*
 :name: named_tuple
-:type: parsing
+:type: parsing lnast
 */
 
 let top = fun {
