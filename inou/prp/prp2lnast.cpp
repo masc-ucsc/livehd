@@ -39,6 +39,8 @@ Prp2lnast::Prp2lnast(std::string_view filename, std::string_view module_name, bo
   tmp_ref_count = 0;
   is_function_input = false;
   is_function_output = false;
+  // FIXME: Temporary placeholder. Error when ret_node is not set when it should be.
+  ret_node = Lnast_node::create_const("0");
 
   process_description();
 }
@@ -232,6 +234,8 @@ void Prp2lnast::process_expression_statement(TSNode node) {
   node = get_child(node);
   process_node(node);
   // TODO: Consider expression statement as function return statement
+  ret_node = primary_node_stack.top();
+  fmt::print("returned: {}\n", ret_node.token.get_text());
   primary_node_stack.pop();
 }
 
@@ -713,12 +717,17 @@ void Prp2lnast::process_if_expression(TSNode node) {
   leave_scope();
 
   auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
+  auto ret_tmp_ref = get_tmp_ref(); // NOTE: return value when used as an expression
   for (size_t i = 0; i < cond_refs.size(); ++i) {
     enter_scope(Expression_state::Rvalue);
     lnast->add_child(if_index, cond_refs[i]);
     auto original_stmts_index = stmts_index;
     stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
     process_node(code_blocks[i]);
+    // FIXME: handle no-return cases
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, ret_tmp_ref);
+    lnast->add_child(assign_index, ret_node);
     stmts_index = original_stmts_index;
     leave_scope();
   }
@@ -727,14 +736,15 @@ void Prp2lnast::process_if_expression(TSNode node) {
     auto original_stmts_index = stmts_index;
     stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
     process_node(code_blocks.back());
+    // FIXME: handle no-return cases
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, ret_tmp_ref);
+    lnast->add_child(assign_index, ret_node);
     stmts_index = original_stmts_index;
     leave_scope();
   }
-  // FIXME: dummy ref for expression statement
-  primary_node_stack.push(get_tmp_ref());
+  primary_node_stack.push(ret_tmp_ref);
 }
-
-
 
 void Prp2lnast::process_for_expression(TSNode node) {
   auto inode = get_child(node, "index");
@@ -819,12 +829,17 @@ void Prp2lnast::process_match_expression(TSNode node) {
 		match_item_node = get_sibling(match_item_node);
 	}
   auto if_index = lnast->add_child(stmts_index, Lnast_node::create_if());
+  auto ret_tmp_ref = get_tmp_ref();
   for (size_t i = 0; i < cond_refs.size(); ++i) {
     enter_scope(Expression_state::Rvalue);
     lnast->add_child(if_index, cond_refs[i]);
     auto original_stmts_index = stmts_index;
     stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
     process_node(code_blocks[i]);
+    // FIXME: handle no-return cases
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, ret_tmp_ref);
+    lnast->add_child(assign_index, ret_node);
     stmts_index = original_stmts_index;
     leave_scope();
   }
@@ -833,11 +848,14 @@ void Prp2lnast::process_match_expression(TSNode node) {
     auto original_stmts_index = stmts_index;
     stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
     process_node(code_blocks.back());
+    // FIXME: handle no-return cases
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, ret_tmp_ref);
+    lnast->add_child(assign_index, ret_node);
     stmts_index = original_stmts_index;
     leave_scope();
   }
-  // FIXME: dummy ref for expression statement
-  primary_node_stack.push(get_tmp_ref());
+  primary_node_stack.push(ret_tmp_ref);
 }
 
 void Prp2lnast::process_binary_expression(TSNode node) {
