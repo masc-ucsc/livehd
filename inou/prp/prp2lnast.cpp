@@ -854,6 +854,18 @@ void Prp2lnast::process_match_expression(TSNode node) {
     lnast->add_child(assign_index, ret_node);
     stmts_index = original_stmts_index;
     leave_scope();
+  } else {
+    // NOTE: assert unreachable
+    auto original_stmts_index = stmts_index;
+    stmts_index = lnast->add_child(if_index, Lnast_node::create_stmts());
+    auto func_call_index = lnast->add_child(stmts_index, Lnast_node::create_func_call());
+    lnast->add_child(func_call_index, get_tmp_ref());
+    lnast->add_child(func_call_index, Lnast_node::create_const("cassert"));
+    lnast->add_child(func_call_index, Lnast_node::create_const("0b0"));
+    auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
+    lnast->add_child(assign_index, ret_tmp_ref);
+    lnast->add_child(assign_index, Lnast_node::create_const("0b?"));
+    stmts_index = original_stmts_index;
   }
   primary_node_stack.push(ret_tmp_ref);
 }
