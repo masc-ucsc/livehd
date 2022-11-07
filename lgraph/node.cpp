@@ -122,7 +122,7 @@ Node::Compact_flat Node::get_compact_flat() const {
 Graph_library *Node::ref_library() const { return current_g->ref_library(); }
 
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
-  I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
+  //I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
   Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
@@ -687,6 +687,7 @@ void Node::dump() const {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);
     fmt::print(" sub:{} (lgid:{}) (inst:{})\n", sub_name, sub_lgid, get_or_create_name());
+    I(!get_driver_pin_raw(0).is_invalid()); // 0 is always valid to allow generic pin for all outputs
   } else {
     fmt::print("\n");
   }
