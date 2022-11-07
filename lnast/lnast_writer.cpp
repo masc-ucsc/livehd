@@ -86,7 +86,9 @@ void Lnast_writer::write_if() {
   print_line("}}");
   if (move_to_sibling()) {
     if (is_last_child()) {
-      print("else {{\n");
+      print(" ");
+      print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+      print(" {{\n");
       ++depth;
       write_lnast();
       --depth;
@@ -94,7 +96,7 @@ void Lnast_writer::write_if() {
     } else {
       while (!is_last_child()) {
         print(" ");
-        print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "else");
+        print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, "elif");
         print(" (");
         write_lnast();
         move_to_sibling();
