@@ -132,6 +132,9 @@ public:
       return idx == other.idx && sink == other.sink && (lgid == other.lgid || lgid == 0u || other.lgid == 0u);
     }
     [[nodiscard]] constexpr bool operator!=(const Compact_flat &other) const { return !(*this == other); }
+    [[nodiscard]] constexpr bool operator<(const Compact_flat &other) const {
+      return idx < other.idx || (idx == other.idx && lgid < other.lgid);
+    }
 
     template <typename H>
     friend H AbslHashValue(H h, const Compact_flat &s) {
