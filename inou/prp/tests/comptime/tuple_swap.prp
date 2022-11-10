@@ -1,0 +1,9 @@
+
+// add and swap
+var a:u2=3
+var b:u2=1
+
+(a::[wrap],b::[wrap]) = (b + 1, a + 1)
+
+cassert b==0
+cassert a==2
