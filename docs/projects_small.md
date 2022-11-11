@@ -188,6 +188,23 @@ allow future integration with wavedrom.
 The idea is to have a hierarchy view/debug support. Some exmples in javascript:
 https://github.com/wavedrom/inspect or https://8bitworkshop.com "Debug Tree".
 
+
+## [medium] Generate Statecharts
+
+There are several libraries to generate/simulate statecharts (UML version of FSMs). E.g:
+
+https://github.com/sverweij/state-machine-cat
+
+It would be good to generate code for visalization out of LNAST or Lgraph. For
+example, if from an enum declaration. [1] is a generic FSM extractor from code.
+A similar idea on top of LNAST. We could "slice" (LNAST slice must be first)
+all the statements that read/write the enum, and then extract the statechart to
+visualize.
+
+
+[1] Chen, Yongheng, et al. "Automated finite state machine extraction." Proceedings of the 3rd ACM Workshop on Forming an Ecosystem Around Software Transformation. 2019.
+
+
 ## [medium] Short demos
 
 Using ascinema, create some small demos to show how to use LiveHD. 
