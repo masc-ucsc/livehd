@@ -1,6 +1,6 @@
 /*
 :name: scope_simple
-:type: parsing
+:type: parsing lnast
 */
 
 var x = 2

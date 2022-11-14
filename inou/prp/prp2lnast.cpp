@@ -198,6 +198,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_attribute_entry(node);
   else if (node_type == "attr_list")
     process_attr_list(node);
+  else if (node_type == "stmt_list")
+    process_stmt_list(node);
   else
     process_node(get_child(node));
 }
@@ -226,8 +228,6 @@ void Prp2lnast::process_stmt_list(TSNode node) {
   while (!ts_node_is_null(node)) {
     fmt::print("{}\n", get_text(node));
     process_node(node);
-    ret_node = primary_node_stack.top();
-    primary_node_stack.pop();
     node = get_named_sibling(node);
   }
 }
@@ -913,6 +913,12 @@ void Prp2lnast::process_binary_expression(TSNode node) {
     lnast_node = Lnast_node::create_logical_and();
   else if (op == "or")
     lnast_node = Lnast_node::create_logical_or();
+  else if (op == ">>")
+    lnast_node = Lnast_node::create_sra();
+  else if (op == "<<")
+    lnast_node = Lnast_node::create_shl();
+  else if (op == "++")
+    lnast_node = Lnast_node::create_tuple_concat();
   else
     lnast_node = Lnast_node::create_invalid();
 

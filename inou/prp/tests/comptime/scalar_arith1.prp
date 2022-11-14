@@ -1,6 +1,6 @@
 /*
 :name: scalar_arith1
-:type: parsing
+:type: parsing lnast
 */
 
 var x = (((123123+232
