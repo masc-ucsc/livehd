@@ -86,7 +86,6 @@ TOKEN_FN( bit_and    , bit_and )
 TOKEN_FN( bit_or     , bit_or  )
 TOKEN_FN( bit_not    , bit_not )
 TOKEN_FN( bit_xor    , bit_xor )
-TOKEN_FN( reduce_or  , ror     )
 TOKEN_FN( logical_and, and     )
 TOKEN_FN( logical_or , or      )
 TOKEN_FN( logical_not, not     )
@@ -105,6 +104,14 @@ TOKEN_FN( le         , le      )
 TOKEN_FN( gt         , gt      )
 TOKEN_FN( ge         , ge      )
 TOKEN_FN( range      , range   )
+
+TOKEN_FN( reduce_or  , reduce_or  )
+TOKEN_FN( reduce_and , reduce_and )
+TOKEN_FN( reduce_xor , reduce_xor )
+TOKEN_FN( popcount   , popcount   )
+
+TOKEN_FN( get_mask   , get_mask   )
+TOKEN_FN( set_mask   , set_mask   )
 
 #undef TOKEN_MK
 #undef TOKEN_PN

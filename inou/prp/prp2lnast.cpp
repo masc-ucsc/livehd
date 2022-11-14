@@ -142,6 +142,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_member_selection(node);
   else if (node_type == "member_select")
     process_member_select(node);
+  else if (node_type == "bit_selection")
+    process_bit_selection(node);
   else if (node_type == "select")
     process_select(node);
   else if (node_type == "assignment_or_declaration_statement")
@@ -947,7 +949,7 @@ void Prp2lnast::process_binary_expression(TSNode node) {
     auto rhs = primary_node_stack.top();
     primary_node_stack.pop();
 
-    if (op == "..=") {
+    if (op == "..<") {
       auto minus_index = lnast->add_child(stmts_index, Lnast_node::create_minus());
       auto ref = get_tmp_ref();
       lnast->add_child(minus_index, ref);
@@ -1106,6 +1108,66 @@ void Prp2lnast::process_select(TSNode node) {
     // TODO: select -> empty
   }
   select_stack.pop();
+}
+
+
+void Prp2lnast::process_bit_selection(TSNode node) {
+  auto root_node = get_child(node, "argument");
+  auto select_node = get_child(node, "select");
+  enter_scope(Expression_state::Rvalue);
+  process_node(root_node);
+  leave_scope();
+  auto root = primary_node_stack.top();
+  primary_node_stack.pop();
+  auto index_node = get_child(select_node, "select");
+
+  auto select_ref = get_tmp_ref();
+  if (!ts_node_is_null(get_child(index_node, "list"))) {
+    process_node(get_child(index_node, "list"));
+    auto mask = primary_node_stack.top();
+    primary_node_stack.pop();
+    auto get_mask_index = lnast->add_child(stmts_index, Lnast_node::create_get_mask());
+    lnast->add_child(get_mask_index, select_ref);
+    lnast->add_child(get_mask_index, root);
+    lnast->add_child(get_mask_index, mask);
+  } else if (!ts_node_is_null(get_child(index_node, "open_range"))) {
+    // TODO: select -> open_range
+    primary_node_stack.push(Lnast_node::create_invalid());
+  } else if (!ts_node_is_null(get_child(index_node, "from_zero"))) {
+    // TODO: select -> from_zero
+    primary_node_stack.push(Lnast_node::create_invalid());
+  } else {
+    // TODO: select -> empty
+    primary_node_stack.push(Lnast_node::create_invalid());
+  }
+
+  auto type_node = get_child(select_node, "type");
+  if (!ts_node_is_null(type_node)) {
+    auto ref = get_tmp_ref();
+    auto op = get_text(type_node);
+    if (op == "sext" || op == "zext") {
+      // TODO: sign extension
+    } else if (op == "|") {
+      auto reduce_or_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_or());
+      lnast->add_child(reduce_or_index, ref);
+      lnast->add_child(reduce_or_index, select_ref);
+    } else if (op == "&") {
+      auto reduce_and_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_and());
+      lnast->add_child(reduce_and_index, ref);
+      lnast->add_child(reduce_and_index, select_ref);
+    } else if (op == "^") {
+      auto reduce_xor_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_xor());
+      lnast->add_child(reduce_xor_index, ref);
+      lnast->add_child(reduce_xor_index, select_ref);
+    } else if (op == "+") {
+      auto popcount_index = lnast->add_child(stmts_index, Lnast_node::create_popcount());
+      lnast->add_child(popcount_index, ref);
+      lnast->add_child(popcount_index, select_ref);
+    }
+    primary_node_stack.push(ref);
+  } else {
+    primary_node_stack.push(select_ref);
+  }
 }
 
 void Prp2lnast::process_identifier(TSNode node) {

@@ -33,7 +33,10 @@ LNAST_NODE( bit_or, or )
 LNAST_NODE( bit_not, not )
 LNAST_NODE( bit_xor, xor )
 // - Bitwidth Insensitive Reduce
-LNAST_NODE( reduce_or, ror )
+LNAST_NODE( reduce_or, reduce_or )
+LNAST_NODE( reduce_and, reduce_and )
+LNAST_NODE( reduce_xor, reduce_xor )
+LNAST_NODE( popcount, popcount )
 // - Logical
 LNAST_NODE( logical_and, land )
 LNAST_NODE( logical_or, lor )

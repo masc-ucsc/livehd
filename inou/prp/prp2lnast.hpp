@@ -85,6 +85,8 @@ protected:
   // Select
   void process_select(TSNode);
   void process_member_select(TSNode);
+  void process_bit_selection(TSNode);
+  void process_bit_select(TSNode);
 
   // Attributes
   void process_attribute_entry(TSNode);

@@ -177,7 +177,7 @@ void Lnast_writer::write_n_ary(std::string_view op) {
   move_to_child();
   write_lnast();
   print(" = ");
-  print(fmt::fg(fmt::color::purple) | fmt::emphasis::bold, op);
+  print(fmt::fg(fmt::color::teal) | fmt::emphasis::bold, op);
   print("(");
   while (move_to_sibling()) {
     write_lnast();
@@ -187,35 +187,37 @@ void Lnast_writer::write_n_ary(std::string_view op) {
   move_to_parent();
 }
 
-void Lnast_writer::write_bit_and()     { write_n_ary("bit_and");  }
-void Lnast_writer::write_bit_or()      { write_n_ary("bit_or");   }
-void Lnast_writer::write_bit_not()     { write_n_ary("bit_not");  }
-void Lnast_writer::write_bit_xor()     { write_n_ary("bit_xor");  }
-void Lnast_writer::write_reduce_or()   { write_n_ary("ror");      }
-void Lnast_writer::write_logical_and() { write_n_ary("and");      }
-void Lnast_writer::write_logical_or()  { write_n_ary("or");       }
-void Lnast_writer::write_logical_not() { write_n_ary("not");      }
-void Lnast_writer::write_plus()        { write_n_ary("add");      }
-void Lnast_writer::write_minus()       { write_n_ary("sub");      }
-void Lnast_writer::write_mult()        { write_n_ary("mul");      }
-void Lnast_writer::write_div()         { write_n_ary("div");      }
-void Lnast_writer::write_mod()         { write_n_ary("mod");      }
-void Lnast_writer::write_shl()         { write_n_ary("shl");      }
-void Lnast_writer::write_sra()         { write_n_ary("sra");      }
-void Lnast_writer::write_is()          { write_n_ary("is");       }
-void Lnast_writer::write_ne()          { write_n_ary("ne");       }
-void Lnast_writer::write_eq()          { write_n_ary("eq");       }
-void Lnast_writer::write_lt()          { write_n_ary("lt");       }
-void Lnast_writer::write_le()          { write_n_ary("le");       }
-void Lnast_writer::write_gt()          { write_n_ary("gt");       }
-void Lnast_writer::write_ge()          { write_n_ary("ge");       }
-
-void Lnast_writer::write_sext() { }
-void Lnast_writer::write_set_mask() { }
-void Lnast_writer::write_get_mask() { }
-void Lnast_writer::write_mask_and() { }
-void Lnast_writer::write_mask_popcount() { }
-void Lnast_writer::write_mask_xor() { }
+void Lnast_writer::write_bit_and()       { write_n_ary("bit_and");       }
+void Lnast_writer::write_bit_or()        { write_n_ary("bit_or");        }
+void Lnast_writer::write_bit_not()       { write_n_ary("bit_not");       }
+void Lnast_writer::write_bit_xor()       { write_n_ary("bit_xor");       }
+void Lnast_writer::write_logical_and()   { write_n_ary("and");           }
+void Lnast_writer::write_logical_or()    { write_n_ary("or");            }
+void Lnast_writer::write_logical_not()   { write_n_ary("not");           }
+void Lnast_writer::write_plus()          { write_n_ary("add");           }
+void Lnast_writer::write_minus()         { write_n_ary("sub");           }
+void Lnast_writer::write_mult()          { write_n_ary("mul");           }
+void Lnast_writer::write_div()           { write_n_ary("div");           }
+void Lnast_writer::write_mod()           { write_n_ary("mod");           }
+void Lnast_writer::write_shl()           { write_n_ary("shl");           }
+void Lnast_writer::write_sra()           { write_n_ary("sra");           }
+void Lnast_writer::write_is()            { write_n_ary("is");            }
+void Lnast_writer::write_ne()            { write_n_ary("ne");            }
+void Lnast_writer::write_eq()            { write_n_ary("eq");            }
+void Lnast_writer::write_lt()            { write_n_ary("lt");            }
+void Lnast_writer::write_le()            { write_n_ary("le");            }
+void Lnast_writer::write_gt()            { write_n_ary("gt");            }
+void Lnast_writer::write_ge()            { write_n_ary("ge");            }
+void Lnast_writer::write_reduce_or()     { write_n_ary("reduce_or");     }
+void Lnast_writer::write_reduce_and()    { write_n_ary("reduce_and");    }
+void Lnast_writer::write_reduce_xor()    { write_n_ary("reduce_xor");    }
+void Lnast_writer::write_popcount()      { write_n_ary("popcount");      }
+void Lnast_writer::write_sext()          { write_n_ary("sext");          }
+void Lnast_writer::write_set_mask()      { write_n_ary("set_mask");      }
+void Lnast_writer::write_get_mask()      { write_n_ary("get_mask");      }
+void Lnast_writer::write_mask_and()      { write_n_ary("mask_and");      }
+void Lnast_writer::write_mask_popcount() { write_n_ary("mask_popcount"); }
+void Lnast_writer::write_mask_xor()      { write_n_ary("mask_xor");      }
 
 void Lnast_writer::write_ref() {
   if (is_func_name) {

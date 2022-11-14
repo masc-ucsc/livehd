@@ -1,0 +1,12 @@
+/*
+:name: bit_select
+:type: parsing lnast
+*/
+
+let top = fun {
+  let x = 0x12345678
+  let y1 = x@[0]
+  let y2 = x@[0..=7]
+  let y3 = x@^[1..=4]
+  let y4 = x@|[1..=4]
+}
