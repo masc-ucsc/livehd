@@ -1,0 +1,15 @@
+
+
+var c = for i in 0..<5 { if i != 3 {cont i} }
+
+cassign c == (0,1,2,4)
+
+var d = for i in 0..<5 { i }
+cassign d == (0,1,2,3,4)
+
+for i in ref d {
+  i += 10
+}
+
+cassign d == (10,11,12,13,14)
+

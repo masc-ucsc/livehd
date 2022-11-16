@@ -1,0 +1,31 @@
+
+let x:s8 = 33
+
+// WRAP CHECKS
+
+x:u4:[wrap] = 0xCAFE
+cassert x == 0xE
+
+x:u4:[wrap] = -1
+cassert x == 0xF
+
+x:s4:[wrap] = 0xCAFE
+cassert x == 7
+
+x:s4:[wrap] = -1
+cassert x == -8
+
+// SATURATE CHECKS
+
+x:int(10..=30):[saturate]  = 300
+cassert x == 30
+
+x:int(10..<30):[saturate]  = 40
+cassert x == 29
+
+x:int(10..<30):[saturate]  = 20
+cassert x == 20
+
+x:int(10..=30):[saturate]  = -3
+cassert x == 10
+

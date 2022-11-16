@@ -1,0 +1,13 @@
+
+
+let a = 2..=4
+
+cassert !a[0]
+cassert !a[1]
+cassert  a[2]
+cassert  a[3]
+cassert  a[4]
+cassert !a[5]
+
+cassert a.::[size] == 3
+

@@ -18,5 +18,7 @@ cassert xxx.0 == 60        == xxx
 bar = foo
 
 cassert foo == bar == (2,3)
+// Same as THIS: cassert foo == bar and bar == (2,3)
+// NOT THIS: cassert (foo == bar) == (2,3)
 
-
+// foo == bar == xx == 33

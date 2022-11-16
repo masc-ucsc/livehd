@@ -1,0 +1,7 @@
+
+let a = "text"
+
+var x = (:u8:[wrap] = 0xFFF, :string=a)
+
+cassert x.0 == 255 and x[1] == "text"
+

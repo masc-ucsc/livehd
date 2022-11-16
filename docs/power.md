@@ -54,3 +54,12 @@ livehd> inou.verilog files:counter.v |> pass.compiler |> pass.opentimer.power fi
 gnuplot> plot "tmp/counter.vcd_counter.power.trace" using 1:2 with lines
 ```
 
+
+## Clock Gating
+
+CGE:   Clock Gating Efficiency
+DACGE: Data Aware Clock Gating Efficiency
+FTR:   Flop Toggle Rate
+
+[1] Srinivas, Jithendra, et al. "Clock gating effectiveness metrics: Applications to power optimization." 2009 10th International Symposium on Quality Electronic Design. IEEE, 2009.
+
