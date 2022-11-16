@@ -1,0 +1,36 @@
+
+var b = 100
+let c = 2
+
+let a::[debug,foo] = 3
+
+b = a + c
+
+cassert b.::[debug] and !b.::[foo]
+cassert b == 5
+
+let x:a = 100 // Just attribute, not type preservation
+
+cassert not x.::[debug]
+cassert x == 100
+
+let y = a
+cassert y.::[debug] and y.::[foo]
+cassert y == 3
+
+var z = a
+cassert z.::[debug] and z.::[foo]
+cassert z == 3
+
+z = 300
+cassert z.::[debug] and z.::[foo]
+cassert z == 300
+
+z.::[potato] = 55
+cassert !z.::[potato]             // Not bind attribute after declaration
+cassert z.::[debug] and z.::[foo] // But keep the declaration attributes
+
+z:u4:[saturate] = 3000
+cassert !z.::[saturate] and z == 15
+cassert z.::[debug] and z.::[foo]
+
