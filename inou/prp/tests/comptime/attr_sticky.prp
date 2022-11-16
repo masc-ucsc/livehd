@@ -34,3 +34,12 @@ z:u4:[saturate] = 3000
 cassert !z.::[saturate] and z == 15
 cassert z.::[debug] and z.::[foo]
 
+let l = 1 + z.::[foo]
+cassert l.::[debug] and !l.::[foo] and l == 3001
+
+let m = z.::[fop]
+cassert m.::[debug] and  m.::[foo] and m == 3000
+
+let n = z.::[foo] + 0
+cassert n.::[debug] and !n.::[foo] and n == 3000
+
