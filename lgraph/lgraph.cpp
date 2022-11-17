@@ -1629,14 +1629,14 @@ void Lgraph::dump_down_nodes() {
 
 Node Lgraph::get_graph_input_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy::hierarchical_root(), Hardcoded_input_nid);
-  else
-    return Node(this, Hierarchy::non_hierarchical(), Hardcoded_input_nid);
+    return {this, Hierarchy::hierarchical_root(), Hardcoded_input_nid};
+
+  return {this, Hierarchy::non_hierarchical(), Hardcoded_input_nid};
 }
 
 Node Lgraph::get_graph_output_node(bool hier) {
   if (hier)
-    return Node(this, Hierarchy::hierarchical_root(), Hardcoded_output_nid);
-  else
-    return Node(this, Hierarchy::non_hierarchical(), Hardcoded_output_nid);
+    return {this, Hierarchy::hierarchical_root(), Hardcoded_output_nid};
+
+  return {this, Hierarchy::non_hierarchical(), Hardcoded_output_nid};
 }
