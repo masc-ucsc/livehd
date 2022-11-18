@@ -379,6 +379,16 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     voltage = *x;
   }
 
+  const auto lib = timer.celllib(ot::MIN);
+  double cap_unit = 1e-12;
+  if (lib && lib->capacitance_unit)
+     cap_unit = lib->capacitance_unit->value();
+
+  //double power_unit = 1e-9;
+  //if (lib && lib->power_unit)
+   //  power_unit = lib->current_unit->value();
+     // power_unit = lib->power_unit->value();
+ 
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub)
@@ -399,6 +409,12 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
 
       auto [cap, ipwr] = it->second.power();
 
+
+      cap  *= freq*voltage*voltage*cap_unit;
+      ipwr *= freq*cap_unit;
+
+      //fmt::print("cap:{} ipwr:{} pin_name:{} power_unit:{} ratio:{}\n",cap, ipwr, pin_name, cap_unit, ipwr/(cap+ipwr));
+
       total_cap += cap;
       total_ipwr += ipwr;
 
@@ -408,14 +424,14 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
 
       auto vcd_name = absl::StrCat(hier_name,",", node_name, ",", e.sink.get_pin_name());
 
-      double power = ipwr + cap*voltage*voltage;
+      double power = ipwr + cap;
       //double power = ipwr; // FIXME
       for(auto &pvcd:vcd_list) {
         pvcd.add(vcd_name, power);
       }
 
-      // fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
-      //fmt::print("power {} cap:{} ipwr:{}\n", vcd_name, cap, ipwr);
+      //fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
+      // fmt::print("power {} cap:{} ipwr:{} v:{} total:{}\n", vcd_name, cap, ipwr, voltage, power);
     }
   }
 
@@ -423,7 +439,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     pvcd.compute(odir);
   }
 
-  fmt::print("power TOTAL switch:{} internal:{} voltage:{}\n", total_cap, total_ipwr, voltage);
+  fmt::print("MAX power switch:{} internal:{} voltage:{}\n", total_cap, total_ipwr, voltage);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {

@@ -19,6 +19,7 @@ void Pass_opentimer::setup() {
 
   Eprp_method m2("pass.opentimer.power", "Power analysis on lgraph", &Pass_opentimer::power_work);
   m2.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
+  m2.add_label_optional("freq", "frequency (Hz)", "1e9");
 
   register_pass(m2);
 }
@@ -29,11 +30,11 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
   for (const auto f : absl::StrSplit(files, ',')) {
     if (str_tools::ends_with(f, ".lib")) {
       fmt::print("opentimer using liberty file '{}'\n", f);
-      if (n_lib_read == 0)
+      if (n_lib_read == 0) {
         timer.read_celllib(f);
-      else
+      }else{
         timer.read_celllib(f, ot::MIN);
-
+      }
       n_lib_read++;
     } else if (str_tools::ends_with(f, ".spef")) {
       spef_file_list.emplace_back(f);
@@ -52,14 +53,22 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
     Pass::error("pass.opentime only supports 1 or 2 liberty (max/min) files not {}", files);
   }
 
+  margin = 0;
   if (var.has_label("margin")) {
     std::string txt{var.get("margin")};
     margin = std::stof(txt, nullptr);
     if (margin<0 || margin>100) {
       Pass::error("pass.opentimer margin must be between 0 and 100 not {}", margin);
     }
-  }else{
-    margin = 0;
+  }
+
+  freq = 1;
+  if (var.has_label("freq")) {
+    std::string txt{var.get("freq")};
+    freq = std::stof(txt, nullptr);
+    if (freq<=0 || freq>1e12) {
+      Pass::error("pass.opentimer frequency must be between 1Hz and 1THz not {}Hz", freq);
+    }
   }
   margin_delay = 0;
 }
