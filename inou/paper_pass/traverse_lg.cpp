@@ -24,16 +24,11 @@ void Traverse_lg::setup() {
 Traverse_lg::Traverse_lg(const Eprp_var& var) : Pass("inou.traverse_lg", var) {}
 
 void Traverse_lg::travers(Eprp_var& var) {
-  //TRACE_EVENT("inou", "LNAST_FROMLG_trans");
   TRACE_EVENT("inou","traverse_lg");
   
 	auto lg_orig = var.get("LGorig");
 	auto lg_synth = var.get("LGsynth");
-	fmt::print("{} {}", lg_orig, lg_synth);
   Traverse_lg p(var);
-
-  fmt::print("\nLGs : {}\n",var.lgs.size());
-  //I(var.lgs.size()==2,"\n\nINPUT ERROR:\n\t provide exactly 2 lgraphs to inou.traverse_lg. CHECK: The 2 lgraphs provided to inou.traverse_lg should be of different names. First LG will be the pre-synth LG and Second LG should be the one from synth netlist.\n\n");
 
 #ifdef DE_DUP
   //Traverse_lg::setMap map_pre_synth;
@@ -56,96 +51,7 @@ void Traverse_lg::travers(Eprp_var& var) {
 	I(sec_done,"\nERROR:\n original LG not provided??\n");
 #endif
 
-#ifdef DEBUG
-//   for (const auto& l : var.lgs) {
-//     p.do_travers(l);
-//   }
-#endif
-
 }
-
-//FOR DEBUG:
-// void Traverse_lg::do_travers(Lgraph* lg) {
-//   //std::string_view module_name = lg->get_name();
-//   std::ofstream ofs;
-//   ofs.open(std::string(lg->get_name()), std::ofstream::out | std::ofstream::trunc);
-//   if(!ofs.is_open()) {
-//     fmt::print("unable to open file {}.txt\n",lg->get_name());
-//     return ;
-//   }
-//   ofs<<std::endl<<std::endl<<lg->get_name()<<std::endl<<std::endl<<std::endl;
-// 
-//   for (const auto& node : lg->forward(true)) {
-//     ofs<<"===============================\n";
-//     ofs<<node.debug_name()<<std::endl; //this is the main node for which we will record IO
-//     if (! (node.has_inputs() || node.has_outputs())) {//no i/ps as well as no o/ps
-//       ofs<<"---------------\n";
-//       continue; //do not keep such nodes in nodeIOmap
-//     }
-// 
-//     
-//     if (node.has_inputs()){
-//     ofs<<"INPUTS:\n";
-//       for (const auto& indr : node.inp_drivers()) {
-//         if(node.get_type_op()==Ntype_op::AttrSet && indr.get_node().get_type_op()==Ntype_op::Const) {continue;}
-//         get_input_node(indr, ofs);
-//       }
-//     }
-// 
-//     if (node.has_outputs()) {
-//     ofs<<"OUTPUTS:\n";
-// 		  for (const auto& oute : node.out_edges() ) {
-//         get_output_node(oute.sink,ofs);
-//       }
-//     }
-// 
-//   }//enf of for lg-> traversal
-// 
-//   if(ofs.is_open()) {
-//     ofs.close();
-//   }
-// }
-// 
-// 
-// void Traverse_lg::get_input_node(const Node_pin &node_pin, std::ofstream& ofs) {
-//   auto node = node_pin.get_node();
-//   if(node.is_type_flop() || node.is_type_const() || node.is_graph_input() ) {
-//     if(node.is_graph_io()) {
-//       ofs<<node_pin.get_pin_name()<<std::endl;
-//     } else {
-//       ofs<<node.get_type_name();
-//       //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-//       //else 
-//       if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
-//       ofs<<std::endl;
-//     }
-//     return;
-//   } else {
-//       for (const auto& indr : node.inp_drivers()) {
-//         get_input_node(indr,ofs);
-//       }
-//   }
-// }
-// 
-// void Traverse_lg::get_output_node(const Node_pin &node_pin, std::ofstream& ofs) {
-//   auto node = node_pin.get_node();
-//   if(node.is_type_flop() || node.is_graph_output() ) {
-//     if(node.is_graph_io()) {
-//       ofs<<node_pin.get_pin_name()<<std::endl;
-//     } else {
-//       ofs<<node.get_type_name();
-//       //if(node.is_type_const()){ ofs<<":"<<node.get_type_const().to_pyrope();}
-//       //else 
-//       if(node.is_type_flop()){ ofs<<":"<<node_pin.get_pin_name()<<"->"<<node.get_driver_pin().get_wire_name();}
-//       ofs<<std::endl;
-//     }
-//     return;
-//   } else {
-// 		  for (const auto& oute : node.out_edges() ) {
-//         get_output_node(oute.sink,ofs);
-//       }
-//   }
-// }
 
 //FOR SET:
 //DE_DUP

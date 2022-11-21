@@ -14,17 +14,12 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/btree_set.h"
 
-/*define only 1 of these:*/
-//#define DEBUG //print everything
-//#define KEEP_DUP //use vector
 #define DE_DUP //use set 
 
 
 class Traverse_lg : public Pass {
 public:
 private:
-//  int get_input_node_count;
-//  int get_output_node_count;
   // typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> setMap_nodeKey;
   // typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>, std::vector<Node::Compact_flat> > setMap_pairKey;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
@@ -74,10 +69,6 @@ private:
 #endif
 */
 protected:
-  //FOR DEBUG:
-  // void do_travers(Lgraph* g);
-  // void get_input_node(const Node_pin &pin, std::ofstream& ofs);
-  // void get_output_node(const Node_pin &pin, std::ofstream& ofs);
   //FOR SET PART:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
