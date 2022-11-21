@@ -159,8 +159,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool req_flops_matched = false;
   bool dealing_flop=false;
   bool dealing_comb=false;
-	get_input_node_count=0;
-	get_output_node_count=0;
 
   for (const auto & node : lg->fast(true)) {
     dealing_flop=false;
@@ -174,9 +172,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     std::set<std::string> out_comb_set;
     std::set<std::string> io_comb_set;
     // fmt::print("{}\n", node.debug_name());
-    
+   
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
-    if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+    if (node.is_type_flop() || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node.is_type_loop_last() ) {
       dealing_flop=true;
 			for (const auto & ine : node.inp_edges()) {
         get_input_node(ine.driver, in_set, io_set);
@@ -206,35 +204,36 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
         fmt::print("\t{}\n",colr); 
       
         //calc node's IO
-        if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
-          auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
-          for(auto in_node: vec_from_map) {
-            in_comb_set.insert( std::to_string(in_node.get_nid()) );
-            io_comb_set.insert( std::to_string(in_node.get_nid()) );
-          }
-        } else {
-			    for (const auto & ine : node.inp_edges()) {
-            auto v = get_input_node(ine.driver, in_comb_set, io_comb_set, true);
-            //if(v.get_nid().value!=0) {
-              if (intermediate_inputs_map.find(v)!=intermediate_inputs_map.end()) {
-                //node already in map
-                for (auto v_ins: intermediate_inputs_map[v].inputs_of_node) {
-                  (intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v_ins);
-                }
-              } else {
-                (intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v);
-              }
-            //}
-          }        
-          intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
-          fmt::print("The intermediate_inputs_map:\n");
-          for(const auto & [k,v]:intermediate_inputs_map){
-            fmt::print("{} ::: \t",k.get_nid());
-            for (const auto & v_val: v.inputs_of_node) {
-              fmt::print("{}\t", v_val.get_nid());
-            }
-            fmt::print("{} \n", v.ins_calc_completed);
-          }
+				for (const auto & ine : node.inp_edges()) {
+          get_input_node(ine.driver, in_comb_set, io_comb_set, true);
+//        if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
+//          auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
+//          for(auto in_node: vec_from_map) {
+//            in_comb_set.insert( std::to_string(in_node.get_node().get_nid()) );//FIXME: just insert entire. w/o iteration.
+//            io_comb_set.insert( std::to_string(in_node.get_node().get_nid()) );
+//          }
+//        } else {
+//			    for (const auto & ine : node.inp_edges()) {
+//            auto v = get_input_node(ine.driver, in_comb_set, io_comb_set, true);
+//            //if(v.get_nid().value!=0) {
+//              if (intermediate_inputs_map.find(v.get_node().get_compact_flat())!=intermediate_inputs_map.end()) { //node already in map
+//                //FIXME: for (auto v_ins: intermediate_inputs_map[v.get_node().get_compact_flat()].inputs_of_node) {
+//                  //FIXME:(intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v_ins);
+//                //FIXME: }
+//              } else {
+//                //FIXME:(intermediate_inputs_map[node.get_driver_pin().get_compact_flat()].inputs_of_node).emplace_back(v);
+//              }
+//            //}
+//          }        
+//          intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
+//          fmt::print("The intermediate_inputs_map:\n");
+//          for(const auto & [k,v]:intermediate_inputs_map){
+//            fmt::print("{} ::: \t",k.get_nid());
+//            for (const auto & v_val: v.inputs_of_node) {
+//              fmt::print("{}\t", v_val.get_node().get_nid());
+//            }
+//            fmt::print("{} \n", v.ins_calc_completed);
+//          }
         }
 			  for (const auto& oute : node.out_edges() ) {
           get_output_node(oute.sink, out_comb_set, io_comb_set, true);
@@ -333,30 +332,36 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
       if(nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
         //put this in matching_map.
         matched_map[node.get_compact_flat()]=nodeIOmap[std::make_pair(in_set, out_set)];//FIXME:put this in matching_map. no need of matched_map then
-        //const auto & synNode = nodeIOmap[std::make_pair(in_set, out_set)];
+
+        /*matched_map -> matching_map*/
+        const auto synNodes = nodeIOmap[std::make_pair(in_set, out_set)];
         //std::vector<Node::Compact_flat> tmpVec;
-        //if(matching_map.find(synNode) != matching_map.end()) {
-        //  tmpVec.assign((matching_map[synNode]).begin() , (matching_map[synNode]).end() );
+        //if(matching_map.find(synNodes) != matching_map.end()) {
+        //  tmpVec.assign((matching_map[synNodes]).begin() , (matching_map[synNodes]).end() );
         //  tmpVec.emplace_back(node.get_compact_flat());
         //} else {
         //  tmpVec.emplace_back(node.get_compact_flat());
         //}
-        //matching_map[synNode]=tmpVec;
-        ///*if synNode in crit_flop_list, remove from crit_flop_list;*/
-        //for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-        //  if(*cfl_it == synNode) {
-        //    crit_flop_list.erase(cfl_it); 
-        //    cfl_it--;
-        //  }
-        //}
-        ///*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
-        //if (crit_flop_list.empty()){ req_flops_matched = true;}
-        //if (crit_flop_map.find(synNode)!=crit_flop_map.end()) {
-        //  //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
-        //  for (const auto & o_n: matching_map[synNode]) {
-        //    matched_color_map[o_n]=crit_flop_map[synNode];
-        //  }
-        //}
+        for (const auto & synNode: synNodes) {
+          (matching_map[synNode]).emplace_back(node.get_compact_flat());//matching_map[synNode]=tmpVec;
+
+          /*if synNode in crit_flop_list, remove from crit_flop_list;*/
+          for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
+            if(*cfl_it == synNode) {
+              crit_flop_list.erase(cfl_it); 
+              cfl_it--;
+            }
+          }
+          /*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
+          if (crit_flop_list.empty()){ req_flops_matched = true;}
+          if (crit_flop_map.find(synNode)!=crit_flop_map.end()) {
+            //if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
+            for (const auto & o_n: matching_map[synNode]) {
+              matched_color_map[o_n]=crit_flop_map[synNode];
+            }
+          }
+         
+        }
 
       } else {
         unmatched_map[node.get_compact_flat()]=std::make_pair(in_set, out_set);//FIXME: (no more needed; kept for debug purposes) (old fixme msg: this won't be needed once matched map is removed and entries put in matching_map are erased from the main maps!
@@ -385,8 +390,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     }//end of if(do_matching)
 
   }//enf of for lg-> traversal
-  fmt::print("**get_input_node_count: {}\n",get_input_node_count);
-	fmt::print("**get_output_node_count: {}\n\n",get_output_node_count);
   if(!do_matching) {
     /*for the sequential part:*/ 
     I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
@@ -446,6 +449,17 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nmatched_map (matching done is):\n");
     for(const auto& [k, n_list]: matched_map) {
+      fmt::print("{}\t", k.get_nid());
+      fmt::print("::: \t");
+      for (const auto& n:n_list) {
+        fmt::print("{}\t", n.get_nid());
+      }
+      fmt::print("\n");
+    }
+    fmt::print("\n\n===============================\n");
+    fmt::print("\n\n===============================\n");
+    fmt::print("\n\nmatching_map (@matching done before pass_1 is):\n");
+    for(const auto& [k, n_list]: matching_map) {
       fmt::print("{}\t", k.get_nid());
       fmt::print("::: \t");
       for (const auto& n:n_list) {
@@ -964,17 +978,17 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string> &in_set, std::s
   return false;
 }
 
-bool Traverse_lg::is_startpoint(Node node_to_eval ){
+bool Traverse_lg::is_startpoint(const Node &node_to_eval ) const {
   /*if (node is flop or graph input) return true else return false*/
-  if(node_to_eval.is_type_flop() || (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_input()){
+  if(node_to_eval.is_type_flop() || (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_input() || node_to_eval.is_type_loop_last() || node_to_eval.is_type_loop_first()){
     return true;
   } 
   return false;
 }
 
-bool Traverse_lg::is_endpoint(Node node_to_eval){
+bool Traverse_lg::is_endpoint(const Node &node_to_eval) const {
   /*if (node is flop or graph output) return true else return false*/
-  if(node_to_eval.is_type_flop() ||  (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_output()){
+  if(node_to_eval.is_type_flop() ||  (node_to_eval.is_type_sub()?((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node_to_eval.is_graph_output() || node_to_eval.is_type_loop_last() || node_to_eval.is_type_loop_first()){
     return true;
   } 
   return false;
@@ -995,23 +1009,32 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
   return ret_vec;
 }
 
-// void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
-Node::Compact_flat Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
-	get_input_node_count++;
-  auto node = node_pin.get_node();
-
-  if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
-    auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
-    for(auto in_node: vec_from_map) {//FIXME: all IO get nid will put "1" in the in_set
-      in_set.insert( std::to_string(in_node.get_nid()) );
-      io_set.insert( std::to_string(in_node.get_nid()) );
-    }
-    return node.get_compact_flat();
+Node_pin/*FIXME?: ::Compact_flat*/ Traverse_lg::get_node_dpin_compactFlat(const Node &node) const {
+  //only subs and mem can have o/p with pid different than 0. all the rest have o/p == 0
+  if (node.is_type_multi_driver()) {
+    return node.get_driver_pin_raw(0);//FIXME?: .get_compact_flat();
   }
-  if(node.is_type_flop() || (!node.has_inputs()) || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+  return node.get_driver_pin();//FIXME?: .get_compact_flat();
+}
+
+// void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
+//Node_pin/*FIXME?: ::Compact_flat*/ Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
+void Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL) {
+auto node = node_pin.get_node();	
+
+//  if ( (intermediate_inputs_map.find(node.get_compact_flat()) != intermediate_inputs_map.end() ) && intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed){
+//    auto vec_from_map = intermediate_inputs_map[node.get_compact_flat()].inputs_of_node;
+//    for(auto in_node_dpin: vec_from_map) {//FIXME: all IO get nid will put "1" in the in_set
+//      in_set.insert( std::to_string(in_node_dpin.get_node().get_nid()) );
+//      io_set.insert( std::to_string(in_node_dpin.get_node().get_nid()) );
+//    }
+//    return get_node_dpin_compactFlat(node);
+//  }
+  if(node.is_type_flop() || (!node.has_inputs()) || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)  || node.is_type_loop_last() || node.is_type_loop_first()) {
     if (node.is_type_const()) {
       //do not keep const for future reference
       //return Node::Compact_flat();
+			return;
     } else if (node.is_graph_io()) {
       auto tmp_x = node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name();
       if (tmp_x!="reset" && tmp_x!="clock") {
@@ -1043,28 +1066,31 @@ Node::Compact_flat Traverse_lg::get_input_node(const Node_pin &node_pin, std::se
       in_set.insert(temp_str);
       if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
     }
-    return node.get_compact_flat();
+    return;// get_node_dpin_compactFlat(node);
   } else {
-
     for (const auto & ine : node.inp_edges()) {
-      auto inter_node_IO_captured = get_input_node(ine.driver, in_set, io_set, addToCFL);
-      /*For saving the inputs of all nodes traversed so that re-computation can be avoided. Potential speedup.*/ 
-      //if(inter_node_IO_captured.get_nid().value!=0) {
-        (intermediate_inputs_map[node.get_compact_flat()].inputs_of_node).emplace_back(inter_node_IO_captured);
-      //}
-
-    }//end of for inp_edges
-    intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
-  }//end of else
-  
-  return node.get_compact_flat();
-}//end of get_input_node
+      get_input_node(ine.driver, in_set, io_set, addToCFL);     
+    }                                                           
+  }
+}                                                                 
+//     for (const auto & ine : node.inp_edges()) {
+//       auto inter_node_IO_captured = get_input_node(ine.driver, in_set, io_set, addToCFL);
+//       /*For saving the inputs of all nodes traversed so that re-computation can be avoided. Potential speedup.*/ 
+//       //if(inter_node_IO_captured.get_nid().value!=0) {
+//         (intermediate_inputs_map[node.get_compact_flat()].inputs_of_node).emplace_back(inter_node_IO_captured);
+//       //}
+// 
+//     }//end of for inp_edges
+//     intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
+//   }//end of else
+//   
+//   return get_node_dpin_compactFlat(node);
+// }//end of get_input_node
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
 void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL) {
-	get_output_node_count++;
   auto node = node_pin.get_node();
-  if(node.is_type_flop() || (!node.has_outputs())  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)) {
+  if(node.is_type_flop() || (!node.has_outputs())  || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false) || node.is_type_loop_last() || node.is_type_loop_first()) {
     if(node.is_graph_io()) {
       //out_set.emplace_back(node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name());
       out_set.insert(node_pin.get_pin_name());
@@ -1094,9 +1120,9 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
     }
     return;
   } else {
-				for (const auto& oute : node.out_edges() ) {
-        get_output_node(oute.sink, out_set, io_set, addToCFL);
-      }
+    for (const auto& oute : node.out_edges() ) {
+      get_output_node(oute.sink, out_set, io_set, addToCFL);
+    }
   }
 }
 
