@@ -66,6 +66,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
   bool dealing_flop=false;
   bool dealing_comb=false;
 
+  if (!do_matching) {
+    make_io_maps(lg);
+    fmt::print("\ninp_map_of_sets:\n");
+    print_io_map(inp_map_of_sets);
+    fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
+    print_io_map(out_map_of_sets);
+  }
+  I(false, "\nintended exit!\n");
+
   for (const auto & node : lg->fast(true)) {
     dealing_flop=false;
     dealing_comb=false;
@@ -773,6 +782,68 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey &nodeIOmap)
 
 }
 
+void Traverse_lg::make_io_maps(Lgraph* lg){
+
+  /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
+  lg->each_graph_input ([this](const Node_pin dpin){
+      for (auto sink_dpin: dpin.out_sinks()) {
+          inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
+      }
+      });
+
+  /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
+  lg->each_graph_output ([this](const Node_pin dpin){
+      auto out_node  = dpin.get_node();
+      //for (auto driver_dpin: spin.inp_drivers()) {
+      for (auto driver_dpin: out_node.inp_drivers()) {
+        out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+      }
+      });
+
+  /*propagate sets. stop at sequential/IO... (_last)*/
+  std::vector<Node_pin::Compact_flat> traverse_order;
+  for (const auto &node: lg->forward(true)) {
+    const auto node_dpin = get_dpin_cf(node);
+    traverse_order.emplace_back(node_dpin);
+
+    absl::flat_hash_set<Node_pin::Compact_flat> self_set;
+    if(inp_map_of_sets.find(node_dpin) != inp_map_of_sets.end()) {//if this cond not present then const gets inserted as keys with no val.
+      self_set = inp_map_of_sets[node_dpin];
+    }
+    for (auto e: node.out_edges()) {
+      auto out_cf = get_dpin_cf(e.sink.get_node());
+      if (node.is_type_loop_last() || node.is_type_loop_first()) {
+        inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+      } else {
+        inp_map_of_sets[out_cf].insert(self_set.begin(), self_set.end());
+      }
+
+    }
+  }
+
+  /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
+  for (std::vector<Node_pin::Compact_flat>::reverse_iterator rit=traverse_order.rbegin(); rit != traverse_order.rend(); ++rit) {
+    auto node_dpin_cf = *rit;
+    Node_pin node_dpin("lgdb", node_dpin_cf) ;
+
+    absl::flat_hash_set<Node_pin::Compact_flat> self_set;
+    if(inp_map_of_sets.find(node_dpin_cf) != inp_map_of_sets.end()) {//if this cond not present then const gets inserted as keys with no val.
+      self_set = out_map_of_sets[node_dpin_cf];
+    }
+    
+    for(auto in_dpin:node_dpin.get_node().inp_drivers()) {
+      auto inp_cf = in_dpin.get_compact_flat();
+      if (node_dpin.get_node().is_type_loop_last() || node_dpin.get_node().is_type_loop_first()) {
+        out_map_of_sets[inp_cf].insert(node_dpin_cf);
+      } else {
+        out_map_of_sets[inp_cf].insert(self_set.begin(), self_set.end());
+      }
+    }
+  }
+
+  
+}
+
 void Traverse_lg::path_traversal(const Node &start_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig){
   Node this_node = start_node;
 	for (const auto& oute : this_node.out_edges() ) {
@@ -915,12 +986,12 @@ std::vector<std::string> Traverse_lg::get_map_val(absl::node_hash_map<Node::Comp
   return ret_vec;
 }
 
-Node_pin/*FIXME?: ::Compact_flat*/ Traverse_lg::get_node_dpin_compactFlat(const Node &node) const {
+Node_pin::Compact_flat Traverse_lg::get_dpin_cf(const Node &node) const {
   //only subs and mem can have o/p with pid different than 0. all the rest have o/p == 0
   if (node.is_type_multi_driver()) {
-    return node.get_driver_pin_raw(0);//FIXME?: .get_compact_flat();
+    return node.get_driver_pin_raw(0).get_compact_flat();
   }
-  return node.get_driver_pin();//FIXME?: .get_compact_flat();
+  return node.get_driver_pin().get_compact_flat();
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
@@ -934,7 +1005,7 @@ auto node = node_pin.get_node();
 //      in_set.insert( std::to_string(in_node_dpin.get_node().get_nid()) );
 //      io_set.insert( std::to_string(in_node_dpin.get_node().get_nid()) );
 //    }
-//    return get_node_dpin_compactFlat(node);
+//    return get_dpin_cf(node);
 //  }
   if(node.is_type_flop() || (!node.has_inputs()) || (node.is_type_sub()?((std::string(node.get_type_sub_node().get_name())).find("_df")!=std::string::npos):false)  || node.is_type_loop_last() || node.is_type_loop_first()) {
     if (node.is_type_const()) {
@@ -972,7 +1043,7 @@ auto node = node_pin.get_node();
       in_set.insert(temp_str);
       if(!isFlop) {io_set.insert(temp_str);}//do not want flops in pure io_set
     }
-    return;// get_node_dpin_compactFlat(node);
+    return;// get_dpin_cf(node);
   } else {
     for (const auto & ine : node.inp_edges()) {
       get_input_node(ine.driver, in_set, io_set, addToCFL);     
@@ -990,7 +1061,7 @@ auto node = node_pin.get_node();
 //     intermediate_inputs_map[node.get_compact_flat()].ins_calc_completed =true;
 //   }//end of else
 //   
-//   return get_node_dpin_compactFlat(node);
+//   return get_dpin_cf(node);
 // }//end of get_input_node
 
 // void Traverse_lg::get_output_node(const Node_pin &node_pin, absl::btree_set<std::string>& out_set) {
@@ -1032,7 +1103,24 @@ void Traverse_lg::get_output_node(const Node_pin &node_pin, std::set<std::string
   }
 }
 
-
+void Traverse_lg::print_io_map(const absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>  > &the_map_of_sets) const {
+  for (const auto & [node_pin_cf, set_pins_cf]: the_map_of_sets){
+    //const auto node_pin = Node_pin("lgdb", node_pin_cf);
+    //Node_pin node_pin("lgdb", node_pin_cf);
+    //fmt::print("{}\t::: ",node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name() );
+    auto n = Node_pin("lgdb", node_pin_cf).get_node();
+    fmt::print("{}\t::: ",n.get_nid());
+    for (const auto &pin_cf: set_pins_cf) {
+      const auto pin = Node_pin("lgdb", pin_cf);
+      auto n_s = Node_pin("lgdb", pin_cf).get_node();
+      if (pin.has_name())
+        fmt::print("{}\t", pin.get_name() );
+      else
+        fmt::print("{}\t", n_s.get_nid());
+    }
+    fmt::print("\n");
+  }
+}
 
 
 void Traverse_lg::print_IOtoNodeMap_synth(const absl::node_hash_map<std::set<std::string>, setMap_pairKey > &mapInMap ){

@@ -11,9 +11,12 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "pass.hpp"
+#include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/btree_set.h"
-
+#include "absl/container/internal/raw_hash_set.h" 
 #define DE_DUP //use set 
 
 
@@ -41,7 +44,7 @@ private:
   absl::node_hash_map<Node::Compact_flat, int> crit_cell_map;
   setMap_pairKey cellIOMap_synth;
   bool probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, setMap_pairKey &orig_map); 
-  Node_pin/*FIXME?: ::Compact_flat*/ get_node_dpin_compactFlat(const Node &node) const;
+  Node_pin::Compact_flat get_dpin_cf(const Node &node) const;
 
   template <typename T>
   std::set<T> getUnion(const std::set<T>& a, const std::set<T>& b)
@@ -68,15 +71,19 @@ private:
   setMap nodeIOmap;
 #endif
 */
-protected:
+//protected:
   //FOR SET PART:
   void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
+  void make_io_maps(Lgraph* lg);
+  absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>  > inp_map_of_sets;
+  absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>  > out_map_of_sets;
+  void print_io_map(const absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
 //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
   void get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>& io_set, bool addToCFL = false);
   void get_output_node(const Node_pin &pin, std::set<std::string>& out_set, std::set<std::string>& io_set, bool addToCFL = false);
-  std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);//FIXME:: string->string_view key_str??
+  std::vector<std::string> get_map_val(absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat> >& find_in_map, std::string key_str);
   void path_traversal(const Node &startPoint_node, const std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val, Traverse_lg::setMap_pairKey &cellIOMap_orig);
   bool check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node);
   bool is_startpoint(const Node &node_to_eval) const ;
