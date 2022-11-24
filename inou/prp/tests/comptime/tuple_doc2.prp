@@ -55,7 +55,9 @@ cassert ccat2 == (1,(2,20),3)
 
 var join1 = (...a,...b)
 cassert join1 == (a=1,b=2,c=3)
+cassert join1 == (b=2,a=1,c=3)
 cassert join1 == (1,2,3)
+cassert join1 != (2,1,3)  // One is unnamed, so order matters
 
 var join2 = (...a,...(b=20)) // compile error, 'b' already exists
 }

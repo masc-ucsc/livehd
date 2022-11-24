@@ -5,11 +5,11 @@
 
 cassert((a=1,b=2) has "a")
 
-cassert (a=1,b=3) does (b=100,a=333,e=40,5)
-cassert (a=1,3) does (a=100,300,b=333,e=40,5)
-cassert (a=1,3) !does (b=100,300,a=333,e=40,5)
+cassert (a=1,b=3) does (b=100,a=333,e=40,5)     // Fully named, order does not matter
+cassert (a=1,3) does (a=100,300,b=333,e=40,5)   // Not fully named, order matters
+cassert (a=1,3) !does (b=100,300,a=333,e=40,5)  // Not fully named, order matters
 
-cassert (x=1,d=4) equals (d=4,x=100)
+cassert (x=1,d=4) equals (d=7,x=100)
 
 // Some unnamed fields, position should also match
 cassert (x=1,4) equals (d=4,100)
