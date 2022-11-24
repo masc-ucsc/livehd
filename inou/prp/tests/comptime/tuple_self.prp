@@ -1,0 +1,13 @@
+/*
+:name: tuple_self
+:type: parsing
+*/
+
+let a = 1
+let b = 7
+
+let c1 = (a=a+1, x = self.a+a+self.z, z = b+1)
+let c2 = (a=1+1, x = (1+1)+1+(7+1)  , z = 7+1)
+
+cassert c1 == c2
+

@@ -1,0 +1,13 @@
+/*
+:name: tuple_bracket
+:type: parsing
+*/
+
+// Bracket syntax (cleaner enums and cases with ids)
+
+let a = ('hello', a=3)
+
+let b = [hello, a=3]
+
+cassert a == b
+

@@ -1,0 +1,7 @@
+/*
+:name: doc_basic4
+:type: parsing
+*/
+
+let a = 1 ; var b = 2 ; cassert a+b == 3 ; cassert true
+
