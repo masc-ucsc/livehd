@@ -32,7 +32,7 @@ case1 = (y=4,x=3) // compile error, order does not match
 var case2:(
   ,long=true
   ,myint=33
-)
+) = _
 
 case2 = (false, 44)
 cassert case2.long == false and case2.myint==44
@@ -48,7 +48,7 @@ var longer=3
 var case3:(
   ,longer=100
   ,x=33
-)
+) = _
 
 case3 = (longer,88)
 cassert case3 == (3,88) == (longer=3,88) == (longer=3,x=88) == (3,x=88)

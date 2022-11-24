@@ -29,20 +29,24 @@ let nourish = fun(x) where (x does Person) or (x does Robot) { // if Person and 
   }
 }
 
-cassert nourish(:Person=_) == "person consume"
-cassert nourish(:Robot=_) == "robot charge"
-cassert nourish(:Potato=_) == "person consume" // structural typing
-//cassert nourish(:Cyborg=_) == "XX"             // compile error, two match entry options at once
+let ro:Robot = _
+let pe:Person = _
+let po:Potato = _
+
+cassert nourish(pe) == "person consume"
+cassert nourish(ro) == "robot charge"
+cassert nourish(po) == "potato consume" // (po does Person) is true 
+//cassert nourish(_:Cyborg=_) == "XX"             // compile error, two match entry options at once
 
 // Pyrope opt2
 
-let Eater = ::enum(
- ,person = :Person
- ,robot  = :Robot
- ,cyborg = :Cyborg
+let Eater:enum = (
+ ,person:Person = _
+ ,robot:Robot   = _
+ ,cyborg:Cyborg = _
 )
 
-let nourish = fun(x:Eater) -> (:string) {
+let nourish = fun(x:Eater) -> (_:string) {
   ret match x {
     == Eater.person { x.consume() }
     == Eater.robot  { x.charge()  }
@@ -51,7 +55,7 @@ let nourish = fun(x:Eater) -> (:string) {
 }
 
 let p:Eaters.Person = _
-let r:Eaters.Robot = _
+let r:Eaters.Robot  = _
 let c:Eaters.Cyborg = _
 
 cassert nourish(p) == "person consume"

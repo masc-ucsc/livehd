@@ -25,7 +25,7 @@ if false { // future with types
 }
 
 if false { // future with function calls
-  let to_digit = func(a:int(0..=9)) -> (s:string) {
+  let to_digit = fun(a:int(0..=9)) -> (s:string) {
     s = 0x30+a
   }
 

@@ -48,7 +48,7 @@ cassert a !has 1
     ,foo=55
   )
   cassert a == (3,44,55) == (3,xx=44,foo=55)
-  cassert xx = 3
+  cassert xx == 3
 }
 
 {
