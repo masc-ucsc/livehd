@@ -796,6 +796,9 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
           inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
       }
       });
+  fmt::print("Starting IN_map_of_sets\n");
+  print_io_map(inp_map_of_sets);
+  fmt::print("\n");
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output ([this](const Node_pin dpin){
@@ -807,6 +810,35 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
   fmt::print("Starting out_map_of_sets\n");
   print_io_map(out_map_of_sets);
 
+  /*in fwd, flops are visited last. Thus this fast pass:
+   * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only constants are. This means that the flop is not visited first.) */
+  for (const auto &node: lg->fast(true)) {
+    if(!node.is_type_loop_last()) {
+      continue; //process flops only in this lg->fast
+    }
+
+    const auto node_dpin_cf = get_dpin_cf(node);
+    bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+
+    const auto self_set=inp_map_of_sets.find(node_dpin_cf);
+
+    for (auto e: node.out_edges()) {
+      if(e.sink.get_node().is_type_loop_first()) {
+        /*need not keep outputs of const/graphIO in in_map_of_sets*/
+        continue;
+      }
+      auto out_cf = get_dpin_cf(e.sink.get_node());
+      if (is_loop_stop) {
+        inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+      } else {
+        if(self_set!=inp_map_of_sets.end()) {
+          inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
+        }
+      }
+    }
+
+  }
+
   /*propagate sets. stop at sequential/IO... (_last)*/
   std::vector<Node_pin::Compact_flat> traverse_order;
   std::vector<Node> traverse_order_DBG;
@@ -816,20 +848,33 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
       traverse_order.emplace_back(node_dpin_cf);
       traverse_order_DBG.emplace_back(node);
     }
+    bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+    fmt::print("***IN_map_of_sets for traverse_order-node {}:***\n", node.get_nid());
 
-    absl::flat_hash_set<Node_pin::Compact_flat> self_set;
-    if(inp_map_of_sets.find(node_dpin_cf) != inp_map_of_sets.end()) {//if this cond not present then const gets inserted as keys with no val.
-      self_set = inp_map_of_sets[node_dpin_cf];
-    }
+    const auto self_set=inp_map_of_sets.find(node_dpin_cf);
+    if(self_set!=inp_map_of_sets.end()) {fmt::print("^Found hit on map\n");} else { fmt::print("^No self set for this one.\n");}
+
     for (auto e: node.out_edges()) {
+      if(e.sink.get_node().is_type_loop_first()) {
+        /*need not keep outputs of const/graphIO in in_map_of_sets*/
+        continue;
+      }
+      fmt::print("its out node (new key): {}\n", e.sink.get_node().get_nid());
       auto out_cf = get_dpin_cf(e.sink.get_node());
-      if (node.is_type_loop_last() || node.is_type_loop_first()) {
+      if (is_loop_stop) {
         inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
       } else {
-        inp_map_of_sets[out_cf].insert(self_set.begin(), self_set.end());
+        if(self_set!=inp_map_of_sets.end()) {
+             fmt::print("--inserting self_set:\n");
+             for(auto x: self_set->second )
+               fmt::print("\t\t{}", Node_pin("lgdb", x).get_node().get_nid());
+             fmt::print("\n");
+          inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
+        }
       }
-
     }
+
+    print_io_map(inp_map_of_sets);
   }
 
   fmt::print("################\n");
@@ -863,10 +908,6 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
       if(is_loop_stop){
         out_map_of_sets[inp_cf].insert(node_dpin_cf);
       } else {
-        const auto self_set1=out_map_of_sets.find(node_dpin_cf);
-        if(self_set1!=out_map_of_sets.end()) {
-          out_map_of_sets[inp_cf].insert(self_set1->second.begin(), self_set1->second.end());
-        }
         if(self_set!=out_map_of_sets.end()) {
           out_map_of_sets[inp_cf].insert(self_set->second.begin(), self_set->second.end());
         }
