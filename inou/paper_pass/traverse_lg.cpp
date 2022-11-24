@@ -841,63 +841,38 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
 
   /*propagate sets. stop at sequential/IO... (_last)*/
   std::vector<Node_pin::Compact_flat> traverse_order;
-  std::vector<Node> traverse_order_DBG;
   for (const auto &node: lg->forward(true)) {
     const auto node_dpin_cf = get_dpin_cf(node);
     if (! node.is_type_const()) {
       traverse_order.emplace_back(node_dpin_cf);
-      traverse_order_DBG.emplace_back(node);
     }
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
-    fmt::print("***IN_map_of_sets for traverse_order-node {}:***\n", node.get_nid());
-
     const auto self_set=inp_map_of_sets.find(node_dpin_cf);
-    if(self_set!=inp_map_of_sets.end()) {fmt::print("^Found hit on map\n");} else { fmt::print("^No self set for this one.\n");}
 
     for (auto e: node.out_edges()) {
       if(e.sink.get_node().is_type_loop_first()) {
         /*need not keep outputs of const/graphIO in in_map_of_sets*/
         continue;
       }
-      fmt::print("its out node (new key): {}\n", e.sink.get_node().get_nid());
       auto out_cf = get_dpin_cf(e.sink.get_node());
       if (is_loop_stop) {
         inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
       } else {
         if(self_set!=inp_map_of_sets.end()) {
-             fmt::print("--inserting self_set:\n");
-             for(auto x: self_set->second )
-               fmt::print("\t\t{}", Node_pin("lgdb", x).get_node().get_nid());
-             fmt::print("\n");
           inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
         }
       }
     }
 
-    print_io_map(inp_map_of_sets);
   }
-
-  fmt::print("################\n");
-  for (auto & node : traverse_order_DBG){
-    fmt::print("{}, {}\n", node.get_nid(), Node_pin("lgdb",get_dpin_cf(node)).get_pid() );
-  }
-  fmt::print("################\n");
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
   for (std::vector<Node_pin::Compact_flat>::reverse_iterator rit=traverse_order.rbegin(); rit != traverse_order.rend(); ++rit) {
     auto node_dpin_cf = *rit;
     auto node = Node_pin("lgdb", node_dpin_cf).get_node() ;
-    fmt::print("***out_map_of_sets for traverse_order-node {}:***\n", node.get_nid());
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
    
     const auto self_set=out_map_of_sets.find(node_dpin_cf);
-    if(self_set!=out_map_of_sets.end()) {fmt::print("^Found hit on map\n");} else { fmt::print("^No self set for this one.\n");}
-    if (node.get_nid().value==361 || node.get_nid().value==388){
-      fmt::print("we are looking for node_pin: {}  {}\n", Node_pin("lgdb",node_dpin_cf).get_pid(), Node_pin("lgdb",node_dpin_cf).get_node().get_nid());
-      for (auto it = out_map_of_sets.begin(); it!=out_map_of_sets.end(); ++it) {
-        fmt::print("> {}  {}\n",Node_pin("lgdb",it->first).get_pid(), Node_pin("lgdb",it->first).get_node().get_nid() );
-      }
-    }
 
     for(auto in_dpin:node.inp_drivers()) {
       if(in_dpin.get_node().is_type_loop_first()) {
