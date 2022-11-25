@@ -1,0 +1,50 @@
+/*
+:name: valid_simple
+:type: parsing
+*/
+
+// Pyrope ? behaves like an optional but it is not a null pointer vs data.
+// There are no pointers in Pyrope. Instead the data is left to behave like
+// without the optional, but there is a new "valid" field associated.
+
+var v1:u32 = 0
+var v2:u32 = _
+
+cassert v1 == 0 and v2 == 0 // data still same as usual
+
+cassert v1?
+cassert not v2?
+
+v1 = 0sb?                      // OK, poison data
+v2 = 0sb?                      // OK, poison data, and unset valid
+
+cassert v1?
+cassert v2?
+
+cassert v1 != 0        // usual verilog x logic
+cassert v2 != 0        // usual verilog x logic
+
+let res1 = v1 + 0              // OK, just unknown result
+let res2 = v2 + 0              // OK, just unknown result
+
+// nil in pyrope is a bit more strict and notifies on any usage error. nil
+// poisons the data. Any op with it is a compile or runtime error
+
+v1 = nil                       // OK, poison data
+v2 = nil                       // OK, poison data, and unset valid
+
+cassert not v1?
+cassert not v2?
+
+let res3 = v1 + 0              // compile or runtime error
+let res4 = v2 + 0              // compile or runtime error
+
+cassert v1 == nil       // compile error, can not do ops with nil
+cassert v2 == nil       // compile error, can not do ops with nil
+
+v2 = 100
+cassert v2? and (v2 + 1) == 101
+
+v2? = false                    // keep data, just toggle valid
+cassert not v2? and v2 == 101
+

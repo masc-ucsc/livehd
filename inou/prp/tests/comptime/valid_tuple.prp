@@ -1,0 +1,28 @@
+/*
+:name: valid_tuple
+:type: parsing
+*/
+
+let Complex = (
+  ,v1:string = _
+  ,v2:string = _
+)
+
+var x1:Complex = (v1="", v2="")
+var x2:Complex = _
+
+cassert x1.v1 == "" and x1.v2 == ""
+cassert not x2? and x2.v1 == "" and x2.v2 == ""
+
+cassert x2?.v1 == "" and x2?.v1 != ""  // any comparison is false
+
+// When x2? is false, any x2?.foo returns 0sb? with the associated x rules
+
+x2.v2 = "hello" // direct access still OK
+
+cassert not x2? and x2.v2? and x2.v1 == "" and x2.v2 == "hello"
+
+x2 = "world"
+
+cassert x2? and x2?.v1 == "world" and x2.v1 == "world"
+
