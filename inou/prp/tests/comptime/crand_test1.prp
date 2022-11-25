@@ -5,7 +5,7 @@
 
 let a=false // boolean type inferred
 
-c = a.::[crand]
+c = a.[crand]
 
 var x = 0
 

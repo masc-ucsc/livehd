@@ -9,5 +9,5 @@ cassert  a[3]
 cassert  a[4]
 cassert !a[5]
 
-cassert a.::[size] == 3
+cassert a.[size] == 3
 

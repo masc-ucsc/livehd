@@ -2,8 +2,8 @@
 
 let foo = (xx=3, yy=4)
 
-cassert foo[0].::[key] == "xx"
-cassert foo[1].::[key] == "yy"
-cassert foo.::[key] == "foo"
+cassert foo[0].[key] == "xx"
+cassert foo[1].[key] == "yy"
+cassert foo.[key] == "foo"
 cassert foo.xx::[key] == "xx"
 

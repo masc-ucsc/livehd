@@ -1,0 +1,40 @@
+/*
+:name: tuple_typename
+:type: parsing
+*/
+
+let X1 = (
+  ,a=33
+)
+
+let X2:(
+  ,a=_
+) = (a=44)
+
+
+cassert X1.[typename] == "X1"
+cassert X2.[typename] == "X2"
+
+let c1:X1 = (a=100)
+let c2:X2 = (a=200)
+
+cassert c1.[typename] == "X1"
+cassert c2.[typename] == "X2"
+
+let d1:c1 = (a=300)
+let d2:c2 = (a=300)
+
+cassert d1.[typename] == "X1"
+cassert d2.[typename] == "X2"
+
+let e1=c1(a=300)
+let e2=c2(a=300)
+
+cassert e1.[typename] == "X1"
+cassert e2.[typename] == "X2"
+
+let g1=c1(a=300) ++ (b=2)
+let g2=c2(a=300) ++ (b=2)
+
+cassert g1.[typename] == "g1"
+cassert g2.[typename] == "g2"

@@ -6,40 +6,40 @@ let a::[debug,foo] = 3
 
 b = a + c
 
-cassert b.::[debug] and !b.::[foo]
+cassert b.[debug] and !b.[foo]
 cassert b == 5
 
 let x:a = 100 // Just attribute, not type preservation
 
-cassert not x.::[debug]
+cassert not x.[debug]
 cassert x == 100
 
 let y = a
-cassert y.::[debug] and y.::[foo]
+cassert y.[debug] and y.[foo]
 cassert y == 3
 
 var z = a
-cassert z.::[debug] and z.::[foo]
+cassert z.[debug] and z.[foo]
 cassert z == 3
 
 z = 300
-cassert z.::[debug] and z.::[foo]
+cassert z.[debug] and z.[foo]
 cassert z == 300
 
-z.::[potato] = 55
-cassert !z.::[potato]             // Not bind attribute after declaration
-cassert z.::[debug] and z.::[foo] // But keep the declaration attributes
+z.[potato] = 55
+cassert !z.[potato]             // Not bind attribute after declaration
+cassert z.[debug] and z.[foo] // But keep the declaration attributes
 
 z:u4:[saturate] = 3000
-cassert !z.::[saturate] and z == 15
-cassert z.::[debug] and z.::[foo]
+cassert !z.[saturate] and z == 15
+cassert z.[debug] and z.[foo]
 
-let l = 1 + z.::[foo]
-cassert l.::[debug] and !l.::[foo] and l == 3001
+let l = 1 + z.[foo]
+cassert l.[debug] and !l.[foo] and l == 3001
 
-let m = z.::[fop]
-cassert m.::[debug] and  m.::[foo] and m == 3000
+let m = z.[fop]
+cassert m.[debug] and  m.[foo] and m == 3000
 
-let n = z.::[foo] + 0
-cassert n.::[debug] and !n.::[foo] and n == 3000
+let n = z.[foo] + 0
+cassert n.[debug] and !n.[foo] and n == 3000
 
