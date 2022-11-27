@@ -17,7 +17,7 @@ protected:
   TSNode      ts_root_node;
 
   // AST States
-  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl };
+  enum class Expression_state { Type, Lvalue, Rvalue, Const, Decl, Attr };
   std::stack<Expression_state> expr_state_stack;
 
   // a::[b] = c::[d = f::[g]]
@@ -84,6 +84,7 @@ protected:
 
   // Select
   void process_select(TSNode);
+  void process_select_options(TSNode);
   void process_member_select(TSNode);
   void process_bit_selection(TSNode);
   void process_bit_select(TSNode);
@@ -94,6 +95,7 @@ protected:
 
   // Basics
   void process_tuple(TSNode);
+  void process_tuple_sq(TSNode);
   void process_tuple_or_expression_list(TSNode);
   void process_lvalue_list(TSNode);
   void process_rvalue_list(TSNode);
@@ -122,7 +124,13 @@ protected:
   std::stack<Lnast_node> rvalue_node_stack;
   std::stack<Lnast_node> lvalue_node_stack;
   std::stack<Lnast_node> primary_node_stack;
-  std::stack<std::vector<Lnast_node>> select_stack;
+
+  struct select_list_t {
+    bool is_attribute = false;
+    std::vector<Lnast_node> nodes;
+  };
+
+  std::stack<select_list_t> select_stack;
   std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
   Lnast_node ret_node;
 

@@ -101,7 +101,7 @@ void Prp2lnast::process_description() {
   while (go_next) {
     enter_scope(Expression_state::Rvalue);
     attr_scope_stack.push(false);
-    select_stack.push(std::vector<Lnast_node>());
+    select_stack.push({});
     process_statement(ts_tree_cursor_current_node(&tc));
     leave_scope();
     attr_scope_stack.pop();
@@ -146,6 +146,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_bit_selection(node);
   else if (node_type == "select")
     process_select(node);
+  else if (node_type == "select_options")
+    process_select_options(node);
   else if (node_type == "assignment_or_declaration_statement")
     process_assignment_or_declaration(node);
   else if (node_type == "simple_assignment")
@@ -186,6 +188,8 @@ void Prp2lnast::process_node(TSNode node) {
     process_array_type(node);
   else if (node_type == "tuple")
     process_tuple(node);
+  else if (node_type == "tuple_sq")
+    process_tuple_sq(node);
   else if (node_type == "tuple_list")
     process_tuple_or_expression_list(node);
   else if (node_type == "expression_list")
@@ -484,6 +488,10 @@ void Prp2lnast::process_tuple(TSNode node) {
   process_node(ts_node_child(node, 1));
 }
 
+void Prp2lnast::process_tuple_sq(TSNode node) {
+  process_node(ts_node_child(node, 1));
+}
+
 void Prp2lnast::process_tuple_or_expression_list(TSNode node) {
   if (attr_scope_stack.top()) {
     enter_scope(Expression_state::Const);
@@ -506,6 +514,10 @@ void Prp2lnast::process_tuple_or_expression_list(TSNode node) {
         break;
       case Expression_state::Decl:
         process_declaration_list(node);
+        break;
+      case Expression_state::Attr:
+        // FIXME: `v.[a0, a1, a2]` : only set `a0`
+        process_node(get_child(node, "item"));
         break;
     }
   }
@@ -541,7 +553,7 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
         primary_node_stack.pop();
         break;
       }
-      if (select_stack.top().empty()) {
+      if (select_stack.top().nodes.empty()) {
         fmt::print("Rvalue node stack : {}\n", rvalue_node_stack.size());
         fmt::print("Primary node stack : {}\n", primary_node_stack.size());
         auto assign_index = lnast->add_child(stmts_index, Lnast_node::create_assign());
@@ -549,14 +561,16 @@ void Prp2lnast::process_lvalue_list(TSNode node) {
         lnast->add_child(assign_index, rvalue);
         primary_node_stack.pop();
       } else {
-        auto tuple_set_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_set());
-        lnast->add_child(tuple_set_index, primary_node_stack.top());
+        auto hier_set_index = lnast->add_child(stmts_index, select_stack.top().is_attribute ?
+            Lnast_node::create_attr_set() : Lnast_node::create_tuple_set());
+        lnast->add_child(hier_set_index, primary_node_stack.top());
         primary_node_stack.pop();
-        for (auto n : select_stack.top()) {
-          lnast->add_child(tuple_set_index, n);
+        for (auto n : select_stack.top().nodes) {
+          lnast->add_child(hier_set_index, n);
         }
-        lnast->add_child(tuple_set_index, rvalue);
-        select_stack.top().clear();
+        lnast->add_child(hier_set_index, rvalue);
+        select_stack.top().nodes.clear();
+        select_stack.top().is_attribute = false;
       }
     }
     if (has_multiple_items)
@@ -1034,9 +1048,17 @@ void Prp2lnast::process_dot_expression(TSNode node) {
   enter_scope(Expression_state::Const);
   while (!ts_node_is_null(node)) {
     fmt::print("-> item `{}`\n", get_text(node));
-    process_node(node);
+    std::string node_type(ts_node_type(node));
+    if (node_type == "tuple_sq") {
+      select_stack.top().is_attribute = true;
+      enter_scope(Expression_state::Attr);
+      process_node(node);
+      leave_scope();
+    } else {
+      process_node(node);
+    }
     fmt::print("{} {}\n", select_stack.size(), primary_node_stack.top().token.get_text());
-    select_stack.top().emplace_back(primary_node_stack.top());
+    select_stack.top().nodes.emplace_back(primary_node_stack.top());
     primary_node_stack.pop();
     node = get_named_sibling(node);
   }
@@ -1044,15 +1066,17 @@ void Prp2lnast::process_dot_expression(TSNode node) {
 
   switch (expr_state_stack.top()) {
     case Expression_state::Rvalue: {
-      auto tuple_get_index = lnast->add_child(stmts_index, Lnast_node::create_tuple_get());
+      auto hier_get_index = lnast->add_child(stmts_index, select_stack.top().is_attribute ?
+          Lnast_node::create_attr_get() : Lnast_node::create_tuple_get());
       auto ref = get_tmp_ref();
-      lnast->add_child(tuple_get_index, ref);
-      lnast->add_child(tuple_get_index, lhs);
-      for (auto i : select_stack.top()) {
-        lnast->add_child(tuple_get_index, i);
+      lnast->add_child(hier_get_index, ref);
+      lnast->add_child(hier_get_index, lhs);
+      for (auto i : select_stack.top().nodes) {
+        lnast->add_child(hier_get_index, i);
       }
       primary_node_stack.push(ref);
-      select_stack.top().clear();
+      select_stack.top().nodes.clear();
+      select_stack.top().is_attribute = false;
     } break;
     case Expression_state::Lvalue: primary_node_stack.push(lhs);
     default: break;
@@ -1079,11 +1103,12 @@ void Prp2lnast::process_member_selection(TSNode node) {
       auto ref = get_tmp_ref();
       lnast->add_child(tuple_get_index, ref);
       lnast->add_child(tuple_get_index, lhs);
-      for (auto i : select_stack.top()) {
+      for (auto i : select_stack.top().nodes) {
         lnast->add_child(tuple_get_index, i);
       }
       primary_node_stack.push(ref);
-      select_stack.top().clear();
+      select_stack.top().nodes.clear();
+      select_stack.top().is_attribute = false;
     } break;
     case Expression_state::Lvalue: primary_node_stack.push(lhs); break;
     default: break;
@@ -1094,16 +1119,18 @@ void Prp2lnast::process_member_select(TSNode node) {
   node = get_child(node);
   while (!ts_node_is_null(node)) {
     process_node(node);
-    select_stack.top().emplace_back(primary_node_stack.top());
+    select_stack.top().nodes.emplace_back(primary_node_stack.top());
     primary_node_stack.pop();
     node = get_sibling(node);
   }
 }
 
 void Prp2lnast::process_select(TSNode node) {
-  fmt::print("-> select `{}`\n", get_text(node));
+  process_node(get_child(node, 1));
+}
 
-  select_stack.push(std::vector<Lnast_node>());
+void Prp2lnast::process_select_options(TSNode node) {
+  select_stack.push({});
   if (!ts_node_is_null(get_child(node, "list"))) {
     process_node(get_child(node, "list"));
   } else if (!ts_node_is_null(get_child(node, "open_range"))) {
@@ -1205,6 +1232,7 @@ void Prp2lnast::process_identifier(TSNode node) {
       */
       break;
     case Expression_state::Const:
+    case Expression_state::Attr:
       primary_node_stack.push(Lnast_node::create_const(name)); break;
     default: break;
   }
@@ -1283,6 +1311,8 @@ inline std::string Prp2lnast::str(Expression_state state) {
       return "const";
     case Expression_state::Decl:
       return "decl";
+    case Expression_state::Attr:
+      return "attr";
   }
   return "invalid";
 }
