@@ -26,3 +26,5 @@ x2 = "world"
 
 cassert x2? and x2?.v1 == "world" and x2.v1 == "world"
 
+//if x2?.v1 { // if x2? and x2.v1!=0
+//}

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "main_api.hpp"
 
+#include "thread_pool.hpp"
 #include "cloud_api.hpp"
 #include "file_utils.hpp"
 #include "inou_lef_api.hpp"
@@ -32,4 +33,11 @@ void Main_api::init() {
 
   Meta_api::setup(Pass::eprp);   // lgraph.*
   Cloud_api::setup(Pass::eprp);  // cloud.*
+}
+
+
+void Main_api::parse_inline(std::string_view line) { 
+  Pass::eprp.parse_inline(line); 
+
+  thread_pool.wait_all();
 }

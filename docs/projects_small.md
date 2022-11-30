@@ -5,6 +5,14 @@ Those are simpler than MS thesis but useful for LiveHD. They are ranked from
 "most" to less "urgent". Each has a easy/medium/hard level. Easy should take a
 few days to implement, hard could take a quarter.
 
+## [small] C++ switch terminal library
+
+Switch from replxx to https://github.com/jcwangxp/Crossline
+
+The reason is OSX failures and replxx is not longer mantained.
+
+This affects main/main.cpp and nothing else.
+
 ## [medium] C++ Cell library (dops)
 
 A related project to the sops is the dops (Dynamic or with unknown bit sizes at

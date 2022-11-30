@@ -16,7 +16,8 @@ cc_library(
     ]),
     copts = [
         "-w",
-        "-O2",
+        "-g",
+#        "-O2",
     ],  # disable turning warnings into errors for external lib
     includes = ["include"],  # Needed because some includes use <foo.h>
     visibility = ["//visibility:public"],

@@ -23,7 +23,7 @@ public:
 
   static void setup(const std::function<void(Eprp &)> &fn) { fn(Pass::eprp); }
 
-  static void parse_inline(std::string_view line) { Pass::eprp.parse_inline(line); }
+  static void parse_inline(std::string_view line);
 
   static void get_commands(std::function<void(std::string_view, std::string_view)> fn) { Pass::eprp.get_commands(fn); };
 
