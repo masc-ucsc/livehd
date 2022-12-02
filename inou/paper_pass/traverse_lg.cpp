@@ -1,14 +1,14 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "traverse_lg.hpp"
-
 #include <iostream>
-#include "lgedgeiter.hpp"
-#include "perf_tracing.hpp"
 #include <fstream>
 #include <utility>
 #include <string>
 #include <algorithm>
+
+#include "traverse_lg.hpp"
+#include "lgedgeiter.hpp"
+#include "perf_tracing.hpp"
 
 int VISITED_COLORED = 401;
 static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
