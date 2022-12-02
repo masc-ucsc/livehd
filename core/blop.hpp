@@ -20,7 +20,9 @@ public:
   static void extend(int64_t *dest, size_t dest_sz, const int64_t src) {
     dest[0]   = src;
     int64_t v = src < 0 ? -1 : 0;
-    for (auto i = 1u; i < dest_sz; ++i) dest[i] = v;
+    for (auto i = 1u; i < dest_sz; ++i) {
+      dest[i] = v;
+    }
   }
 
   //--------------------------------------------------------------------------

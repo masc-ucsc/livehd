@@ -42,8 +42,9 @@ public:
   void release_ptr(T* to_release) {
     I(to_release->shared_count == 1);
     bool fits = _pointer_queue.enqueue(to_release);
-    if (fits)
+    if (fits) {
       return;
+    }
     delete to_release;
   }
 };
@@ -84,8 +85,9 @@ public:
   }
 
   ~spool_ptr() {
-    if (data_)
+    if (data_) {
       dec_shared_count();
+    }
   }
 
   spool_ptr& operator=(const spool_ptr& sp) noexcept {
@@ -112,8 +114,9 @@ public:
   explicit operator bool() const noexcept { return data_ != nullptr; }
 
   void reset() noexcept {
-    if (data_ == nullptr)
+    if (data_ == nullptr) {
       return;
+    }
     dec_shared_count();
     data_ = nullptr;
   }

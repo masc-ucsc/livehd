@@ -14,8 +14,9 @@
 File_output::File_output(std::string_view fname) : filename(fname), sz(0), aborted(false) {}
 
 File_output::~File_output() {
-  if (aborted)
+  if (aborted) {
     return;
+  }
 
   //---------------------------------- OPEN
 

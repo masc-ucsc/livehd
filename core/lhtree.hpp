@@ -23,7 +23,7 @@
 // 19: ?? │   │   -── 1.4.2.1
 // 20: ?? │   ├── 1.4.3
 // 21: ?? │   │   -── 1.4.3.1
-// 
+//
 // Vector n-ary tree implementation:
 //
 // 2 arrays: main and overflow
@@ -380,8 +380,9 @@ protected:
       I(l[shift_pos].parent == current_pos);
       l[shift_pos].parent = new_pos;
       shift_pos           = l[shift_pos].next_sibling >> 2;
-      if (shift_pos == 0)
+      if (shift_pos == 0) {
         return;
+      }
     }
   }
 
@@ -395,14 +396,16 @@ protected:
     I(first_child.level == sibling.level);
 
     auto last_pos = ptrs.next_sibling & 3;
-    if (last_pos == 0)
+    if (last_pos == 0) {
       last_pos = 3;
+    }
 
     I((sibling.pos & 3) <= last_pos);
 
     auto first_pos = sibling.pos & 3;
-    if (after)
+    if (after) {
       first_pos++;
+    }
 
     for (int i = last_pos; i > first_pos; --i) {
       data_stack[sibling.level][((sibling.pos >> 2) << 2) + i] = data_stack[sibling.level][((sibling.pos >> 2) << 2) + i - 1];
@@ -483,8 +486,9 @@ protected:
     I((index.pos >> 2) < (int)pointers_stack[index.level].size());
 
     auto pos = pointers_stack[index.level][index.pos >> 2].next_sibling;
-    if ((pos & 3) > (index.pos & 3) || (pos & 3) == 0)
+    if ((pos & 3) > (index.pos & 3) || (pos & 3) == 0) {
       return true;  // Either the index is smaller than end or all the entries are used (pos==0)
+    }
 
     return false;
   }
@@ -531,11 +535,11 @@ public:
 
   size_t max_size() const {
     size_t sz = 0;
-    for(const auto &ent : pointers_stack) {
+    for (const auto &ent : pointers_stack) {
       sz += ent.size();
     }
 
-    return sz*4; // WARNING: 4x because pointers stack has 4x pointer
+    return sz * 4;  // WARNING: 4x because pointers stack has 4x pointer
   }
 
   bool is_last_child(const Tree_index &self_index) const { return get_sibling_next(self_index) == invalid_index(); }
@@ -553,14 +557,17 @@ public:
     const auto next_offset     = next_bucket_pos & 3;
     const auto sibling_offset  = sibling.pos & 3;
 
-    if (next_offset == 0 && sibling_offset != 3)
+    if (next_offset == 0 && sibling_offset != 3) {
       return Tree_index(sibling.level, sibling.pos + 1);
+    }
 
-    if (next_offset != 0 && next_offset > (sibling_offset + 1))
+    if (next_offset != 0 && next_offset > (sibling_offset + 1)) {
       return Tree_index(sibling.level, sibling.pos + 1);
+    }
 
-    if ((next_bucket_pos >> 2) == 0)
+    if ((next_bucket_pos >> 2) == 0) {
       return invalid_index();  // No more siblings
+    }
 
     return Tree_index(sibling.level, (next_bucket_pos >> 2) << 2);
   }
@@ -574,8 +581,9 @@ public:
     auto       index = get_first_child(get_parent(sibling));
     Tree_index prev;
     while (true) {
-      if (index == sibling)
+      if (index == sibling) {
         return prev;  // Returns invalid if first chipd ast for prev
+      }
 
       prev = index;
 
@@ -730,8 +738,9 @@ public:
   Tree_index append_sibling(const Tree_index &sibling, const X &data);
   Tree_index insert_next_sibling(const Tree_index &sibling, const X &data);
   size_t     get_tree_width(const Tree_level &level) const {
-    if (level >= data_stack.size())
+    if (level >= data_stack.size()) {
       return 0;
+    }
 
     return data_stack[level].size();
   }
@@ -768,8 +777,9 @@ public:
 
     auto pos   = pointers_stack[index.level][index.pos >> 2].parent;
     auto level = index.level - 1;
-    if (level < 0)
+    if (level < 0) {
       level = 0;  // TODO: cleaner to return invalid_index()
+    }
 
     GI(index.level == 0, level == 0 && pos == 0);  // parent of root is root
 
@@ -807,8 +817,9 @@ public:
 
   Tree_sibling_iterator siblings(const Tree_index &start_index) const { return Tree_sibling_iterator(start_index, this); }
   Tree_sibling_iterator children(const Tree_index &start_index) const {
-    if (is_leaf(start_index))
+    if (is_leaf(start_index)) {
       return Tree_sibling_iterator(invalid_index(), this);
+    }
 
     return Tree_sibling_iterator(get_first_child(start_index), this);
   }
@@ -820,8 +831,9 @@ public:
   bool has_single_child(const Tree_index &index) const {
     auto fc_pos = get_first_child_pos(index);
 
-    if (fc_pos == -1)
+    if (fc_pos == -1) {
       return false;
+    }
 
     auto lc_index = get_last_child(index);
 
@@ -860,8 +872,9 @@ public:
     for (const auto &index : depth_preorder()) {
       std::string indent(index.level, ' ');
       printf("%s l:%d p:%d\n", indent.c_str(), index.level, index.pos);
-      if (index.level == 0)  // skip root
+      if (index.level == 0) {  // skip root
         continue;
+      }
       auto parent = get_parent(index);
       auto pos    = index.pos;
       while (true) {
@@ -891,8 +904,9 @@ public:
     for (const auto &index : depth_postorder()) {
       std::string indent(index.level, ' ');
       printf("%s l:%d p:%d\n", indent.c_str(), index.level, index.pos);
-      if (index.level == 0)  // skip root
+      if (index.level == 0) {  // skip root
         continue;
+      }
       auto parent = get_parent(index);
       auto pos    = index.pos;
       while (true) {
@@ -917,8 +931,9 @@ public:
 
 template <typename X>
 void tree<X>::adjust_to_level(Tree_level level) {
-  if (data_stack.size() > static_cast<size_t>(level))
+  if (data_stack.size() > static_cast<size_t>(level)) {
     return;
+  }
 
   while (data_stack.size() <= static_cast<size_t>(level)) {
     data_stack.emplace_back();
@@ -1238,8 +1253,9 @@ Tree_index tree<X>::get_depth_preorder_next(const Tree_index &child) const {
   auto parent = get_parent(child);
   while (!parent.is_root()) {
     auto parent_next = get_sibling_next(parent);
-    if (!parent_next.is_invalid())
+    if (!parent_next.is_invalid()) {
       return parent_next;
+    }
 
     parent = get_parent(parent);
   }
@@ -1256,8 +1272,9 @@ Tree_index tree<X>::get_depth_postorder_next(const Tree_index &child) const {
     }
     return next_child;
   }
-  if (is_root(child))
+  if (is_root(child)) {
     return invalid_index();
+  }
 
   auto parent = get_parent(child);
   return parent;
@@ -1285,8 +1302,9 @@ void tree<X>::each_bottom_up_fast(std::function<void(const Tree_index &self, con
 
     for (size_t j = 0; j < sz2; j++) {
       Tree_index ti(i, j);
-      if (!is_valid(ti))
+      if (!is_valid(ti)) {
         continue;
+      }
 
       fn(ti, data_stack[i][j]);
     }
@@ -1301,8 +1319,9 @@ void tree<X>::each_top_down_fast(std::function<void(const Tree_index &self, cons
 
     for (size_t j = 0; j < sz2; j++) {
       Tree_index ti(i, j);
-      if (!is_valid(ti))
+      if (!is_valid(ti)) {
         continue;
+      }
 
       fn(ti, data_stack[i][j]);
     }
@@ -1312,8 +1331,9 @@ void tree<X>::each_top_down_fast(std::function<void(const Tree_index &self, cons
 template <typename X>
 Tree_index tree<X>::get_child(const Tree_index &top) const {
   auto fc = get_first_child_pos(top);
-  if (fc == -1)
+  if (fc == -1) {
     return invalid_index();
+  }
 
   return Tree_index(top.level + 1, fc);
 }

@@ -31,8 +31,9 @@ public:
 
   void release_ptr(void *to_release) {
     bool fits = _pointer_queue.enqueue(to_release);
-    if (fits)
+    if (fits) {
       return;
+    }
     free(to_release);
   }
 

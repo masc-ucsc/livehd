@@ -59,8 +59,9 @@ static void clean_dir_thread(char *path) {
 }
 
 void file_utils::clean_dir(std::string_view dir) {
-  if (dir.empty())
+  if (dir.empty()) {
     return;
+  }
 
   const std::string path(dir);
 

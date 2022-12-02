@@ -12,8 +12,9 @@
 namespace str_tools {
 
 [[nodiscard]] inline int to_i(std::string_view str) {  // convert to integer
-  if (str.empty() || !std::isdigit(str.front()))
+  if (str.empty() || !std::isdigit(str.front())) {
     return 0;
+  }
   int result{};
   std::from_chars(str.data(), str.data() + str.size(), result);
   return result;
@@ -38,81 +39,92 @@ namespace str_tools {
 }
 
 [[nodiscard]] inline int to_u64_from_hex(std::string_view str) {  // convert to integer from hexa
-  if (str.empty())
+  if (str.empty()) {
     return 0;
+  }
   int result{};
   std::from_chars(str.data(), str.data() + str.size(), result, 16);
   return result;
 }
 
 [[nodiscard]] inline bool is_string(std::string_view str) {
-  if (str.empty())
+  if (str.empty()) {
     return false;
+  }
 
   auto ch = str.front();
-  if (std::isdigit(ch) || ch == '-')
+  if (std::isdigit(ch) || ch == '-') {
     return false;
+  }
 
   return true;
 }
 
 [[nodiscard]] inline bool is_i(std::string_view str) {
-  if (str.size() == 0 || !(std::isdigit(str.front()) || str.front() == '-'))
+  if (str.size() == 0 || !(std::isdigit(str.front()) || str.front() == '-')) {
     return false;
+  }
 
   int result{};
   auto [p, ec] = std::from_chars(str.data(), str.data() + str.size(), result);
   (void)p;
-  if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range)
+  if (ec == std::errc::invalid_argument || ec == std::errc::result_out_of_range) {
     return false;
+  }
 
   return true;
 }
 
 [[nodiscard]] inline std::string_view get_str_after_last(std::string_view str, const char chr) {
   auto pos = str.rfind(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return {};
+  }
 
   return str.substr(pos + 1);
 }
 
 [[nodiscard]] inline std::string_view get_str_after_last_if_exists(std::string_view str, const char chr) {
   auto pos = str.rfind(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return str;
+  }
 
   return str.substr(pos + 1);
 }
 
 [[nodiscard]] inline std::string_view get_str_after_first(std::string_view str, const char chr) {
   auto pos = str.find(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return {};
+  }
 
   return str.substr(pos + 1);
 }
 
 [[nodiscard]] inline std::string_view get_str_after_first_if_exists(std::string_view str, const char chr) {
   auto pos = str.find(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return str;
+  }
 
   return str.substr(pos + 1);
 }
 
 [[nodiscard]] inline std::string_view get_str_before_last(std::string_view str, const char chr) {
   auto pos = str.rfind(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return str;
+  }
 
   return str.substr(0, pos);
 }
 
 [[nodiscard]] inline std::string_view get_str_before_first(std::string_view str, const char chr) {
   auto pos = str.find(chr);
-  if (pos == std::string_view::npos)
+  if (pos == std::string_view::npos) {
     return str;
+  }
 
   return str.substr(0, pos);
 }
@@ -124,8 +136,9 @@ namespace str_tools {
 }
 
 [[nodiscard]] inline bool starts_with(std::string_view str, std::string_view start) {
-  if (str.size() < start.size())
+  if (str.size() < start.size()) {
     return false;
+  }
 
   return str.substr(0, start.size()) == start;
 }
@@ -134,8 +147,9 @@ namespace str_tools {
   if (end.size() == str.size()) {
     return str == end;  // faster path
   }
-  if (end.size() > str.size())
+  if (end.size() > str.size()) {
     return false;  // end is larger
+  }
 
   const auto *base_en   = end.data();
   const auto *base_self = str.data() + str.size() - end.size();

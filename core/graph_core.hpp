@@ -105,8 +105,9 @@ protected:
     bool has_local_edges() const { return n_edges > 0; }
 
     std::pair<size_t, size_t> get_num_local_edges() const {
-      if (inputs)
+      if (inputs) {
         return std::pair(n_edges, 0);
+      }
       return std::pair(0, n_edges);
     }
 
@@ -194,8 +195,9 @@ protected:
 
     bool     has_overflow() const { return overflow_link; }
     uint32_t get_overflow_id() const {
-      if (overflow_link)
+      if (overflow_link) {
         return ledge1_or_overflow;
+      }
       return 0;
     }
 
@@ -206,8 +208,9 @@ protected:
     }
 
     uint32_t get_pid() const {
-      if (is_node())
+      if (is_node()) {
         return 0;
+      }
 
       uint32_t pid = sedge2_or_pid;
       pid <<= 8;
@@ -274,8 +277,9 @@ public:
   }
 
   bool is_invalid(uint32_t id) const {
-    if (id == 0 || table.size() <= id)
+    if (id == 0 || table.size() <= id) {
       return true;
+    }
 
     return table[id].overflow_vertex;  // overflow set in deleted nodes
   }
@@ -295,8 +299,9 @@ public:
   uint32_t get_node(uint32_t id) {
     I(!is_invalid(id));
 
-    if (table[id].is_node())
+    if (table[id].is_node()) {
       return id;
+    }
 
     return table[id].get_prev_ptr();
   }

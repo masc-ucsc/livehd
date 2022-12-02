@@ -3,6 +3,7 @@ BasedOnStyle: Google
 ColumnLimit: '132'
 AlignConsecutiveAssignments: 'true'
 AlignConsecutiveDeclarations: 'true'
+#ArrayInitializerAlignmentStyle: 'Right'
 #AlignConsecutiveBitFields: 'true'
 AlignConsecutiveMacros: 'true'
 AlignTrailingComments: 'true'
@@ -17,4 +18,6 @@ BreakConstructorInitializers: 'BeforeComma'
 BreakBeforeBinaryOperators: 'true'
 BreakStringLiterals: 'true'
 AccessModifierOffset: -2
+IndentAccessModifiers: 'false'
+InsertBraces: 'true'
 ...

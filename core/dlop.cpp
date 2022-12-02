@@ -1,11 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "dlop.hpp"
+
 #include <cstdlib>
 
 #include "fmt/format.h"
-
 #include "likely.hpp"
-#include "dlop.hpp"
 #include "str_tools.hpp"
 
 void Dlop::free(size_t sz, int64_t *ptr) {
@@ -17,8 +17,9 @@ void Dlop::free(size_t sz, int64_t *ptr) {
 int64_t *Dlop::alloc(size_t sz) {  // sz is in int64 chunks (8bytes)
   assert(sz >= 1);                 // less than 1 is not valid in dlop
 
-  if (likely(free_pool.size() > (sz >> 3)))
+  if (likely(free_pool.size() > (sz >> 3))) {
     return static_cast<int64_t *>(free_pool[sz >> 3]->get_ptr());
+  }
 
   while ((sz >> 3) >= free_pool.size()) {
     auto *ptr = new raw_ptr_pool((free_pool.size() + 1) << 6);  // 64bytes chunk multiples
@@ -64,8 +65,9 @@ spool_ptr<Dlop> Dlop::from_binary(std::string_view txt, bool unsigned_result) {
     // Look for the first not underscore character (this is the sign)
     for (auto i = 0u; i < txt.size(); ++i) {
       const auto ch2 = txt[i];
-      if (ch2 == '_')
+      if (ch2 == '_') {
         continue;
+      }
       if (ch2 == '1') {
         dlop->extend_base(-1);
       } else if (ch2 == '?') {
@@ -77,8 +79,9 @@ spool_ptr<Dlop> Dlop::from_binary(std::string_view txt, bool unsigned_result) {
 
   for (auto i = 0u; i < txt.size(); ++i) {
     const auto ch2 = txt[i];
-    if (ch2 == '_')
+    if (ch2 == '_') {
       continue;
+    }
 
     dlop->shl_base(1);
     dlop->shl_extra(1);
@@ -98,8 +101,9 @@ spool_ptr<Dlop> Dlop::from_binary(std::string_view txt, bool unsigned_result) {
 }
 
 spool_ptr<Dlop> Dlop::from_pyrope(std::string_view orig_txt) {
-  if (orig_txt.empty())
+  if (orig_txt.empty()) {
     return spool_ptr<Dlop>::make(Type::Invalid, 0);
+  }
 
   auto txt = str_tools::to_lower(orig_txt);
 
@@ -179,16 +183,18 @@ spool_ptr<Dlop> Dlop::from_pyrope(std::string_view orig_txt) {
         dlop->mult_base(10);
         dlop->add_base(v);
       } else {
-        if (txt[i] == '_')
+        if (txt[i] == '_') {
           continue;
+        }
 
         throw std::runtime_error(fmt::format("ERROR: {} encoding could not use {}\n", orig_txt, txt[i]));
       }
     }
   } else if (shift_mode == 1) {  // 0b binary
     auto v = from_binary(txt.substr(skip_chars), unsigned_result);
-    if (!negative)
+    if (!negative) {
       return v;
+    }
 
     dlop->negate_mut();
     return dlop;
@@ -197,8 +203,9 @@ spool_ptr<Dlop> Dlop::from_pyrope(std::string_view orig_txt) {
 
     auto first_digit = -1;
     for (auto i = skip_chars; i < txt.size(); ++i) {
-      if (txt[i] == '_')
+      if (txt[i] == '_') {
         continue;
+      }
 
       auto v = char_to_val[(uint8_t)txt[i]];
       if (unlikely(v < 0)) {
@@ -275,8 +282,12 @@ spool_ptr<Dlop> Dlop::add_op(int64_t other) {
 
 void Dlop::dump() const {
   fmt::print("size:{}\n  base:0x", size);
-  for (int i = size - 1; i >= 0; --i) fmt::print("_{:016x}", (uint64_t)base[i]);
+  for (int i = size - 1; i >= 0; --i) {
+    fmt::print("_{:016x}", (uint64_t)base[i]);
+  }
   fmt::print("\n extra:0x", size);
-  for (int i = size - 1; i >= 0; --i) fmt::print("_{:016x}", (uint64_t)extra[i]);
+  for (int i = size - 1; i >= 0; --i) {
+    fmt::print("_{:016x}", (uint64_t)extra[i]);
+  }
   fmt::print("\n");
 }

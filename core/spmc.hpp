@@ -24,16 +24,18 @@ public:
   Type *getTailRef() { return &array[tail]; }
 
   int size() const {  // WARNING: NOT ATOMIC. Can give WEIRD RESULTS
-    if (tail > head)
+    if (tail > head) {
       return tail - head.load(std::memory_order_relaxed);
-    else
+    } else {
       return 256 - (head.load(std::memory_order_relaxed) - tail);
+    }
   }
 
   bool enqueue(const Type &item_) {
     // Not thread safe to insert (sp)
-    if (full())
+    if (full()) {
       return false;
+    }
 
     array[tail] = item_;
     tail++;
@@ -47,11 +49,13 @@ public:
   bool dequeue(Type &data) {
     for (;;) {
       IndexType head_copy = head.load(std::memory_order_acquire);
-      if (head_copy == tail)
+      if (head_copy == tail) {
         return false;
+      }
       data = array[head_copy];
-      if (head.compare_exchange_weak(head_copy, (IndexType)(head_copy + 1), std::memory_order_release))
+      if (head.compare_exchange_weak(head_copy, (IndexType)(head_copy + 1), std::memory_order_release)) {
         return true;
+      }
     }
   };
 };

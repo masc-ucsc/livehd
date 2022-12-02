@@ -14,9 +14,9 @@
 #include <limits>
 #include <sstream>
 #include <type_traits>
-//#include <random>
+// #include <random>
 #include <utility>
-//#include <stdlib.h>
+// #include <stdlib.h>
 
 // this is probably the fastest high quality 64bit random number generator that exists.
 // Implements Small Fast Counting v4 RNG from PractRand.
@@ -31,19 +31,20 @@ public:
 #else
   static inline bool initialized = false;
   size_t             lrand_get_seed() {
-                static sfc64 seed{sfc64::default_seed};
+    static sfc64 seed{sfc64::default_seed};
 
-                if (__builtin_expect(initialized, 1))
+    if (__builtin_expect(initialized, 1)) {
       return seed.uniform<size_t>();
-
-    const char* lbench_seed = getenv("LBENCH_SEED");
-                if (lbench_seed) {
-                  seed.seed(std::atoi(lbench_seed));
     }
 
-                initialized = true;
+    const char* lbench_seed = getenv("LBENCH_SEED");
+    if (lbench_seed) {
+      seed.seed(std::atoi(lbench_seed));
+    }
 
-                return seed.uniform<size_t>();
+    initialized = true;
+
+    return seed.uniform<size_t>();
   }
   sfc64() : sfc64(lrand_get_seed()) {}
 #endif

@@ -27,7 +27,7 @@
 // 19: ?? │   │   -── 1.4.2.1
 // 20: ?? │   ├── 1.4.3
 // 21: ?? │   │   -── 1.4.3.1
-// 
+//
 // Vector n-ary tree implementation:
 //
 // 2 arrays: main and overflow
@@ -288,7 +288,6 @@ using Tree_pos   = int32_t;
 
 unsing Tree_index = uint32_t;
 
-
 class Tree2 {
 protected:
 public:
@@ -306,7 +305,7 @@ public:
 
   Tree_index get_sibling_prev(const Tree_index &sibling) const;
 
-  #if 0
+#if 0
   class Tree_depth_preorder_iterator {
   public:
     class CTree_depth_preorder_iterator {
@@ -328,9 +327,9 @@ public:
     CTree_depth_preorder_iterator begin() const;
     CTree_depth_preorder_iterator end() const;
   };
-  #endif
+#endif
 
-  #if 0
+#if 0
   class Tree_depth_postorder_iterator {
   public:
     class CTree_depth_postorder_iterator {
@@ -435,7 +434,7 @@ public:
 
   Tree_index get_child(const Tree_index &start_index) const;
 
-  #if 0
+#if 0
   void each_bottom_up_fast(std::function<void(const Tree_index &self, const X &)> fn) const;
   void each_top_down_fast(std::function<void(const Tree_index &self, const X &)> fn) const;
 
@@ -469,4 +468,3 @@ public:
   void dump() const;
   /* LCOV_EXCL_STOP */
 };
-

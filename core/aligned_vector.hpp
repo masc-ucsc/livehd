@@ -17,9 +17,9 @@ inline void* align(size_t __align, size_t __size, void*& __ptr, size_t& __space)
   const auto __intptr  = reinterpret_cast<uintptr_t>(__ptr);
   const auto __aligned = (__intptr - 1u + __align) & -__align;
   const auto __diff    = __aligned - __intptr;
-  if ((__size + __diff) > __space)
+  if ((__size + __diff) > __space) {
     return nullptr;
-  else {
+  } else {
     __space -= __diff;
     return __ptr = reinterpret_cast<void*>(__aligned);
   }
@@ -31,7 +31,7 @@ inline void* align(size_t __align, size_t __size, void*& __ptr, size_t& __space)
 template <typename T, size_t A>
 class aligned_vector {
 public:
-  explicit aligned_vector() noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) { }
+  explicit aligned_vector() noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) {}
 
   explicit aligned_vector(size_t n) noexcept : data_(NULL), raw_data_(NULL), size_(0), capacity_(0) { resize(n); }
 

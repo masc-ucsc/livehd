@@ -10,8 +10,9 @@ void err_tracker::logger(const std::string &text) {
   FILE *f;
   f = fopen(log_file.c_str(), "a+");
 
-  if (f == NULL)
+  if (f == NULL) {
     I(false, "Cannot open log_file");
+  }
 
   fprintf(f, "%s", text.c_str());
   fprintf(f, "\n----\n");
@@ -31,8 +32,9 @@ void err_tracker::sot_logger(const std::string &text) {
   FILE *f;
   f = fopen(log_file.c_str(), "a+");
 
-  if (f == NULL)
+  if (f == NULL) {
     I(false, "Cannot open log_file");
+  }
 
   fprintf(f, "%s", text.c_str());
   fprintf(f, "\n----\n");

@@ -176,8 +176,9 @@ public:
       thread_count = lim;
     }
 
-    if (thread_count < 1)
+    if (thread_count < 1) {
       thread_count = 1;
+    }
 
     assert(thread_count);
 
@@ -187,8 +188,9 @@ public:
   static int get_task_id() { return task_id; }
 
   virtual ~Thread_pool() {
-    while (!started_lock)
+    while (!started_lock) {
       ;  // The exit could be before we even booting the threads (uff)
+    }
 
     wait_all();
 
@@ -196,9 +198,11 @@ public:
 
     job_available_var.notify_all();
 
-    for (auto &x : threads)
-      if (x.joinable())
+    for (auto &x : threads) {
+      if (x.joinable()) {
         x.join();
+      }
+    }
 
     stop_tracing();
   }

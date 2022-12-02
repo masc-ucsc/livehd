@@ -13,8 +13,9 @@
 void Graph_core::Master_entry::readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t, 40> &pending_inp,
                                               boost::container::static_vector<uint32_t, 40> &pending_out) {
   for (auto i = 0u; i < Num_sedges; ++i) {
-    if (sedge[i] == 0)
+    if (sedge[i] == 0) {
       continue;
+    }
 
     if (inp_mask & (1 << i)) {
       pending_inp.emplace_back(self_id + sedge[i]);
@@ -54,8 +55,9 @@ void Graph_core::Master_entry::readjust_edges(uint32_t self_id, boost::container
 
 bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
   for (auto i = 0u; i < Num_sedges; ++i) {
-    if (sedge[i])
+    if (sedge[i]) {
       continue;
+    }
 
     sedge[i] = rel_id;
     if (out) {
@@ -109,37 +111,43 @@ bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
  * @returns 0 if success and 1 if empty
  */
 bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, bool out) {
-  if (out && n_outputs == 0)
+  if (out && n_outputs == 0) {
     return false;  // no output in master
-  if (!out && !inp_mask)
+  }
+  if (!out && !inp_mask) {
     return false;  // no input in master
+  }
 
   int32_t rel_id    = other_id - self_id;
   bool    short_rel = INT16_MIN < rel_id && rel_id < INT16_MAX;
 
   if (short_rel) {
     for (auto i = 0u; i < Num_sedges; ++i) {
-      if (sedge[i] != rel_id)
+      if (sedge[i] != rel_id) {
         continue;
+      }
 
-      if ((inp_mask & (1 << i)) == out)
+      if ((inp_mask & (1 << i)) == out) {
         continue;
+      }
 
       sedge[i] = 0;
-      if (out)
+      if (out) {
         --n_outputs;
-      else
+      } else {
         inp_mask ^= (1 << i);
+      }
 
       return true;
     }
     if (node_vertex && sedge2_or_pid == rel_id) {
       if ((inp_mask & (1 << Num_sedges)) != out) {
         sedge2_or_pid = 0;
-        if (out)
+        if (out) {
           --n_outputs;
-        else
+        } else {
           inp_mask ^= (1 << Num_sedges);
+        }
 
         return true;
       }
@@ -148,20 +156,22 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
 
   if (node_vertex && ledge0_or_prev == other_id && (inp_mask & (1 << (Num_sedges + 1))) != out) {
     ledge0_or_prev = 0;
-    if (out)
+    if (out) {
       --n_outputs;
-    else
+    } else {
       inp_mask ^= (1 << (Num_sedges + 1));
+    }
 
     return true;
   }
 
   if (!overflow_link && ledge1_or_overflow == other_id && (inp_mask & (1 << (Num_sedges + 2))) != out) {
     ledge1_or_overflow = 0;
-    if (out)
+    if (out) {
       --n_outputs;
-    else
+    } else {
       inp_mask ^= (1 << (Num_sedges + 2));
+    }
 
     return true;
   }
@@ -176,8 +186,9 @@ void Graph_core::Overflow_entry::extract_all(boost::container::static_vector<uin
   expanded.emplace_back(v);
 
   for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i] == 0)
+    if (sedge0[i] == 0) {
       continue;
+    }
 
     auto v2 = ledge_min + sedge0[i];
     expanded.emplace_back(v2);
@@ -187,8 +198,9 @@ void Graph_core::Overflow_entry::extract_all(boost::container::static_vector<uin
   expanded.emplace_back(v);
 
   for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i] == 0)
+    if (sedge1[i] == 0) {
       continue;
+    }
 
     auto v2 = ledge1 + sedge1[i];
     expanded.emplace_back(v2);
@@ -233,8 +245,9 @@ void Graph_core::Overflow_entry::readjust_edges(boost::container::static_vector<
       I(ledge_max == 0);
       pending->pop_back();
       ++n_edges;
-      if (pending->empty())
+      if (pending->empty()) {
         return;
+      }
     }
     if (ledge_max == 0) {
       ledge_max = pending->back();
@@ -246,8 +259,9 @@ void Graph_core::Overflow_entry::readjust_edges(boost::container::static_vector<
         ledge_min = ledge_max;
         ledge_max = tmp;
       }
-      if (pending->empty())
+      if (pending->empty()) {
         return;
+      }
     }
     if (ledge1 == 0) {
       ledge1 = pending->back();
@@ -262,8 +276,9 @@ void Graph_core::Overflow_entry::readjust_edges(boost::container::static_vector<
       }
       pending->pop_back();
       ++n_edges;
-      if (pending->empty())
+      if (pending->empty()) {
         return;
+      }
     }
 
     // TODO: Add the most common cases to avoid the large/slow expand case
@@ -416,8 +431,9 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
       sedge0[pos] = 0;
 
       for (auto i = 0u; i < sedge0_size; ++i) {  // adjust deltas
-        if (sedge0[i] == 0)
+        if (sedge0[i] == 0) {
           continue;
+        }
 
         int32_t s = sedge0[i] - smallest;
         if (INT16_MIN > s || s > INT16_MAX) {
@@ -451,8 +467,9 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
         sedge1[pos] = 0;
 
         for (auto i = 0u; i < sedge1_size; ++i) {  // adjust deltas
-          if (sedge1[i] == 0)
+          if (sedge1[i] == 0) {
             continue;
+          }
 
           int32_t s = sedge1[i] - smallest;
           if (INT16_MIN > s || s > INT16_MAX) {
@@ -521,12 +538,14 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
 }
 
 bool Graph_core::Overflow_entry::delete_edge(uint32_t other_id, bool out) {
-  if (likely(inputs == out || other_id < ledge_min || (other_id > ledge_max && ledge_max)))
+  if (likely(inputs == out || other_id < ledge_min || (other_id > ledge_max && ledge_max))) {
     return false;
+  }
 
   bool done = delete_edge_rebalance_ledges(other_id);
-  if (done)
+  if (done) {
     return true;
+  }
 
   {
     int32_t rel_index = other_id - ledge_min;
@@ -591,23 +610,26 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
 
   if (short_rel) {
     bool ok = ent.insert_sedge(static_cast<int16_t>(rel_index), out);
-    if (ok)
+    if (ok) {
       return;
+    }
   }
 
   bool ok = ent.insert_ledge(other_id, out);
-  if (ok)
+  if (ok) {
     return;
+  }
 
   boost::container::static_vector<uint32_t, 40> pending_inp;
   boost::container::static_vector<uint32_t, 40> pending_out;
 
   ent.readjust_edges(self_id, pending_inp, pending_out);
 
-  if (out)
+  if (out) {
     pending_out.emplace_back(other_id);
-  else
+  } else {
     pending_inp.emplace_back(other_id);
+  }
 
   std::sort(pending_inp.begin(), pending_inp.end(), std::greater<uint32_t>());  // sort reverse order
   std::sort(pending_out.begin(), pending_out.end(), std::greater<uint32_t>());  // sort reverse order
@@ -684,8 +706,9 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
     }
 
     if (pending_inp.empty() && pending_out.empty()) {
-      if (add_to_end.empty())
+      if (add_to_end.empty()) {
         return;  // Nothing to do
+      }
 
       // Find the last or the first empty (start with overflow_id)
       // enqueue the add_to_end
@@ -694,11 +717,13 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
       while (true) {
         last_id = next_id;
         next_id = over_ptr->get_overflow_id();
-        if (next_id == 0)
+        if (next_id == 0) {
           break;
+        }
         over_ptr = ref_overflow(next_id);
-        if (over_ptr->is_full())
+        if (over_ptr->is_full()) {
           break;
+        }
       }
 
       ref_overflow(last_id)->overflow_next_id           = add_to_end.front();
@@ -719,8 +744,9 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
 
 void Graph_core::del_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   bool done1 = table[self_id].delete_edge(self_id, other_id, out);
-  if (done1)
+  if (done1) {
     return;
+  }
 
   auto            over_id  = table[self_id].get_overflow_id();
   Overflow_entry *prev_ptr = nullptr;
@@ -729,11 +755,13 @@ void Graph_core::del_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
     bool  done2    = over_ptr->delete_edge(other_id, out);
     if (done2) {
       if (over_ptr->has_local_edges()) {
-        if (prev_ptr == nullptr)
+        if (prev_ptr == nullptr) {
           return;
+        }
 
-        if (!prev_ptr->is_full())
+        if (!prev_ptr->is_full()) {
           return;
+        }
 
         // If prev is full, move to first position (fulls must be at the end)
         prev_ptr->overflow_next_id        = over_ptr->get_overflow_id();
@@ -875,8 +903,9 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
 
   fmt::print("  edges:");
   for (auto i = 0u; i < Num_sedges; ++i) {
-    if (sedge[i])
+    if (sedge[i]) {
       fmt::print(" {}", self_id + sedge[i]);
+    }
   }
   if (node_vertex && sedge2_or_pid) {
     fmt::print(" {}", self_id + sedge2_or_pid);
@@ -894,22 +923,26 @@ void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
   fmt::print("  over:{} {} n_edges:{} next_id:{}\n", self_id, inputs ? "inp" : "out", n_edges, overflow_next_id);
 
   fmt::print("    edges:");
-  if (ledge_min)
+  if (ledge_min) {
     fmt::print(" min:{}", ledge_min);
+  }
 
   for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i])
+    if (sedge0[i]) {
       fmt::print(" f{}", ledge_min + sedge0[i]);
+    }
   }
   if (ledge1) {
     fmt::print(" ledge1:{}", ledge1);
   }
   for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i])
+    if (sedge1[i]) {
       fmt::print(" s{}", ledge1 + sedge1[i]);
+    }
   }
-  if (ledge_max)
+  if (ledge_max) {
     fmt::print(" max:{}", ledge_max);
+  }
   fmt::print("\n");
 }
 

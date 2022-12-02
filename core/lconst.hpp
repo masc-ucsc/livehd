@@ -45,12 +45,15 @@ protected:
   Lconst(bool str, Bits_t d, Number n) : explicit_str(str), bits(d), num(n) { assert(d < Bits_max); }
 
   static Bits_t calc_num_bits(const Number &num) {
-    if (num == 0)
+    if (num == 0) {
       return 0;
-    if (num == -1)
+    }
+    if (num == -1) {
       return 1;
-    if (num > 0)
+    }
+    if (num > 0) {
       return msb(num) + 2;  // +2 because values are signed (msb==0 is 1 bit)
+    }
     return msb(-num - 1) + 2;
   }
   Bits_t calc_num_bits() const { return calc_num_bits(num); }
@@ -70,7 +73,7 @@ public:
   using Container = std::string;
 
   explicit Lconst(absl::Span<unsigned char> v);
-  explicit Lconst(Number v);
+  explicit Lconst(const Number &v);
   Lconst(int64_t v);  // not explicit to allow easy Lconst(x) < 0 operations
 
   Lconst();
@@ -133,21 +136,25 @@ public:
 
   bool has_unknowns() const { return explicit_str && bits < calc_num_bits(num); }
   bool is_negative() const {
-    if (!explicit_str)
+    if (!explicit_str) {
       return num < 0;
+    }
 
-    if (!has_unknowns())
+    if (!has_unknowns()) {
       return false;
+    }
 
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '1');
   }
   bool is_positive() const {
-    if (!explicit_str)
+    if (!explicit_str) {
       return num >= 0;
+    }
 
-    if (!has_unknowns())
+    if (!has_unknowns()) {
       return false;
+    }
 
     uint8_t msb = static_cast<uint8_t>(num);
     return (msb == '0');
@@ -162,11 +169,11 @@ public:
   [[nodiscard]] bool is_power2() const { return !explicit_str && ((num - 1) & (num)) == 0; }
 
   [[nodiscard]] std::vector<std::pair<int, int>> get_mask_range_pairs() const;
-  [[nodiscard]] std::pair<int, int> get_mask_range() const;
+  [[nodiscard]] std::pair<int, int>              get_mask_range() const;
 
   [[nodiscard]] Bits_t get_bits() const { return bits; }  // note: this is returning signed bits of the constant
 
-  [[nodiscard]] bool bit_test(size_t p) const;
+  [[nodiscard]] bool   bit_test(size_t p) const;
   [[nodiscard]] size_t get_first_bit_set() const;
   [[nodiscard]] size_t get_last_bit_set() const;
 

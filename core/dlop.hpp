@@ -71,16 +71,18 @@ public:
   }
 
   void or_base(int64_t src2) {
-    if (size == 1)
+    if (size == 1) {
       Blop::or64(*base, *base, src2);
-    else
+    } else {
       Blop::orn(base, size, base, src2);
+    }
   }
   void or_extra(int64_t src2) {
-    if (size == 1)
+    if (size == 1) {
       Blop::or64(*extra, *extra, src2);
-    else
+    } else {
       Blop::orn(extra, size, extra, src2);
+    }
   }
 
   bool is_negative() const { return base[size - 1] < 0 || extra[size - 1] < 0; }

@@ -110,12 +110,14 @@ protected:
   }
 
   static inline void* aligned_malloc(size_t size) {
-    if (std::alignment_of<T>::value >= 256)
+    if (std::alignment_of<T>::value >= 256) {
       return std::malloc(size);
+    }
     size_t alignment = 256;
     void*  raw       = std::malloc(size + alignment - 1 + sizeof(void*));
-    if (!raw)
+    if (!raw) {
       return nullptr;
+    }
     char* ptr = align_for(reinterpret_cast<char*>(raw) + sizeof(void*));
     assert(ptr > raw);
     *(reinterpret_cast<void**>(ptr) - 1) = raw;
@@ -123,11 +125,13 @@ protected:
   }
 
   static inline void aligned_free(void* ptr) {
-    if (ptr == nullptr)
+    if (ptr == nullptr) {
       return;
+    }
 
-    if (std::alignment_of<T>::value >= 256)
+    if (std::alignment_of<T>::value >= 256) {
       return std::free(ptr);
+    }
 
     std::free(*(reinterpret_cast<void**>(ptr) - 1));
   }
