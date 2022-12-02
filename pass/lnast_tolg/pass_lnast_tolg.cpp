@@ -20,7 +20,9 @@ void Pass_lnast_tolg::setup() {
 Pass_lnast_tolg::Pass_lnast_tolg(const Eprp_var &var) : Pass("pass.lnast_tolg", var) {}
 
 void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
-  for (const auto &lnast : var.lnasts) lnast->ssa_trans();
+  for (const auto &lnast : var.lnasts) {
+    lnast->ssa_trans();
+  }
 }
 
 void Pass_lnast_tolg::tolg(Eprp_var &var) {

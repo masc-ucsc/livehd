@@ -7,11 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "lgraph.hpp"
 #include "edge.hpp"
+#include "inou_json.hpp"
 #include "lgraph.hpp"
 #include "node_pin.hpp"
-#include "inou_json.hpp"
 
 namespace yjson {
 
@@ -40,8 +39,9 @@ void Cell::ToJson(const JsonComposer* jcm) const {
   };
   vector<PortConn> port_conn;
   int              i = 0;
-  for (auto p : *ports)  // assocaite port with its connection
+  for (auto p : *ports) {  // assocaite port with its connection
     port_conn.push_back({p, connections.at(i++)});
+  }
 
   auto jparams = BatchWriter(&port_conn, [](PortConn const* port_wire, JsonElement*, const JsonComposer* json) {
     auto   port      = port_wire->port;
@@ -52,8 +52,9 @@ void Cell::ToJson(const JsonComposer* jcm) const {
     width.insert(0, port_name);
     auto        wire     = port_wire->wire;
     JsonElement params[] = {{width.c_str(), (long)(wire ? wire->get_width() : 0)}, {sign.c_str(), 1}, {}};
-    if (port->get_dir() == pdOutput)
+    if (port->get_dir() == pdOutput) {
       params[1].type = etEndOfList;  // Do not write "SIGNED" for output
+    }
     json->Write(params);
   });
 
@@ -88,12 +89,15 @@ Cell* Module::add_cell(const Prototype* proto) {
 Wire* Module::get_wire(const std::string& driver_pin_name) { return wires.count(driver_pin_name) ? wires[driver_pin_name] : NULL; }
 
 void Module::create_wires(XEdge_iterator out_edges) {
-  for (auto e : out_edges) create_single_wire(e.driver.get_wire_name(), e.driver.get_bits());
+  for (auto e : out_edges) {
+    create_single_wire(e.driver.get_wire_name(), e.driver.get_bits());
+  }
 }
 
 Wire* Module::create_single_wire(std::string wire_name, int wire_width) {
-  if (wires.count(wire_name))
+  if (wires.count(wire_name)) {
     return wires[wire_name];
+  }
 
   // if this edge does not already have a wire
   auto new_wire    = new Wire(wire_width, last_wire_id);
@@ -110,14 +114,16 @@ void Module::ToJson(const JsonComposer* jcm) const {
   NetMapT unique_nets;       // maps each wire* to a name
   for (auto prt : *ports) {  // map port wires to thier names
     auto port_wire = wires.find(prt->get_name());
-    if ((port_wire == wires.end()) || unique_nets.count(port_wire->second))  // if unique_nets contains ...
+    if ((port_wire == wires.end()) || unique_nets.count(port_wire->second)) {  // if unique_nets contains ...
       continue;
+    }
     unique_nets[port_wire->second] = port_wire->first;
   }
   // add non-port wires
   for (auto itr = wires.begin(); itr != wires.end(); ++itr) {
-    if (unique_nets.count(itr->second))  // if unique_nets already contains the wire
+    if (unique_nets.count(itr->second)) {  // if unique_nets already contains the wire
       continue;
+    }
     unique_nets[itr->second] = itr->first;
   }
 

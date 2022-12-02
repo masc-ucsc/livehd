@@ -18,15 +18,17 @@ Pass_cprop::Pass_cprop(const Eprp_var &var) : Pass("pass.cprop", var) {
   auto hier_txt = var.get("hier");
   auto gioc_txt = var.get("gioc");
 
-  if (hier_txt != "false" && hier_txt != "0")
+  if (hier_txt != "false" && hier_txt != "0") {
     hier = true;
-  else
+  } else {
     hier = false;
+  }
 
-  if (gioc_txt != "false" && gioc_txt != "0")
+  if (gioc_txt != "false" && gioc_txt != "0") {
     gioc = true;
-  else
+  } else {
     gioc = false;
+  }
 
   (void)gioc;  // not used now
 }
@@ -36,8 +38,9 @@ void Pass_cprop::optimize(Eprp_var &var) {
   Cprop      cp(pcp.hier);
 
   for (auto &lg : var.lgs) {
-    if (lg->is_empty())
+    if (lg->is_empty()) {
       continue;
+    }
     cp.do_trans(lg);
   }
 }

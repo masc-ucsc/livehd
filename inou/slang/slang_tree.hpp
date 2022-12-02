@@ -27,10 +27,10 @@ protected:
 
   bool has_lnast(std::string_view name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
-  bool        process_top_instance(const slang::InstanceSymbol& symbol);
-  bool        process(const slang::AssignmentExpression& expr);
+  bool process_top_instance(const slang::InstanceSymbol& symbol);
+  bool process(const slang::AssignmentExpression& expr);
 
-  void        process_lhs(const slang::Expression &lhs, const std::string &rhs_var, bool last_value);
+  void process_lhs(const slang::Expression& lhs, const std::string& rhs_var, bool last_value);
 
   std::string process_expression(const slang::Expression& expr, bool last_value);
   std::string process_mask_and(const slang::UnaryExpression& uexpr, bool last_value);

@@ -19,8 +19,9 @@ Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {
 }
 
 Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
-  if (hidx <= 0)  // -1 if no hierarchical
+  if (hidx <= 0) {  // -1 if no hierarchical
     return top;
+  }
 
   I(hidx < up_vector.size());  // invalid hierarchy hidx
 
@@ -49,8 +50,9 @@ Node Hierarchy::get_instance_up_node(const Hierarchy_index hidx) const {
 }
 
 Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) const {
-  if (hidx <= 0)
+  if (hidx <= 0) {
     return -1;
+  }
 
   I(hidx < up_vector.size());  // Do not ask for up for root or invalid hidx
 
@@ -60,19 +62,20 @@ Hierarchy_index Hierarchy::go_up(const Hierarchy_index hidx) const {
 }
 
 std::string_view Hierarchy::get_name(const Hierarchy_index hidx) const {
-
-  if (hidx<=0)
+  if (hidx <= 0) {
     return "";
+  }
 
   I(hidx < up_vector.size());  // invalid hierarchy hidx
-  if (!up_vector[hidx].name.empty())
+  if (!up_vector[hidx].name.empty()) {
     return up_vector[hidx].name;
+  }
 
-  auto i = up_vector[hidx].parent_hidx;
+  auto        i = up_vector[hidx].parent_hidx;
   std::string name{up_vector[hidx].parent_lg->get_name()};
-  while (i>0) {
+  while (i > 0) {
     name = absl::StrCat(up_vector[hidx].parent_lg->get_name(), ",", name);
-    i = up_vector[hidx].parent_hidx;
+    i    = up_vector[hidx].parent_hidx;
   }
 
   up_vector[hidx].name = name;

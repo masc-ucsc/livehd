@@ -8,13 +8,12 @@
 #include "fmt/format.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
 #include "label_synth.hpp"
 #include "lgraph.hpp"
 #include "lrand.hpp"
 
 // Defined with #ifdef
-//#define RUN 1
+// #define RUN 1
 #define DEBUG 1
 
 // Defined with #if
@@ -30,7 +29,7 @@ public:
 
 #if TEST1
 TEST_F(Label_synth_test, test1) {
-  auto *lib = Graph_library::instance("lgdb");
+  auto   *lib     = Graph_library::instance("lgdb");
   Lgraph *a_graph = lib->create_lgraph("a_graph", "-");
   ASSERT_NE(a_graph, nullptr);
 
@@ -89,7 +88,7 @@ TEST_F(Label_synth_test, test1) {
 
 #if TEST2
 TEST_F(Label_synth_test, test2) {
-  auto *lib = Graph_library::instance("lgdb");
+  auto   *lib     = Graph_library::instance("lgdb");
   Lgraph *b_graph = lib->create_lgraph("b_graph", "-");
   ASSERT_NE(b_graph, nullptr);
 
@@ -175,7 +174,7 @@ TEST_F(Label_synth_test, test2) {
 
 #if TEST3
 TEST_F(Label_synth_test, test3) {
-  auto *lib = Graph_library::instance("lgdb");
+  auto   *lib     = Graph_library::instance("lgdb");
   Lgraph *c_graph = lib->create_lgraph("c_graph", "-");
   ASSERT_NE(c_graph, nullptr);
 

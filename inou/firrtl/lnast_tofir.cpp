@@ -750,13 +750,15 @@ std::string_view Inou_firrtl::strip_prefixes(std::string_view str) {
   auto skip = 0u;
 
   auto ch = str.front();
-  if (ch == '$' || ch == '%' || ch == '#')
+  if (ch == '$' || ch == '%' || ch == '#') {
     skip = 1;
-  else if (ch == '_' && str.substr(0, 3) == "_._")
+  } else if (ch == '_' && str.substr(0, 3) == "_._") {
     skip = 3;
+  }
 
-  if (skip)
+  if (skip) {
     return str.substr(skip);
+  }
   return str;
 }
 

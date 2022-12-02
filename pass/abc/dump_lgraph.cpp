@@ -97,44 +97,46 @@ void Pass_abc::gen_comb_cell_from_abc(Lgraph *new_graph, const Lgraph *old_graph
       new_graph->set_bits(cell_idx, 1);
 
       if (opack.liberty_file.empty()) {
-        if (gate_name == ("BUF"))
+        if (gate_name == ("BUF")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_BUF_"));
-        else if (gate_name == ("NOT"))
+        } else if (gate_name == ("NOT")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_NOT_"));
-        else if (gate_name == ("AND"))
+        } else if (gate_name == ("AND")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_AND_"));
-        else if (gate_name == ("NAND"))
+        } else if (gate_name == ("NAND")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_NAND_"));
-        else if (gate_name == ("OR"))
+        } else if (gate_name == ("OR")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_OR_"));
-        else if (gate_name == ("NOR"))
+        } else if (gate_name == ("NOR")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_NOR_"));
-        else if (gate_name == ("XOR"))
+        } else if (gate_name == ("XOR")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_XOR_"));
-        else if (gate_name == ("XNOR"))
+        } else if (gate_name == ("XNOR")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_XNOR_"));
-        else if (gate_name == ("ANDNOT"))
+        } else if (gate_name == ("ANDNOT")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_ANDNOT_"));
-        else if (gate_name == ("ORNOT"))
+        } else if (gate_name == ("ORNOT")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_ORNOT_"));
-        else if (gate_name == ("AOI3"))
+        } else if (gate_name == ("AOI3")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_AOI3_"));
-        else if (gate_name == ("OAI3"))
+        } else if (gate_name == ("OAI3")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_OAI3_"));
-        else if (gate_name == ("AOI4"))
+        } else if (gate_name == ("AOI4")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_AOI4_"));
-        else if (gate_name == ("OAI4"))
+        } else if (gate_name == ("OAI4")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_OAI4_"));
-        else if (gate_name == ("MUX"))
+        } else if (gate_name == ("MUX")) {
           tcell = tlib.get_const_cell(tlib.get_cell_id("$_MUX_"));
-        else if (gate_name == ("ONE")) {
+        } else if (gate_name == ("ONE")) {
           constnode = true;
         } else if (gate_name == ("ZERO")) {
           constnode = true;
-        } else
+        } else {
           assert(false);
-      } else
+        }
+      } else {
         tcell = tlib.get_const_cell(tlib.get_cell_id(gate_name));
+      }
 
       if (constnode) {
         std::string op = (gate_name == ("ONE")) ? "1" : "0";
@@ -485,8 +487,9 @@ void Pass_abc::connect_constant(Lgraph *g, uint32_t value, uint32_t size, const 
 }
 
 Node_pin Pass_abc::create_pick_operator(Lgraph *g, const Node_pin &driver, int offset, int width) {
-  if (offset == 0 && g->get_bits(driver) == width)
+  if (offset == 0 && g->get_bits(driver) == width) {
     return driver;
+  }
 
   auto pick_node = g->create_node(Pick_Op, width);
   g->add_edge(driver, pick_node.setup_sink_pin(0));

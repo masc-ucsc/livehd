@@ -38,12 +38,13 @@ int main(int argc, const char **argv) {
 
   for (auto iter_io = dinfo.ios.begin(); iter_io != dinfo.ios.end(); ++iter_io) {
     Tech_cell::Direction dir = Tech_cell::Direction::input;
-    if (iter_io->dir == 0)
+    if (iter_io->dir == 0) {
       dir = Tech_cell::Direction::input;
-    else if (iter_io->dir == 1)
+    } else if (iter_io->dir == 1) {
       dir = Tech_cell::Direction::output;
-    else
+    } else {
       assert(false);  // Unhandled direction option
+    }
 
     tmp_cell.add_pin(iter_io->io_name, dir);
     Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();

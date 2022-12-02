@@ -5,7 +5,8 @@
 class Pass_lnast_print : public Pass {
 public:
   Pass_lnast_print(const Eprp_var&);
-  static void setup();  
+  static void setup();
   static void do_work(const Eprp_var& var);
+
 protected:
 };

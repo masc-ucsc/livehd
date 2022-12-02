@@ -11,8 +11,8 @@
 
 class Cgen_verilog {
 private:
-  const bool       verbose;
-  std::string_view odir;
+  const bool        verbose;
+  std::string_view  odir;
   static inline int trace_module_cnt = 0;
 
   using pin2str_type = absl::flat_hash_map<Node_pin::Compact_class, std::string>;

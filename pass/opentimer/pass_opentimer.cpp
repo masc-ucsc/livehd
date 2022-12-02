@@ -1,9 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_opentimer.hpp"
+
 #include <fstream>
 #include <string>
 
-#include "pass_opentimer.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "str_tools.hpp"
@@ -32,7 +33,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
       fmt::print("opentimer using liberty file '{}'\n", f);
       if (n_lib_read == 0) {
         timer.read_celllib(f);
-      }else{
+      } else {
         timer.read_celllib(f, ot::MIN);
       }
       n_lib_read++;
@@ -42,8 +43,8 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
       vcd_file_list.emplace_back(f);
     } else if (str_tools::ends_with(f, ".sdc")) {
       sdc_file_list.emplace_back(f);
-    } else if (str_tools::ends_with(f, ".v")) { // Nothing to do
-    } else if (str_tools::ends_with(f, ".prp")) { // Nothing to do
+    } else if (str_tools::ends_with(f, ".v")) {    // Nothing to do
+    } else if (str_tools::ends_with(f, ".prp")) {  // Nothing to do
     } else {
       Pass::error("pass.opentimer unknown file extension '{}'", f);
     }
@@ -57,7 +58,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
   if (var.has_label("margin")) {
     std::string txt{var.get("margin")};
     margin = std::stof(txt, nullptr);
-    if (margin<0 || margin>100) {
+    if (margin < 0 || margin > 100) {
       Pass::error("pass.opentimer margin must be between 0 and 100 not {}", margin);
     }
   }
@@ -66,7 +67,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
   if (var.has_label("freq")) {
     std::string txt{var.get("freq")};
     freq = std::stof(txt, nullptr);
-    if (freq<=0 || freq>1e12) {
+    if (freq <= 0 || freq > 1e12) {
       Pass::error("pass.opentimer frequency must be between 1Hz and 1THz not {}Hz", freq);
     }
   }
@@ -74,7 +75,7 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
 }
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
-  std::ifstream  file(std::string{sdc_file});
+  std::ifstream file(std::string{sdc_file});
   if (!file.is_open()) {
     Pass::error("pass.opentimer could not open sdc:{}", sdc_file);
     return;
@@ -83,7 +84,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   std::string line;
 
   while (std::getline(file, line)) {
-    std::vector<std::string> line_vec = absl::StrSplit(line,' ', absl::SkipWhitespace());
+    std::vector<std::string> line_vec = absl::StrSplit(line, ' ', absl::SkipWhitespace());
 
     if (line_vec[0] == "create_clock") {
       float       period = 1000;
@@ -155,7 +156,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       } else if (line_vec[2] == "-max") {
         timer.set_slew(pname, ot::MIN, ot::FALL, delay);
         timer.set_slew(pname, ot::MIN, ot::RISE, delay);
-      }else{
+      } else {
         timer.set_slew(pname, ot::MAX, ot::FALL, delay);
         timer.set_slew(pname, ot::MAX, ot::RISE, delay);
         timer.set_slew(pname, ot::MIN, ot::FALL, delay);
@@ -188,7 +189,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       } else if (line_vec[2] == "-min") {
         timer.set_rat(pname, ot::MIN, ot::FALL, delay);
         timer.set_rat(pname, ot::MIN, ot::RISE, delay);
-      }else{
+      } else {
         timer.set_rat(pname, ot::MAX, ot::FALL, delay);
         timer.set_rat(pname, ot::MAX, ot::RISE, delay);
         timer.set_rat(pname, ot::MIN, ot::FALL, delay);

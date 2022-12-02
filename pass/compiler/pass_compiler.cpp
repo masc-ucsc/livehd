@@ -71,20 +71,20 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 }
 
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, bool &only_cprop) {
-  (void) only_cprop;
+  (void)only_cprop;
   compiler.do_fir_lnast2lgraph(var.lnasts);
   compiler.do_fir_cprop();
-	if (!only_cprop) {
+  if (!only_cprop) {
     compiler.do_fir_firbits();
     compiler.do_fir_firmap_bitwidth();
   }
 }
 
-Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::string_view cell_name, const std::vector<std::string> &inp, std::string_view out) {
-
+Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::string_view cell_name,
+                                                  const std::vector<std::string> &inp, std::string_view out) {
   auto *sub = lib->ref_or_create_sub(cell_name);
-  auto pos = 0;
-  for(const auto &i:inp) {
+  auto  pos = 0;
+  for (const auto &i : inp) {
     sub->add_input_pin(i, pos++);
   }
   sub->add_output_pin(out, pos);
@@ -94,48 +94,49 @@ Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::strin
 }
 
 void Pass_compiler::setup_firmap_library(std::string_view path) {
-  auto   *lib = Graph_library::instance(path);
-  if (lib->exists("__fir_const"))
+  auto *lib = Graph_library::instance(path);
+  if (lib->exists("__fir_const")) {
     return;
+  }
 
   auto *sub_fir_const = setup_firmap_library_gen(lib, "__fir_const", {}, "Y");
   sub_fir_const->set_loop_first();
 
   setup_firmap_library_gen(lib, "__fir_bits", {"e1", "e2", "e3"}, "Y");
 
-  setup_firmap_library_gen(lib, "__fir_add" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_sub" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_mul" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_div" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_rem" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_lt"  , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_leq" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_gt"  , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_geq" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_eq"  , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_neq" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_pad" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_shl" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_shr" , {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_add", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_sub", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_mul", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_div", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_rem", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_lt", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_leq", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_gt", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_geq", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_eq", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_neq", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_pad", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_shl", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_shr", {"e1", "e2"}, "Y");
   setup_firmap_library_gen(lib, "__fir_dshl", {"e1", "e2"}, "Y");
   setup_firmap_library_gen(lib, "__fir_dshr", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_and" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_or"  , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_xor" , {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_cat" , {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_and", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_or", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_xor", {"e1", "e2"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_cat", {"e1", "e2"}, "Y");
   setup_firmap_library_gen(lib, "__fir_head", {"e1", "e2"}, "Y");
   setup_firmap_library_gen(lib, "__fir_tail", {"e1", "e2"}, "Y");
 
-  setup_firmap_library_gen(lib, "__fir_as_uint" , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_as_sint" , {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_as_uint", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_as_sint", {"e1"}, "Y");
   setup_firmap_library_gen(lib, "__fir_as_clock", {"e1"}, "Y");
   setup_firmap_library_gen(lib, "__fir_as_async", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_cvt"     , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_neg"     , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_not"     , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_andr"    , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_orr"     , {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_xorr"    , {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_cvt", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_neg", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_not", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_andr", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_orr", {"e1"}, "Y");
+  setup_firmap_library_gen(lib, "__fir_xorr", {"e1"}, "Y");
 }
 
 bool Pass_compiler::check_option_gviz(Eprp_var &var) {
@@ -152,7 +153,7 @@ bool Pass_compiler::check_option_gviz(Eprp_var &var) {
 bool Pass_compiler::check_option_cprop(Eprp_var &var) {
   bool is_cprop_only;
   if (var.has_label("cprop_only")) {
-    auto co = var.get("cprop_only");
+    auto co       = var.get("cprop_only");
     is_cprop_only = co != "false" && co != "0";
   } else {
     is_cprop_only = false;

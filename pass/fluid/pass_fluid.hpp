@@ -24,13 +24,14 @@ public:
   bool operator<(const Node_pin &rhs) const {
     if (this->get_nid() < rhs.get_nid()) {
       return 1;
-    } else if (this->get_nid() > rhs.get_nid())
+    } else if (this->get_nid() > rhs.get_nid()) {
       return 0;
-    else {  // equal
-      if (this->get_pid() < rhs.get_pid())
+    } else {  // equal
+      if (this->get_pid() < rhs.get_pid()) {
         return 1;
-      else
+      } else {
         return 0;
+      }
     }
   }
   bool operator==(const Node_pin &rhs) const {

@@ -58,20 +58,22 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {  // fpin 
 
   Tech_cell::Direction dir = Tech_cell::Direction::input;
   if (fpin->hasDirection()) {
-    if (strcmp(fpin->direction(), "INPUT") == 0)
+    if (strcmp(fpin->direction(), "INPUT") == 0) {
       dir = Tech_cell::Direction::input;
-    else if (strcmp(fpin->direction(), "OUTPUT") == 0)
+    } else if (strcmp(fpin->direction(), "OUTPUT") == 0) {
       dir = Tech_cell::Direction::output;
-    else if (strcmp(fpin->direction(), "INOUT") == 0)  // we will set inout as input in lgraph
+    } else if (strcmp(fpin->direction(), "INOUT") == 0) {  // we will set inout as input in lgraph
       dir = Tech_cell::Direction::input;
-    else
+    } else {
       assert(false);  // Unknown option
+    }
   }
   tmp_cell.add_pin(fpin->name(), dir);
   Tech_cell::Pin &tmp_pin = tmp_cell.get_vec_pins()->back();
 
-  if (fpin->hasUse())
+  if (fpin->hasUse()) {
     tmp_pin.use = fpin->use();
+  }
 
   for (pn = 0; pn < fpin->numPorts(); pn++) {
     const lefiGeometries *geometry = fpin->port(pn);
@@ -87,10 +89,11 @@ int lef_pin_cb(lefrCallbackType_e c, lefiPin *fpin, lefiUserData ud) {  // fpin 
         const lefiGeomRect      *rect    = geometry->getRect(i);
 
         std::string metal_name_str(geometry->lefiGeometries::getLayer(i - 1));
-        if (strncmp(metal_name_str.c_str(), "Metal", 5) == 0)
+        if (strncmp(metal_name_str.c_str(), "Metal", 5) == 0) {
           tmp_phy.metal_name = geometry->lefiGeometries::getLayer(i - 1);
-        else
+        } else {
           tmp_phy.metal_name = geometry->lefiGeometries::getLayer(0);
+        }
         // tmp_pin.phy.rects.resize(tmp_pin.phy.rects.size()+1);
         // Tech_cell::Rect& tmp_rect = tmp_pin.phy.rects.back();
         tmp_phy.xl = rect->xl;
@@ -124,10 +127,11 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {  //
   tmp_layer.name = flayer->name();
 
   if (flayer->hasDirection()) {
-    if (strcmp(flayer->direction(), "HORIZONTAL") == 0)
+    if (strcmp(flayer->direction(), "HORIZONTAL") == 0) {
       tmp_layer.horizontal = true;
-    else
+    } else {
       tmp_layer.horizontal = false;
+    }
   }
 
   if (flayer->hasMinwidth()) {
@@ -148,9 +152,9 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {  //
 
   if (flayer->hasSpacingNumber()) {
     for (i = 0; i < flayer->numSpacing(); i++) {
-      if (i == 0)
+      if (i == 0) {
         tmp_layer.spacing_eol.push_back(flayer->spacing(i));
-      else if (flayer->hasSpacingEndOfLine(i)) {
+      } else if (flayer->hasSpacingEndOfLine(i)) {
         tmp_layer.spacing_eol.push_back(flayer->spacing(i));
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWidth(i));
         tmp_layer.spacing_eol.push_back(flayer->spacingEolWithin(i));
@@ -162,12 +166,15 @@ int lef_layer_cb(lefrCallbackType_e c, lefiLayer *flayer, lefiUserData ud) {  //
     spTable = flayer->spacingTable(i);
     if (spTable->lefiSpacingTable::isParallel()) {
       parallel = spTable->lefiSpacingTable::parallel();
-      for (j = 0; j < parallel->lefiParallel::numLength(); j++) tmp_layer.spctb_prl = parallel->lefiParallel::length(j);
+      for (j = 0; j < parallel->lefiParallel::numLength(); j++) {
+        tmp_layer.spctb_prl = parallel->lefiParallel::length(j);
+      }
 
       for (j = 0; j < parallel->lefiParallel::numWidth(); j++) {
         tmp_layer.spctb_width.push_back(parallel->lefiParallel::width(j));
-        for (k = 0; k < parallel->lefiParallel::numLength(); k++)
+        for (k = 0; k < parallel->lefiParallel::numLength(); k++) {
           tmp_layer.spctb_spacing.push_back(parallel->lefiParallel::widthSpacing(j, k));
+        }
       }
     }  // end if
   }
@@ -274,12 +281,13 @@ int def_io_cb(defrCallbackType_e type, defiPin *fpin, defiUserData ud) {
 
   tmp_io.io_name  = fpin->pinName();
   tmp_io.net_name = fpin->netName();
-  if (strcmp(fpin->direction(), "INPUT") == 0)
+  if (strcmp(fpin->direction(), "INPUT") == 0) {
     tmp_io.dir = Def_io::Direction::input;
-  else if (strcmp(fpin->direction(), "OUTPUT") == 0)
+  } else if (strcmp(fpin->direction(), "OUTPUT") == 0) {
     tmp_io.dir = Def_io::Direction::output;
-  else if (strcmp(fpin->direction(), "INOUT") == 0)
+  } else if (strcmp(fpin->direction(), "INOUT") == 0) {
     tmp_io.dir = Def_io::Direction::input;
+  }
 
   tmp_io.posx = fpin->placementX();
   tmp_io.posy = fpin->placementY();
@@ -306,7 +314,9 @@ int def_track_cb(defrCallbackType_e type, defiTrack *ftrack, defiUserData ud) {
   tmp_track.num_tracks = ftrack->xNum();
   tmp_track.space      = ftrack->xStep();
   tmp_track.layers.reserve(ftrack->numLayers());
-  for (int i = 0; i < ftrack->numLayers(); i++) tmp_track.layers.push_back(ftrack->layer(i));
+  for (int i = 0; i < ftrack->numLayers(); i++) {
+    tmp_track.layers.push_back(ftrack->layer(i));
+  }
 
   // cout << "TRACKS" << tmp_track.direction << " " << tmp_track.location << " DO " << tmp_track.num_tracks << " STEP " <<
   // tmp_track.space <<" LAYER " << tmp_track.layers.back() << endl;

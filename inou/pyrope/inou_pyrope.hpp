@@ -6,6 +6,7 @@
 class Inou_pyrope : public Pass {
 private:
   static inline int trace_module_cnt = 0;
+
 protected:
   void to_lgraph(std::string_view file);
 

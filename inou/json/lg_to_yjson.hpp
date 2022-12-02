@@ -8,13 +8,12 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <string>
 #include <vector>
 
-#include "lgraph.hpp"
 #include "edge.hpp"
-#include "lgraph.hpp"
-#include "node_pin.hpp"
 #include "file_output.hpp"
 #include "inou_json.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "node_pin.hpp"
 #include "yosys_json.hpp"
 
 #define INP_DRV_NAME(node, input_index)  node->inp_edges()[input_index].driver.get_wire_name()

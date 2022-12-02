@@ -84,31 +84,35 @@ public:
     }
 
     inline bool operator<(const index_offset &rhs) const {
-      if (idx < rhs.idx)
+      if (idx < rhs.idx) {
         return true;
-      else if (idx == rhs.idx) {
-        if (pid < rhs.pid)
+      } else if (idx == rhs.idx) {
+        if (pid < rhs.pid) {
           return true;
-        else if (pid == rhs.pid) {
+        } else if (pid == rhs.pid) {
           return offset[0] < rhs.offset[0];
-        } else
+        } else {
           return false;
-      } else
+        }
+      } else {
         return false;
+      }
     }
 
     inline bool operator()(const index_offset &lhs, const index_offset &rhs) const {
-      if (lhs.idx < rhs.idx)
+      if (lhs.idx < rhs.idx) {
         return true;
-      else if (lhs.idx == rhs.idx) {
-        if (lhs.pid < rhs.pid)
+      } else if (lhs.idx == rhs.idx) {
+        if (lhs.pid < rhs.pid) {
           return true;
-        else if (lhs.pid == rhs.pid) {
+        } else if (lhs.pid == rhs.pid) {
           return lhs.offset[0] < rhs.offset[0];
-        } else
+        } else {
           return false;
-      } else
+        }
+      } else {
         return false;
+      }
     }
   };
 

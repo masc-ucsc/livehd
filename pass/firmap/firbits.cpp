@@ -35,18 +35,19 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
   // TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { ctx.event()->set_name("firbits." + lg->get_name()); });
   //
   // note: tricks to make perfetto display different color on sub-modules
-  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) { 
-      std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-      ctx.event()->set_name(converted_str + lg->get_name()); 
-      });
+  TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
+    std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+    ctx.event()->set_name(converted_str + lg->get_name());
+  });
 
   I(fbmaps.find(lg) != fbmaps.end());  // call add_map_entry
   auto &fbmap = fbmaps.find(lg)->second;
 
   int firbits_iters = 0;
   do {
-    if (firbits_iters > 10)
+    if (firbits_iters > 10) {
       Pass::error("FIRBITS cannot converge within 10 iterations!\n");
+    }
 
 #ifndef NDEBUG
     fmt::print("\nFIRBITS Iteration:{}\n", firbits_iters);
@@ -66,18 +67,20 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
         fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(1, false));
       } else if (op == Ntype_op::Sub) {
         auto subname = node.get_type_sub_node().get_name();
-        if (subname.substr(0, 6) == "__fir_")
+        if (subname.substr(0, 6) == "__fir_") {
           analysis_fir_ops(node, subname, fbmap);
-        else
+        } else {
           continue;
+        }
       } else if (op == Ntype_op::Const) {
         analysis_lg_const(node, fbmap);
       } else if (op == Ntype_op::TupGet || op == Ntype_op::TupAdd) {
-        I(false); // cprop should clean up all the TupAdd and TupGet nodes
+        I(false);  // cprop should clean up all the TupAdd and TupGet nodes
       } else if (op == Ntype_op::AttrSet) {
         analysis_lg_attr_set(node, fbmap);
-        if (node.is_invalid())
+        if (node.is_invalid()) {
           continue;
+        }
       } else if (op == Ntype_op::AttrGet) {
         I(false, "firrtl ir should not have any attr_get node, it's achieved by firrtl bits op");
       } else if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
@@ -94,7 +97,6 @@ void Firmap::do_firbits_analysis(Lgraph *lg) {  // multi-threade
   } while (firbits_wait_flop);
 }
 
-
 /* * *
  * we know firrtl flop bits originally, set on the qpin directly, no need to be propagated from other node
  * * */
@@ -103,32 +105,32 @@ void Firmap::analysis_lg_flop(Node &node, FBMap &fbmap) {
   auto qpin = node.get_driver_pin();
   // I(qpin.get_bits() > 0);
   if (qpin.get_bits() > 0) {
-    auto bits = qpin.get_bits() - 1; // turn from lgraph signed bits back to firrtl ubits 
-    auto it = fbmap.find(qpin.get_compact_class_driver());
+    auto bits = qpin.get_bits() - 1;  // turn from lgraph signed bits back to firrtl ubits
+    auto it   = fbmap.find(qpin.get_compact_class_driver());
     if (it == fbmap.end()) {
       fbmap.insert_or_assign(qpin.get_compact_class_driver(), Firrtl_bits(bits, false));
     }
     return;
-  } 
+  }
 
   I(node.is_sink_connected("din"));
- 
-   auto d_dpin    = node.get_sink_pin("din").get_driver_pin();
-   auto it_d_dpin = fbmap.find(d_dpin.get_compact_class_driver());
- 
-   if (it_d_dpin != fbmap.end()) {
-     auto bits = it_d_dpin->second.get_bits();
-     auto sign = it_d_dpin->second.get_sign();
-     fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(bits, sign));
-     return;
-   } else {
- #ifndef NDEBUG
-     fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
-     fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
- #endif
-     firbits_issues = true;
-     return;
-   }
+
+  auto d_dpin    = node.get_sink_pin("din").get_driver_pin();
+  auto it_d_dpin = fbmap.find(d_dpin.get_compact_class_driver());
+
+  if (it_d_dpin != fbmap.end()) {
+    auto bits = it_d_dpin->second.get_bits();
+    auto sign = it_d_dpin->second.get_sign();
+    fbmap.insert_or_assign(node.get_driver_pin().get_compact_class_driver(), Firrtl_bits(bits, sign));
+    return;
+  } else {
+#ifndef NDEBUG
+    fmt::print("    {} input driver {} not ready\n", node.debug_name(), d_dpin.debug_name());
+    fmt::print("    {} flop q_pin {} not ready\n", node.debug_name(), qpin.debug_name());
+#endif
+    firbits_issues = true;
+    return;
+  }
 }
 
 void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
@@ -140,13 +142,15 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
   bool   no_one_ready   = true;
   bool   some_one_ready = false;
   for (auto e : inp_edges) {
-    if (e.sink.get_pid() == 0)
+    if (e.sink.get_pid() == 0) {
       continue;  // Skip select
+    }
 
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -196,7 +200,7 @@ void Firmap::analysis_lg_mux(Node &node, FBMap &fbmap) {
 void Firmap::analysis_lg_const(Node &node, FBMap &fbmap) {
   auto dpin = node.get_driver_pin();
   auto bits = node.get_type_const().get_bits() - 1;  // -1 for turn sbits to ubits
-  bits = bits == -1 ? 1 : bits; // the case of const 0
+  bits      = bits == -1 ? 1 : bits;                 // the case of const 0
   fbmap.insert_or_assign(dpin.get_compact_class_driver(), Firrtl_bits(bits, false));
 }
 
@@ -220,7 +224,7 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   I(dpin_key.get_node().is_type_const());
 
   // copy parent's fb for some judgement and then update to attr_set value
-  Firrtl_bits fb; 
+  Firrtl_bits fb;
   bool        parent_pending = false;
   auto        parent_dpin    = node_attr.get_sink_pin("parent").get_driver_pin();
   if (node_attr.is_sink_connected("parent")) {
@@ -246,33 +250,32 @@ void Firmap::analysis_lg_attr_set(Node &node_attr, FBMap &fbmap) {
   }
 
   auto attr_dpin = node_attr.get_driver_pin();
-  
+
   // original
   if (parent_dpin.is_graph_input()) {
     for (auto out_dpin : node_attr.out_connected_pins()) {
       fbmap.insert_or_assign(out_dpin.get_compact_class_driver(), fb);
     }
-  } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%'){
-      fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
+  } else if (attr_dpin.has_name() && attr_dpin.get_name().at(0) == '%') {
+    fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   } else {
     for (auto &e : node_attr.out_edges()) {
       auto sink_node = e.sink.get_node();
-      if (sink_node.is_type_flop()) { 
+      if (sink_node.is_type_flop()) {
         auto dpin_of_sink_node = sink_node.get_driver_pin("Y");
-        dpin_of_sink_node.set_bits(bits + 1); // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
+        dpin_of_sink_node.set_bits(bits
+                                   + 1);  // lgraph assumes signed bits, so the ubits needs to be incremented by 1 to be signed bits
         fbmap.insert_or_assign(dpin_of_sink_node.get_compact_class_driver(), fb);
       }
     }
     fbmap.insert_or_assign(attr_dpin.get_compact_class_driver(), fb);
   }
-  
 
   // upwards propagate for one step node_attr, most graph input bits are set here
   if (parent_pending) {
     fbmap.insert_or_assign(parent_dpin.get_compact_class_driver(), fb);
   }
 }
-
 
 void Firmap::analysis_lg_attr_set_dp_assign(Node &node_dp, FBMap &fbmap) {
   auto dpin_lhs = node_dp.get_sink_pin("parent").get_driver_pin();
@@ -317,29 +320,37 @@ Firmap::Attr Firmap::get_key_attr(std::string_view key) {
   // FIXME: code duplicated in bitwidth. Create a separate class for Attr
   const auto sz = key.size();
 
-  if (sz < 5)
+  if (sz < 5) {
     return Attr::Set_other;
+  }
 
-  if (str_tools::ends_with(key, "__max"))
+  if (str_tools::ends_with(key, "__max")) {
     return Attr::Set_max;
+  }
 
-  if (str_tools::ends_with(key, "__min"))
+  if (str_tools::ends_with(key, "__min")) {
     return Attr::Set_min;
+  }
 
-  if (sz < 7)
+  if (sz < 7) {
     return Attr::Set_other;
+  }
 
-  if (str_tools::ends_with(key, "__ubits"))
+  if (str_tools::ends_with(key, "__ubits")) {
     return Attr::Set_ubits;
+  }
 
-  if (str_tools::ends_with(key, "__sbits"))
+  if (str_tools::ends_with(key, "__sbits")) {
     return Attr::Set_sbits;
+  }
 
-  if (sz < 11)
+  if (sz < 11) {
     return Attr::Set_other;
+  }
 
-  if (str_tools::ends_with(key, "__dp_assign"))
+  if (str_tools::ends_with(key, "__dp_assign")) {
     return Attr::Set_dp_assign;
+  }
 
   return Attr::Set_other;
 }
@@ -356,8 +367,8 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_mul(node, inp_edges, fbmap);
   } else if (op == "__fir_div") {
     analysis_fir_div(node, inp_edges, fbmap);
-  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || 
-             op == "__fir_geq" || op == "__fir_eq" || op == "__fir_neq") {
+  } else if (op == "__fir_lt" || op == "__fir_leq" || op == "__fir_gt" || op == "__fir_geq" || op == "__fir_eq"
+             || op == "__fir_neq") {
     analysis_fir_comp(node, inp_edges, fbmap);
   } else if (op == "__fir_pad") {
     analysis_fir_pad(node, inp_edges, fbmap);
@@ -387,8 +398,8 @@ void Firmap::analysis_fir_ops(Node &node, std::string_view op, FBMap &fbmap) {
     analysis_fir_tail(node, inp_edges, fbmap);
   } else if (op == "__fir_as_sint") {
     analysis_fir_single_input_op(node, inp_edges, fbmap, true);
-  } else if (op == "__fir_as_uint"  || op == "__fir_as_sint" || op == "__fir_as_async" || 
-             op == "__fir_as_clock" || op == "__fir_not") {
+  } else if (op == "__fir_as_uint" || op == "__fir_as_sint" || op == "__fir_as_async" || op == "__fir_as_clock"
+             || op == "__fir_not") {
     analysis_fir_single_input_op(node, inp_edges, fbmap, false);
   } else if (op == "__fir_rem") {
     analysis_fir_rem(node, inp_edges, fbmap);
@@ -426,15 +437,15 @@ FBMap::iterator Firmap::get_fbits_from_hierarchy(XEdge &e) {
 }
 
 void Firmap::analysis_fir_tail(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
-  
   I(inp_edges.size() == 2);
   Bits_t bits1 = 0, bits2 = 0;
   for (auto &e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
       // driver is not from other sugraph, wait next iteration for Flop being solved
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -460,8 +471,9 @@ void Firmap::analysis_fir_head(Node &node, XEdge_iterator &inp_edges, FBMap &fbm
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -489,8 +501,9 @@ void Firmap::analysis_fir_bits_extract(Node &node, XEdge_iterator &inp_edges, FB
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -519,8 +532,9 @@ void Firmap::analysis_fir_cat(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -554,8 +568,9 @@ void Firmap::analysis_fir_bitwise(Node &node, XEdge_iterator &inp_edges, FBMap &
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -583,8 +598,9 @@ void Firmap::analysis_fir_not(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -609,8 +625,9 @@ void Firmap::analysis_fir_neg(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -636,8 +653,9 @@ void Firmap::analysis_fir_cvt(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -669,8 +687,9 @@ void Firmap::analysis_fir_dshr(Node &node, XEdge_iterator &inp_edges, FBMap &fbm
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -698,8 +717,9 @@ void Firmap::analysis_fir_dshl(Node &node, XEdge_iterator &inp_edges, FBMap &fbm
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -726,8 +746,9 @@ void Firmap::analysis_fir_shr(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -760,8 +781,9 @@ void Firmap::analysis_fir_shl(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -788,8 +810,9 @@ void Firmap::analysis_fir_as_sint(Node &node, XEdge_iterator &inp_edges, FBMap &
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -813,8 +836,9 @@ void Firmap::analysis_fir_single_input_op(Node &node, XEdge_iterator &inp_edges,
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -838,8 +862,9 @@ void Firmap::analysis_fir_as_async_reset(Node &node, XEdge_iterator &inp_edges, 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -863,8 +888,9 @@ void Firmap::analysis_fir_as_clock(Node &node, XEdge_iterator &inp_edges, FBMap 
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -889,8 +915,9 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -912,10 +939,10 @@ void Firmap::analysis_fir_pad(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
 
 void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
   auto dpin_cmpt = node.get_driver_pin("Y").get_compact_class_driver();
-  auto it2 = fbmap.find(dpin_cmpt);
-  if (it2 != fbmap.end()) 
+  auto it2       = fbmap.find(dpin_cmpt);
+  if (it2 != fbmap.end()) {
     return;
-  
+  }
 
   I(inp_edges.size());
   bool sign;
@@ -923,8 +950,9 @@ void Firmap::analysis_fir_comp(Node &node, XEdge_iterator &inp_edges, FBMap &fbm
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -951,8 +979,9 @@ void Firmap::analysis_fir_rem(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -982,8 +1011,9 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -1001,10 +1031,11 @@ void Firmap::analysis_fir_div(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
     }
   }
 
-  if (sign)
+  if (sign) {
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1 + 1, sign));
-  else
+  } else {
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits1, sign));
+  }
 }
 
 void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges, FBMap &fbmap) {
@@ -1016,8 +1047,9 @@ void Firmap::analysis_fir_mul(Node &node, XEdge_iterator &inp_edges, FBMap &fbma
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {
@@ -1048,11 +1080,11 @@ void Firmap::analysis_fir_const(Node &node, FBMap &fbmap) {
     bits = str_tools::to_i(const_str.substr(pos1 + 5));
     fbmap.insert_or_assign(node.get_driver_pin("Y").get_compact_class_driver(), Firrtl_bits(bits, sign));
     return;
-  }                                              
+  }
 
   auto pos2 = const_str.find("sbits");
   I(pos1 != std::string_view::npos || pos2 != std::string_view::npos);
-  if (pos2 != std::string_view::npos){
+  if (pos2 != std::string_view::npos) {
     sign = true;
     bits = str_tools::to_i(const_str.substr(pos2 + 5));
     return;
@@ -1067,8 +1099,9 @@ void Firmap::analysis_fir_add_sub(Node &node, XEdge_iterator &inp_edges, FBMap &
   for (auto e : inp_edges) {
     auto it = fbmap.find(e.driver.get_compact_class_driver());
     if (it == fbmap.end()) {
-      if (firbits_wait_flop == true)
+      if (firbits_wait_flop == true) {
         return;
+      }
 
       // driver is not from other sugraph, wait next iteration for Flop being solved
       if (e.driver.get_type_op() == Ntype_op::Flop) {

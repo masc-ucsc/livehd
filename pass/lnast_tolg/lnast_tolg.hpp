@@ -22,7 +22,7 @@ private:
   std::string            module_name;
   std::string            path;
   std::string            tuple_assign_str;
-  static inline int trace_module_cnt = 0;
+  static inline int      trace_module_cnt = 0;
 
   absl::flat_hash_map<Lnast_ntype::Lnast_ntype_int, Ntype_op> primitive_type_lnast2lg;
   absl::flat_hash_map<std::string, Node_pin>                  name2dpin;  // for scalar variable

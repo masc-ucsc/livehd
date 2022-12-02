@@ -18,7 +18,7 @@
 #include "mockturtle/algorithms/resubstitution.hpp"
 #include "mockturtle/generators/arithmetic.hpp"
 #include "mockturtle/io/write_bench.hpp"
-//#include "mockturtle/networks/aig.hpp"
+// #include "mockturtle/networks/aig.hpp"
 #include "cell.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -206,15 +206,17 @@ protected:
         // fmt::print("Node: ShiftLeft_Op\n");
         // check if Node_Pin "B" is a constant or of small bit_width
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
             return false;
+          }
         }
         break;
       case Ntype_op::SRA: {
         // fmt::print("Node: ArithShiftRight_Op\n");
         for (const auto &in_edge : cell.inp_edges()) {
-          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD)
+          if (in_edge.sink.get_pid() == 1 && in_edge.get_bits() > BIT_WIDTH_THRESHOLD) {
             return false;
+          }
         }
         break;
       }

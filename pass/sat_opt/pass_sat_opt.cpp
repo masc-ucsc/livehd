@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_sat_opt.hpp"
+
 #include "lezminisat.hpp"
 #include "lezsat.hpp"
 #include "lgedgeiter.hpp"
@@ -8,7 +9,7 @@
 #include "node.hpp"
 #include "node_pin.hpp"
 
-//#define DEBUG
+// #define DEBUG
 
 /*
 
@@ -344,7 +345,9 @@ o_num++;
 
     if (sat.solve(model_expression_vec, modelValues, eq)) {
       fmt::print("satisfiable \n");
-      for (int i = 0; i < int(eq.size()); i++) printf(" %s = %d", sat.to_string(eq[i]).c_str(), int(modelValues[i]));
+      for (int i = 0; i < int(eq.size()); i++) {
+        printf(" %s = %d", sat.to_string(eq[i]).c_str(), int(modelValues[i]));
+      }
       printf("\n\n");
     } else {
       fmt::print("unsatisfiable \n");

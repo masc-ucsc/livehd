@@ -3,9 +3,9 @@
 
 #include "absl/strings/str_cat.h"
 
-//#ifndef NDEBUG
-//#define NDEBUG
-//#endif
+// #ifndef NDEBUG
+// #define NDEBUG
+// #endif
 #include <algorithm>
 #include <cassert>
 #include <memory>
@@ -209,7 +209,7 @@ void Code_gen::do_assign(const lh::Tree_index& assign_node_index, std::vector<st
           key,
           lnast_to->ref_name_str(ref)));  // The pair::second element in the pair is set to true if a new element was inserted or
                                           // false if an equivalent key already existed.
-      if (!ref_map_inst_res.second) {  // this means an equivalent key already exists.
+      if (!ref_map_inst_res.second) {     // this means an equivalent key already exists.
         // so append to main buffer:  key value, assign op, ref value
         if (hier_tup_assign) {
           // fmt::print("hier_tup_assign is {} for hier_tup_vec: {}", hier_tup_assign, hier_tup_vec);
@@ -392,10 +392,11 @@ void Code_gen::do_func_def(const lh::Tree_index& func_def_node_index) {
   if (curr_index != lnast->invalid_index()) {
     while (curr_index != lnast->invalid_index()) {
       assert(!(lnast->get_type(curr_index)).is_invalid());
-      if (parameters.empty())
+      if (parameters.empty()) {
         parameters = lnast->get_name(curr_index);
-      else
+      } else {
         parameters = absl::StrCat(parameters, lnast_to->func_param_sep(), lnast_to->ref_name_str(lnast->get_name(curr_index)));
+      }
       curr_index = lnast->get_sibling_next(curr_index);
     }
   } else {
@@ -859,8 +860,9 @@ void Code_gen::do_dot(const lh::Tree_index& dot_node_index, std::string_view sel
       auto map_it = ref_map.find(key);
       if (map_it != ref_map.end()) {
         key = map_it->second;
-      } else
+      } else {
         I(false, "this tuple_add key is supposed to be fetched from ref_map. This must already be there.");
+      }
 
       buffer_to_print->append(indent(), lnast_to->ref_name_str(value), " = ", key, "\n");
       lnast_to->add_to_buff_vec_for_cpp(absl::StrCat(indent(), lnast_to->ref_name_str(value), " = ", key, "\n"));
@@ -905,8 +907,9 @@ void Code_gen::do_select(const lh::Tree_index& select_node_index, std::string_vi
     }
     if (lnast->get_type(curr_index).is_ref()) {
       lastIsRef = true;
-    } else
+    } else {
       lastIsRef = false;
+    }
     curr_index = lnast->get_sibling_next(curr_index);
   }
 

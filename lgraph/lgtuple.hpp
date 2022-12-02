@@ -86,28 +86,33 @@ public:
   static bool is_single_level(std::string_view key) { return key.find('.') == std::string::npos; }
 
   static bool is_root_attribute(std::string_view key) {
-    if (key.substr(0, 2) == "__" && key[3] != '_')
+    if (key.substr(0, 2) == "__" && key[3] != '_') {
       return true;
-    if (key.substr(0, 4) == "0.__" && key[5] != '_')
+    }
+    if (key.substr(0, 4) == "0.__" && key[5] != '_') {
       return true;
+    }
 
     return false;
   }
 
   static bool is_attribute(std::string_view key) {
-    if (is_root_attribute(key))
+    if (is_root_attribute(key)) {
       return true;
+    }
 
     auto it = key.find(".__");
     if (it != std::string::npos) {
-      if (key[it + 3] != '_')
+      if (key[it + 3] != '_') {
         return true;
+      }
     }
 
     auto it2 = key.find(":__");
     if (it2 != std::string::npos) {
-      if (key[it2 + 3] != '_')
+      if (key[it2 + 3] != '_') {
         return true;
+      }
     }
 
     return false;
@@ -115,8 +120,9 @@ public:
 
   static std::string_view get_attribute(std::string_view key) {
     auto last = get_last_level(key);
-    if (last.size() > 2 && last[0] == '_' && last[1] == '_' && last[2] != '_')
+    if (last.size() > 2 && last[0] == '_' && last[1] == '_' && last[2] != '_') {
       return last;
+    }
     return "";
   }
 

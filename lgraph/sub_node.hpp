@@ -176,8 +176,9 @@ public:
         instance_pid = deleted.back();
         deleted.pop_back();
         I(io_pins.size() > instance_pid);
-        if (io_pins[instance_pid].is_invalid())
+        if (io_pins[instance_pid].is_invalid()) {
           break;
+        }
       }
     }
 
@@ -195,8 +196,9 @@ public:
     }
     name2id[io_name] = instance_pid;
     I(io_pins[instance_pid].name == io_name);
-    if (graph_pos != Port_invalid)
+    if (graph_pos != Port_invalid) {
       map_pin_int(instance_pid, graph_pos);
+    }
 
     return instance_pid;
   }
@@ -245,8 +247,9 @@ public:
   }
 
   [[nodiscard]] Port_ID get_instance_pid(std::string_view io_name) const {
-    if (io_name == "$" || io_name == "%")
+    if (io_name == "$" || io_name == "%") {
       return 0;
+    }
     I(has_pin(io_name));
     return name2id.at(io_name);
   }
@@ -321,8 +324,9 @@ public:
   }
 
   [[nodiscard]] std::string_view get_name_from_instance_pid(Port_ID instance_pid) const {
-    if (!has_instance_pin(instance_pid))
+    if (!has_instance_pin(instance_pid)) {
       return "INVALID_PID";
+    }
     return io_pins[instance_pid].name;
   }
 
@@ -342,12 +346,14 @@ public:
   }
 
   [[nodiscard]] bool is_input(std::string_view io_name) const {
-    if (io_name == "$")
+    if (io_name == "$") {
       return true;
+    }
 
     const auto it = name2id.find(io_name);
-    if (it == name2id.end())
+    if (it == name2id.end()) {
       return false;
+    }
 
     return io_pins[it->second].is_input();
   }
@@ -363,12 +369,14 @@ public:
   }
 
   [[nodiscard]] bool is_output(std::string_view io_name) const {
-    if (io_name == "%")
+    if (io_name == "%") {
       return true;
+    }
 
     const auto it = name2id.find(io_name);
-    if (it == name2id.end())
+    if (it == name2id.end()) {
       return false;
+    }
 
     return io_pins[it->second].is_output();
   }
@@ -396,8 +404,9 @@ public:
     std::vector<std::pair<const IO_pin *, Port_ID>> v;
     Port_ID                                         i = 0;
     for (const auto &e : io_pins) {
-      if (e.is_output())
+      if (e.is_output()) {
         v.emplace_back(&e, i);
+      }
       ++i;
     }
     return v;
@@ -408,8 +417,9 @@ public:
     std::vector<std::pair<const IO_pin *, Port_ID>> v;
     Port_ID                                         i = 0;
     for (const auto &e : io_pins) {
-      if (e.is_input())
+      if (e.is_input()) {
         v.emplace_back(&e, i);
+      }
       ++i;
     }
     return v;

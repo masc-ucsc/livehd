@@ -26,7 +26,7 @@ void Pass_lnastopt::work(Eprp_var &var) {
     Lnast_create ln2;
     ln2.new_lnast("ln2");
     p.reconstruct(ln, ln2);
-    //ln2.lnast->dump();
+    // ln2.lnast->dump();
     lnlist.emplace_back(ln2.lnast);
   }
 

@@ -44,8 +44,9 @@ static absl::flat_hash_map<const RTLIL::Wire *, std::vector<int>>  partially_ass
 static std::vector<const RTLIL::Wire *> pending_outputs;
 
 static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
-  if (wire2pin.find(wire) != wire2pin.end())
+  if (wire2pin.find(wire) != wire2pin.end()) {
     return;
+  }
 
   if (wire->port_input) {
     // log("input %s\n",wire->name.c_str());
@@ -147,8 +148,9 @@ bool operator==(const Pick_ID &lhs, const Pick_ID &rhs) {
 static absl::flat_hash_map<Pick_ID, Node_pin> picks;
 
 static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int width, bool is_signed) {
-  if (offset == 0 && (int)wide_dpin.get_bits() == width && !is_signed)
+  if (offset == 0 && (int)wide_dpin.get_bits() == width && !is_signed) {
     return wide_dpin;
+  }
 
   Pick_ID pick_id(wide_dpin, offset, width, is_signed);
   if (picks.find(pick_id) != picks.end()) {
@@ -226,16 +228,19 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
       // I(wire->width == wire2pin[wire].get_bits());
     }
 
-    if (is_signed)  // || !dpin.has_graph_input())
+    if (is_signed) {  // || !dpin.has_graph_input())
       return dpin;
+    }
 
     auto node = dpin.get_node();
 
-    if (node.is_type(Ntype_op::Get_mask))
+    if (node.is_type(Ntype_op::Get_mask)) {
       return dpin;
+    }
 
-    if (node.is_type_const() && !node.get_type_const().is_negative())
+    if (node.is_type_const() && !node.get_type_const().is_negative()) {
       return dpin;
+    }
 
     auto tposs_node = g->create_node(Ntype_op::Get_mask, dpin.get_bits() + 1);
     tposs_node.setup_sink_pin("a").connect_driver(dpin);
@@ -255,8 +260,9 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
 }
 
 static Node_pin create_pick_operator(Lgraph *g, const RTLIL::Wire *wire, int offset, int width, bool is_signed) {
-  if (wire->width == width && offset == 0)
+  if (wire->width == width && offset == 0) {
     return get_edge_pin(g, wire, is_signed);
+  }
 
   return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width, is_signed);
 }
@@ -264,8 +270,9 @@ static Node_pin create_pick_operator(Lgraph *g, const RTLIL::Wire *wire, int off
 static void append_to_or_node(Lgraph *g, const Node &or_node, const Node_pin &dpin, int or_offset) {
   if (or_node.has_inputs() && dpin.get_node().is_type_const()) {
     auto val = dpin.get_node().get_type_const();
-    if (val == 0)
+    if (val == 0) {
       return;
+    }
   }
 
   Node tposs_node = g->create_node(Ntype_op::Get_mask);
@@ -333,8 +340,9 @@ static Node_pin create_pick_concat_dpin(Lgraph *g, const RTLIL::SigSpec &ss, boo
     dpin = inp_pins[0];  // single wire, do not create pick_concat
   }
 
-  if (dpin.is_invalid())
+  if (dpin.is_invalid()) {
     return g->create_node_const(0).setup_driver_pin();
+  }
 
   return dpin;
 }
@@ -369,18 +377,21 @@ static Node_pin get_unsigned_dpin(Lgraph *g, const RTLIL::Cell *cell, const RTLI
 
   if (name == ID::A) {
     bits = cell->getParam(ID::A_WIDTH).as_int();
-    if (cell->hasParam(ID::A_SIGNED))
+    if (cell->hasParam(ID::A_SIGNED)) {
       no_need = cell->getParam(ID::A_SIGNED).as_bool();
+    }
   } else if (name == ID::B) {
     bits = cell->getParam(ID::B_WIDTH).as_int();
-    if (cell->hasParam(ID::B_SIGNED))
+    if (cell->hasParam(ID::B_SIGNED)) {
       no_need = cell->getParam(ID::B_SIGNED).as_bool();
+    }
   } else {
     I(false);  // do not use it for this port name
   }
   auto dpin = get_dpin(g, cell, name);
-  if (no_need)
+  if (no_need) {
     return dpin;
+  }
 
   auto node = dpin.get_node();
   if (node.is_type(Ntype_op::Get_mask)) {
@@ -406,25 +417,30 @@ static void connect_all_inputs(const Node_pin &spin, const RTLIL::Cell *cell) {
   bool is_signed = false;
   for (auto &conn : cell->connections()) {
     RTLIL::SigSpec ss = conn.second;
-    if (ss.size() == 0)
+    if (ss.size() == 0) {
       continue;
-    if (is_yosys_output(conn.first.c_str()))
+    }
+    if (is_yosys_output(conn.first.c_str())) {
       continue;  // Just go over the inputs
+    }
     if (conn.first == ID::A && cell->hasParam(ID::A_SIGNED)) {
       is_signed = cell->getParam(ID::A_SIGNED).as_bool();
     } else if (conn.first == ID::B && cell->hasParam(ID::B_SIGNED)) {
       is_signed = cell->getParam(ID::B_SIGNED).as_bool();
     }
-    if (!is_signed)
+    if (!is_signed) {
       break;  // no need to test more
+    }
   }
 
   for (auto &conn : cell->connections()) {
     RTLIL::SigSpec ss = conn.second;
-    if (ss.size() == 0)
+    if (ss.size() == 0) {
       continue;
-    if (is_yosys_output(conn.first.c_str()))
+    }
+    if (is_yosys_output(conn.first.c_str())) {
       continue;  // Just go over the inputs
+    }
 
     spin.connect_driver(create_pick_concat_dpin(spin.get_class_lgraph(), ss, is_signed));
   }
@@ -433,8 +449,9 @@ static void connect_all_inputs(const Node_pin &spin, const RTLIL::Cell *cell) {
 static const std::regex dc_name("(\\|/)n(\\d\\+)|^N(\\d\\+)");
 
 static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
-  if (!wire)
+  if (!wire) {
     return;
+  }
 
   if (!wire->port_input && !wire->port_output) {
     // we don't want to keep internal abc/yosys wire names
@@ -502,8 +519,9 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
       const RTLIL::Wire *wire = chunk.wire;
 
       // disconnected output
-      if (wire == 0)
+      if (wire == 0) {
         continue;
+      }
 
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
@@ -559,16 +577,18 @@ static bool is_black_box_output(const RTLIL::Module *mod, const RTLIL::Cell *cel
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
-  if (!wire)
+  if (!wire) {
     return false;
+  }
 
   // WARNING: It can be forward: NOT TRUE global output
   // if(wire->port_output)
   //  return true;
 
   // global input
-  if (wire->port_input)
+  if (wire->port_input) {
     return false;
+  }
 
   auto cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
 
@@ -595,16 +615,18 @@ static bool is_black_box_input(const RTLIL::Module *mod, const RTLIL::Cell *cell
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
-  if (!wire)
+  if (!wire) {
     return true;
+  }
 
   // WARNING: It can be used for output in another cell global output
   // if(wire->port_output)
   // return false;
 
   // global input
-  if (wire->port_input)
+  if (wire->port_input) {
     return true;
+  }
 
   auto cell_port = absl::StrCat(cell->type.str(), "_:_", port_name.str());
 
@@ -670,8 +692,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
               bool is_output = false;
               for (auto &chunk : conn.second.chunks()) {
                 const RTLIL::Wire *wire = chunk.wire;
-                if (wire->port_input)
+                if (wire->port_input) {
                   is_input = true;
+                }
                 // WARNING: Not always if (wire->port_output) is_output = true;
                 if (driven_signals.count(wire->hash()) != 0) {
                   is_input = true;
@@ -692,8 +715,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             }
           }
           auto io_pin = sub->get_io_pin_from_graph_pos(pos);
-          if (io_pin.dir == Sub_node::Direction::Input)
+          if (io_pin.dir == Sub_node::Direction::Input) {
             continue;
+          }
 
 #ifndef NDEBUG
           printf("module %s cell type %s has output pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
@@ -702,14 +726,16 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           auto *sub = sub_lg->ref_self_sub_node();
 
           if (!sub->has_pin(pin_name)) {
-            if (cell->input(conn.first) || is_black_box_input(mod, cell, conn.first))
+            if (cell->input(conn.first) || is_black_box_input(mod, cell, conn.first)) {
               sub_lg->add_graph_input(pin_name, Port_invalid, 0);
-            else if (cell->output(conn.first) || is_black_box_output(mod, cell, conn.first))
+            } else if (cell->output(conn.first) || is_black_box_output(mod, cell, conn.first)) {
               sub_lg->add_graph_output(pin_name, Port_invalid, 0);
+            }
           }
 
-          if (!sub->has_pin(pin_name) || sub->is_input(pin_name))
+          if (!sub->has_pin(pin_name) || sub->is_input(pin_name)) {
             continue;
+          }
 
 #ifndef NDEBUG
           printf("module %s submodule %s has pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
@@ -721,8 +747,9 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       } else {
         node.set_type(Ntype_op::Or);  // it will be updated later. Just a generic 1 output cell
 
-        if (cell->input(conn.first))
+        if (cell->input(conn.first)) {
           continue;
+        }
       }
 
       Node_pin driver_pin;
@@ -735,16 +762,18 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 
       const RTLIL::SigSpec ss = conn.second;
 
-      if (ss.chunks().size() > 0)
+      if (ss.chunks().size() > 0) {
         driver_pin.set_bits(ss.size());
+      }
 
       uint32_t offset = 0;
       for (auto &chunk : ss.chunks()) {
         const RTLIL::Wire *wire = chunk.wire;
 
         // disconnected output
-        if (wire == 0)
+        if (wire == 0) {
           continue;
+        }
 
         // fmt::print("dpin:{} bits:{} wire:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str());
 
@@ -837,8 +866,9 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
       const RTLIL::Wire *lhs_wire = lchunk.wire;
 
       // printf("Assignment to %s\n", lhs_wire->name.c_str());
-      if (lchunk.width == 0)
+      if (lchunk.width == 0) {
         continue;
+      }
 
       if (lhs_wire->port_input) {
         log_error("Assignment to input port %s\n", lhs_wire->name.c_str());
@@ -908,8 +938,9 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
             }
 
             // done for this rchunk?
-            if (rhs_pos == rchunk.width)
+            if (rhs_pos == rchunk.width) {
               continue;
+            }
 
             // There should be some overlap between rchunk and lchunk
             if (rchunk.wire == lhs_wire) {
@@ -998,12 +1029,14 @@ static uint32_t get_input_size(const RTLIL::Cell *cell) {
 
   uint32_t max_input = 0;
   for (const auto &conn : cell->connections()) {
-    if (cell->output(conn.first))
+    if (cell->output(conn.first)) {
       continue;
+    }
 
     const RTLIL::SigSpec ss = conn.second;
-    if (ss.chunks().size() > max_input)
+    if (ss.chunks().size() > max_input) {
       max_input = ss.size();
+    }
   }
 
   return max_input;
@@ -1012,16 +1045,19 @@ static uint32_t get_input_size(const RTLIL::Cell *cell) {
 static uint32_t get_output_size(const RTLIL::Cell *cell) {
   I(cell->known());  // use only in based yosys cells (known type)
 
-  if (cell->hasParam(ID::Y_WIDTH))
+  if (cell->hasParam(ID::Y_WIDTH)) {
     return cell->getParam(ID::Y_WIDTH).as_int();
+  }
 
   for (const auto &conn : cell->connections()) {
-    if (cell->input(conn.first))
+    if (cell->input(conn.first)) {
       continue;
+    }
 
     const RTLIL::SigSpec &ss = conn.second;
-    if (ss.chunks().size() > 0)
+    if (ss.chunks().size() > 0) {
       return ss.size();
+    }
   }
 
   I(0);
@@ -1105,8 +1141,9 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
       }
     }
 
-    if ((int)processed_pos.size() == wire->width)
+    if ((int)processed_pos.size() == wire->width) {
       return;  // nothing pending to do
+    }
 
     while (pending_chain) {
       pending_chain = false;
@@ -1115,8 +1152,9 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
 
       for (int pos = 0; pos < (int)partially_assigned_fwd[wire].size(); ++pos) {
         auto shift = partially_assigned_fwd[wire][pos];
-        if (shift == 0)
+        if (shift == 0) {
           continue;
+        }
 
         I(partially_assigned[wire].size() > pos);
         I(pos - shift >= 0);
@@ -1131,8 +1169,9 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
         shifts.insert(shift);
       }
 
-      if (shifts.empty())
+      if (shifts.empty()) {
         return;  // done
+      }
 
       auto master_or_dpin = get_partial_dpin(g, wire);
       auto master_or_node = master_or_dpin.get_node();
@@ -1154,8 +1193,9 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
         // for(int pos=0;pos<v.size();++pos)
         for (int pos = v.size() - 1; pos >= 0; --pos) {
           auto i = v[pos];
-          if (started)
+          if (started) {
             wr_mask = wr_mask << 1;
+          }
           started = true;
 
           if (i == shift && processed_pos.count(pos - shift)) {
@@ -1163,10 +1203,11 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
           }
         }
         Lconst rd_mask;
-        if (shift < 0)
+        if (shift < 0) {
           rd_mask = wr_mask.lsh_op(-shift).adjust_bits(wire->width);
-        else
+        } else {
           rd_mask = wr_mask.rsh_op(shift).adjust_bits(wire->width);
+        }
 
         // fmt::print("wr_mask:{} = rd_mask:{}>>{} from node:{} wire:{}\n" ,wr_mask.to_yosys(), rd_mask.to_yosys(), shift,
         // master_or_node.debug_name(), wire->name.str());
@@ -1213,10 +1254,11 @@ static void connect_comparator(Node &exit_node, const RTLIL::Cell *cell) {
 
   exit_node.setup_sink_pin("A").connect_driver(a_dpin);
 
-  if (exit_node.is_type(Ntype_op::EQ))
+  if (exit_node.is_type(Ntype_op::EQ)) {
     exit_node.setup_sink_pin("A").connect_driver(b_dpin);
-  else
+  } else {
     exit_node.setup_sink_pin("B").connect_driver(b_dpin);
+  }
 }
 
 static void process_partially_assigned(Lgraph *g) {
@@ -1233,17 +1275,20 @@ static void process_connect_outputs(RTLIL::Module *mod, Lgraph *g) {
   for (auto *wire : pending_outputs) {
     std::string wname(&wire->name.c_str()[1]);
 
-    if (!g->has_graph_output(wname))
+    if (!g->has_graph_output(wname)) {
       g->add_graph_output(wname, wire->port_id, wire->width);
+    }
 
-    if (wire2pin.find(wire) == wire2pin.end())
+    if (wire2pin.find(wire) == wire2pin.end()) {
       continue;
+    }
 
     Node_pin dpin3 = wire2pin[wire];
 
     I(wire->port_output);
-    if (dpin3.is_graph_output())
+    if (dpin3.is_graph_output()) {
       continue;
+    }
 
     Node_pin spin = g->get_graph_output(wname);
     g->add_edge(dpin3, spin);  // , wire->width);
@@ -1613,8 +1658,9 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
 
         if (cell->hasParam(ID::SRST_VALUE)) {
           const auto &v = cell->getParam(ID::SRST_VALUE);
-          if (!v.is_fully_zero())
+          if (!v.is_fully_zero()) {
             exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::SRST_VALUE));
+          }
         }
       } else if (cell->hasPort(ID::ARST)) {
         if (cell->hasParam(ID::ARST_POLARITY)) {
@@ -1629,8 +1675,9 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
 
         if (cell->hasParam(ID::ARST_VALUE)) {
           const auto &v = cell->getParam(ID::ARST_VALUE);
-          if (!v.is_fully_zero())
+          if (!v.is_fully_zero()) {
             exit_node.setup_sink_pin("initial").connect_driver(get_dpin(g, cell, ID::ARST_VALUE));
+          }
         }
       }
 
@@ -1766,8 +1813,9 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       }
 
       std::string b{"A"};
-      if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0)
+      if (std::strncmp(cell->type.c_str(), "$sub", 4) == 0) {
         b = "B";
+      }
 
       if (a_sign && b_sign) {
         auto a_dpin = get_dpin(g, cell, ID::A);
@@ -2021,17 +2069,20 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       int rd_clk_enabled = 0;
       int rd_clk_polarity = 0;
       for (int i = 0; i < rd_clkp.size(); i++) {
-        if (rd_clke[i] != RTLIL::S1)
+        if (rd_clke[i] != RTLIL::S1) {
           continue;
+        }
 
         if (rd_clkp[i] == RTLIL::S1) {
-          if (rd_clk_enabled)
+          if (rd_clk_enabled) {
             I(rd_clk_polarity);  // All the read ports are equal
+          }
           rd_clk_enabled = 1;
           rd_clk_polarity = 1;
         } else if (rd_clkp[i] == RTLIL::S0) {
-          if (rd_clk_enabled)
+          if (rd_clk_enabled) {
             I(!rd_clk_polarity);  // All the read ports are equal
+          }
           rd_clk_enabled = 1;
           rd_clk_polarity = 0;
         }
@@ -2039,8 +2090,9 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       if (rd_clk_enabled) {
         // If there is a rd_clk, all should have rd_clk
         for (int i = 0; i < rd_clkp.size(); i++) {
-          if (rd_clke[i] == RTLIL::S1)
+          if (rd_clke[i] == RTLIL::S1) {
             continue;
+          }
 
           log("oops rd_port:%d does not need clk cell %s\n", i, cell->type.c_str());
         }
@@ -2048,16 +2100,19 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       int wr_clk_enabled = 0;
       int wr_clk_polarity = 0;
       for (int i = 0; i < wr_clkp.size(); i++) {
-        if (wr_clke[i] != RTLIL::S1)
+        if (wr_clke[i] != RTLIL::S1) {
           continue;
+        }
         if (wr_clkp[i] == RTLIL::S1) {
-          if (wr_clk_enabled)
+          if (wr_clk_enabled) {
             I(wr_clk_polarity);  // All the read ports are equal
+          }
           wr_clk_enabled = 1;
           wr_clk_polarity = 1;
         } else if (wr_clkp[i] == RTLIL::S0) {
-          if (wr_clk_enabled)
+          if (wr_clk_enabled) {
             I(!wr_clk_polarity);  // All the read ports are equal
+          }
           wr_clk_enabled = 1;
           wr_clk_polarity = 0;
         }
@@ -2065,10 +2120,12 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       rd_clk_polarity = rd_clk_polarity ? 0 : 1;  // polarity flipped in lgraph vs yosys
       wr_clk_polarity = wr_clk_polarity ? 0 : 1;  // polarity flipped in lgraph vs yosys
 
-      if (rd_clk_enabled)
+      if (rd_clk_enabled) {
         connect_constant(g, rd_clk_polarity, exit_node, LgRAPH_MEMOP_RDCLKPOL);
-      if (wr_clk_enabled)
+      }
+      if (wr_clk_enabled) {
         connect_constant(g, wr_clk_polarity, exit_node, LgRAPH_MEMOP_WRCLKPOL);
+      }
 
       connect_constant(g, transp.as_int(), exit_node, LgRAPH_MEMOP_RDTRAN);
 
@@ -2096,11 +2153,13 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       entry_node.set_type_sub(sub_lgid);
 
       std::string inst_name = cell->name.str().substr(1);
-      if (!inst_name.empty())
+      if (!inst_name.empty()) {
         entry_node.set_name(inst_name);
+      }
 #ifndef NDEBUG
-      else
+      else {
         fmt::print("yosys2lg got empty inst_name for cell type {}\n", cell->type.c_str());
+      }
 #endif
 
 #endif
@@ -2167,20 +2226,23 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
 
       for (auto &conn : cell->connections()) {
         RTLIL::SigSpec ss = conn.second;
-        if (ss.size() == 0)
+        if (ss.size() == 0) {
           continue;
+        }
 
         std::string name(&conn.first.c_str()[1]);
 
-        if (sub.is_output(name))
+        if (sub.is_output(name)) {
           continue;
+        }
         if (!sub.is_input(name)) {
           log_error("sub:%s does not have pin:%s as input\n", std::string(sub.get_name()).c_str(), name.c_str());
         }
 
         Node_pin spin = exit_node.setup_sink_pin(name);
-        if (spin.is_invalid())
+        if (spin.is_invalid()) {
           continue;
+        }
 
         Node_pin dpin = create_pick_concat_dpin(g, ss, true);
 
@@ -2251,7 +2313,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       RTLIL::Module *mod = it.second;
       std::string    mod_name(&mod->name.c_str()[1]);
 
-      auto *g = library->ref_or_create_lgraph(mod_name, "-");
+      auto     *g   = library->ref_or_create_lgraph(mod_name, "-");
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {
@@ -2262,17 +2324,19 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         if (wire->port_input && !wire->port_output) {
           // fmt::print("mod:{} inp:{}\n", mod->name.str(), wire->name.str());
           cell_port_inputs.insert(cell_port);
-          if (sub->has_pin(wire_name))
+          if (sub->has_pin(wire_name)) {
             sub->map_graph_pos(wire_name, Sub_node::Direction::Input, wire->port_id);
-          else
+          } else {
             g->add_graph_input(wire_name, wire->port_id, wire->width);
+          }
         } else if (!wire->port_input && wire->port_output) {
           // fmt::print("mod:{} out:{}\n", mod->name.str(), wire->name.str());
           cell_port_outputs.insert(cell_port);
-          if (sub->has_pin(wire_name))
+          if (sub->has_pin(wire_name)) {
             sub->map_graph_pos(wire_name, Sub_node::Direction::Output, wire->port_id);
-          else
+          } else {
             g->add_graph_output(wire_name, wire->port_id, wire->width);
+          }
         } else {
           ::Lgraph::error("inou.yosys.tolg: mod:{} bidirectional:{} NOT supported by livehd\n", mod->name.str(), wire->name.str());
         }

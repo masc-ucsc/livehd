@@ -26,12 +26,12 @@ protected:
   //                 \0/ \1/
   std::stack<bool> attr_scope_stack;
 
-  using attr_map_t = std::vector<std::pair<Lnast_node, Lnast_node>>;
+  using attr_map_t  = std::vector<std::pair<Lnast_node, Lnast_node>>;
   using node_attr_t = std::pair<Lnast_node, attr_map_t>;
 
   // FIXME: Temporary fix for generating input/output refs
-  bool is_function_input;
-  bool is_function_output;
+  bool                                          is_function_input;
+  bool                                          is_function_output;
   absl::flat_hash_map<std::string, std::string> ref_name_map;
 
   // TODO: Replace this with Prp_type
@@ -65,7 +65,7 @@ protected:
   // Expressions
   void process_if_expression(TSNode);
   void process_for_expression(TSNode);
-	void process_match_expression(TSNode);
+  void process_match_expression(TSNode);
   void process_binary_expression(TSNode);
   void process_unary_expression(TSNode);
   void process_dot_expression(TSNode);
@@ -107,47 +107,47 @@ protected:
   // Ref-Attribute Helpers
   // NOTE: This function adds `ref_node` with all attributes `parent` index
   void add_ref_child(lh::Tree_index parent, node_attr_t ref_node);
-  void add_ref_child(lh::Tree_index parent); // NOTE: add `primary_node_stack.top()`
+  void add_ref_child(lh::Tree_index parent);  // NOTE: add `primary_node_stack.top()`
   // NOTE: add `primary_node_stack.top()` if it has any attribute
   void add_ref_child_conditional(lh::Tree_index parent);
 
   // Lnast Tree Helpers
-  std::unique_ptr<Lnast>              lnast;
-  lh::Tree_index                      stmts_index;
+  std::unique_ptr<Lnast> lnast;
+  lh::Tree_index         stmts_index;
 
-  lh::Tree_index                      prev_stmt_index;
-  std::stack<lh::Tree_index>          tuple_index_stack;
+  lh::Tree_index             prev_stmt_index;
+  std::stack<lh::Tree_index> tuple_index_stack;
 
-  lh::Tree_index                      type_index;
-  std::vector<int>                    tuple_lvalue_positions;
+  lh::Tree_index   type_index;
+  std::vector<int> tuple_lvalue_positions;
   // NOTE: suboptimal - copying the whole attribute vector
   std::stack<Lnast_node> rvalue_node_stack;
   std::stack<Lnast_node> lvalue_node_stack;
   std::stack<Lnast_node> primary_node_stack;
 
   struct select_list_t {
-    bool is_attribute = false;
+    bool                    is_attribute = false;
     std::vector<Lnast_node> nodes;
   };
 
-  std::stack<select_list_t> select_stack;
+  std::stack<select_list_t>                                  select_stack;
   std::stack<std::vector<std::pair<Lnast_node, Lnast_node>>> tuple_rvalue_stack;
-  Lnast_node ret_node;
+  Lnast_node                                                 ret_node;
 
   std::stack<std::vector<Lnast_node>> scope_node_stack;
 
-  void add_attr_set(const Lnast_node key, const Lnast_node value);
+  void       add_attr_set(const Lnast_node key, const Lnast_node value);
   Lnast_node add_attr_get(const Lnast_node key);
-  void add_attr_check(const Lnast_node key);
+  void       add_attr_check(const Lnast_node key);
 
   // Lnast_node Helpers
   // TODO: Forward location to Lnast_node
   int               tmp_ref_count;
   std::string       get_tmp_name();
   inline Lnast_node get_tmp_ref();
-  
-  void enter_scope(Expression_state);
-  void leave_scope();
+
+  void        enter_scope(Expression_state);
+  void        leave_scope();
   std::string str(Expression_state);
 
   // TS API Helpers

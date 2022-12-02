@@ -1,8 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_sample.hpp"
+
 #include <string>
 
-#include "pass_sample.hpp"
 #include "cell.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
@@ -73,7 +74,9 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
   }
 
   std::string space;
-  for (int i = 0; i < indent; i++) space.append("  ");
+  for (int i = 0; i < indent; i++) {
+    space.append("  ");
+  }
 
   fmt::print("{}module {} : inputs {} bits {} : outputs {} bits {} : nodes {} : submodules {} : wire {} bits {}\n",
              space,
@@ -93,8 +96,9 @@ void Pass_sample::do_wirecount(Lgraph *g, int indent) {
     auto *lib = Graph_library::instance(path);
 
     Lgraph *sub_lg = lib->open_lgraph(Lg_type_id(lgid));
-    if (!sub_lg)
+    if (!sub_lg) {
       return;
+    }
 
     if (sub_lg->is_empty()) {
       int n_inp = 0;
@@ -145,8 +149,9 @@ void Pass_sample::compute_max_depth(Lgraph *g) {
     int local_max = 0;
     for (const auto &edge : node.inp_edges()) {
       int d = depth[edge.driver.get_node().get_compact()];
-      if (local_max <= d)
+      if (local_max <= d) {
         local_max = d + 1;
+      }
     }
     fmt::print("{} {}\n", node.debug_name(), local_max);
     depth[node.get_compact()] = local_max;
@@ -179,9 +184,9 @@ void Pass_sample::annotate_placement(Lgraph *g) {
 }
 
 void Pass_sample::create_sample_graph(Lgraph *g) {
-  //auto lg_path = g->get_path();
+  // auto lg_path = g->get_path();
 
-  auto *lg = g->ref_library()->create_lgraph("pass_sample","-");
+  auto *lg = g->ref_library()->create_lgraph("pass_sample", "-");
 
   fmt::print("Creating new sample Lgraph...\n");
   auto graph_inp_a = lg->add_graph_input("g_inp_a", 0, 4);  // First io in module, 4 bits

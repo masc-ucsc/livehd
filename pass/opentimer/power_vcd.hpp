@@ -1,8 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-
-#include "absl/container/node_hash_map.h"
-#include "absl/container/flat_hash_map.h"
+#include <sys/mman.h>
 
 #include <cassert>
 #include <charconv>
@@ -12,6 +10,9 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
 
 class Power_vcd {
 protected:
@@ -33,7 +34,7 @@ protected:
     std::vector<size_t>      transitions;
   };
 
-  size_t deepest_vcd_hier_name_level{0};
+  size_t      deepest_vcd_hier_name_level{0};
   std::string deepest_vcd_hier_name;
 
   absl::node_hash_map<std::string, Channel> id2channel;
@@ -56,8 +57,9 @@ protected:
 public:
   Power_vcd() = default;
   ~Power_vcd() {
-    if (map_fd < 0)
+    if (map_fd < 0) {
       return;
+    }
 
     ::munmap((void *)map_buffer, map_size);
     ::close(map_fd);
@@ -67,13 +69,9 @@ public:
 
   void dump() const;
 
-  void clear_power() {
-    hier_name2power.clear();
-  }
+  void clear_power() { hier_name2power.clear(); }
 
-  void add(std::string_view hier_name, double power) {
-    hier_name2power.insert_or_assign(hier_name, power);
-  }
+  void add(std::string_view hier_name, double power) { hier_name2power.insert_or_assign(hier_name, power); }
 
   void compute(std::string_view odir) const;
 };

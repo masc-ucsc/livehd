@@ -108,8 +108,9 @@ protected:
 
   [[nodiscard]] Port_ID get_inp_pid() const {
     const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
-    if (is_snode())
+    if (is_snode()) {
       return s->get_inp_pid();
+    }
 
     const auto *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_inp_pid();
@@ -131,7 +132,7 @@ public:
   [[nodiscard]] bool is_input() const { return input; }
 
   [[nodiscard]] bool is_snode() const { return snode; }
-  void set_snode(bool s) {
+  void               set_snode(bool s) {
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
     snode = s;
     I(snode == reinterpret_cast<const SEdge_Internal *>(this)->is_snode());
@@ -143,17 +144,19 @@ public:
   [[nodiscard]] Index_id get_self_nid() const;
   [[nodiscard]] Index_id get_idx() const {
     const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
-    if (is_snode())
+    if (is_snode()) {
       return s->get_idx(get_page_idx());
+    }
 
     const auto *l = reinterpret_cast<const LEdge_Internal *>(this);
     return l->get_idx();
   }
   void dump() const {
     const auto *s = reinterpret_cast<const SEdge_Internal *>(this);
-    Index_id              a = -1;
-    if (is_snode())
+    Index_id    a = -1;
+    if (is_snode()) {
       a = s->ridx;
+    }
 
     fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
   }
@@ -162,8 +165,9 @@ public:
     return ((((uint64_t)this) & 0xFFF) == 0);  // page align.
   }
 
-  Edge_raw(Edge_raw &&rhs)                 = delete;
-  Edge_raw &operator=(Edge_raw &&rhs)      = delete;
+  Edge_raw(Edge_raw &&rhs)            = delete;
+  Edge_raw &operator=(Edge_raw &&rhs) = delete;
+
 private:  // all constructor&assignment should be marked as private
   Edge_raw()                               = default;
   Edge_raw(const Edge_raw &rhs)            = default;
@@ -193,7 +197,7 @@ class Node_internal;
 
 struct __attribute__((packed)) Node_internal_Page {
   Node_state state : 3;  // 1byte
-  uint64_t   pad1:56;    // 7bytes waste just to get Index_id aligned
+  uint64_t   pad1 : 56;  // 7bytes waste just to get Index_id aligned
   uint32_t   idx;        // 4bytes 32bits but for speed
   uint32_t   free_idx;   // 4bytes 32bits to the first free node
 #pragma clang diagnostic push
@@ -290,24 +294,27 @@ public:
 
   void set_full_hint() {
     I(is_root());
-    if (is_last_state())
+    if (is_last_state()) {
       return;  // No hint
+    }
     auto *raw_ptr = (uint8_t *)&sedge[0];
-    raw_ptr[5]       = 1;  // 4 bytes for next. Rest is clear
+    raw_ptr[5]    = 1;  // 4 bytes for next. Rest is clear
   }
 
   void clear_full_hint() {
     I(is_root());
-    if (is_last_state())
+    if (is_last_state()) {
       return;  // No hint
+    }
     auto *raw_ptr = (uint8_t *)&sedge[0];
-    raw_ptr[5]       = 0;  // 4 bytes for next. Rest is clear
+    raw_ptr[5]    = 0;  // 4 bytes for next. Rest is clear
   }
 
   [[nodiscard]] bool has_full_hint() const {
     I(is_root());
-    if (is_last_state())
+    if (is_last_state()) {
       return false;  // No hint
+    }
     auto *raw_ptr = (uint8_t *)&sedge[0];
     return raw_ptr[5] != 0;
   }
@@ -348,12 +355,15 @@ public:
   }
 
   [[nodiscard]] bool is_deleted() const {
-    if (likely(nid))
+    if (likely(nid)) {
       return false;
-    if (state == Last_node_state)
+    }
+    if (state == Last_node_state) {
       return true;
-    if (state == Free_node_state)
+    }
+    if (state == Free_node_state) {
       return false;
+    }
 
     I(false);  // if a node is deleted it should be Free (todo after garbage collect) or Last
     return false;
@@ -374,8 +384,9 @@ public:
   [[nodiscard]] bool           is_master_root() const {
     I(is_node_state());
     bool ms = nid == get_self_idx().value;
-    if (ms)
+    if (ms) {
       I(root);
+    }
 
     return ms;
   }
@@ -384,7 +395,7 @@ public:
   void clear_root() { root = false; }
 
   [[nodiscard]] Port_ID get_dst_pid() const { return dst_pid; }
-  void    set_dst_pid(Port_ID eid) {
+  void                  set_dst_pid(Port_ID eid) {
     I(eid < (1 << Port_bits));
     dst_pid = eid;
   }
@@ -394,8 +405,9 @@ public:
   }
   [[nodiscard]] Index_id get_master_root_nid() const {
     I(nid);
-    if (likely(root))
+    if (likely(root)) {
       return nid;
+    }
 
     return get_root().get_nid();  // No need to do get_master_root
   }
@@ -417,8 +429,8 @@ public:
   [[nodiscard]] inline static Node_internal &get(const Edge_raw *ptr) {
     // WARNING: this belongs to a structure that it is cache aligned (32 bytes)
     auto root_int = (uint64_t)ptr;
-    root_int          = root_int >> 5;  // 32 byte alignment
-    root_int          = root_int << 5;  // 32 byte alignment
+    root_int      = root_int >> 5;  // 32 byte alignment
+    root_int      = root_int << 5;  // 32 byte alignment
 
     auto *root_n = reinterpret_cast<Node_internal *>(root_int);
     I(root_n->is_node_state());
@@ -555,15 +567,17 @@ private:
     // if (inp_pos == 0) return get_input_begin_pos_int();
 
     int pos = inp_pos;
-    if (state != Last_node_state)
+    if (state != Last_node_state) {
       pos += 2;
+    }
 
     return pos;
   }
 
   [[nodiscard]] int get_input_begin_pos_int() const {
-    if (state == Last_node_state)
+    if (state == Last_node_state) {
       return 0;
+    }
     return 2;
   }
   [[nodiscard]] int get_output_begin_pos_int() const { return Num_SEdges - out_pos - 1; }

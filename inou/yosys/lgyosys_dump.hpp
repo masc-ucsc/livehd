@@ -44,16 +44,18 @@ private:
   std::string unique_name(Lgraph *g, const std::string &test) {
     std::string tmp;
     assert(test.size() >= 1);
-    if (test[0] == '\\')
+    if (test[0] == '\\') {
       tmp = test.substr(1);
-    else
+    } else {
       tmp = test;
+    }
 
     while (true) {
       tmp = absl::StrCat(test, "_", std::to_string(ids++));
 
-      if (g->get_node_pin_name_rmap().contains(tmp))
+      if (g->get_node_pin_name_rmap().contains(tmp)) {
         continue;
+      }
 
       return tmp;
     }

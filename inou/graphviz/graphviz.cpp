@@ -1,11 +1,12 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "graphviz.hpp"
+
 #include <fcntl.h>
 
 #include <fstream>
 #include <regex>
 
-#include "graphviz.hpp"
 #include "RGB.hpp"
 #include "cell.hpp"
 #include "pass.hpp"
@@ -18,10 +19,11 @@ Graphviz::Graphviz(bool _bits, bool _verbose, std::string_view _odir) : verbose(
 void Graphviz::save_graph(std::string_view name, std::string_view dot_postfix, const std::string &data) {
   auto file = absl::StrCat(odir, "/", name);
 
-  if (dot_postfix == "")
+  if (dot_postfix == "") {
     absl::StrAppend(&file, ".dot");
-  else
+  } else {
     absl::StrAppend(&file, ".", dot_postfix, ".dot");
+  }
 
   int fd = ::open(file.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
   if (fd < 0) {
@@ -64,9 +66,9 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
   auto dbits   = out.driver.get_bits();
   auto dp_name = graphviz_legalize_name(out.driver.has_name() ? out.driver.get_name() : "unk");
 
-  if (node.get_type_op() == Ntype_op::Const)
+  if (node.get_type_op() == Ntype_op::Const) {
     data += fmt::format(" {}->{}[label=<{}b:({},{})>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid);
-  else if (node.get_type_op() == Ntype_op::TupAdd)
+  } else if (node.get_type_op() == Ntype_op::TupAdd) {
     data += fmt::format(" {}->{}[label=<{}b:({},{}):<font color=\"#0000ff\">{}</font>>];\n",
                         dn_name,
                         sn_name,
@@ -74,8 +76,9 @@ void Graphviz::populate_lg_handle_xedge(const Node &node, const XEdge &out, std:
                         dp_pid,
                         sp_pid,
                         dp_name);
-  else
+  } else {
     data += fmt::format(" {}->{}[label=<{}b:({},{}):{}>];\n", dn_name, sn_name, dbits, dp_pid, sp_pid, dp_name);
+  }
 }
 
 std::string Graphviz::graphviz_legalize_name(std::string_view name) {
@@ -118,10 +121,12 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
       fmt::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-      if (p.first == p.second)
+      if (p.first == p.second) {
         continue;  // no itself edges
-      if (added.contains(p))
+      }
+      if (added.contains(p)) {
         continue;
+      }
       added.insert(p);
 
       data += fmt::format(" {}->{};\n",
@@ -134,10 +139,12 @@ void Graphviz::do_hierarchy(Lgraph *lg) {
       fmt::print("edge from:{} to:{}\n", e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
 
       auto p = std::pair(e.driver.get_class_lgraph()->get_name(), e.sink.get_class_lgraph()->get_name());
-      if (p.first == p.second)
+      if (p.first == p.second) {
         continue;  // no itself edges
-      if (added.contains(p))
+      }
+      if (added.contains(p)) {
         continue;
+      }
       added.insert(p);
 
       data += fmt::format(" {}->{};\n",
@@ -155,12 +162,14 @@ void Graphviz::create_color_map(Lgraph *lg) {
   absl::flat_hash_map<int, size_t> color2id;
 
   for (auto node : lg->fast()) {
-    if (!node.has_color())
+    if (!node.has_color()) {
       continue;
+    }
 
     auto c = node.get_color();
-    if (color2id.contains(c))
+    if (color2id.contains(c)) {
       continue;
+    }
 
     color2id.insert({c, color2id.size()});
   }
@@ -176,24 +185,28 @@ void Graphviz::create_color_map(Lgraph *lg) {
 
   absl::flat_hash_set<uint64_t> edges;  // hackish graph
   for (auto node : lg->fast()) {
-    if (!node.has_color())
+    if (!node.has_color()) {
       continue;
+    }
 
     auto c = node.get_color();
     for (auto e : node.out_edges()) {
       auto snode = e.sink.get_node();
-      if (!snode.has_color())
+      if (!snode.has_color()) {
         continue;
+      }
       auto sc = snode.get_color();
-      if (sc == c)
+      if (sc == c) {
         continue;
+      }
 
       uint64_t edge = c;
       edge <<= 32;
       edge |= sc;
 
-      if (edges.contains(edge))
+      if (edges.contains(edge)) {
         continue;
+      }
 
       data += fmt::format(" c{}->c{};\n", c, sc);
 
@@ -213,14 +226,16 @@ void Graphviz::do_from_lgraph(Lgraph *lg_parent, std::string_view dot_postfix) {
 
   lg_parent->each_local_sub_fast([&, this](Node &node, Lg_type_id lgid) {
     // no need to populate firrtl_op_subgraph, it's just tmap cells.
-    if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir")
+    if (node.get_type_sub_node().get_name().substr(0, 5) == "__fir") {
       return;
+    }
 
     (void)node;
     fmt::print("subgraph lgid:{}\n", lgid);
     Lgraph *lg_child = lg_parent->ref_library()->open_lgraph(lgid);
-    if (lg_child)
+    if (lg_child) {
       populate_lg_data(lg_child, dot_postfix);
+    }
   });
 }
 
@@ -228,8 +243,9 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
   std::string data = "digraph {\n";
 
   for (auto node : g->fast(false)) {
-    if (!node.has_inputs() && !node.has_outputs())
+    if (!node.has_inputs() && !node.has_outputs()) {
       continue;
+    }
     std::string node_info;
     if (!verbose) {
       auto pos  = node.debug_name().find("_lg");
@@ -247,10 +263,11 @@ void Graphviz::populate_lg_data(Lgraph *g, std::string_view dot_postfix) {
         color = absl::StrCat("fillcolor=\"", it->second, "\" ");
       }
     }
-    if (node.get_type_op() == Ntype_op::Const)
+    if (node.get_type_op() == Ntype_op::Const) {
       data += fmt::format(" {} [{}label=<{}:{}>];\n", gv_name, color, node_info, node.get_type_const().to_pyrope());
-    else
+    } else {
       data += fmt::format(" {} [{}label=<{}>];\n", gv_name, color, node_info);
+    }
 
     for (const auto &out : node.out_edges()) {
       populate_lg_handle_xedge(node, out, data, verbose);
@@ -305,8 +322,9 @@ void Graphviz::do_from_lnast(const std::shared_ptr<Lnast> &lnast, std::string_vi
       data += fmt::format(" {} [label=<{}, {}>];\n", id, node_data.type.debug_name(), name);
     }
 
-    if (node_data.type.is_top())
+    if (node_data.type.is_top()) {
       continue;
+    }
 
     // get parent data for link
     auto p = lnast->get_parent(itr);

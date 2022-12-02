@@ -3,7 +3,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
-//#include "absl/container/inlined_vector.h"
+// #include "absl/container/inlined_vector.h"
 
 #include "cell.hpp"
 #include "hierarchy.hpp"
@@ -177,8 +177,7 @@ public:
   Node(std::string_view path, const Compact_flat &comp);
   Node(Lgraph *_g, const Compact_flat &comp);
   Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp);
-  constexpr Node(Lgraph *_g, const Compact_class &comp)
-      : top_g(_g), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+  constexpr Node(Lgraph *_g, const Compact_class &comp) : top_g(_g), hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
     I(nid);
     I(top_g);
 
@@ -225,9 +224,7 @@ public:
   Node_pin get_driver_pin_raw(Port_ID pid) const;
   Node_pin get_sink_pin_raw(Port_ID pid) const;
 
-  Node_pin get_sink_pin_driver(std::string_view pname) const {
-    return get_sink_pin(pname).get_driver_pin();
-  }
+  Node_pin get_sink_pin_driver(std::string_view pname) const { return get_sink_pin(pname).get_driver_pin(); }
 
   Node_pin get_driver_pin_slow(std::string_view pname) const;
   Node_pin get_driver_pin(std::string_view pname) const {
@@ -235,7 +232,7 @@ public:
     if (unlikely(is_type_sub() && pname != "%")) {
       return get_driver_pin_slow(pname);
     }
-    I(!Ntype::is_multi_driver(get_type_op()));               // Use direct pid for multidriver
+    I(!Ntype::is_multi_driver(get_type_op()));       // Use direct pid for multidriver
     return {top_g, current_g, hidx, nid, 0, false};  // could be invalid if not setup
   }
   Node_pin get_sink_pin_slow(std::string_view pname) const;
@@ -245,8 +242,9 @@ public:
       return get_sink_pin_slow(pname);
     }
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
-    if (pid)
+    if (pid) {
       return get_sink_pin_raw(pid);
+    }
     return {top_g, current_g, hidx, nid, 0, true};  // could be invalid if not setup
   }
 
@@ -262,8 +260,9 @@ public:
       return setup_sink_pin_slow(pname);
     }
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
-    if (pid)
+    if (pid) {
       return setup_sink_pin_raw(pid);
+    }
     return {top_g, current_g, hidx, nid, 0, true};  // could be invalid if not setup
   }
 
@@ -365,18 +364,18 @@ public:
   std::string default_instance_name() const;
 
   // non-hierarchical node name (1 for all nodes)
-  void        set_name(std::string_view iname);
-  std::string get_name() const;
+  void                           set_name(std::string_view iname);
+  std::string                    get_name() const;
   [[nodiscard]] std::string_view get_hier_name() const;
-  std::string get_or_create_name() const;
-  bool        has_name() const;
+  std::string                    get_or_create_name() const;
+  bool                           has_name() const;
 
   void            set_place(const Ann_place &p);
   const Ann_place get_place() const;
   bool            has_place() const;
 
   Bits_t get_bits() const;
-  
+
   void                                set_loc(const uint64_t &pos1, const uint64_t &pos2);
   const std::pair<uint64_t, uint64_t> get_loc() const;
   bool                                has_loc() const;

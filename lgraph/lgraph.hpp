@@ -171,8 +171,9 @@ protected:
   void bottom_up_visit_step(Pending_map &pending_map, Parent_map_type &parent_map, absl::flat_hash_set<Lgraph *> &leafs_set,
                             std::vector<Lgraph *> &leafs);
 
-  void clear_int(); // same as clear but when called by graph_library to avoid locks
+  void clear_int();  // same as clear but when called by graph_library to avoid locks
   void load(std::shared_ptr<Hif_read> hif);
+
 public:
   Lgraph()               = delete;
   Lgraph(const Lgraph &) = delete;
@@ -231,7 +232,7 @@ public:
   Sub_node                     *ref_self_sub_node();        // Access all input/outputs
 
   void save(std::string filename = "");
-  void dump(bool hier=false);
+  void dump(bool hier = false);
   void dump_down_nodes();
 
   Node get_graph_input_node(bool hier = false);

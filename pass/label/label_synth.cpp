@@ -19,14 +19,16 @@ int Label_synth::get_free_id() { return last_free_id++; }
 
 void Label_synth::set_id(const Node &node, int id) {
   auto [it, inserted] = flat_node2id.insert({node.get_compact(), id});
-  if (inserted || id == it->second)
+  if (inserted || id == it->second) {
     return;
+  }
 
   auto it2 = flat_merges.find(it->second);
-  if (it2 == flat_merges.end())
+  if (it2 == flat_merges.end()) {
     flat_merges[id] = it->second;
-  else
+  } else {
     flat_merges[id] = it2->second;
+  }
 }
 
 void Label_synth::mark_ids(Lgraph *g) {
@@ -36,25 +38,30 @@ void Label_synth::mark_ids(Lgraph *g) {
     auto id = get_free_id();
     for (const auto &e : pin.out_edges()) {
       auto node = e.sink.get_node();
-      if (!node.is_type_loop_last())
+      if (!node.is_type_loop_last()) {
         set_id(node, id);
+      }
     }
   });
 #endif
 
   for (auto node : g->forward(hier)) {
-    if (node.is_type_loop_last())
+    if (node.is_type_loop_last()) {
       continue;
-    if (node.is_type_const())
+    }
+    if (node.is_type_const()) {
       continue;  // consts do not need to create new IDs
+    }
 
     if (synth) {
       auto op = node.get_type_op();
-      if (op == Ntype_op::Mult || op == Ntype_op::Div)
+      if (op == Ntype_op::Mult || op == Ntype_op::Div) {
         continue;
+      }
       auto b = node.get_driver_pin().get_bits();
-      if (op == Ntype_op::Sum && b > 8)
+      if (op == Ntype_op::Sum && b > 8) {
         continue;
+      }
     }
 
     int  id = 0;
@@ -79,16 +86,19 @@ void Label_synth::collapse_merge(int dst) {
     fmt::print("d:{}\n", dst);
   }
 
-  if (collapse_set_min > dst)
+  if (collapse_set_min > dst) {
     collapse_set_min = dst;
+  }
 
   auto it = flat_merges.find(dst);
-  if (it == flat_merges.end())
+  if (it == flat_merges.end()) {
     return;
+  }
 
   collapse_set.insert(dst);
-  if (collapse_set.contains(it->second))
+  if (collapse_set.contains(it->second)) {
     return;
+  }
 
   recursion++;
   collapse_merge(it->second);
@@ -108,8 +118,9 @@ void Label_synth::merge_ids() {
         collapse_set.insert(it.second);
         collapse_set_min = it.second;
         collapse_merge(it.second);
-        if (collapse_set_min == it.second)
+        if (collapse_set_min == it.second) {
           continue;
+        }
         it.second = collapse_set_min;
         updated   = true;
       }
@@ -119,8 +130,9 @@ void Label_synth::merge_ids() {
   // 2nd relabel
   for (auto &it : flat_node2id) {
     auto it2 = flat_merges.find(it.second);
-    if (it2 == flat_merges.end())
+    if (it2 == flat_merges.end()) {
       continue;
+    }
 
     it.second = it2->second;
   }
@@ -128,16 +140,19 @@ void Label_synth::merge_ids() {
 #ifndef NDEBUG
   for (auto &it : flat_node2id) {
     auto it2 = flat_merges.find(it.second);
-    if (it2 == flat_merges.end())
+    if (it2 == flat_merges.end()) {
       continue;
-    if (it2->second == it.second)
+    }
+    if (it2->second == it.second) {
       continue;
+    }
     collapse_set.clear();
     collapse_set_min = it.second;
     collapse_merge(it.second);
     collapse_merge(it2->second);
-    if (it2->second == it.second && it.second == collapse_set_min)
+    if (it2->second == it.second && it.second == collapse_set_min) {
       continue;
+    }
     I(false);  // The collapse_merge avoid to trigger this many times
   }
 #endif
@@ -186,6 +201,7 @@ void Label_synth::label(Lgraph *g) {
   }
   */
 
-  if (verbose)
+  if (verbose) {
     dump(g);
+  }
 }

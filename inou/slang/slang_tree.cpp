@@ -15,16 +15,12 @@
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/types/Type.h"
 
-Slang_tree::Slang_tree() {
-
-  parsed_lnasts.clear();
-
-}
+Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 
 void Slang_tree::process_root(const slang::RootSymbol &root) {
   auto topInstances = root.topInstances;
   for (auto inst : topInstances) {
-    //fmt::print("slang_tree top:{}\n", inst->name);
+    // fmt::print("slang_tree top:{}\n", inst->name);
 
     I(!has_lnast(inst->name));  // top level should not be already (may sub instances)
     auto ok = process_top_instance(*inst);
@@ -38,8 +34,9 @@ std::vector<std::shared_ptr<Lnast>> Slang_tree::pick_lnast() {
   std::vector<std::shared_ptr<Lnast>> v;
 
   for (auto &l : parsed_lnasts) {
-    if (l.second)  // do not push null ptr
+    if (l.second) {  // do not push null ptr
       v.emplace_back(l.second);
+    }
   }
 
   parsed_lnasts.clear();
@@ -65,28 +62,28 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
   lnast_create_obj.new_lnast(def.name);
 
-  //symbol.resolvePortConnections();
+  // symbol.resolvePortConnections();
   auto decl_pos = 0u;
   for (const auto &p : symbol.body.getPortList()) {
     if (p->kind == slang::SymbolKind::Port) {
       const auto &port = p->as<slang::PortSymbol>();
 
-      //I(port.defaultValue == nullptr);  // give me a case to DEBUG
+      // I(port.defaultValue == nullptr);  // give me a case to DEBUG
 
       std::string var_name;
       if (port.direction == slang::ArgumentDirection::In) {
-        #ifdef LNAST_NODE
+#ifdef LNAST_NODE
         var_name = absl::StrCat("$.:", decl_pos, ":", port.name);
-        #else
+#else
         var_name = absl::StrCat("$", port.name);
-        #endif
+#endif
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       } else {
-        #ifdef LNAST_NODE
+#ifdef LNAST_NODE
         var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
-        #else
+#else
         var_name = absl::StrCat("%", port.name);
-        #endif
+#endif
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       }
 
@@ -119,7 +116,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       auto       *expr = ns.getInitializer();
       if (expr) {
         // std::string lhs_var = lnast_create_obj.get_lnast_name(member.name);
-        lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr, true)); // get last value for assigns
+        lnast_create_obj.create_assign_stmts(member.name, process_expression(*expr, true));  // get last value for assigns
       }
     } else if (member.kind == slang::SymbolKind::ContinuousAssign) {
       const auto &ca = member.as<slang::ContinuousAssignSymbol>();
@@ -168,27 +165,31 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       const auto &nlist = mod.getPortNames();
       I(plist.size() == nlist.size());
 
-      auto *library = Graph_library::instance("lgdb"); // FIXME: no hardcode path
+      auto *library = Graph_library::instance("lgdb");  // FIXME: no hardcode path
 
-      auto lgid = library->get_lgid(mod.moduleName);
-      Sub_node *sub = nullptr;
+      auto      lgid = library->get_lgid(mod.moduleName);
+      Sub_node *sub  = nullptr;
       if (lgid != 0) {
         sub = library->ref_sub(lgid);
         I(sub);
-      }else{
+      } else {
         // If the cell only has PWD/GND, it may be a filler/decap or related. Skip it
-        for(auto i=0u; i<plist.size(); ++i) {
+        for (auto i = 0u; i < plist.size(); ++i) {
           const auto &n = nlist[i];
           std::string str(n);
 
-          if (strcasestr(str.c_str(),"PWR")!=0)
+          if (strcasestr(str.c_str(), "PWR") != 0) {
             continue;
-          if (strcasestr(str.c_str(),"GND")!=0)
+          }
+          if (strcasestr(str.c_str(), "GND") != 0) {
             continue;
-          if (strcasestr(str.c_str(),"clock")!=0)
+          }
+          if (strcasestr(str.c_str(), "clock") != 0) {
             continue;
-          if (strcasestr(str.c_str(),"reset")!=0)
+          }
+          if (strcasestr(str.c_str(), "reset") != 0) {
             continue;
+          }
 
           const auto &p = plist[i];
           I(p->kind == slang::AssertionExprKind::Simple);
@@ -196,15 +197,17 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
           if (expr.expr.kind == slang::ExpressionKind::NamedValue) {
             const auto &nv = expr.expr.as<slang::NamedValueExpression>();
             std::string str2(nv.symbol.name);
-            if (strcasestr(str2.c_str(),"PWR")!=0)
+            if (strcasestr(str2.c_str(), "PWR") != 0) {
               continue;
-            if (strcasestr(str2.c_str(),"GND")!=0)
+            }
+            if (strcasestr(str2.c_str(), "GND") != 0) {
               continue;
-          }else if (expr.expr.kind == slang::ExpressionKind::IntegerLiteral) {
+            }
+          } else if (expr.expr.kind == slang::ExpressionKind::IntegerLiteral) {
             continue;
           }
 
-          Pass::error("Unable to figure unknown cell:{} direction for pin:{} (add to liberty?)",mod.moduleName, n);
+          Pass::error("Unable to figure unknown cell:{} direction for pin:{} (add to liberty?)", mod.moduleName, n);
         }
 
         continue;
@@ -215,7 +218,7 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       // 1st- create input tuple
       std::vector<std::pair<std::string, std::string>> inp_tup;
 
-      for(auto i=0u; i<plist.size(); ++i) {
+      for (auto i = 0u; i < plist.size(); ++i) {
         const auto &n = nlist[i];
 
         if (sub->is_output(n)) {
@@ -226,7 +229,8 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
         I(p->kind == slang::AssertionExprKind::Simple);
         const auto &expr = p->as<slang::SimpleAssertionExpr>();
 
-        inp_tup.emplace_back(std::make_pair(n, process_expression(expr.expr, true))); // module connections should use last_value write
+        inp_tup.emplace_back(
+            std::make_pair(n, process_expression(expr.expr, true)));  // module connections should use last_value write
       }
 
       auto inp_tup_var = lnast_create_obj.create_lnast_tmp();
@@ -236,11 +240,12 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       lnast_create_obj.create_func_call(mod.name, mod.moduleName, inp_tup_var);
 
       // 3rd- assign output tuple to associated variables
-      for(auto i=0u; i<plist.size(); ++i) {
+      for (auto i = 0u; i < plist.size(); ++i) {
         const auto &n = nlist[i];
 
-        if (!sub->is_output(n))
+        if (!sub->is_output(n)) {
           continue;
+        }
 
         auto rhs_var = lnast_create_obj.create_tuple_get(mod.name, n);
 
@@ -248,14 +253,14 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
         I(p->kind == slang::AssertionExprKind::Simple);
 
         const auto &aexpr = p->as<slang::SimpleAssertionExpr>();
-        process_lhs(aexpr.expr, rhs_var, true); // last_value in module
+        process_lhs(aexpr.expr, rhs_var, true);  // last_value in module
       }
     } else {
       Pass::error("FIXME: missing body type\n");
     }
   }
 
-  //lnast_create_obj.lnast->dump();
+  // lnast_create_obj.lnast->dump();
 
   parsed_lnasts.insert_or_assign(def.name, lnast_create_obj.lnast);
   lnast_create_obj.lnast = nullptr;
@@ -264,7 +269,6 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 }
 
 void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rhs_var, bool last_value) {
-
   std::string var_name;
   bool        dest_var_sign;
   int         dest_var_bits;
@@ -309,12 +313,13 @@ void Slang_tree::process_lhs(const slang::Expression &lhs, const std::string &rh
   if (it == lnast_create_obj.vname2lname.end()) {
     lnast_create_obj.vname2lname.emplace(var_name, var_name);
     lnast_create_obj.create_declare_bits_stmts(var_name, dest_var_sign, dest_var_bits);
-    if (dest_var_sign)
+    if (dest_var_sign) {
       lnast_create_obj.create_assign_stmts(var_name, "0sb?");
-    else {
-      std::string qmarks(dest_var_bits,'?');
+    } else {
+      std::string qmarks(dest_var_bits, '?');
 
-      lnast_create_obj.create_assign_stmts(var_name, absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
+      lnast_create_obj.create_assign_stmts(var_name,
+                                           absl::StrCat("0b", qmarks));  // mark with x so that potential use is poison if needed
     }
   }
 
@@ -354,17 +359,17 @@ std::string Slang_tree::process_expression(const slang::Expression &expr, bool l
     auto                              svint = il.getValue();
     slang::SmallVectorSized<char, 32> buffer;
 
-    if (svint.hasUnknown()) { // unknowns in binary
+    if (svint.hasUnknown()) {  // unknowns in binary
       svint.writeTo(buffer, slang::LiteralBase::Binary, false);
       return absl::StrCat("0b", std::string_view(buffer.data(), buffer.size()));
     }
 
-    if (svint.getMinRepresentedBits() < 8) { // small numbers in decimal (easier to read)
+    if (svint.getMinRepresentedBits() < 8) {  // small numbers in decimal (easier to read)
       svint.writeTo(buffer, slang::LiteralBase::Decimal, false);
       return std::string(buffer.data(), buffer.size());
     }
 
-    svint.writeTo(buffer, slang::LiteralBase::Hex, false); // larger numbers in hexa
+    svint.writeTo(buffer, slang::LiteralBase::Hex, false);  // larger numbers in hexa
     return absl::StrCat("0x", std::string_view(buffer.data(), buffer.size()));
   }
 
@@ -404,14 +409,18 @@ std::string Slang_tree::process_expression(const slang::Expression &expr, bool l
   if (expr.kind == slang::ExpressionKind::UnaryOp) {
     const auto &op = expr.as<slang::UnaryExpression>();
 
-    if (op.op == slang::UnaryOperator::BitwiseAnd)
+    if (op.op == slang::UnaryOperator::BitwiseAnd) {
       return process_mask_and(op, last_value);
-    if (op.op == slang::UnaryOperator::BitwiseNand)
+    }
+    if (op.op == slang::UnaryOperator::BitwiseNand) {
       return lnast_create_obj.create_bit_not_stmts(process_mask_and(op, last_value));
-    if (op.op == slang::UnaryOperator::BitwiseXor)
+    }
+    if (op.op == slang::UnaryOperator::BitwiseXor) {
       return process_mask_xor(op, last_value);
-    if (op.op == slang::UnaryOperator::BitwiseXnor)
+    }
+    if (op.op == slang::UnaryOperator::BitwiseXnor) {
       return lnast_create_obj.create_bit_not_stmts(process_mask_xor(op, last_value));
+    }
 
     auto lhs = process_expression(op.operand(), last_value);
     switch (op.op) {
@@ -442,13 +451,15 @@ std::string Slang_tree::process_expression(const slang::Expression &expr, bool l
 
     const slang::Type *from_type = conv.operand().type;
 
-    if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() >= from_type->getBitWidth())
+    if (to_type->isSigned() == from_type->isSigned() && to_type->getBitWidth() >= from_type->getBitWidth()) {
       return res;  // no need to add mask if expanding
+    }
 
     auto min_bits = std::to_string(std::min(to_type->getBitWidth(), from_type->getBitWidth()));
 
-    if (to_type->isSigned())
+    if (to_type->isSigned()) {
       return lnast_create_obj.create_sext_stmts(res, min_bits);
+    }
 
     I(!to_type->isSigned());
     // and(and(X,a),b) -> and(X,min(a,b))

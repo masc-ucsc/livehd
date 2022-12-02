@@ -258,8 +258,9 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else if (name.substr(0, 1) == "$" || name.substr(0, 1) == "%") {
     // $ = input
-    if (io_map.contains(name.substr(1)))
+    if (io_map.contains(name.substr(1))) {
       return;
+    }
     auto port = umod->add_port();
     port->set_id(std::string(name.substr(1)));
     // auto type = CreateTypeObject(ln.get_bitwidth(name.substr(1)));
@@ -273,17 +274,19 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
     }
     port->set_allocated_type(type);
 
-    if (name.substr(0, 1) == "$")
+    if (name.substr(0, 1) == "$") {
       port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_IN);
-    else
+    } else {
       port->set_direction(firrtl::FirrtlPB_Port_Direction_PORT_DIRECTION_OUT);
+    }
 
     io_map[name.substr(1)] = port;
 
   } else if (name.substr(0, 1) == "#") {
     // # = register
-    if (reg_wire_map.contains(name.substr(1)))
+    if (reg_wire_map.contains(name.substr(1))) {
       return;
+    }
     auto reg = new firrtl::FirrtlPB_Statement_Register();
     reg->set_id(std::string(name.substr(1)));
 
@@ -313,8 +316,9 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
   } else if (name.substr(0, 3) == "_._") {
     // _._ = wire
     auto new_name = absl::StrCat("_", name.substr(3));
-    if (reg_wire_map.contains(new_name))
+    if (reg_wire_map.contains(new_name)) {
       return;
+    }
     auto wire = new firrtl::FirrtlPB_Statement_Wire();
     wire->set_id(new_name);
 
@@ -333,8 +337,9 @@ void Inou_firrtl::CheckRefForComp(Lnast &ln, const Lnast_nid &ref_node, firrtl::
 
   } else {
     // otherwise = wire
-    if (reg_wire_map.contains(name))
+    if (reg_wire_map.contains(name)) {
       return;
+    }
     // if (wire_rename_map.contains(name)) // Ignore this, since it's a call to a submodule and not a wire.
     //  return;
     auto wire = new firrtl::FirrtlPB_Statement_Wire();

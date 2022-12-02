@@ -10,6 +10,7 @@ class Sub_node;
 class Chunkify_verilog : public Elab_scanner {
 private:
   static inline int trace_module_cnt = 0;
+
 protected:
   std::string path;
   std::string chunk_dir;
@@ -31,7 +32,7 @@ protected:
       }
       if (token_list[scanner_pos - 1].pos2 == token_list[scanner_pos].pos1) {
         absl::StrAppend(&text, txt);
-      }else{
+      } else {
         absl::StrAppend(&text, " ", txt);
       }
       return;
@@ -52,7 +53,5 @@ public:
   Chunkify_verilog(std::string_view path, bool incremental_mode);
   void elaborate() final;
 
-  const std::vector<std::string> &get_generated_files() const {
-    return generated_files;
-  }
+  const std::vector<std::string> &get_generated_files() const { return generated_files; }
 };

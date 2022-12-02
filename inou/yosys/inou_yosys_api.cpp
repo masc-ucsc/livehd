@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-//#include <ext/stdio_filebuf.h>
+// #include <ext/stdio_filebuf.h>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -34,7 +34,6 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 
   auto main_path = file_utils::get_exe_path();
 
-
   std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/lnast_fromlg/lgtoln_verif_from_verilog.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/lnast_fromlg/lgtoln_verif_from_pyrope.sh.runfiles/livehd/inou/yosys/",
@@ -50,10 +49,11 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 
   if (script.empty()) {
     std::string do_read_str;
-    if (do_read)
+    if (do_read) {
       do_read_str = "inou_yosys_read.ys";
-    else
+    } else {
       do_read_str = "inou_yosys_write.ys";
+    }
 
     for (const auto &e : alt_paths) {
       auto test = main_path + e + do_read_str;
@@ -62,7 +62,7 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
         break;
       }
     }
-  }else{
+  } else {
     script_file = script;
   }
 
@@ -77,8 +77,9 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var &var, bool do_read) {
 void Inou_yosys_api::call_yosys(mustache::data &vars) {
   std::ifstream inFile;
   inFile.open(std::string(script_file));
-  if (!inFile.good())
+  if (!inFile.good()) {
     error("inou_yosys_api: could not open {}", script_file);
+  }
 
   std::stringstream strStream;
   strStream << inFile.rdbuf();  // read the whole file
@@ -94,8 +95,9 @@ void Inou_yosys_api::call_yosys(mustache::data &vars) {
 
   for (const auto &c : cmd_list) {
     auto x = std::find_if(c.begin(), c.end(), [](char ch) { return std::isalnum(ch); });
-    if (x == c.end())
+    if (x == c.end()) {
       continue;  // skip empty (or just space lines)
+    }
 
     std::string cmd{c};  // yosys call needs std::string
 

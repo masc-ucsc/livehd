@@ -38,7 +38,7 @@ public:
   static inline Eprp eprp;
 
   static void error(std::string_view msg) {
-    //Graph_library::sync_all();
+    // Graph_library::sync_all();
     throw Eprp::parser_error(eprp, msg);
   }
   static void warn(std::string_view msg) { eprp.parser_warn(msg); }

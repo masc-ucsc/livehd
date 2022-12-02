@@ -86,7 +86,7 @@ public:
   [[nodiscard]] std::string_view get_unique_name() const { return unique_name; }
   [[nodiscard]] std::string_view get_name() const { return name; }
   [[nodiscard]] std::string_view get_path() const { return path; }
-  [[nodiscard]] std::string get_save_filename() const { return absl::StrCat(path, "/", name); }
+  [[nodiscard]] std::string      get_save_filename() const { return absl::StrCat(path, "/", name); }
 
   [[nodiscard]] const Lg_type_id get_lgid() const { return lgid; }
 };

@@ -84,8 +84,9 @@ public:
   void print_stats() const;
 
   [[nodiscard]] bool is_valid_node(Index_id nid) const {
-    if (nid >= node_internal.size())
+    if (nid >= node_internal.size()) {
       return false;
+    }
 
     // node_internal.ref_lock();
     const auto *ref = &node_internal[nid];
@@ -96,8 +97,9 @@ public:
   }
 
   [[nodiscard]] bool is_valid_node_pin(Index_id idx) const {
-    if (idx >= node_internal.size())
+    if (idx >= node_internal.size()) {
       return false;
+    }
 
     // node_internal.ref_lock();
     const auto *ref = &node_internal[idx];
@@ -123,8 +125,8 @@ public:
     return ret;
   }
 
-  static size_t max_size() { return (((size_t)1) << Index_bits) - 1; }
-  [[nodiscard]] size_t        size() const { return node_internal.size(); }
+  static size_t        max_size() { return (((size_t)1) << Index_bits) - 1; }
+  [[nodiscard]] size_t size() const { return node_internal.size(); }
 
   class _init {
   public:

@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "meta_api.hpp"
 
 #include <regex>
 #include <string>
 
-#include "meta_api.hpp"
 #include "file_utils.hpp"
 #include "graph_library.hpp"
 #include "lgraph.hpp"
@@ -18,7 +18,7 @@ void Meta_api::open(Eprp_var &var) {
   assert(!name.empty());
 
   auto *lib = Graph_library::instance(path);
-  if (lib==nullptr) {
+  if (lib == nullptr) {
     Main_api::error("could not open graph library path {}", path);
     return;
   }
@@ -47,15 +47,9 @@ void Meta_api::save(Eprp_var &var) {
     } else {
       if (hier != "false" && hier != "0") {
         // lg->each_hier_unique_sub_bottom_up([&var](Lgraph *g) { g->save(); });
-        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { 
-          thread_pool.add([g]() -> void {
-            g->save();
-          });
-         });
-      }else{
-        thread_pool.add([lg]() -> void {
-          lg->save();
-        });
+        lg->each_hier_unique_sub_bottom_up([](Lgraph *g) { thread_pool.add([g]() -> void { g->save(); }); });
+      } else {
+        thread_pool.add([lg]() -> void { lg->save(); });
       }
     }
   }
@@ -192,8 +186,8 @@ void Meta_api::spef(Eprp_var &var) {
 }
 
 void Meta_api::lgdump(Eprp_var &var) {
-  //auto odir = var.get("odir");
-  auto hier = var.get("hier") == "true"? true:false;
+  // auto odir = var.get("odir");
+  auto hier = var.get("hier") == "true" ? true : false;
   fmt::print("lgraph.dump lgraphs:\n");
   for (const auto &l : var.lgs) {
     fmt::print("  {}/{}\n", l->get_path(), l->get_name());

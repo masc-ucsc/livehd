@@ -18,7 +18,7 @@ Lconst Bitwidth_range::to_lconst(bool overflow, int64_t val) {
     return Lconst::get_mask_value(val);
   }
 
-  return Lconst::get_neg_mask_value(-(val+1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
+  return Lconst::get_neg_mask_value(-(val + 1));  // Lconst(0) - (Lconst(1).lsh_op(-val));
 }
 
 Bitwidth_range::Bitwidth_range(const Lconst &val) {
@@ -52,21 +52,21 @@ void Bitwidth_range::set_range(const Lconst &min_val, const Lconst &max_val) {
     I(max >= min);
   } else {
     overflow = true;
-    min = 0;
-    max = 0;
-    if (min_val.is_negative())
+    min      = 0;
+    max      = 0;
+    if (min_val.is_negative()) {
       min = -(min_val.get_bits());
-    if (max_val.is_positive())
+    }
+    if (max_val.is_positive()) {
       max = max_val.get_bits();
+    }
 
-    //fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
+    // fmt::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
     I(min == 0 || min <= max || max == 0);
   }
 }
 
-Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) {
-  set_range(min_val, max_val);
-}
+Bitwidth_range::Bitwidth_range(const Lconst &min_val, const Lconst &max_val) { set_range(min_val, max_val); }
 
 void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
   if (likely(!bw.is_overflow() && !is_overflow())) {
@@ -78,13 +78,15 @@ void Bitwidth_range::set_narrower_range(const Bitwidth_range &bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max < l_max)
+  if (n_max < l_max) {
     l_max = n_max;
+  }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min > l_min)
+  if (n_min > l_min) {
     l_min = n_min;
+  }
 
   set_range(l_min, l_max);
 }
@@ -99,13 +101,15 @@ void Bitwidth_range::set_wider_range(const Bitwidth_range &bw) {
 
   auto l_max = get_max();
   auto n_max = bw.get_max();
-  if (n_max > l_max)
+  if (n_max > l_max) {
     l_max = n_max;
+  }
 
   auto l_min = get_min();
   auto n_min = bw.get_min();
-  if (n_min < l_min)
+  if (n_min < l_min) {
     l_min = n_min;
+  }
 
   set_range(l_min, l_max);
 }
@@ -122,7 +126,7 @@ void Bitwidth_range::set_sbits_range(Bits_t size) {
 
   if (size > 63) {
     overflow = true;
-    max      = size - 1;     // Use bits in overflow mode
+    max      = size - 1;                     // Use bits in overflow mode
     min      = -static_cast<int>(size - 1);  // Use bits
   } else {
     overflow = false;
@@ -147,7 +151,7 @@ void Bitwidth_range::set_ubits_range(Bits_t size) {
 
   if (size >= 62) {
     overflow = true;
-    max      = size+1;  // Use bits in overflow mode
+    max      = size + 1;  // Use bits in overflow mode
   } else {
     overflow = false;
     max      = (1ULL << size) - 1;
@@ -159,10 +163,12 @@ Bits_t Bitwidth_range::get_sbits() const {
   if (overflow) {
     Bits_t bits = std::max(max, -min);
     I(min == 0 || min <= max || max == 0);
-    if (min != 0 && max != 0)
+    if (min != 0 && max != 0) {
       bits++;
-    if (bits >= Bits_max)
+    }
+    if (bits >= Bits_max) {
       return 0;  // To indicate overflow (unable to compute)
+    }
     return bits;
   }
 

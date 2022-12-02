@@ -20,17 +20,18 @@
 #include "lgraph.hpp"
 #include "main_api.hpp"
 #include "meta_api.hpp"
-#include "replxx.hxx"
 #include "perf_tracing.hpp"
+#include "replxx.hxx"
 
 using Replxx = replxx::Replxx;
 
 void help(std::string_view cmd, std::string_view txt) { fmt::print("{:20s} {}\n", cmd, txt); }
 void help_labels(std::string_view cmd, std::string_view txt, bool required) {
-  if (required)
+  if (required) {
     fmt::print("  {:20s} {} (required)\n", cmd, txt);
-  else
+  } else {
     fmt::print("  {:20s} {} (optional)\n", cmd, txt);
+  }
 }
 
 // prototypes
@@ -137,8 +138,9 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
         struct dirent*           dp;
 
         while ((dp = readdir(dirp)) != NULL) {
-          if (dp->d_type != DT_DIR && (label_path || label_odir))
+          if (dp->d_type != DT_DIR && (label_path || label_odir)) {
             continue;
+          }
           // fmt::print("preadding {}\n",dp->d_name);
 
           if (strncasecmp(dp->d_name, filename.c_str(), filename.size()) == 0 || filename.empty()) {
@@ -173,16 +175,18 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       (void)txt;
       fields.emplace_back(absl::StrCat(label, ":"));
     });
-    if (!fields.empty())
+    if (!fields.empty()) {
       examples = &fields;
+    }
     prefix = cmd;
   }
 
   int last_match_end   = context.size();
   int last_match_start = last_match_end;
   for (int i = last_match_end - 1; i >= 0; --i) {
-    if (!std::isalnum(context[i]) && context[i] != '.' && context[i] != '_')
+    if (!std::isalnum(context[i]) && context[i] != '.' && context[i] != '_') {
       break;
+    }
     last_match_start = i;
   }
   std::string match = context.substr(last_match_start, last_match_end);
@@ -201,11 +205,13 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
     auto        to_chop = prefix.size() - fprefix.size();
     for (auto& completion : completions) {
       const std::string comp = completion.text();
-      if (comp.back() == ':')
+      if (comp.back() == ':') {
         continue;
+      }
       // fmt::print("fprefix[{}] completion[{}]\n", fprefix, comp);
-      if (comp.size() > to_chop && to_chop > 0)
+      if (comp.size() > to_chop && to_chop > 0) {
         completion = Replxx::Completion(comp.substr(to_chop));
+      }
     }
   }
 
@@ -322,17 +328,18 @@ int main(int argc, char** argv) {
   }
 
   for (int i = std::max(optind, 1); i < argc; ++i) {
-    if (cmd.empty())
+    if (cmd.empty()) {
       cmd.append(argv[i]);
-    else
+    } else {
       absl::StrAppend(&cmd, " ", argv[i]);
+    }
   }
 
   Main_api::init();
 
   if (!cmd.empty()) {
     fmt::print("livehd cmd {}\n", cmd);
-    for(const auto line:absl::StrSplit(cmd,'\n')) {
+    for (const auto line : absl::StrSplit(cmd, '\n')) {
       Main_api::parse_inline(line);
     }
     return 0;
@@ -457,7 +464,7 @@ int main(int argc, char** argv) {
       } while ((cinput == nullptr) && (errno == EAGAIN));
 
       if (cinput == nullptr) {
-        fmt::print("errno:{}\n",errno);
+        fmt::print("errno:{}\n", errno);
         break;
       }
       if (cinput[0] == 0) {
@@ -473,7 +480,9 @@ int main(int argc, char** argv) {
 
       } else if (input.compare(0, 4, "help") == 0) {
         auto pos = input.find(' ');
-        while (input[pos + 1] == ' ') pos++;
+        while (input[pos + 1] == ' ') {
+          pos++;
+        }
 
         if (pos == std::string::npos) {
           help("help [str]", "this output, or for a specific command");
@@ -488,8 +497,9 @@ int main(int argc, char** argv) {
         } else {
           std::string cmd2 = input.substr(pos + 1);
           auto        pos2 = cmd2.find(' ');
-          if (pos2 != std::string::npos)
+          if (pos2 != std::string::npos) {
             cmd2 = cmd2.substr(0, pos2);
+          }
 
           help(cmd2, Main_api::get_command_help(cmd2));
           Main_api::get_labels(cmd2, help_labels);
@@ -569,16 +579,19 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (!option_quiet)
+  if (!option_quiet) {
     std::cerr << "See you soon!\n";
+  }
 
-  if (history)
+  if (history) {
     rx.history_save(history_file);
+  }
 
   Graph_library::sync_all();
 
-  if (Main_api::has_errors())
+  if (Main_api::has_errors()) {
     return 1;
+  }
 
   return 0;
 }

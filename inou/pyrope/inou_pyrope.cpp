@@ -24,18 +24,17 @@ void Inou_pyrope::parse_to_lnast(Eprp_var &var) {
   TRACE_EVENT("pyrope", perfetto::DynamicString{"pyrope_tolnast"});
   Inou_pyrope p(var);
 
-  std::mutex              var_add_mutex;
+  std::mutex var_add_mutex;
 
   for (auto f : absl::StrSplit(p.files, ',')) {
-
     std::string fname{f};
 
     thread_pool.add([=, &var, &var_add_mutex]() -> void {
       // TRACE_EVENT("pyrope", perfetto::DynamicString{fname});
-      TRACE_EVENT("pyrope", nullptr, [&fname](perfetto::EventContext ctx) { 
-          std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-          ctx.event()->set_name(converted_str + fname); 
-          });
+      TRACE_EVENT("pyrope", nullptr, [&fname](perfetto::EventContext ctx) {
+        std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+        ctx.event()->set_name(converted_str + fname);
+      });
 
       Prp_lnast converter;
       converter.parse_file(fname);

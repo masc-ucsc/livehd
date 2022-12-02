@@ -122,8 +122,9 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
       if (std::isdigit(b[b_last_section])) {
         bool m;
         std::tie(m, a_pos, b_pos) = match_int_advance(a, b, a_last_section, b_last_section);
-        if (!m)
+        if (!m) {
           return std::make_tuple(false, false, b_last_section);
+        }
       } else {
         I(a[a_pos] == ':');
         ++a_pos;  // skip first
@@ -142,8 +143,9 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
       if (std::isdigit(a[a_last_section])) {
         bool m;
         std::tie(m, b_pos, a_pos) = match_int_advance(b, a, b_last_section, a_last_section);  // swap order
-        if (!m)
+        if (!m) {
           return std::make_tuple(false, false, b_last_section);
+        }
       } else {
         I(b[b_pos] == ':');
         ++b_pos;  // skip first
@@ -169,17 +171,20 @@ std::tuple<bool, bool, size_t> Lgtuple::match_int(std::string_view a, std::strin
   bool a_match = (a_pos >= a.size()) && (b_pos >= b.size() || b[b_pos] == '.');
   bool b_match = (b_pos >= b.size()) && (a_pos >= a.size() || a[a_pos] == '.');
 
-  if (b.size() > b_pos && b[b_pos] == '.')
+  if (b.size() > b_pos && b[b_pos] == '.') {
     ++b_pos;
-  if (a.size() > a_pos && a[a_pos] == '.')
+  }
+  if (a.size() > a_pos && a[a_pos] == '.') {
     ++a_pos;
+  }
 
   return std::make_tuple(a_match, b_match, b_pos);
 }
 
 std::string Lgtuple::append_field(std::string_view a, std::string_view b) {
-  if (a.empty())
+  if (a.empty()) {
     return std::string(b);
+  }
 
   return absl::StrCat(a, ".", b);
 }
@@ -324,15 +329,18 @@ std::tuple<std::string, std::string> Lgtuple::learn_fix_int(std::string_view a, 
 }
 
 bool Lgtuple::match(std::string_view a, std::string_view b) {
-  if (a == b)
+  if (a == b) {
     return true;
+  }
   if (a.empty()) {
-    if (b == "0" || (b.size() > 3 && b.substr(0, 3) == ":0:"))
+    if (b == "0" || (b.size() > 3 && b.substr(0, 3) == ":0:")) {
       return true;
+    }
   }
   if (b.empty()) {
-    if (a == "0" || (a.size() > 3 && a.substr(0, 3) == ":0:"))
+    if (a == "0" || (a.size() > 3 && a.substr(0, 3) == ":0:")) {
       return true;
+    }
   }
 
   auto [m1, m2, x] = match_int(a, b);
@@ -343,8 +351,9 @@ bool Lgtuple::match(std::string_view a, std::string_view b) {
 size_t Lgtuple::match_first_partial(std::string_view a, std::string_view b) {
   auto [m1, m2, x] = match_int(a, b);
   (void)m2;
-  if (m1)
+  if (m1) {
     return x;  // a reached the end in match
+  }
   return 0;
 }
 
@@ -379,8 +388,9 @@ void Lgtuple::reconnect_flop_if_needed(Node &flop, std::string_view flop_name, N
 
   if (s_din.is_connected()) {
     auto d_din = s_din.get_driver_pin();
-    if (d_din == dpin)
+    if (d_din == dpin) {
       return;  // already connected
+    }
     XEdge::del_edge(d_din, s_din);
   }
 
@@ -388,8 +398,9 @@ void Lgtuple::reconnect_flop_if_needed(Node &flop, std::string_view flop_name, N
 }
 
 int Lgtuple::get_first_level_pos(std::string_view key) {
-  if (key.empty())
+  if (key.empty()) {
     return -1;
+  }
 
   auto skip = 0u;
 
@@ -407,14 +418,16 @@ int Lgtuple::get_first_level_pos(std::string_view key) {
 std::string_view Lgtuple::get_first_level_name(std::string_view key) {
   auto dot_pos = key.find('.');
   if (key.size() > 0 && key.front() != ':') {
-    if (dot_pos == std::string::npos)
+    if (dot_pos == std::string::npos) {
       return key;
+    }
     return key.substr(0, dot_pos);
   }
 
   auto n = key.substr(1).find(':');
-  if (dot_pos == std::string::npos)
+  if (dot_pos == std::string::npos) {
     return key.substr(1 + 1 + n);
+  }
   return key.substr(1 + 1 + n, dot_pos - 1 - 1 - n);
 }
 
@@ -429,16 +442,18 @@ std::string_view Lgtuple::get_canonical_name(std::string_view key) {
     break;
   }
 
-  if (key == "0")
+  if (key == "0") {
     key = "";
+  }
 
   return key;
 }
 
 std::string_view Lgtuple::get_last_level(std::string_view key) {
   auto n = key.rfind('.');
-  if (n == std::string::npos)
+  if (n == std::string::npos) {
     return key;
+  }
 
   I(n != 0);  // name can not start with a .
   return key.substr(n + 1);
@@ -459,8 +474,9 @@ std::pair<Port_ID, std::string> Lgtuple::convert_key_to_io(std::string_view key)
   if (key[skip] == '$' || key[skip] == '%') {
     ++skip;
   }
-  if (key[skip] == '.')
+  if (key[skip] == '.') {
     ++skip;
+  }
 
   if (key[skip] != ':') {
     return std::pair(Port_invalid, std::string(key.substr(skip)));
@@ -489,8 +505,9 @@ std::string_view Lgtuple::get_all_but_first_level(std::string_view key) {
     return key.substr(n + 1);
   }
 
-  if (key.front() == '$' || key.front() == '%' || key.front() == '#')
+  if (key.front() == '$' || key.front() == '%' || key.front() == '#') {
     return key.substr(1);
+  }
 
   return "";  // empty if no dot left
 }
@@ -507,8 +524,9 @@ std::string Lgtuple::learn_fix(std::string_view a) {
 
 const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
   for (auto &e : key_map) {
-    if (match(e.first, key))
+    if (match(e.first, key)) {
       return e.second;
+    }
   }
 
   return invalid_dpin;
@@ -517,22 +535,25 @@ const Node_pin &Lgtuple::get_dpin(std::string_view key) const {
 const Node_pin &Lgtuple::get_dpin() const {
   int pos = -1;
   for (auto i = 0u; i < key_map.size(); ++i) {
-    if (is_attribute(key_map[i].first))
+    if (is_attribute(key_map[i].first)) {
       continue;
+    }
     I(pos < 0);  // only scalars, so dpin can not be defined already
     pos = i;
   }
 
-  if (pos < 0)
+  if (pos < 0) {
     return invalid_dpin;
+  }
 
   return key_map[pos].second;
 }
 
 bool Lgtuple::has_dpin(std::string_view key) const {
   for (auto &e : key_map) {
-    if (match(e.first, key))
+    if (match(e.first, key)) {
       return true;
+    }
   }
   return false;
 }
@@ -549,8 +570,9 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
   for (auto &e : key_map) {
     std::string_view entry(e.first);
     auto             e_pos = match_first_partial(key, entry);
-    if (e_pos == 0)
+    if (e_pos == 0) {
       continue;
+    }
     GI(e_pos < entry.size(), entry[e_pos] != '.');  // . not included
 
     if (!tup) {
@@ -573,8 +595,9 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(std::string_view key) const {
     }
   }
 
-  if (!is_correct())
+  if (!is_correct()) {
     tup->set_issue();
+  }
 
   return tup;
 }
@@ -611,8 +634,9 @@ std::shared_ptr<Lgtuple> Lgtuple::get_sub_tuple(const std::shared_ptr<Lgtuple co
     ++pos;
   }
 
-  if (!tup->is_correct())
+  if (!tup->is_correct()) {
     ret_tup->set_issue();
+  }
   return ret_tup;
 }
 
@@ -646,8 +670,9 @@ void Lgtuple::del(std::string_view key) {
       new_map.emplace_back(std::move(e));
       continue;
     }
-    if (e_pos >= entry.size())
+    if (e_pos >= entry.size()) {
       continue;  // full match?
+    }
 
     I(entry[e_pos] != '.');  // not . included
 
@@ -676,10 +701,11 @@ void Lgtuple::add(std::string_view key, const std::shared_ptr<Lgtuple const> &tu
     std::string key2;
     // Remove 0. from tup if tup is scalar
     if (tup_scalar && e.first.front() == '0' && (e.first.size() == 1 || e.first[1] == '.')) {
-      if (e.first.size() == 1)
+      if (e.first.size() == 1) {
         key2 = std::string("");  // remove "0"
-      else
+      } else {
         key2 = e.first.substr(2);  // remove "0."
+      }
     } else {
       key2 = e.first;
     }
@@ -739,15 +765,17 @@ void Lgtuple::add(std::string_view key, const Node_pin &dpin) {
         lpart = get_last_level(e.first);
       }
 
-      if (fpart.size() >= key_part.size())
+      if (fpart.size() >= key_part.size()) {
         continue;
+      }
 
       // NOTE: full match foo.bar == foo not foo.bar == foo match
       if (key_part[fpart.size()] == '.' && fpart == key_part.substr(0, fpart.size())) {
-        if (lpart.empty())
+        if (lpart.empty()) {
           e.first = absl::StrCat(fpart, ".0"sv);
-        else
+        } else {
           e.first = absl::StrCat(fpart, ".0.", lpart);
+        }
         if (e.first == fixed_key) {
           e.second = dpin;
           return;
@@ -815,8 +843,9 @@ bool Lgtuple::concat(const std::shared_ptr<Lgtuple const> &tup) {
         Lgraph::info("can not concat tuple pin to tuple unordered {} field {}", get_name(), e.first);
         return false;
       }
-      if (x > max_pos)
+      if (x > max_pos) {
         max_pos = x;
+      }
     }
     for (const auto &e : delayed_numbers) {
       auto        x = str_tools::to_i(e.first);
@@ -920,18 +949,21 @@ Node_pin Lgtuple::flatten() const {
   Node_pin a_dpin;
   bool     all_const = true;
 
-  if (is_trivial_scalar())
+  if (is_trivial_scalar()) {
     return get_dpin();
+  }
 
   std::stable_sort(key_map.begin(), key_map.end(), tuple_sort);  // mutable (no semantic check. Just faster to process)
 
   for (auto &e : key_map) {
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;
+    }
 
     a_dpin = e.second;
-    if (e.second.is_invalid())
+    if (e.second.is_invalid()) {
       return invalid_dpin;
+    }
 
     if (!e.second.is_type_const()) {
       all_const = false;
@@ -939,16 +971,18 @@ Node_pin Lgtuple::flatten() const {
     }
   }
 
-  if (a_dpin.is_invalid())
+  if (a_dpin.is_invalid()) {
     return a_dpin;
+  }
 
   if (all_const) {
     Lconst result;
     int    i         = 0;
     Bits_t accu_bits = 0;
     for (auto &e : key_map) {
-      if (is_attribute(e.first))
+      if (is_attribute(e.first)) {
         continue;
+      }
       auto v = e.second.get_type_const();
       // v      = v << result.get_bits();
       v      = v << accu_bits;
@@ -969,10 +1003,11 @@ Node_pin Lgtuple::flatten() const {
   for (auto &e : key_map) {
     if (is_attribute(e.first)) {
       auto attr_txt = get_last_level(e.first);
-      if (attr_txt == "__sbits")
+      if (attr_txt == "__sbits") {
         sbits_dpin = e.second;
-      else if (attr_txt == "__ubits")
+      } else if (attr_txt == "__ubits") {
         ubits_dpin = e.second;
+      }
 
       if (!last_non_attr_dpin.is_invalid()) {
         auto attr_set_node = result_node.create(Ntype_op::AttrSet);
@@ -1057,18 +1092,20 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
       const auto &e = key_map[i];
       if (is_attribute(e.first)) {
         auto attr_txt = get_last_level(e.first);
-        if (attr_txt == "__sbits")
+        if (attr_txt == "__sbits") {
           sbits_dpin = e.second;
-        else if (attr_txt == "__ubits")
+        } else if (attr_txt == "__ubits") {
           ubits_dpin = e.second;
+        }
 
         I(!e.first.empty());
         tup->key_map.emplace_back(e.first, e.second);  // Keep all the attributes
 
         auto txt = get_all_but_last_level(e.first);
 
-        if (txt == non_attr_field)
+        if (txt == non_attr_field) {
           continue;
+        }
         if (non_attr_field.empty()) {
           non_attr_field = txt;
           continue;
@@ -1077,8 +1114,9 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
         // Change in attr fields, so last attr must have an entry
         // E.g: (..., foo.__ubits=2, bar.__sbits=3,...)
         bool ok = add_pending(rhs_node, pending_entries, non_attr_field, ubits_dpin, sbits_dpin);
-        if (!ok)
+        if (!ok) {
           return nullptr;
+        }
 
         non_attr_field = e.first;
         ubits_dpin     = invalid_dpin;
@@ -1090,11 +1128,13 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
         // last attr did not plain entry
         // E.g: (..., foo.__ubits=2, bar=3,...)
         bool ok = add_pending(rhs_node, pending_entries, non_attr_field, ubits_dpin, sbits_dpin);
-        if (!ok)
+        if (!ok) {
           return nullptr;
+        }
 
-        if (pending_pos >= 0 && non_attr_field == key_map[pending_pos].first)
+        if (pending_pos >= 0 && non_attr_field == key_map[pending_pos].first) {
           pending_pos = -1;
+        }
 
         non_attr_field = "";
         ubits_dpin     = invalid_dpin;
@@ -1125,15 +1165,17 @@ std::shared_ptr<Lgtuple> Lgtuple::create_assign(const Node_pin &rhs_dpin) const 
       }
 
       bool ok = add_pending(rhs_node, pending_entries, key_map[pending_pos].first, ubits_dpin, sbits_dpin);
-      if (!ok)
+      if (!ok) {
         return nullptr;
+      }
       pending_pos = -1;
     }
 
     if (pending_pos >= 0) {
       bool ok = add_pending(rhs_node, pending_entries, key_map[pending_pos].first, ubits_dpin, sbits_dpin);
-      if (!ok)
+      if (!ok) {
         return nullptr;
+      }
     }
   }
 
@@ -1181,8 +1223,9 @@ bool Lgtuple::concat(const Node_pin &dpin) {
       Lgraph::info("can not concat pin:{} to tuple unordered {} field {}", dpin.debug_name(), get_name(), e.first);
       return false;
     }
-    if (x > max_pos)
+    if (x > max_pos) {
       max_pos = x;
+    }
   }
 
   std::string new_key(std::to_string(max_pos + 1));
@@ -1207,8 +1250,9 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   absl::btree_map<std::string, Node_pin> key_entries;
   bool                                   first_iter = true;
   for (const auto &tup : tup_list) {
-    if (!tup->is_correct())
+    if (!tup->is_correct()) {
       fixing_tup->set_issue();
+    }
 
     for (const auto &e : tup->get_map()) {
       std::string key{e.first};
@@ -1265,8 +1309,9 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_mux_tup(const std::vecto
   std::stable_sort(fixing_tup->key_map.begin(), fixing_tup->key_map.end(), tuple_sort);
 
   for (const auto &e : fixing_tup->get_map()) {
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;  // Attributes can not from different paths
+    }
 
     for (const auto &tup : tup_list) {
       if (!tup->has_dpin(e.first)) {
@@ -1304,8 +1349,9 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
   if (n_inputs < mux_input_dpins.size()) {
     Node_pin error_dpin;
     for (auto &e : mux_input_dpins) {
-      if (!e.is_invalid())
+      if (!e.is_invalid()) {
         continue;
+      }
 
       if (error_dpin.is_invalid()) {
         error_dpin = mux_node.create(Ntype_op::CompileErr).setup_driver_pin();
@@ -1359,8 +1405,9 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
           // NOTE: all the pins but the IOs should have the constraints already.
           // This Attr could be set always but slower and redundant
           for (auto &attr_it : tup_list[i]->get_level_attributes(e.first)) {
-            if (Ntype::has_sink(Ntype_op::Flop, std::string(attr_it.first.substr(2))))
+            if (Ntype::has_sink(Ntype_op::Flop, std::string(attr_it.first.substr(2)))) {
               continue;  // Do not create attr for flop config (handled in cprop directly)
+            }
 
             // fmt::print("adding attr:{}\n", attr_it.first);
             // attr_it.second.get_node().dump();
@@ -1385,7 +1432,7 @@ std::vector<Node::Compact> Lgtuple::make_mux(Node &mux_node, Node_pin &sel_dpin,
 
       // FIXME->sh: a temporary hack patching, but we don't need this new
       // design once the problem is solved at the lgtuple level
-      auto spin = node.setup_sink_pin_raw(i+1);
+      auto spin = node.setup_sink_pin_raw(i + 1);
       if (!spin.has_inputs()) {
         spin.connect_driver(dpin);
       }
@@ -1402,12 +1449,14 @@ std::tuple<std::string, bool> Lgtuple::get_flop_name(const Node &flop) const {
   std::string flop_root_name;
   if (flop.get_driver_pin().has_name()) {
     flop_root_name = flop.get_driver_pin().get_name();
-    if (has_dpin(flop_root_name))
+    if (has_dpin(flop_root_name)) {
       first_flop = false;  // Do not allow to use flop directly
+    }
 
     auto n = flop_root_name.find('.');
-    if (n != std::string::npos)
+    if (n != std::string::npos) {
       flop_root_name = flop_root_name.substr(0, n);
+    }
   } else {
     flop_root_name = name;
   }
@@ -1434,8 +1483,9 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) con
     if (e.second.is_invalid()) {
       pending_iterations = true;
     }
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;
+    }
 
     auto [attr, new_flop_name] = get_flop_attr_name(flop_root_name, e.first);
     I(attr.empty());
@@ -1444,8 +1494,9 @@ std::tuple<std::shared_ptr<Lgtuple>, bool> Lgtuple::get_flop_tup(Node &flop) con
 
     if (!dpin.is_invalid()) {
       auto node = dpin.get_node();
-      if (node == flop)
+      if (node == flop) {
         first_flop = false;
+      }
     } else if (first_flop) {
       dpin = flop.setup_driver_pin();
       dpin.reset_name(new_flop_name);
@@ -1542,8 +1593,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
         I(!attr2_dpin.is_invalid());
         I(attr2_dpin.is_type_const());
         auto attr2 = attr2_dpin.get_type_const().to_pyrope();
-        if (attr2 == attr)
+        if (attr2 == attr) {
           continue;  // same attribute already set (can it have different value??)
+        }
       }
     }
 
@@ -1582,8 +1634,9 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
     for (auto &node : all_flops) {
       if (!root.empty()) {
         auto n = node.get_driver_pin().get_name();
-        if (n.substr(0, root.size()) != root)
+        if (n.substr(0, root.size()) != root) {
           continue;  // Only matches update
+        }
       }
 
       auto flop_spin = node.setup_sink_pin(attr);
@@ -1598,12 +1651,12 @@ std::shared_ptr<Lgtuple> Lgtuple::make_flop(Node &flop) const {
       if (attr == "initial") {
         // use get_mask to get the bit that assigned to the corresponding individual flop
         if (it.second.is_type_const()) {
-          Lconst init_val   = it.second.get_type_const();
-          Lconst masked_val = init_val.get_mask_op(1 << i);
-          auto masked_node = lg->create_node_const(masked_val);
+          Lconst init_val    = it.second.get_type_const();
+          Lconst masked_val  = init_val.get_mask_op(1 << i);
+          auto   masked_node = lg->create_node_const(masked_val);
           flop_spin.connect_driver(masked_node.setup_driver_pin());
         } else {
-          I(i == 0); // if tuple expantion needs a get_mask_op()
+          I(i == 0);  // if tuple expantion needs a get_mask_op()
           flop_spin.connect_driver(it.second);
         }
       } else {
@@ -1622,8 +1675,9 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 
   if (key.empty() || is_scalar()) {
     for (const auto &e : key_map) {
-      if (!is_attribute(e.first))
+      if (!is_attribute(e.first)) {
         continue;
+      }
       v.emplace_back(e.first, e.second);
     }
 
@@ -1633,13 +1687,15 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
   for (const auto &e : key_map) {
     std::string entry{e.first};
     auto        e_pos = match_first_partial(key, entry);
-    if (e_pos == 0 || e_pos >= entry.size())
+    if (e_pos == 0 || e_pos >= entry.size()) {
       continue;
+    }
 
     I(entry[e_pos] != '.');  // . not included
 
-    if (!is_root_attribute(entry.substr(e_pos)))
+    if (!is_root_attribute(entry.substr(e_pos))) {
       continue;
+    }
 
     v.emplace_back(entry.substr(e_pos), e.second);
   }
@@ -1650,10 +1706,12 @@ std::vector<std::pair<std::string, Node_pin>> Lgtuple::get_level_attributes(std:
 bool Lgtuple::is_scalar() const {
   auto conta = 0;
   for (const auto &e : key_map) {
-    if (is_attribute(e.first))
+    if (is_attribute(e.first)) {
       continue;
-    if (conta > 0)
+    }
+    if (conta > 0) {
       return false;
+    }
     ++conta;
   }
   return true;
@@ -1661,12 +1719,14 @@ bool Lgtuple::is_scalar() const {
 
 bool Lgtuple::is_ordered() const {
   for (const auto &e : key_map) {
-    if (is_root_attribute(e.first))
+    if (is_root_attribute(e.first)) {
       continue;
+    }
 
     auto pos = get_first_level_pos(e.first);
-    if (pos < 0)
+    if (pos < 0) {
       return false;
+    }
   }
   return true;
 }
@@ -1681,8 +1741,9 @@ std::string_view Lgtuple::get_scalar_name() const {
     } else {
       s = e.first;
     }
-    if (!sname.empty() && sname != s)
+    if (!sname.empty() && sname != s) {
       return "";
+    }
     sname = s;
   }
 
@@ -1698,12 +1759,14 @@ bool Lgtuple::is_trivial_scalar() const {
     if (is_attribute(field)) {
       field = get_all_but_last_level(field);
     } else {
-      if (conta > 0)
+      if (conta > 0) {
         return false;
+      }
       ++conta;
     }
-    if (field == "0")
+    if (field == "0") {
       continue;
+    }
 
     return false;
   }

@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_semantic.hpp"
+
 #include "lgraph.hpp"
 #include "perf_tracing.hpp"
 #include "semantic_check.hpp"

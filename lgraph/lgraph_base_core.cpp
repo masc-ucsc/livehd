@@ -16,8 +16,9 @@
 // static_assert(sizeof(Hierarchy_index) == 16);
 
 Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
-  if (last_path == path)
+  if (last_path == path) {
     return;
+  }
   last_path = path;
 
   struct stat info;
@@ -25,8 +26,9 @@ Lgraph_base_core::Setup_path::Setup_path(std::string_view path) {
   std::string spath(path);
 
   if (stat(spath.c_str(), &info) == 0) {
-    if ((info.st_mode & S_IFDIR))
+    if ((info.st_mode & S_IFDIR)) {
       return;
+    }
 
     unlink(spath.c_str());
   }

@@ -5,7 +5,7 @@
 #include "lgraph.hpp"
 
 // Useful for debug
-//#define PRESERVE_ATTR_NODE
+// #define PRESERVE_ATTR_NODE
 
 static Pass_plugin sample("pass_firmap", Pass_firmap::setup);
 
@@ -19,10 +19,11 @@ void Pass_firmap::setup() {
 Pass_firmap::Pass_firmap(const Eprp_var &var) : Pass("pass.firmap", var) {
   auto hier_txt = var.get("hier");
 
-  if (hier_txt != "false" && hier_txt != "0")
+  if (hier_txt != "false" && hier_txt != "0") {
     hier = true;
-  else
+  } else {
     hier = false;
+  }
 }
 
 void Pass_firmap::trans(Eprp_var &var) {
@@ -49,5 +50,7 @@ void Pass_firmap::trans(Eprp_var &var) {
     lgs.emplace_back(new_lg);
   }
   var.clear();
-  for (auto *lg : lgs) var.add(lg);
+  for (auto *lg : lgs) {
+    var.add(lg);
+  }
 }

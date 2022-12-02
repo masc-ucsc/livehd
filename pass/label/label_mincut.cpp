@@ -13,7 +13,7 @@
 #include "tools/string.h"
 #include "tools/timer.h"
 
-//#define M_DEBUG 1
+// #define M_DEBUG 1
 
 // typedef graph_access graph_type;
 typedef std::shared_ptr<mutable_graph> GraphPtr;
@@ -37,10 +37,12 @@ Label_mincut::Label_mincut(bool _v, bool _h, int _i, int _s, std::string_view _a
 void Label_mincut::gather_ids(Lgraph *g) {
   node_id = 0;                       // ensure reset
   for (auto n : g->forward(hier)) {  // forward iteration for order
-    if (n.get_type_op() == Ntype_op::IO)
+    if (n.get_type_op() == Ntype_op::IO) {
       continue;
-    if (n.get_type_op() == Ntype_op::Const)
+    }
+    if (n.get_type_op() == Ntype_op::Const) {
       continue;
+    }
     node2id[n.get_compact()] = node_id;
     id2node[node_id]         = n.get_compact();
     node_id++;
@@ -58,8 +60,9 @@ void Label_mincut::gather_neighs(Lgraph *g) {
 
     Node tmp_n(g, curr_node);
 
-    if (tmp_n.get_type_op() == Ntype_op::Const)
+    if (tmp_n.get_type_op() == Ntype_op::Const) {
       continue;
+    }
     // gather the sinks
     for (auto &e : tmp_n.out_edges()) {
       auto spin        = e.sink;
@@ -69,8 +72,9 @@ void Label_mincut::gather_neighs(Lgraph *g) {
       auto outgoing_id = node2id[snode.get_compact()];
       auto this_id     = node2id[dnode.get_compact()];
 
-      if (snode.get_type_op() == Ntype_op::Const)
+      if (snode.get_type_op() == Ntype_op::Const) {
         continue;
+      }
       if (snode.get_type_op() != Ntype_op::IO) {
         if ((curr_id != outgoing_id) && (curr_id == this_id)) {
           id2neighs[curr_id].insert(outgoing_id);
@@ -88,8 +92,9 @@ void Label_mincut::gather_neighs(Lgraph *g) {
       auto incoming_id = node2id[dnode.get_compact()];
       auto this_id     = node2id[snode.get_compact()];
 
-      if (dnode.get_type_op() == Ntype_op::Const)
+      if (dnode.get_type_op() == Ntype_op::Const) {
         continue;
+      }
       if (dnode.get_type_op() != Ntype_op::IO) {
         if ((curr_id != incoming_id) && (curr_id == this_id)) {
           id2neighs[curr_id].insert(incoming_id);
@@ -138,8 +143,9 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
   cfg->seed                    = seed;
   // cfg->seed = 12;
 
-  if (cfg->find_lowest_conductance)
+  if (cfg->find_lowest_conductance) {
     cfg->find_most_balanced_cut = true;
+  }
 
   std::vector<int> numthreads;
   timer            t;
@@ -147,8 +153,9 @@ void Label_mincut::viecut_cut(std::string inp_metis_path, std::string out_path) 
 
   GraphPtr G = graph_io::readGraphWeighted<mutable_graph>(cfg->graph_filename);
 
-  if (numthreads.empty())
+  if (numthreads.empty()) {
     numthreads.emplace_back(1);
+  }
 
   for (size_t i = 0; i < num_iterations; ++i) {
     for (int numthread : numthreads) {
@@ -207,8 +214,9 @@ void Label_mincut::viecut_label(std::string result_path) {
   if (in_file.is_open()) {
     while (in_file) {
       std::getline(in_file, one_line);
-      if (one_line.size() == 0)
+      if (one_line.size() == 0) {
         continue;
+      }
       auto curr_node = id2node[line_tracker++];
       // Add one to avoid 0 as a color
       auto t_col            = str_tools::to_i(one_line);
@@ -287,6 +295,7 @@ void Label_mincut::label(Lgraph *g) {
     }
   }
 
-  if (verbose)
+  if (verbose) {
     dump(g);
+  }
 }

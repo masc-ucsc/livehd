@@ -2,11 +2,11 @@
 
 #include "pass_lnast_print.hpp"
 
-#include "lnast_writer.hpp"
-
 #include <fstream>
-#include <ostream>
 #include <iostream>
+#include <ostream>
+
+#include "lnast_writer.hpp"
 
 static Pass_plugin sample("pass_lnast_print", Pass_lnast_print::setup);
 
@@ -20,15 +20,15 @@ void Pass_lnast_print::setup() {
 
 void Pass_lnast_print::do_work(const Eprp_var& var) {
   Pass_lnast_print pass(var);
-  auto odir = pass.get_odir(var);
-  bool has_file_output = (odir != "/INVALID");
-  for (const auto &lnast : var.lnasts) {
+  auto             odir            = pass.get_odir(var);
+  bool             has_file_output = (odir != "/INVALID");
+  for (const auto& lnast : var.lnasts) {
     std::fstream fs;
     if (has_file_output) {
       fs.open(absl::StrCat(odir, "/", lnast->get_top_module_name(), ".ln"), std::fstream::out);
     }
-    std::ostream &os = (has_file_output) ? fs : std::cout;
-    Lnast_writer writer(os, lnast);
+    std::ostream& os = (has_file_output) ? fs : std::cout;
+    Lnast_writer  writer(os, lnast);
     writer.write_all();
   }
 }

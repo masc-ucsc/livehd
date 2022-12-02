@@ -20,8 +20,9 @@ Ntype::_init::_init() {
     int n_sinks = 0;
     for (int pid = 0; pid < 12; ++pid) {
       auto pin_name = Ntype::get_sink_name_slow(static_cast<Ntype_op>(op), pid);
-      if (pin_name.empty() || pin_name == "invalid")
+      if (pin_name.empty() || pin_name == "invalid") {
         continue;
+      }
 
       ++n_sinks;
 
@@ -35,8 +36,9 @@ Ntype::_init::_init() {
         I(it->second == pid);  // same name should always have same PID
       }
 
-      if (static_cast<Ntype_op>(op) != Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10)
+      if (static_cast<Ntype_op>(op) != Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10) {
         continue;
+      }
 
       sink_name2pid[pin_name[0]][op] = pid;
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
@@ -95,10 +97,11 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Sum:
     case Ntype_op::LT:
     case Ntype_op::GT:
-      if (pid == 0)
+      if (pid == 0) {
         return "A";
-      else if (pid == 1)
+      } else if (pid == 1) {
         return "B";
+      }
       return "invalid";
       break;
     case Ntype_op::Mult:
@@ -107,29 +110,33 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
     case Ntype_op::Xor:
     case Ntype_op::Ror:
     case Ntype_op::EQ:
-      if (pid == 0)
+      if (pid == 0) {
         return "A";
+      }
       return "invalid";
       break;
     case Ntype_op::Not:
-      if (pid == 0)
+      if (pid == 0) {
         return "a";
+      }
       return "invalid";
       break;
     case Ntype_op::Sext:
     case Ntype_op::Div:
     case Ntype_op::SRA:
-      if (pid == 0)
+      if (pid == 0) {
         return "a";
-      else if (pid == 1)
+      } else if (pid == 1) {
         return "b";
+      }
       return "invalid";
       break;
     case Ntype_op::SHL:  // n<<(a,b) == (n<<a)|(n<<b) : useful for onehot encoding for lgtuple inputs
-      if (pid == 0)
+      if (pid == 0) {
         return "a";
-      else if (pid == 1)
+      } else if (pid == 1) {
         return "B";
+      }
       return "invalid";
       break;
     case Ntype_op::Const:  // No drivers to Constants
@@ -260,8 +267,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
 bool Ntype::has_sink(Ntype_op op, std::string_view str) {
   auto it = name2pid.find(str);
   if (it == name2pid.end()) {
-    if (std::isdigit(str[0]) && is_unlimited_sink(op))
+    if (std::isdigit(str[0]) && is_unlimited_sink(op)) {
       return true;
+    }
 
     return false;
   }

@@ -1,19 +1,23 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_locator.hpp"
+
 #include "perf_tracing.hpp"
 
 static Pass_plugin sample("pass_locator", Pass_locator::setup);
 
 void Pass_locator::setup() {
-  Eprp_method m1("pass.locator", "after inou.pyrope or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)", &Pass_locator::begin_pass);
-  //m1.add_label_optional("odir", "path to put the LNAST", ".");
+  Eprp_method m1("pass.locator",
+                 "after inou.pyrope or any other FE pass that creates LN.(For paper: LoC.) (Paper pass)",
+                 &Pass_locator::begin_pass);
+  // m1.add_label_optional("odir", "path to put the LNAST", ".");
   register_pass(m1);
 }
 
-Pass_locator::Pass_locator(const Eprp_var &var) : Pass("pass.locator", var) {
-  if (var.has_label("top"))
+Pass_locator::Pass_locator(const Eprp_var& var) : Pass("pass.locator", var) {
+  if (var.has_label("top")) {
     top = var.get("top");
+  }
 }
 
 void Pass_locator::begin_pass(Eprp_var& var) {

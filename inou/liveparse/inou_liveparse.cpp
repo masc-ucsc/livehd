@@ -18,7 +18,6 @@ void Inou_liveparse::setup() {
 Inou_liveparse::Inou_liveparse(const Eprp_var &var) : Pass("inou.liveparse", var) {}
 
 void Inou_liveparse::do_tolg(Eprp_var &var) {
-
   bool incremental_mode = false;
 
   if (var.has_label("incr")) {
@@ -43,16 +42,17 @@ void Inou_liveparse::do_tolg(Eprp_var &var) {
   }
 
   std::string files2;
-  for(const auto &f:chunker_v.get_generated_files()) {
-    if (files2.empty())
+  for (const auto &f : chunker_v.get_generated_files()) {
+    if (files2.empty()) {
       files2 = f;
-    else
+    } else {
       absl::StrAppend(&files2, ",", f);
+    }
   }
 
   if (files2.empty()) {
     var.delete_label("files");
-  }else{
+  } else {
     var.add("files", files2);
   }
 }

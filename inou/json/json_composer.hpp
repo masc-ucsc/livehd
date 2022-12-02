@@ -30,8 +30,9 @@ struct Batch : public Object {
   const T* data;
   Batch(const T* d) { data = d; }
   void ToJson(const JsonComposer* jcm) const {
-    if (data)
+    if (data) {
       this->WriteEach(data->cbegin(), data->cend(), jcm);
+    }
   }
 
   void         WriteEach(IterT start, IterT end, const JsonComposer* jcm) const;
@@ -208,8 +209,9 @@ class JsonComposer {
   friend struct Batch;
   void WriteObject(const JsonElement* prop) const {
     auto obj = prop->ActiveObject();
-    if (obj)
+    if (obj) {
       obj->ToJson(this);
+    }
   }
   void WriteDelimiter() const { target << (current_key ? ",\n" : ", "); }
 
@@ -223,15 +225,17 @@ public:
 
 template <class T>
 void jsn::Batch<T>::WriteEach(IterT start, IterT end, const JsonComposer* jcm) const {
-  if (start == end)
+  if (start == end) {
     return;
+  }
   JsonElement model[] = {{}, {}};
   for (auto itr = start;;) {
     WriteItem(&(*itr), &model[0], jcm);
-    if (++itr == end)
+    if (++itr == end) {
       break;
-    else
+    } else {
       jcm->WriteDelimiter();
+    }
   }
 }
 

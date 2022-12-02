@@ -43,7 +43,7 @@ void Inou_slang::work(Eprp_var &var) {
 #endif
 
   argv.push_back(strdup("--ignore-unknown-modules"));
-  //argv.push_back(strdup("--single-unit"));
+  // argv.push_back(strdup("--single-unit"));
 
   if (var.has_label("includes")) {
     auto txt = var.get("includes");
@@ -69,18 +69,18 @@ void Inou_slang::work(Eprp_var &var) {
     }
   }
 
-  std::mutex              var_add_mutex;
+  std::mutex var_add_mutex;
 
   for (const auto f : absl::StrSplit(p.files, ',')) {
     std::string fname{f};
 
     thread_pool.add([=, &var, &argv, &var_add_mutex]() -> void {
-      //const std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
+      // const std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
       // TRACE_EVENT("verilog", perfetto::DynamicString{fname});
-      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) { 
-          std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-          ctx.event()->set_name(converted_str + fname.c_str()); 
+      TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) {
+        std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
+        ctx.event()->set_name(converted_str + fname.c_str());
       });
 
       Slang_tree tree;
@@ -107,8 +107,8 @@ void Inou_slang::work(Eprp_var &var) {
   thread_pool.wait_all();
 
   for (char *ptr : argv) {
-    if (ptr)
+    if (ptr) {
       free(ptr);
+    }
   }
-
 }

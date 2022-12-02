@@ -46,11 +46,13 @@ RTLIL::Wire *Lgyosys_dump::create_tree(Lgraph *g, const std::vector<RTLIL::Wire 
                                        add_cell_fnc_sign add_fnc, bool sign, RTLIL::Wire *result_wire, int width) {
   assert(mod);
 
-  if (wires.size() == 0)
+  if (wires.size() == 0) {
     return nullptr;
+  }
 
-  if (result_wire)
+  if (result_wire) {
     width = result_wire->width;
+  }
   assert(width);
 
   if (wires.size() == 1) {
@@ -86,8 +88,9 @@ RTLIL::Wire *Lgyosys_dump::create_tree(Lgraph *g, const std::vector<RTLIL::Wire 
   }
 
   auto name = next_id(g);
-  if (result_wire == nullptr)
+  if (result_wire == nullptr) {
     result_wire = mod->addWire(next_id(g), width);
+  }
 
 #if 0
   if (sign && (unsigned_wire.contains(result_wire) || unsigned_wire.contains(l) || unsigned_wire.contains(r)))
@@ -118,8 +121,9 @@ RTLIL::Wire *Lgyosys_dump::create_io_wire(const Node_pin &pin, RTLIL::Module *mo
 }
 
 void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) {
-  if (created_sub.find(sub.get_name()) != created_sub.end())
+  if (created_sub.find(sub.get_name()) != created_sub.end()) {
     return;
+  }
   created_sub.insert(std::string(sub.get_name()));
 
   auto *mod                     = new RTLIL::Module;
@@ -130,8 +134,9 @@ void Lgyosys_dump::create_blackbox(const Sub_node &sub, RTLIL::Design *bdesign) 
 
   int port_id = 0;
   for (const auto &io_pin : sub.get_io_pins()) {  // no need to be sorted if pins are named
-    if (io_pin.is_invalid())
+    if (io_pin.is_invalid()) {
       continue;
+    }
     // fmt::print("bbox:{} name:{}\n", sub.get_name(), io_pin.name);
     auto         name = absl::StrCat("\\", io_pin.name);
     RTLIL::Wire *wire = mod->addWire(mod->uniquify(name));  // , pin.get_bits());
@@ -359,13 +364,15 @@ void Lgyosys_dump::create_wires(Lgraph *g, RTLIL::Module *mod) {
     I(!node.is_invalid());
     I(!node.is_type_io());
 
-    if (!node.has_inputs() && !node.has_outputs())
+    if (!node.has_inputs() && !node.has_outputs()) {
       continue;  // DCE code
+    }
 
     auto op = node.get_type_op();
 
-    if (op == Ntype_op::AttrSet || op == Ntype_op::AttrGet || op == Ntype_op::TupAdd || op == Ntype_op::TupGet)
+    if (op == Ntype_op::AttrSet || op == Ntype_op::AttrGet || op == Ntype_op::TupAdd || op == Ntype_op::TupGet) {
       continue;
+    }
 
     if (op == Ntype_op::Const) {
       auto         lc = node.get_type_const();
@@ -446,8 +453,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
         for (const auto &e : pin.change_to_sink_from_graph_out_driver().inp_edges()) {
           RTLIL::SigSpec rhs = RTLIL::SigSpec(get_wire(e.driver));
-          if (rhs == lhs)
+          if (rhs == lhs) {
             continue;
+          }
           if (lhs.size() == rhs.size()) {
             mod->connect(lhs, rhs);
           } else if (lhs.size() < rhs.size()) {  // Drop bits
@@ -463,15 +471,18 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 
   // now create nodes and make connections
   for (auto node : g->forward(hierarchy)) {
-    if (!node.has_inputs() && !node.has_outputs())
+    if (!node.has_inputs() && !node.has_outputs()) {
       continue;  // DCE code
+    }
 
     auto op = node.get_type_op();
     I(op != Ntype_op::IO);
 
-    if (op != Ntype_op::Memory && op != Ntype_op::Sub)
-      if (!node.has_inputs() || !node.has_outputs())
+    if (op != Ntype_op::Memory && op != Ntype_op::Sub) {
+      if (!node.has_inputs() || !node.has_outputs()) {
         continue;
+      }
+    }
 
     assert(op != Ntype_op::Const);  // filtered before
 
@@ -549,10 +560,12 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         } else if (s_result != nullptr) {
           mod->addSub(next_id(g), RTLIL::Const(0), s_result, result_wire, true);
         } else {
-          if (cell_output_map[node.get_driver_pin().get_compact()]->name != a_result->name)
+          if (cell_output_map[node.get_driver_pin().get_compact()]->name != a_result->name) {
             mod->connect(result_wire, RTLIL::SigSpec(a_result));
-          if (all_inp_unsigned)
+          }
+          if (all_inp_unsigned) {
             unsigned_wire.insert(result_wire);
+          }
         }
       } break;
       case Ntype_op::Mult: {
@@ -574,8 +587,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           ms_result = m_signed[0];
         }
 
-        if (cell_output_map[node.get_driver_pin().get_compact()]->name != ms_result->name)
+        if (cell_output_map[node.get_driver_pin().get_compact()]->name != ms_result->name) {
           mod->connect(cell_output_map[node.get_driver_pin().get_compact()], RTLIL::SigSpec(ms_result));
+        }
 
       } break;
       case Ntype_op::Div: {
@@ -637,8 +651,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           has_inputs = true;
         }
 
-        if (!has_inputs)
+        if (!has_inputs) {
           continue;
+        }
 
         assert(cell_output_map.find(node.get_driver_pin().get_compact()) != cell_output_map.end());
 
@@ -674,15 +689,17 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         }
 
         add_cell_fnc_sign yop = &RTLIL::Module::addAnd;
-        if (op == Ntype_op::Or)
+        if (op == Ntype_op::Or) {
           yop = &RTLIL::Module::addOr;
-        else if (op == Ntype_op::Xor)
+        } else if (op == Ntype_op::Xor) {
           yop = &RTLIL::Module::addXor;
+        }
 
         auto *result_wire = cell_output_map[node.get_driver_pin().get_compact()];
         create_tree(g, inps, mod, yop, !all_inp_unsigned, result_wire);
-        if (all_inp_unsigned)
+        if (all_inp_unsigned) {
           unsigned_wire.insert(result_wire);
+        }
       } break;
       case Ntype_op::Ror: {
         std::vector<RTLIL::Wire *> inps;
@@ -724,22 +741,30 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         Node_pin negreset_dpin;
         Node_pin async_dpin;
 
-        if (node.is_sink_connected("reset"))
+        if (node.is_sink_connected("reset")) {
           reset_dpin = node.get_sink_pin("reset").get_driver_pin();
-        if (node.is_sink_connected("initial"))
+        }
+        if (node.is_sink_connected("initial")) {
           initial_dpin = node.get_sink_pin("initial").get_driver_pin();
-        if (node.is_sink_connected("clock"))
+        }
+        if (node.is_sink_connected("clock")) {
           clock_dpin = node.get_sink_pin("clock").get_driver_pin();
-        if (node.is_sink_connected("din"))
+        }
+        if (node.is_sink_connected("din")) {
           din_dpin = node.get_sink_pin("din").get_driver_pin();
-        if (node.is_sink_connected("enable"))
+        }
+        if (node.is_sink_connected("enable")) {
           enable_dpin = node.get_sink_pin("enable").get_driver_pin();
-        if (node.is_sink_connected("posclk"))
+        }
+        if (node.is_sink_connected("posclk")) {
           posclk_dpin = node.get_sink_pin("posclk").get_driver_pin();
-        if (node.is_sink_connected("negreset"))
+        }
+        if (node.is_sink_connected("negreset")) {
           negreset_dpin = node.get_sink_pin("negreset").get_driver_pin();
-        if (node.is_sink_connected("async"))
+        }
+        if (node.is_sink_connected("async")) {
           async_dpin = node.get_sink_pin("async").get_driver_pin();
+        }
 
         RTLIL::Wire *reset_wire  = nullptr;
         RTLIL::Wire *clock_wire  = nullptr;
@@ -845,10 +870,11 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
           if (!all_inp_unsigned && unsigned_wire.contains(w)) {
             w = zero_extend_one_bit(g, mod, w);
           }
-          if (first)
+          if (first) {
             rest.push_back(w);
-          else
+          } else {
             first = w;
+          }
         }
         assert(rest.size() > 0);  // otherwise nothing to compare
         RTLIL::Wire *result_wire = cell_output_map[node.get_driver_pin().get_compact()];
@@ -864,8 +890,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
             mod->addEq(next_id(g), first, lhs, result_wire, !all_inp_unsigned);
           }
         }
-        if (multi_comparator)
+        if (multi_comparator) {
           create_tree(g, cmp_wires, mod, &RTLIL::Module::addAnd, false, result_wire);
+        }
         unsigned_wire.insert(result_wire);
       } break;
       case Ntype_op::LT:
@@ -891,8 +918,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
 #endif
         }
 
-        if (v_lhs.empty() || v_rhs.empty())
+        if (v_lhs.empty() || v_rhs.empty()) {
           log_error("Internal error: found no connections to compare.\n");
+        }
 
         RTLIL::Wire *final_wire = cell_output_map[node.get_driver_pin().get_compact()];
         assert(final_wire);
@@ -903,8 +931,9 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         for (auto *lhs : v_lhs) {
           for (auto *rhs : v_rhs) {
             bool must_be_signed = true;
-            if (unsigned_wire.contains(rhs) && unsigned_wire.contains(lhs))
+            if (unsigned_wire.contains(rhs) && unsigned_wire.contains(lhs)) {
               must_be_signed = false;
+            }
 
             RTLIL::Wire *wire;
             if (multi_comparator) {
@@ -1003,10 +1032,11 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
             auto *new_wire = mod->addWire(next_id(g), out_width);
 
             if (wire->width < out_width) {
-              if (unsigned_wire.contains(wire))
+              if (unsigned_wire.contains(wire)) {
                 w2.extend_u0(out_width, false);  // zero extend
-              else
+              } else {
                 w2.extend_u0(out_width, true);  // sign extend
+              }
             } else {
               w2 = w2.extract(0, out_width);  // drop bits
             }

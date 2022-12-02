@@ -73,8 +73,9 @@ void Node::update(const Node::Compact &comp) {
   I(top_g);
 
   nid = comp.nid;
-  if (hidx == comp.hidx)
+  if (hidx == comp.hidx) {
     return;
+  }
   hidx      = comp.hidx;
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
 
@@ -90,8 +91,7 @@ Node::Node(Lgraph *_g, Hierarchy_index _hidx, const Compact_class &comp) : top_g
   // I(top_g->get_hierarchy_class_lgid(hidx) == current_g->get_lgid());
 }
 
-Node::Node(Lgraph *_g, const Compact_flat &comp)
-    : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+Node::Node(Lgraph *_g, const Compact_flat &comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = _g->ref_library();
   top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
@@ -102,11 +102,10 @@ Node::Node(Lgraph *_g, const Compact_flat &comp)
   I(current_g->is_valid_node(nid));
 }
 
-Node::Node(std::string_view path, const Compact_flat &comp)
-    : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
+Node::Node(std::string_view path, const Compact_flat &comp) : hidx(Hierarchy::non_hierarchical()), nid(comp.nid) {
   I(nid);
   auto *lib = Graph_library::instance(path);
-  top_g = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
+  top_g     = lib->try_ref_lgraph(Lg_type_id(comp.lgid));
   I(top_g);
   current_g = top_g;
   I(top_g);
@@ -122,7 +121,7 @@ Node::Compact_flat Node::get_compact_flat() const {
 Graph_library *Node::ref_library() const { return current_g->ref_library(); }
 
 Node_pin Node::get_driver_pin_raw(Port_ID pid) const {
-  //I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
+  // I(!is_type_sub());  // Do not setup subs by PID, use name. IF your really need it, use setup_driver_pin_raw
   I(Ntype::has_driver(get_type_op(), pid));
   Index_id idx = current_g->find_idx_from_pid(nid, pid);
   // It can be zero, then invalid node_pin
@@ -210,24 +209,28 @@ bool Node::is_sink_connected(std::string_view pname) const {
     auto pid = Ntype::get_sink_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
     Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-    if (idx == 0)
+    if (idx == 0) {
       return false;
+    }
     return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
   }
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
 
   const auto &sub = current_g->get_library().get_sub(sub_lgid);
-  if (!sub.has_pin(pname) || !sub.is_input(pname))
+  if (!sub.has_pin(pname) || !sub.is_input(pname)) {
     return false;
+  }
 
   auto pid = sub.get_instance_pid(pname);
-  if (pid == Port_invalid)
+  if (pid == Port_invalid) {
     return false;
+  }
 
   Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-  if (idx == 0)
+  if (idx == 0) {
     return false;
+  }
 
   return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, true));
 }
@@ -237,24 +240,28 @@ bool Node::is_driver_connected(std::string_view pname) const {
     auto pid = Ntype::get_driver_pid(get_type_op(), pname);
     I(pid >= 0);  // if quering a cell, the name should be right, no?
     Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-    if (idx == 0)
+    if (idx == 0) {
       return false;
+    }
     return get_lg()->has_outputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
   }
 
   Lg_type_id sub_lgid = current_g->get_type_sub(nid);
 
   const auto &sub = current_g->get_library().get_sub(sub_lgid);
-  if (!sub.has_pin(pname) || sub.is_input(pname))
+  if (!sub.has_pin(pname) || sub.is_input(pname)) {
     return false;
+  }
 
   auto pid = sub.get_instance_pid(pname);
-  if (pid == Port_invalid)
+  if (pid == Port_invalid) {
     return false;
+  }
 
   Index_id idx = get_lg()->find_idx_from_pid(nid, pid);
-  if (idx == 0)
+  if (idx == 0) {
     return false;
+  }
 
   return get_lg()->has_inputs(Node_pin(top_g, current_g, hidx, idx, pid, false));
 }
@@ -268,16 +275,18 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
 
   const auto &sub = current_g->get_library().get_sub(sub_lgid);
   I(sub.has_pin(name));  // maybe you forgot an add_graph_input/output in the sub?
-  if (sub.is_output(name))
+  if (sub.is_output(name)) {
     return {};
+  }
 
   Port_ID pid;
 
   if (str_tools::is_i(name)) {
     int pos = str_tools::to_i(name);
 
-    if (!sub.has_instance_pin(pos))
+    if (!sub.has_instance_pin(pos)) {
       return {};  // invalid pin
+    }
 
     auto io_pin = sub.get_io_pin_from_graph_pos(pos);
     if (io_pin.dir == Sub_node::Direction::Output) {
@@ -287,8 +296,9 @@ Node_pin Node::setup_sink_pin_slow(std::string_view name) {
     pid = sub.get_instance_pid(io_pin.name);
   } else {
     pid = sub.get_instance_pid(name);
-    if (pid == Port_invalid)
+    if (pid == Port_invalid) {
       return {};
+    }
   }
 
   I(pid != Port_invalid);  // graph_pos must be valid if connected
@@ -443,12 +453,14 @@ Lgraph *Node::ref_type_sub_lgraph() const {
 }
 
 bool Node::is_type_sub_present() const {
-  if (!is_type_sub())
+  if (!is_type_sub()) {
     return false;
+  }
 
   auto *sub_lg = ref_type_sub_lgraph();
-  if (sub_lg)
+  if (sub_lg) {
     return !sub_lg->is_empty();
+  }
 
   return false;
 }
@@ -509,13 +521,14 @@ void Node::set_name(std::string_view iname) { current_g->ref_node_name_map()->in
 std::string Node::default_instance_name() const {
   std::string name{""};
 
-  //if (is_hierarchical()) {
-  //  name = absl::StrCat("i_lg", current_g->get_name(), "_hidx", hidx);
-  //}
+  // if (is_hierarchical()) {
+  //   name = absl::StrCat("i_lg", current_g->get_name(), "_hidx", hidx);
+  // }
 
   if (has_name()) {
-    if (name.empty())
+    if (name.empty()) {
       return get_name();
+    }
 
     return absl::StrCat(name, get_name());
   }
@@ -524,7 +537,6 @@ std::string Node::default_instance_name() const {
 }
 
 std::string_view Node::get_hier_name() const {
-
   if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
     return top_g->ref_htree()->get_name(hidx);
   }
@@ -541,8 +553,9 @@ std::string Node::get_or_create_name() const {
   auto      *ref = current_g->ref_node_name_map();
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end()) {
-    if (root_name.empty())
+    if (root_name.empty()) {
       return it->second;
+    }
 
     return absl::StrCat(root_name, ",", it->second);
   }
@@ -586,8 +599,9 @@ std::string Node::debug_name() const {
   }
 
   auto cell_name = Ntype::get_name(get_type_op());
-  if (name.empty())
+  if (name.empty()) {
     return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_lg", current_g->get_name());
+  }
   return absl::StrCat("n", std::to_string(nid), "_", cell_name, "_", name, "_lg", current_g->get_name());
 }
 
@@ -610,22 +624,22 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
 void Node::set_loc(const uint64_t &pos1, const uint64_t &pos2) {
-  if (pos1==0) {
+  if (pos1 == 0) {
     current_g->ref_node_loc_map()->erase(get_compact_class());
     return;
   }
-	const auto &pos = std::make_pair(pos1,pos2);
-	current_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos);
+  const auto &pos = std::make_pair(pos1, pos2);
+  current_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos);
 }
 
-const std::pair<uint64_t,uint64_t> Node::get_loc() const {
+const std::pair<uint64_t, uint64_t> Node::get_loc() const {
   const auto &ptr = current_g->get_node_loc_map();
-  const auto it = ptr.find(get_compact_class());
+  const auto  it  = ptr.find(get_compact_class());
   I(it != ptr.end());
   return it->second;
 }
 
-bool Node::has_loc() const {return current_g->get_node_loc_map().contains(get_compact_class()); }
+bool Node::has_loc() const { return current_g->get_node_loc_map().contains(get_compact_class()); }
 
 void Node::set_fname(const std::string &fname) {
   if (fname.empty()) {
@@ -633,22 +647,20 @@ void Node::set_fname(const std::string &fname) {
 
     return;
   }
-	current_g->ref_node_fname_map()->insert_or_assign(get_compact_class(), fname);
+  current_g->ref_node_fname_map()->insert_or_assign(get_compact_class(), fname);
 }
 
 const std::string Node::get_fname() const {
   const auto &ptr = current_g->get_node_fname_map();
-  const auto it = ptr.find(get_compact_class());
+  const auto  it  = ptr.find(get_compact_class());
   I(it != ptr.end());
   return it->second;
 }
 
-bool Node::has_fname() const {return current_g->get_node_fname_map().contains(get_compact_class()); }
+bool Node::has_fname() const { return current_g->get_node_fname_map().contains(get_compact_class()); }
 
 //----- Subject to changes in the future:
-void Node::del_color() {
-  current_g->ref_node_color_map()->erase(get_compact());
-}
+void Node::del_color() { current_g->ref_node_color_map()->erase(get_compact()); }
 
 void Node::set_color(int new_color) { top_g->ref_node_color_map()->insert_or_assign(get_compact(), new_color); }
 
@@ -673,7 +685,7 @@ void Node::dump() const {
     fmt::print(" color:{} ", get_color());
   }
   if (has_loc()) {
-    std::pair<uint64_t,uint64_t> loc = get_loc();
+    std::pair<uint64_t, uint64_t> loc = get_loc();
     fmt::print(" loc:[{},{}] ", loc.first, loc.second);
   }
   if (has_fname()) {
@@ -687,7 +699,7 @@ void Node::dump() const {
     Lg_type_id sub_lgid = current_g->get_type_sub(nid);
     auto       sub_name = top_g->get_library().get_name(sub_lgid);
     fmt::print(" sub:{} (lgid:{}) (inst:{})\n", sub_name, sub_lgid, get_or_create_name());
-    I(!get_driver_pin_raw(0).is_invalid()); // 0 is always valid to allow generic pin for all outputs
+    I(!get_driver_pin_raw(0).is_invalid());  // 0 is always valid to allow generic pin for all outputs
   } else {
     fmt::print("\n");
   }

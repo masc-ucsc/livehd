@@ -280,14 +280,15 @@ public:
   // No constexpr (get_root_idx)
 
   [[nodiscard]] Compact get_compact() const {
-    if (Hierarchy::is_invalid(hidx))
+    if (Hierarchy::is_invalid(hidx)) {
       return Compact(Hierarchy::hierarchical_root(), get_root_idx(), sink);
+    }
     return Compact(hidx, get_root_idx(), sink);
   }
   [[nodiscard]] Compact_flat   get_compact_flat() const;
   [[nodiscard]] Compact_driver get_compact_driver() const;
   [[nodiscard]] Compact_class  get_compact_class() const {
-     // OK to pick a hierarchical to avoid replication of info like names
+    // OK to pick a hierarchical to avoid replication of info like names
     return Compact_class(idx, sink);
   }
 
@@ -369,8 +370,9 @@ public:
   void connect_driver(const Node_pin &dst) const;
   void connect_driver(const Node &dst) const;
   void connect(const Node_pin &dst) const {
-    if (dst.is_sink() && is_driver())
+    if (dst.is_sink() && is_driver()) {
       return connect_sink(dst);
+    }
     I(dst.is_driver() && is_sink());
     return connect_driver(dst);
   }
@@ -397,8 +399,8 @@ public:
   void nuke();  // Delete all the edges, and attributes of this node_pin
 
   // BEGIN ATTRIBUTE ACCESSORS
-  [[nodiscard]] std::string debug_name() const;
-  [[nodiscard]] std::string get_wire_name() const;
+  [[nodiscard]] std::string      debug_name() const;
+  [[nodiscard]] std::string      get_wire_name() const;
   [[nodiscard]] std::string_view get_hier_name() const;
 
   void                          set_name(std::string_view wname);

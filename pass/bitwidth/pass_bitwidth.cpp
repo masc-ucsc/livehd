@@ -6,7 +6,7 @@
 #include "pass.hpp"
 
 // Useful for debug
-//#define PRESERVE_ATTR_NODE
+// #define PRESERVE_ATTR_NODE
 
 static Pass_plugin sample("pass_bitwidth", Pass_bitwidth::setup);
 
@@ -23,10 +23,11 @@ Pass_bitwidth::Pass_bitwidth(const Eprp_var &var) : Pass("pass.bitwidth", var) {
   auto miters   = var.get("max_iterations");
   auto hier_txt = var.get("hier");
 
-  if (hier_txt != "false" && hier_txt != "0")
+  if (hier_txt != "false" && hier_txt != "0") {
     hier = true;
-  else
+  } else {
     hier = false;
+  }
 
   if (!str_tools::is_i(miters)) {
     error("pass.bitwidth max_iterations:{} should be bigger than zero and less than 100", miters);

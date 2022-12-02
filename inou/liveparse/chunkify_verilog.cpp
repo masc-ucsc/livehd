@@ -20,9 +20,7 @@
 #include "perf_tracing.hpp"
 
 Chunkify_verilog::Chunkify_verilog(std::string_view _path, bool _incremental_mode)
-  :path(_path)
-  ,incremental_mode(_incremental_mode) {
-
+    : path(_path), incremental_mode(_incremental_mode) {
   library = Graph_library::instance(path);
 
   chunk_dir = absl::StrCat(path, "/liveparse");
@@ -56,8 +54,9 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
 
   const std::string elab_filename = absl::StrCat(chunk_dir, "/", module_name, ".v");
   int               fd            = open(elab_filename.c_str(), O_RDONLY);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
 
   struct stat sb;
   fstat(fd, &sb);
@@ -88,8 +87,9 @@ bool Chunkify_verilog::is_same_file(std::string_view module_name, std::string_vi
 
 void Chunkify_verilog::write_file(std::string_view fname, std::string_view text1, std::string_view text2) const {
   int fd = open_write_file(fname);
-  if (fd < 0)
+  if (fd < 0) {
     return;
+  }
 
   size_t sz = write(fd, text1.data(), text1.size());
   if (sz != text1.size()) {
@@ -105,8 +105,9 @@ void Chunkify_verilog::write_file(std::string_view fname, std::string_view text1
 
 void Chunkify_verilog::write_file(std::string_view fname, std::string_view text) const {
   auto fd = open_write_file(fname);
-  if (fd < 0)
+  if (fd < 0) {
     return;
+  }
 
   size_t sz2 = write(fd, text.data(), text.size());
   if (sz2 != text.size()) {
@@ -133,9 +134,9 @@ void Chunkify_verilog::elaborate() {
   // TRACE_EVENT("liveparse", perfetto::DynamicString{fname.c_str()});
   // note: tricks to make perfetto display different color on sub-modules
   TRACE_EVENT("liveparse", "liveparse");
-  // TRACE_EVENT("liveparse", nullptr, [&fname](perfetto::EventContext ctx) { 
+  // TRACE_EVENT("liveparse", nullptr, [&fname](perfetto::EventContext ctx) {
   //     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
-  //     ctx.event()->set_name(converted_str + fname.c_str()); 
+  //     ctx.event()->set_name(converted_str + fname.c_str());
   //     });
 
   generated_files.clear();
@@ -213,10 +214,11 @@ void Chunkify_verilog::elaborate() {
         }
       }
       if (scan_is_token(Token_id_comment)) {
-        if (in_module)
+        if (in_module) {
           in_module_text.append("\n");
-        else
+        } else {
           not_in_module_text.append("\n");
+        }
         scan_next();
         continue;
       }

@@ -11,11 +11,12 @@
 #include "sub_node.hpp"
 #include "thread_pool.hpp"
 
-//#define NO_BOTTOM_UP_PARALLEL 1
+// #define NO_BOTTOM_UP_PARALLEL 1
 
 void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_ID pos)> &f1, bool hierarchical) {
-  if (node_internal.size() < Hardcoded_output_nid)
+  if (node_internal.size() < Hardcoded_output_nid) {
     return;
+  }
 
   struct Pair_type {
     Pair_type(Lgraph *lg, Hierarchy_index hidx, Index_id idx, Port_ID pid, Port_ID _pos)
@@ -28,14 +29,16 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_invalid())
+    if (io_pin.is_invalid()) {
       continue;
+    }
 
     Port_ID pid = get_self_sub_node().get_instance_pid(io_pin.name);
 
     Index_id nid = Hardcoded_output_nid;
-    if (io_pin.is_input())
+    if (io_pin.is_input()) {
       nid = Hardcoded_input_nid;
+    }
     auto idx = find_idx_from_pid(nid, pid);
     if (idx) {
       Pair_type p(this, hidx, idx, pid, io_pin.graph_io_pos);
@@ -56,22 +59,28 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
       if (a.dpin.is_graph_input() && b.dpin.is_graph_input()) {
         auto a_name = a.dpin.get_name();
         auto b_name = b.dpin.get_name();
-        if (a_name == "clock" && b_name != "clock")
+        if (a_name == "clock" && b_name != "clock") {
           return true;
-        if (a_name == "reset" && b_name != "reset")
+        }
+        if (a_name == "reset" && b_name != "reset") {
           return true;
-        if (b_name == "clock")
+        }
+        if (b_name == "clock") {
           return false;
-        if (b_name == "reset")
+        }
+        if (b_name == "reset") {
           return false;
+        }
       }
 
       return a.dpin.get_name() < b.dpin.get_name();
     }
-    if (a.pos == Port_invalid)
+    if (a.pos == Port_invalid) {
       return true;
-    if (b.pos == Port_invalid)
+    }
+    if (b.pos == Port_invalid) {
       return false;
+    }
 
     return a.pos < b.pos;
   });
@@ -90,8 +99,9 @@ void Lgraph::each_pin(const Node_pin &dpin, const std::function<bool(Index_id id
   while (true) {
     I(!should_not_find);
     bool cont = f1(idx2);
-    if (!cont)
+    if (!cont) {
       return;
+    }
 
     // node_internal.ref_lock();
     do {
@@ -111,8 +121,9 @@ void Lgraph::each_pin(const Node_pin &dpin, const std::function<bool(Index_id id
 }
 
 void Lgraph::each_graph_input(const std::function<void(Node_pin &pin)> &f1, bool hierarchical) {
-  if (node_internal.size() < Hardcoded_output_nid)
+  if (node_internal.size() < Hardcoded_output_nid) {
     return;
+  }
 
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
@@ -122,16 +133,18 @@ void Lgraph::each_graph_input(const std::function<void(Node_pin &pin)> &f1, bool
       auto    idx = find_idx_from_pid(Hardcoded_input_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        if (dpin.has_name())
+        if (dpin.has_name()) {
           f1(dpin);
+        }
       }
     }
   }
 }
 
 void Lgraph::each_graph_output(const std::function<void(Node_pin &pin)> &f1, bool hierarchical) {
-  if (node_internal.size() < Hardcoded_output_nid)
+  if (node_internal.size() < Hardcoded_output_nid) {
     return;
+  }
 
   auto hidx = hierarchical ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical();
 
@@ -141,8 +154,9 @@ void Lgraph::each_graph_output(const std::function<void(Node_pin &pin)> &f1, boo
       auto    idx = find_idx_from_pid(Hardcoded_output_nid, pid);
       if (idx) {
         Node_pin dpin(this, this, hidx, idx, pid, false);
-        if (dpin.has_name())  // It could be partially deleted
+        if (dpin.has_name()) {  // It could be partially deleted
           f1(dpin);
+        }
       }
     }
   }
@@ -156,8 +170,9 @@ void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type
     auto node = Node(this, e.first);
 
     bool cont = fn(node, e.second);
-    if (!cont)
+    if (!cont) {
       return;
+    }
   }
 }
 
@@ -185,30 +200,35 @@ void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)
     Index_id cid = e.first.nid;
     I(cid);
 
-    if (visited.find(e.second) != visited.end())
+    if (visited.find(e.second) != visited.end()) {
       continue;
+    }
 
     visited.insert(e.second);
 
     auto *sub_lg = ref_library()->open_lgraph(e.second);
-    if (sub_lg == nullptr || sub_lg->is_empty())
+    if (sub_lg == nullptr || sub_lg->is_empty()) {
       continue;
+    }
 
     bool cont = fn(sub_lg);
-    if (!cont)
+    if (!cont) {
       return;
+    }
   }
 }
 
 void Lgraph::each_hier_unique_sub_bottom_up_int(std::set<Lg_type_id> &visited, const std::function<void(Lgraph *lg_sub)> &fn) {
   for (const auto &ent : get_down_class_map()) {
-    if (visited.find(ent.first) != visited.end())
+    if (visited.find(ent.first) != visited.end()) {
       continue;
+    }
     visited.insert(ent.first);
 
     auto *down_lg = ref_library()->open_lgraph(Lg_type_id(ent.first));
-    if (down_lg == nullptr || down_lg->is_empty())
+    if (down_lg == nullptr || down_lg->is_empty()) {
       continue;
+    }
     down_lg->each_hier_unique_sub_bottom_up_int(visited, fn);
     fn(down_lg);
   }
@@ -225,8 +245,9 @@ void Lgraph::bottom_up_visit_wrap(const std::function<void(Lgraph *lg_sub)> *fn,
   (*fn)(this);
 
   const auto it = parent_map->find(this);
-  if (it == parent_map->end())
+  if (it == parent_map->end()) {
     return;
+  }
 
   for (auto *parent_lg : it->second) {
     auto it2 = pending_map->find(parent_lg);

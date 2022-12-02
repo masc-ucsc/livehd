@@ -13,21 +13,16 @@
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
-//struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
-  //bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
+// struct eprp_casecmp_str : public std::binary_function<const std::string &, const std::string &, bool> {
+// bool operator()(std::string_view lhs, std::string_view rhs) const { return str_tools::to_lower(lhs) < str_tools::to_lower(rhs); }
 //};
 
 struct eprp_casecmp_str {
   struct nocase_compare {
-    bool operator() (const unsigned char& c1, const unsigned char& c2) const {
-      return std::tolower(c1) < std::tolower(c2);
-    }
+    bool operator()(const unsigned char &c1, const unsigned char &c2) const { return std::tolower(c1) < std::tolower(c2); }
   };
-  bool operator() (const std::string & s1, const std::string & s2) const {
-    return std::lexicographical_compare
-      (s1.begin(), s1.end(),
-       s2.begin(), s2.end(),
-       nocase_compare());
+  bool operator()(const std::string &s1, const std::string &s2) const {
+    return std::lexicographical_compare(s1.begin(), s1.end(), s2.begin(), s2.end(), nocase_compare());
   }
 };
 
@@ -68,7 +63,7 @@ public:
 
   [[nodiscard]] bool has_label(std::string_view name) const { return dict.find(name) != dict.end(); };
 
-  [[nodiscard]] std::string_view get(std::string_view name, std::string_view default_value="") const;
+  [[nodiscard]] std::string_view get(std::string_view name, std::string_view default_value = "") const;
 
   void clear() {
     dict.clear();

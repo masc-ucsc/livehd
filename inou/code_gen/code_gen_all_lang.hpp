@@ -38,21 +38,24 @@ public:
   std::string func_begin() const { return ""; }
   std::string func_name(std::string_view func_name) const { return std::string(func_name); }
   std::string param_start(bool param_exist) const {
-    if (param_exist)
+    if (param_exist) {
       return " = |(";
-    else
+    } else {
       return "= |";
+    }
   }
   std::string func_param_sep() const { return ", "; }
   std::string param_end(bool param_exist) const {
-    if (param_exist)
+    if (param_exist) {
       return ")";
-    else
+    } else {
       return "";
+    }
   }
   std::string print_cond(std::string_view cond_val) const {
-    if (cond_val != "")
+    if (cond_val != "") {
       return absl::StrCat(" when ", cond_val);
+    }
 
     return std::string(cond_val);
   }
@@ -73,20 +76,22 @@ public:
 
   // TODO: select related parameters: need to make language specific! currently as per pyrope:
   std::string select_init(std::string_view select_type) const {
-    if (select_type == "bit")
+    if (select_type == "bit") {
       return "[[";
-    else if (select_type == "tuple_add")
+    } else if (select_type == "tuple_add") {
       return "(";
-    else
+    } else {
       return "[";
+    }
   }
   std::string select_end(std::string_view select_type) const {
-    if (select_type == "bit")
+    if (select_type == "bit") {
       return "]]";
-    else if (select_type == "tuple_add")
+    } else if (select_type == "tuple_add") {
       return ")";
-    else
+    } else {
       return "]";
+    }
   }
 
   bool has_prefix(std::string_view test_string) const {

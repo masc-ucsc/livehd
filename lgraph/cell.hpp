@@ -89,7 +89,8 @@ protected:
 public:
   static inline constexpr bool is_loop_first(Ntype_op op) { return op == Ntype_op::Const || op == Ntype_op::IO; }
   static inline constexpr bool is_loop_last(Ntype_op op) {
-    return (static_cast<int>(op) >= static_cast<int>(Ntype_op::Memory) && static_cast<int>(op) <= static_cast<int>(Ntype_op::Sub)) || op == Ntype_op::IO ;
+    return (static_cast<int>(op) >= static_cast<int>(Ntype_op::Memory) && static_cast<int>(op) <= static_cast<int>(Ntype_op::Sub))
+           || op == Ntype_op::IO;
   }
 
   static inline constexpr bool is_multi_sink(Ntype_op op) {
@@ -98,7 +99,8 @@ public:
   }
 
   static inline constexpr bool is_pin_trackable(Ntype_op op) {
-    return op == Ntype_op::Set_mask || op== Ntype_op::Get_mask || op==Ntype_op::SHL || op==Ntype_op::SRA || op==Ntype_op::And;
+    return op == Ntype_op::Set_mask || op == Ntype_op::Get_mask || op == Ntype_op::SHL || op == Ntype_op::SRA
+           || op == Ntype_op::And;
   }
 
   static inline constexpr bool is_synthesizable(Ntype_op op) {
@@ -115,8 +117,9 @@ public:
   }
   static inline constexpr bool is_multi_driver(Ntype_op op) { return is_unlimited_driver(op); }
   static inline bool           is_single_driver_per_pin(Ntype_op op) {
-    if (is_unlimited_sink(op))
+    if (is_unlimited_sink(op)) {
       return true;
+    }
     auto c = sink_pid2name[0][static_cast<std::size_t>(op)];  // Is first port Upper or lower case
     return c[0] >= 'a' && c[0] <= 'z';
   }
@@ -173,8 +176,9 @@ public:
 
   static bool                  has_sink(Ntype_op op, std::string_view str);
   static inline constexpr bool has_sink(Ntype_op op, int pid) {
-    if (pid > 10)
+    if (pid > 10) {
       return is_unlimited_sink(op);
+    }
     return sink_pid2name[pid][static_cast<std::size_t>(op)] != "invalid";
   }
 
@@ -192,8 +196,9 @@ public:
   }
 
   static inline constexpr bool has_driver(Ntype_op op, int pid) {
-    if (pid == 0)
+    if (pid == 0) {
       return true;
+    }
     return is_unlimited_driver(op);
   }
 
@@ -203,8 +208,9 @@ public:
 
   static Ntype_op get_op(std::string_view name) {
     const auto it = cell_name_map.find(name);
-    if (it == cell_name_map.end())
+    if (it == cell_name_map.end()) {
       return Ntype_op::Invalid;
+    }
     return it->second;
   }
 };

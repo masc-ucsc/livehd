@@ -65,8 +65,8 @@ void Lgraph_Base::emplace_back() {
   }
 
   I(!ptr->is_page_align());
-  //new (ptr) Node_internal();  // call constructor
-  ptr->set_nid(nid);          // self by default
+  // new (ptr) Node_internal();  // call constructor
+  ptr->set_nid(nid);  // self by default
 }
 
 Index_id Lgraph_Base::create_node_int() {
@@ -160,12 +160,14 @@ Index_id Lgraph_Base::create_node_space(const Index_id last_idx, const Port_ID d
   // make space in idx so that we can push_next_state
   node_internal[idx3].set_dst_pid(node_internal[last_idx].get_dst_pid());
   node_internal[idx3].clear_root();
-  if (node_internal[last_idx].is_root())
+  if (node_internal[last_idx].is_root()) {
     node_internal[idx3].set_nid(last_idx);
-  else
+  } else {
     node_internal[idx3].set_nid(node_internal[last_idx].get_nid());
-  if (!node_internal[last_idx].has_next_space())
+  }
+  if (!node_internal[last_idx].has_next_space()) {
     node_internal[idx3].assimilate_edges(&node_internal[last_idx]);
+  }
 
   I(node_internal[last_idx].has_next_space());
   I(node_internal[idx2].has_next_space());
@@ -209,8 +211,9 @@ void Lgraph_Base::print_stats() const {
       n_nodes++;
       if (node_internal[i].is_root()) {
         n_roots++;
-        if (node_internal[i].is_master_root())
+        if (node_internal[i].is_master_root()) {
           n_master++;
+        }
       }
     } else if (node_internal[i].is_free_state()) {
       n_deleted++;
@@ -253,7 +256,7 @@ void Lgraph_Base::print_stats() const {
              (n_short_edges) / (1.0 + n_short_edges + n_long_edges));
 }
 
-//#define PERF_OUTPUT_PIN
+// #define PERF_OUTPUT_PIN
 
 #ifdef PERF_OUTPUT_PIN
 static inline unsigned long long get_cycles(void) {
@@ -405,8 +408,9 @@ Index_id Lgraph_Base::setup_idx_from_pid(const Index_id nid, const Port_ID pid) 
 
   Index_id root_idx = 0;
   Index_id idx_new  = get_space_output_pin(nid, pid, root_idx);
-  if (root_idx == 0)
+  if (root_idx == 0) {
     root_idx = idx_new;
+  }
 
   return root_idx;
 }
@@ -426,8 +430,9 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_
 
   while (true) {
     if (node_internal[idx].get_dst_pid() == dst_pid) {
-      if (node_internal[idx].is_root())
+      if (node_internal[idx].is_root()) {
         root_idx = idx;
+      }
 
       if (node_internal[idx].has_space_short()) {
         GI(root_idx != start_nid, node_internal[start_nid].get_dst_pid() != node_internal[root_idx].get_dst_pid());
@@ -443,8 +448,9 @@ Index_id Lgraph_Base::get_space_output_pin(const Index_id start_nid, const Port_
       // node_internal.ref_unlock();
       idx_new = create_node_space(idx, dst_pid, start_nid, root_idx);
       // node_internal.ref_lock();
-      if (root_idx == 0)
+      if (root_idx == 0) {
         root_idx = idx_new;
+      }
       I(node_internal[root_idx].is_root());
       // node_internal.ref_unlock();
       return idx_new;
@@ -496,8 +502,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
       }
     }
 
-    if (!node_internal[idx].has_space_short())
+    if (!node_internal[idx].has_space_short()) {
       idx_insert_cache.erase(it);
+    }
   }
 
   if (!out_done) {
@@ -532,8 +539,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
     }
     I(node_internal[idx].get_dst_pid() == dst_pid);
 
-    if (node_internal[idx].has_space_short())
+    if (node_internal[idx].has_space_short()) {
       idx_insert_cache[src_idx] = idx;
+    }
   }
 
   //-----------------------
@@ -563,8 +571,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
       }
     }
 
-    if (!node_internal[idx].has_space_short())
+    if (!node_internal[idx].has_space_short()) {
       idx_insert_cache.erase(it);
+    }
   }
 
   if (!inp_done) {
@@ -591,8 +600,9 @@ void Lgraph_Base::add_edge_int(const Index_id dst_idx, const Port_ID inp_pid, In
     }
     I(node_internal[idx].get_dst_pid() == inp_pid);
 
-    if (node_internal[idx].has_space_short())
+    if (node_internal[idx].has_space_short()) {
       idx_insert_cache[dst_idx] = idx;
+    }
   }
 
   I(node_internal[root_idx].is_root());

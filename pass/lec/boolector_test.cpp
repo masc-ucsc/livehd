@@ -62,8 +62,9 @@ int main(void) {
   result = boolector_sat(btor);
   printf("Expect: unsat\n");
   printf("Boolector: %s\n", result == BOOLECTOR_SAT ? "sat" : (result == BOOLECTOR_UNSAT ? "unsat" : "unknown"));
-  if (result != BOOLECTOR_UNSAT)
+  if (result != BOOLECTOR_UNSAT) {
     abort();
+  }
 
   /* cleanup */
   boolector_release(btor, x);

@@ -29,10 +29,11 @@ const Edge_raw *Edge_raw::find_edge(const Edge_raw *bt, const Edge_raw *et, Inde
       return eit;
     }
 
-    if (eit->is_snode())
+    if (eit->is_snode()) {
       eit++;
-    else
+    } else {
       eit += 2;
+    }
   }
 
   return nullptr;
@@ -60,8 +61,9 @@ Index_id Node_internal::get_self_idx() const {
 
 const Node_internal &Node_internal::get_root() const {
   I(nid);
-  if (is_root())
+  if (is_root()) {
     return *this;
+  }
 
   const auto          &root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr  = (const Node_internal *)&root_page;
@@ -76,8 +78,9 @@ const Node_internal &Node_internal::get_root() const {
 
 const Node_internal &Node_internal::get_master_root() const {
   I(nid);
-  if (is_master_root())
+  if (is_master_root()) {
     return *this;
+  }
 
   const auto          &root_page = Node_internal_Page::get(this);
   const Node_internal *root_ptr;
@@ -86,8 +89,9 @@ const Node_internal &Node_internal::get_master_root() const {
   root_ptr        = ((const Node_internal *)&root_page) + delta;
   I(root_ptr->is_root());
   I(root_ptr->is_node_state());
-  if (root_ptr->is_master_root())
+  if (root_ptr->is_master_root()) {
     return *root_ptr;
+  }
 
   delta    = static_cast<SIndex_id>(root_ptr->get_nid()) - root_page.get_idx();
   root_ptr = ((const Node_internal *)&root_page) + delta;
@@ -210,19 +214,21 @@ void Node_internal::dump() const {
   const Edge_raw *out = get_output_begin();
   while (out != get_output_end()) {
     fmt::print("  out idx:{} pid:{}\n", out->get_idx(), out->get_inp_pid());
-    if (out->is_snode())
+    if (out->is_snode()) {
       out++;
-    else
+    } else {
       out += 2;
+    }
   }
 
   out = get_input_begin();
   while (out != get_input_end()) {
     fmt::print("  inp idx:{} pid:{}\n", out->get_idx(), out->get_inp_pid());
-    if (out->is_snode())
+    if (out->is_snode()) {
       out++;
-    else
+    } else {
       out += 2;
+    }
   }
 }
 // LCOV_EXCL_STOP
@@ -241,8 +247,9 @@ void Node_internal::dump_full() const {
 
     node->dump();
 
-    if (node->is_last_state())
+    if (node->is_last_state()) {
       return;
+    }
   }
 }
 // LCOV_EXCL_STOP
@@ -283,8 +290,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
           self_pos++;
           inc_inputs(false);
         } else {
-          if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8)
+          if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) {
             break;
+          }
 
           LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];
           ledge_i->set(other.sedge[other_pos].get_idx(), other.sedge[other_pos].get_inp_pid(), true  // input
@@ -296,8 +304,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
         other_pos++;
         i += 1;
       } else {
-        if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8)
+        if (self_pos >= (Num_SEdges - 2 - 2) || inp_long >= 8) {
           break;
+        }
         sedge[self_pos++] = other.sedge[other_pos++];
         sedge[self_pos++] = other.sedge[other_pos++];
         i += 2;
@@ -305,8 +314,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
         other_inp_long_removed++;
       }
 
-      if (self_pos >= (Num_SEdges - 1 - 2))  // at least an snode
+      if (self_pos >= (Num_SEdges - 1 - 2)) {  // at least an snode
         break;
+      }
       I(has_space_short());
     }
 
@@ -322,8 +332,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
     I(other.inp_pos >= (2 * other.inp_long));
   }
 
-  if (!has_space_short())
+  if (!has_space_short()) {
     return;
+  }
 
   // try transfer outputs if there is space in current
 
@@ -338,8 +349,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
     if (done) {
       inc_outputs(false);
     } else {
-      if (!has_space_long())
+      if (!has_space_long()) {
         break;  // We need long space
+      }
       self_pos -= (2 - 1);
       LEdge_Internal *ledge_i = (LEdge_Internal *)&sedge[self_pos];         // became an ledge
       ledge_i->set(other_out->get_idx(), other_out->get_inp_pid(), false);  // output
@@ -355,8 +367,9 @@ void Node_internal::assimilate_edges(Node_internal *other_ptr) {
       other.out_long--;
     }
 
-    if (!has_space_short())
+    if (!has_space_short()) {
       break;
+    }
   }
 }
 
@@ -364,18 +377,20 @@ Port_ID Edge_raw::get_dst_pid() const { return Node_internal::get(this).get_dst_
 
 Node_pin Edge_raw::get_out_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id self_idx) const {
   I(get_self_idx() == self_idx);
-  if (is_input())
+  if (is_input()) {
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), false);
-  else
+  } else {
     return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), false);
+  }
 }
 
 Node_pin Edge_raw::get_inp_pin(Lgraph *g, Lgraph *cg, const Hierarchy_index &hidx, Index_id self_idx) const {
   I(get_self_idx() == self_idx);
-  if (is_input())
+  if (is_input()) {
     return Node_pin(g, cg, hidx, self_idx, get_dst_pid(), true);
-  else
+  } else {
     return Node_pin(g, cg, hidx, get_idx(), get_inp_pid(), true);
+  }
 }
 
 Index_id Edge_raw::get_self_nid() const { return Node_internal::get(this).get_nid(); }

@@ -36,8 +36,9 @@ protected:
 
     child = forkpty(&master, NULL, NULL, &win);
     EXPECT_NE(child, -1);
-    if (child == -1)
+    if (child == -1) {
       exit(-3);
+    }
 
     if (child == 0) {
       const char *lgshell = "main/lgshell";
@@ -73,26 +74,31 @@ protected:
       bool skipping_warning = false;
       while (1) {
         int sz = read(master, &buffer, 1);
-        if (sz != 1)
+        if (sz != 1) {
           break;
+        }
 
         if (line == ":0:0 warning:") {
           skipping_warning = true;
         }
-        if ((buffer == '#') && line.size())
+        if ((buffer == '#') && line.size()) {
           break;
+        }
 
-        if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty())
+        if ((buffer == '\n' || buffer == '\r' || buffer == ' ') && line.empty()) {
           continue;
+        }
 
-        if ((buffer == '\n' || buffer == '\r') && line.size())
+        if ((buffer == '\n' || buffer == '\r') && line.size()) {
           break;
+        }
 
         line += buffer;
       }
 
-      if (!skipping_warning)
+      if (!skipping_warning) {
         break;
+      }
       line.clear();  // let's try again
     }
 
@@ -108,8 +114,9 @@ protected:
             char ch = s->lines[r]->chars[c].c;
 
             // Do not add multiple spaces
-            if (line2.empty() || !(line2.back() == ' ' && ch == ' '))
+            if (line2.empty() || !(line2.back() == ' ' && ch == ' ')) {
               line2.push_back(ch);
+            }
           }
         }
       }

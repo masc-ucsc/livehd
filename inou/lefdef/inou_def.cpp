@@ -34,8 +34,9 @@ std::vector<Lgraph *> Inou_def::generate() {
     // cout<< "node_place of nid " << compo_nid << " is " << g->get_x(compo_nid) << " " << g->get_y(compo_nid) << endl;
     for (uint16_t cell_id = 0; cell_id < cell_types_size; cell_id++) {  // decide component's cell_type
       auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
-      if (iter_compo->macro_name == cell_type_name)
+      if (iter_compo->macro_name == cell_type_name) {
         compo_node.set_type_tmap_id(cell_id);  // node nid's cell type is cell_id.
+      }
     }
     // const Tech_cell* cell_type = tlib.get_const_cell(g->tmap_id_get(compo_nid));
     // cout << "node_type of nid "  << compo_nid << " is " << cell_type->get_name()<< endl;
@@ -48,8 +49,9 @@ std::vector<Lgraph *> Inou_def::generate() {
   Node cf_node = g->create_node();                                    // cf = chip_frame_node
   for (uint16_t cell_id = 0; cell_id < cell_types_size; cell_id++) {  // decide chip_frame_node's cell_type
     auto cell_type_name = tlib.get_const_cell(cell_id)->get_name();
-    if (cell_type_name == "chip_frame")
+    if (cell_type_name == "chip_frame") {
       cf_node.set_type_tmap_id(cell_id);  // node nid's cell type is cell_id.
+    }
   }
 
   for (auto iter_net = dinfo.nets.begin(); iter_net != dinfo.nets.end(); ++iter_net) {

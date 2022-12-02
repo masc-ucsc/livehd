@@ -3,6 +3,8 @@
 Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 */
 
+#include "lg_to_yjson.hpp"
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -11,13 +13,11 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include <iostream>
 #include <map>
 
-#include "lg_to_yjson.hpp"
-#include "lgraph.hpp"
 #include "edge.hpp"
-#include "lgraph.hpp"
-#include "node_pin.hpp"
 #include "inou_json.hpp"
 #include "lgedgeiter.hpp"
+#include "lgraph.hpp"
+#include "node_pin.hpp"
 #include "yosys_json.hpp"
 
 vector<Port*> LGtoYJson::primitive_2inp_ABY{new Port("A", pdInput), new Port("B", pdInput), new Port("Y", pdOutput)};
@@ -76,9 +76,9 @@ Prototype LGtoYJson::primitives[] = {Prototype(Ntype_op::Invalid, NULL),  // DO 
 void LGtoYJson::create_all_wires(Lgraph* lg, Module* module) {
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
-    if (op == Ntype_op::Get_mask)
+    if (op == Ntype_op::Get_mask) {
       continue;
-    else if (op == Ntype_op::Const) {
+    } else if (op == Ntype_op::Const) {
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().get_type_op() != Ntype_op::Get_mask) {
           // TODO: if const value is not -1
@@ -141,8 +141,9 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
         dpin      = spin.get_driver_pin();
       } else {
         dpin = node->get_driver_pin(io_pin.name);
-        if (!dpin.is_connected())
+        if (!dpin.is_connected()) {
           dpin.invalidate();
+        }
       }
       cell->add_connection(module->get_wire(dpin.get_wire_name()));
       if (!dpin.is_invalid()) {
@@ -166,7 +167,7 @@ void LGtoYJson::conncet_cell(Module* module, Cell* cell, Node* node) {
   }
 }
 
-yjson::Module* LGtoYJson::add_new_module(std::string_view name) {  //yjson::StrTyp name)
+yjson::Module* LGtoYJson::add_new_module(std::string_view name) {  // yjson::StrTyp name)
   _modules.push_back(new yjson::Module(std::string(name)));
   return _modules.back();
 }
@@ -178,8 +179,9 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
   for (const auto& edge : inp_io_node.out_edges()) {
     I(edge.driver.has_name());
     auto pin_name = edge.driver.get_name();
-    if (unique_inputs.contains(pin_name))
+    if (unique_inputs.contains(pin_name)) {
       continue;
+    }
     unique_inputs[pin_name] = edge.get_bits();
   }
   for (auto& inp : unique_inputs) {
@@ -201,8 +203,9 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
     auto out_pin  = edge.sink.get_node().get_driver_pin_raw(sink_pid);
     I(out_pin.has_name());
     auto pin_name = out_pin.get_name();
-    if (unique_outputs.contains(pin_name))
+    if (unique_outputs.contains(pin_name)) {
       continue;
+    }
     unique_outputs[pin_name] = edge.get_bits();
   }
   for (auto& outp : unique_outputs) {
@@ -218,9 +221,11 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
 }
 
 yjson::Module* LGtoYJson::find_module(std::string_view module_name) {
-  for (auto m : _modules)
-    if (m->get_name() == module_name)
+  for (auto m : _modules) {
+    if (m->get_name() == module_name) {
       return m;
+    }
+  }
   return NULL;
 }
 
@@ -240,8 +245,9 @@ yjson::Prototype* LGtoYJson::find_node_prototype(Node* node, Ntype_op op) {
 }
 
 bool is_node_invalid(const Node& node) {
-  if (node.get_num_out_edges() == 0 || !node.has_outputs() || node.is_type_flop())
+  if (node.get_num_out_edges() == 0 || !node.has_outputs() || node.is_type_flop()) {
     return true;
+  }
   if (node.get_driver_pin().get_bits() == 0) {
     node.dump();
     Pass::error("node:{} does not have bits set. It needs bits to generate correct JSON", node.debug_name());
@@ -257,15 +263,17 @@ void LGtoYJson::import_module(Lgraph* lg) {
 
   for (auto node : lg->forward()) {
     auto op = node.get_type_op();
-    if (op == Ntype_op::Get_mask || op == Ntype_op::Const)
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Const) {
       continue;
+    }
 
     const Prototype* cell_type = NULL;
     if (Ntype::is_multi_driver(op)) {  // submodule, memory ...
       cell_type = find_node_prototype(&node, op);
     } else {
-      if (is_node_invalid(node))
+      if (is_node_invalid(node)) {
         continue;
+      }
       cell_type = find_primitive(op);
     }
 

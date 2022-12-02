@@ -130,8 +130,9 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
 
         if (temp_name) {
           auto it = str2dpin.find(io.rhs);
-          if (it != str2dpin.end())
+          if (it != str2dpin.end()) {
             dpin = Node_pin(this, it->second);
+          }
         } else {
           dpin = Node_pin::find_driver_pin(this, io.rhs);
         }
@@ -175,8 +176,9 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
 
     if (temp_name) {
       auto it = str2dpin.find(p.second);
-      if (it != str2dpin.end())
+      if (it != str2dpin.end()) {
         dpin = Node_pin(this, it->second);
+      }
     } else {
       dpin = Node_pin::find_driver_pin(this, p.second);
     }
@@ -199,8 +201,9 @@ Lgraph *Lgraph::clone_skeleton(std::string_view new_lg_name) {
   new_sub->reset_pins();  // NOTE: it may have been created before. Clear to keep same order/attributes
 
   for (const auto &old_io_pin : get_self_sub_node().get_io_pins()) {
-    if (old_io_pin.is_invalid())
+    if (old_io_pin.is_invalid()) {
       continue;
+    }
 
     if (old_io_pin.is_input()) {
       auto old_dpin = get_graph_input(old_io_pin.name);
@@ -257,8 +260,9 @@ Node_pin Lgraph::get_graph_output_driver_pin(std::string_view str) {
 }
 
 bool Lgraph::has_graph_input(std::string_view io_name) const {
-  if (!get_self_sub_node().is_input(io_name))
+  if (!get_self_sub_node().is_input(io_name)) {
     return false;
+  }
 
   auto inst_pid = get_self_sub_node().get_instance_pid(io_name);
 
@@ -267,8 +271,9 @@ bool Lgraph::has_graph_input(std::string_view io_name) const {
 }
 
 bool Lgraph::has_graph_output(std::string_view io_name) const {
-  if (!get_self_sub_node().is_output(io_name))
+  if (!get_self_sub_node().is_output(io_name)) {
     return false;
+  }
 
   auto inst_pid = get_self_sub_node().get_instance_pid(io_name);
   auto idx      = find_idx_from_pid(Hardcoded_output_nid, inst_pid);
@@ -289,8 +294,9 @@ Node_pin Lgraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
 
   Index_id root_idx = 0;
   auto     idx      = find_idx_from_pid(Hardcoded_input_nid, inst_pid);
-  if (idx == 0)
+  if (idx == 0) {
     idx = get_space_output_pin(Hardcoded_input_nid, inst_pid, root_idx);
+  }
 
   Node_pin pin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, false);
 
@@ -314,8 +320,9 @@ Node_pin Lgraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bi
 
   Index_id root_idx = 0;
   auto     idx      = find_idx_from_pid(Hardcoded_output_nid, inst_pid);
-  if (idx == 0)
+  if (idx == 0) {
     idx = get_space_output_pin(Hardcoded_output_nid, inst_pid, root_idx);
+  }
 
   Node_pin dpin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, false);
   dpin.set_name(str);
@@ -341,8 +348,9 @@ Node_pin_iterator Lgraph::out_connected_pins(const Node &node) const {
     auto n = node_internal[idx2].get_num_local_outputs();
     if (n > 0) {
       auto root_idx = idx2;
-      if (!node_internal[idx2].is_root())
+      if (!node_internal[idx2].is_root()) {
         root_idx = node_internal[idx2].get_nid();
+      }
 
       xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), root_idx, pid, false));
 
@@ -381,8 +389,9 @@ Node_pin_iterator Lgraph::inp_connected_pins(const Node &node) const {
     auto n = node_internal[idx2].get_num_local_inputs();
     if (n > 0) {
       auto root_idx = idx2;
-      if (!node_internal[idx2].is_root())
+      if (!node_internal[idx2].is_root()) {
         root_idx = node_internal[idx2].get_nid();
+      }
 
       xiter.emplace_back(Node_pin(node.get_top_lgraph(), node.get_class_lgraph(), node.get_hidx(), root_idx, pid, true));
       xiter_set.insert(pid);
@@ -422,8 +431,9 @@ Node_pin_iterator Lgraph::inp_drivers(const Node &node) const {
 
     if (n) {
       auto root_idx = idx2;
-      if (!node_internal[idx2].is_root())
+      if (!node_internal[idx2].is_root()) {
         root_idx = node_internal[idx2].get_nid();
+      }
 
       const Node_pin spin(node.get_top_lgraph(),
                           node.get_class_lgraph(),
@@ -457,8 +467,9 @@ Node_pin_iterator Lgraph::inp_drivers(const Node &node) const {
       // node_internal.ref_lock();
     }
 
-    if (node_internal[idx2].is_last_state())
+    if (node_internal[idx2].is_last_state()) {
       break;
+    }
     Index_id tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -522,8 +533,9 @@ XEdge_iterator Lgraph::out_edges(const Node &node) const {
         }
       }
     }
-    if (node_internal[idx2].is_last_state())
+    if (node_internal[idx2].is_last_state()) {
       break;
+    }
     Index_id tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -590,8 +602,9 @@ XEdge_iterator Lgraph::inp_edges(const Node &node) const {
       }
       // node_internal.ref_lock();
     }
-    if (node_internal[idx2].is_last_state())
+    if (node_internal[idx2].is_last_state()) {
       break;
+    }
     Index_id tmp = node_internal[idx2].get_next();
     I(node_internal[tmp].get_master_root_nid() == node_internal[idx2].get_master_root_nid());
     idx2 = tmp;
@@ -755,8 +768,9 @@ Node_pin_iterator Lgraph::out_sinks(const Node_pin &dpin) const {
 
   Node_pin_iterator piter;
   for (auto e : dpin.get_node().out_edges()) {
-    if (e.driver != dpin)
+    if (e.driver != dpin) {
       continue;
+    }
     piter.emplace_back(e.sink);
   }
 
@@ -830,11 +844,12 @@ bool Lgraph::has_outputs(const Node_pin &pin) const {
 
   // node_internal.ref_lock();
   while (true) {
-    if (node_internal[idx2].get_dst_pid() == pin.get_pid())
+    if (node_internal[idx2].get_dst_pid() == pin.get_pid()) {
       if (node_internal[idx2].has_local_outputs()) {
         // node_internal.ref_unlock();
         return true;
       }
+    }
 
     if (node_internal[idx2].is_last_state()) {
       // node_internal.ref_unlock();
@@ -857,11 +872,12 @@ bool Lgraph::has_inputs(const Node_pin &pin) const {
 
   // node_internal.ref_lock();
   while (true) {
-    if (node_internal[idx2].get_dst_pid() == pin.get_pid())
+    if (node_internal[idx2].get_dst_pid() == pin.get_pid()) {
       if (node_internal[idx2].has_local_inputs()) {
         // node_internal.ref_unlock();
         return true;
       }
+    }
 
     if (node_internal[idx2].is_last_state()) {
       // node_internal.ref_unlock();
@@ -957,8 +973,9 @@ int Lgraph::get_num_out_edges(const Node_pin &pin) const {
   while (true) {
     const auto *ref = &node_internal[idx2];
 
-    if (ref->get_dst_pid() == pin.get_pid())
+    if (ref->get_dst_pid() == pin.get_pid()) {
       total += ref->get_num_local_outputs();
+    }
 
     if (ref->is_last_state()) {
       // node_internal.ref_unlock();
@@ -984,8 +1001,9 @@ int Lgraph::get_num_inp_edges(const Node_pin &pin) const {
   while (true) {
     const auto *ref = &node_internal[idx2];
 
-    if (ref->get_dst_pid() == pin.get_pid())
+    if (ref->get_dst_pid() == pin.get_pid()) {
       total += ref->get_num_local_inputs();
+    }
 
     if (ref->is_last_state()) {
       // node_internal.ref_unlock();
@@ -1007,9 +1025,13 @@ void Lgraph::del_pin(const Node_pin &pin) {
   }
 
   if (pin.is_driver()) {
-    for (auto &e : out_edges(pin)) e.del_edge();
+    for (auto &e : out_edges(pin)) {
+      e.del_edge();
+    }
   } else {
-    for (auto &e : inp_edges(pin)) e.del_edge();
+    for (auto &e : inp_edges(pin)) {
+      e.del_edge();
+    }
   }
 }
 
@@ -1298,8 +1320,9 @@ void Lgraph::del_edge(const Node_pin &dpin, const Node_pin &spin) {
   I(spin.get_top_lgraph() == dpin.get_top_lgraph());
 
   bool found = del_edge_driver_int(dpin, spin);
-  if (!found)
+  if (!found) {
     return;
+  }
 
   found = del_edge_sink_int(dpin, spin);
   I(found);
@@ -1478,7 +1501,9 @@ void Lgraph::save(std::string filename) {
 #ifndef NDEBUG
   fmt::print("lgraph save: {}, size: {}\n", name, node_internal.size());
 #endif
-  if (filename == "") filename = get_save_filename();
+  if (filename == "") {
+    filename = get_save_filename();
+  }
 
   auto wr = Hif_write::create(filename, "lgraph", Lgraph::version);
   if (wr == nullptr) {
@@ -1492,8 +1517,9 @@ void Lgraph::save(std::string filename) {
 
     // WARNING: NOT SORTED, so that it uses the pid as position
     for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
-      if (io_pin.is_invalid())
+      if (io_pin.is_invalid()) {
         continue;
+      }
       ios.add(io_pin.is_input(), io_pin.name, io_pin.get_io_pos());
 
       Bits_t bits = 0;
@@ -1589,17 +1615,18 @@ void Lgraph::save(std::string filename) {
 
     n.add(true, out_dpin.get_name(), e.driver.get_wire_name());
   }
-  if (!n.io.empty())
+  if (!n.io.empty()) {
     wr->add(n);
+  }
 }
 
 void Lgraph::dump(bool hier) {
-
   fmt::print("lgraph name: {}, size: {}\n", name, node_internal.size());
 
   for (const auto &io_pin : get_self_sub_node().get_io_pins()) {
-    if (io_pin.is_invalid())
+    if (io_pin.is_invalid()) {
       continue;
+    }
     fmt::print("  lgraph io name: {}, port pos: {}, pid: {}, i/o: {}\n",
                io_pin.name,
                io_pin.graph_io_pos,
@@ -1609,7 +1636,7 @@ void Lgraph::dump(bool hier) {
 
   fmt::print("\n");
 
-  for (auto node:fast(hier)) {
+  for (auto node : fast(hier)) {
     node.dump();
   }
 
@@ -1628,15 +1655,17 @@ void Lgraph::dump_down_nodes() {
 }
 
 Node Lgraph::get_graph_input_node(bool hier) {
-  if (hier)
+  if (hier) {
     return {this, Hierarchy::hierarchical_root(), Hardcoded_input_nid};
+  }
 
   return {this, Hierarchy::non_hierarchical(), Hardcoded_input_nid};
 }
 
 Node Lgraph::get_graph_output_node(bool hier) {
-  if (hier)
+  if (hier) {
     return {this, Hierarchy::hierarchical_root(), Hardcoded_output_nid};
+  }
 
   return {this, Hierarchy::non_hierarchical(), Hardcoded_output_nid};
 }

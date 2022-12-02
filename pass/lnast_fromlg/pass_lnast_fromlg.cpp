@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_lnast_fromlg.hpp"
 
 #include <queue>
 #include <stack>
@@ -9,8 +10,6 @@
 #include <vector>
 
 #include "absl/strings/match.h"
-
-#include "pass_lnast_fromlg.hpp"
 #include "lgedgeiter.hpp"
 #include "perf_tracing.hpp"
 
@@ -1037,24 +1036,33 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
       default: Pass::error("bad input edge into memory node {} with sink pid {}", pin.get_node().debug_name(), inp.sink.get_pid());
     }
   }
-  if (addr_q.size() == 1)
+  if (addr_q.size() == 1) {
     is_one_addr = true;
-  if (clk_q.size() == 1)
+  }
+  if (clk_q.size() == 1) {
     is_one_clk = true;
-  if (din_q.size() == 1)
+  }
+  if (din_q.size() == 1) {
     is_one_din = true;
-  if (en_q.size() == 1)
+  }
+  if (en_q.size() == 1) {
     is_one_en = true;
-  if (fwd_q.size() == 1)
+  }
+  if (fwd_q.size() == 1) {
     is_one_fwd = true;
-  if (lat_q.size() == 1)
+  }
+  if (lat_q.size() == 1) {
     is_one_lat = true;
-  if (wmask_q.size() == 1)
+  }
+  if (wmask_q.size() == 1) {
     is_one_wmask = true;
-  if (pose_q.size() == 1)
+  }
+  if (pose_q.size() == 1) {
     is_one_pose = true;
-  if (wmode_q.size() == 1)
+  }
+  if (wmode_q.size() == 1) {
     is_one_wmode = true;
+  }
 
   auto port_count = std::max(
       {addr_q.size(), clk_q.size(), din_q.size(), fwd_q.size(), lat_q.size(), wmask_q.size(), pose_q.size(), wmode_q.size()});
@@ -1072,46 +1080,53 @@ void Pass_lnast_fromlg::attach_memory_node(Lnast& lnast, Lnast_nid& parent_node,
     auto idx_asg_addr = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_addr, Lnast_node::create_const("__addr"));
     attach_child(lnast, idx_asg_addr, addr_q.front());
-    if (!is_one_addr)
+    if (!is_one_addr) {
       addr_q.pop();
+    }
 
     auto idx_asg_clk = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_clk, Lnast_node::create_const("__clk_pin"));
     attach_child(lnast, idx_asg_clk, clk_q.front());
-    if (!is_one_clk)
+    if (!is_one_clk) {
       clk_q.pop();
+    }
 
     // FIXME: How to handle __data? (din)
 
     auto idx_asg_en = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_en, Lnast_node::create_const("__enable"));
     attach_child(lnast, idx_asg_en, en_q.front());
-    if (!is_one_en)
+    if (!is_one_en) {
       en_q.pop();
+    }
 
     auto idx_asg_fwd = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_fwd, Lnast_node::create_const("__fwd"));
     attach_child(lnast, idx_asg_fwd, fwd_q.front());
-    if (!is_one_fwd)
+    if (!is_one_fwd) {
       fwd_q.pop();
+    }
 
     auto idx_asg_lat = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_lat, Lnast_node::create_const("__type"));
     attach_child(lnast, idx_asg_lat, lat_q.front());
-    if (!is_one_lat)
+    if (!is_one_lat) {
       lat_q.pop();
+    }
 
     auto idx_asg_wmask = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_wmask, Lnast_node::create_const("__wrmask"));
     attach_child(lnast, idx_asg_wmask, wmask_q.front());
-    if (!is_one_wmask)
+    if (!is_one_wmask) {
       wmask_q.pop();
+    }
 
     auto idx_asg_pose = lnast.add_child(idx_tuple, Lnast_node::create_assign());
     lnast.add_child(idx_asg_pose, Lnast_node::create_const("__posedge"));
     attach_child(lnast, idx_asg_pose, pose_q.front());
-    if (!is_one_pose)
+    if (!is_one_pose) {
       pose_q.pop();
+    }
 
     // FIXME: How to handle wmode?
   }

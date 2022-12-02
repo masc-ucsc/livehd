@@ -2,7 +2,6 @@
 
 #include "lcompiler.hpp"
 
-
 // FIXME: todo: the top should always specified so that the bottom-up mechanism works
 
 Lcompiler::Lcompiler(std::string_view _path, std::string_view _odir, std::string_view _top, bool _gviz)
@@ -32,8 +31,10 @@ void Lcompiler::prp_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
     }
   }
 
-  std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
-  for (auto *lg : local_lgs) lgs.emplace_back(lg);
+  std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
+  for (auto *lg : local_lgs) {
+    lgs.emplace_back(lg);
+  }
   // auto tp = std::chrono::system_clock::now();
   // auto tp2 = std::chrono::system_clock::now();
   // fmt::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
@@ -47,8 +48,9 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
   if (!top.empty()) {
     top_lg = nullptr;
     for (auto lg2 : lgs) {
-      if (lg2->get_name() != top)
+      if (lg2->get_name() != top) {
         continue;
+      }
       top_lg = lg2;
       break;
     }
@@ -62,7 +64,7 @@ void Lcompiler::do_prp_local_cprop_bitwidth() {
     Bitwidth bw(false, 11);
     Cprop    cp(false);
 
-    //fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
+    // fmt::print("---------------- Copy-Propagation ({}) ------------------- (C-0)\n", lg_sub->get_name());
     cp.do_trans(lg_sub);
     gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
 
@@ -105,8 +107,9 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
       gviz == true ? gv.do_from_lgraph(lg, "") : void();
     }
 
-    if (lgcnt > 1 && hit == false)
+    if (lgcnt > 1 && hit == false) {
       Pass::error("Top module not specified from multiple Pyrope source codes!\n");
+    }
   }
 }
 
@@ -115,9 +118,9 @@ void Lcompiler::do_prp_global_bitwidth_inference() {
 void Lcompiler::do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &lnasts) {
   TRACE_EVENT("pass", "lnast_ssa + lnast_tolg");
 
-  std::sort(lnasts.begin(), lnasts.end(), [](const std::shared_ptr<Lnast> &a, const std::shared_ptr<Lnast> &b) 
-    { return a->max_size() > b->max_size(); }
-  );
+  std::sort(lnasts.begin(), lnasts.end(), [](const std::shared_ptr<Lnast> &a, const std::shared_ptr<Lnast> &b) {
+    return a->max_size() > b->max_size();
+  });
 
   for (const auto &ln : lnasts) {
     thread_pool.add(&Lcompiler::fir_thread_ln2lg, this, ln);
@@ -153,7 +156,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
     }
   }
 
-  std::lock_guard<std::mutex>guard(lgs_mutex);  // guarding Lcompiler::lgs
+  std::lock_guard<std::mutex> guard(lgs_mutex);  // guarding Lcompiler::lgs
   for (auto *lg : local_lgs) {
     // lg->dump();
     lgs.emplace_back(lg);
@@ -184,8 +187,9 @@ void Lcompiler::do_fir_cprop() {
       break;
     }
   }
-  if (lgcnt > 1 && hit == false)
+  if (lgcnt > 1 && hit == false) {
     Pass::error("Top module not specified for firrtl codes!\n");
+  }
 }
 
 void Lcompiler::setup_maps() {  // single-thread
@@ -198,16 +202,18 @@ void Lcompiler::setup_maps() {  // single-thread
   // spinmaps_xorr.clear();
 
   for (auto *lg : lgs) {
-    if (fbmaps.find(lg) != fbmaps.end())
+    if (fbmaps.find(lg) != fbmaps.end()) {
       continue;
+    }
 
     fbmaps.insert_or_assign(lg, FBMap());
     pinmaps.insert_or_assign(lg, PinMap());
     spinmaps_xorr.insert_or_assign(lg, XorrMap());
 
     lg->each_hier_unique_sub_bottom_up([this](Lgraph *lg_sub) {
-      if (fbmaps.find(lg_sub) != fbmaps.end())
+      if (fbmaps.find(lg_sub) != fbmaps.end()) {
         return;
+      }
       fbmaps.insert_or_assign(lg_sub, FBMap());
       pinmaps.insert_or_assign(lg_sub, PinMap());
       spinmaps_xorr.insert_or_assign(lg_sub, XorrMap());
@@ -230,24 +236,27 @@ void Lcompiler::do_fir_firmap_bitwidth() {
   for (auto &lg : lgs) {
     {
       std::unique_lock<std::mutex> guard(lg_visited_mutex);
-      if (lg_visited.find(lg) != lg_visited.end())
+      if (lg_visited.find(lg) != lg_visited.end()) {
         continue;  // already processed
+      }
     }
     ++lgcnt;
     // bottom up approach to parallelly do cprop, start from top. Since we could start from top in firrtl, the visitation will never
     // duplicated
-    if (lg->get_name() != top_name_before_firmap)
+    if (lg->get_name() != top_name_before_firmap) {
       continue;  // WE COULD REMOTE THIS. THEN NO TOP NEEDED
+    }
 
-    hit = true;
+    hit            = true;
     Lgraph *new_lg = nullptr;
 
     // thread task already enqueued in the lambda each_hier_unique_sub_bottom_up_parallel()
     lg->each_hier_unique_sub_bottom_up_parallel2([this, &lg_visited, &new_lg, &lg, &lg_visited_mutex, &new_lgs](Lgraph *lg_sub) {
       {
         std::unique_lock<std::mutex> guard(lg_visited_mutex);
-        if (lg_visited.find(lg_sub) != lg_visited.end())
+        if (lg_visited.find(lg_sub) != lg_visited.end()) {
           return;  // already processed
+        }
         lg_visited.insert(lg_sub);
       }
 
@@ -258,8 +267,9 @@ void Lcompiler::do_fir_firmap_bitwidth() {
 
       auto new_lg_sub = fm.do_firrtl_mapping(lg_sub);
       gviz == true ? gv.do_from_lgraph(new_lg_sub, "firmap-ed") : void();
-      if (lg_sub == lg)
+      if (lg_sub == lg) {
         new_lg = new_lg_sub;
+      }
 
       // FIXME->sh: bw.is_finished() malfunction
       bw.do_trans(new_lg_sub);
@@ -271,9 +281,9 @@ void Lcompiler::do_fir_firmap_bitwidth() {
       }
     });
 
-    //Bitwidth bw(false, 10);
-    //bw.do_trans(new_lg);  // FIXME: WHY??? to call twice. Check if needed
-    //bw.do_trans(new_lg);
+    // Bitwidth bw(false, 10);
+    // bw.do_trans(new_lg);  // FIXME: WHY??? to call twice. Check if needed
+    // bw.do_trans(new_lg);
     gviz == true ? gv.do_from_lgraph(new_lg, "") : void();
 
     {
@@ -282,8 +292,9 @@ void Lcompiler::do_fir_firmap_bitwidth() {
     }
   }
 
-  if (lgcnt > 1 && hit == false)
+  if (lgcnt > 1 && hit == false) {
     Pass::error("Top module not specified for firrtl codes!\n");
+  }
 
   lgs = new_lgs;  // this line is single threaded code or it will fail
 }
@@ -311,6 +322,7 @@ void Lcompiler::do_fir_firbits() {
       break;
     }
   }
-  if (lgcnt > 1 && hit == false)
+  if (lgcnt > 1 && hit == false) {
     Pass::error("Top module not specified for firrtl codes!\n");
+  }
 }

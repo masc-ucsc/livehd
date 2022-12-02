@@ -32,8 +32,9 @@ public:
   }
 
   virtual bool move_to_sibling() {
-    if (current_nid.is_invalid())
+    if (current_nid.is_invalid()) {
       return false;
+    }
     current_nid = lnast->get_sibling_next(current_nid);
     return !current_nid.is_invalid();
   }
@@ -51,8 +52,9 @@ public:
   bool is_invalid() const { return current_nid.is_invalid(); }
 
   bool is_last_child() const {
-    if (current_nid.is_invalid())
+    if (current_nid.is_invalid()) {
       return false;
+    }
     return lnast->is_last_child(current_nid);
   }
 

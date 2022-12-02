@@ -5,10 +5,10 @@
 #include <stdexcept>
 #include <typeinfo>
 
-#include "cell.hpp"
 #include "ann_place.hpp"
-#include "lgedgeiter.hpp"
+#include "cell.hpp"
 #include "helpers.hpp"
+#include "lgedgeiter.hpp"
 
 Lhd_floorplanner::Lhd_floorplanner(Node_tree&& nt_arg)
     : root_lg(nt_arg.get_root_lg()), nt(std::move(nt_arg)), root_layout(nullptr) {

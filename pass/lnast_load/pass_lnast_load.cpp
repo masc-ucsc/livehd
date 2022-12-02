@@ -2,12 +2,12 @@
 
 #include "pass_lnast_load.hpp"
 
-#include "lnast_ntype.hpp"
-#include "lnast_hif_reader.hpp"
-
 #include <fstream>
-#include <ostream>
 #include <iostream>
+#include <ostream>
+
+#include "lnast_hif_reader.hpp"
+#include "lnast_ntype.hpp"
 
 static Pass_plugin sample("pass_lnast_load", Pass_lnast_load::setup);
 
@@ -21,9 +21,9 @@ void Pass_lnast_load::setup() {
 
 void Pass_lnast_load::do_work(Eprp_var& var) {
   Pass_lnast_load pass(var);
-  auto files = var.get("files");
-  for (const auto &file : absl::StrSplit(files, ",")) {
-    auto lnast = std::make_unique<Lnast>(file);
+  auto            files = var.get("files");
+  for (const auto& file : absl::StrSplit(files, ",")) {
+    auto             lnast = std::make_unique<Lnast>(file);
     Lnast_hif_reader reader(file);
     var.add(reader.read_all());
   }

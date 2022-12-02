@@ -12,11 +12,11 @@ protected:
 
   ot::Timer timer;
 
-  int margin;         // % margin to mark nodes
+  int margin;  // % margin to mark nodes
 
-  float freq;         // Frequency for power estimation
-  float max_delay;    // slowest arrival time (delay) on the circuit
-  float margin_delay; // time delay to mark any slower cell for criticality
+  float freq;          // Frequency for power estimation
+  float max_delay;     // slowest arrival time (delay) on the circuit
+  float margin_delay;  // time delay to mark any slower cell for criticality
 
   std::vector<std::string> sdc_file_list;
   std::vector<std::string> spef_file_list;
@@ -41,7 +41,7 @@ protected:
   void populate_table(Lgraph *lg);
 
   std::string get_driver_net_name(const Node_pin &dpin) const;
-  void backpath_set_color(Node &node, int color);
+  void        backpath_set_color(Node &node, int color);
 
 public:
   Pass_opentimer(const Eprp_var &var);

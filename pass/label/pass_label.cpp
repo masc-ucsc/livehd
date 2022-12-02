@@ -12,17 +12,19 @@ static Pass_plugin sample("pass_label", Pass_label::setup);
 Pass_label::Pass_label(const Eprp_var &var) : Pass("pass.label", var) {
   auto hier_txt = var.get("hier");
 
-  if (hier_txt != "false" && hier_txt != "0")
+  if (hier_txt != "false" && hier_txt != "0") {
     hier = true;
-  else
+  } else {
     hier = false;
+  }
 
   auto verbose_txt = var.get("verbose");
 
-  if (verbose_txt != "false" && verbose_txt != "0")
+  if (verbose_txt != "false" && verbose_txt != "0") {
     verbose = true;
-  else
+  } else {
     verbose = false;
+  }
 }
 
 void Pass_label::setup() {
@@ -86,8 +88,9 @@ void Pass_label::label_acyclic(Eprp_var &var) {
 
   auto merge_txt = var.get("merge");
   bool merge_en  = false;
-  if (merge_txt != "false" && merge_txt != "0")
+  if (merge_txt != "false" && merge_txt != "0") {
     merge_en = true;
+  }
 
   Label_acyclic p(pp.verbose, pp.hier, cutoff, merge_en);
 

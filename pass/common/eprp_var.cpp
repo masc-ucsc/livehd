@@ -7,9 +7,8 @@
 #include <utility>
 #include <vector>
 
-#include "graph_library.hpp"
-
 #include "absl/strings/str_split.h"
+#include "graph_library.hpp"
 
 void Eprp_var::add(const Eprp_dict &_dict) {
   for (const auto &var : _dict) {
@@ -35,8 +34,9 @@ void Eprp_var::add(const Eprp_var &_var) {
 }
 
 void Eprp_var::add(Lgraph *lg) {
-  if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end())
+  if (std::find(lgs.begin(), lgs.end(), lg) == lgs.end()) {
     lgs.push_back(lg);
+  }
 }
 
 void Eprp_var::add(std::unique_ptr<Lnast> lnast) { lnasts.emplace_back(std::move(lnast)); }
@@ -60,11 +60,11 @@ void Eprp_var::add(std::string_view name, std::string_view value) {
         fmt::print("ERROR: path {} is not accessible (skipping)\n", path);
         throw std::runtime_error("not valid file");
       }
-    } 
+    }
 
     // WARNING: THis is needed because the global_instance is NOT lock
     // protected (the path must be set/created before the threads span)
-    auto *ptr = Graph_library::instance(path); 
+    auto *ptr = Graph_library::instance(path);
     I(ptr);
   }
 
@@ -95,8 +95,9 @@ void Eprp_var::replace(const std::shared_ptr<Lnast> &lnast_old, std::shared_ptr<
 
 void Eprp_var::delete_label(std::string_view name) {
   auto it = dict.find(name);
-  if (it != dict.end())
+  if (it != dict.end()) {
     dict.erase(it);
+  }
 }
 
 std::string_view Eprp_var::get(std::string_view name, std::string_view default_value) const {
@@ -106,4 +107,3 @@ std::string_view Eprp_var::get(std::string_view name, std::string_view default_v
   }
   return elem->second;
 }
-

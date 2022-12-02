@@ -3,11 +3,12 @@
 #include "graph_library.hpp"
 
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include <climits>
 #include <cstdlib>
 #include <memory>
-#include <sys/stat.h>
-#include <fcntl.h>
 
 #ifdef __APPLE__
 #include <copyfile.h>
@@ -28,7 +29,7 @@
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/prettywriter.h"
 
-Graph_library::Global_instances   Graph_library::global_instances;
+Graph_library::Global_instances Graph_library::global_instances;
 
 class Cleanup_graph_library {
 public:
@@ -46,8 +47,9 @@ void Graph_library::shutdown_int() {
   absl::flat_hash_set<Graph_library *> deleted;
 
   for (const auto &it : global_instances) {
-    if (deleted.contains(it.second))
+    if (deleted.contains(it.second)) {
       continue;
+    }
     deleted.insert(it.second);
     delete it.second;
   }
@@ -191,7 +193,7 @@ Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view s
     attributes[it->second].version = max_next_version++;
     if (attributes[it->second].source != source) {
       if (source == "-") {
-        //Lgraph::warn("keeping Lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
+        // Lgraph::warn("keeping Lgraph:{} source {}", name, attributes[it->second].source);  // LCOV_EXCL_LINE
       } else if (attributes[it->second].source.empty()) {
         // Blackbox with a newly populated. OK
         attributes[it->second].source = source;
@@ -212,13 +214,12 @@ Lg_type_id Graph_library::reset_id_int(std::string_view name, std::string_view s
   return add_name_int(name, source);
 }
 
-bool Graph_library::exists_int(std::string_view name) const {
-  return name2id.find(name) != name2id.end();
-}
+bool Graph_library::exists_int(std::string_view name) const { return name2id.find(name) != name2id.end(); }
 
 bool Graph_library::exists_int(Lg_type_id lgid) const {
-  if (sub_nodes.size() <= lgid || lgid.is_invalid())
+  if (sub_nodes.size() <= lgid || lgid.is_invalid()) {
     return false;
+  }
   I(attributes.size() > lgid);
 
   return sub_nodes[lgid]->get_lgid() == lgid;
@@ -226,15 +227,17 @@ bool Graph_library::exists_int(Lg_type_id lgid) const {
 
 Lgraph *Graph_library::try_ref_lgraph_int(std::string_view name) const {
   const auto it = name2id.find(name);
-  if (it == name2id.end())
+  if (it == name2id.end()) {
     return nullptr;
+  }
 
   return attributes[it->second].lg;
 }
 
 Lgraph *Graph_library::try_ref_lgraph_int(const Lg_type_id lgid) const {
-  if (lgid >= attributes.size())
+  if (lgid >= attributes.size()) {
     return nullptr;
+  }
 
   return attributes[lgid].lg;
 }
@@ -269,7 +272,7 @@ Sub_node *Graph_library::ref_or_create_sub(std::string_view name, std::string_vi
       return sub_nodes[lgid];
     }
   }
-  lgid = add_name(name, source); // This acquires a WriterMutexLock
+  lgid = add_name(name, source);  // This acquires a WriterMutexLock
 
   I(lgid);
   return sub_nodes[lgid];
@@ -347,8 +350,9 @@ bool Graph_library::rename_name_int(std::string_view orig, std::string_view dest
 void Graph_library::update_int(Lg_type_id lgid) {
   I(lgid < attributes.size());
 
-  if (attributes[lgid].version == (max_next_version - 1))
+  if (attributes[lgid].version == (max_next_version - 1)) {
     return;
+  }
 
   graph_library_clean      = false;
   attributes[lgid].version = max_next_version++;
@@ -422,8 +426,9 @@ void Graph_library::reload_int() {
 
     auto version = lg_entry["version"].GetUint64();
     if (version != 0) {
-      if (max_next_version < version)
+      if (max_next_version < version) {
         max_next_version = version;
+      }
 
       I(lg_entry.HasMember("source"));
       attributes[id].source  = lg_entry["source"].GetString();
@@ -444,8 +449,9 @@ void Graph_library::reload_int() {
 
 Lgraph *Graph_library::ref_or_create_lgraph_int(std::string_view name, std::string_view source) {
   auto *lg = try_ref_lgraph_int(name);
-  if (lg)
+  if (lg) {
     return lg;
+  }
 
   auto lgid = reset_id_int(name, source);
 
@@ -453,8 +459,8 @@ Lgraph *Graph_library::ref_or_create_lgraph_int(std::string_view name, std::stri
 
   lg->clear_int();
 
-  attributes[lgid].lg            = lg;   // It could be already set if there was a copy
-  attributes[lgid].tried_to_load = true; // already present
+  attributes[lgid].lg            = lg;    // It could be already set if there was a copy
+  attributes[lgid].tried_to_load = true;  // already present
 
 #ifndef NDEBUG
   const auto &it = name2id.find(name);
@@ -473,14 +479,14 @@ Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view
 }
 
 Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
-
   auto name = get_name_int(lgid);
 
   auto &attr = attributes[lgid];
 
   std::shared_ptr<Hif_read> hif;
-  if (name.substr(0,2) != "__")
+  if (name.substr(0, 2) != "__") {
     hif = Hif_read::open(absl::StrCat(path, "/", name));
+  }
   if (hif == nullptr) {
     attr.lg            = nullptr;
     attr.tried_to_load = true;
@@ -498,15 +504,15 @@ Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
 }
 
 Lgraph *Graph_library::open_or_create_lgraph(std::string_view name, std::string_view source) {
-  Lgraph *lg=nullptr;
-  bool pending_load;
+  Lgraph *lg = nullptr;
+  bool    pending_load;
   {
     absl::WriterMutexLock guard(&lgs_mutex);
-    //std::lock_guard<std::mutex> guard(lgs_mutex);
-    std::tie(lg, pending_load) =  open_or_create_lgraph_int(name, source);
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) = open_or_create_lgraph_int(name, source);
   }
-  if (pending_load) { // out of the lock because it can be slow and call graph library
-    I(lg==nullptr);
+  if (pending_load) {  // out of the lock because it can be slow and call graph library
+    I(lg == nullptr);
     auto lgid = get_lgid_int(name);
     return do_pending_load_int(lgid);
   }
@@ -514,15 +520,15 @@ Lgraph *Graph_library::open_or_create_lgraph(std::string_view name, std::string_
 }
 
 Lgraph *Graph_library::open_lgraph(std::string_view name, std::string_view source) {
-  Lgraph *lg=nullptr;
-  bool pending_load;
+  Lgraph *lg = nullptr;
+  bool    pending_load;
   {
     absl::WriterMutexLock guard(&lgs_mutex);
-    //std::lock_guard<std::mutex> guard(lgs_mutex);
-    std::tie(lg, pending_load) =  open_lgraph_int(name, source);
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) = open_lgraph_int(name, source);
   }
-  if (pending_load) { // out of the lock because it can be slow and call graph library
-    I(lg==nullptr);
+  if (pending_load) {  // out of the lock because it can be slow and call graph library
+    I(lg == nullptr);
     auto lgid = get_lgid_int(name);
     return do_pending_load_int(lgid);
   }
@@ -530,44 +536,44 @@ Lgraph *Graph_library::open_lgraph(std::string_view name, std::string_view sourc
 }
 
 Lgraph *Graph_library::open_lgraph(Lg_id_t lgid) {
-  Lgraph *lg=nullptr;
-  bool pending_load;
+  Lgraph *lg = nullptr;
+  bool    pending_load;
   {
     absl::WriterMutexLock guard(&lgs_mutex);
-    //std::lock_guard<std::mutex> guard(lgs_mutex);
-    std::tie(lg, pending_load) =  open_lgraph_int(lgid);
+    // std::lock_guard<std::mutex> guard(lgs_mutex);
+    std::tie(lg, pending_load) = open_lgraph_int(lgid);
   }
-  if (pending_load) { // out of the lock because it can be slow and call graph library
-    I(lg==nullptr);
+  if (pending_load) {  // out of the lock because it can be slow and call graph library
+    I(lg == nullptr);
     return do_pending_load_int(lgid);
   }
   return lg;
 }
 
 std::pair<Lgraph *, bool> Graph_library::open_lgraph_int(Lg_id_t lgid) {
-  I(attributes.size()> lgid);
+  I(attributes.size() > lgid);
 
   const auto &attr = attributes[lgid];
-  if (attr.is_blackbox())
-    return {nullptr, false}; // already tried to open and failed
-  if (attr.lg)
+  if (attr.is_blackbox()) {
+    return {nullptr, false};  // already tried to open and failed
+  }
+  if (attr.lg) {
     return {attr.lg, false};
+  }
 
   return {nullptr, true};
 }
 
 std::pair<Lgraph *, bool> Graph_library::open_lgraph_int(std::string_view name, std::string_view source) {
-
   auto lgid = get_lgid_int(name);
-  if (!lgid) { // no lgid exists
-    lgid = reset_id_int(name, source); // get new ID
+  if (!lgid) {                          // no lgid exists
+    lgid = reset_id_int(name, source);  // get new ID
   }
 
   return open_lgraph_int(lgid);
 }
 
 std::pair<Lgraph *, bool> Graph_library::open_or_create_lgraph_int(std::string_view name, std::string_view source) {
-
   auto [lg, pending_load] = open_lgraph_int(name, source);
   if (lg) {
     return {lg, pending_load};
@@ -583,8 +589,9 @@ Graph_library::Graph_library(std::string_view _path) : path(_path), library_file
 }
 
 Lg_type_id Graph_library::try_get_recycled_id_int() {
-  if (recycled_id.empty())
+  if (recycled_id.empty()) {
     return 0;
+  }
 
   auto       it   = recycled_id.begin();
   Lg_type_id lgid = *it;
@@ -698,8 +705,9 @@ void Graph_library::unregister_int(Lgraph *lg) {
   attributes[lgid].lg            = nullptr;
   attributes[lgid].tried_to_load = false;
 
-  if (sub_nodes[lgid]->is_invalid())
+  if (sub_nodes[lgid]->is_invalid()) {
     expunge_int(lg->get_name());
+  }
 }
 
 void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
@@ -708,15 +716,16 @@ void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::s
   }
 }
 
-void Graph_library::each_lgraph(std::string_view                                                  match,
+void Graph_library::each_lgraph(std::string_view                                                   match,
                                 const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 
   for (const auto &[name, id] : name2id) {
     const std::string line(name);
-    if (!std::regex_search(line, txt_regex))
+    if (!std::regex_search(line, txt_regex)) {
       continue;
+    }
 
     f1(id, name);
   }

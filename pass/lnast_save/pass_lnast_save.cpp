@@ -2,11 +2,11 @@
 
 #include "pass_lnast_save.hpp"
 
-#include "lnast_hif_writer.hpp"
-
 #include <fstream>
-#include <ostream>
 #include <iostream>
+#include <ostream>
+
+#include "lnast_hif_writer.hpp"
 
 static Pass_plugin sample("pass_lnast_save", Pass_lnast_save::setup);
 
@@ -20,9 +20,9 @@ void Pass_lnast_save::setup() {
 
 void Pass_lnast_save::do_work(const Eprp_var& var) {
   Pass_lnast_save pass(var);
-  auto odir = pass.get_odir(var);
-  odir = (odir == "/INVALID") ? "." : odir;
-  for (const auto &lnast : var.lnasts) {
+  auto            odir = pass.get_odir(var);
+  odir                 = (odir == "/INVALID") ? "." : odir;
+  for (const auto& lnast : var.lnasts) {
     Lnast_hif_writer writer(absl::StrCat(odir, "/", lnast->get_top_module_name()), lnast);
     writer.write_all();
   }

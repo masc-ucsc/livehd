@@ -1,19 +1,19 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "power_vcd.hpp"
+
 #include <fcntl.h>
 #include <fmt/format.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "power_vcd.hpp"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "pass.hpp"
 
-#include "absl/strings/str_split.h"
-#include "absl/strings/str_cat.h"
-
-//#define bithack_haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
-//#define bithack_hasvalue(x,n) (haszero((x) ^ (~0UL/255 * (n))))
+// #define bithack_haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
+// #define bithack_hasvalue(x,n) (haszero((x) ^ (~0UL/255 * (n))))
 
 #define VALUES "0123456789zZxXbU-"  // allowed bus values/types
 
@@ -39,8 +39,9 @@ bool Power_vcd::find_max_time() {
       continue;
     }
 
-    if (max_timestamp == 0)
+    if (max_timestamp == 0) {
       return false;
+    }
 
     return true;
   }
@@ -56,8 +57,9 @@ const char *Power_vcd::skip_command(const char *ptr) const {
     }
     ++ptr;
 
-    if (strncmp(ptr, "end", 3) == 0)
+    if (strncmp(ptr, "end", 3) == 0) {
       return ptr + 3;
+    }
   }
 
   return ptr;
@@ -115,7 +117,7 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     }
     id2channel[std::string(var_id)].hier_name.emplace_back(hier_name);
 
-    //fmt::print("hier_name:{} var_id:{}\n", hier_name, var_id);
+    // fmt::print("hier_name:{} var_id:{}\n", hier_name, var_id);
 
   } else if (strncmp("scope", ptr, 5) == 0) {
     ptr += 5;
@@ -127,14 +129,14 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     // fmt::print("scope:{}\n", scope_name);
     scope_stack.emplace_back(scope_name);
 
-    if (scope_stack.size()>deepest_vcd_hier_name_level) {
+    if (scope_stack.size() > deepest_vcd_hier_name_level) {
       std::string hier_name;
       for (auto &str : scope_stack) {
         hier_name.append(str);
         hier_name.append(",");
       }
       deepest_vcd_hier_name_level = scope_stack.size();
-      deepest_vcd_hier_name = hier_name;
+      deepest_vcd_hier_name       = hier_name;
     }
 
   } else if (strncmp("date", ptr, 4) == 0) {
@@ -146,8 +148,9 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
   } else if (strncmp("comment", ptr, 7) == 0) {
     ptr += 7;
   } else if (strncmp("upscope", ptr, 7) == 0) {
-    if (!scope_stack.empty())
+    if (!scope_stack.empty()) {
       scope_stack.pop_back();
+    }
     ptr += 7;
   } else if (strncmp("enddefinitions", ptr, 14) == 0) {
     ptr += 14;
@@ -239,8 +242,9 @@ bool Power_vcd::open(std::string_view file_name) {
   auto ok = find_max_time();
   fmt::print("INFO: vcd max_timestamp:{}\n", max_timestamp);
 
-  if (ok)
+  if (ok) {
     parse();
+  }
 
   return ok;
 }
@@ -259,7 +263,6 @@ void Power_vcd::dump() const {
 }
 
 void Power_vcd::compute(std::string_view odir) const {
-
   // FIXME:
   //
   // Now the VCD (id2channel) and hierarchy (hier_name2power) match. This is
@@ -271,7 +274,6 @@ void Power_vcd::compute(std::string_view odir) const {
   // testbench has more things it can drop more. It should always be a constant
   // part
 
-
   // Pick a random hier_name2power and decide how much from the deepest_vcd_hier_name must be dropped
   size_t n_skip = 0;
   {
@@ -279,15 +281,17 @@ void Power_vcd::compute(std::string_view odir) const {
 
     for (const auto &hname : hier_name2power) {
       const char *top_level_end = strchr(hname.first.c_str(), ',');
-      if (top_level_end==nullptr)
+      if (top_level_end == nullptr) {
         continue;
+      }
 
-      auto top_str = hname.first.substr(0,top_level_end-hname.first.c_str());
+      auto top_str = hname.first.substr(0, top_level_end - hname.first.c_str());
 
       const char *match_str = strstr(deepest_vcd_hier_name.c_str(), top_str.c_str());
 
-      if (match_str == nullptr)
+      if (match_str == nullptr) {
         continue;
+      }
 
       n_skip = match_str - deepest_vcd_hier_name.c_str();
 
@@ -296,22 +300,23 @@ void Power_vcd::compute(std::string_view odir) const {
     }
   }
 
-  #if 1
+#if 1
   {
     // This is to debug if there are not matching names in VCD and hier
     for (const auto &hname : hier_name2power) {
       auto hier_name = hname.first;
-      bool found = false;
+      bool found     = false;
       for (const auto &e : id2channel) {
-        for(const auto &e2: e.second.hier_name) {
+        for (const auto &e2 : e.second.hier_name) {
           auto vcd_hier_name = e2.substr(n_skip);
           if (vcd_hier_name == hier_name) {
             found = true;
             break;
           }
         }
-        if (found)
+        if (found) {
           break;
+        }
       }
       if (!found) {
         // WARNING: This may be OK if the VCD is partial, but not nice because the power
@@ -321,12 +326,12 @@ void Power_vcd::compute(std::string_view odir) const {
       }
     }
   }
-  #endif
+#endif
 
   absl::node_hash_map<std::string, std::vector<double>> module_trace;
 
-  double transitions=0;
-  double max_transitions=1;
+  double transitions     = 0;
+  double max_transitions = 1;
 
   for (const auto &e : id2channel) {
     std::vector<double> trace_step;
@@ -335,8 +340,9 @@ void Power_vcd::compute(std::string_view odir) const {
       auto hier_name = hname.substr(n_skip);
 
       auto it = hier_name2power.find(hier_name);
-      if (it == hier_name2power.end())
+      if (it == hier_name2power.end()) {
         continue;
+      }
 
       if (trace_step.empty()) {
         trace_step.reserve(e.second.transitions.size());
@@ -353,17 +359,18 @@ void Power_vcd::compute(std::string_view odir) const {
 
       std::string hier_path;
 
-      for(int i=0;i<static_cast<int>(m.size()-2);++i) {
-        if (hier_path.empty())
+      for (int i = 0; i < static_cast<int>(m.size() - 2); ++i) {
+        if (hier_path.empty()) {
           hier_path = m[i];
-        else
-          absl::StrAppend(&hier_path, ":", m[i]); // : is easier for file names
+        } else {
+          absl::StrAppend(&hier_path, ":", m[i]);  // : is easier for file names
+        }
 
         auto it2 = module_trace.find(hier_path);
         if (it2 == module_trace.end()) {
           module_trace[hier_path] = trace_step;
-        }else{
-          for(auto j=0u;j<trace_step.size();++j) {
+        } else {
+          for (auto j = 0u; j < trace_step.size(); ++j) {
             module_trace[hier_path][j] += trace_step[j];
           }
         }
@@ -371,10 +378,9 @@ void Power_vcd::compute(std::string_view odir) const {
     }
   }
 
-  double step = max_timestamp/n_buckets;
-  for(const auto &e:module_trace) {
-
-    auto out_fname = absl::StrCat(odir,"/", fname, "_", e.first, ".power.trace");
+  double step = max_timestamp / n_buckets;
+  for (const auto &e : module_trace) {
+    auto out_fname = absl::StrCat(odir, "/", fname, "_", e.first, ".power.trace");
 
     std::FILE *f = std::fopen(out_fname.c_str(), "w");
     if (f == nullptr) {
@@ -383,8 +389,8 @@ void Power_vcd::compute(std::string_view odir) const {
     }
 
     double x = 0;
-    for(double v:e.second) {
-      fmt::print(f,"{} {}\n", x, v/max_timestamp);
+    for (double v : e.second) {
+      fmt::print(f, "{} {}\n", x, v / max_timestamp);
       x += step;
     }
 
@@ -392,6 +398,5 @@ void Power_vcd::compute(std::string_view odir) const {
   }
 
   // NOTE: 2x because clock does 2x transitions (max_timestamp)
-  fmt::print("average activity rate {}\n", 2*transitions/max_transitions);
+  fmt::print("average activity rate {}\n", 2 * transitions / max_transitions);
 }
-

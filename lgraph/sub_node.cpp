@@ -47,14 +47,15 @@ void Sub_node::to_json(rapidjson::PrettyWriter<rapidjson::StringBuffer> &writer)
     writer.Uint(pin.bits);
 
     writer.Key("dir");
-    if (pin.dir == Direction::Invalid)
+    if (pin.dir == Direction::Invalid) {
       writer.String("inv");
-    else if (pin.dir == Direction::Output)
+    } else if (pin.dir == Direction::Output) {
       writer.String("out");
-    else if (pin.dir == Direction::Input)
+    } else if (pin.dir == Direction::Input) {
       writer.String("inp");
-    else
+    } else {
       I(false);
+    }
 
     writer.EndObject();
     pos++;
@@ -87,13 +88,13 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
     std::string dir_str = io_pin["dir"].GetString();
     Direction   dir;
-    if (dir_str == "inv")
+    if (dir_str == "inv") {
       dir = Direction::Invalid;
-    else if (dir_str == "out")
+    } else if (dir_str == "out") {
       dir = Direction::Output;
-    else if (dir_str == "inp")
+    } else if (dir_str == "inp") {
       dir = Direction::Input;
-    else {
+    } else {
       dir = Direction::Invalid;
       I(false);
     }
@@ -108,16 +109,18 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
     auto io_name     = io_pin["name"].GetString();
     name2id[io_name] = instance_pid;
-    if (io_pins.size() <= instance_pid)
+    if (io_pins.size() <= instance_pid) {
       io_pins.resize(instance_pid + 1);
+    }
 
     io_pins[instance_pid].name         = io_name;
     io_pins[instance_pid].dir          = dir;
     io_pins[instance_pid].graph_io_pos = pid;
     io_pins[instance_pid].bits         = bits;
 
-    if (io_pins[instance_pid].is_invalid())
+    if (io_pins[instance_pid].is_invalid()) {
       deleted.emplace_back(instance_pid);
+    }
 
     if (pid != Port_invalid) {
       map_pin_int(instance_pid, pid);
@@ -146,19 +149,23 @@ void Sub_node::dump() const {
 std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
   std::vector<IO_pin> sort_io;
   for (auto i = 1u; i < io_pins.size(); ++i) {
-    if (io_pins[i].is_invalid())
+    if (io_pins[i].is_invalid()) {
       continue;
+    }
     sort_io.emplace_back(io_pins[i]);
   }
 
   // Sort based on port_id first, then name
   std::sort(sort_io.begin(), sort_io.end(), [](const IO_pin &a, const IO_pin &b) {
-    if (a.graph_io_pos == Port_invalid && b.graph_io_pos == Port_invalid)
+    if (a.graph_io_pos == Port_invalid && b.graph_io_pos == Port_invalid) {
       return a.name < b.name;
-    if (a.graph_io_pos == Port_invalid)
+    }
+    if (a.graph_io_pos == Port_invalid) {
       return true;
-    if (b.graph_io_pos == Port_invalid)
+    }
+    if (b.graph_io_pos == Port_invalid) {
       return false;
+    }
 
     return a.graph_io_pos < b.graph_io_pos;
   });
@@ -191,20 +198,23 @@ std::vector<Sub_node::IO_pin> Sub_node::get_sorted_io_pins() const {
 }
 
 void Sub_node::populate_graph_pos() {
-  if (graph_pos2instance_pid.size() == io_pins.size() - 1)
+  if (graph_pos2instance_pid.size() == io_pins.size() - 1) {
     return;  // all the pins are already populated
+  }
 
   Port_ID pos = 0;
   for (auto &sorted_pin : get_sorted_io_pins()) {
     pos++;
-    if (sorted_pin.graph_io_pos != pos)
+    if (sorted_pin.graph_io_pos != pos) {
       map_graph_pos(sorted_pin.name, sorted_pin.dir, pos);
+    }
   }
 }
 
 void Sub_node::del_pin(Port_ID instance_pid) {
-  if (instance_pid == 0)
+  if (instance_pid == 0) {
     return;  // $ and % are special cases
+  }
 
   I(has_instance_pin(instance_pid));
 

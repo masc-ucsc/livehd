@@ -2,7 +2,7 @@
 
 #include "label_acyclic.hpp"
 
-//#include "pass.hpp"
+// #include "pass.hpp"
 
 #define G_DEBUG           0  // toggle for gather_inou debug print
 #define O_DEBUG           0  // toggle for oneparent merge debug print
@@ -20,11 +20,13 @@ Label_acyclic::Label_acyclic(bool _v, bool _h, uint8_t _c, bool _m) : verbose(_v
  Compares absl::flat_hash_set<Node::Compact>'s
  * * * * * * */
 bool Label_acyclic::node_set_cmp(NodeSet a, NodeSet b) const {
-  if (a.size() != b.size())
+  if (a.size() != b.size()) {
     return false;
+  }
   for (auto &n : a) {
-    if (!(b.contains(n)))
+    if (!(b.contains(n))) {
       return false;
+    }
   }
   return true;
 }
@@ -33,11 +35,13 @@ bool Label_acyclic::node_set_cmp(NodeSet a, NodeSet b) const {
  Compares absl::flat_hash_set<int>'s
  * * * * * * */
 bool Label_acyclic::int_set_cmp(IntSet a, IntSet b) const {
-  if (a.size() != b.size())
+  if (a.size() != b.size()) {
     return false;
+  }
   for (auto &n : a) {
-    if (!(b.contains(n)))
+    if (!(b.contains(n))) {
       return false;
+    }
   }
   return true;
 }
@@ -80,8 +84,9 @@ void Label_acyclic::gather_roots(Lgraph *g) {
   // Adding potential roots to the root list
   bool add_root = false;
   for (const auto &n : g->forward(hier)) {
-    if (n.get_type_op() == Ntype_op::Const)
+    if (n.get_type_op() == Ntype_op::Const) {
       continue;
+    }
     if (n.get_num_out_edges() > 1) {
       add_root = true;
     } else if (n.get_num_out_edges() == 0) {
@@ -113,12 +118,14 @@ void Label_acyclic::gather_roots(Lgraph *g) {
  * * * * * * */
 void Label_acyclic::grow_partitions(Lgraph *g) {
   // Iterating through all the potential roots
-  if (roots.empty())
+  if (roots.empty()) {
     return;
+  }
 
   for (auto &n : roots) {
-    if (!node_preds.empty())
+    if (!node_preds.empty()) {
       node_preds.clear();
+    }
 
     auto curr_id = node2id[n];
     node_preds.push_back(n);  // Adding yourself as a predecessor
@@ -130,14 +137,16 @@ void Label_acyclic::grow_partitions(Lgraph *g) {
       // Get driver of all inp_edges and add to pot list if not already in a Part
       Node temp_n(g, curr_pred);
 
-      if (temp_n.get_type_op() == Ntype_op::Const)
+      if (temp_n.get_type_op() == Ntype_op::Const) {
         continue;
+      }
 
       for (auto &ie : temp_n.inp_edges()) {
         auto pot_pred = ie.driver.get_node();
 
-        if (pot_pred.get_type_op() == Ntype_op::Const)
+        if (pot_pred.get_type_op() == Ntype_op::Const) {
           continue;
+        }
 
         auto pot_predc = pot_pred.get_compact();
         // Three conditions for node to be addable
@@ -181,8 +190,9 @@ void Label_acyclic::gather_inou(Lgraph *g) {
     for (auto &n : curr_id_nodes) {
       Node tmp_n(g, n);
 
-      if (tmp_n.get_type_op() == Ntype_op::Const)
+      if (tmp_n.get_type_op() == Ntype_op::Const) {
         continue;
+      }
       // gather the sinks for id2out and id2outparts
       for (auto &e : tmp_n.out_edges()) {
         auto spin        = e.sink;
@@ -192,8 +202,9 @@ void Label_acyclic::gather_inou(Lgraph *g) {
         auto outgoing_id = node2id[snode.get_compact()];
         auto this_id     = node2id[dnode.get_compact()];
 
-        if (snode.get_type_op() == Ntype_op::Const)
+        if (snode.get_type_op() == Ntype_op::Const) {
           continue;
+        }
         if (snode.get_type_op() != Ntype_op::IO) {
           if ((curr_id != outgoing_id) && (curr_id == this_id)) {
             common_node1.insert(snode.get_compact());
@@ -211,8 +222,9 @@ void Label_acyclic::gather_inou(Lgraph *g) {
         auto incoming_id = node2id[dnode.get_compact()];
         auto this_id     = node2id[snode.get_compact()];
 
-        if (dnode.get_type_op() == Ntype_op::Const)
+        if (dnode.get_type_op() == Ntype_op::Const) {
           continue;
+        }
         if (dnode.get_type_op() != Ntype_op::IO) {
           if ((curr_id != incoming_id) && (curr_id == this_id)) {
             common_node2.insert(dnode.get_compact());
@@ -303,10 +315,12 @@ void Label_acyclic::merge_partitions_same_parents() {
 
   // Populate vectors with Part ids
   for (int i = 0; i < part_id; ++i) {
-    if (id2inc.contains(i))
+    if (id2inc.contains(i)) {
       pwi.push_back(i);
-    if (id2out.contains(i))
+    }
+    if (id2out.contains(i)) {
       pwo.push_back(i);
+    }
     parts.push_back(i);
   }
 
@@ -358,12 +372,15 @@ void Label_acyclic::merge_partitions_same_parents() {
       auto pwi_rm_iter   = std::find(pwi.begin(), pwi.end(), merge_from);
       auto pwo_rm_iter   = std::find(pwo.begin(), pwo.end(), merge_from);
 
-      if (parts_rm_iter != parts.end())
+      if (parts_rm_iter != parts.end()) {
         parts.erase(parts_rm_iter);
-      if (pwi_rm_iter != pwi.end())
+      }
+      if (pwi_rm_iter != pwi.end()) {
         pwi.erase(pwi_rm_iter);
-      if (pwo_rm_iter != pwo.end())
+      }
+      if (pwo_rm_iter != pwo.end()) {
         pwo.erase(pwo_rm_iter);
+      }
 
       pivot = pwi.begin();  // reset pivot to begin() for merge re-scan
     } else {
@@ -390,10 +407,12 @@ void Label_acyclic::merge_partitions_one_parent() {
 
   // Populate vectors with Part ids
   for (int i = 0; i < part_id; ++i) {
-    if (id2inc.contains(i))
+    if (id2inc.contains(i)) {
       pwi.push_back(i);
-    if (id2out.contains(i))
+    }
+    if (id2out.contains(i)) {
       pwo.push_back(i);
+    }
     parts.push_back(i);
   }
 
@@ -446,12 +465,15 @@ void Label_acyclic::merge_partitions_one_parent() {
       auto pwi_rm_iter   = std::find(pwi.begin(), pwi.end(), merge_from);
       auto pwo_rm_iter   = std::find(pwo.begin(), pwo.end(), merge_from);
 
-      if (parts_rm_iter != parts.end())
+      if (parts_rm_iter != parts.end()) {
         parts.erase(parts_rm_iter);
-      if (pwi_rm_iter != pwi.end())
+      }
+      if (pwi_rm_iter != pwi.end()) {
         pwi.erase(pwi_rm_iter);
-      if (pwo_rm_iter != pwo.end())
+      }
+      if (pwo_rm_iter != pwo.end()) {
         pwo.erase(pwo_rm_iter);
+      }
 
       pivot = pwi.begin();
     } else {
@@ -560,6 +582,7 @@ void Label_acyclic::label(Lgraph *g) {
     }
   }
 
-  if (verbose)
+  if (verbose) {
     dump(g);
+  }
 }

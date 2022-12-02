@@ -51,30 +51,34 @@
 char *optarg;
 int   optind = 1, optcur = 1;
 int   getopt(int argc, char **argv, const char *optstring) {
-    if (optind >= argc || argv[optind][0] != '-')
+  if (optind >= argc || argv[optind][0] != '-') {
     return -1;
+  }
 
   bool takes_arg = false;
-    int  opt       = argv[optind][optcur];
-    for (int i = 0; optstring[i]; i++)
-    if (opt == optstring[i] && optstring[i + 1] == ':')
+  int  opt       = argv[optind][optcur];
+  for (int i = 0; optstring[i]; i++) {
+    if (opt == optstring[i] && optstring[i + 1] == ':') {
       takes_arg = true;
+    }
+  }
 
   if (!takes_arg) {
-      if (argv[optind][++optcur] == 0)
+    if (argv[optind][++optcur] == 0) {
       optind++, optcur = 1;
+    }
     return opt;
   }
 
-    if (argv[optind][++optcur]) {
-      optarg = argv[optind++] + optcur;
-      optcur = 1;
-      return opt;
+  if (argv[optind][++optcur]) {
+    optarg = argv[optind++] + optcur;
+    optcur = 1;
+    return opt;
   }
 
-    optarg = argv[++optind];
-    optind++, optcur = 1;
-    return opt;
+  optarg = argv[++optind];
+  optind++, optcur = 1;
+  return opt;
 }
 #endif
 
@@ -122,7 +126,9 @@ void run(const char *command) {
     run_pass(command);
     log_last_error = "";
   } catch (...) {
-    while (GetSize(yosys_get_design()->selection_stack) > selSize) yosys_get_design()->selection_stack.pop_back();
+    while (GetSize(yosys_get_design()->selection_stack) > selSize) {
+      yosys_get_design()->selection_stack.pop_back();
+    }
     throw;
   }
 }
@@ -131,7 +137,9 @@ const char *errmsg() { return log_last_error.c_str(); }
 
 const char *prompt() {
   const char *p = create_prompt(yosys_get_design(), 0);
-  while (*p == '\n') p++;
+  while (*p == '\n') {
+    p++;
+  }
   return p;
 }
 
@@ -158,8 +166,9 @@ void yosys_atexit() {
     if (yosys_history_offset > 0) {
       history_truncate_file(yosys_history_file.c_str(), 100);
       append_history(where_history() - yosys_history_offset, yosys_history_file.c_str());
-    } else
+    } else {
       write_history(yosys_history_file.c_str());
+    }
 #else
     write_history(yosys_history_file.c_str());
 #endif
@@ -168,8 +177,9 @@ void yosys_atexit() {
   clear_history();
 #if defined(YOSYS_ENABLE_READLINE)
   HIST_ENTRY **hist_list = history_list();
-  if (hist_list != NULL)
+  if (hist_list != NULL) {
     free(hist_list);
+  }
 #endif
 #endif
 }
@@ -356,13 +366,15 @@ int main(int argc, char **argv) {
           fprintf(stderr, "Can't open log file `%s' for writing!\n", optarg);
           exit(1);
         }
-        if (opt == 'L')
+        if (opt == 'L') {
           setvbuf(log_files.back(), NULL, _IOLBF, 0);
+        }
         break;
       case 'q':
         mode_q = true;
-        if (log_errfile == stderr)
+        if (log_errfile == stderr) {
           log_quiet_warnings = true;
+        }
         log_errfile = stderr;
         break;
       case 'v':
@@ -396,10 +408,12 @@ int main(int argc, char **argv) {
           }
           log_hdump_all = true;
         } else {
-          if (!args.empty() && !args[0].empty() && args[0].back() == '.')
+          if (!args.empty() && !args[0].empty() && args[0].back() == '.') {
             args[0].pop_back();
-          if (GetSize(args) == 1)
+          }
+          if (GetSize(args) == 1) {
             args.push_back("yosys_dump_" + args[0] + ".il");
+          }
           if (GetSize(args) != 2) {
             fprintf(stderr, "Invalid number of tokens in -D.\n");
             exit(1);
@@ -418,11 +432,13 @@ int main(int argc, char **argv) {
     log_error_stderr = true;
   }
 
-  if (print_banner)
+  if (print_banner) {
     yosys_banner();
+  }
 
-  if (print_stats)
+  if (print_stats) {
     log_hasher = new SHA1;
+  }
 
 #if defined(__linux__)
   // set stack size to >= 128 MB
@@ -443,48 +459,65 @@ int main(int argc, char **argv) {
 #endif
   log_error_atexit = yosys_atexit;
 
-  for (auto &fn : plugin_filenames) load_plugin(fn, {});
+  for (auto &fn : plugin_filenames) {
+    load_plugin(fn, {});
+  }
 
   if (!vlog_defines.empty()) {
     std::string vdef_cmd = "read -define";
-    for (const auto &vdef : vlog_defines) vdef_cmd += " " + vdef;
+    for (const auto &vdef : vlog_defines) {
+      vdef_cmd += " " + vdef;
+    }
     run_pass(vdef_cmd);
   }
 
-  while (optind < argc)
-    if (run_frontend(argv[optind++], frontend_command))
+  while (optind < argc) {
+    if (run_frontend(argv[optind++], frontend_command)) {
       run_shell = false;
+    }
+  }
 
-  if (!topmodule.empty())
+  if (!topmodule.empty()) {
     run_pass("hierarchy -top " + topmodule);
+  }
 
   if (!scriptfile.empty()) {
     if (scriptfile_tcl) {
 #ifdef YOSYS_ENABLE_TCL
-      if (Tcl_EvalFile(yosys_get_tcl_interp(), scriptfile.c_str()) != TCL_OK)
+      if (Tcl_EvalFile(yosys_get_tcl_interp(), scriptfile.c_str()) != TCL_OK) {
         log_error("TCL interpreter returned an error: %s\n", Tcl_GetStringResult(yosys_get_tcl_interp()));
+      }
 #else
       log_error("Can't exectue TCL script: this version of yosys is not built with TCL support enabled.\n");
 #endif
-    } else
+    } else {
       run_frontend(scriptfile, "script");
+    }
   }
 
-  for (auto &passes_command : passes_commands) run_pass(passes_command);
+  for (auto &passes_command : passes_commands) {
+    run_pass(passes_command);
+  }
 
-  if (run_shell)
+  if (run_shell) {
     shell(yosys_design);
-  else
+  } else {
     run_backend(output_filename, backend_command);
+  }
 
   yosys_design->check();
-  for (auto it : saved_designs) it.second->check();
-  for (auto it : pushed_designs) it->check();
+  for (auto it : saved_designs) {
+    it.second->check();
+  }
+  for (auto it : pushed_designs) {
+    it->check();
+  }
 
   if (!depsfile.empty()) {
     FILE *f = fopen(depsfile.c_str(), "wt");
-    if (f == nullptr)
+    if (f == nullptr) {
       log_error("Can't open dependencies file for writing: %s\n", strerror(errno));
+    }
     bool first = true;
     for (const auto &fn : yosys_output_files) {
       fprintf(f, "%s%s", first ? "" : " ", escape_filename_spaces(fn).c_str());
@@ -492,17 +525,19 @@ int main(int argc, char **argv) {
     }
     fprintf(f, ":");
     for (const auto &fn : yosys_input_files) {
-      if (yosys_output_files.count(fn) == 0)
+      if (yosys_output_files.count(fn) == 0) {
         fprintf(f, " %s", escape_filename_spaces(fn).c_str());
+      }
     }
     fprintf(f, "\n");
   }
 
-  if (log_expect_no_warnings && log_warnings_count_noexpect)
+  if (log_expect_no_warnings && log_warnings_count_noexpect) {
     log_error("Unexpected warnings found: %d unique messages, %d total, %d expected\n",
               GetSize(log_warnings),
               log_warnings_count,
               log_warnings_count - log_warnings_count_noexpect);
+  }
 
   if (print_stats) {
     std::string hash = log_hasher->final().substr(0, 10);
@@ -513,14 +548,17 @@ int main(int argc, char **argv) {
     yosys_xtrace = 0;
     log_spacer();
 
-    if (mode_v && !mode_q)
+    if (mode_v && !mode_q) {
       log_files.push_back(stderr);
+    }
 
-    if (log_warnings_count)
+    if (log_warnings_count) {
       log("Warnings: %d unique messages, %d total\n", GetSize(log_warnings), log_warnings_count);
+    }
 
-    if (!log_experimentals.empty())
+    if (!log_experimentals.empty()) {
       log("Warnings: %d experimental features used (not excluded with -x).\n", GetSize(log_experimentals));
+    }
 
 #ifdef _WIN32
     log("End of script. Logfile hash: %s\n", hash.c_str());
@@ -556,11 +594,12 @@ int main(int argc, char **argv) {
     int64_t                                     total_ns = 0;
     std::set<tuple<int64_t, int, std::string> > timedat;
 
-    for (auto &it : pass_register)
+    for (auto &it : pass_register) {
       if (it.second->call_counter) {
         total_ns += it.second->runtime_ns + 1;
         timedat.insert(make_tuple(it.second->runtime_ns + 1, it.second->call_counter, it.first));
       }
+    }
 
     if (timing_details) {
       log("Time spent:\n");
@@ -604,12 +643,15 @@ int main(int argc, char **argv) {
 
     f = fopen(filename.c_str(), "a+");
 
-    if (f == NULL)
+    if (f == NULL) {
       log_error("Can't create coverage file `%s'.\n", filename.c_str());
+    }
 
     log("<writing coverage file \"%s\">\n", filename.c_str());
 
-    for (auto &it : get_coverage_data()) fprintf(f, "%-60s %10d %s\n", it.second.first.c_str(), it.second.second, it.first.c_str());
+    for (auto &it : get_coverage_data()) {
+      fprintf(f, "%-60s %10d %s\n", it.second.first.c_str(), it.second.second, it.first.c_str());
+    }
 
     fclose(f);
   }
@@ -620,8 +662,9 @@ int main(int argc, char **argv) {
   yosys_atexit();
 
   memhasher_off();
-  if (call_abort)
+  if (call_abort) {
     abort();
+  }
 
   log_flush();
 #if defined(_MSC_VER)

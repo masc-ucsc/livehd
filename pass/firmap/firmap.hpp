@@ -10,11 +10,12 @@
 
 using FBMap   = absl::flat_hash_map<Node_pin::Compact_class_driver, Firrtl_bits>;  // pin->firrtl bits
 using PinMap  = absl::flat_hash_map<Node_pin, Node_pin>;                           // old_pin to new_pin for both dpin and spin
-using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;              // special case for xorr one old spin -> multi newspin
+using XorrMap = absl::flat_hash_map<Node_pin, std::vector<Node_pin>>;  // special case for xorr one old spin -> multi newspin
 
 class Firmap {
 private:
-static inline int trace_module_cnt = 0;    
+  static inline int trace_module_cnt = 0;
+
 protected:
   bool firbits_issues    = false;
   bool firmap_issues     = false;
@@ -24,7 +25,7 @@ protected:
   absl::node_hash_map<Lgraph *, PinMap>  &pinmaps;  // pin maps center
   absl::node_hash_map<Lgraph *, XorrMap> &spinmaps_xorr;
   enum class Attr { Set_other, Set_ubits, Set_sbits, Set_max, Set_min, Set_dp_assign };
-  
+
   static Attr     get_key_attr(std::string_view key);
   FBMap::iterator get_fbits_from_hierarchy(XEdge &e);
 

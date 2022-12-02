@@ -71,8 +71,9 @@ Opt_lnast::Opt_lnast(const Eprp_var &var) {
   (void)var;
   // could check for options
 
-  if (var.has_label("top"))
+  if (var.has_label("top")) {
     top = var.get("top");
+  }
 
   needs_hierarchy = false;
   hier_mode       = false;
@@ -1164,10 +1165,11 @@ void Opt_lnast::reconstruct_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_
 void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
   st.function_scope(ln->get_top_module_name());
 
-  if (ln->get_top_module_name() == top || top.empty())
+  if (ln->get_top_module_name() == top || top.empty()) {
     hier_mode = true;
-  else
+  } else {
     hier_mode = false;
+  }
 
   const auto &data = ln->get_data(Lnast_nid::root());
   if (!data.type.is_top()) {
@@ -1183,10 +1185,11 @@ void Opt_lnast::opt(const std::shared_ptr<Lnast> &ln) {
 }
 
 void Opt_lnast::reconstruct(const std::shared_ptr<Lnast> &ln, Lnast_create &ln2) {
-  if (ln->get_top_module_name() == top || top.empty())
+  if (ln->get_top_module_name() == top || top.empty()) {
     hier_mode = true;
-  else
+  } else {
     hier_mode = false;
+  }
 
   const auto &data = ln->get_data(Lnast_nid::root());
   if (!data.type.is_top()) {
@@ -1197,6 +1200,7 @@ void Opt_lnast::reconstruct(const std::shared_ptr<Lnast> &ln, Lnast_create &ln2)
   reconstruct_stmts(ln, idx, ln2);
 
   auto outputs = st.leave_scope();
-  if (outputs)
+  if (outputs) {
     outputs->dump();
+  }
 }

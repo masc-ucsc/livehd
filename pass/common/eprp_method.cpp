@@ -24,8 +24,9 @@ std::string_view Eprp_method::get_label_help(std::string_view label) const {
 
 std::pair<bool, std::string> Eprp_method::check_labels(const Eprp_var &var) const {
   for (const auto &l : labels) {
-    if (!l.second.required)
+    if (!l.second.required) {
       continue;
+    }
 
     if (!var.has_label(l.first)) {
       std::string err_msg(fmt::format("method {} requires label {}:, but it is missing", name, l.first));

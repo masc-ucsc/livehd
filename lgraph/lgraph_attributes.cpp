@@ -46,8 +46,9 @@ void Lgraph_attributes::set_type(Index_id nid, const Ntype_op op) {
       down_class_map.erase(it2);
     }
     subid_map.erase(it);
-  } else if (type == Ntype_op::LUT)
+  } else if (type == Ntype_op::LUT) {
     lut_map.erase(Node::Compact_class(nid));
+  }
 
   node_internal[nid].set_type(op);
 }

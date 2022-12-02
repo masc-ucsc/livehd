@@ -12,6 +12,7 @@
 class Bitwidth {
 private:
   static inline int trace_module_cnt = 0;
+
 protected:
   int  max_iterations;
   bool hier;

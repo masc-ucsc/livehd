@@ -6,6 +6,7 @@
 class Inou_slang : public Pass {
 private:
   static inline int trace_module_cnt = 0;
+
 protected:
   void check_lec(Lgraph *g);
 

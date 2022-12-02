@@ -1,6 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "eprp_pipe.hpp"
+
 #include "eprp.hpp"
 #include "perf_tracing.hpp"
 
@@ -10,8 +11,9 @@ void Pipe_step::run(Eprp_var &last_cmd_var) {
   last_cmd_var.add(var_fields);
 
   for (const auto &label : m.labels) {
-    if (!label.second.default_value.empty() && !last_cmd_var.has_label(label.first))
+    if (!label.second.default_value.empty() && !last_cmd_var.has_label(label.first)) {
       last_cmd_var.add(label.first, label.second.default_value);
+    }
   }
 
   auto [err, err_msg] = m.check_labels(last_cmd_var);
@@ -28,18 +30,20 @@ void Pipe_step::run(Eprp_var &last_cmd_var) {
 }
 
 void Eprp_pipe::run() {
-  if (steps.empty())
+  if (steps.empty()) {
     return;
+  }
 
   for (auto i = 0u; i < steps.size(); ++i) {
-    if ((i + 1) < steps.size())
+    if ((i + 1) < steps.size()) {
       steps[i].next_step = &steps[i + 1];
-    else
+    } else {
       assert(steps[i].next_step == nullptr);
+    }
   }
 
   static Eprp_var last_cmd_var;
-  last_cmd_var.clear(); // weird but better for benchmarkng
+  last_cmd_var.clear();  // weird but better for benchmarkng
 
   steps[0].run(last_cmd_var);
 }

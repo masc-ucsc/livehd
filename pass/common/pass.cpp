@@ -32,7 +32,7 @@ std::string Pass::get_path(const Eprp_var &var) const {
 
   if (var.has_label("path")) {
     _path = var.get("path");
-  }else{
+  } else {
     _path = "lgdb";
   }
   if (!setup_directory(_path)) {
@@ -96,15 +96,17 @@ void Pass::register_inou(std::string_view pname, Eprp_method &method) {
 }
 
 bool Pass::setup_directory(std::string_view dir) const {
-  if (dir == ".")
+  if (dir == ".") {
     return true;
+  }
 
   struct stat sb;
 
   std::string sdir(dir);
 
-  if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode))
+  if (stat(sdir.c_str(), &sb) == 0 && S_ISDIR(sb.st_mode)) {
     return true;
+  }
 
   int e = mkdir(sdir.c_str(), 0755);
   if (e < 0) {

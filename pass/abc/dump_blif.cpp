@@ -101,8 +101,9 @@ void Pass_abc::gen_io_conn(const Lgraph *g, std::ofstream &fs) {
   for (const auto &idx : graph_info->graphio_output_id) {
     auto src = graph_info->primary_output_conn[idx];
     assert(src.size() == 1);
-    if (g->get_node_wirename(src[0].idx) == g->get_node_wirename(idx))
+    if (g->get_node_wirename(src[0].idx) == g->get_node_wirename(idx)) {
       continue;
+    }
     fs << ".names ";
     for (const auto &inp : src) {
       write_src_info(g, inp, fs);

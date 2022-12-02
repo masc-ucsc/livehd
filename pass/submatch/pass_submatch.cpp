@@ -1,10 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "pass_submatch.hpp"
 
 #include <queue>
 #include <string>
 
-#include "pass_submatch.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "node.hpp"
@@ -115,8 +115,9 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
   });
 
   for (auto &node : g->forward()) {
-    if (node.get_num_out_edges() == 1)
+    if (node.get_num_out_edges() == 1) {
       continue;
+    }
     auto h_root              = hash_mffc_root(node);
     mffc[node.get_compact()] = {mffc_id++, h_root, 0};
     mffc_root.push_back({node.get_compact(), h_root});
@@ -134,13 +135,15 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
         auto nc_sink = fringe.front().nc;
         auto depth   = fringe.front().depth;
         auto h_sink  = fringe.front().h;
-        if (depth + 1 > mffc_depth)
+        if (depth + 1 > mffc_depth) {
           break;
+        }
         fringe.pop();
         for (auto e : nc_sink.get_node(g).inp_edges()) {
           auto nc_driver = e.driver.get_node().get_compact();
-          if (mffc_root_set.contains(nc_driver) || mffc.contains(nc_driver))
+          if (mffc_root_set.contains(nc_driver) || mffc.contains(nc_driver)) {
             continue;
+          }
           auto h_driver   = hash_mffc_node(e.driver.get_node(), h_sink, e.sink.get_pid());
           mffc[nc_driver] = {mffc[nc_sink].id, h_driver, depth + 1};
           fringe.push({nc_driver, h_driver, depth + 1});
@@ -148,8 +151,9 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
         }
         mffc_size++;
       }
-      if (i_hash.empty())
+      if (i_hash.empty()) {
         break;
+      }
       std::sort(i_hash.begin(), i_hash.end());
       uint64_t h_mffc = lh::woothash64(i_hash.data(), i_hash.size() * 8);
       h_mffc ^= mffc_depth_tree[id].back().h;
@@ -174,8 +178,9 @@ void pass_submatch::find_mffc_group(Lgraph *g) {
     uint32_t d         = mffc_depth_tree[id].size() - 1;
     uint64_t h         = mffc_depth_tree[id][d].h;
     uint32_t tree_size = mffc_depth_tree[id][d].size;
-    if (tree_size > 100)
+    if (tree_size > 100) {
       ungrouped.insert(id);
+    }
     if (hash2group_id.contains(h)) {
       mffc_group[hash2group_id[h]].mffc_set.insert(id);
     } else {
@@ -202,8 +207,9 @@ void pass_submatch::find_subs(Lgraph *g) {
     while (!node_queue.empty()) {
       auto node = Node(g, node_queue.front());
       node_queue.pop();
-      if (visited.count(node.get_compact()))
+      if (visited.count(node.get_compact())) {
         continue;
+      }
       sorted_compact_nodes.emplace_back(node.get_compact());
       visited.insert(node.get_compact());
       for (auto e : node.inp_edges()) {
@@ -242,8 +248,9 @@ void pass_submatch::find_subs(Lgraph *g) {
           max_depth = std::max(subtree_depth, max_depth);
         }
       }
-      if (depth != max_depth)
+      if (depth != max_depth) {
         break;
+      }
       std::sort(i_hash.begin(), i_hash.end());
       uint64_t h = lh::woothash64(i_hash.data(), i_hash.size() * 8);
       uint64_t n = static_cast<uint64_t>(node.get_type_op());
@@ -292,10 +299,12 @@ void pass_submatch::find_subs(Lgraph *g) {
         has_output = true;
         break;
       }
-      if (!has_output)
+      if (!has_output) {
         break;
-      if (node2depth_hash[node.get_compact()].size() < height)
+      }
+      if (node2depth_hash[node.get_compact()].size() < height) {
         break;
+      }
       h ^= node2depth_hash[node.get_compact()][height - 1];
       h = lh::waterhash(&h, 4, pid & 0xFFFF);
       node2height_hash[compact_node].emplace_back(Root_hash(node.get_compact(), h));
@@ -351,10 +360,12 @@ void pass_submatch::find_subs(Lgraph *g) {
     for (auto root : root_set) {
       absl::flat_hash_set<Node::Compact>      tree_node_set;
       std::function<void(Node::Compact, int)> traverse_tree = [&](Node::Compact nc, int depth) -> void {
-        if (depth > d_best)
+        if (depth > d_best) {
           return;
-        if (tree_node_set.count(nc))
+        }
+        if (tree_node_set.count(nc)) {
           return;
+        }
         tree_node_set.insert(nc);
         if (global_node_set.count(nc)) {
           shared_node_set.insert(nc);
@@ -366,7 +377,9 @@ void pass_submatch::find_subs(Lgraph *g) {
         }
       };
       traverse_tree(root, 0);
-      for (auto nc : tree_node_set) global_node_set.insert(nc);
+      for (auto nc : tree_node_set) {
+        global_node_set.insert(nc);
+      }
     }
 
     fmt::print("#Nodes:         {}\n", sorted_compact_nodes.size());
@@ -377,8 +390,9 @@ void pass_submatch::find_subs(Lgraph *g) {
     absl::flat_hash_map<uint64_t, absl::flat_hash_set<Node::Compact>> hash2leaf;
     for (const auto &[nc, vec] : node2height_hash) {
       for (size_t d = 0; d < d_best && d < vec.size(); ++d) {
-        if (shared_node_set.count(nc))
+        if (shared_node_set.count(nc)) {
           continue;
+        }
         if (root_set.count(vec[d].root)) {
           leaf2root[nc] = vec[d].root;
           hash2leaf[vec[d].hash].insert(nc);

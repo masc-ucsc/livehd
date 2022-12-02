@@ -134,7 +134,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
   for (const auto &[key, val] : inp_bw) {
     auto i_val = str_tools::to_i(val);
 
-    if (!(i_val < 2))
+    if (!(i_val < 2)) {
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -142,7 +142,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(std::to_string(i_val - 1), ":0]\", vcd::VariableType::wire, ", val, ");\n"));
-    else
+    } else {
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -151,10 +151,11 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       "\", vcd::VariableType::wire, ",
                       val,
                       ");\n");
+    }
   }
   for (auto const &[key, val] : outp_bw) {
     auto i_val = str_tools::to_i(val);
-    if (!(i_val < 2))  // was (val>"1") before std::string
+    if (!(i_val < 2)) {  // was (val>"1") before std::string
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -162,7 +163,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(std::to_string(i_val - 1), ":0]\", vcd::VariableType::wire, ", val, ");\n"));
-    else
+    } else {
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -171,10 +172,11 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       "\", vcd::VariableType::wire, ",
                       val,
                       ");\n");
+    }
   }
   for (auto const &[key, val] : reg_bw) {
     auto i_val = str_tools::to_i(val);
-    if (!(i_val < 2))
+    if (!(i_val < 2)) {
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -182,7 +184,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       key,
                       "[",
                       absl::StrCat(std::to_string(i_val - 1), ":0]\", vcd::VariableType::wire, ", val, ");\n"));
-    else
+    } else {
       absl::StrAppend(&vcd_varptrs,
                       "  vcd::VarPtr vcd_",
                       key,
@@ -191,6 +193,7 @@ void Cpp_parser::set_supp_buffer_to_print(std::string_view modname) {
                       "\", vcd::VariableType::wire, ",
                       val,
                       ");\n");
+    }
   }
 
   auto vcd_funcs = absl::StrCat("  ",
@@ -228,10 +231,11 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
   }
 
   std::string no_prefix_key;
-  if (key[1] == '.')
+  if (key[1] == '.') {
     no_prefix_key = key.substr(2);
-  else
+  } else {
     no_prefix_key = key.substr(1);
+  }
 
   assert(key.size() >= 1);
   if (key[0] == '$') {  // it is i/p
@@ -241,10 +245,11 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
       sys_clock_bits = ref;
     } else {
       inp_bw.insert(std::pair<std::string, std::string>(no_prefix_key, ref));
-      if (inps_csv.empty())
+      if (inps_csv.empty()) {
         absl::StrAppend(&inps_csv, "UInt<", ref, "> ", no_prefix_key);
-      else
+      } else {
         absl::StrAppend(&inps_csv, ", UInt<", ref, "> ", no_prefix_key);
+      }
     }
   } else if (key[0] == '%') {  // it is o/p
     outp_bw.insert(std::pair<std::string, std::string>(no_prefix_key, ref));
@@ -259,26 +264,38 @@ bool Cpp_parser::set_convert_parameters(std::string_view key, std::string_view r
 
 void Prp_parser::dump_maps() const {
   fmt::print("printing the unsigned vector\n");
-  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) {
+    fmt::print("var:{}\n", elem);
+  }
 }
 void Prp_parser::call_dump_maps() const { Prp_parser::dump_maps(); }
 void Ver_parser::dump_maps() const {
   fmt::print("printing the unsigned vector\n");
-  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) {
+    fmt::print("var:{}\n", elem);
+  }
 }
 void Ver_parser::call_dump_maps() const { Ver_parser::dump_maps(); }
 void Cpp_parser::dump_maps() const {
   fmt::print("printing I/P bitwidth values:\n");
-  for (const auto &elem : inp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : inp_bw) {
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  }
 
   fmt::print("printing O/P bitwidth values:\n");
-  for (const auto &elem : outp_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : outp_bw) {
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  }
 
   fmt::print("printing reg bitwidth values:\n");
-  for (const auto &elem : reg_bw) fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  for (const auto &elem : reg_bw) {
+    fmt::print("\tkey: {}, value: {}\n", elem.first, elem.second);
+  }
 
   fmt::print("printing the unsigned vector\n");
-  for (const auto &elem : unsigned_vars) fmt::print("var:{}\n", elem);
+  for (const auto &elem : unsigned_vars) {
+    fmt::print("var:{}\n", elem);
+  }
 }
 void Cpp_parser::call_dump_maps() const { Cpp_parser::dump_maps(); }
 int  Cpp_parser::indent_final_system() const { return 1; }

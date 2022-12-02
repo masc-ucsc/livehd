@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+
 #include "absl/container/flat_hash_map.h"
 #include "ann_file_loc.hpp"
 #include "ann_place.hpp"
@@ -60,11 +61,11 @@ public:
   [[nodiscard]] const Node_place_map &get_node_place_map() const { return node_place_map; };
   [[nodiscard]] Node_place_map       *ref_node_place_map() { return &node_place_map; };
 
-  using Node_loc_map = absl::flat_hash_map<Node::Compact_class, std::pair<uint64_t,uint64_t>>;//pos1 and pos2 from LN
+  using Node_loc_map = absl::flat_hash_map<Node::Compact_class, std::pair<uint64_t, uint64_t>>;  // pos1 and pos2 from LN
   [[nodiscard]] const Node_loc_map &get_node_loc_map() const { return node_loc_map; };
   [[nodiscard]] Node_loc_map       *ref_node_loc_map() { return &node_loc_map; };
 
-  using Node_fname_map = absl::flat_hash_map<Node::Compact_class, std::string>;//source file name from LN
+  using Node_fname_map = absl::flat_hash_map<Node::Compact_class, std::string>;  // source file name from LN
   [[nodiscard]] const Node_fname_map &get_node_fname_map() const { return node_fname_map; };
   [[nodiscard]] Node_fname_map       *ref_node_fname_map() { return &node_fname_map; };
 
@@ -87,7 +88,7 @@ protected:
   Node_name_map  node_name_map;
   Node_color_map node_color_map;
   Node_place_map node_place_map;
-  Node_loc_map node_loc_map;
+  Node_loc_map   node_loc_map;
   Node_fname_map node_fname_map;
 
   void clear() override;

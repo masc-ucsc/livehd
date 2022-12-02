@@ -19,8 +19,9 @@ uint8_t Prp::rule_start(std::list<std::tuple<Rule_id, Token_entry>> &pass_list) 
   INIT_FUNCTION("rule_start.");
 
   eat_comments();
-  if (scan_is_end())
+  if (scan_is_end()) {
     return true;
+  }
 
   base_token = scan_token_entry() - 1;
   if (!CHECK_RULE(&Prp::rule_code_blocks)) {
@@ -537,9 +538,9 @@ uint8_t Prp::rule_punch_rhs(std::list<std::tuple<Rule_id, Token_entry>> &pass_li
 
   if (CHECK_RULE(&Prp::rule_identifier)) {
     while (next) {
-      if (!SCAN_IS_TOKEN(Token_id_dot))
+      if (!SCAN_IS_TOKEN(Token_id_dot)) {
         next = false;
-      else {
+      } else {
         if (!CHECK_RULE(&Prp::rule_identifier)) {
           PSEUDO_FAIL();
           next = false;
@@ -647,8 +648,9 @@ uint8_t Prp::rule_fcall_explicit(std::list<std::tuple<Rule_id, Token_entry>> &pa
           PSEUDO_FAIL();
         }
       }
-    } else
+    } else {
       next = false;
+    }
   }
 
   // optional
@@ -687,8 +689,9 @@ uint8_t Prp::rule_fcall_arg_notation(std::list<std::tuple<Rule_id, Token_entry>>
           next = false;
         }
       }
-    } else
+    } else {
       next = false;
+    }
   }
   // optional
   SCAN_IS_TOKEN(Token_id_comma, Prp_rule_fcall_arg_notation);
@@ -1156,8 +1159,9 @@ uint8_t Prp::rule_identifier(std::list<std::tuple<Rule_id, Token_entry>> &pass_l
 
   // optional
   bool op = false;
-  if (SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_tilde, Prp_rule_identifier))
+  if (SCAN_IS_TOKEN(Token_id_bang, Prp_rule_identifier) || SCAN_IS_TOKEN(Token_id_tilde, Prp_rule_identifier)) {
     op = true;
+  }
 
   Token_id toks[] = {Token_id_register, Token_id_input, Token_id_output, Token_id_alnum, Token_id_percent, Token_id_dollar};
   if (!SCAN_IS_TOKENS(toks, 6, Prp_rule_reference)) {
@@ -1420,8 +1424,9 @@ uint8_t Prp::rule_relational_expression(std::list<std::tuple<Rule_id, Token_entr
         RULE_FAILED("Failed Prp_rule_relational_expression; couldn't find an answering additive_expression.\n");
       }
     } else {
-      if (eos)
+      if (eos) {
         loc_list.pop_back();
+      }
       go_back(tokens_consumed - cur_tokens);
       cur_line = lines_start;
       next     = false;
@@ -1780,8 +1785,9 @@ inline void Prp::check_lb() {
       scan_next();
       tokens_consumed++;
       next = true;
-    } else
+    } else {
       next = false;
+    }
   }
 }
 
@@ -1797,8 +1803,9 @@ inline void Prp::check_ws() {
       scan_next();
       tokens_consumed++;
       next = true;
-    } else
+    } else {
       next = false;
+    }
   }
 }
 
@@ -1819,8 +1826,9 @@ inline bool Prp::check_eos() {
       scan_next();
       tokens_consumed++;
       found = true;
-    } else
+    } else {
       next = false;
+    }
   }
 
   if (found) {
@@ -1956,8 +1964,9 @@ inline bool Prp::unconsume_token() {
 }
 
 bool Prp::go_back(uint64_t num_tok) {
-  if (num_tok == 0)
+  if (num_tok == 0) {
     return true;
+  }
   bool ok = false;
   PRINT_DBG_AST("Going back {} token(s); total token(s) consumed: {}.\n", num_tok, tokens_consumed);
   for (uint64_t i = 0; i < num_tok; i++) {
@@ -2033,8 +2042,9 @@ uint8_t Prp::check_function(uint8_t (Prp::*rule)(std::list<std::tuple<Rule_id, T
 bool Prp::chk_and_consume(Token_id tok, Rule_id rid, uint64_t *sub_cnt, std::list<std::tuple<Rule_id, Token_entry>> &loc_list) {
   // PRINT_DBG_AST("Checking  token {} from rule {}.\n", scan_text(scan_token_entry()), rule_id_to_string(rid));
   if (tok != TOKEN_ID_ANY) {
-    if (!scan_is_token(tok))
+    if (!scan_is_token(tok)) {
       return false;
+    }
   }
 
   auto start_line = cur_line;
@@ -2130,8 +2140,9 @@ bool Prp::chk_and_consume_options(Token_id *toks, uint8_t tok_cnt, Rule_id rid, 
       break;
     }
   }
-  if (!found)
+  if (!found) {
     return false;
+  }
 
   auto start_pos  = cur_pos;
   auto start_line = cur_line;

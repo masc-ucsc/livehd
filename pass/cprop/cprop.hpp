@@ -10,9 +10,9 @@
 
 class Cprop {
 private:
-  bool hier;
-  bool tuple_issues;
-  bool tuple_found;  // set during scalar_pass
+  bool              hier;
+  bool              tuple_issues;
+  bool              tuple_found;  // set during scalar_pass
   static inline int trace_module_cnt = 0;
 
   inline static Node_pin invalid_pin;  // just for speed
@@ -73,10 +73,10 @@ protected:
   bool tuple_tuple_get(Node &node);
   void tuple_attr_set(const Node &node);
 
-  bool scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered);
-  void scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
+  bool     scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered);
+  void     scalar_sext(Node &node, XEdge_iterator &inp_edges_ordered);
   Node_pin try_find_single_driver_pin(Node &node, int pos);
-  bool scalar_get_mask(Node &node);
+  bool     scalar_get_mask(Node &node);
 
   // io construction
   void try_create_graph_output(Node &node, const std::shared_ptr<Lgtuple const> &tup);

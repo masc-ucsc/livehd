@@ -27,8 +27,9 @@ void Top_api::files(Eprp_var &var) {
     std::vector<std::string> sort_files;
     struct dirent           *dp;
     while ((dp = readdir(dirp)) != NULL) {
-      if (dp->d_type == DT_DIR)
+      if (dp->d_type == DT_DIR) {
         continue;
+      }
       std::string filename(dp->d_name);  // string looks for 0 sequence
       if (match.empty()) {
         if (filter.empty()) {
@@ -49,10 +50,11 @@ void Top_api::files(Eprp_var &var) {
     std::sort(sort_files.begin(), sort_files.end());
     std::string files;
     for (const auto &s : sort_files) {
-      if (!files.empty())
+      if (!files.empty()) {
         absl::StrAppend(&files, ",", src_path, "/", s);
-      else
+      } else {
         files = absl::StrCat(src_path, "/", s);
+      }
     }
 
     var.add("files", files);
