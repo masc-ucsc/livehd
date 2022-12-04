@@ -15,9 +15,14 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "pass.hpp"
-// #include "absl/container/btree_set.h"
-#include "absl/container/internal/raw_hash_set.h"
-#define DE_DUP  // use set
+#include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/node_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+//#include "absl/container/btree_set.h"
+#include "absl/container/internal/raw_hash_set.h" 
+#define DE_DUP //use set 
+
 
 class Traverse_lg : public Pass {
 public:
@@ -74,14 +79,18 @@ private:
   setMap nodeIOmap;
 #endif
 */
-  // protected:
-  // FOR SET PART:
-  void do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap);
-  void make_io_maps(Lgraph *lg);
-  absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> inp_map_of_sets;
-  absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> out_map_of_sets;
-  void                                                                                     print_io_map(
-                                                                                          const absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
+//protected:
+  //FOR SET PART:
+  void do_travers(Lgraph* g, Traverse_lg::setMap_pairKey &nodeIOmap);
+  void boundary_traversal(Lgraph* lg);
+  void fast_pass_for_inputs(Lgraph* lg);
+  void fwd_traversal_for_inp_map(Lgraph* lg);
+  std::vector<Node_pin::Compact_flat> traverse_order;
+  void bwd_traversal_for_out_map();
+  void make_io_maps(Lgraph* lg);
+  absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>  > inp_map_of_sets;
+  absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>  > out_map_of_sets;
+  void print_io_map(const absl::node_hash_map< Node_pin::Compact_flat  , absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
