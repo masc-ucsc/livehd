@@ -1,16 +1,17 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <iostream>
-#include <fstream>
-#include <utility>
-#include <string>
-#include <algorithm>
-
 #include "traverse_lg.hpp"
+
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <utility>
+
 #include "lgedgeiter.hpp"
 #include "perf_tracing.hpp"
 
-int VISITED_COLORED = 401;
+int                VISITED_COLORED = 401;
 static Pass_plugin sample("traverse_lg", Traverse_lg::setup);
 
 void Traverse_lg::setup() {
@@ -67,9 +68,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap)
   if (!do_matching) {
     make_io_maps(lg);
     fmt::print("\ninp_map_of_sets:\n");
-    //print_io_map(inp_map_of_sets);
+    // print_io_map(inp_map_of_sets);
     fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
-    //print_io_map(out_map_of_sets);
+    // print_io_map(out_map_of_sets);
     fmt::print("\n out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
   }
   I(false, "\nintended exit!\n");
@@ -829,15 +830,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap)
   }
 }
 
-void Traverse_lg::make_io_maps(Lgraph* lg){
-
+void Traverse_lg::make_io_maps(Lgraph* lg) {
   boundary_traversal(lg);
 
-//   fmt::print("Starting IN_map_of_sets\n");
-//   print_io_map(inp_map_of_sets);
-//   fmt::print("\nStarting out_map_of_sets\n");
-//   print_io_map(out_map_of_sets);
- 
+  //   fmt::print("Starting IN_map_of_sets\n");
+  //   print_io_map(inp_map_of_sets);
+  //   fmt::print("\nStarting out_map_of_sets\n");
+  //   print_io_map(out_map_of_sets);
+
   /*in fwd, flops are visited last. Thus this fast pass:*/
   fast_pass_for_inputs(lg);
 
@@ -846,31 +846,27 @@ void Traverse_lg::make_io_maps(Lgraph* lg){
   fwd_traversal_for_inp_map(lg);
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
-  bwd_traversal_for_out_map(); 
-
+  bwd_traversal_for_out_map();
 }
 
-void Traverse_lg::boundary_traversal(Lgraph* lg){
-
+void Traverse_lg::boundary_traversal(Lgraph* lg) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
-  lg->each_graph_input ([this](const Node_pin dpin){
-      for (auto sink_dpin: dpin.out_sinks()) {
-          inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
-      }
-      });
+  lg->each_graph_input([this](const Node_pin dpin) {
+    for (auto sink_dpin : dpin.out_sinks()) {
+      inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
+    }
+  });
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
-  lg->each_graph_output ([this](const Node_pin dpin){
-      auto out_node  = dpin.get_node();
-      for (auto driver_dpin: out_node.inp_drivers()) {
-        out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
-      }
-      });
-
+  lg->each_graph_output([this](const Node_pin dpin) {
+    auto out_node = dpin.get_node();
+    for (auto driver_dpin : out_node.inp_drivers()) {
+      out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+    }
+  });
 }
 
 void Traverse_lg::fast_pass_for_inputs(Lgraph* lg) {
-
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
@@ -899,11 +895,10 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg) {
       }
     }
   }
-
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
-  for (const auto &node: lg->forward(true)) {
+  for (const auto& node : lg->forward(true)) {
     const auto node_dpin_cf = get_dpin_cf(node);
     if (!node.is_type_const()) {
       traverse_order.emplace_back(node_dpin_cf);
@@ -919,26 +914,25 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
       if (is_loop_stop) {
         inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
       } else {
-        const auto self_set=inp_map_of_sets.find(node_dpin_cf);
-        if(self_set!=inp_map_of_sets.end()) {
+        const auto self_set = inp_map_of_sets.find(node_dpin_cf);
+        if (self_set != inp_map_of_sets.end()) {
           inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
         }
       }
     }
   }
-
 }
 
 void Traverse_lg::bwd_traversal_for_out_map() {
-
-  for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit=traverse_order.rbegin(); rit != traverse_order.rend(); ++rit) {//const iter for const vec
+  for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
+       ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
     auto node         = Node_pin("lgdb", node_dpin_cf).get_node();
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
-   
-    const absl::flat_hash_set<Node_pin::Compact_flat> *self_set=nullptr;
-    auto it = out_map_of_sets.find(node_dpin_cf);
-    if(it!=out_map_of_sets.end()) {
+
+    const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
+    auto                                               it       = out_map_of_sets.find(node_dpin_cf);
+    if (it != out_map_of_sets.end()) {
       self_set = &it->second;
     }
 
@@ -951,18 +945,17 @@ void Traverse_lg::bwd_traversal_for_out_map() {
       if (is_loop_stop) {
         out_map_of_sets[inp_cf].insert(node_dpin_cf);
       } else {
-        if(self_set) {
+        if (self_set) {
           out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end());
         }
       }
     }
-    //print_io_map(out_map_of_sets);
+    // print_io_map(out_map_of_sets);
   }
 }
 
 void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::string> synth_set,
                                  const std::vector<Node::Compact_flat>& synth_val, Traverse_lg::setMap_pairKey& cellIOMap_orig) {
-
   Node this_node = start_node;
   for (const auto& oute : this_node.out_edges()) {
     const auto s = oute.sink;
