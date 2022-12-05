@@ -905,6 +905,12 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
     }
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
+    const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
+    auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
+    if (it != inp_map_of_sets.end()) {
+      self_set = &it->second;
+    }
+
     for (auto e : node.out_edges()) {
       if (e.sink.get_node().is_type_loop_first()) {
         /*need not keep outputs of const/graphIO in in_map_of_sets*/
@@ -914,9 +920,8 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
       if (is_loop_stop) {
         inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
       } else {
-        const auto self_set = inp_map_of_sets.find(node_dpin_cf);
-        if (self_set != inp_map_of_sets.end()) {
-          inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
+        if (self_set) {
+          inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
         }
       }
     }
