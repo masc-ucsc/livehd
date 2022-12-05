@@ -62,6 +62,27 @@ Summary of sop tasks:
   from text to binary
 
 
+## [medium] Pyrope v3 upass code gen
+
+The inou/codegen directory has a Pyrope v2 code generator. It traverses over the LNAST
+and creates a Pyrope.
+
+The idea is to create a upass/prpgen that it is mostly based on codegen but
+without the verilog/C++ output. The reason for not patching codegen is that it
+should be kept until the Pyrope v3 is fully working. At which time, we can
+fully deprecase Pyrope v2.
+
+There are a few differences with inou/codegen:
+
+* No C++ and Verilog code gen in upass/prpgen
+
+* New syntax like attributes and other syntax like types. The new Pyrope v3 is
+  in inou/prp, inou/pyrope has Pyrope v2.
+
+* Use the upass API not a separate pass API. The upass stands for micro-pass
+  and it allows to combine multiple passes as the tree iterates.
+
+
 ## [medium] Large HIF files
 
 Not much testing on large HIF files that require multiple IDs (0.??, 1.??). It
