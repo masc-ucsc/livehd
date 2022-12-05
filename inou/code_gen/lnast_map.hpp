@@ -17,7 +17,7 @@ protected:
 
                                              "&",          "|",         "~",         "^",
 
-                                             "ror",
+                                             "ror",        "rand", "rxor", "popcount",
 
                                              "and",        "or",        "!",
 
@@ -31,13 +31,13 @@ protected:
                                              "is",         "!=",        "==",        "<",         "<=",
                                              ">",          ">=",
 
-                                             "ref",        "const",
+                                             "ref",        "const",     "range",
 
                                              "++",         "++",        "tuple_get", "tuple_set",
 
                                              "attr_set",   "attr_get",
 
-                                             "error_flag", "phi",       "hot_phi"};
+                                             "cassert",    "error_flag", "phi",       "hot_phi"};
 
   constexpr static std::array namemap_verilog{
       "invalid",
@@ -60,6 +60,9 @@ protected:
       "^",
 
       "ror",
+      "rand",
+      "rxor",
+      "popcount",
 
       "and",
       "or",
@@ -91,6 +94,7 @@ protected:
 
       "ref",
       "const",
+      "range",
 
       "tuple_concat",
       "tuple_add",
@@ -100,6 +104,7 @@ protected:
       "attr_set",
       "attr_get",
 
+      "cassert",
       "error_flag",
       "phi",
       "hotphi",
@@ -127,6 +132,9 @@ protected:
       "^",  // not
 
       "ror",
+      "rand",
+      "rxor",
+      "popcount",
 
       "&&",  // logical_and
       "||",  // logical_or
@@ -158,6 +166,7 @@ protected:
 
       "ref",
       "const",
+      "range",
 
       "tuple_concat",  // ++
       "tuple_add",
@@ -167,6 +176,7 @@ protected:
       "attr_set",
       "attr_get",
 
+      "cassert",
       "error_flag",
       "phi",
       "hotphi",
