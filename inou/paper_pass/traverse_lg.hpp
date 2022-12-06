@@ -57,25 +57,6 @@ private:
     return result;
   }
   std::set<Node::Compact_flat> combo_loop_vec;
-  //  struct intermediate_inputs {
-  //    std::vector<Node_pin/*FIXME?: ::Compact_flat*/> inputs_of_node;
-  //    bool ins_calc_completed;//inputs_of_node calculated for this node?
-  //  };
-  //  struct intermediate_outputs {
-  //    std::vector<Node_pin/*FIXME?: ::Compact_flat*/> outputs_of_node;
-  //    bool outs_calc_completed;//inputs_of_node calculated for this node?
-  //  };
-  //  typedef struct intermediate_inputs intermediateInp;
-  //  typedef struct intermediate_outputs intermediateOut;
-  //  absl::node_hash_map<Node::Compact_flat, intermediateInp> intermediate_inputs_map;
-  //  absl::node_hash_map<Node::Compact_flat, intermediateOut> intermediate_outputs_map;
-  /*
-#ifdef DE_DUP
-  setMap nodeIOmap;
-#endif
-*/
-  // protected:
-  // FOR SET PART:
   void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap);
   void                                boundary_traversal(Lgraph *lg);
   void                                fast_pass_for_inputs(Lgraph *lg);
