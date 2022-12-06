@@ -67,11 +67,48 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap)
 
   if (!do_matching) {
     make_io_maps(lg);
-    fmt::print("\ninp_map_of_sets:\n");
+
+    /*//FIXME: remove; for DBG only;*/
+    std::vector<unsigned int> inp_keys;
+    std::vector<Node> inp_keys_n;
+    std::vector<unsigned int> out_keys;
+    std::vector<Node> out_keys_n;
+    std::vector<unsigned int> diff1;
+    std::vector<unsigned int> diff2;
+    for(auto it= inp_map_of_sets.begin(); it != inp_map_of_sets.end(); ++it) {
+      inp_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
+      inp_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
+    }
+    for(auto it= out_map_of_sets.begin(); it != out_map_of_sets.end(); ++it) {
+      out_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
+      out_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
+    }
+    std::sort(std::begin(inp_keys), std::end(inp_keys));
+    std::sort(std::begin(out_keys), std::end(out_keys));
+    std::set_difference(inp_keys.begin(), inp_keys.end(), out_keys.begin(), out_keys.end(),
+        std::inserter(diff1, diff1.begin()));
+    fmt::print("\ninp_map_of_sets - out_map_of_sets (keys): {}\n", diff1.size());
+    for(auto i:diff1) {fmt::print("{}\t",i);}
     // print_io_map(inp_map_of_sets);
     fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
+    std::set_difference(out_keys.begin(), out_keys.end(), inp_keys.begin(), inp_keys.end(),
+        std::inserter(diff2, diff2.begin()));
+    fmt::print("\nout_map_of_sets - inp_map_of_sets (keys) : {} \n", diff2.size());
+    for(auto i:diff2) {fmt::print("{}\t",i);}
     // print_io_map(out_map_of_sets);
     fmt::print("\n out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
+    fmt::print("\n----");
+
+    for(auto i : inp_keys_n){
+      if (std::find(diff1.begin(), diff1.end(), i.get_nid().value) != diff1.end() )  {
+        i.dump();
+        fmt::print("\n----");
+      }
+    }
+    /*^^FIXME: remove; for DBG only;*/
+    // fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
+    // print_io_map(out_map_of_sets);
+    // fmt::print("\n out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
   }
   I(false, "\nintended exit!\n");
 
@@ -947,6 +984,9 @@ void Traverse_lg::bwd_traversal_for_out_map() {
         continue;
       }
       auto inp_cf = get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
+      if (Node_pin("lgdb", inp_cf).get_node().get_nid().value == 5869) {  //FIXME: remove; for DBG only;
+        fmt::print("Hit it!");                                            //FIXME: remove; for DBG only; 
+      }                                                                   //FIXME: remove; for DBG only;
       if (is_loop_stop) {
         out_map_of_sets[inp_cf].insert(node_dpin_cf);
       } else {
