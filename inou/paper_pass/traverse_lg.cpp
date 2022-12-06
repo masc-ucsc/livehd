@@ -834,6 +834,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 }
 
 void Traverse_lg::make_io_maps(Lgraph* lg) {
+
+  /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
   boundary_traversal(lg);
 
   //   fmt::print("Starting IN_map_of_sets\n");
@@ -874,6 +876,12 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg) {
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
   for (const auto& node : lg->fast(true)) {
+
+    /*capture the colored nodes*/
+    if(node.has_color()) {
+      crit_node_map[get_dpin_cf(node)]=node.get_color();
+    }
+
     if (!node.is_type_loop_last()) {
       continue;  // process flops only in this lg->fast
     }

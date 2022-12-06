@@ -64,10 +64,10 @@ private:
   std::vector<Node_pin::Compact_flat> traverse_order;
   void                                bwd_traversal_for_out_map();
   void                                make_io_maps(Lgraph *lg);
+  void  print_io_map( const absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> inp_map_of_sets;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> out_map_of_sets;
-  void                                                                                     print_io_map(
-                                                                                          const absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
+  absl::node_hash_map<Node_pin::Compact_flat, int>                                         crit_node_map;
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
