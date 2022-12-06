@@ -57,7 +57,7 @@ private:
     return result;
   }
   std::set<Node::Compact_flat> combo_loop_vec;
-  void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap);
+  void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
   void                                boundary_traversal(Lgraph *lg);
   void                                fast_pass_for_inputs(Lgraph *lg);
   void                                fwd_traversal_for_inp_map(Lgraph *lg);

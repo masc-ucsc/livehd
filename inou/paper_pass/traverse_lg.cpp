@@ -37,7 +37,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   bool                        first_done = false;
   for (const auto& l : var.lgs) {
     if (l->get_name() == lg_synth) {
-      p.do_travers(l, map_post_synth);  // synth LG
+      p.do_travers(l, map_post_synth, false);  // synth LG
       first_done = true;
     }
   }
@@ -45,7 +45,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   bool sec_done = false;
   for (const auto& l : var.lgs) {
     if (l->get_name() == lg_orig) {
-      p.do_travers(l, map_post_synth);  // original LG (pre-syn LG)
+      p.do_travers(l, map_post_synth, true);  // original LG (pre-syn LG)
       sec_done = true;
     }
   }
@@ -55,11 +55,7 @@ void Traverse_lg::travers(Eprp_var& var) {
 
 // FOR SET:
 // DE_DUP
-void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap) {
-  bool do_matching = false;  // for post syn graph, make map. do not match map!
-  if (!nodeIOmap.empty()) {
-    do_matching = true;  // now we have pre-syn graph and post-syn map ready.
-  }                      // if do_matching is false then the lg is post-syn-LG
+void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap, bool do_matching) {
 
   bool req_flops_matched = false;
   bool dealing_flop      = false;
