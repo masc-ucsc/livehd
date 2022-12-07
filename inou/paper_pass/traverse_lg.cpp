@@ -864,8 +864,8 @@ void Traverse_lg::boundary_traversal(Lgraph* lg) {
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output([this](const Node_pin dpin) {
-    auto out_node = dpin.get_node();
-    for (auto driver_dpin : out_node.inp_drivers()) {
+    auto spin = dpin.change_to_sink_from_graph_out_driver();
+    for (auto driver_dpin : spin.inp_drivers()) {
       out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
     }
   });
