@@ -62,7 +62,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   bool dealing_comb      = false;
 
   if (!do_matching) {
-    make_io_maps(lg);
+    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth);
 
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
@@ -71,11 +71,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     std::vector<Node> out_keys_n;
     std::vector<unsigned int> diff1;
     std::vector<unsigned int> diff2;
-    for(auto it= inp_map_of_sets.begin(); it != inp_map_of_sets.end(); ++it) {
+    for(auto it= inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end(); ++it) {
       inp_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
       inp_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
     }
-    for(auto it= out_map_of_sets.begin(); it != out_map_of_sets.end(); ++it) {
+    for(auto it= out_map_of_sets_synth.begin(); it != out_map_of_sets_synth.end(); ++it) {
       out_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
       out_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
     }
@@ -83,16 +83,16 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     std::sort(std::begin(out_keys), std::end(out_keys));
     std::set_difference(inp_keys.begin(), inp_keys.end(), out_keys.begin(), out_keys.end(),
         std::inserter(diff1, diff1.begin()));
-    fmt::print("\ninp_map_of_sets - out_map_of_sets (keys): {}\n", diff1.size());
+    fmt::print("\ninp_map_of_sets_synth - out_map_of_sets_synth (keys): {}\n", diff1.size());
     for(auto i:diff1) {fmt::print("{}\t",i);}
-    // print_io_map(inp_map_of_sets);
-    fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
+    // print_io_map(inp_map_of_sets_synth);
+    fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     std::set_difference(out_keys.begin(), out_keys.end(), inp_keys.begin(), inp_keys.end(),
         std::inserter(diff2, diff2.begin()));
-    fmt::print("\nout_map_of_sets - inp_map_of_sets (keys) : {} \n", diff2.size());
+    fmt::print("\nout_map_of_sets_synth - inp_map_of_sets_synth (keys) : {} \n", diff2.size());
     for(auto i:diff2) {fmt::print("{}\t",i);}
-    // print_io_map(out_map_of_sets);
-    fmt::print("\n out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
+    // print_io_map(out_map_of_sets_synth);
+    fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
     fmt::print("\n----");
 
     for(auto i : inp_keys_n){
@@ -102,10 +102,17 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       }
     }
     /*^^FIXME: remove; for DBG only;*/
-    // fmt::print("\n inp_map_of_sets.size() =  {}\nout_map_of_sets:\n", inp_map_of_sets.size());
-    // print_io_map(out_map_of_sets);
-    // fmt::print("\n out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
+    // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
+    // print_io_map(out_map_of_sets_synth);
+    // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
   }
+  if (do_matching) {
+    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig);
+
+    fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
+    fmt::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
+  }
+
   I(false, "\nintended exit!\n");
 
   for (const auto& node : lg->fast(true)) {
@@ -833,45 +840,48 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   }
 }
 
-void Traverse_lg::make_io_maps(Lgraph* lg) {
+void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
 
   /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
-  boundary_traversal(lg);
+  boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);
 
   //   fmt::print("Starting IN_map_of_sets\n");
-  //   print_io_map(inp_map_of_sets);
-  //   fmt::print("\nStarting out_map_of_sets\n");
-  //   print_io_map(out_map_of_sets);
+  //   print_io_map(inp_map_of_sets_synth);
+  //   fmt::print("\nStarting out_map_of_sets_synth\n");
+  //   print_io_map(out_map_of_sets_synth);
 
   /*in fwd, flops are visited last. Thus this fast pass:*/
-  fast_pass_for_inputs(lg);
+  fast_pass_for_inputs(lg, inp_map_of_sets);
 
   /*propagate sets. stop at sequential/IO... (_last)*/
   traverse_order.clear();
-  fwd_traversal_for_inp_map(lg);
+  fwd_traversal_for_inp_map(lg, inp_map_of_sets);
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
-  bwd_traversal_for_out_map();
+  bwd_traversal_for_out_map(out_map_of_sets);
 }
 
-void Traverse_lg::boundary_traversal(Lgraph* lg) {
+void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
-  lg->each_graph_input([this](const Node_pin dpin) {
+  lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
     for (auto sink_dpin : dpin.out_sinks()) {
       inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
     }
   });
+  //print_io_map(inp_map_of_sets);
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
-  lg->each_graph_output([this](const Node_pin dpin) {
+  lg->each_graph_output([&out_map_of_sets](const Node_pin dpin) {
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
       out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
     }
   });
+  fmt::print("\n:::: out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
+  print_io_map(out_map_of_sets);
 }
 
-void Traverse_lg::fast_pass_for_inputs(Lgraph* lg) {
+void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets) {
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
@@ -908,7 +918,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg) {
   }
 }
 
-void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
+void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets) {
   for (const auto& node : lg->forward(true)) {
     const auto node_dpin_cf = get_dpin_cf(node);
     if (!node.is_type_const()) {
@@ -939,7 +949,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg) {
   }
 }
 
-void Traverse_lg::bwd_traversal_for_out_map() {
+void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets) {
   for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
        ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
@@ -958,9 +968,6 @@ void Traverse_lg::bwd_traversal_for_out_map() {
         continue;
       }
       auto inp_cf = get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
-      if (Node_pin("lgdb", inp_cf).get_node().get_nid().value == 5869) {  //FIXME: remove; for DBG only;
-        fmt::print("Hit it!");                                            //FIXME: remove; for DBG only; 
-      }                                                                   //FIXME: remove; for DBG only;
       if (is_loop_stop) {
         out_map_of_sets[inp_cf].insert(node_dpin_cf);
       } else {

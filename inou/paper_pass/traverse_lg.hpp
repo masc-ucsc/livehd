@@ -57,17 +57,20 @@ private:
     return result;
   }
   std::set<Node::Compact_flat> combo_loop_vec;
+  typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;
   void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
-  void                                boundary_traversal(Lgraph *lg);
-  void                                fast_pass_for_inputs(Lgraph *lg);
-  void                                fwd_traversal_for_inp_map(Lgraph *lg);
+  void                                boundary_traversal(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
+  void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets);
+  void                                fwd_traversal_for_inp_map(Lgraph *lg, map_of_sets &inp_map_of_sets);
   std::vector<Node_pin::Compact_flat> traverse_order;
-  void                                bwd_traversal_for_out_map();
-  void                                make_io_maps(Lgraph *lg);
-  void  print_io_map( const absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> &the_map_of_sets) const;
-  absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> inp_map_of_sets;
-  absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> out_map_of_sets;
-  absl::node_hash_map<Node_pin::Compact_flat, int>                                         crit_node_map;
+  void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets );
+  void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
+  void  print_io_map( const map_of_sets &the_map_of_sets) const;
+  absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
+  map_of_sets inp_map_of_sets_synth;
+  map_of_sets out_map_of_sets_synth;
+  map_of_sets inp_map_of_sets_orig;
+  map_of_sets out_map_of_sets_orig;
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
