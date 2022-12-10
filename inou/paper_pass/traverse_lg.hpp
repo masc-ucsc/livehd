@@ -49,6 +49,7 @@ private:
   bool                   probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
                                              setMap_pairKey &orig_map);
   Node_pin::Compact_flat get_dpin_cf(const Node &node) const;
+  Node_pin get_dpin(const Node &node) const;
 
   template <typename T>
   std::set<T> getUnion(const std::set<T> &a, const std::set<T> &b) {
@@ -66,11 +67,13 @@ private:
   void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets );
   void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
+  void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   map_of_sets inp_map_of_sets_synth;
   map_of_sets out_map_of_sets_synth;
   map_of_sets inp_map_of_sets_orig;
   map_of_sets out_map_of_sets_orig;
+  absl::node_hash_map<Node_pin::Compact_flat, Node_pin::Compact_flat> net_to_orig_pin_match_map;
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&

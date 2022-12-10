@@ -35,8 +35,10 @@ void Traverse_lg::travers(Eprp_var& var) {
   // Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
   bool                        first_done = false;
+  Lgraph *synth_lg;
   for (const auto& l : var.lgs) {
     if (l->get_name() == lg_synth) {
+      synth_lg = l;
       p.do_travers(l, map_post_synth, false);  // synth LG
       first_done = true;
     }
@@ -45,6 +47,9 @@ void Traverse_lg::travers(Eprp_var& var) {
   bool sec_done = false;
   for (const auto& l : var.lgs) {
     if (l->get_name() == lg_orig) {
+      /*know all the inputs and outputs match by name*/
+      p.netpin_to_origpin_default_match(l, synth_lg);
+
       p.do_travers(l, map_post_synth, true);  // original LG (pre-syn LG)
       sec_done = true;
     }
@@ -101,12 +106,20 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
         fmt::print("\n----");
       }
     }
+
+    fmt::print("=IN:=======================================\n");            //FIXME: for DBG; remove.
+    print_io_map(inp_map_of_sets_synth);                                  //FIXME: for DBG; remove.
+    fmt::print("=:IN====================================OUT:===\n");        //FIXME: for DBG; remove.
+    print_io_map(out_map_of_sets_synth);                                  //FIXME: for DBG; remove.
+    fmt::print("=:OUT=======================================\n");           //FIXME: for DBG; remove.
     /*^^FIXME: remove; for DBG only;*/
     // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     // print_io_map(out_map_of_sets_synth);
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
+    return;          //FIXME: for DBG; remove.
   }
   if (do_matching) {
+
     make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig);
 
     fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
@@ -868,7 +881,8 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
       inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
     }
   });
-  //print_io_map(inp_map_of_sets);
+  fmt::print("\n:::: inp_map_of_sets.size() =  {}\n", inp_map_of_sets.size());
+  print_io_map(inp_map_of_sets);
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output([&out_map_of_sets](const Node_pin dpin) {
@@ -978,6 +992,33 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets) {
     }
     // print_io_map(out_map_of_sets);
   }
+}
+
+void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg) {
+  orig_lg->dump(true);
+  for (auto orig_node: orig_lg->fast(true) ) {
+    auto orig_node_dpin = get_dpin(orig_node);
+    auto orig_node_dpin_name = orig_node_dpin.has_name() ? orig_node_dpin.get_name() : "" ;
+
+    if(orig_node_dpin_name!="") {
+      fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, (orig_node.get_class_lgraph())->get_name());
+      //see if the name matches to any in netlist LG
+      auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
+      if ( !synth_node_dpin.is_invalid() )  {
+        fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
+        net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ] = orig_node_dpin.get_compact_flat();
+      }
+    }
+
+  }
+    for (auto syn_node: synth_lg->fast(true) ) {//FIXME: for DBG only; remove!
+    auto syn_node_dpin = get_dpin(syn_node);
+    auto syn_node_dpin_name = syn_node_dpin.has_name() ? syn_node_dpin.get_name() : "" ;
+
+    if(syn_node_dpin_name!="") {
+      fmt::print("synth_node_dpin_name: {} for lg: {}\n", syn_node_dpin_name, (syn_node.get_class_lgraph())->get_name());
+  }}
+
 }
 
 void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::string> synth_set,
@@ -1134,6 +1175,14 @@ Node_pin::Compact_flat Traverse_lg::get_dpin_cf(const Node& node) const {
     return node.get_driver_pin_raw(0).get_compact_flat();
   }
   return node.get_driver_pin().get_compact_flat();
+}
+
+Node_pin Traverse_lg::get_dpin(const Node& node) const {
+  // only subs and mem can have o/p with pid different than 0. all the rest have o/p == 0
+  if (node.is_type_multi_driver()) {
+    return node.get_driver_pin_raw(0);
+  }
+  return node.get_driver_pin();
 }
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
