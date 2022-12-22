@@ -156,6 +156,64 @@ Upgrade lgshell to latest version. Fix auto-completion for path: files: src_path
 
 Create a jupyter app that allows to run livehd against a server or local
 
+## [medium] Diagnostics
+
+Create a new Diagnostics class (static) to report/centralize errors. It should replace the ::error ::warn APIs (Pass,upass,eprp)
+that we have.
+
+The error/warning messages should leverage either of these:
+https://github.com/Excse/pretty_diagnostics
+https://github.com/QazmoQwerty/error-reporter
+
+The pretty_diagnostics is an internal library, the API is not exposed.
+
+An error/warning message should provide a set of LNAST or LGraph nodes which are used for finding the original source code location.
+
+// If there are several because, it is a "error" because either X or Y.
+
+Like the Pass::error, it should accept a fmt::format for the error string generation, but the string has this format:
+
+* All lower case
+* No regex similarity to other error with different meaning
+* Less than 80 characters
+* Variable info/values shown outside message
+
+
+```
+var a:uint = 0
+a = -3
+```
+
+diag.code(33)
+    .error(a_lgraph,"value overflow")
+    .because("{} exceeds the min value of {}", a_lgraph, a.min)
+    .prp_after(a_lgraph,"::[wrap]")
+    .note(a_rhs,"overflow value")
+
+```
+if a.[len] < 10 {
+
+}
+```
+
+x = diag.code(444)
+    .error(len_token, "undefined {} attribute", len_token)
+    .prp_replace(len_token, "size")
+x = pretty_print_note_allowed_attr(x, a_symbol_table);
+
+Code is to force all the error with same code to have same error/warning message. It is redundant, but to catch errors.
+
+because: it is the explanation (there can be multiple options of explanations)
+
+prp_after/before/replace, suggest to add a string to the source code to fix the error, but
+used only if source code matches the language.
+
+note: it is a language independent note/comment to annotate a piece of code to
+provide a hint on the problem. Note can have location or no location included.
+
+reference: it is a multi-line reference (like token list) or multi-line text explanation on information related to the error.
+It could print other tuple fields or valid list of attributes or ???
+
 ## [medium] OpenWare
 
 We need a set of set of implementations with different trade-offs for each basic Lgraph gate. The implementations
