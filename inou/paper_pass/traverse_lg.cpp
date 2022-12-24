@@ -907,6 +907,11 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
 void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
   lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
+    /*capture the colored nodes in the process.*/
+    auto node = dpin.get_node()
+    if(node.has_color()) {
+      crit_node_map[get_dpin_cf(node)]=node.get_color();
+    }
     for (auto sink_dpin : dpin.out_sinks()) {
       if(!net_to_orig_pin_match_map.empty()){
         auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());
@@ -927,6 +932,11 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output([&out_map_of_sets, this](const Node_pin dpin) {
+    /*capture the colored nodes in the process.*/
+    auto node = dpin.get_node()
+    if(node.has_color()) {
+      crit_node_map[get_dpin_cf(node)]=node.get_color();
+    }
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
       if(!net_to_orig_pin_match_map.empty()){
@@ -1110,7 +1120,7 @@ void Traverse_lg::matching_pass_boundary_only() {
   
 }
 
-void Traverse_lg::matching_pass_inputs_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig) {
+void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig) {
 
   for (auto it = map_of_sets_synth.begin(); it != map_of_sets_synth.end();) {
     bool matched=false;
