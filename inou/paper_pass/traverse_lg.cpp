@@ -1104,9 +1104,9 @@ void Traverse_lg::matching_pass_boundary_only() {
    * 3. remove the matched entries from map_of_sets-synth; to keep the time complexity of further matching-passes lowered.*/
 
   /*For inputs*/
-  matching_pass_inputs_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
+  matching_pass_io_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
   /*Same as above for output*/
-  matching_pass_inputs_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
+  matching_pass_io_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
   
 }
 

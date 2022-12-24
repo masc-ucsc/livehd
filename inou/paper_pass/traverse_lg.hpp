@@ -70,7 +70,7 @@ private:
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_boundary_only();
-  void matching_pass_inputs_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
+  void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   // void exact_matching();
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   map_of_sets inp_map_of_sets_synth;
