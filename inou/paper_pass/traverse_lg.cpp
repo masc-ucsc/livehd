@@ -126,6 +126,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
   }
 
+  I(!inp_map_of_sets_orig.empty() && !out_map_of_sets_orig.empty() , "\nCHECK: why is either inp_map_of_sets_orig or out_map_of_sets_orig empty??\n");
+  // if (do_matching){
+  //   exact_matching();
+  // }
+
   I(false, "\nintended exit!\n");
 
   for (const auto& node : lg->fast(true)) {
@@ -995,18 +1000,26 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets) {
 }
 
 void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg) {
-  orig_lg->dump(true);
-  for (auto orig_node: orig_lg->fast(true) ) {
+  orig_lg->dump(true);//FIXME: remove this
+  for (auto orig_node: orig_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
     auto orig_node_dpin = get_dpin(orig_node);
     auto orig_node_dpin_name = orig_node_dpin.has_name() ? orig_node_dpin.get_name() : "" ;
 
     if(orig_node_dpin_name!="") {
-      fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, (orig_node.get_class_lgraph())->get_name());
-      //see if the name matches to any in netlist LG
-      auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
+      auto orig_sub_lg_name = orig_node.get_class_lgraph()->get_name();
+      fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, orig_sub_lg_name);
+      /*see if the name matches to any in netlist LG.
+       * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
+       * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy! #FIXME!!
+       * */
+      auto synth_sub_lg_name = orig_sub_lg_name.substr(9,orig_sub_lg_name.end()); //removing "__firrtl_"
+      std::string path("lgdb");
+      auto *library = Graph_library::instance(path);
+      auto *synth_sub_lg = library->try_ref_lgraph(synth_sub_lg_name);
+      auto synth_node_dpin = Node_pin::find_driver_pin( synth_sub_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
       if ( !synth_node_dpin.is_invalid() )  {
         fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
-        net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ] = orig_node_dpin.get_compact_flat();
+        net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
       }
     }
 
@@ -1021,6 +1034,10 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
 }
 
+// void Traverse_lg::exact_matching() {
+// 
+//   for () {}
+// }
 void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::string> synth_set,
                                  const std::vector<Node::Compact_flat>& synth_val, Traverse_lg::setMap_pairKey& cellIOMap_orig) {
   Node this_node = start_node;
