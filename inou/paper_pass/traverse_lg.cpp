@@ -27,8 +27,8 @@ Traverse_lg::Traverse_lg(const Eprp_var& var) : Pass("inou.traverse_lg", var) {}
 void Traverse_lg::travers(Eprp_var& var) {
   TRACE_EVENT("inou", "traverse_lg");
 
-  auto        lg_orig  = var.get("LGorig");
-  auto        lg_synth = var.get("LGsynth");
+  auto        lg_orig_name  = var.get("LGorig");
+  auto        lg_synth_name = var.get("LGsynth");
   Traverse_lg p(var);
 
 #ifdef DE_DUP
@@ -36,25 +36,27 @@ void Traverse_lg::travers(Eprp_var& var) {
   Traverse_lg::setMap_pairKey map_post_synth;
   bool                        first_done = false;
   Lgraph *synth_lg;
+  Lgraph *orig_lg;
   for (const auto& l : var.lgs) {
-    if (l->get_name() == lg_synth) {
+    if (l->get_name() == lg_synth_name) {
       synth_lg = l;
-      p.do_travers(l, map_post_synth, false);  // synth LG
       first_done = true;
     }
   }
-  I(first_done, "\nERROR:\n Synth LG not provided??\n");
+  I(first_done, "\nERROR:\n Synth LG not/incorrectly provided??\n");
   bool sec_done = false;
   for (const auto& l : var.lgs) {
-    if (l->get_name() == lg_orig) {
-      /*know all the inputs and outputs match by name*/
-      p.netpin_to_origpin_default_match(l, synth_lg);
-      
-      p.do_travers(l, map_post_synth, true);  // original LG (pre-syn LG)
+    if (l->get_name() == lg_orig_name) {
+      orig_lg = l;
       sec_done = true;
     }
   }
-  I(sec_done, "\nERROR:\n original LG not provided??\n");
+  I(sec_done, "\nERROR:\n original LG not/incorrectly provided??\n");
+  
+  /*know all the inputs and outputs match by name*/
+  p.netpin_to_origpin_default_match(orig_lg, synth_lg);
+  p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
+  p.do_travers(synth_lg, map_post_synth, false);  // synth LG
 #endif
 }
 
@@ -1025,6 +1027,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     net_to_orig_pin_match_map_string[synth_node_dpin.get_name()].insert(dpin.get_name());
   });
 
+  /*known points matching*/
   orig_lg->dump(true);//FIXME: remove this
   for (auto orig_node: orig_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
     auto orig_node_dpin = get_dpin(orig_node);
