@@ -10,7 +10,7 @@ cmake(
     build_args = select({
         "@platforms//os:macos": [
             "--",
-            "-j 4",
+            "-j 8",
         ],
         "//conditions:default": [
         ],
