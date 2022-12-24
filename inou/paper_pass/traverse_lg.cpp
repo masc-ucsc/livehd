@@ -908,13 +908,14 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
   lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
-    auto node = dpin.get_node()
+    auto node = dpin.get_node();
     if(node.has_color()) {
-      crit_node_map[get_dpin_cf(node)]=node.get_color();
+      crit_node_map[get_dpin_cf(node)]=node.get_color();//keep till end for color data
+      crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
     }
     for (auto sink_dpin : dpin.out_sinks()) {
       if(!net_to_orig_pin_match_map.empty()){
-        auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());
+        auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());//resolution attempt
         if(it_match!=net_to_orig_pin_match_map.end()) {
           for(auto it_val: it_match->second)
             inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(it_val);
@@ -933,9 +934,10 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output([&out_map_of_sets, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
-    auto node = dpin.get_node()
+    auto node = dpin.get_node();
     if(node.has_color()) {
       crit_node_map[get_dpin_cf(node)]=node.get_color();
+      crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
     }
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
@@ -943,7 +945,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
         auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());
         if(it_match!=net_to_orig_pin_match_map.end()) { 
           for(auto it_val: it_match->second)
-          out_map_of_sets[driver_dpin.get_compact_flat()].insert(it_val);
+          out_map_of_sets[driver_dpin.get_compact_flat()].insert(it_val);//resolution attempt
           //: in synth map_of_sets, insert the equivalent orig_dpin match as IO entry.
         } else {
           out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
@@ -966,6 +968,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets)
     /*capture the colored nodes*/
     if(node.has_color()) {
       crit_node_map[get_dpin_cf(node)]=node.get_color();
+      crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
     }
 
     if (!node.is_type_loop_last()) {

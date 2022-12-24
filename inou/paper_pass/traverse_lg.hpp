@@ -73,6 +73,7 @@ private:
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   // void exact_matching();
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
+  std::vector<Node_pin::Compact_flat> crit_node_vec;
   map_of_sets inp_map_of_sets_synth;
   map_of_sets out_map_of_sets_synth;
   map_of_sets inp_map_of_sets_orig;
