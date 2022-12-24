@@ -75,6 +75,7 @@ private:
   map_of_sets inp_map_of_sets_orig;
   map_of_sets out_map_of_sets_orig;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
+  absl::node_hash_map<std::string, absl::flat_hash_set<std::string> > net_to_orig_pin_match_map_string;//FIXME: for debug only
 
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
