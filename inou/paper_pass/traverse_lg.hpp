@@ -66,8 +66,11 @@ private:
   std::vector<Node_pin::Compact_flat> traverse_order;
   void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets );
   void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
+  void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
+  void matching_pass_boundary_only();
+  void matching_pass_inputs_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   // void exact_matching();
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   map_of_sets inp_map_of_sets_synth;
@@ -76,7 +79,7 @@ private:
   map_of_sets out_map_of_sets_orig;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
   absl::node_hash_map<std::string, absl::flat_hash_set<std::string> > net_to_orig_pin_match_map_string;//FIXME: for debug only
-
+                                                                                                       //
   // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
   // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
