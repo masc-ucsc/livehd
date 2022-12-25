@@ -74,6 +74,7 @@ private:
   void complete_io_match();
   bool process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
+  void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   std::vector<Node_pin::Compact_flat> crit_node_vec;

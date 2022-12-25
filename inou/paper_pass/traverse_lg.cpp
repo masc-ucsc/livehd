@@ -78,7 +78,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
+      return;
     } 
+    resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//FIXME: THOUGHT: bring change_done code outside? as return val and put in do while here?
+    resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
     std::vector<Node> inp_keys_n;
@@ -1222,6 +1226,24 @@ void Traverse_lg::report_critical_matches_with_color(){
   fmt::print("\n");
 }
 
+void Traverse_lg::resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set){
+ 
+  bool resolved_some = false;
+  do {
+    resolved_some = false;
+    for(auto &[synth_np, synth_set_np]:synth_map_of_set){
+      for(auto &set_np_val: synth_set_np){
+        if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
+          synth_set_np.erase(set_np_val);
+          auto equiv_val = net_to_orig_pin_match_map[set_np_val];
+          synth_set_np.insert(equiv_val.begin(), equiv_val.end());
+          resolved_some=true;
+        }
+      }
+    }
+  } while (resolved_some);
+
+}
 
 void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::string> synth_set,
                                  const std::vector<Node::Compact_flat>& synth_val, Traverse_lg::setMap_pairKey& cellIOMap_orig) {
