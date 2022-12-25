@@ -65,14 +65,15 @@ void Traverse_lg::travers(Eprp_var& var) {
 
 // FOR SET:
 // DE_DUP
-void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap, bool do_matching) {
+void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap, bool do_matching) {//FIXME: change do_matching to is_orig_lg
 
+  bool is_orig_lg = do_matching;//FIXME: remove this once do_matching changed to is_orig_lg
   bool req_flops_matched = false;
   bool dealing_flop      = false;
   bool dealing_comb      = false;
 
-  if (!do_matching) {
-    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth);
+  if (!is_orig_lg) {
+    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
 
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
@@ -124,9 +125,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     return;          //FIXME: for DBG; remove.
   }
   
-  if (do_matching) {
+  if (is_orig_lg) {
 
-    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig);
+    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);
 
     fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
     fmt::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
@@ -874,6 +875,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   }
 }
 
+absl::flat_hash_set<Node_pin::Compact_flat> Traverse_lg::get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const {
+  auto it_match = net_to_orig_pin_match_map.find(dpin_cf);
+  if(it_match!=net_to_orig_pin_match_map.end()){
+    return it_match->second;
+  }
+  return absl::flat_hash_set<Node_pin::Compact_flat>();
+}
+
 void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
 
   /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
@@ -886,7 +895,7 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
 
 }
 
-void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
+void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets, bool is_orig_lg) {
 
   //   fmt::print("Starting IN_map_of_sets\n");
   //   print_io_map(inp_map_of_sets_synth);
@@ -894,14 +903,14 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
   //   print_io_map(out_map_of_sets_synth);
 
   /*in fwd, flops are visited last. Thus this fast pass:*/
-  fast_pass_for_inputs(lg, inp_map_of_sets);
+  fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
 
   /*propagate sets. stop at sequential/IO... (_last)*/
   traverse_order.clear();
-  fwd_traversal_for_inp_map(lg, inp_map_of_sets);
+  fwd_traversal_for_inp_map(lg, inp_map_of_sets, is_orig_lg);
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
-  bwd_traversal_for_out_map(out_map_of_sets);
+  bwd_traversal_for_out_map(out_map_of_sets, is_orig_lg);
 }
 
 void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
@@ -915,10 +924,9 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
     }
     for (auto sink_dpin : dpin.out_sinks()) {
       if(!net_to_orig_pin_match_map.empty()){
-        auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());//resolution attempt
-        if(it_match!=net_to_orig_pin_match_map.end()) {
-          for(auto it_val: it_match->second)
-            inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(it_val);
+        auto match_val = get_matching_map_val(dpin.get_compact_flat());//resolution attempt
+        if(!match_val.empty()) {
+          inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(match_val.begin(), match_val.end());
           //: in synth map_of_sets, insert the equivalent orig_dpin match as IO entry.
         } else {
           inp_map_of_sets[get_dpin_cf(sink_dpin.get_node())].insert(dpin.get_compact_flat());
@@ -942,10 +950,9 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
       if(!net_to_orig_pin_match_map.empty()){
-        auto it_match = net_to_orig_pin_match_map.find(dpin.get_compact_flat());
-        if(it_match!=net_to_orig_pin_match_map.end()) { 
-          for(auto it_val: it_match->second)
-          out_map_of_sets[driver_dpin.get_compact_flat()].insert(it_val);//resolution attempt
+        auto match_val = get_matching_map_val(dpin.get_compact_flat());
+        if(!match_val.empty()) { 
+          out_map_of_sets[driver_dpin.get_compact_flat()].insert(match_val.begin(), match_val.end());//resolution attempt
           //: in synth map_of_sets, insert the equivalent orig_dpin match as IO entry.
         } else {
           out_map_of_sets[driver_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
@@ -959,7 +966,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
   print_io_map(out_map_of_sets);
 }
 
-void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets) {
+void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
@@ -987,17 +994,23 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets)
       }
       auto out_cf = get_dpin_cf(e.sink.get_node());
       if (is_loop_stop) {
-        inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+        if(!is_orig_lg && !(get_matching_map_val(e.driver.get_compact_flat())).empty()) {
+          auto match_val = get_matching_map_val(e.driver.get_compact_flat());
+          inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
+        } else {
+          inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+        }
       } else {
         if (self_set != inp_map_of_sets.end()) {
           inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
         }
       }
     }
+
   }
 }
 
-void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets) {
+void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
   for (const auto& node : lg->forward(true)) {
     const auto node_dpin_cf = get_dpin_cf(node);
     if (!node.is_type_const()) {
@@ -1018,7 +1031,12 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
       }
       auto out_cf = get_dpin_cf(e.sink.get_node());
       if (is_loop_stop) {
-        inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+        if(!is_orig_lg && !(get_matching_map_val(e.driver.get_compact_flat())).empty()) {
+          auto match_val = get_matching_map_val(e.driver.get_compact_flat());
+          inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
+        } else {
+          inp_map_of_sets[out_cf].insert(e.driver.get_compact_flat());
+        }
       } else {
         if (self_set) {
           inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
@@ -1028,7 +1046,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
   }
 }
 
-void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets) {
+void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool is_orig_lg) {
   for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
        ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
@@ -1048,7 +1066,12 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets) {
       }
       auto inp_cf = get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
       if (is_loop_stop) {
-        out_map_of_sets[inp_cf].insert(node_dpin_cf);
+        if(!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
+          auto match_val = get_matching_map_val(node_dpin_cf);
+          out_map_of_sets[inp_cf].insert(match_val.begin(), match_val.end());//resolution
+        } else {
+          out_map_of_sets[inp_cf].insert(node_dpin_cf);
+        }
       } else {
         if (self_set) {
           out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end());
