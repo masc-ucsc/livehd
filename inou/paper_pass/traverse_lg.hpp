@@ -69,12 +69,15 @@ private:
   void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
-  void matching_pass_boundary_only();
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   void complete_io_match();
   bool process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
+  void probabilistic_match();
+  map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) ;
+  void print_nodes_vec();
+  void print_everything() ;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   std::vector<Node_pin::Compact_flat> crit_node_vec;

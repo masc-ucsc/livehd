@@ -54,11 +54,21 @@ void Traverse_lg::travers(Eprp_var& var) {
   I(sec_done, "\nERROR:\n original LG not/incorrectly provided??\n");
   
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig);//orig-boundary only
+  fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
+  p.print_everything();
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)
+  fmt::print("2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
+  p.print_everything();
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching
+  fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
+  p.print_everything();
 
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
+  fmt::print("4. p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)\n");
+  p.print_everything();
   p.do_travers(synth_lg, map_post_synth, false);  // synth LG
+  fmt::print("5. p.do_travers(synth_lg, map_post_synth, false);  // synth LG\n");
+  p.print_everything();
 
 #endif
 }
@@ -82,6 +92,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     } 
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//FIXME: THOUGHT: bring change_done code outside? as return val and put in do while here?
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+    probabilistic_match();
 
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
@@ -139,6 +150,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
     fmt::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
+    return;          //FIXME: for DBG; remove.
   }
 
   I(!inp_map_of_sets_orig.empty() && !out_map_of_sets_orig.empty() , "\nCHECK: why is either inp_map_of_sets_orig or out_map_of_sets_orig empty??\n");
@@ -885,10 +897,20 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
 
   /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
   boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);
+  fmt::print("3.0. boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);\n"); 
+  print_everything();
 
   /*For synth, set values were replaced using net_to_orig_pin_match_map. Thus these synth map_of_sets can be matched with orig map_of_sets for matching at the boundary of the design.*/
   if(!net_to_orig_pin_match_map.empty()) {
-    matching_pass_boundary_only();
+    /* 1. match map_of_sets-synth to map_of_sets-orig (both in and out)
+     * 2. put matches in net_to_orig_pin_match_map.
+     * 3. remove the matched entries from map_of_sets-synth; to keep the time complexity of further matching-passes lowered.*/
+
+    /*For inputs*/
+    matching_pass_io_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
+    /*Same as above for output*/
+    matching_pass_io_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
+  
   }
 
 }
@@ -1132,18 +1154,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
 }
 
-void Traverse_lg::matching_pass_boundary_only() {
-  /* 1. match map_of_sets-synth to map_of_sets-orig (both in and out)
-   * 2. put matches in net_to_orig_pin_match_map.
-   * 3. remove the matched entries from map_of_sets-synth; to keep the time complexity of further matching-passes lowered.*/
-
-  /*For inputs*/
-  matching_pass_io_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
-  /*Same as above for output*/
-  matching_pass_io_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
-  
-}
-
 void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig) {
 
   for (auto it = map_of_sets_synth.begin(); it != map_of_sets_synth.end();) {
@@ -1244,6 +1254,34 @@ void Traverse_lg::resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set)
   } while (resolved_some);
 
 }
+
+void Traverse_lg::print_everything() {
+  fmt::print("\norig lg in map:\n");
+  print_io_map(inp_map_of_sets_orig);
+  fmt::print("\norig lg out map:\n");
+  print_io_map(out_map_of_sets_orig);
+  fmt::print("\nsynth lg in map:\n");
+  print_io_map(inp_map_of_sets_synth);
+  fmt::print("\nsynth lg out map:\n");
+  print_io_map(out_map_of_sets_synth);
+  fmt::print("\nmatching map:\n");
+  print_io_map(net_to_orig_pin_match_map);
+  fmt::print("\ncrit nodes vec:\n");
+  print_nodes_vec();
+  fmt::print("\n-------------------\n");
+
+}
+
+void Traverse_lg::probabilistic_match() {
+
+//  make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig);
+//  make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth);
+
+}
+
+// Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) {
+//   
+// }
 
 void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::string> synth_set,
                                  const std::vector<Node::Compact_flat>& synth_val, Traverse_lg::setMap_pairKey& cellIOMap_orig) {
@@ -1526,6 +1564,15 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
   }
 }
 
+void Traverse_lg::print_nodes_vec(){
+  for(const auto &v: crit_node_vec){
+
+    auto n = Node_pin("lgdb", v).get_node();
+    fmt::print("{}\t ", n.get_nid());
+
+  }
+}
+
 void Traverse_lg::print_io_map(
     const absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>>& the_map_of_sets) const {
   for (const auto& [node_pin_cf, set_pins_cf] : the_map_of_sets) {
@@ -1533,7 +1580,12 @@ void Traverse_lg::print_io_map(
     // Node_pin node_pin("lgdb", node_pin_cf);
     // fmt::print("{}\t::: ",node_pin.has_name()?node_pin.get_name():node_pin.get_pin_name() );
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
-    fmt::print("{}\t::: ", n.get_nid());
+    auto p = Node_pin("lgdb", node_pin_cf);
+    if (p.has_name()) {
+      fmt::print("{}\t::: ", p.get_name());
+    } else {
+      fmt::print("{}\t::: ", n.get_nid());
+    }
     for (const auto& pin_cf : set_pins_cf) {
       const auto pin = Node_pin("lgdb", pin_cf);
       auto       n_s = Node_pin("lgdb", pin_cf).get_node();
