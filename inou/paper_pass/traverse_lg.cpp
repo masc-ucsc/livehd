@@ -76,7 +76,6 @@ void Traverse_lg::travers(Eprp_var& var) {
 // FOR SET:
 // DE_DUP
 void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap, bool do_matching) {//FIXME: change do_matching to is_orig_lg
-
   bool is_orig_lg = do_matching;//FIXME: remove this once do_matching changed to is_orig_lg
   bool req_flops_matched = false;
   bool dealing_flop      = false;
@@ -84,15 +83,23 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (!is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);//has in-place resolution as well.
-    complete_io_match();
+    fmt::print("7. before matching starts -- synth"); print_everything();
+    bool change_done = complete_io_match();
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
       return;
     } 
-    resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//FIXME: THOUGHT: bring change_done code outside? as return val and put in do while here?
-    resolution_of_synth_map_of_sets(out_map_of_sets_synth);
-    probabilistic_match();
+
+    while (change_done && !crit_node_vec.empty()) {
+      resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+      resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+      change_done = complete_io_match();//alters crit_node_vec too
+    }
+    fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
+    // resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//FIXME: THOUGHT: bring change_done code outside? as return val and put in do while here?
+    // resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+    // probabilistic_match();
 
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
@@ -992,10 +999,15 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
    * constants are. This means that the flop is not visited first.) */
   for (const auto& node : lg->fast(true)) {
 
+    if(!is_orig_lg) {
     /*capture the colored nodes*/
-    if(node.has_color()) {
-      crit_node_map[get_dpin_cf(node)]=node.get_color();
-      crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
+      if(node.has_color()) {
+        crit_node_map[get_dpin_cf(node)]=node.get_color();
+        crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
+      }
+      if(node.is_type_loop_last()) {
+        flop_set.insert(get_dpin_cf(node));
+      }
     }
 
     if (!node.is_type_loop_last()) {
@@ -1157,8 +1169,15 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig) {
 
   for (auto it = map_of_sets_synth.begin(); it != map_of_sets_synth.end();) {
+    auto n_s = Node_pin("lgdb", it->first).get_node();
+    
     bool matched=false;
     for(const auto &[orig_np, orig_set_np]: map_of_sets_orig) {
+      auto o_s = Node_pin("lgdb", orig_np).get_node();
+      if (! ((!n_s.is_type_loop_last() && !o_s.is_type_loop_last()) || (n_s.is_type_loop_last() && o_s.is_type_loop_last())) ) {
+        continue; //REASON: flop/combo node should be matched with flop/combo node only! else datatype mismatch!
+      }
+
       if((it->second)==orig_set_np){//POSSIBLE FIXME: unrdered sets compared with ==
         matched=true;
         net_to_orig_pin_match_map[it->first].insert(orig_np);
@@ -1172,13 +1191,24 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth,
 
 }
 
-void Traverse_lg::complete_io_match() {
+bool Traverse_lg::complete_io_match( ) {
 
+  bool any_matching_done = false;
   for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
+    auto n_s = Node_pin("lgdb", it->first).get_node();
+    if ( !n_s.is_type_loop_last()) {
+      it++;
+      continue; //if flop node, then only do matching; else continue with other entry.
+    }
     bool in_matched = false;
     bool out_matched = false;
     
     for(const auto &[orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
+      auto o_s = Node_pin("lgdb", orig_in_np).get_node();
+      if (!o_s.is_type_loop_last()) {
+        continue; //flop node should be matched with flop node only! else datatype mismatch!
+      }
+
       if(it->second == orig_in_set_np) {
         in_matched = true;
       }
@@ -1196,16 +1226,19 @@ void Traverse_lg::complete_io_match() {
 
       if (out_matched) {//in+out matched. complete exact match. put in matching map 
         net_to_orig_pin_match_map[it->first].insert(orig_in_np);
+        any_matching_done=true;
       }
     }
 
     if (out_matched) {//in+out matched. complete exact match.  remove from synth map_of_sets
       process_crit_node_vec_and_tell_is_empty(it->first);
+      if(flop_set.find(it->first)!=flop_set.end()) { flop_set.erase(it->first); }
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
     } else it++;
 
   }
+  return any_matching_done;
 
 }
 
@@ -1239,7 +1272,7 @@ void Traverse_lg::report_critical_matches_with_color(){
 void Traverse_lg::resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set){
  
   bool resolved_some = false;
-  do {
+  do {//FIXME: is do while really needed here? I doubt!
     resolved_some = false;
     for(auto &[synth_np, synth_set_np]:synth_map_of_set){
       for(auto &set_np_val: synth_set_np){
@@ -1268,6 +1301,8 @@ void Traverse_lg::print_everything() {
   print_io_map(net_to_orig_pin_match_map);
   fmt::print("\ncrit nodes vec:\n");
   print_nodes_vec();
+  fmt::print("\nflop set:\n");
+  print_flop_set();
   fmt::print("\n-------------------\n");
 
 }
@@ -1564,11 +1599,27 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
   }
 }
 
-void Traverse_lg::print_nodes_vec(){
+void Traverse_lg::print_nodes_vec() const {
   for(const auto &v: crit_node_vec){
 
     auto n = Node_pin("lgdb", v).get_node();
-    fmt::print("{}\t ", n.get_nid());
+    auto p = Node_pin("lgdb", v);
+    if(p.has_name())
+      fmt::print("{}\t ", p.get_name());
+    else
+      fmt::print("{}\t ", n.get_nid());
+
+  }
+}
+void Traverse_lg::print_flop_set() const {
+  for(const auto &v: flop_set){
+
+    auto n = Node_pin("lgdb", v).get_node();
+    auto p = Node_pin("lgdb", v);
+    if(p.has_name())
+      fmt::print("{}\t ", p.get_name());
+    else
+      fmt::print("{}\t ", n.get_nid());
 
   }
 }
