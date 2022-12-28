@@ -99,7 +99,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
   g->each_graph_input([this, &pin_tracker](const Node_pin &pin) {
     std::string driver_name(pin.get_hierarchical().get_wire_name());  // OT needs std::string, not string_view support
 
-    // fmt::print("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
+    //fmt::print("OT: top input:{} bits:{}\n", driver_name, pin.get_bits());
     timer.insert_primary_input(driver_name);
     timer.insert_net(driver_name);
     for (auto i = 1; i < pin.get_bits(); ++i) {
@@ -115,7 +115,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     if (!driver_dpin.is_invalid()) {                 // It could be disconnected
       std::string driver_name(pin.get_wire_name());  // OT needs std::string, not string_view support
 
-      // fmt::print("OT: top output:{} bits:{}\n", driver_name, pin.get_bits());
+      //fmt::print("OT: top output:{} bits:{}\n", driver_name, pin.get_bits());
 
       timer.insert_primary_output(driver_name);
       timer.insert_net(driver_name);
@@ -200,6 +200,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
           }
         }
       } else {
+        //fmt::print("OT: wname:{}\n", wname);
         timer.insert_net(wname);
       }
     }
@@ -321,7 +322,7 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
 
     // setup driver pins and nets
     for (auto &dpin : node.out_connected_pins()) {
-      auto pin_name = absl::StrCat(instance_name, ":", dpin.get_pin_name());
+      auto pin_name = absl::StrCat(instance_name, ",", dpin.get_pin_name());
 
       auto it = pins.find(pin_name);
       I(it != pins.end());  // just inserted before
@@ -367,7 +368,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
 
   timer.update_timing();
 
-  const auto &pins = timer.pins();
+  const auto &gates = timer.gates();
 
   double total_cap  = 0;
   double total_ipwr = 0;
@@ -395,43 +396,37 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       continue;
     }
 
-    auto       &sub_node      = node.get_type_sub_node();
-    auto        instance_name = node.get_or_create_name();
-    std::string type_name{sub_node.get_name()};  // OT needs std::string
+    auto instance_name = node.get_or_create_name();
 
-    timer.insert_gate(instance_name, type_name);
+    auto it2 = gates.find(instance_name);
+    if (it2==gates.end()) {
+      fmt::print("WEIRD. Where is the gate? named {}\n", instance_name);
+    }
 
-    for (auto &e : node.inp_edges()) {
-      auto pin_name = absl::StrCat(instance_name, ":", e.sink.get_pin_name());
-      auto it       = pins.find(pin_name);
-      if (it == pins.end()) {
-        continue;
-      }
+    for(const auto *pin:it2->second.pins()) {
+      auto [cap, ipwr] = pin->power();
 
-      auto [cap, ipwr] = it->second.power();
-
-      cap *= freq * voltage * voltage * cap_unit;
-      ipwr *= freq * cap_unit;
-
-      // fmt::print("cap:{} ipwr:{} pin_name:{} power_unit:{} ratio:{}\n",cap, ipwr, pin_name, cap_unit, ipwr/(cap+ipwr));
+      cap  *= static_cast<float>(freq * voltage * voltage * cap_unit);
+      ipwr *= static_cast<float>(freq * cap_unit);
 
       total_cap += cap;
       total_ipwr += ipwr;
 
-      // auto wire_name = get_driver_net_name(e.driver);
-      auto hier_name = e.driver.get_hier_name();
-      auto node_name = node.get_name();
+      // WARNING: Replace last , for :
+      // -OpenTimer use as pin name: "whatever":"pin"
+      // -Power_vcd uses "whatever","pin"
+      std::string pin_name{pin->name()};
+      auto last_comma_pos = pin_name.rfind(':');
+      I(last_comma_pos!=std::string::npos);
+      pin_name[last_comma_pos] = ',';
 
-      auto vcd_name = absl::StrCat(hier_name, ",", node_name, ",", e.sink.get_pin_name());
-
-      double power = ipwr + cap;
-      // double power = ipwr; // FIXME
       for (auto &pvcd : vcd_list) {
-        pvcd.add(vcd_name, power);
+        //pvcd.add(pin_name, ipwr );
+        //pvcd.add(pin_name, cap);
+        pvcd.add(pin_name, ipwr + cap);
       }
 
-      // fmt::print("power hier:{} inst:{} driver:{} {} cap:{} ipwr:{}\n", hier_name, node_name, wire_name, pin_name, cap, ipwr);
-      //  fmt::print("power {} cap:{} ipwr:{} v:{} total:{}\n", vcd_name, cap, ipwr, voltage, power);
+      //fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 

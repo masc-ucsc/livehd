@@ -339,6 +339,8 @@ void Power_vcd::compute(std::string_view odir) const {
     for (const auto &hname : e.second.hier_name) {
       auto hier_name = hname.substr(n_skip);
 
+      //fmt::print("VCD transition for:{}\n", hier_name);
+
       auto it = hier_name2power.find(hier_name);
       if (it == hier_name2power.end()) {
         continue;

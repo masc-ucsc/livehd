@@ -209,9 +209,9 @@ http_archive(
     name = "opentimer",
     build_file = "opentimer.BUILD",
     patches = ["//external:opentimer.patch"],
-    strip_prefix = "OpenTimer-e3a9d9e95b7b23dcf7a3aa96c9939d1ab88bba27",
+    strip_prefix = "OpenTimer-979a5f33936c8deef846a26df8ef58d1b4a7ca82",
     urls = [
-        "https://github.com/masc-ucsc/OpenTimer/archive/e3a9d9e95b7b23dcf7a3aa96c9939d1ab88bba27.zip",
+        "https://github.com/masc-ucsc/OpenTimer/archive/979a5f33936c8deef846a26df8ef58d1b4a7ca82.zip",
     ],
 )
 

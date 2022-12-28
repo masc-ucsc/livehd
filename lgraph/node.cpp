@@ -545,23 +545,16 @@ std::string_view Node::get_hier_name() const {
 }
 
 std::string Node::get_or_create_name() const {
-  std::string root_name;
-  if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
-    root_name = top_g->ref_htree()->get_name(hidx);
-  }
+  auto root_name = get_hier_name();
 
   auto      *ref = current_g->ref_node_name_map();
   const auto it  = ref->find(get_compact_class());
   if (it != ref->end()) {
-    if (root_name.empty()) {
-      return it->second;
-    }
-
     return absl::StrCat(root_name, ",", it->second);
   }
 
   auto cell_name = Ntype::get_name(get_type_op());
-  return absl::StrCat("_", root_name, ",", std::to_string(nid), cell_name);
+  return absl::StrCat(root_name, ",", std::to_string(nid), "_", cell_name);
 }
 
 std::string Node::get_name() const {
