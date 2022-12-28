@@ -872,7 +872,7 @@ void Bitwidth::process_bit_or(Node &node, XEdge_iterator &inp_edges) {
       return;
     }
 
-    any_negative = any_negative || it->second.is_always_negative();
+    any_negative = any_negative || !it->second.is_always_positive();
 
     bits = it->second.get_sbits();
     if (bits > max_bits) {
@@ -1485,6 +1485,8 @@ void Bitwidth::bw_pass(Lgraph *lg) {
       }
 
     }  // end of lg->forward()
+
+    // dump(lg);
 
     // set bits for graph input and output
     lg->each_graph_input(
