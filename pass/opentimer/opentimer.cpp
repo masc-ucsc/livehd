@@ -325,7 +325,8 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
       auto pin_name = absl::StrCat(instance_name, ",", dpin.get_pin_name());
 
       auto it = pins.find(pin_name);
-      I(it != pins.end());  // just inserted before
+      if(it != pins.end())
+        continue;
 
       auto at_f = it->second.at(ot::MAX, ot::FALL);
       auto at_r = it->second.at(ot::MAX, ot::RISE);
