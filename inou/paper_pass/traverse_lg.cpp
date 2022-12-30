@@ -88,7 +88,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
     fmt::print("7. before matching starts -- synth"); print_everything();
-    bool change_done = complete_io_match(true);
+    bool change_done = complete_io_match(true);//FIXME: do not need for flop only as matching flop already
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
@@ -96,7 +96,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     } 
     fmt::print("8. before resolution + matching while loop starts -- synth"); print_everything();
 
-    while (change_done && !crit_node_vec.empty()) {
+    while (change_done && !crit_node_vec.empty()) {//FIXME: do not need for flop only as matching flop already
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);//alters crit_node_vec too
@@ -951,12 +951,17 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
       for (auto &[n_o, set_o]: inp_map_of_sets_orig) {
         auto node_o = Node_pin("lgdb", n_o).get_node().get_nid().value;
 
-        if(node_s == 380 && node_o==95)
+        if(node_s == 380 && node_o==95) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
-        else if(node_s == 399 && node_o==82)
+          process_crit_node_vec_and_tell_is_empty(n_s);
+        } else if(node_s == 399 && node_o==82) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
-        else if(node_s == 416 && node_o==68)
+          process_crit_node_vec_and_tell_is_empty(n_s);
+        } else if(node_s == 416 && node_o==68) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
+          process_crit_node_vec_and_tell_is_empty(n_s);
+        }
+
       }
     }
     flop_set.clear();
@@ -1235,7 +1240,6 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
         it++;
         continue; //if flop node, then only do matching; else continue with other entry.
     }}
-    bool in_matched = false;
     bool out_matched = false;
     
     for(const auto &[orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
@@ -1245,20 +1249,19 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
         continue; //flop node should be matched with flop node only! else datatype mismatch!
       }}
 
-      if(it->second == orig_in_set_np) {
-        in_matched = true;
-      }
-
-      if(in_matched) {
+      out_matched=false;
+      if(it->second == orig_in_set_np) {//in_matched
         /*it->first == orig_in_np for inputs. see if their output sets match as well.
          * 1. both might not have outputs and thus not be present in out_map_of_sets_<> 
          * 2. if both are present, then compare the output sets.*/
         if(out_map_of_sets_synth.find(it->first)!=out_map_of_sets_synth.end() && out_map_of_sets_orig.find(orig_in_np)!= out_map_of_sets_orig.end()) { //both present
-          if(out_map_of_sets_synth[it->first]==out_map_of_sets_orig[orig_in_np]) {out_matched=true;} 
+          if(out_map_of_sets_synth[it->first]==out_map_of_sets_orig[orig_in_np]) {
+            out_matched=true;
+          } 
         } else { //both absent. thus a match!?
           out_matched = true;
         }
-      } 
+      }
 
       if (out_matched) {//in+out matched. complete exact match. put in matching map 
         net_to_orig_pin_match_map[it->first].insert(orig_in_np);
@@ -1278,7 +1281,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
 
 }
 
-bool Traverse_lg::process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf) {
+void Traverse_lg::process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf) {
   /* if this dpin_cf is found in crit_node_vec, 
    * 1.  delete from crit_node_vec
    * 2.  if upon deletion, vec becomes empty (all crit nodes matched) return true else return false*/
@@ -1286,10 +1289,10 @@ bool Traverse_lg::process_crit_node_vec_and_tell_is_empty(const Node_pin::Compac
   if(it!=crit_node_vec.end()){
     crit_node_vec.erase(it);
   } 
-  if (crit_node_vec.empty())
-    return false;
-  else
-    return true;
+  // if (crit_node_vec.empty())
+  //   return false;
+  // else
+  //   return true;
 }
 
 void Traverse_lg::report_critical_matches_with_color(){
@@ -1305,15 +1308,10 @@ void Traverse_lg::report_critical_matches_with_color(){
   fmt::print("\n");
 }
 
-void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){//FIXME: remove print stmts after debug
-  fmt::print("\nRESOLVING\n"); 
+void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
   for(auto &[synth_np, synth_set_np]:synth_map_of_set){
-    auto p = Node_pin("lgdb", synth_np);
-    fmt::print("{}, {},  {}\n", p.get_node().get_nid(), p.get_pid(), synth_set_np.size());
     for(auto it = synth_set_np.begin(); it!=synth_set_np.end();){
       const auto set_np_val = *it;
-      const auto x = Node_pin("lgdb", set_np_val);
-      fmt::print("   {}, {}, {}\n", x.get_node().get_nid(), x.get_pid(), synth_set_np.size());
       if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
         synth_set_np.erase(it++);
         auto equiv_val = net_to_orig_pin_match_map[set_np_val];
