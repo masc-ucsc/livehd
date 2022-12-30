@@ -318,14 +318,14 @@ void Pass_opentimer::compute_timing(Lgraph *g) {  // Expand this method to compu
     auto        instance_name = node.get_or_create_name();
     std::string type_name{sub_node.get_name()};  // OT needs std::string
 
-    timer.insert_gate(instance_name, type_name);
+    //timer.insert_gate(instance_name, type_name);
 
     // setup driver pins and nets
     for (auto &dpin : node.out_connected_pins()) {
-      auto pin_name = absl::StrCat(instance_name, ",", dpin.get_pin_name());
+      auto pin_name = absl::StrCat(instance_name, ":", dpin.get_pin_name());
 
       auto it = pins.find(pin_name);
-      if(it != pins.end())
+      if(it == pins.end())
         continue;
 
       auto at_f = it->second.at(ot::MAX, ot::FALL);
