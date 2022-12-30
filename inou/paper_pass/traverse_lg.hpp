@@ -57,6 +57,26 @@ private:
     result.insert(b.begin(), b.end());
     return result;
   }
+  template <typename T>
+  absl::flat_hash_set<T> get_union(const absl::flat_hash_set<T> &a, const absl::flat_hash_set<T> &b) const {
+    absl::flat_hash_set<T> result = a;
+    result.insert(b.begin(), b.end());
+    return result;
+  }
+  template<class InputIt1, class InputIt2, class OutputIt>
+  OutputIt get_intersection(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, OutputIt d_first)  {
+      while (first1 != last1 && first2 != last2) {
+          if (*first1 < *first2) {
+              ++first1;
+          } else  {
+              if (!(*first2 < *first1)) {
+                  *d_first++ = *first1++; // *first1 and *first2 are equivalent.
+              }
+              ++first2;
+          }
+      }
+      return d_first;
+  }
   std::set<Node::Compact_flat> combo_loop_vec;
   typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;
   void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
@@ -70,12 +90,13 @@ private:
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
-  bool complete_io_match();//returns true if any matching took place
+  bool complete_io_match(bool flop_only);//returns true if any matching took place
   bool process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
-  void probabilistic_match();
- // map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) ;
+  void probabilistic_match_loopLast_only();
+  bool probabilistic_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
+  map_of_sets make_in_out_union_loopLast_only(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) const ;
   void print_nodes_vec () const;
   void print_flop_set () const ;
   void print_everything() ;
