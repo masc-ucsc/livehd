@@ -91,7 +91,7 @@ private:
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
-  void process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf);
+  void remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
   void probabilistic_match_loopLast_only();

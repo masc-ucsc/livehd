@@ -946,23 +946,32 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
   fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
    if(!is_orig_lg) {
     /*HACK : matching flops for the test case MaxPeriodFibonacciLFSR*/
-    for (auto &[n_s, set_s]: inp_map_of_sets_synth) {
+    for (auto it = inp_map_of_sets_synth.begin(); it!= inp_map_of_sets_synth.end();) {
+      auto n_s = it->first;
+      auto set_s = it->second;
       auto node_s = Node_pin("lgdb", n_s).get_node().get_nid().value;
+      bool do_clear = false;
       for (auto &[n_o, set_o]: inp_map_of_sets_orig) {
         auto node_o = Node_pin("lgdb", n_o).get_node().get_nid().value;
 
         if(node_s == 380 && node_o==95) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
-          process_crit_node_vec_and_tell_is_empty(n_s);
+          do_clear=true;
         } else if(node_s == 399 && node_o==82) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
-          process_crit_node_vec_and_tell_is_empty(n_s);
+          do_clear=true;
         } else if(node_s == 416 && node_o==68) {
           net_to_orig_pin_match_map[n_s].insert(n_o);
-          process_crit_node_vec_and_tell_is_empty(n_s);
-        }
+          do_clear=true;
+        } 
 
       }
+      if (do_clear){
+        remove_from_crit_node_vec(n_s); 
+        //out_map_of_sets_synth.erase(n_s); inp_map_of_sets_synth.erase(it++); 
+        //^COMMENTED because: flop formed afterwards did not have clock. so won't match 
+        it++;
+      } else it++;
     }
     flop_set.clear();
     fmt::print("9. Printing after Hackish matching!"); print_everything();
@@ -1085,7 +1094,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
     if (node.is_type_const()) {
       continue;
     }
-    traverse_order.emplace_back(node_dpin_cf);
+    traverse_order.emplace_back(node_dpin_cf);//FIXME: since flops are already matched, do not keep them here for backward matching.
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
     const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
@@ -1095,8 +1104,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
     }
 
     for (auto e : node.out_edges()) {
-      if (e.sink.get_node().is_type_loop_first()) {
-        /*need not keep outputs of const/graphIO in in_map_of_sets*/
+      if (e.sink.get_node().is_type_loop_first() /*need not keep outputs of const/graphIO in in_map_of_sets*//*|| e.sink.get_node().is_type_loop_last() is_type_loop_last processed in previous fast pass*/) {
         continue;
       }
       auto out_cf = get_dpin_cf(e.sink.get_node());
@@ -1131,8 +1139,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
     }
 
     for (auto in_dpin : node.inp_drivers()) {
-      if (in_dpin.get_node().is_type_loop_first()) {
-        /*need not keep outputs of const/graphIO in out_map_of_sets*/
+      if (in_dpin.get_node().is_type_loop_first()/*need not keep outputs of const/graphIO in out_map_of_sets*//*|| in_dpin.get_node().is_type_loop_last() is_type_loop_last - specifically flops -  processed in hackish matching*/) {
         continue;
       }
       auto inp_cf = get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
@@ -1161,12 +1168,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
   orig_lg->each_graph_input([synth_lg, this](const Node_pin dpin) {
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
-    process_crit_node_vec_and_tell_is_empty(synth_node_dpin.get_compact_flat());
+    remove_from_crit_node_vec(synth_node_dpin.get_compact_flat());
   });
   orig_lg->each_graph_output([synth_lg, this](const Node_pin dpin) {
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
-    process_crit_node_vec_and_tell_is_empty(synth_node_dpin.get_compact_flat());
+    remove_from_crit_node_vec(synth_node_dpin.get_compact_flat());
   });
 
   /*known points matching*/
@@ -1190,7 +1197,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
       if ( !synth_node_dpin.is_invalid() )  {
         fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
         net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
-        process_crit_node_vec_and_tell_is_empty(synth_node_dpin.get_compact_flat());
+        remove_from_crit_node_vec(synth_node_dpin.get_compact_flat());
       }
     }
 
@@ -1220,7 +1227,7 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth,
       if((it->second)==orig_set_np){//POSSIBLE FIXME: unrdered sets compared with ==
         matched=true;
         net_to_orig_pin_match_map[it->first].insert(orig_np);
-        process_crit_node_vec_and_tell_is_empty(it->first);
+        remove_from_crit_node_vec(it->first);
       }
     }
     if(matched) {
@@ -1234,6 +1241,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
 
   bool any_matching_done = false;
   for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
+    any_matching_done = false;
     auto n_s = Node_pin("lgdb", it->first).get_node();
     if(flop_only) {
       if ( !n_s.is_type_loop_last()) {
@@ -1269,8 +1277,8 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
       }
     }
 
-    if (out_matched) {//in+out matched. complete exact match.  remove from synth map_of_sets
-      process_crit_node_vec_and_tell_is_empty(it->first);
+    if (any_matching_done) {//in+out matched. complete exact match.  remove from synth map_of_sets
+      remove_from_crit_node_vec(it->first);
       if(flop_set.find(it->first)!=flop_set.end()) { flop_set.erase(it->first); }
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
@@ -1281,7 +1289,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
 
 }
 
-void Traverse_lg::process_crit_node_vec_and_tell_is_empty(const Node_pin::Compact_flat &dpin_cf) {
+void Traverse_lg::remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf) {
   /* if this dpin_cf is found in crit_node_vec, 
    * 1.  delete from crit_node_vec
    * 2.  if upon deletion, vec becomes empty (all crit nodes matched) return true else return false*/
