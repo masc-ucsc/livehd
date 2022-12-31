@@ -6,10 +6,7 @@
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
 #include "iassert.hpp"
-
-using Bits_t               = int32_t;  // bits type (future use)
-constexpr int    Bits_bits = 17;
-constexpr Bits_t Bits_max  = ((1ULL << Bits_bits) - 1);
+#include "graph_sizing.hpp"
 
 class Lconst {
 private:

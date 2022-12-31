@@ -10,8 +10,8 @@
 #include "iassert.hpp"
 #include "likely.hpp"
 
-void Graph_core::Master_entry::readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t, 40> &pending_inp,
-                                              boost::container::static_vector<uint32_t, 40> &pending_out) {
+void Graph_core::Master_entry::readjust_edges(uint32_t self_id, absl::InlinedVector<uint32_t, 40> &pending_inp,
+                                              absl::InlinedVector<uint32_t, 40> &pending_out) {
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i] == 0) {
       continue;
@@ -179,7 +179,7 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
   return false;
 }
 
-void Graph_core::Overflow_entry::extract_all(boost::container::static_vector<uint32_t, 40> &expanded) {
+void Graph_core::Overflow_entry::extract_all(absl::InlinedVector<uint32_t, 40> &expanded) {
   I(ledge_min && ledge1 && ledge_max);
 
   auto v = ledge_min;
@@ -218,11 +218,11 @@ void Graph_core::Overflow_entry::extract_all(boost::container::static_vector<uin
   overflow_next_id = tmp_overflow_next_id;
 }
 
-void Graph_core::Overflow_entry::readjust_edges(boost::container::static_vector<uint32_t, 40> &pending_inp,
-                                                boost::container::static_vector<uint32_t, 40> &pending_out) {
+void Graph_core::Overflow_entry::readjust_edges(absl::InlinedVector<uint32_t, 40> &pending_inp,
+                                                absl::InlinedVector<uint32_t, 40> &pending_out) {
   I(n_edges < max_edges);
 
-  boost::container::static_vector<uint32_t, 40> *pending = nullptr;
+  absl::InlinedVector<uint32_t, 40> *pending = nullptr;
 
   if (n_edges == 0) {
     inputs = !pending_inp.empty();
@@ -620,8 +620,8 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
     return;
   }
 
-  boost::container::static_vector<uint32_t, 40> pending_inp;
-  boost::container::static_vector<uint32_t, 40> pending_out;
+  absl::InlinedVector<uint32_t, 40> pending_inp;
+  absl::InlinedVector<uint32_t, 40> pending_out;
 
   ent.readjust_edges(self_id, pending_inp, pending_out);
 
@@ -739,6 +739,18 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
       // readjust_edges can change the table (move it), so must recompute
       ref_overflow(prev_over_id)->overflow_next_id = overflow_id;
     }
+  }
+}
+
+void Graph_core::del_node(uint32_t self_id) {
+  table[self_id].delete_node();
+
+  auto            over_id  = table[self_id].get_overflow_id();
+  while (over_id) {
+    auto *over_ptr = ref_overflow(over_id);
+    over_id  = over_ptr->get_overflow_id();
+
+    over_ptr->delete_node();
   }
 }
 
@@ -917,6 +929,13 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
     fmt::print(" {}", ledge1_or_overflow);
   }
   fmt::print("\n");
+}
+
+void Graph_core::Master_entry::delete_node() {
+  I(false);
+}
+void Graph_core::Overflow_entry::delete_node() {
+  I(false);
 }
 
 void Graph_core::Overflow_entry::dump(uint32_t self_id) const {

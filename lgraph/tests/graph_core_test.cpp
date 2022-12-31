@@ -14,6 +14,8 @@
 
 #include "lrand.hpp"
 #include "perf_tracing.hpp"
+#include "graph_library.hpp"
+#include "lgraph.hpp"
 
 class Setup_graph_core : public ::testing::Test {
 protected:
@@ -227,7 +229,6 @@ TEST_F(Setup_graph_core, delete_edge) {
   EXPECT_EQ(gc.get_num_pin_outputs(m1), sink_nodes.size());
   EXPECT_EQ(gc.get_num_pin_inputs(m1), driver_nodes.size());
 
-#if 1
   std::shuffle(sink_nodes.begin(), sink_nodes.end(), std::knuth_b());
   std::shuffle(driver_nodes.begin(), driver_nodes.end(), std::knuth_b());
 
@@ -259,6 +260,106 @@ TEST_F(Setup_graph_core, delete_edge) {
 
   EXPECT_EQ(gc.get_num_pin_outputs(m1), 0);
   EXPECT_EQ(gc.get_num_pin_inputs(m1), 0);
+}
+
+TEST_F(Setup_graph_core, fully_connected_gc) {
+
+  constexpr std::size_t num_nodes = 1024;
+
+  std::vector<uint32_t> nodes;
+
+  nodes.resize(num_nodes);
+
+  Graph_core gc("lgdb_graph_core_test", "fully_connected");
+
+  for (size_t i = 0u; i < num_nodes; ++i) {
+    nodes[i] = gc.create_node();
+    EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+    for (size_t j = 0u; j < i; ++j) {
+      gc.add_edge(nodes[j], nodes[i]);
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]),  j+1);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0  );
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]),  j);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i-j  );
+    }
+  }
+
+  for (auto i = 0u; i < num_nodes; ++i) {
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes-1-i);
+    for (size_t j = i+1; j < num_nodes; ++j) {
+      gc.del_edge(nodes[i], nodes[j]);
+    }
+    EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+  }
+}
+
+TEST_F(Setup_graph_core, fully_connected_boost) {
+
+  constexpr std::size_t num_nodes = 1024;
+
+  std::vector<uint32_t> nodes;
+
+  nodes.resize(num_nodes);
+
+  // create a boost mutable (adjecency_list)
+  boost::adjacency_list<boost::vecS, boost::vecS, boost::bidirectionalS, boost::no_property, boost::no_property> g;
+
+  for (size_t i = 0u; i < num_nodes; ++i) {
+    nodes[i] = boost::add_vertex(g);
+
+    EXPECT_EQ(boost::in_degree(nodes[i], g), 0 );
+    EXPECT_EQ(boost::out_degree(nodes[i], g), 0 );
+    for (size_t j = 0u; j < i; ++j) {
+      boost::add_edge(nodes[j], nodes[i], g);
+      EXPECT_EQ(boost::in_degree(nodes[i], g), j+1 );
+      EXPECT_EQ(boost::out_degree(nodes[i], g), 0 );
+      EXPECT_EQ(boost::in_degree(nodes[j], g), j );
+      EXPECT_EQ(boost::out_degree(nodes[j], g), i-j );
+    }
+  }
+
+  for (auto i = 0u; i < num_nodes; ++i) {
+    EXPECT_EQ(boost::out_degree(nodes[i], g), num_nodes-1-i);
+    for (size_t j = i+1; j < num_nodes; ++j) {
+      boost::remove_edge(nodes[i], nodes[j], g);
+    }
+    EXPECT_EQ(boost::out_degree(nodes[i], g), 0);
+    EXPECT_EQ(boost::in_degree(nodes[i], g), 0);
+  }
+}
+
+TEST_F(Setup_graph_core, fully_connected_del_node) {
+
+  constexpr std::size_t num_nodes = 1024;
+
+  std::vector<uint32_t> nodes;
+
+  nodes.resize(num_nodes);
+
+  Graph_core gc("lgdb_graph_core_test", "fully_connected");
+
+  for (size_t i = 0u; i < num_nodes; ++i) {
+    nodes[i] = gc.create_node();
+    EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+    for (size_t j = 0u; j < i; ++j) {
+      gc.add_edge(nodes[j], nodes[i]);
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]),  j+1);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0  );
+      EXPECT_EQ(gc.get_num_pin_inputs(nodes[j]),  j);
+      EXPECT_EQ(gc.get_num_pin_outputs(nodes[j]), i-j  );
+    }
+  }
+
+  #if 0
+  for (auto i = 0u; i < num_nodes; ++i) {
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes-1-i);
+    gc.del_node(nodes[i]);
+    EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
+    EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
+  }
 #endif
 }
 
@@ -411,17 +512,18 @@ TEST_F(Setup_graph_core, bench_gc) {
   }
 }
 
-#if 0
 TEST_F(Setup_graph_core, bench_lgraph) {
   // This is to show the full Lgraph overhead (it should be close to Graph_core
   // once it replaced node_internal)
+
+  auto *lib = Graph_library::instance("lgdb_graph_core");
 
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
     TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
       ctx.event()->set_name("test1_lg_insert_" + std::to_string(sz));
     });
 
-    auto *lg = Lgraph_create("graph_core_test", "lg_test1", "test");
+    auto *lg = lib->create_lgraph("lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();
@@ -440,7 +542,7 @@ TEST_F(Setup_graph_core, bench_lgraph) {
       ctx.event()->set_name("test2_lg_delete_" + std::to_string(sz));
     });
 
-    auto *lg = Lgraph_create("graph_core_test", "lg_test1", "test");
+    auto *lg = lib->create_lgraph("lg_test1", "test");
 
     auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
     auto p1 = m1.get_driver_pin();
@@ -461,5 +563,25 @@ TEST_F(Setup_graph_core, bench_lgraph) {
 
     EXPECT_EQ(m1.get_num_out_edges(), 0);
   }
+
+  for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {
+    TRACE_EVENT("core", nullptr, [sz](perfetto::EventContext ctx) {
+      ctx.event()->set_name("test2_lg_chain_" + std::to_string(sz));
+    });
+
+    auto *lg = lib->create_lgraph("lg_test2", "test");
+
+    auto m1 = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
+    auto p1 = m1.get_driver_pin();
+
+    for (auto i = 0u; i < sz; ++i) {
+      auto m = lg->create_node(Ntype_op::CompileErr);  // CompileErr to allow arbitrary edges without checks
+      auto p = m.get_sink_pin();
+      lg->add_edge(p1, p);
+      p1 = m.setup_driver_pin();
+    }
+
+    EXPECT_EQ(m1.get_num_out_edges(), 1);
+    EXPECT_EQ(p1.get_node().get_num_inp_edges(), 1);
+  }
 }
-#endif

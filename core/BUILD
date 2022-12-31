@@ -69,17 +69,6 @@ cc_test(
 )
 
 cc_test(
-    name = "graph_core_test",
-    srcs = ["tests/graph_core_test.cpp"],
-    #tags = ["fixme"],
-    deps = [
-        ":core",
-        "@boost//:graph",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "lconst_test",
     srcs = ["tests/lconst_test.cpp"],
     deps = [

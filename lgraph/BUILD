@@ -116,3 +116,14 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "graph_core_test",
+    srcs = ["tests/graph_core_test.cpp"],
+    deps = [
+        ":lgraph",
+        "@boost//:graph",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+

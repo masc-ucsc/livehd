@@ -5,13 +5,12 @@
 #include <string_view>
 #include <vector>
 
-#include "boost/container/static_vector.hpp"
+//#include "boost/container/static_vector.hpp"
+#include "absl/container/inlined_vector.h"
 #include "iassert.hpp"
+#include "graph_sizing.hpp"
 
 class Graph_core;
-
-using Bits_t  = uint32_t;
-using Port_ID = uint32_t;
 
 class Index_iter {
 protected:
@@ -59,7 +58,7 @@ class Graph_core {
 protected:
   class __attribute__((packed)) Overflow_entry {
   protected:
-    void extract_all(boost::container::static_vector<uint32_t, 40> &expanded);
+    void extract_all(absl::InlinedVector<uint32_t, 40> &expanded);
     bool delete_edge_rebalance_ledges(uint32_t other_id);
 
   public:
@@ -69,8 +68,10 @@ protected:
       overflow_vertex = 1;
     }
 
-    void readjust_edges(boost::container::static_vector<uint32_t, 40> &pending_inp,
-                        boost::container::static_vector<uint32_t, 40> &pending_out);
+    void delete_node();
+
+    void readjust_edges(absl::InlinedVector<uint32_t, 40> &pending_inp,
+                        absl::InlinedVector<uint32_t, 40> &pending_out);
 
     bool delete_edge(uint32_t other_id, bool out);
 
@@ -147,11 +148,13 @@ protected:
       bzero(this, sizeof(Master_entry));  // set zero everything
     }
 
-    void readjust_edges(uint32_t self_id, boost::container::static_vector<uint32_t, 40> &pending_inp,
-                        boost::container::static_vector<uint32_t, 40> &pending_out);
+    void readjust_edges(uint32_t self_id, absl::InlinedVector<uint32_t, 40> &pending_inp,
+                        absl::InlinedVector<uint32_t, 40> &pending_out);
     bool insert_sedge(int16_t rel_id, bool out);
     bool insert_ledge(uint32_t id, bool out);
     bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
+
+    void delete_node();
 
     bool is_pin() const { return !node_vertex; }
     bool is_node() const { return node_vertex; }
@@ -327,8 +330,8 @@ public:
   }
 
   // Make sure that this methods have "c++ copy elision" (strict rules in return)
-  const boost::container::static_vector<uint32_t, 40> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
-  const boost::container::static_vector<uint32_t, 40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
+  const absl::InlinedVector<uint32_t, 40> get_setup_drivers(uint32_t node_id) const;  // the drivers set for node_id
+  const absl::InlinedVector<uint32_t, 40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
   uint32_t fast_next(uint32_t start);
