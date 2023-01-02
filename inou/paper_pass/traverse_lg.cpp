@@ -108,13 +108,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // probabilistic_match_loopLast_only();
     // fmt::print("9. Printing after flop probabilistic_match_loopLast_only matching!"); print_everything();
     
-    if(flop_set.empty()) { //all flops matched!?
+    if(flop_set.empty() && !crit_node_vec.empty()) { //all flops matched and still some crit cells left to map!
       //move to combinational matching
       do {
         resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
         resolution_of_synth_map_of_sets(out_map_of_sets_synth);
         change_done = complete_io_match(false);//alters crit_node_vec too
         fmt::print("Change done = {}\n", change_done);
+        fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!"); print_everything();
     } while (change_done && !crit_node_vec.empty());
     fmt::print("10. Printing after all the combinational resolution and matching!"); print_everything();
     }
@@ -1239,9 +1240,10 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth,
 
 bool Traverse_lg::complete_io_match(bool flop_only ) {
 
+  bool io_matched = false;
   bool any_matching_done = false;
   for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
-    any_matching_done = false;
+    io_matched = false;
     auto n_s = Node_pin("lgdb", it->first).get_node();
     if(flop_only) {
       if ( !n_s.is_type_loop_last()) {
@@ -1273,11 +1275,12 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
 
       if (out_matched) {//in+out matched. complete exact match. put in matching map 
         net_to_orig_pin_match_map[it->first].insert(orig_in_np);
-        any_matching_done=true;
+        io_matched=true;
+        any_matching_done = true;
       }
     }
 
-    if (any_matching_done) {//in+out matched. complete exact match.  remove from synth map_of_sets
+    if (io_matched) {//in+out matched. complete exact match.  remove from synth map_of_sets
       remove_from_crit_node_vec(it->first);
       if(flop_set.find(it->first)!=flop_set.end()) { flop_set.erase(it->first); }
       out_map_of_sets_synth.erase(it->first);
@@ -1739,17 +1742,17 @@ void Traverse_lg::print_io_map(
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
     auto p = Node_pin("lgdb", node_pin_cf);
     if (p.has_name()) {
-      fmt::print("{},{},{} \t::: ", n.get_or_create_name(), p.get_name(), p.get_pid());
+      fmt::print("{} \t::: ", /*n.get_or_create_name(),*/ p.get_name()/*, p.get_pid()*/);
     } else {
-      fmt::print("{},n{},{} \t::: ", n.get_or_create_name(), n.get_nid(), p.get_pid());
+      fmt::print("n{} \t::: ", /*n.get_or_create_name(),*/ n.get_nid()/*, p.get_pid()*/);
     }
     for (const auto& pin_cf : set_pins_cf) {
       const auto pin = Node_pin("lgdb", pin_cf);
       auto       n_s = Node_pin("lgdb", pin_cf).get_node();
       if (pin.has_name()) {
-        fmt::print("{},{},{} \t", n_s.get_or_create_name(), pin.get_name(), pin.get_pid());
+        fmt::print("{} \t",/* n_s.get_or_create_name(),*/ pin.get_name()/*, pin.get_pid()*/);
       } else {
-        fmt::print("{},n{},{} \t", n_s.get_or_create_name(), n_s.get_nid(), pin.get_pid());
+        fmt::print("n{} \t",/* n_s.get_or_create_name(),*/ n_s.get_nid()/*, pin.get_pid()*/);
       }
     }
     fmt::print("\n");
