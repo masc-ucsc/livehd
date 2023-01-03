@@ -310,27 +310,23 @@ like Python, Javascript, and RUST.
 
 ## (medium) SMT Solver for LEC
 
-Finish pass/lec. Capable of doing a SMT LEC.
+There are several attems to translate LGraph to SMT (lec pass), but none is working.
 
-Maybe good to avoid LEC when structural traversal is the same (remove those nodes from inputs).
+The proposal is to create a pass that uses https://github.com/stanford-centaur/smt-switch as
+a common SMT front-end. There is an API to can process each node and create an smt-switch
+circuit. As a sample of use, iterating over 2 LGraphs, the resulting smt-switch can be
+used as LEC. Another sample of use is to iterate over 2 subsections of a LGraph and check
+if the output edges are equivalent (to allow simplication).
 
-Main requirements:
+Sample passes to perform:
 
 * Optimize equiv check. Traverse and remove subsets with same functionality
 * Allow to SAT equiv graphs marked
 * Reduce ports in rams, and collapse muxes when parallel/full case
 * Partition graph in sub-graphs. Each subgraph can synthesis/check by itself.
 
-Decide ezSAT or boolector or CVC or (ezSAT + XX)
 
-* https://boolector.github.io/docs/cboolector.html
-* Create a small benchmark and decide (some simple circuit)
-
-extend ezSAT and interface with lgraph to:
-
-* check equivalence of lgraphs
-* Reduce port in SRAMs
-* Check parallel cases in muxes
+Potential functionality to simplify. Remove the ezSAT pass, use smt-switch.
 
 Potential paper:
 
@@ -339,8 +335,6 @@ Potential paper:
 * Use parallel SAT checks (each output cone, partition of cones, after synth)
 * Mark "boundaries" for equivalence in lgraph. Faster synthesis, verification...
 * Different SAT solvers in parallel (ezsat, CVC4, SPT) and pick fastest
-
-Maybe use https://github.com/Boolector/boolector
 
 ## (medium) Useful Lgraph Passes
 

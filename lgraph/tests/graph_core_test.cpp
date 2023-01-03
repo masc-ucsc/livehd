@@ -342,6 +342,9 @@ TEST_F(Setup_graph_core, fully_connected_del_node) {
 
   for (size_t i = 0u; i < num_nodes; ++i) {
     nodes[i] = gc.create_node();
+    if (rand() & 3) {
+      nodes[i] = gc.create_pin(nodes[i], rand() & 1023);
+    }
     EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
     for (size_t j = 0u; j < i; ++j) {
@@ -353,14 +356,16 @@ TEST_F(Setup_graph_core, fully_connected_del_node) {
     }
   }
 
-  #if 0
   for (auto i = 0u; i < num_nodes; ++i) {
+    if (gc.get_num_pin_outputs(nodes[i]) != num_nodes-1-i) {
+      gc.dump(nodes[i]);
+      fmt::print("HELLO\n");
+    }
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), num_nodes-1-i);
     gc.del_node(nodes[i]);
     EXPECT_EQ(gc.get_num_pin_outputs(nodes[i]), 0);
     EXPECT_EQ(gc.get_num_pin_inputs(nodes[i]), 0);
   }
-#endif
 }
 
 // For benchmarking

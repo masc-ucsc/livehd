@@ -742,15 +742,39 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   }
 }
 
-void Graph_core::del_node(uint32_t self_id) {
-  table[self_id].delete_node();
+void Graph_core::del_pin(uint32_t self_id) {
+  table[self_id].delete_node(self_id, table);
 
   auto            over_id  = table[self_id].get_overflow_id();
+
   while (over_id) {
     auto *over_ptr = ref_overflow(over_id);
+    auto over_ptr_id = over_id;
     over_id  = over_ptr->get_overflow_id();
 
-    over_ptr->delete_node();
+    over_ptr->delete_node(self_id, table);
+
+    if (free_overflow_id) {
+      table[over_ptr_id].insert_free_next(free_overflow_id);
+    }else{
+      over_ptr->clear();
+    }
+    free_overflow_id = over_ptr_id;
+  }
+
+  table[self_id].clear();
+}
+
+void Graph_core::del_node(uint32_t self_id) {
+  if (table[self_id].is_pin()) {
+    self_id = table[self_id].get_prev_ptr(); // point to master
+  }
+  auto next_pin_id = table[self_id].next_ptr;
+  del_pin(self_id);
+  while (next_pin_id) {
+    auto id = table[next_pin_id].next_ptr;
+    del_pin(next_pin_id);
+    next_pin_id = id;
   }
 }
 
@@ -931,11 +955,73 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   fmt::print("\n");
 }
 
-void Graph_core::Master_entry::delete_node() {
-  I(false);
+void Graph_core::Master_entry::delete_node(uint32_t self_id, std::vector<Master_entry> &mtable) {
+  for (auto i = 0u; i < Num_sedges; ++i) {
+    if (sedge[i] == 0) {
+      continue;
+    }
+
+    if (!(inp_mask & (1 << i))) {
+      auto id = self_id + sedge[i];
+      mtable[id].delete_edge(id, self_id, false);
+    }
+    sedge[i] = 0;
+  }
+  if (is_node() && sedge2_or_pid) {
+    if (!(inp_mask & (1 << Num_sedges))) {
+      auto id = self_id + sedge2_or_pid;
+      mtable[id].delete_edge(id, self_id, false);
+    }
+    sedge2_or_pid = 0;
+  }
+
+  if (is_node() && ledge0_or_prev) {
+    uint32_t tmp   = ledge0_or_prev;
+    ledge0_or_prev = 0;
+    if (!(inp_mask & (1 << (Num_sedges + 1)))) {
+      mtable[tmp].delete_edge(tmp, self_id, false);
+    }
+  }
+  if (!overflow_link && ledge1_or_overflow) {
+    uint32_t tmp       = ledge1_or_overflow;
+    ledge1_or_overflow = 0;
+    if (!(inp_mask & (1 << (Num_sedges + 2)))) {
+      mtable[tmp].delete_edge(tmp, self_id, false);
+    }
+  }
 }
-void Graph_core::Overflow_entry::delete_node() {
-  I(false);
+
+void Graph_core::Overflow_entry::delete_node(uint32_t self_id, std::vector<Master_entry> &mtable) {
+  if (inputs) {
+    return;
+  }
+
+  auto v = ledge_min;
+  mtable[v].delete_edge(v, self_id, false);
+
+  for (auto i = 0u; i < sedge0_size; ++i) {
+    if (sedge0[i] == 0) {
+      continue;
+    }
+
+    auto v2 = ledge_min + sedge0[i];
+    mtable[v2].delete_edge(v2, self_id, false);
+  }
+
+  v = ledge1;
+  mtable[v].delete_edge(v, self_id, false);
+
+  for (auto i = 0u; i < sedge1_size; ++i) {
+    if (sedge1[i] == 0) {
+      continue;
+    }
+
+    auto v2 = ledge1 + sedge1[i];
+    mtable[v2].delete_edge(v2, self_id, false);
+  }
+
+  v = ledge_max;
+  mtable[v].delete_edge(v, self_id, false);
 }
 
 void Graph_core::Overflow_entry::dump(uint32_t self_id) const {

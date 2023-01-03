@@ -56,6 +56,8 @@ public:
 
 class Graph_core {
 protected:
+  class Master_entry;
+
   class __attribute__((packed)) Overflow_entry {
   protected:
     void extract_all(absl::InlinedVector<uint32_t, 40> &expanded);
@@ -68,7 +70,7 @@ protected:
       overflow_vertex = 1;
     }
 
-    void delete_node();
+    void delete_node(uint32_t self_id, std::vector<Master_entry> &table);
 
     void readjust_edges(absl::InlinedVector<uint32_t, 40> &pending_inp,
                         absl::InlinedVector<uint32_t, 40> &pending_out);
@@ -124,7 +126,7 @@ protected:
     // CTRL: Byte 0:1
     uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
     uint8_t  node_vertex : 1;      // node or just pin
-    uint16_t inp_mask : 9;         // are the edges input or output edges
+    uint16_t inp_mask : 9;         // are the edges input or output edges (NOTE: only 6 needed)
     uint8_t  n_outputs : 4;
     uint8_t  overflow_link : 1;  // When set, ledge_min points to overflow
     // CTRL: Byte 2
@@ -154,7 +156,7 @@ protected:
     bool insert_ledge(uint32_t id, bool out);
     bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
 
-    void delete_node();
+    void delete_node(uint32_t self_id, std::vector<Master_entry> &table);
 
     bool is_pin() const { return !node_vertex; }
     bool is_node() const { return node_vertex; }
@@ -339,11 +341,9 @@ public:
   Index_iter node_out_ids(uint32_t id);  // Iterate over the out edges of s (*it is uint32_t)
   Index_iter node_inp_ids(uint32_t id);  // Iterate over the inp edges of s
 
-  // delete all the pins and edges in the node
-  void del_node(uint32_t id);
-
   // Delete edges and pin itself (if pin is node, then it is kept as empty because pins need a node)
   void del_pin(uint32_t id);
+  void del_node(uint32_t id);            // delete all the pins and edges in the node
 
   // Delete edges between pins
   void del_edges(uint32_t id);
