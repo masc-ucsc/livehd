@@ -1333,7 +1333,7 @@ bool Traverse_lg::surrounding_cell_match() {
         auto it_syn_inp_cc = inp_map_of_sets_synth.find(cc_s);
         auto it_syn_out_cc = out_map_of_sets_synth.find(cc_s);
         auto it_out_syn    = out_map_of_sets_synth.find(it->first);
-        if ((it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
+        if (it!=inp_map_of_sets_synth.end() && it_syn_inp_cc!=inp_map_of_sets_synth.end() && (it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
           //IO of the 2 cells matches. thus they can be collapsed as 1.
           auto it_rem = std::find(connected_cells_synth_vec.begin(), connected_cells_synth_vec.end(), cc_s);
           if(it_rem!=connected_cells_synth_vec.end()) { connected_cells_synth_vec.erase(it_rem); }
