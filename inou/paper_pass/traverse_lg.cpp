@@ -120,6 +120,21 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("10. Printing after all the combinational resolution and matching!"); print_everything();
     }
 
+    if (!crit_node_vec.empty()) { //exact combinational matching could not resolve all crit nodes
+      //surrounding cell loc-similarity matching
+      change_done = surrounding_cell_match();
+      fmt::print("Change done = {}\n", change_done);
+    }
+    fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
+    if(change_done) {
+      resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+      resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+      //change_done = complete_io_match(false);
+      //fmt::print("Change done = {}\n", change_done);
+      //fmt::print("12. Printing within do-while for all the combinational resolution and matching!"); print_everything();
+    }
+    //FIXME: now again go for exact matching?
+
     /*//FIXME: remove; for DBG only;*/
     std::vector<unsigned int> inp_keys;
     std::vector<Node> inp_keys_n;
@@ -1290,6 +1305,74 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
   }
   return any_matching_done;
 
+}
+
+bool Traverse_lg::surrounding_cell_match() {
+
+  bool any_matching_done = false;
+  for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
+    auto n_s = Node_pin("lgdb", it->first).get_node();
+    bool orig_connected_cells_vec_formed = true;
+
+    /* for each surrounding cell, 
+     * if all resolved using net_to_orig_pin_match_map then check LoC;
+     * else report n_s couldn't be confidently resolved.*/
+    auto connected_cells_synth_vec = get_surrounding_pins(n_s);//list of all surrounding cells_node_dpins
+    std::vector<Node_pin::Compact_flat> connected_cells_orig_vec;
+    for (const auto &cc_s: connected_cells_synth_vec){
+
+      if(net_to_orig_pin_match_map.find(cc_s)!=net_to_orig_pin_match_map.end()){
+        connected_cells_orig_vec.emplace_back(*(net_to_orig_pin_match_map[cc_s].begin()));
+      } else {
+        fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+        orig_connected_cells_vec_formed=false;
+      }
+    }
+
+    if(orig_connected_cells_vec_formed) {
+      any_matching_done=true;
+      auto connected_cells_loc_vec = get_loc_vec(connected_cells_orig_vec);
+      if( std::adjacent_find( connected_cells_loc_vec.begin(), connected_cells_loc_vec.end(), std::not_equal_to<>() ) == connected_cells_loc_vec.end()) {//All elements are equal each other
+        net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_vec.begin(), connected_cells_orig_vec.end());
+        remove_from_crit_node_vec(it->first);
+        inp_map_of_sets_synth.erase(it++);
+      } else {
+        fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+        it++;
+      }
+    } else it++;
+
+  }
+  return any_matching_done;
+}
+
+std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node) const {
+
+  std::vector<Node_pin::Compact_flat> dpin_vec;
+  for(const auto &in_pin: node.inp_drivers() ){
+    dpin_vec.emplace_back( get_dpin_cf(in_pin.get_node()) );
+  }
+  for(const auto &out_pin: node.out_sinks()) {
+    dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
+  }
+
+  return dpin_vec;
+}
+
+std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(std::vector<Node_pin::Compact_flat> &orig_node_pin_vec) const {
+  
+  std::vector<std::pair<uint64_t, uint64_t>> loc_vec;
+  for (auto &dpin: orig_node_pin_vec) {
+    auto n_o = Node_pin("lgdb", dpin).get_node();
+    auto loc_val = std::make_pair(0,0);
+    if( n_o.has_loc()) {
+      loc_val = n_o.get_loc();
+    } else {
+      fmt::print("FIXME: No Location found for n{}.\n", n_o.get_nid());
+    }
+    loc_vec.emplace_back(loc_val);
+  }
+  return loc_vec;
 }
 
 void Traverse_lg::remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf) {
