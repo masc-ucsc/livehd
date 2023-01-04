@@ -1313,22 +1313,48 @@ bool Traverse_lg::surrounding_cell_match() {
   for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
     auto n_s = Node_pin("lgdb", it->first).get_node();
     bool orig_connected_cells_vec_formed = true;
+    bool cell_collapsed = true;
 
     /* for each surrounding cell, 
      * if all resolved using net_to_orig_pin_match_map then check LoC;
      * else report n_s couldn't be confidently resolved.*/
     auto connected_cells_synth_vec = get_surrounding_pins(n_s);//list of all surrounding cells_node_dpins
     absl::flat_hash_set<Node_pin::Compact_flat> connected_cells_orig_set;
+    Node_pin::Compact_flat connected_same_cell ;
     for (const auto &cc_s: connected_cells_synth_vec){
       auto p = Node_pin("lgdb", cc_s);//for debug
+      auto p_n = Node_pin("lgdb", cc_s).get_node();
       fmt::print("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());//FOR DEBUG
 
-      if(net_to_orig_pin_match_map.find(cc_s)!=net_to_orig_pin_match_map.end()){
-        //connected_cells_orig_set.emplace_back(*(net_to_orig_pin_match_map[cc_s].begin()));
+      if(net_to_orig_pin_match_map.find(cc_s)!=net_to_orig_pin_match_map.end()){//connected_cell_synth is resolved.
         connected_cells_orig_set.insert(net_to_orig_pin_match_map[cc_s].begin(), net_to_orig_pin_match_map[cc_s].end());
-      } else {
-        fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
-        orig_connected_cells_vec_formed=false;
+      } else {//connected_cell_synth is NOT reoslved. if its IO is same to that of n_s, consider them collpased and then resolve.
+        connected_same_cell = cc_s; 
+        auto it_syn_inp_cc = inp_map_of_sets_synth.find(cc_s);
+        auto it_syn_out_cc = out_map_of_sets_synth.find(cc_s);
+        auto it_out_syn    = out_map_of_sets_synth.find(it->first);
+        if ((it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
+          //IO of the 2 cells matches. thus they can be collapsed as 1.
+          auto it_rem = std::find(connected_cells_synth_vec.begin(), connected_cells_synth_vec.end(), cc_s);
+          if(it_rem!=connected_cells_synth_vec.end()) { connected_cells_synth_vec.erase(it_rem); }
+
+          auto same_cell_conn_cells_synth_vec = get_surrounding_pins(p_n);
+          for(const auto &same_cc_s: same_cell_conn_cells_synth_vec) {
+            if (net_to_orig_pin_match_map.find(same_cc_s)!=net_to_orig_pin_match_map.end()) {
+              connected_cells_orig_set.insert(net_to_orig_pin_match_map[same_cc_s].begin(), net_to_orig_pin_match_map[same_cc_s].end());
+            } else {
+              fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+              orig_connected_cells_vec_formed=false;
+              cell_collapsed = false;
+            }
+          }
+
+        } else {
+          fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+          orig_connected_cells_vec_formed=false;
+          cell_collapsed = false;
+        }
+
       }
     }
 
@@ -1340,6 +1366,12 @@ bool Traverse_lg::surrounding_cell_match() {
         remove_from_crit_node_vec(it->first);
         out_map_of_sets_synth.erase(it->first);
         inp_map_of_sets_synth.erase(it++);
+        if (cell_collapsed) {//connected_same_cell present
+          net_to_orig_pin_match_map[connected_same_cell].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
+          remove_from_crit_node_vec(connected_same_cell);
+          out_map_of_sets_synth.erase(connected_same_cell);
+          inp_map_of_sets_synth.erase(connected_same_cell);
+        }
       } else {
         fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
         any_matching_done=false;
