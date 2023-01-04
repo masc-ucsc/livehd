@@ -1350,7 +1350,10 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
 
   std::vector<Node_pin::Compact_flat> dpin_vec;
   for(const auto &in_pin: node.inp_drivers() ){
-    dpin_vec.emplace_back( get_dpin_cf(in_pin.get_node()) );
+    auto n = in_pin.get_node();
+    if(!n.is_type_const()) {
+      dpin_vec.emplace_back( get_dpin_cf(n) );
+    }
   }
   for(const auto &out_pin: node.out_sinks()) {
     dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
