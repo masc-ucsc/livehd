@@ -1318,11 +1318,14 @@ bool Traverse_lg::surrounding_cell_match() {
      * if all resolved using net_to_orig_pin_match_map then check LoC;
      * else report n_s couldn't be confidently resolved.*/
     auto connected_cells_synth_vec = get_surrounding_pins(n_s);//list of all surrounding cells_node_dpins
-    std::vector<Node_pin::Compact_flat> connected_cells_orig_vec;
+    absl::flat_hash_set<Node_pin::Compact_flat> connected_cells_orig_set;
     for (const auto &cc_s: connected_cells_synth_vec){
+      auto p = Node_pin("lgdb", cc_s);//for debug
+      fmt::print("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());//FOR DEBUG
 
       if(net_to_orig_pin_match_map.find(cc_s)!=net_to_orig_pin_match_map.end()){
-        connected_cells_orig_vec.emplace_back(*(net_to_orig_pin_match_map[cc_s].begin()));
+        //connected_cells_orig_set.emplace_back(*(net_to_orig_pin_match_map[cc_s].begin()));
+        connected_cells_orig_set.insert(net_to_orig_pin_match_map[cc_s].begin(), net_to_orig_pin_match_map[cc_s].end());
       } else {
         fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
         orig_connected_cells_vec_formed=false;
@@ -1330,17 +1333,22 @@ bool Traverse_lg::surrounding_cell_match() {
     }
 
     if(orig_connected_cells_vec_formed) {
-      any_matching_done=true;
-      auto connected_cells_loc_vec = get_loc_vec(connected_cells_orig_vec);
+      auto connected_cells_loc_vec = get_loc_vec(connected_cells_orig_set);
       if( std::adjacent_find( connected_cells_loc_vec.begin(), connected_cells_loc_vec.end(), std::not_equal_to<>() ) == connected_cells_loc_vec.end()) {//All elements are equal each other
-        net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_vec.begin(), connected_cells_orig_vec.end());
+        net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
+        any_matching_done=true;
         remove_from_crit_node_vec(it->first);
+        out_map_of_sets_synth.erase(it->first);
         inp_map_of_sets_synth.erase(it++);
       } else {
         fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+        any_matching_done=false;
         it++;
       }
-    } else it++;
+    } else { 
+      it++;
+      any_matching_done=false;
+    }
 
   }
   return any_matching_done;
@@ -1362,7 +1370,7 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
   return dpin_vec;
 }
 
-std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(std::vector<Node_pin::Compact_flat> &orig_node_pin_vec) const {
+std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(absl::flat_hash_set<Node_pin::Compact_flat> &orig_node_pin_vec) const {
   
   std::vector<std::pair<uint64_t, uint64_t>> loc_vec;
   for (auto &dpin: orig_node_pin_vec) {
@@ -1370,10 +1378,10 @@ std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(std::vector<
     auto loc_val = std::make_pair(0,0);
     if( n_o.has_loc()) {
       loc_val = n_o.get_loc();
+      loc_vec.emplace_back(loc_val);
     } else {
       fmt::print("FIXME: No Location found for n{}.\n", n_o.get_nid());
     }
-    loc_vec.emplace_back(loc_val);
   }
   return loc_vec;
 }
@@ -1828,17 +1836,17 @@ void Traverse_lg::print_io_map(
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
     auto p = Node_pin("lgdb", node_pin_cf);
     if (p.has_name()) {
-      fmt::print("{} \t::: ", /*n.get_or_create_name(),*/ p.get_name()/*, p.get_pid()*/);
+      fmt::print("{},{} \t::: ", /*n.get_or_create_name(),*/ p.get_name(), p.get_pid());
     } else {
-      fmt::print("n{} \t::: ", /*n.get_or_create_name(),*/ n.get_nid()/*, p.get_pid()*/);
+      fmt::print("n{},{} \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid());
     }
     for (const auto& pin_cf : set_pins_cf) {
       const auto pin = Node_pin("lgdb", pin_cf);
       auto       n_s = Node_pin("lgdb", pin_cf).get_node();
       if (pin.has_name()) {
-        fmt::print("{} \t",/* n_s.get_or_create_name(),*/ pin.get_name()/*, pin.get_pid()*/);
+        fmt::print("{},{} \t",/* n_s.get_or_create_name(),*/ pin.get_name(), pin.get_pid());
       } else {
-        fmt::print("n{} \t",/* n_s.get_or_create_name(),*/ n_s.get_nid()/*, pin.get_pid()*/);
+        fmt::print("n{},{} \t",/* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid());
       }
     }
     fmt::print("\n");
