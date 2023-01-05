@@ -1350,7 +1350,7 @@ bool Traverse_lg::surrounding_cell_match() {
           }
 
         } else {
-          fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+          fmt::print("$$ Reporting cell n{} due to {}.\n", n_s.get_nid(), p_n);
           orig_connected_cells_vec_formed=false;
           cell_collapsed = false;
         }
@@ -1391,11 +1391,19 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
   std::vector<Node_pin::Compact_flat> dpin_vec;
   for(const auto &in_pin: node.inp_drivers() ){
     auto n = in_pin.get_node();
+    if(n.is_type_io()) {
+      dpin_vec.emplace_back(in_pin.get_compact_flat());
+      continue;
+    }
     if(!n.is_type_const()) {
       dpin_vec.emplace_back( get_dpin_cf(n) );
     }
   }
   for(const auto &out_pin: node.out_sinks()) {
+    //if (out_pin.get_node().is_type_io()) {
+    //  dpin_vec.emplace_back(out_pin.get_compact_flat());
+    //  continue;
+    //}
     dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
   }
 
