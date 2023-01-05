@@ -1350,7 +1350,7 @@ bool Traverse_lg::surrounding_cell_match() {
           }
 
         } else {
-          fmt::print("$$ Reporting cell n{} due to {}.\n", n_s.get_nid(), p_n);
+          fmt::print("$$ Reporting cell n{} due to n{}.\n", n_s.get_nid(), p_n.get_nid());
           orig_connected_cells_vec_formed=false;
           cell_collapsed = false;
         }
@@ -1366,7 +1366,7 @@ bool Traverse_lg::surrounding_cell_match() {
         remove_from_crit_node_vec(it->first);
         out_map_of_sets_synth.erase(it->first);
         inp_map_of_sets_synth.erase(it++);
-        if (cell_collapsed) {//connected_same_cell present
+        if (cell_collapsed && !connected_same_cell.is_invalid()) {//connected_same_cell present
           net_to_orig_pin_match_map[connected_same_cell].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
           remove_from_crit_node_vec(connected_same_cell);
           out_map_of_sets_synth.erase(connected_same_cell);
