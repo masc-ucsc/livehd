@@ -1401,10 +1401,10 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
     }
   }
   for(const auto &out_pin: node.out_sinks()) {
-    //if (out_pin.get_node().is_type_io()) {
-    //  dpin_vec.emplace_back(out_pin.get_compact_flat());
-    //  continue;
-    //}
+    if (out_pin.get_node().is_type_io()) {
+      dpin_vec.emplace_back(get_dpin_cf(out_pin.get_node()));
+      continue;
+    }
     dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
   }
 
