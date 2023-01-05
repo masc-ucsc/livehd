@@ -1334,11 +1334,12 @@ bool Traverse_lg::surrounding_cell_match() {
         auto it_syn_out_cc = out_map_of_sets_synth.find(cc_s);
         auto it_out_syn    = out_map_of_sets_synth.find(it->first);
         if (it!=inp_map_of_sets_synth.end() && it_syn_inp_cc!=inp_map_of_sets_synth.end() && (it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
-          //IO of the 2 cells matches. thus they can be collapsed as 1.
+          /*IO of the 2 cells matches. thus they can be collapsed as 1.*/
           auto it_rem = std::find(connected_cells_synth_vec.begin(), connected_cells_synth_vec.end(), cc_s);
-          if(it_rem!=connected_cells_synth_vec.end()) { connected_cells_synth_vec.erase(it_rem); }
+          if(it_rem!=connected_cells_synth_vec.end()) { connected_cells_synth_vec.erase(it_rem); } //do not keep in connected_cells_synth_vec. coz cc_s is now collapsed with n_s. cc_s's LoC will not be checked and it need not be converted to its orig.
 
-          auto same_cell_conn_cells_synth_vec = get_surrounding_pins(p_n);
+          // cells surrounding cc_s - now collapsed with n_s - will be the surrounding cells for n_s too.
+          auto same_cell_conn_cells_synth_vec = get_surrounding_pins(p_n, it->first );
           for(const auto &same_cc_s: same_cell_conn_cells_synth_vec) {
             if (net_to_orig_pin_match_map.find(same_cc_s)!=net_to_orig_pin_match_map.end()) {
               connected_cells_orig_set.insert(net_to_orig_pin_match_map[same_cc_s].begin(), net_to_orig_pin_match_map[same_cc_s].end());
@@ -1386,7 +1387,7 @@ bool Traverse_lg::surrounding_cell_match() {
   return any_matching_done;
 }
 
-std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node) const {
+std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node, Node_pin::Compact_flat main_node_dpin) const {
 
   std::vector<Node_pin::Compact_flat> dpin_vec;
   for(const auto &in_pin: node.inp_drivers() ){
@@ -1395,7 +1396,7 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
       dpin_vec.emplace_back(in_pin.get_compact_flat());
       continue;
     }
-    if(!n.is_type_const()) {
+    if(!n.is_type_const() && main_node_dpin!=get_dpin_cf(n)) {
       dpin_vec.emplace_back( get_dpin_cf(n) );
     }
   }
