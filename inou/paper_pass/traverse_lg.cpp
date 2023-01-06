@@ -1334,7 +1334,9 @@ bool Traverse_lg::surrounding_cell_match() {
         auto it_syn_out_cc = out_map_of_sets_synth.find(cc_s);
         auto it_out_syn    = out_map_of_sets_synth.find(it->first);
         if (it!=inp_map_of_sets_synth.end() && it_syn_inp_cc!=inp_map_of_sets_synth.end() && (it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
+          
           /*IO of the 2 cells matches. thus they can be collapsed as 1.*/
+
           auto it_rem = std::find(connected_cells_synth_vec.begin(), connected_cells_synth_vec.end(), cc_s);
           if(it_rem!=connected_cells_synth_vec.end()) { connected_cells_synth_vec.erase(it_rem); } //do not keep in connected_cells_synth_vec. coz cc_s is now collapsed with n_s. cc_s's LoC will not be checked and it need not be converted to its orig.
 
@@ -1351,7 +1353,7 @@ bool Traverse_lg::surrounding_cell_match() {
           }
 
         } else {
-          fmt::print("$$ Reporting cell n{} due to n{}.\n", n_s.get_nid(), p_n.get_nid());
+          fmt::print("$$ Reporting cell n{} due to no same IO with the connected n{}.\n", n_s.get_nid(), p_n.get_nid());
           orig_connected_cells_vec_formed=false;
           cell_collapsed = false;
         }
@@ -1402,10 +1404,12 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
   }
   for(const auto &out_pin: node.out_sinks()) {
     if (out_pin.get_node().is_type_io()) {
-      dpin_vec.emplace_back(get_dpin_cf(out_pin.get_node()));
+      dpin_vec.emplace_back(out_pin.change_to_driver_from_graph_out_sink().get_compact_flat());
       continue;
     }
-    dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
+    if(main_node_dpin!=get_dpin_cf(out_pin.get_node())) {
+      dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
+    }
   }
 
   return dpin_vec;
