@@ -92,6 +92,7 @@ private:
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
   bool surrounding_cell_match();//returns true if any matching took place
+  bool surrounding_cell_match_final();//matches any unmatched cell with resolved surrounding cells. returns T if unmatched still left.
   std::vector<Node_pin::Compact_flat> get_surrounding_pins(Node &node, Node_pin::Compact_flat main_node_dpin = Node_pin::Compact_flat(0,0,0)) const;
   std::vector<std::pair<uint64_t, uint64_t>> get_loc_vec(absl::flat_hash_set<Node_pin::Compact_flat> &orig_node_pin_vec) const ;//FIXME: should have fnmae as well?
   void remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf);
