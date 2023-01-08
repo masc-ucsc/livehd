@@ -126,7 +126,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       fmt::print("Change done = {}\n", change_done);
     }
     fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
-#if 0
+#if 1
     if(!crit_node_vec.empty()) {
       bool unmatched_left;
       do {
@@ -137,7 +137,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("12. Printing after FINAL surrounding_cell matching!"); print_everything();
 #endif
 
-#if 1
+#if 0
     //if(!crit_node_vec.empty()) {//FIXME: uncomment
       probabilistic_match_final();
     //}
@@ -1545,7 +1545,7 @@ void Traverse_lg::probabilistic_match_loopLast_only() {
 
 void Traverse_lg::probabilistic_match_final() {
 
-  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);
+  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);//false: not loop_last
 	fmt::print("io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
   auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false);
 	fmt::print("io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
