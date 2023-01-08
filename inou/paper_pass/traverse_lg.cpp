@@ -126,6 +126,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       fmt::print("Change done = {}\n", change_done);
     }
     fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
+#if 0
     if(!crit_node_vec.empty()) {
       bool unmatched_left;
       do {
@@ -134,51 +135,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       } while(unmatched_left && !crit_node_vec.empty());
     }
     fmt::print("12. Printing after FINAL surrounding_cell matching!"); print_everything();
+#endif
 
-    /*//FIXME: remove; for DBG only;*/
-    std::vector<unsigned int> inp_keys;
-    std::vector<Node> inp_keys_n;
-    std::vector<unsigned int> out_keys;
-    std::vector<Node> out_keys_n;
-    std::vector<unsigned int> diff1;
-    std::vector<unsigned int> diff2;
-    for(auto it= inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end(); ++it) {
-      inp_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
-      inp_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
-    }
-    for(auto it= out_map_of_sets_synth.begin(); it != out_map_of_sets_synth.end(); ++it) {
-      out_keys.emplace_back(Node_pin("lgdb", it->first).get_node().get_nid().value);
-      out_keys_n.emplace_back(Node_pin("lgdb", it->first).get_node());
-    }
-    std::sort(std::begin(inp_keys), std::end(inp_keys));
-    std::sort(std::begin(out_keys), std::end(out_keys));
-    std::set_difference(inp_keys.begin(), inp_keys.end(), out_keys.begin(), out_keys.end(),
-        std::inserter(diff1, diff1.begin()));
-    fmt::print("\ninp_map_of_sets_synth - out_map_of_sets_synth (keys): {}\n", diff1.size());
-    for(auto i:diff1) {fmt::print("{}\t",i);}
-    // print_io_map(inp_map_of_sets_synth);
-    fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
-    std::set_difference(out_keys.begin(), out_keys.end(), inp_keys.begin(), inp_keys.end(),
-        std::inserter(diff2, diff2.begin()));
-    fmt::print("\nout_map_of_sets_synth - inp_map_of_sets_synth (keys) : {} \n", diff2.size());
-    for(auto i:diff2) {fmt::print("{}\t",i);}
-    // print_io_map(out_map_of_sets_synth);
-    fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
-    fmt::print("\n----");
+#if 1
+    //if(!crit_node_vec.empty()) {//FIXME: uncomment
+      probabilistic_match_final();
+    //}
+    //fmt::print("12. Printing after flop probabilistic_match_final matching!"); print_everything();//causing error
+#endif
 
-    for(auto i : inp_keys_n){
-      if (std::find(diff1.begin(), diff1.end(), i.get_nid().value) != diff1.end() )  {
-        i.dump();
-        fmt::print("\n----");
-      }
-    }
-
-    fmt::print("=IN:=======================================\n");            //FIXME: for DBG; remove.
-    print_io_map(inp_map_of_sets_synth);                                  //FIXME: for DBG; remove.
-    fmt::print("=:IN====================================OUT:===\n");        //FIXME: for DBG; remove.
-    print_io_map(out_map_of_sets_synth);                                  //FIXME: for DBG; remove.
-    fmt::print("=:OUT=======================================\n");           //FIXME: for DBG; remove.
-    /*^^FIXME: remove; for DBG only;*/
     // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     // print_io_map(out_map_of_sets_synth);
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
@@ -1408,6 +1373,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
     if(!connected_cells_orig_set.empty()) {
       net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
       remove_from_crit_node_vec(it->first);
+      forced_match_vec.emplace_back(it->first);
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
     } else { //no resolved connected cell present.
@@ -1435,6 +1401,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
       if(!connected_cells_orig_set.empty()) {
         net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
         remove_from_crit_node_vec(it->first);
+        forced_match_vec.emplace_back(it->first);
         out_map_of_sets_synth.erase(it++);
       } else { //no resolved connected cell present.
         it++;
@@ -1545,15 +1512,27 @@ void Traverse_lg::print_everything() {
   print_nodes_vec();
   fmt::print("\nflop set:\n");
   print_flop_set();
+  fmt::print("\nforced_match_vec:\n");
+  {
+    for(const auto &v: forced_match_vec){
+
+      auto n = Node_pin("lgdb", v).get_node();
+      auto p = Node_pin("lgdb", v);
+      if(p.has_name())
+        fmt::print("{}\t ", p.get_name());
+      else
+        fmt::print("{}\t ", n.get_nid());
+    }
+  }
   fmt::print("\n-------------------\n");
 
 }
 
 void Traverse_lg::probabilistic_match_loopLast_only() {
 
-  auto io_map_of_sets_orig = make_in_out_union_loopLast_only(inp_map_of_sets_orig, out_map_of_sets_orig);
+  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, true);
 	fmt::print("io_map_of_sets_orig: loop_last only\n"); print_io_map(io_map_of_sets_orig);
-  auto io_map_of_sets_synth = make_in_out_union_loopLast_only(inp_map_of_sets_synth, out_map_of_sets_synth);
+  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, true);
 	fmt::print("io_map_of_sets_synth: loop_last only\n"); print_io_map(io_map_of_sets_synth);
 
 	bool some_matching_done = false;
@@ -1562,6 +1541,30 @@ void Traverse_lg::probabilistic_match_loopLast_only() {
 	  some_matching_done = probabilistic_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
 	} while (some_matching_done);
 
+}
+
+void Traverse_lg::probabilistic_match_final() {
+
+  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);
+	fmt::print("io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
+  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false);
+	fmt::print("io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+
+	bool some_matching_done = false;
+	do {
+	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
+	  some_matching_done = probabilistic_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
+	} while (some_matching_done /*&& !crit_node_vec.empty()*/);//FIXME: uncomment
+
+}
+
+absl::btree_set<Node_pin::Compact_flat> Traverse_lg::sort_set(absl::flat_hash_set<Node_pin::Compact_flat> &unsorted_set) const {
+
+  absl::btree_set<Node_pin::Compact_flat> sorted_set;
+  for(const auto &set_val:unsorted_set) {
+    sorted_set.insert(set_val);
+  }
+  return sorted_set;
 }
 
 bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
@@ -1576,7 +1579,12 @@ bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_s
       for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
          std::vector<Node_pin::Compact_flat> setIntersectionVec(synth_set.size() + orig_set.size());
          std::vector<Node_pin::Compact_flat>::iterator ls;
-         ls = get_intersection(synth_set.begin(), synth_set.end(), orig_set.begin(), orig_set.end(), setIntersectionVec.begin());
+         
+         absl::btree_set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
+         absl::btree_set<Node_pin::Compact_flat> orig_sorted_set; // = sort_set(orig_set) ;
+         for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
+         for(const auto &set_val:orig_set) {orig_sorted_set.insert(set_val);}
+         ls = get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_sorted_set.begin(), orig_sorted_set.end(), setIntersectionVec.begin());
          auto matches = ls - setIntersectionVec.begin();  
          auto total      = (get_union(synth_set, orig_set)).size();
          auto mismatches = total-matches;
@@ -1592,6 +1600,7 @@ bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_s
       }
       if (!matched_node_pins.empty()) {
          net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
+         forced_match_vec.emplace_back(synth_key);
          some_matching_done = true;
       }
       
@@ -1601,16 +1610,16 @@ bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_s
 
 }
 
-Traverse_lg::map_of_sets Traverse_lg::make_in_out_union_loopLast_only(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) const {
+Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const {
 	/* make union of inp_map_of_sets and out_map_of_sets
-	 * for only those keys that are is_type_loop_last
+	 * if(loop_last_only):for only those keys that are is_type_loop_last
 	 * */
  
 	Traverse_lg::map_of_sets io_map;
 	for ( const auto &[in_key, in_val_set] : inp_map_of_sets) {
 
     auto o_s = Node_pin("lgdb", in_key).get_node();
-    if (!o_s.is_type_loop_last()) {
+    if ( (loop_last_only && !o_s.is_type_loop_last()) || (!loop_last_only && o_s.is_type_loop_last()) ) {
       continue; //flop node should be matched with flop node only! else datatype mismatch!
     }
 

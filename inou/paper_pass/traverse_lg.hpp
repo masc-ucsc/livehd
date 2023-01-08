@@ -15,7 +15,7 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "pass.hpp"
-// #include "absl/container/btree_set.h"
+#include "absl/container/btree_set.h"
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
 
@@ -66,14 +66,16 @@ private:
   template<class InputIt1, class InputIt2, class OutputIt>
   OutputIt get_intersection(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, OutputIt d_first)  {
       while (first1 != last1 && first2 != last2) {
-          if (*first1 < *first2) {
-              ++first1;
-          } else  {
-              if (!(*first2 < *first1)) {
-                  *d_first++ = *first1++; // *first1 and *first2 are equivalent.
-              }
-              ++first2;
+        auto first1_val = *first1;
+        auto first2_val = *first2;
+        if (first1_val < first2_val) {
+          ++first1;
+        } else  {
+          if (!(first2_val < first1_val)) {
+            *d_first++ = *first1++; // *first1 and *first2 are equivalent.
           }
+          ++first2;
+        }
       }
       return d_first;
   }
@@ -84,6 +86,7 @@ private:
   void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   void                                fwd_traversal_for_inp_map(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   std::vector<Node_pin::Compact_flat> traverse_order;
+  std::vector<Node_pin::Compact_flat> forced_match_vec;
   void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets , bool is_orig_lg);
   void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets , bool is_orig_lg);
   void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
@@ -99,8 +102,10 @@ private:
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
   void probabilistic_match_loopLast_only();
+  void probabilistic_match_final();
   bool probabilistic_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
-  map_of_sets make_in_out_union_loopLast_only(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets) const ;
+  map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const ;
+  absl::btree_set<Node_pin::Compact_flat> sort_set(absl::flat_hash_set<Node_pin::Compact_flat> &unsorted_set) const ;
   void print_nodes_vec () const;
   void print_flop_set () const ;
   void print_everything() ;
