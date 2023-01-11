@@ -66,12 +66,10 @@ private:
   template<class InputIt1, class InputIt2, class OutputIt>
   OutputIt get_intersection(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, OutputIt d_first)  {
       while (first1 != last1 && first2 != last2) {
-        auto first1_val = *first1;
-        auto first2_val = *first2;
-        if (first1_val < first2_val) {
+        if (*first1 < *first2) {
           ++first1;
         } else  {
-          if (!(first2_val < first1_val)) {
+          if (!(*first2 < *first1)) {
             *d_first++ = *first1++; // *first1 and *first2 are equivalent.
           }
           ++first2;
