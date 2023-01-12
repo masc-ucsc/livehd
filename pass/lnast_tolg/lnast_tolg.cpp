@@ -1051,10 +1051,10 @@ Node Lnast_tolg::setup_node_opr_and_lhs(Lgraph *lg, const Lnast_nid &lnidx_opr, 
       exit_node = lg->create_node_sub(fir_func_name);
     } else {
       exit_node        = lg->create_node(op);
-      const auto &tok1 = lnast->get_token(lnidx_opr);
-      exit_node.set_loc(tok1.pos1, tok1.pos2);
-      exit_node.set_fname(tok1.fname);
     }
+    const auto &tok1 = lnast->get_token(lnidx_opr);
+    exit_node.set_loc(tok1.pos1, tok1.pos2);
+    exit_node.set_fname(tok1.fname);
   } else {  // handle normal lnast oprator
     auto lnopr_type = lnast->get_type(lnidx_opr);
     if (lnopr_type.is_ne()) {
