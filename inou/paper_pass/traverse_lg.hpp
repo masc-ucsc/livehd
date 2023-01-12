@@ -64,7 +64,7 @@ private:
     return result;
   }
   template<class InputIt1, class InputIt2, class OutputIt>
-  OutputIt get_intersection(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, OutputIt d_first)  {
+  void get_intersection(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt2 last2, OutputIt d_first)  {
       while (first1 != last1 && first2 != last2) {
         if (*first1 < *first2) {
           ++first1;
@@ -75,7 +75,6 @@ private:
           ++first2;
         }
       }
-      return d_first;
   }
   std::set<Node::Compact_flat> combo_loop_vec;
   typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;

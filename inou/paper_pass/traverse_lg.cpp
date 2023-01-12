@@ -134,14 +134,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
         fmt::print("unmatched left = {}\n", unmatched_left);
       } while(unmatched_left && !crit_node_vec.empty());
     }
-    fmt::print("12. Printing after FINAL surrounding_cell matching!"); print_everything();
 #endif
 
 #if 1
-    //if(!crit_node_vec.empty()) {//FIXME: uncomment
+    if(!crit_node_vec.empty()) {
       probabilistic_match_final();
-    //}
-    //fmt::print("12. Printing after flop probabilistic_match_final matching!"); print_everything();//causing error
+    }
 #endif
 
     // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
@@ -1554,7 +1552,7 @@ void Traverse_lg::probabilistic_match_final() {
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
 	  some_matching_done = probabilistic_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
-	} while (some_matching_done /*&& !crit_node_vec.empty()*/);//FIXME: uncomment
+	} while (some_matching_done && !crit_node_vec.empty());
 
 	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
@@ -1571,12 +1569,11 @@ absl::btree_set<Node_pin::Compact_flat> Traverse_lg::sort_set(absl::flat_hash_se
 
 bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
 
-	unsigned long match_count = 0;
-	unsigned long mismatch_count = 0;
   bool some_matching_done = false;
 
 	for ( auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
-    //const auto &[ synth_key, synth_set ] : io_map_of_sets_synth) 
+	  unsigned long match_count = 0;
+	  unsigned long mismatch_count = 0;
     auto synth_key = it->first;
     auto synth_set = it->second;
       some_matching_done = false;
@@ -1588,14 +1585,14 @@ bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_s
          for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
          for(const auto &set_val:orig_set) {orig_sorted_set.insert(set_val);}
          std::vector<Node_pin::Compact_flat> setIntersectionVec;
-         get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_sorted_set.begin(), orig_sorted_set.end(), std::back_inserter(setIntersectionVec));//FIXME: make it void
-         //auto matches = ls - setIntersectionVec.begin();  
+         get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_sorted_set.begin(), orig_sorted_set.end(), std::back_inserter(setIntersectionVec));
          auto matches = setIntersectionVec.size();  
          auto total      = (get_union(synth_set, orig_set)).size();
          auto mismatches = total-matches;
          if (matches> match_count)  {
             matched_node_pins.insert(orig_key) ; 
             match_count = matches;
+						mismatch_count = mismatches;
          } else if ((matches == match_count)  && ( mismatches < mismatch_count)) { 
             matched_node_pins.insert(orig_key) ; 
             match_count = matches ; 
