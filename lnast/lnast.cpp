@@ -34,7 +34,8 @@ void Lnast::do_ssa_trans(const Lnast_nid &top_nid) {
 
   std::string tmp_str("0b?");
   std::string err_var("err_var");
-  auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(State_token()));
+  auto tok = get_token(top_sts_nid);
+  auto        asg_nid = add_child(top_sts_nid, Lnast_node::create_assign(State_token(tok.pos1, tok.pos2, tok.fname)));
   add_child(asg_nid, Lnast_node::create_ref(err_var));
   undefined_var_nid = add_child(asg_nid, Lnast_node::create_const(tmp_str));
 
@@ -1060,7 +1061,8 @@ Lnast_nid Lnast::check_phi_table_parents_chain(std::string_view target_name, con
 void Lnast::add_phi_node(const Lnast_nid &cond_nid, const Lnast_nid &t_nid, const Lnast_nid &f_nid) {
   auto        if_nid                   = get_parent(cond_nid);
   Phi_rtable &new_added_phi_node_table = new_added_phi_node_tables[if_nid];
-  auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), State_token()));
+  auto if_tok = get_token(if_nid);
+  auto        new_phi_nid              = add_child(if_nid, Lnast_node(Lnast_ntype::create_phi(), State_token(if_tok.pos1, if_tok.pos2, if_tok.fname)));
   Lnast_nid   lhs_phi_nid;
 
   lhs_phi_nid

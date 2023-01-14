@@ -191,6 +191,13 @@ public:
     text = _text;
 		fname = "";
   }
+  State_token(uint64_t _pos1, uint64_t _pos2, std::string _fname) : tok(Token_id_nop){
+    pos1 = _pos1;
+    pos2 = _pos2;
+    line = 0;
+    text = "";
+    fname = _fname;
+  }
   State_token(Token_id _tok, uint64_t _pos1, uint64_t _pos2, uint32_t _line, std::string_view _text, std::string _fname) {
     tok  = _tok;
     pos1 = _pos1;
