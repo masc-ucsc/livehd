@@ -509,6 +509,15 @@ Node Node::create(Ntype_op op) const {
   return node;
 }
 
+Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const {
+  auto node  = current_g->create_node(op);
+  node.set_loc(loc.first, loc.second);//pos1 and pos2
+  node.set_fname(fname);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
+}
+
 Node Node::create_const(const Lconst &value) const {
   auto node  = current_g->create_node_const(value);
   node.top_g = top_g;

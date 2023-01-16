@@ -5,6 +5,7 @@
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "node.hpp"
+#include <cstdint>
 
 Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!Hierarchy::is_invalid(comp.hidx));  // Why to Compact. Use Compact_class
@@ -191,6 +192,15 @@ Node_pin_iterator Node_pin::out_sinks() const {
 
 Node Node_pin::create(Ntype_op op) const {
   auto node  = current_g->create_node(op);
+  node.top_g = top_g;
+  node.hidx  = hidx;
+  return node;
+}
+
+Node Node_pin::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const {
+  auto node  = current_g->create_node(op);
+  node.set_loc(loc.first, loc.second);//pos1 and pos2
+  node.set_fname(fname);
   node.top_g = top_g;
   node.hidx  = hidx;
   return node;
