@@ -478,7 +478,8 @@ void Lnast::sel2local_tuple_chain(const Lnast_nid &psts_nid, Lnast_nid &selc_nid
     auto dp_asg_nid  = paired_nid;  // for code reading
 
     // insert new TA on the right hand side of the dp
-    auto new_ta = insert_next_sibling(dp_asg_nid, Lnast_node(Lnast_ntype::create_tuple_add(), State_token()));
+    auto dp_asg_tok = get_token(dp_asg_nid);
+    auto new_ta = insert_next_sibling(dp_asg_nid, Lnast_node(Lnast_ntype::create_tuple_add(), State_token(dp_asg_tok.pos1, dp_asg_tok.pos2, dp_asg_tok.fname)));
     for (auto old_child : children(selc_nid)) {
       if (old_child == get_first_child(selc_nid))
         continue;
