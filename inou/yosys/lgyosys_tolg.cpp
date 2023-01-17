@@ -2027,7 +2027,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       exit_node.set_type(Ntype_op::SHL, get_output_size(cell));
 
       exit_node.setup_sink_pin("a").connect_driver(get_dpin(g, cell, ID::A));
-      exit_node.setup_sink_pin("b").connect_driver(get_dpin(g, cell, ID::B));
+      exit_node.setup_sink_pin("B").connect_driver(get_dpin(g, cell, ID::B));
 
     } else if (std::strncmp(cell->type.c_str(), "$mem", 4) == 0) {
       exit_node.set_type(Ntype_op::Memory);
