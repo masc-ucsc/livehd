@@ -280,7 +280,7 @@ static void append_to_or_node(Lgraph *g, const Node &or_node, const Node_pin &dp
   if (or_offset) {
     auto shl_node = g->create_node(Ntype_op::SHL, or_offset + dpin.get_bits());
     shl_node.setup_sink_pin("a").connect_driver(dpin);
-    shl_node.setup_sink_pin("b").connect_driver(g->create_node_const(or_offset));
+    shl_node.setup_sink_pin("B").connect_driver(g->create_node_const(or_offset));
 
     tposs_node.setup_driver_pin().set_bits(or_offset + dpin.get_bits() + 1);
     tposs_node.setup_sink_pin("a").connect_driver(shl_node);
@@ -1156,6 +1156,8 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
           continue;
         }
 
+        // fmt::print("wire name:{}\n", wire->name.str());
+
         I(partially_assigned[wire].size() > pos);
         I(pos - shift >= 0);
         I(pos - shift < partially_assigned[wire].size());
@@ -1230,7 +1232,7 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
         } else {
           auto shl_node = g->create_node(Ntype_op::SHL, wire->width);
           shl_node.setup_sink_pin("a").connect_driver(tposs_node);
-          shl_node.setup_sink_pin("b").connect_driver(g->create_node_const(Lconst(shift)));
+          shl_node.setup_sink_pin("B").connect_driver(g->create_node_const(Lconst(shift)));
 
           master_or_node.connect_sink(shl_node);
         }
@@ -1952,7 +1954,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       neg_node.setup_sink_pin("B").connect_driver(b_dpin);
 
       shl_node.setup_sink_pin("a").connect_driver(a_dpin);
-      shl_node.setup_sink_pin("b").connect_driver(neg_node);
+      shl_node.setup_sink_pin("B").connect_driver(neg_node);
 
       auto y1_dpin = shl_node.setup_driver_pin();
 
@@ -2350,6 +2352,15 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 #ifndef NDEBUG
         fmt::print("inou.yosys.tolg module:{}\n", mod_name);
 #endif
+
+        driven_signals.clear();
+        cell_port_inputs.clear();
+        cell_port_outputs.clear();
+        wire2pin.clear();
+        cell2node.clear();
+        partially_assigned.clear();
+        partially_assigned_bits.clear();
+        partially_assigned_fwd.clear();
 
         TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) { ctx.event()->set_name("YOSYS_tolg_" + mod_name); });
 

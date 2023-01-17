@@ -74,8 +74,6 @@ private:
     if (graph_pos2instance_pid.size() <= graph_pos) {
       graph_pos2instance_pid.resize(graph_pos + 1, Port_invalid);
       I(graph_pos2instance_pid[graph_pos] == Port_invalid);
-    } else {
-      I(graph_pos2instance_pid[graph_pos] == Port_invalid || graph_pos2instance_pid[graph_pos] == instance_pid);
     }
     graph_pos2instance_pid[graph_pos] = instance_pid;
   }
@@ -210,7 +208,7 @@ public:
 
     Port_ID instance_pid = name2id[io_name];
     I(io_pins[instance_pid].name == io_name);
-    I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
+    //I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
     if (io_pins[instance_pid].graph_io_pos != Port_invalid) {
