@@ -407,7 +407,8 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     for(const auto *pin:it2->second.pins()) {
       auto [cap, ipwr] = pin->power();
 
-      cap  *= static_cast<float>(freq * voltage * voltage * cap_unit);
+      // cap / 2 because only charge consumes dynamic power
+      cap  *= static_cast<float>(freq * voltage * voltage * cap_unit / 2);
       ipwr *= static_cast<float>(freq * cap_unit);
 
       total_cap += cap;
@@ -427,7 +428,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
         pvcd.add(pin_name, ipwr + cap);
       }
 
-      //fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
+      // fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 

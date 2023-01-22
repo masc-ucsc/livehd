@@ -755,6 +755,8 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       Node_pin driver_pin;
       if (node.is_type_sub()) {
         std::string pin_name(&(conn.first.c_str()[1]));
+        if (pin_name == "Q")
+          fmt::print("HERE\n");
         driver_pin = node.setup_driver_pin(pin_name);
       } else {
         driver_pin = node.setup_driver_pin();
@@ -793,6 +795,8 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           }
           offset += chunk.width;
 
+// HERE: create dpin_name "pc_offset_bits" 
+
         } else {
           if (partially_assigned.find(wire) == partially_assigned.end()) {
             partially_assigned[wire].resize(wire->width);
@@ -818,6 +822,8 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                      wire->name.str(),
                      chunk.offset,
                      chunk.offset + chunk.width - 1);
+
+// HERE: create dpin_name "pc_" chunk.offst "_" chunk.offset + chunk.width - 1;
 
           partially_assigned[wire][chunk.offset]      = src_pin;
           partially_assigned_bits[wire][chunk.offset] = chunk.width;
