@@ -15,6 +15,7 @@ protected:
   int margin;  // % margin to mark nodes
 
   float freq;          // Frequency for power estimation
+  std::string odir;    // output directory power trace
   float max_delay;     // slowest arrival time (delay) on the circuit
   float margin_delay;  // time delay to mark any slower cell for criticality
 
