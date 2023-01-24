@@ -145,6 +145,19 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     ptr += 7;
   } else if (strncmp("timescale", ptr, 9) == 0) {
     ptr += 9;
+    auto [ptr2, tscale] = parse_word(ptr);
+    if (tscale.find("fs") != std::string::npos) {
+      timescale = 1e-15;
+    }else if (tscale.find("ps") != std::string::npos) {
+      timescale = 1e-12;
+    }else if (tscale.find("ns") != std::string::npos) {
+      timescale = 1e-9;
+    }else if (tscale.find("us") != std::string::npos) {
+      timescale = 1e-6;
+    }else{
+      Pass::error("unrecognized vcd timescale of {}\n", tscale);
+    }
+    ptr = ptr2;
   } else if (strncmp("comment", ptr, 7) == 0) {
     ptr += 7;
   } else if (strncmp("upscope", ptr, 7) == 0) {
@@ -201,6 +214,7 @@ const char *Power_vcd::parse_sample(const char *ptr) {
 void Power_vcd::parse() {
   const char *ptr = map_buffer;
 
+  max_edges = 0;
   while (ptr < map_end) {
     if (std::isspace(*ptr)) {
       ++ptr;
@@ -210,11 +224,14 @@ void Power_vcd::parse() {
     if (*ptr == '$') {
       ptr = parse_instruction(++ptr);
     } else if (*ptr == '#') {
+      max_edges++;
       ptr = parse_timestamp(++ptr);
     } else {
       ptr = parse_sample(ptr);
     }
   }
+  if (max_edges==0)
+    max_edges = 1;
 }
 
 bool Power_vcd::open(std::string_view file_name) {
@@ -240,7 +257,11 @@ bool Power_vcd::open(std::string_view file_name) {
   map_end = map_buffer + map_size;
 
   auto ok = find_max_time();
-  fmt::print("INFO: vcd max_timestamp:{}\n", max_timestamp);
+  fmt::print("INFO: vcd max_timestamp:{} timescale:{} implies {} secs of execution\n"
+      , max_timestamp
+      , timescale
+      , timescale*static_cast<double>(max_timestamp)
+      );
 
   if (ok) {
     parse();
@@ -330,31 +351,37 @@ void Power_vcd::compute(std::string_view odir) const {
 
   absl::node_hash_map<std::string, std::vector<double>> module_trace;
 
-  double transitions     = 0;
+  double num_transitions = 0;
   double max_transitions = 1;
 
   for (const auto &e : id2channel) {
     std::vector<double> trace_step;
+    trace_step.reserve(n_buckets);
 
     for (const auto &hname : e.second.hier_name) {
       auto hier_name = hname.substr(n_skip);
 
-      //fmt::print("VCD transition for:{}\n", hier_name);
+      // fmt::print("VCD transition for:{}\n", hier_name);
 
       auto it = hier_name2power.find(hier_name);
       if (it == hier_name2power.end()) {
         continue;
       }
 
-      if (trace_step.empty()) {
-        trace_step.reserve(e.second.transitions.size());
+      trace_step.clear();
 
-        for (const auto &v : e.second.transitions) {
-          transitions += v;
-          trace_step.emplace_back(v * it->second);
-        }
-        max_transitions += max_timestamp;
+      size_t local_transitions = 0;
+      for (const auto &v : e.second.transitions) {
+        local_transitions += v;
+        trace_step.emplace_back(v * it->second);
       }
+      num_transitions += local_transitions;
+      max_transitions += max_edges;
+
+      fmt::print("VCD {} transition {} power for {}\n"
+          , static_cast<double>(local_transitions)/max_edges
+          , it->second*static_cast<double>(local_transitions)/max_edges
+          , hier_name);
 
       const std::vector<std::string> m = absl::StrSplit(hier_name, ',');
       // top_1,imm1,imm2,lib,pin  // top_1 + imm1 + imm2 traces
@@ -380,7 +407,7 @@ void Power_vcd::compute(std::string_view odir) const {
     }
   }
 
-  double step = max_timestamp / n_buckets;
+  double step = timescale * max_timestamp / n_buckets;
   for (const auto &e : module_trace) {
     auto out_fname = absl::StrCat(odir, "/", fname, "_", e.first, ".power.trace");
 
@@ -392,7 +419,7 @@ void Power_vcd::compute(std::string_view odir) const {
 
     double x = 0;
     for (double v : e.second) {
-      fmt::print(f, "{} {}\n", x, v / max_timestamp);
+      fmt::print(f, "{} {}\n", x, v / (step/lib_timescale));
       x += step;
     }
 
@@ -400,5 +427,5 @@ void Power_vcd::compute(std::string_view odir) const {
   }
 
   // NOTE: 2x because clock does 2x transitions (max_timestamp)
-  fmt::print("average activity rate {}\n", 2 * transitions / max_transitions);
+  fmt::print("average activity rate {}\n", 2*num_transitions / max_transitions);
 }

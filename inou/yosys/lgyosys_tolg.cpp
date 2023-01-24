@@ -113,15 +113,16 @@ static Node_pin resolve_constant(Lgraph *g, const std::vector<RTLIL::State> &dat
 
   for (size_t i = data.size(); i > 0; i--) {
     switch (data[i - 1]) {
-      case RTLIL::S0: val = absl::StrCat("0", val); break;
-      case RTLIL::S1: val = absl::StrCat("1", val); break;
-      case RTLIL::Sz: val = absl::StrCat("z", val); break;
-      default: val = absl::StrCat("?", val); break;
+      case RTLIL::S0: absl::StrAppend(&val, "0"); break;
+      case RTLIL::S1: absl::StrAppend(&val, "1"); break;
+      case RTLIL::Sz: absl::StrAppend(&val, "z"); break;
+      default: absl::StrAppend(&val, "?"); break;
     }
   }
 
-  // fmt::print("val:{} prp:{} bits:{}\n", val, lc.to_pyrope(), lc.get_bits());
-  return g->create_node_const(Lconst::from_pyrope(val)).setup_driver_pin();
+  auto lc = Lconst::from_pyrope(val);
+  //fmt::print("val:{} prp:{} bits:{}\n", val, lc.to_pyrope(), lc.get_bits());
+  return g->create_node_const(lc).setup_driver_pin();
 }
 
 class Pick_ID {
@@ -893,7 +894,7 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
         Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto prev_dpin = wire2pin[lhs_wire];
-          if (prev_dpin.has_outputs()) {  // OOPS, got used out of order (lack of topo here)
+          if (true || prev_dpin.has_outputs()) {  // OOPS, got used out of order (lack of topo here)
             I(prev_dpin.get_node().is_type(Ntype_op::Or));
             I(!prev_dpin.get_node().has_inputs());
             append_to_or_node(g, prev_dpin.get_node(), dpin, 0);

@@ -18,6 +18,9 @@ class Power_vcd {
 protected:
   size_t timestamp{0};
   size_t max_timestamp{1};
+  size_t max_edges{1};
+  double timescale{1e-12};
+  double lib_timescale{1e-9};
   size_t n_buckets{100};
 
   int         map_fd{-1};
@@ -68,6 +71,8 @@ public:
   bool open(std::string_view file_name);
 
   void dump() const;
+
+  void set_tech_timeunit(double ts) { lib_timescale = ts; }
 
   void clear_power() { hier_name2power.clear(); }
 

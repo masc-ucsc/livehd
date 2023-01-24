@@ -1,4 +1,7 @@
 
+// Moved to FIXME because yosys can not check equivalence with itself (maybe
+// future?) or new checker?
+
 module async(y,clk,reset);
 
 input clk, reset;

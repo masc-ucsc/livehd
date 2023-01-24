@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "Pin_tracker.hpp"
+#include "pin_tracker.hpp"
 #include "lgedgeiter.hpp"
 #include "lgraph.hpp"
 #include "pass_opentimer.hpp"
@@ -94,7 +94,13 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
 
   overwrite_dpin2net.clear();
 
-  Pin_tracker<std::string> pin_tracker;
+#if 1
+  Pin_tracker<std::string> pin_tracker("zero");
+#else
+  auto zero_dpin = g->create_node_const(0).get_driver_pin();
+  Pin_tracker<std::string> pin_tracker(zero_dpin.get_wire_name());
+  overwrite_dpin2net.insert_or_assign(zero_dpin.get_compact_driver(), zero_dpin.get_wire_name());
+#endif
 
   g->each_graph_input([this, &pin_tracker](const Node_pin &pin) {
     std::string driver_name(pin.get_hierarchical().get_wire_name());  // OT needs std::string, not string_view support
@@ -169,13 +175,57 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
           return;
         }
         auto mask_const = mask_dpin.get_type_const();
-        pin_tracker.add_get_mask(wname, a_dpin.get_wire_name(), mask_const);
+        pin_tracker.add_get_mask(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), mask_const);
+      } else if (op == Ntype_op::SRA) {
+        auto a_dpin    = node.get_sink_pin_driver("a");
+        auto b_dpin    = node.get_sink_pin_driver("b");
+        if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
+          node.dump();
+          Pass::error("Invalid corrupt SRA node (cprop should have delete it)");
+          return;
+        }
+        if (!b_dpin.is_type_const()) {
+          node.dump();
+          Pass::error("opentimer can not handle non-constant SRA (cprop/tmap first)");
+          return;
+        }
+        auto b_const = b_dpin.get_type_const();
+        pin_tracker.add_sra(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), b_const);
+      } else if (op == Ntype_op::SHL) {
+        auto a_dpin    = node.get_sink_pin_driver("a");
+        if (a_dpin.is_invalid()) {
+          node.dump();
+          Pass::error("Invalid corrupt SHL node (cprop should have delete it)");
+          return;
+        }
+        for(auto e:node.inp_edges()) {
+          if (e.sink.get_pin_name() == "a")
+            continue;
+          I(e.sink.get_pin_name() == "B");
+          if (!e.driver.is_type_const()) {
+            node.dump();
+            Pass::error("opentimer can not handle non-constant SHL (cprop/tmap first)");
+            return;
+          }
+          auto b_const = e.driver.get_type_const();
+          pin_tracker.add_shl(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), b_const);
+        }
+      } else if (op == Ntype_op::Or || op == Ntype_op::And) {
+        for(auto e:node.inp_edges()) {
+          pin_tracker.add_andor(wname, e.driver.get_wire_name());
+        }
       } else {
         node.dump();
         Pass::error("opentimer needs a tmap/synthesized netlist");
         return;
       }
+      continue;
     }
+    if (op != Ntype_op::Sub) {
+      node.dump();
+      Pass::error("opentimer needs a tmap/synthesized netlist");
+    }
+
 
     // setup driver pins and nets
     for (const auto &dpin : node.out_connected_pins()) {
@@ -191,6 +241,8 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
 
         if (pv.size() == 1) {  // single bit tracking result
           auto dpin_cd = dpin.get_compact_driver();
+          if (pv[0].pos<0)
+            continue; // no connection
 
           if (pv[0].pos) {
             auto bus_bit_name = absl::StrCat(pv[0].id, ".", str_tools::to_s(pv[0].pos));
@@ -206,6 +258,9 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
   }
 
+  //g->dump(true);
+  //pin_tracker.dump();
+
   // 3rd: populate the cells
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
@@ -213,7 +268,7 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
       continue;
     }
 
-    if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {  // mask handled in previous loop
+    if (Ntype::is_pin_trackable(op)) {  // mask handled in previous loop
       continue;
     }
 
@@ -386,6 +441,16 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     cap_unit = lib->capacitance_unit->value();
   }
 
+  double timeunit = 1e-9;
+  if (lib && lib->time_unit) {
+    timeunit = lib->time_unit->value();
+  }else{
+    Pass::warn("could not find default timeunit in liberty or override, using 1e-9");
+  }
+  for (auto &pvcd : vcd_list) {
+    pvcd.set_tech_timeunit(timeunit);
+  }
+
   // double power_unit = 1e-9;
   // if (lib && lib->power_unit)
   //   power_unit = lib->current_unit->value();
@@ -401,6 +466,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
 
     auto it2 = gates.find(instance_name);
     if (it2==gates.end()) {
+      node.dump();
       fmt::print("WEIRD. Where is the gate? named {}\n", instance_name);
     }
 
@@ -408,8 +474,8 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       auto [cap, ipwr] = pin->power();
 
       // cap / 2 because only charge consumes dynamic power
-      cap  *= static_cast<float>(freq * voltage * voltage * cap_unit / 2);
-      ipwr *= static_cast<float>(freq * cap_unit);
+      cap  *= static_cast<float>(0.5*voltage * voltage * cap_unit / timeunit);
+      ipwr *= static_cast<float>(cap_unit/timeunit);
 
       total_cap += cap;
       total_ipwr += ipwr;
@@ -423,12 +489,13 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       pin_name[last_comma_pos] = ',';
 
       for (auto &pvcd : vcd_list) {
+        // x2 power because VCD uses transition (power for 1->0 and 0->1)
         //pvcd.add(pin_name, ipwr );
-        //pvcd.add(pin_name, cap);
-        pvcd.add(pin_name, ipwr + cap);
+        //pvcd.add(pin_name, 2*cap);
+        pvcd.add(pin_name, ipwr + 2*cap);
       }
 
-      // fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
+      //fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 
