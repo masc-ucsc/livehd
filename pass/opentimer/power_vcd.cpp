@@ -354,10 +354,10 @@ void Power_vcd::compute(std::string_view odir) const {
   double num_transitions = 0;
   double max_transitions = 1;
 
-  for (const auto &e : id2channel) {
-    std::vector<double> trace_step;
-    trace_step.reserve(n_buckets);
+  std::vector<double> trace_step;
+  trace_step.reserve(n_buckets);
 
+  for (const auto &e : id2channel) {
     for (const auto &hname : e.second.hier_name) {
       auto hier_name = hname.substr(n_skip);
 
@@ -378,7 +378,7 @@ void Power_vcd::compute(std::string_view odir) const {
       num_transitions += local_transitions;
       max_transitions += max_edges;
 
-      fmt::print("VCD {} transition {} power for {}\n"
+      fmt::print("average VCD {} transition {} power for {}\n"
           , static_cast<double>(local_transitions)/max_edges
           , it->second*static_cast<double>(local_transitions)/max_edges
           , hier_name);
@@ -407,7 +407,7 @@ void Power_vcd::compute(std::string_view odir) const {
     }
   }
 
-  double step = timescale * max_timestamp / n_buckets;
+  double time_step = timescale * max_timestamp / n_buckets;
   for (const auto &e : module_trace) {
     auto out_fname = absl::StrCat(odir, "/", fname, "_", e.first, ".power.trace");
 
@@ -419,13 +419,13 @@ void Power_vcd::compute(std::string_view odir) const {
 
     double x = 0;
     for (double v : e.second) {
-      fmt::print(f, "{} {}\n", x, v / (step/lib_timescale));
-      x += step;
+      fmt::print(f, "{} {}\n", x, v* n_buckets / max_edges);
+      x += time_step;
     }
 
     std::fclose(f);
   }
 
   // NOTE: 2x because clock does 2x transitions (max_timestamp)
-  fmt::print("average activity rate {}\n", 2*num_transitions / max_transitions);
+  fmt::print("average activity rate {} max_timestamp:{}\n", 2*num_transitions / max_transitions, timescale * max_timestamp);
 }

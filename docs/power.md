@@ -2,8 +2,11 @@
 
 LiveHD is starting to generate power. Use it at your own risk.
 
-Steps to model power:
 
+
+# Using bazel_rules_hdl_test
+
+Steps to model power:
 
 1-Get a synthesized netlist and an VCD.
 
@@ -53,6 +56,39 @@ livehd> inou.verilog files:counter.v |> pass.compiler |> pass.opentimer.power fi
 ```
 gnuplot> plot "tmp/counter.vcd_counter.power.trace" using 1:2 with lines
 ```
+
+## trivial_and2 to generate VCD and power:
+
+1-Read the liberty file
+
+```
+bazel build -c dbg //main:all
+./bazel-bin/main/lgshell
+livehd> inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib
+livehd> exit
+```
+
+2-Generate VCD with verilator
+
+```
+verilator -O3 --top-module test_and2 ./pass/opentimer/tests/test_and2.v ../synth/bazel_rules_hdl_test/model/sky130_fd_sc_hd.v --cc --trace --exe ./pass/opentimer/tests/dut_test_and2.cpp
+make -C ./obj_dir/ -f Vtest_and2.mk
+./obj_dir/Vtest_and2
+```
+
+This generated output.vcd that has 3 levels of power activity
+
+3-Read the vcd and compute power trace
+
+```
+livehd> inou.liveparse files:pass/opentimer/tests/test_and2.v |> inou.verilog |> pass.compiler |> pass.opentimer.power files:output.vcd,sky130_fd_sc_hd__ff_100C_1v95.lib
+...
+average activity rate 0.45307482200203425
+MAX power switch:6.135333863879571e-15 W internal:3.113571942569545e-14 W voltage:1.95 V
+```
+
+The MAX power (ignoring VCD) has dynamic switching W and internal power. The
+`output.vcd_test_and2.power.trace` file has a power trace for dynamic power.
 
 
 ## Clock Gating

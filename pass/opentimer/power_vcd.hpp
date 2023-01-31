@@ -76,7 +76,10 @@ public:
 
   void clear_power() { hier_name2power.clear(); }
 
-  void add(std::string_view hier_name, double power) { hier_name2power.insert_or_assign(hier_name, power); }
+  void add(std::string_view hier_name, double power) {
+    // x2 power because VCD uses transition (power for 1->0 and 0->1)
+    hier_name2power.insert_or_assign(hier_name, 2*power);
+  }
 
   void compute(std::string_view odir) const;
 };

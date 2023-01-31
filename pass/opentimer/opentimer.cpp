@@ -435,26 +435,14 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     voltage = *x;
   }
 
-  const auto lib      = timer.celllib(ot::MIN);
-  double     cap_unit = 1e-12;
-  if (lib && lib->capacitance_unit) {
-    cap_unit = lib->capacitance_unit->value();
-  }
+  const auto lib    = timer.celllib(ot::MIN);
+  double cap_unit   = timer.capacitance_unit()->value();
+  double timeunit   = timer.time_unit()->value();
+  double power_unit = timer.power_unit()->value();
 
-  double timeunit = 1e-9;
-  if (lib && lib->time_unit) {
-    timeunit = lib->time_unit->value();
-  }else{
-    Pass::warn("could not find default timeunit in liberty or override, using 1e-9");
-  }
   for (auto &pvcd : vcd_list) {
     pvcd.set_tech_timeunit(timeunit);
   }
-
-  // double power_unit = 1e-9;
-  // if (lib && lib->power_unit)
-  //   power_unit = lib->current_unit->value();
-  //  power_unit = lib->power_unit->value();
 
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
@@ -474,8 +462,8 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       auto [cap, ipwr] = pin->power();
 
       // cap / 2 because only charge consumes dynamic power
-      cap  *= static_cast<float>(0.5*voltage * voltage * cap_unit / timeunit);
-      ipwr *= static_cast<float>(cap_unit/timeunit);
+      cap  *= static_cast<float>(power_unit*0.5*voltage * voltage * cap_unit / timeunit);
+      ipwr *= static_cast<float>(power_unit*cap_unit/timeunit);
 
       total_cap += cap;
       total_ipwr += ipwr;
@@ -489,13 +477,12 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       pin_name[last_comma_pos] = ',';
 
       for (auto &pvcd : vcd_list) {
-        // x2 power because VCD uses transition (power for 1->0 and 0->1)
         //pvcd.add(pin_name, ipwr );
-        //pvcd.add(pin_name, 2*cap);
-        pvcd.add(pin_name, ipwr + 2*cap);
+        //pvcd.add(pin_name, cap);
+        pvcd.add(pin_name, ipwr + cap);
       }
 
-      //fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
+      fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 
@@ -503,7 +490,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     pvcd.compute(odir);
   }
 
-  fmt::print("MAX power switch:{} internal:{} voltage:{}\n", total_cap, total_ipwr, voltage);
+  fmt::print("MAX power switch:{} W internal:{} W voltage:{} V\n", total_cap, total_ipwr, voltage);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {
