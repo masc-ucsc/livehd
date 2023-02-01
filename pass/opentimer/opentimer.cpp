@@ -462,8 +462,8 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       auto [cap, ipwr] = pin->power();
 
       // cap / 2 because only charge consumes dynamic power
-      cap  *= static_cast<float>(power_unit*0.5*voltage * voltage * cap_unit / timeunit);
-      ipwr *= static_cast<float>(power_unit*cap_unit/timeunit);
+      cap  *= static_cast<float>(freq*power_unit*0.5*voltage * voltage * cap_unit / timeunit);
+      ipwr *= static_cast<float>(freq*power_unit*cap_unit/timeunit);
 
       total_cap += cap;
       total_ipwr += ipwr;
@@ -490,7 +490,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
     pvcd.compute(odir);
   }
 
-  fmt::print("MAX power switch:{} W internal:{} W voltage:{} V\n", total_cap, total_ipwr, voltage);
+  fmt::print("MAX power switch:{} W internal:{} W voltage:{} V freq={}MHz\n", total_cap, total_ipwr, voltage, freq/1e6);
 }
 
 void Pass_opentimer::populate_table(Lgraph *lg) {

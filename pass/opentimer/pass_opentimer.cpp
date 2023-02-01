@@ -21,6 +21,7 @@ void Pass_opentimer::setup() {
   Eprp_method m2("pass.opentimer.power", "Power analysis on lgraph", &Pass_opentimer::power_work);
   m2.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
   m2.add_label_optional("odir", "output directory", ".");
+  m2.add_label_optional("freq", "frequency (Hz)", "1e9");
 
   register_pass(m2);
 }
@@ -66,6 +67,11 @@ Pass_opentimer::Pass_opentimer(const Eprp_var &var) : Pass("pass.opentimer", var
   odir = ".";
   if (var.has_label("odir")) {
     odir = var.get("odir");
+  }
+  freq = 1e9;
+  if (var.has_label("freq")) {
+    std::string txt{var.get("freq")};
+    freq = std::stof(txt, nullptr);
   }
   margin_delay = 0;
 }

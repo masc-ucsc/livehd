@@ -1558,15 +1558,6 @@ void Traverse_lg::probabilistic_match_final() {
 	fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 }
 
-absl::btree_set<Node_pin::Compact_flat> Traverse_lg::sort_set(absl::flat_hash_set<Node_pin::Compact_flat> &unsorted_set) const {
-
-  absl::btree_set<Node_pin::Compact_flat> sorted_set;
-  for(const auto &set_val:unsorted_set) {
-    sorted_set.insert(set_val);
-  }
-  return sorted_set;
-}
-
 bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
 
   bool some_matching_done = false;
@@ -1580,8 +1571,8 @@ bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_s
       absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
       for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
 
-         absl::btree_set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
-         absl::btree_set<Node_pin::Compact_flat> orig_sorted_set; // = sort_set(orig_set) ;
+         std::set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
+         std::set<Node_pin::Compact_flat> orig_sorted_set; // = sort_set(orig_set) ;
          for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
          for(const auto &set_val:orig_set) {orig_sorted_set.insert(set_val);}
          std::vector<Node_pin::Compact_flat> setIntersectionVec;

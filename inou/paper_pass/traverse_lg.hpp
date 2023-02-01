@@ -15,16 +15,12 @@
 #include "lgraph.hpp"
 #include "node.hpp"
 #include "pass.hpp"
-#include "absl/container/btree_set.h"
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
 
 class Traverse_lg : public Pass {
 public:
 private:
-  // typedef absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>>
-  // setMap_nodeKey; typedef absl::node_hash_map<std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>,
-  // std::vector<Node::Compact_flat> > setMap_pairKey;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat>>
       setMap_pairKey;
@@ -32,7 +28,6 @@ private:
                               std::vector<Node::Compact_flat>>
                                                                            setMap_pairCompFlatKey;
   absl::node_hash_map<Node::Compact_flat, std::vector<Node::Compact_flat>> matched_map;
-  // absl::node_hash_map<Node::Compact_flat, std::pair<absl::btree_set<std::string>, absl::btree_set<std::string>>> unmatched_map;
   absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> unmatched_map;
   setMap_pairKey                                                                                   full_orig_map;
   absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat>>                      IOtoNodeMap_orig;
@@ -102,7 +97,6 @@ private:
   void probabilistic_match_final();
   bool probabilistic_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const ;
-  absl::btree_set<Node_pin::Compact_flat> sort_set(absl::flat_hash_set<Node_pin::Compact_flat> &unsorted_set) const ;
   void print_nodes_vec () const;
   void print_flop_set () const ;
   void print_everything() ;
@@ -116,8 +110,6 @@ private:
   map_of_sets out_map_of_sets_orig;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
   
-  // void get_input_node(const Node_pin &pin, absl::btree_set<std::string>& in_set);
-  // void get_output_node(const Node_pin &pin, absl::btree_set<std::string>& out_set);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
   //  io_set, bool addToCFL = false);
   void get_input_node(const Node_pin &pin, std::set<std::string> &in_set, std::set<std::string> &io_set, bool addToCFL = false);

@@ -13,6 +13,7 @@ protected:
   ot::Timer timer;
 
   int margin;  // % margin to mark nodes
+  double freq;
 
   std::string odir;    // output directory power trace
   float max_delay;     // slowest arrival time (delay) on the circuit
