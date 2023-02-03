@@ -419,8 +419,8 @@ void Power_vcd::compute(std::string_view odir) const {
 
     double x = 0;
     for (double v : e.second) {
-      fmt::print(f, "{} {}\n", x, v* n_buckets / max_edges);
       x += time_step;
+      fmt::print(f, "{} {}\n", x, v* n_buckets / max_edges);
     }
 
     std::fclose(f);

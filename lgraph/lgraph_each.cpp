@@ -163,7 +163,7 @@ void Lgraph::each_graph_output(const std::function<void(Node_pin &pin)> &f1, boo
 }
 
 void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type_id)> &fn) {
-  for (auto e : get_down_nodes_map()) {
+  for (const auto &e : get_down_nodes_map()) {
     Index_id cid = e.first.nid;
     I(cid);
 
@@ -196,7 +196,7 @@ void Lgraph::each_hier_fast(const std::function<bool(Node &)>& f) {
 
 void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)> &fn) {
   std::set<Lg_type_id> visited;
-  for (auto e : get_down_nodes_map()) {
+  for (const auto &e : get_down_nodes_map()) {
     Index_id cid = e.first.nid;
     I(cid);
 
