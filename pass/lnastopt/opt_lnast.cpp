@@ -357,7 +357,7 @@ void Opt_lnast::process_bit_not(const std::shared_ptr<Lnast> &ln, const Lnast_ni
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_logical_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_and(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand1;
@@ -402,7 +402,7 @@ void Opt_lnast::process_logical_and(const std::shared_ptr<Lnast> &ln, const Lnas
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_logical_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_or(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand1;
@@ -447,7 +447,7 @@ void Opt_lnast::process_logical_or(const std::shared_ptr<Lnast> &ln, const Lnast
   st.set(var, result_trivial);
 }
 
-void Opt_lnast::process_logical_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
+void Opt_lnast::process_log_not(const std::shared_ptr<Lnast> &ln, const Lnast_nid &lnid) {
   std::string var;
   Lconst      result_trivial;
   Lconst      operand;
@@ -1058,9 +1058,9 @@ void Opt_lnast::process_stmts(const std::shared_ptr<Lnast> &ln, const Lnast_nid 
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_and: process_bit_and(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_or: process_bit_or(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_bit_not: process_bit_not(ln, idx); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_and: process_logical_and(ln, idx); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_or: process_logical_or(ln, idx); break;
-      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_logical_not: process_logical_not(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_log_and: process_log_and(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_log_or: process_log_or(ln, idx); break;
+      case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_log_not: process_log_not(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_assign: process_assign(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_set: process_tuple_set(ln, idx); break;
       case Lnast_ntype::Lnast_ntype_int::Lnast_ntype_tuple_get: process_tuple_get(ln, idx); break;

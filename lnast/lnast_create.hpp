@@ -31,8 +31,8 @@ public:
   std::string create_mask_stmts(std::string_view dest_max_bit);
   std::string create_bitmask_stmts(std::string_view max_bit, std::string_view min_bit);
   std::string create_bit_not_stmts(std::string_view var_name);
-  std::string create_logical_not_stmts(std::string_view var_name);
-  std::string create_reduce_or_stmts(std::string_view var_name);
+  std::string create_log_not_stmts(std::string_view var_name);
+  std::string create_red_or_stmts(std::string_view var_name);
 
   std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_pick_bit_stmts(std::string_view a_var, std::string_view pos);

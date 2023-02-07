@@ -41,13 +41,13 @@ public:
   // Super types
   bool constexpr is_primitive_op() const { return (val >= Lnast_ntype_assign && val <= Lnast_ntype_attr_get); }
   bool constexpr is_logical_op() const {
-    return (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_logical_not);
+    return (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_log_not);
   }
 
   bool constexpr is_mask_op() const { return val >= Lnast_ntype_mask_and && val <= Lnast_ntype_mask_xor; }
 
   bool constexpr is_unary_op() const {
-    return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_logical_not) || (val == Lnast_ntype_assign)
+    return (val == Lnast_ntype_bit_not) || (val == Lnast_ntype_log_not) || (val == Lnast_ntype_assign)
            || (val == Lnast_ntype_dp_assign) || (val == Lnast_ntype_mut);
   }
 
@@ -57,7 +57,7 @@ public:
 
   bool constexpr is_nary_op() const {
     return (val == Lnast_ntype_bit_and) || (val == Lnast_ntype_bit_or) || (val == Lnast_ntype_bit_xor)
-           || (val == Lnast_ntype_logical_and) || (val == Lnast_ntype_logical_or) || (val == Lnast_ntype_plus)
+           || (val == Lnast_ntype_log_and) || (val == Lnast_ntype_log_or) || (val == Lnast_ntype_plus)
            || (val == Lnast_ntype_minus) || (val == Lnast_ntype_mult) || (val == Lnast_ntype_is) || (val == Lnast_ntype_eq)
            || (val == Lnast_ntype_ne) || (val == Lnast_ntype_lt) || (val == Lnast_ntype_le) || (val == Lnast_ntype_gt)
            || (val == Lnast_ntype_ge);

@@ -136,9 +136,9 @@ protected:
       "rxor",
       "popcount",
 
-      "&&",  // logical_and
-      "||",  // logical_or
-      "!",   // logical_not
+      "&&",  // log_and
+      "||",  // log_or
+      "!",   // log_not
 
       "+",
       "-",

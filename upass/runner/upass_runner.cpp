@@ -30,12 +30,14 @@ void uPass_runner::process_lnast() {
     PROCESS_NODE(bit_xor)
 
     // Bitwidth Insensitive Reduce
-    PROCESS_NODE(reduce_or)
+    PROCESS_NODE(red_or)
+    PROCESS_NODE(red_and)
+    PROCESS_NODE(red_xor)
 
     // Logical
-    PROCESS_NODE(logical_and)
-    PROCESS_NODE(logical_or)
-    PROCESS_NODE(logical_not)
+    PROCESS_NODE(log_and)
+    PROCESS_NODE(log_or)
+    PROCESS_NODE(log_not)
 
     // Arithmetic
     PROCESS_NODE(plus)

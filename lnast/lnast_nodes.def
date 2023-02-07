@@ -28,19 +28,19 @@ LNAST_NODE( mut, mut )              // FIXME: remove
 
 // Operators
 // - Bitwidth
-LNAST_NODE( bit_and, and )
-LNAST_NODE( bit_or, or )
-LNAST_NODE( bit_not, not )
-LNAST_NODE( bit_xor, xor )
+LNAST_NODE( bit_and, bit_and )
+LNAST_NODE( bit_or , bit_or )
+LNAST_NODE( bit_not, bit_not )
+LNAST_NODE( bit_xor, bit_xor )
 // - Bitwidth Insensitive Reduce
-LNAST_NODE( reduce_or, reduce_or )
-LNAST_NODE( reduce_and, reduce_and )
-LNAST_NODE( reduce_xor, reduce_xor )
+LNAST_NODE( red_or , red_or )
+LNAST_NODE( red_and, red_and )
+LNAST_NODE( red_xor, red_xor )
 LNAST_NODE( popcount, popcount )
 // - Logical
-LNAST_NODE( logical_and, land )
-LNAST_NODE( logical_or, lor )
-LNAST_NODE( logical_not, lnot )
+LNAST_NODE( log_and, log_and )
+LNAST_NODE( log_or , log_or )
+LNAST_NODE( log_not, log_not )
 // - Arithmetic
 LNAST_NODE( plus, plus )
 LNAST_NODE( minus, minus )

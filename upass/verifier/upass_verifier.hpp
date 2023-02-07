@@ -21,9 +21,9 @@ public:
   // - Bitwidth Insensitive Reduce
   // void process_reduce_or() override { check_binary(); }
   // - Logical
-  void process_logical_and() override { check_binary(); }
-  void process_logical_or() override { check_binary(); }
-  // void process_logical_not() override { check_binary(); }
+  void process_log_and() override { check_binary(); }
+  void process_log_or() override { check_binary(); }
+  // void process_log_not() override { check_binary(); }
   // - Arithmetic
   void process_plus() override { check_binary(); }
   void process_minus() override { check_binary(); }

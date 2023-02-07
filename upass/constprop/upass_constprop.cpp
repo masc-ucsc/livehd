@@ -100,9 +100,9 @@ void uPass_constprop::process_bit_not() {
   process_unary([](Lconst &r) { r = r.not_op(); });
 }
 
-void uPass_constprop::process_logical_and() {}
-void uPass_constprop::process_logical_or() {}
-void uPass_constprop::process_logical_not() {}
+void uPass_constprop::process_log_and() {}
+void uPass_constprop::process_log_or() {}
+void uPass_constprop::process_log_not() {}
 
 void uPass_constprop::process_ne() {
   process_binary([](Lconst x, Lconst y) { return x != y; });

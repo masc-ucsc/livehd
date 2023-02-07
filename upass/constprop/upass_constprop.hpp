@@ -20,9 +20,9 @@ public:
   void process_bit_and();
   void process_bit_or();
   void process_bit_not();
-  void process_logical_and();
-  void process_logical_or();
-  void process_logical_not();
+  void process_log_and();
+  void process_log_or();
+  void process_log_not();
   void process_ne();
   void process_eq();
   void process_lt();

@@ -425,14 +425,14 @@ std::string Slang_tree::process_expression(const slang::Expression &expr, bool l
     auto lhs = process_expression(op.operand(), last_value);
     switch (op.op) {
       case slang::UnaryOperator::BitwiseNot: return lnast_create_obj.create_bit_not_stmts(lhs);
-      case slang::UnaryOperator::LogicalNot: return lnast_create_obj.create_logical_not_stmts(lhs);
+      case slang::UnaryOperator::LogicalNot: return lnast_create_obj.create_log_not_stmts(lhs);
       case slang::UnaryOperator::Plus: return lhs;
       case slang::UnaryOperator::Minus: return lnast_create_obj.create_minus_stmts("0", lhs);
-      case slang::UnaryOperator::BitwiseOr: return lnast_create_obj.create_reduce_or_stmts(lhs);
+      case slang::UnaryOperator::BitwiseOr: return lnast_create_obj.create_red_or_stmts(lhs);
       // do I use bit not or logical not?
       // Also is it ok for it to be two connected references if we have no lnast node?
       case slang::UnaryOperator::BitwiseNor:
-        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_reduce_or_stmts(lhs));
+        return lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_or_stmts(lhs));
         // case UnaryOperator::Preincrement:
         // case UnaryOperator::Predecrement:
         // case UnaryOperator::Postincrement:
@@ -551,7 +551,7 @@ std::string Slang_tree::process_mask_and(const slang::UnaryExpression &uexpr, bo
   auto inp = process_expression(op, last_value);
 
   auto tmp
-      = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_reduce_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
+      = lnast_create_obj.create_bit_not_stmts(lnast_create_obj.create_red_or_stmts(lnast_create_obj.create_bit_not_stmts(inp)));
   return lnast_create_obj.create_bit_and_stmts(
       tmp,
       lnast_create_obj.create_sra_stmts(inp, std::to_string(msb_pos)));  // No need pick (reduce is 1 bit)

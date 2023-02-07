@@ -248,14 +248,18 @@ Lnast_node Pass_lnastfmt::duplicate_node(std::shared_ptr<Lnast>& lnastfmted, con
     new_node = Lnast_node::create_bit_not();
   } else if (orig_node_type.is_bit_xor()) {
     new_node = Lnast_node::create_bit_xor();
-  } else if (orig_node_type.is_logical_and()) {
-    new_node = Lnast_node::create_logical_and();
-  } else if (orig_node_type.is_logical_or()) {
-    new_node = Lnast_node::create_logical_or();
-  } else if (orig_node_type.is_logical_not()) {
-    new_node = Lnast_node::create_logical_not();
-  } else if (orig_node_type.is_reduce_or()) {
-    new_node = Lnast_node::create_reduce_or();
+  } else if (orig_node_type.is_log_and()) {
+    new_node = Lnast_node::create_log_and();
+  } else if (orig_node_type.is_log_or()) {
+    new_node = Lnast_node::create_log_or();
+  } else if (orig_node_type.is_log_not()) {
+    new_node = Lnast_node::create_log_not();
+  } else if (orig_node_type.is_red_or()) {
+    new_node = Lnast_node::create_red_or();
+  } else if (orig_node_type.is_red_and()) {
+    new_node = Lnast_node::create_red_and();
+  } else if (orig_node_type.is_red_xor()) {
+    new_node = Lnast_node::create_red_xor();
   } else if (orig_node_type.is_plus()) {
     new_node = Lnast_node::create_plus();
   } else if (orig_node_type.is_minus()) {

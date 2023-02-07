@@ -437,7 +437,7 @@ void Pass_lnast_fromlg::attach_binaryop_node(Lnast& lnast, Lnast_nid& parent_nod
         break;  // fmt::print("\t{}\n", pid0_pin.get_node().debug_name()); break;
       case Ntype_op::Or: bop_node = lnast.add_child(parent_node, Lnast_node::create_bit_or()); break;
       case Ntype_op::Xor: bop_node = lnast.add_child(parent_node, Lnast_node::create_bit_xor()); break;
-      case Ntype_op::Ror: bop_node = lnast.add_child(parent_node, Lnast_node::create_logical_or()); break;
+      case Ntype_op::Ror: bop_node = lnast.add_child(parent_node, Lnast_node::create_log_or()); break;
       default: Pass::error("attach_binaryop_node doesn't support given node: {}", pid0_pin.get_node().debug_name());
     }
     lnast.add_child(bop_node, Lnast_node::create_ref(dpin_get_name(pid0_pin)));

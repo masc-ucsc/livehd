@@ -914,9 +914,9 @@ void Prp2lnast::process_binary_expression(TSNode node) {
   } else if (op == "!=") {
     lnast_node = Lnast_node::create_ne();
   } else if (op == "and") {
-    lnast_node = Lnast_node::create_logical_and();
+    lnast_node = Lnast_node::create_log_and();
   } else if (op == "or") {
-    lnast_node = Lnast_node::create_logical_or();
+    lnast_node = Lnast_node::create_log_or();
   } else if (op == ">>") {
     lnast_node = Lnast_node::create_sra();
   } else if (op == "<<") {
@@ -997,7 +997,7 @@ void Prp2lnast::process_unary_expression(TSNode node) {
 
   // Regular math operators
   if (op == "!" || op == "not") {
-    lnast_node = Lnast_node::create_logical_not();
+    lnast_node = Lnast_node::create_log_not();
   } else if (op == "~") {
     lnast_node = Lnast_node::create_bit_not();
   } else if (op == "-") {
@@ -1171,15 +1171,15 @@ void Prp2lnast::process_bit_selection(TSNode node) {
     if (op == "sext" || op == "zext") {
       // TODO: sign extension
     } else if (op == "|") {
-      auto reduce_or_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_or());
+      auto reduce_or_index = lnast->add_child(stmts_index, Lnast_node::create_red_or());
       lnast->add_child(reduce_or_index, ref);
       lnast->add_child(reduce_or_index, select_ref);
     } else if (op == "&") {
-      auto reduce_and_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_and());
+      auto reduce_and_index = lnast->add_child(stmts_index, Lnast_node::create_red_and());
       lnast->add_child(reduce_and_index, ref);
       lnast->add_child(reduce_and_index, select_ref);
     } else if (op == "^") {
-      auto reduce_xor_index = lnast->add_child(stmts_index, Lnast_node::create_reduce_xor());
+      auto reduce_xor_index = lnast->add_child(stmts_index, Lnast_node::create_red_xor());
       lnast->add_child(reduce_xor_index, ref);
       lnast->add_child(reduce_xor_index, select_ref);
     } else if (op == "+") {

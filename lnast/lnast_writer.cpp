@@ -191,9 +191,9 @@ void Lnast_writer::write_bit_and()       { write_n_ary("bit_and");       }
 void Lnast_writer::write_bit_or()        { write_n_ary("bit_or");        }
 void Lnast_writer::write_bit_not()       { write_n_ary("bit_not");       }
 void Lnast_writer::write_bit_xor()       { write_n_ary("bit_xor");       }
-void Lnast_writer::write_logical_and()   { write_n_ary("and");           }
-void Lnast_writer::write_logical_or()    { write_n_ary("or");            }
-void Lnast_writer::write_logical_not()   { write_n_ary("not");           }
+void Lnast_writer::write_log_and()       { write_n_ary("log_and");       }
+void Lnast_writer::write_log_or()        { write_n_ary("log_or");        }
+void Lnast_writer::write_log_not()       { write_n_ary("log_not");       }
 void Lnast_writer::write_plus()          { write_n_ary("add");           }
 void Lnast_writer::write_minus()         { write_n_ary("sub");           }
 void Lnast_writer::write_mult()          { write_n_ary("mul");           }
@@ -208,9 +208,9 @@ void Lnast_writer::write_lt()            { write_n_ary("lt");            }
 void Lnast_writer::write_le()            { write_n_ary("le");            }
 void Lnast_writer::write_gt()            { write_n_ary("gt");            }
 void Lnast_writer::write_ge()            { write_n_ary("ge");            }
-void Lnast_writer::write_reduce_or()     { write_n_ary("reduce_or");     }
-void Lnast_writer::write_reduce_and()    { write_n_ary("reduce_and");    }
-void Lnast_writer::write_reduce_xor()    { write_n_ary("reduce_xor");    }
+void Lnast_writer::write_red_or()        { write_n_ary("red_or");        }
+void Lnast_writer::write_red_and()       { write_n_ary("red_and");       }
+void Lnast_writer::write_red_xor()       { write_n_ary("red_xor");       }
 void Lnast_writer::write_popcount()      { write_n_ary("popcount");      }
 void Lnast_writer::write_sext()          { write_n_ary("sext");          }
 void Lnast_writer::write_set_mask()      { write_n_ary("set_mask");      }

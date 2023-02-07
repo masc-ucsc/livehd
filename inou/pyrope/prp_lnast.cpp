@@ -1085,7 +1085,7 @@ Lnast_node Prp_lnast::eval_expression(lh::Tree_index idx_start_ast, lh::Tree_ind
         }
       }
       lnast->add_child(idx_operator_ln, op1);  // first operand
-      if (!(added_assign_op || it->type.is_bit_not() || it->type.is_logical_not())) {
+      if (!(added_assign_op || it->type.is_bit_not() || it->type.is_log_not())) {
         auto op2 = operand_stack.front();  // optional second operand
         operand_stack.pop_front();
         lnast->add_child(idx_operator_ln, op2);
@@ -1857,7 +1857,7 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
         if (tid.size() > 1) {
           return Lnast_node::create_ne();
         } else {
-          return Lnast_node::create_logical_not();
+          return Lnast_node::create_log_not();
         }
       case '>':
         if (tid.size() > 1) {
@@ -1885,8 +1885,8 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
           }
           return Lnast_node::create_lt();
         }
-      case 'o': return Lnast_node::create_logical_or();
-      case 'a': return Lnast_node::create_logical_and();
+      case 'o': return Lnast_node::create_log_or();
+      case 'a': return Lnast_node::create_log_and();
       case 'i': return Lnast_node::create_is();
       case '~': return Lnast_node::create_bit_not();
       case '+':
@@ -1913,8 +1913,8 @@ Lnast_node Prp_lnast::gen_operator(lh::Tree_index idx, uint8_t *skip_sibs) {
 }
 
 void Prp_lnast::generate_priority_map() {
-  priority_map[Lnast_ntype::Lnast_ntype_logical_and]  = 3;
-  priority_map[Lnast_ntype::Lnast_ntype_logical_or]   = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_log_and]  = 3;
+  priority_map[Lnast_ntype::Lnast_ntype_log_or]   = 3;
   priority_map[Lnast_ntype::Lnast_ntype_gt]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_lt]           = 2;
   priority_map[Lnast_ntype::Lnast_ntype_ge]           = 2;
@@ -1936,7 +1936,7 @@ void Prp_lnast::generate_priority_map() {
 
 /*
 inline void Prp_lnast::generate_priority_matrix() {
-  auto op_list[] = {Lnast_ntype::Lnast_ntype_logical_and, Lnast_ntype::Lnast_ntype_logical_or, Lnast_ntype::Lnast_ntype_gt,
+  auto op_list[] = {Lnast_ntype::Lnast_ntype_log_and, Lnast_ntype::Lnast_ntype_log_or, Lnast_ntype::Lnast_ntype_gt,
 Lnast_ntype::Lnast_ntype_lt, Lnast_ntype::Lnast_ntype_ge, Lnast_ntype::Lnast_ntype_le, Lnast_ntype::Lnast_ntype_same,
 Lnast_ntype::Lnast_ntype_eq, Lnast_ntype::Lnast_ntype_tuple_concat, Lnast_ntype::Lnast_ntype_shift_left,
 Lnast_ntype::Lnast_ntype_shift_right, Lnast_ntype::Lnast_ntype_rotate_shift_left, Lnast_ntype::Lnast_ntype_rotate_shift_right,

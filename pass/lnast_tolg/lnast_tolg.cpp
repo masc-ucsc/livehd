@@ -1590,11 +1590,13 @@ void Lnast_tolg::process_ast_while_op(Lgraph *lg, const Lnast_nid &lnidx) {
 
 void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
   // Logical handled in a separate step
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_and] = Ntype_op::And;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_not] = Ntype_op::Not;
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_logical_or]  = Ntype_op::Ror;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_log_and] = Ntype_op::And;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_log_not] = Ntype_op::Not;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_log_or]  = Ntype_op::Ror;
 
-  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_reduce_or] = Ntype_op::Ror;
+  primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_red_or]    = Ntype_op::Ror;
+  // No direct primive translate for red_and/red_xor
+
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_assign]    = Ntype_op::Or;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_and]   = Ntype_op::And;
   primitive_type_lnast2lg[Lnast_ntype::Lnast_ntype_bit_or]    = Ntype_op::Or;

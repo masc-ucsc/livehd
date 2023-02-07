@@ -130,12 +130,12 @@ std::string Lnast_create::create_bit_not_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_logical_not_stmts(std::string_view var_name) {
+std::string Lnast_create::create_log_not_stmts(std::string_view var_name) {
   if (var_name.empty())
     return "";
 
   auto res_var = create_lnast_tmp();
-  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_logical_not());
+  auto not_idx = lnast->add_child(idx_stmts, Lnast_node::create_log_not());
   lnast->add_child(not_idx, Lnast_node::create_ref(res_var));
   if (str_tools::is_string(var_name))
     lnast->add_child(not_idx, Lnast_node::create_ref(var_name));
@@ -145,12 +145,12 @@ std::string Lnast_create::create_logical_not_stmts(std::string_view var_name) {
   return res_var;
 }
 
-std::string Lnast_create::create_reduce_or_stmts(std::string_view var_name) {
+std::string Lnast_create::create_red_or_stmts(std::string_view var_name) {
   if (var_name.empty())
     return "";
 
   auto res_var = create_lnast_tmp();
-  auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_reduce_or());
+  auto or_idx  = lnast->add_child(idx_stmts, Lnast_node::create_red_or());
   lnast->add_child(or_idx, Lnast_node::create_ref(res_var));
   if (str_tools::is_string(var_name))
     lnast->add_child(or_idx, Lnast_node::create_ref(var_name));
