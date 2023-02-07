@@ -19,7 +19,6 @@ Pass_label::Pass_label(const Eprp_var &var) : Pass("pass.label", var) {
   }
 
   auto verbose_txt = var.get("verbose");
-
   if (verbose_txt != "false" && verbose_txt != "0") {
     verbose = true;
   } else {

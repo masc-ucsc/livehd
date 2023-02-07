@@ -4,7 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_upass_test",
+    name = "pass_upass",
     srcs = glob(
         ["*.cpp"],
     ),

@@ -79,7 +79,7 @@ cc_library(
         # "//pass/mockturtle:pass_mockturtle",
         #add dependencies to new passes here
         #"//inou/hif:inou_hif"
-        "//pass/upass_test:pass_upass_test",
+        "//pass/upass:pass_upass",
     ],
 )
 
