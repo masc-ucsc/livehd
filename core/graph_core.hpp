@@ -1,6 +1,49 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+// This is a graph representation optimized based on structure and use in
+// LiveHD.
+//
+// Some key characteristics:
+//
+// -Graph mutates (add/remove edges and nodes)
+//
+// -At most 32 bit ID for node (graph would be partitioned if larger is needed)
+//
+// -Once an ID is created, even if node is deleted, it can not be reused
+//
+// -Delete node is frequent (code optimization)
+//
+// -2 main types of traversal (any order or topological sort)
+//
+// -Add edges is not so frequent after the 1st phase of graph creation
+//
+// -Nodes has several "pins" and the edges are bi-directional
+//
+// -In practice (topological sort), most edges are "short" no need to keep large
+// 32 bit integer. Delta optimization to fit more edges.
+//
+// -Meta information (attributes) are kept separate unless VERY dense and
+// frequent. Currently only: (1) type info per node; (2) bits for driver pin.
+//
+// -Most nodes have under 8 edges, but some (reset/clk) have LOTS of edges
+//
+// -The graph operations do NOT need to be multithreaded with updates. The
+// parallelism is extracted from parallel thread operations. (parallel read-only
+// may happen).
+
+// Some related (but different) graph representations:
+//
+// Winter, Martin, et al. "faimGraph: high performance management of
+// fully-dynamic graphs under tight memory constraints on the GPU." SC18:
+// International Conference for High Performance Computing, Networking, Storage
+// and Analysis. IEEE, 2018.
+//
+// Bader, David A., et al. "Stinger: Spatio-temporal interaction networks and
+// graphs (sting) extensible representation." Georgia Institute of Technology,
+// Tech. Rep (2009).
+//
+
 #include <cassert>
 #include <string_view>
 #include <vector>
