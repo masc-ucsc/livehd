@@ -114,7 +114,7 @@ create_pre-synth_verilog () {
  #   echo "PRP -> HL LNAST -> save LN "
  #   echo "----------------------------------------------------"
  #   #PRP->LN
- #   ${LGSHELL} "inou.pyrope files:${PRP_PATH}/${pt}.prp |> pass.lnast_save "
+ #   ${LGSHELL} "inou.pyrope files:${PRP_PATH}/${pt}.prp |> lnast.save "
  #   
  #   ret_val=$?
  #   if [ $ret_val -ne 0 ]; then
@@ -127,7 +127,7 @@ create_pre-synth_verilog () {
  #   echo "----------------------------------------------------"
  #   echo "saved LN -> (loaded using hif format)-> LGraph"
  #   echo "----------------------------------------------------"
- #   ${LGSHELL} "pass.lnast_load files:${pt} |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> save.lgraph hier:true"
+ #   ${LGSHELL} "lnast.load files:${pt} |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> save.lgraph hier:true"
  #   ret_val=$?
  #   if [ $ret_val -ne 0 ]; then
  #     echo "ERROR: could not create/save LG for pattern: ${pt}!"

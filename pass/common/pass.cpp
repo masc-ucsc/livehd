@@ -66,8 +66,12 @@ void Pass::register_pass(Eprp_method &method) {
   eprp.register_method(method);
 
   // All the passses should start with pass.*
-  assert(method.get_name().substr(0, 5) == "pass." || method.get_name().substr(0, 5) == "live."
-         || method.get_name().substr(0, 5) == "inou.");
+  assert(method.get_name().substr(0, 5) == "pass."
+         || method.get_name().substr(0, 5) == "live."
+         || method.get_name().substr(0, 5) == "inou."
+         || method.get_name().substr(0, 6) == "lnast."
+         || method.get_name().substr(0, 7) == "lgraph."
+         );
 }
 
 void Pass::register_inou(std::string_view pname, Eprp_method &method) {

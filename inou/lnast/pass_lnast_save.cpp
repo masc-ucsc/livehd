@@ -8,12 +8,12 @@
 
 #include "lnast_hif_writer.hpp"
 
-static Pass_plugin sample("pass_lnast_save", Pass_lnast_save::setup);
+static Pass_plugin sample("lnast.save", Pass_lnast_save::setup);
 
-Pass_lnast_save::Pass_lnast_save(const Eprp_var& var) : Pass("pass.lnast_save", var) {}
+Pass_lnast_save::Pass_lnast_save(const Eprp_var& var) : Pass("lnast.save", var) {}
 
 void Pass_lnast_save::setup() {
-  Eprp_method m1("pass.lnast_save", "Serialize LNAST to HIF format", &Pass_lnast_save::do_work);
+  Eprp_method m1("lnast.save", "Serialize LNAST to HIF format", &Pass_lnast_save::do_work);
   m1.add_label_optional("odir", "Output Directory");
   register_pass(m1);
 }

@@ -76,14 +76,14 @@ livehd>
 This works:
   inou.pyrope files:inou/pyrope/tests/scalar_tuple.prp |> pass.lnast_tolg |> pass.bitwidth |> pass.cprop |> lgraph.save hier:true
 But this does not work:
-  inou.pyrope files:inou/pyrope/tests/scalar_tuple.prp |> pass.lnast_save
+  inou.pyrope files:inou/pyrope/tests/scalar_tuple.prp |> lnast.save
   pass.lnast_load files:scalar_tuple |> pass.lnast_tolg |> pass.cprop |> pass.bitwidth |> save.lgraph hier:true
 It gives:
   pass.lnast_load files:scalar_tuple |> pass.lnast_tolg |> pass.bitwidth |> pass.cprop |> lgraph.save 
   pass/lnast_tolg/lnast_tolg.cpp:536 :assertion !tn_dpin.is_invalid() failed  
   Aborted    
 
-Is it because the lnast saved in "pass.lnast_save" does not have "name"?
+Is it because the lnast saved in "lnast.save" does not have "name"?
 Bug, @Jing-Hsiang Huang may be able to fix it. Looks like the lnast name is not populated when lnast is loaded
 
 I agree, the last_save should have an “odir:” option (or path: for lgdb as default)

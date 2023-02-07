@@ -9,12 +9,12 @@
 #include "lnast_hif_reader.hpp"
 #include "lnast_ntype.hpp"
 
-static Pass_plugin sample("pass_lnast_load", Pass_lnast_load::setup);
+static Pass_plugin sample("lnast.load", Pass_lnast_load::setup);
 
-Pass_lnast_load::Pass_lnast_load(const Eprp_var& var) : Pass("pass.lnast_load", var) {}
+Pass_lnast_load::Pass_lnast_load(const Eprp_var& var) : Pass("lnast.load", var) {}
 
 void Pass_lnast_load::setup() {
-  Eprp_method m1("pass.lnast_load", "Load from HIF to LNAST", &Pass_lnast_load::do_work);
+  Eprp_method m1("lnast.load", "Load from HIF to LNAST", &Pass_lnast_load::do_work);
   m1.add_label_required("files", "HIF directory");
   register_pass(m1);
 }

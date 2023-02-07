@@ -18,7 +18,7 @@ if [ ! -f $LGSHELL ]; then
   echo "could not find $LGSHELL"
   exit
 else
-  $LGSHELL "inou.firrtl.tolnast files:$FIRRTL |> pass.lnast_print odir:benchmark/ln/"
+  $LGSHELL "inou.firrtl.tolnast files:$FIRRTL |> lnast.print odir:benchmark/ln/"
 fi
 
 BENCH=./bazel-bin/benchmark/bm_format

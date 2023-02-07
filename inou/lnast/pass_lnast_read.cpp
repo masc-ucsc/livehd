@@ -9,12 +9,12 @@
 #include "fmt/printf.h"
 #include "lnast_parser.hpp"
 
-static Pass_plugin sample("pass_lnast_read", Pass_lnast_read::setup);
+static Pass_plugin sample("lnast.read", Pass_lnast_read::setup);
 
-Pass_lnast_read::Pass_lnast_read(Eprp_var& var) : Pass("pass.lnast_read", var) {}
+Pass_lnast_read::Pass_lnast_read(Eprp_var& var) : Pass("lnast.read", var) {}
 
 void Pass_lnast_read::setup() {
-  Eprp_method m1("pass.lnast_read", "Read from LNAST textual IR files and convert them to LNAST", &Pass_lnast_read::do_work);
+  Eprp_method m1("lnast.read", "Read from LNAST textual IR files and convert them to LNAST", &Pass_lnast_read::do_work);
   m1.add_label_optional("files", "LNAST textual IR files");
   m1.add_label_optional("path", "LNAST textual IR directory");
   register_pass(m1);

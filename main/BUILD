@@ -55,6 +55,7 @@ cc_library(
         "//inou/prp:inou_prp",
         "//inou/slang:inou_slang",
         "//inou/yosys:lgyosys",
+        "//inou/lnast:inou_lnast",
         "//lgext/common:lgcpp",
         "//lgext/prplib",
         "//pass/bitwidth:pass_bitwidth",
@@ -76,11 +77,7 @@ cc_library(
         "//pass/submatch:pass_submatch",
         "//pass/compiler:pass_compiler",
         # "//pass/mockturtle:pass_mockturtle",
-        "//pass/lnast_print:pass_lnast_print",
-        "//pass/lnast_read:pass_lnast_read",
         #add dependencies to new passes here
-        "//pass/lnast_save:pass_lnast_save",
-        "//pass/lnast_load:pass_lnast_load",
         #"//inou/hif:inou_hif"
         "//pass/upass_test:pass_upass_test",
     ],

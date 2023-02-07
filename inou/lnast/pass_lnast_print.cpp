@@ -8,12 +8,12 @@
 
 #include "lnast_writer.hpp"
 
-static Pass_plugin sample("pass_lnast_print", Pass_lnast_print::setup);
+static Pass_plugin sample("lnast.print", Pass_lnast_print::setup);
 
-Pass_lnast_print::Pass_lnast_print(const Eprp_var& var) : Pass("pass.lnast_print", var) {}
+Pass_lnast_print::Pass_lnast_print(const Eprp_var& var) : Pass("lnast.print", var) {}
 
 void Pass_lnast_print::setup() {
-  Eprp_method m1("pass.lnast_print", "Print LNAST in textual form to the terminal or a specified file", &Pass_lnast_print::do_work);
+  Eprp_method m1("lnast.print", "Print LNAST in textual form to the terminal or a specified file", &Pass_lnast_print::do_work);
   m1.add_label_optional("odir", "output directory");
   register_pass(m1);
 }

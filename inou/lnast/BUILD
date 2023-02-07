@@ -4,7 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
-    name = "pass_lnast_load",
+    name = "inou_lnast",
     srcs = glob(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
@@ -15,8 +15,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
-        "//pass/common:pass",
         "//lnast",
+        "//pass/common:pass",
     ],
     alwayslink = True,
 )
