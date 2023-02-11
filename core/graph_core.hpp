@@ -43,6 +43,9 @@
 // graphs (sting) extensible representation." Georgia Institute of Technology,
 // Tech. Rep (2009).
 //
+// Feng, Guanyu, et al. "Risgraph: A real-time streaming system for evolving
+// graphs to support sub-millisecond per-update analysis at millions ops/s."
+// Proceedings of the 2021 International Conference on Management of Data. 2021.
 
 #include <cassert>
 #include <string_view>
