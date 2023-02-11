@@ -112,6 +112,7 @@ public:
       }
     }
   }
+
   void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
     I(a_sbits>0);
     I(amount.to_i()>=0);
@@ -126,6 +127,30 @@ public:
     }
 
     for(auto i=0;i<a_sbits-amount.to_i();++i) {
+      if (i>=it->second.size()) {
+        pv[i].id  = it->second.back().id;
+        pv[i].pos = it->second.back().pos;
+      }else{
+        pv[i].id  = it->second[i].id;
+        pv[i].pos = it->second[i].pos;
+      }
+    }
+  }
+
+  void add_sext(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
+    I(a_sbits>0);
+    I(amount.to_i()>=0);
+
+    auto &pv = full_map[dst_pin];
+    pv.resize(amount.to_i(), {Zero_pin, -1});
+
+    auto it = full_map.find(a_pin);
+    if (it == full_map.end()) {
+      add_input(a_pin, a_sbits);
+      it = full_map.find(a_pin);
+    }
+
+    for(auto i=0;i<amount.to_i();++i) {
       if (i>=it->second.size()) {
         pv[i].id  = it->second.back().id;
         pv[i].pos = it->second.back().pos;

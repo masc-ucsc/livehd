@@ -191,6 +191,21 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
         }
         auto b_const = b_dpin.get_type_const();
         pin_tracker.add_sra(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), b_const);
+      } else if (op == Ntype_op::Sext) {
+        auto a_dpin    = node.get_sink_pin_driver("a");
+        auto b_dpin    = node.get_sink_pin_driver("b");
+        if (a_dpin.is_invalid() || b_dpin.is_invalid()) {
+          node.dump();
+          Pass::error("Invalid corrupt Sext node (cprop should have delete it)");
+          return;
+        }
+        if (!b_dpin.is_type_const()) {
+          node.dump();
+          Pass::error("opentimer can not handle non-constant Sext (cprop/tmap first)");
+          return;
+        }
+        auto b_const = b_dpin.get_type_const();
+        pin_tracker.add_sext(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), b_const);
       } else if (op == Ntype_op::SHL) {
         auto a_dpin    = node.get_sink_pin_driver("a");
         if (a_dpin.is_invalid()) {
