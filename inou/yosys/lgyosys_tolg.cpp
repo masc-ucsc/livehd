@@ -745,6 +745,10 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 
         auto *sub = sub_lg->ref_self_sub_node();
         node.set_type_sub(sub->get_lgid());
+        std::string inst_name{cell->name.str()};
+        if (!inst_name.empty()) {
+          node.set_name(inst_name.substr(1));
+        }
       } else {
         node.set_type(Ntype_op::Or);  // it will be updated later. Just a generic 1 output cell
 
@@ -2322,7 +2326,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       RTLIL::Module *mod = it.second;
       std::string    mod_name(&mod->name.c_str()[1]);
 
-      auto     *g   = library->ref_or_create_lgraph(mod_name, "-");
+      auto     *g   = library->create_lgraph(mod_name, "-");
       Sub_node *sub = g->ref_self_sub_node();
 
       for (const auto &port : mod->ports) {

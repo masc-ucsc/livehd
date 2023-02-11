@@ -475,6 +475,10 @@ Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view
   auto *lg = ref_or_create_lgraph_int(name, source);
   lg->clear_int();
   clear_int(lg->get_lgid());
+
+  graph_library_clean      = false;
+  attributes[lg->get_lgid()].version = max_next_version++;
+
   return lg;
 }
 
