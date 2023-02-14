@@ -185,6 +185,7 @@ void Graph_core::Overflow_entry::extract_all(absl::InlinedVector<uint32_t, 40> &
   auto v = ledge_min;
   expanded.emplace_back(v);
 
+  #pragma unroll
   for (auto i = 0u; i < sedge0_size; ++i) {
     if (sedge0[i] == 0) {
       continue;
@@ -197,6 +198,7 @@ void Graph_core::Overflow_entry::extract_all(absl::InlinedVector<uint32_t, 40> &
   v = ledge1;
   expanded.emplace_back(v);
 
+  #pragma unroll
   for (auto i = 0u; i < sedge1_size; ++i) {
     if (sedge1[i] == 0) {
       continue;
