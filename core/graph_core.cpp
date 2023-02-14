@@ -68,18 +68,14 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
 
     sedge[i] = rel_id;
     ++n_edges;
-    if (!out) {
-      inp_mask |= (1 << i);
-    }
+    inp_mask |= ((out?0:1) << i);
     return true;
   }
 
   if (is_node() && sedge2_or_pid == 0) {
     sedge2_or_pid = rel_id;
     ++n_edges;
-    if (!out) {
-      inp_mask |= (1 << Num_sedges);
-    }
+    inp_mask |= ((out?0:1) << Num_sedges);
     return true;
   }
 
@@ -90,18 +86,14 @@ bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
   if (is_node() && ledge0_or_prev == 0) {
     ledge0_or_prev = id;
     ++n_edges;
-    if (!out) {
-      inp_mask |= (1 << (Num_sedges + 1));
-    }
+    inp_mask |= ((out?0:1) << (Num_sedges + 1));
     return true;
   }
 
   if (!overflow_link && ledge1_or_overflow == 0) {
     ledge1_or_overflow = id;
     ++n_edges;
-    if (!out) {
-      inp_mask |= (1 << (Num_sedges + 2));
-    }
+    inp_mask |= ((out?0:1) << (Num_sedges + 2));
     return true;
   }
 
