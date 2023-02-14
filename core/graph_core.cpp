@@ -61,6 +61,16 @@ void Graph_core::Master_entry::readjust_edges(uint32_t self_id, absl::InlinedVec
 // empty, and moves to overflow)
 
 bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
+#if 1
+  if (n_edges < Num_sedges) {
+    I(sedge[n_edges]==0);
+    sedge[n_edges] = rel_id;
+    inp_mask |= ((out?0:1) << n_edges);
+
+    ++n_edges;
+    return true;
+  }
+#else
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i]) {
       continue;
@@ -71,10 +81,12 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
     inp_mask |= ((out?0:1) << i);
     return true;
   }
+#endif
 
   if (is_node() && sedge2_or_pid == 0) {
     sedge2_or_pid = rel_id;
-    ++n_edges;
+    I(n_edges == Num_sedges);
+    n_edges = Num_sedges+1;
     inp_mask |= ((out?0:1) << Num_sedges);
     return true;
   }
