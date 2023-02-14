@@ -53,6 +53,13 @@ void Graph_core::Master_entry::readjust_edges(uint32_t self_id, absl::InlinedVec
   }
 }
 
+// Maybe use #define haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
+// to see that there is no space?
+// Moving: sedge after sedge2_or_pid could allow a faster 8 byte op check
+//
+// TODO: MOST of the time, there should be space (when out of space. It gets
+// empty, and moves to overflow)
+
 bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
   for (auto i = 0u; i < Num_sedges; ++i) {
     if (sedge[i]) {
@@ -60,9 +67,8 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
     }
 
     sedge[i] = rel_id;
-    if (out) {
-      ++n_outputs;
-    } else {
+    ++n_edges;
+    if (!out) {
       inp_mask |= (1 << i);
     }
     return true;
@@ -70,9 +76,8 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
 
   if (is_node() && sedge2_or_pid == 0) {
     sedge2_or_pid = rel_id;
-    if (out) {
-      ++n_outputs;
-    } else {
+    ++n_edges;
+    if (!out) {
       inp_mask |= (1 << Num_sedges);
     }
     return true;
@@ -84,9 +89,8 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
 bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
   if (is_node() && ledge0_or_prev == 0) {
     ledge0_or_prev = id;
-    if (out) {
-      ++n_outputs;
-    } else {
+    ++n_edges;
+    if (!out) {
       inp_mask |= (1 << (Num_sedges + 1));
     }
     return true;
@@ -94,9 +98,8 @@ bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
 
   if (!overflow_link && ledge1_or_overflow == 0) {
     ledge1_or_overflow = id;
-    if (out) {
-      ++n_outputs;
-    } else {
+    ++n_edges;
+    if (!out) {
       inp_mask |= (1 << (Num_sedges + 2));
     }
     return true;
@@ -111,9 +114,6 @@ bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
  * @returns 0 if success and 1 if empty
  */
 bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, bool out) {
-  if (out && n_outputs == 0) {
-    return false;  // no output in master
-  }
   if (!out && !inp_mask) {
     return false;  // no input in master
   }
@@ -132,9 +132,8 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
       }
 
       sedge[i] = 0;
-      if (out) {
-        --n_outputs;
-      } else {
+      --n_edges;
+      if (!out) {
         inp_mask ^= (1 << i);
       }
 
@@ -143,9 +142,8 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
     if (node_vertex && sedge2_or_pid == rel_id) {
       if ((inp_mask & (1 << Num_sedges)) != out) {
         sedge2_or_pid = 0;
-        if (out) {
-          --n_outputs;
-        } else {
+        --n_edges;
+        if (!out) {
           inp_mask ^= (1 << Num_sedges);
         }
 
@@ -156,9 +154,8 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
 
   if (node_vertex && ledge0_or_prev == other_id && (inp_mask & (1 << (Num_sedges + 1))) != out) {
     ledge0_or_prev = 0;
-    if (out) {
-      --n_outputs;
-    } else {
+    --n_edges;
+    if (!out) {
       inp_mask ^= (1 << (Num_sedges + 1));
     }
 
@@ -167,9 +164,8 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
 
   if (!overflow_link && ledge1_or_overflow == other_id && (inp_mask & (1 << (Num_sedges + 2))) != out) {
     ledge1_or_overflow = 0;
-    if (out) {
-      --n_outputs;
-    } else {
+    --n_edges;
+    if (!out) {
       inp_mask ^= (1 << (Num_sedges + 2));
     }
 
@@ -635,7 +631,7 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   std::sort(pending_out.begin(), pending_out.end(), std::greater<uint32_t>());  // sort reverse order
 
   ent.inp_mask  = 0;
-  ent.n_outputs = 0;
+  ent.n_edges   = 0;
 
   auto overflow_id = ent.get_overflow_id();
   if (overflow_id == 0) {

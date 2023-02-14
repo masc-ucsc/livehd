@@ -173,20 +173,20 @@ protected:
     uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
     uint8_t  node_vertex : 1;      // node or just pin
     uint16_t inp_mask : 9;         // are the edges input or output edges (NOTE: only 6 needed)
-    uint8_t  n_outputs : 4;
-    uint8_t  overflow_link : 1;  // When set, ledge_min points to overflow
+    uint8_t  n_edges : 4;          // input or output edges
+    uint8_t  overflow_link : 1;    // When set, ledge_min points to overflow
     // CTRL: Byte 2
-    uint8_t lpid_or_type;  // type in node, pid bits in pin
+    uint8_t lpid_or_type;          // type in node, pid bits in pin
     // CTRL: Byte 3:5
     uint32_t bits : 24;
     // SEDGE: Byte 6:7 (special case)
-    int16_t sedge2_or_pid;  // edge_store in node, 16 pid bits in pin
+    int16_t sedge2_or_pid;         // edge_store in node, 16 pid bits in pin
     // LEDGE: Byte  8:11
-    uint32_t ledge0_or_prev;  // prev pointer (only for pin)
+    uint32_t ledge0_or_prev;       // prev pointer (only for pin)
     // LEDGE: Byte 12:15
     uint32_t ledge1_or_overflow;
     // LEDGE: Byte 16:19
-    uint32_t next_ptr;  // next pointer (pin or node)
+    uint32_t next_ptr;             // next pointer (pin or node)
     // SEDGE: Byte 20:31
     int16_t sedge[Num_sedges];
 
@@ -239,10 +239,10 @@ protected:
 
     std::pair<size_t, size_t> get_num_local_edges() const {
       auto n_inp = __builtin_popcount(inp_mask);
-      return std::pair(n_inp, n_outputs);
+      return std::pair(n_inp, n_edges-n_inp);
     }
 
-    bool has_edges() const { return overflow_link || n_outputs || inp_mask; }
+    bool has_edges() const { return overflow_link || n_edges; }
 
     bool     has_overflow() const { return overflow_link; }
     uint32_t get_overflow_id() const {
