@@ -422,6 +422,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
     // Look for smallest delta in sedge0
     int     pos      = -1;
     int16_t smallest = INT16_MAX;
+    #pragma unroll
     for (auto i = 0u; i < sedge0_size; ++i) {
       if (sedge0[i] && sedge0[i] < smallest) {
         smallest = sedge0[i];
@@ -432,6 +433,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
       ledge_min   = deleted_id + smallest;
       sedge0[pos] = 0;
 
+      #pragma unroll
       for (auto i = 0u; i < sedge0_size; ++i) {  // adjust deltas
         if (sedge0[i] == 0) {
           continue;
@@ -458,6 +460,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
     {
       int     pos      = -1;
       int16_t smallest = INT16_MAX;
+      #pragma unroll
       for (auto i = 0u; i < sedge1_size; ++i) {
         if (sedge1[i] && sedge1[i] < smallest) {
           smallest = sedge1[i];
@@ -468,6 +471,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
         ledge1      = deleted_id + smallest;
         sedge1[pos] = 0;
 
+        #pragma unroll
         for (auto i = 0u; i < sedge1_size; ++i) {  // adjust deltas
           if (sedge1[i] == 0) {
             continue;
@@ -490,6 +494,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
     {
       int     pos     = -1;
       int16_t largest = INT16_MIN;
+      #pragma unroll
       for (auto i = 0u; i < sedge0_size; ++i) {
         if (sedge0[i] && sedge0[i] > largest) {
           largest = sedge0[i];
@@ -509,6 +514,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
   // Look for largest delta in sedge1
   int     pos     = -1;
   int16_t largest = INT16_MIN;
+  #pragma unroll
   for (auto i = 0u; i < sedge1_size; ++i) {
     if (sedge1[i] && sedge1[i] > largest) {
       largest = sedge1[i];
@@ -527,6 +533,7 @@ bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id)
   // Look for largest in sedge0 and move to ledge1
   pos     = -1;
   largest = INT16_MIN;
+  #pragma unroll
   for (auto i = 0u; i < sedge0_size; ++i) {
     if (sedge0[i] && sedge0[i] > largest) {
       largest = sedge0[i];
@@ -554,6 +561,7 @@ bool Graph_core::Overflow_entry::delete_edge(uint32_t other_id, bool out) {
     bool    short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
 
     if (short_rel) {
+      #pragma unroll
       for (auto i = 0u; i < sedge0_size; ++i) {
         if (sedge0[i] == static_cast<int16_t>(rel_index)) {
           sedge0[i] = 0;
@@ -571,6 +579,7 @@ bool Graph_core::Overflow_entry::delete_edge(uint32_t other_id, bool out) {
     bool    short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
 
     if (short_rel) {
+      #pragma unroll
       for (auto i = 0u; i < sedge1_size; ++i) {
         if (sedge1[i] == static_cast<int16_t>(rel_index)) {
           sedge1[i] = 0;
@@ -1001,6 +1010,7 @@ void Graph_core::Overflow_entry::delete_node(uint32_t self_id, std::vector<Maste
   auto v = ledge_min;
   mtable[v].delete_edge(v, self_id, false);
 
+  #pragma unroll
   for (auto i = 0u; i < sedge0_size; ++i) {
     if (sedge0[i] == 0) {
       continue;
@@ -1013,6 +1023,7 @@ void Graph_core::Overflow_entry::delete_node(uint32_t self_id, std::vector<Maste
   v = ledge1;
   mtable[v].delete_edge(v, self_id, false);
 
+  #pragma unroll
   for (auto i = 0u; i < sedge1_size; ++i) {
     if (sedge1[i] == 0) {
       continue;
@@ -1034,6 +1045,7 @@ void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
     fmt::print(" min:{}", ledge_min);
   }
 
+  #pragma unroll
   for (auto i = 0u; i < sedge0_size; ++i) {
     if (sedge0[i]) {
       fmt::print(" f{}", ledge_min + sedge0[i]);
@@ -1042,6 +1054,7 @@ void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
   if (ledge1) {
     fmt::print(" ledge1:{}", ledge1);
   }
+  #pragma unroll
   for (auto i = 0u; i < sedge1_size; ++i) {
     if (sedge1[i]) {
       fmt::print(" s{}", ledge1 + sedge1[i]);
