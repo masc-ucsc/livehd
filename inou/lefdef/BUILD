@@ -9,7 +9,7 @@ cc_library(
         ["*.cpp"],
         exclude = [
             "*_test.cpp",
-            "lglefdef.cpp",
+            "lef2lg.cpp",
             "defrw.cpp",
             "lefrw.cpp",
         ],

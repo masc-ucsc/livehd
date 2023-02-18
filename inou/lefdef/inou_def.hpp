@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "inou.hpp"
+#include "pass.hpp"
 
 //************************************
 //***** Start Def Class Definition ***

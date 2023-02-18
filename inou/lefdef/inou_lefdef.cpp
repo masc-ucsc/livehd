@@ -2,7 +2,8 @@
 
 #include "absl/strings/str_split.h"
 
-#include "lglefdef.hpp"
+#include "def2lg.hpp"
+#include "lef2lg.hpp"
 #include "perf_tracing.hpp"
 #include "inou_lefdef.hpp"
 #include "inou_def.hpp"
