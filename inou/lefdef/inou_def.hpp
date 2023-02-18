@@ -1,6 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#ifndef GUARD_INOU_DEF
-#define GUARD_INOU_DEF
+
+#pragma once
 
 #include <string>
 
@@ -89,33 +89,3 @@ public:
 //***** End of Def Class Definition ***
 //*************************************
 
-// TODO: Options_pack has been deprecated this needs to be updated to the new
-// eprp format.
-class Inou_def_options_pack {  //: public Options_pack {
-public:
-  Inou_def_options_pack();
-
-  std::string lgdb_path;
-
-  std::string lef_file;
-  std::string def_file;
-};
-
-class Inou_def : public Inou {
-private:
-  Def_info dinfo;
-
-protected:
-  Inou_def_options_pack opack;
-
-public:
-  Inou_def();
-
-  Inou_def_options_pack get_opack() { return opack; }
-  void                  set_def_info(Def_info &);
-
-  std::vector<Lgraph *> generate();                                  // final;
-  void                  generate(std::vector<const Lgraph *> &out);  // final;
-};
-
-#endif

@@ -1,7 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "inou_liveparse.hpp"
 
 #include "absl/strings/str_split.h"
+
+#include "inou_liveparse.hpp"
 #include "chunkify_verilog.hpp"
 #include "str_tools.hpp"
 

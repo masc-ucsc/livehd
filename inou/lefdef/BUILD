@@ -8,6 +8,7 @@ cc_library(
     srcs = glob(
         ["*.cpp"],
         exclude = [
+            "*_test.cpp",
             "lglefdef.cpp",
             "defrw.cpp",
             "lefrw.cpp",

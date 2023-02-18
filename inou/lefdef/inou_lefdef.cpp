@@ -1,20 +1,55 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// See LICENSE for details
+
+#include "absl/strings/str_split.h"
+
+#include "lglefdef.hpp"
+#include "perf_tracing.hpp"
+#include "inou_lefdef.hpp"
 #include "inou_def.hpp"
 
-#include <string>
+static Pass_plugin sample("inou_lefdef", Inou_lefdef::setup);
 
-#include "lgraph.hpp"
+Inou_lefdef::Inou_lefdef(const Eprp_var &var) : Pass("inou.lefdef", var) {
+  lgdb= var.get("lgdb");
+}
 
-Inou_def_options_pack ::Inou_def_options_pack() {}
+void Inou_lefdef::setup() {
+  Eprp_method m1("inou.lefdef", "read lef/def to lgraph", &Inou_lefdef::to_lg);
 
-Inou_def::Inou_def() { fmt::print("DEBUG:: Inou_def class created\n"); };
+  register_inou("lefdef", m1);
+}
 
-void Inou_def::set_def_info(Def_info &dinfo_in) { dinfo = dinfo_in; };
+void Inou_lefdef::to_lg(Eprp_var &var) {
+  TRACE_EVENT("inou", "lefdef");
 
-std::vector<Lgraph *> Inou_def::generate() {
+  std::vector<Lgraph *> lgs;
+
+  auto files = var.get("files");
+
+  Inou_lefdef pp(var);
+  for (const auto &f : absl::StrSplit(files, ',')) {
+    if (str_tools::ends_with(f, ".def")) {
+      auto new_lgs = pp.parse_def(f);
+      lgs.insert(lgs.end(), new_lgs.begin(), new_lgs.end());
+    }else{
+      Pass::error("unsupported format file {}", f);
+      return;
+    }
+  }
+}
+
+std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
+  fmt::print("process {}\n", def_file);
+
   std::vector<Lgraph *> lgs;
 #if 1
-  I(false);
+  Def_info dinfo;
+  //def_parsing(dinfo, def_file);
+
+  for(auto &&io:dinfo.ios) {
+    fmt::print("io.name:{}\n", io.io_name);
+  }
+
 #else
   // clear since loading from def
   auto *g = Lgraph_create(opack.lgdb_path, dinfo.mod_name, opack.def_file);
@@ -120,9 +155,4 @@ std::vector<Lgraph *> Inou_def::generate() {
 
 #endif
   return lgs;
-}
-
-void Inou_def::generate(std::vector<const Lgraph *> &out) {
-  assert(0);  // just generate
-  out.clear();
 }
