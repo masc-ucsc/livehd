@@ -57,6 +57,17 @@ cc_test(
 )
 
 cc_test(
+    name = "graph_core_bench",
+    srcs = [
+        "tests/graph_core_bench.cpp",
+    ],
+    deps = [
+        ":core",
+        "@com_google_benchmark//:benchmark",
+    ],
+)
+
+cc_test(
     name = "pool_bench",
     srcs = [
         "tests/concurrentqueue.hpp",

@@ -382,7 +382,7 @@ public:
   const absl::InlinedVector<uint32_t, 40> get_setup_sinks(uint32_t node_id) const;    // the sinks set for node_id
 
   // unlike the const iterator, it should allow to delete edges/nodes while
-  uint32_t fast_next(uint32_t start);
+  [[nodiscard]] uint32_t fast_next(uint32_t start) const;
 
   Index_iter node_out_ids(uint32_t id);  // Iterate over the out edges of s (*it is uint32_t)
   Index_iter node_inp_ids(uint32_t id);  // Iterate over the inp edges of s

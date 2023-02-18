@@ -365,9 +365,9 @@ TEST_F(Setup_graph_core, fully_connected_del_node) {
 }
 
 // For benchmarking
-//#define BENCH_SIZE 1'000'000u
+#define BENCH_SIZE 1'000'000u
 // FOR testing (not benchmarking)
-#define BENCH_SIZE 100'000u
+//#define BENCH_SIZE 100'000u
 
 TEST_F(Setup_graph_core, bench_boost) {
   for (auto sz = 100u; sz < BENCH_SIZE; sz = sz * 10) {  // test1

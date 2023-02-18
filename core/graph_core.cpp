@@ -1078,3 +1078,19 @@ void Graph_core::dump(uint32_t id) const {
     over_id = over_ptr->get_overflow_id();
   }
 }
+
+uint32_t Graph_core::fast_next(uint32_t id) const {
+  I(!is_invalid(id));
+
+  while (true) {
+    ++id;
+
+    if (id>=table.size())
+      return 0;
+    if (table[id].is_node()) {
+      return id;
+    }
+  }
+
+  return 0;
+}
