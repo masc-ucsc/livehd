@@ -1,14 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fstream>
-#include <iostream>
+#include "lef2lg.hpp"
+
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <random>
 
 #include "inou_def.hpp"
 #include "perf_tracing.hpp"
-#include "lef2lg.hpp"
 
 int lef_macro_begin_cb(lefrCallbackType_e c, const char *macroName, lefiUserData ud) {
   Tech_library *tlib = (Tech_library *)ud;
@@ -216,4 +217,3 @@ void lef_parsing(Tech_library *tlib, const std::string &lef_file_name) {
                                           // return as a argument in your user-defined callback routine
   fclose(fin);
 }
-

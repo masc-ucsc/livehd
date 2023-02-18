@@ -1,18 +1,16 @@
 // See LICENSE for details
 
-#include "absl/strings/str_split.h"
+#include "inou_lefdef.hpp"
 
+#include "absl/strings/str_split.h"
 #include "def2lg.hpp"
+#include "inou_def.hpp"
 #include "lef2lg.hpp"
 #include "perf_tracing.hpp"
-#include "inou_lefdef.hpp"
-#include "inou_def.hpp"
 
 static Pass_plugin sample("inou_lefdef", Inou_lefdef::setup);
 
-Inou_lefdef::Inou_lefdef(const Eprp_var &var) : Pass("inou.lefdef", var) {
-  lgdb= var.get("lgdb");
-}
+Inou_lefdef::Inou_lefdef(const Eprp_var &var) : Pass("inou.lefdef", var) { lgdb = var.get("lgdb"); }
 
 void Inou_lefdef::setup() {
   Eprp_method m1("inou.lefdef", "read lef/def to lgraph", &Inou_lefdef::to_lg);
@@ -32,7 +30,7 @@ void Inou_lefdef::to_lg(Eprp_var &var) {
     if (str_tools::ends_with(f, ".def")) {
       auto new_lgs = pp.parse_def(f);
       lgs.insert(lgs.end(), new_lgs.begin(), new_lgs.end());
-    }else{
+    } else {
       Pass::error("unsupported format file {}", f);
       return;
     }
@@ -45,9 +43,9 @@ std::vector<Lgraph *> Inou_lefdef::parse_def(std::string_view def_file) {
   std::vector<Lgraph *> lgs;
 #if 1
   Def_info dinfo;
-  //def_parsing(dinfo, def_file);
+  // def_parsing(dinfo, def_file);
 
-  for(auto &&io:dinfo.ios) {
+  for (auto &&io : dinfo.ios) {
     fmt::print("io.name:{}\n", io.io_name);
   }
 

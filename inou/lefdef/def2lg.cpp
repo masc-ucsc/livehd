@@ -1,14 +1,15 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include <fstream>
-#include <iostream>
+#include "def2lg.hpp"
+
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <random>
 
 #include "inou_def.hpp"
 #include "perf_tracing.hpp"
-#include "def2lg.hpp"
 
 int def_net_cb(defrCallbackType_e type, defiNet *fnet, defiUserData ud) {
   (void)type;
@@ -161,4 +162,3 @@ void def_parsing(Def_info &dinfo, std::string_view def_file_name) {
   defrRead(fin, def_file.c_str(), (void *)&dinfo, 1);
   fclose(fin);
 }
-
