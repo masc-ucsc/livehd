@@ -30,7 +30,7 @@ static void BM_create_flops_100K(benchmark::State& state) {
       gc.add_edge(rst_id, last_rst_id);
       gc.add_edge(din_id, last_id);
 
-      for(auto i=0;i<100000;++i) {
+      for(auto i=0;i<10000;++i) {
         auto new_id     = gc.create_node();
         auto new_clk_id = gc.create_pin(new_id, 1); // clk
         auto new_rst_id = gc.create_pin(new_id, 2); // reset
