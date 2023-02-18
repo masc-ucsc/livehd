@@ -395,4 +395,6 @@ public:
   void del_edges(uint32_t id);
 
   void dump(uint32_t id) const;
+
+  size_t size_bytes() const { return sizeof(Master_entry)*table.size(); }
 };

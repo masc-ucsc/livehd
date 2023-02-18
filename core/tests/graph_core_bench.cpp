@@ -1,9 +1,12 @@
 
+#include "fmt/format.h"
 #include "benchmark/benchmark.h"
 
 #include "graph_core.hpp"
 
 static void BM_create_chain_1M(benchmark::State& state) {
+
+  size_t total_bytes = 0;
 
   for (auto _ : state) {
 
@@ -19,12 +22,17 @@ static void BM_create_chain_1M(benchmark::State& state) {
 
         last_id = new_id;
       }
+
+      total_bytes += gc.size_bytes();
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
+  state.counters["bytes"] = benchmark::Counter(total_bytes / (state.iterations() * state.range(0)), benchmark::Counter::kIsRate);
 }
 
 static void BM_create_chain_100K(benchmark::State& state) {
+
+  size_t total_bytes = 0;
 
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
@@ -39,11 +47,15 @@ static void BM_create_chain_100K(benchmark::State& state) {
 
         last_id = new_id;
       }
+
+      total_bytes += gc.size_bytes();
+      //fmt::print("size:{}\n", gc.size_bytes());
       benchmark::DoNotOptimize(last_id);
     }
   }
 
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
+  state.counters["bytes"] = benchmark::Counter(total_bytes / (state.iterations() * state.range(0)), benchmark::Counter::kIsRate);
 }
 
 static void BM_delete_chain_100K(benchmark::State& state) {
