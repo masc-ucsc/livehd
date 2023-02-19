@@ -10,7 +10,8 @@
 //
 // -At most 32 bit ID for node (graph would be partitioned if larger is needed)
 //
-// -Once an ID is created, even if node is deleted, it can not be reused
+// -Once an ID is created, even if node is deleted, it can not be reused. This
+// sometimes called a "tombstone deletion"
 //
 // -Delete node is frequent (code optimization)
 //
@@ -34,6 +35,10 @@
 
 // Some related (but different) graph representations:
 //
+// Pandey, Prashant, et al. "Terrace: A hierarchical graph container for skewed
+// dynamic graphs." Proceedings of the 2021 International Conference on
+// Management of Data. 2021.
+//
 // Winter, Martin, et al. "faimGraph: high performance management of
 // fully-dynamic graphs under tight memory constraints on the GPU." SC18:
 // International Conference for High Performance Computing, Networking, Storage
@@ -56,7 +61,7 @@
 #include "iassert.hpp"
 #include "graph_sizing.hpp"
 
-class Graph_core;
+    class Graph_core;
 
 class Index_iter {
 protected:

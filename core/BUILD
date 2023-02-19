@@ -66,6 +66,16 @@ cc_test(
         "@com_google_benchmark//:benchmark",
     ],
 )
+cc_test(
+    name = "small_set_bench",
+    srcs = [
+        "tests/small_set_bench.cpp",
+    ],
+    deps = [
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_benchmark//:benchmark",
+    ],
+)
 
 cc_test(
     name = "pool_bench",
