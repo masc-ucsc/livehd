@@ -99,7 +99,7 @@ private:
   bool probabilistic_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const ;
   void print_nodes_vec () const;
-  void print_flop_set () const ;
+  void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
