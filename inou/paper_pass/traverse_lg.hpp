@@ -73,6 +73,7 @@ private:
   }
   std::set<Node::Compact_flat> combo_loop_vec;
   typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;
+  //void debug_function(Lgraph *lg);
   void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
   void                                boundary_traversal(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
   void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);

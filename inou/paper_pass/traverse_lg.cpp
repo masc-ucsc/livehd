@@ -1046,12 +1046,15 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
     if(!is_orig_lg) {
     /*capture the colored nodes*/
       if(node.has_color()) {
-        //for(const auto dpin: node.out_connected_pins()){}
-        crit_node_map[get_dpin_cf(node)]=node.get_color();
-        crit_node_vec.emplace_back(get_dpin_cf(node));//keep on deleting as matching takes place 
+        for(const auto dpins: node.out_connected_pins()){
+          crit_node_map[dpins.get_compact_flat()]=node.get_color();
+          crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
+        }
       }
       if(node.is_type_loop_last()) {
-        flop_set.insert(get_dpin_cf(node));
+        for(const auto dpins: node.out_connected_pins()){
+          flop_set.insert(dpins.get_compact_flat());
+        }
       }
     }
 
@@ -1059,27 +1062,31 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
       continue;  // process flops only in this lg->fast
     }
 
-    const auto node_dpin_cf = get_dpin_cf(node);
-    bool       is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+    for (const auto dpins:node.out_connected_pins()) {
+      const auto node_dpin_cf = dpins.get_compact_flat();
+      bool       is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
-    const auto self_set = inp_map_of_sets.find(node_dpin_cf);
+      const auto self_set = inp_map_of_sets.find(node_dpin_cf);
 
-    for (auto e : node.out_edges()) {
-      if (e.sink.get_node().is_type_loop_first()) {
-        /*need not keep outputs of const/graphIO in in_map_of_sets*/
-        continue;
-      }
-      auto out_cf = get_dpin_cf(e.sink.get_node());
-      if (is_loop_stop) {
-        if(!is_orig_lg && !(get_matching_map_val(get_dpin_cf(e.driver.get_node()))).empty()) {
-          auto match_val = get_matching_map_val(get_dpin_cf(e.driver.get_node()));
-          inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
-        } else {
-          inp_map_of_sets[out_cf].insert(get_dpin_cf(e.driver.get_node()));
+      for (auto e : node.out_edges()) {
+        if (e.sink.get_node().is_type_loop_first()) {
+          /*need not keep outputs of const/graphIO in in_map_of_sets*/
+          continue;
         }
-      } else {
-        if (self_set != inp_map_of_sets.end()) {
-          inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
+        for (const auto out_cfs : e.sink.get_node().out_connected_pins()) {
+          auto out_cf = out_cfs.get_compact_flat();
+          if (is_loop_stop) {
+            if(!is_orig_lg && !(get_matching_map_val(dpins.get_compact_flat())).empty()) {
+              auto match_val = get_matching_map_val(dpins.get_compact_flat());
+              inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
+            } else {
+              inp_map_of_sets[out_cf].insert(dpins.get_compact_flat());
+            }
+          } else {
+            if (self_set != inp_map_of_sets.end()) {
+              inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
+            }
+          }
         }
       }
     }
@@ -1089,38 +1096,42 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
   for (const auto& node : lg->forward(true)) {
-    const auto node_dpin_cf = get_dpin_cf(node);
     if (node.is_type_const()) {
       continue;
     }
-    traverse_order.emplace_back(node_dpin_cf);//FIXME: since flops are already matched, do not keep them here for backward matching.
-    bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+    traverse_order.emplace_back(get_dpin_cf(node));//FIXME: since flops are already matched, do not keep them here for backward matching.
+    for (const auto node_dpins: node.out_connected_pins()) {
+      const auto node_dpin_cf = node_dpins.get_compact_flat();
+      bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
-    const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
-    auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
-    if (it != inp_map_of_sets.end()) {
-      self_set = &it->second;
-    }
-
-    for (auto e : node.out_edges()) {
-      if (e.sink.get_node().is_type_loop_first() /*need not keep outputs of const/graphIO in in_map_of_sets*//*|| e.sink.get_node().is_type_loop_last() is_type_loop_last processed in previous fast pass*/) {
-        continue;
+      const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
+      auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
+      if (it != inp_map_of_sets.end()) {
+        self_set = &it->second;
       }
-      auto out_cf = get_dpin_cf(e.sink.get_node());
-      if (is_loop_stop) {
-        if(!is_orig_lg && !(get_matching_map_val(get_dpin_cf(e.driver.get_node()))).empty()) {
-          auto match_val = get_matching_map_val(get_dpin_cf(e.driver.get_node()));
-          inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
-        } else {
-          inp_map_of_sets[out_cf].insert(get_dpin_cf(e.driver.get_node()));
+
+      for (auto e : node.out_edges()) {
+        if (e.sink.get_node().is_type_loop_first() /*need not keep outputs of const/graphIO in in_map_of_sets*//*|| e.sink.get_node().is_type_loop_last() is_type_loop_last processed in previous fast pass*/) {
+          continue;
         }
-      } else {
-        if (self_set) {
-          inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
+        for (const auto out_cfs: e.sink.get_node().out_connected_pins()){
+          auto out_cf = out_cfs.get_compact_flat();
+          if (is_loop_stop) {
+            if(!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
+              auto match_val = get_matching_map_val(node_dpin_cf);
+              inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
+            } else {
+              inp_map_of_sets[out_cf].insert(node_dpin_cf);
+            }
+          } else {
+            if (self_set) {
+              inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
+            }
+          }
         }
       }
-    }
 
+    }
   }
 }
 
@@ -1141,7 +1152,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
       if (in_dpin.get_node().is_type_loop_first()/*need not keep outputs of const/graphIO in out_map_of_sets*//*|| in_dpin.get_node().is_type_loop_last() is_type_loop_last - specifically flops -  processed in hackish matching*/) {
         continue;
       }
-      auto inp_cf = get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
+      auto inp_cf = in_dpin.get_compact_flat() ; //get_dpin_cf(in_dpin.get_node());  // cannot do "in_dpin.get_compact_flat()" directly. pid-1 gets registered.
       if (is_loop_stop) {
         if(!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
           auto match_val = get_matching_map_val(node_dpin_cf);
@@ -1206,12 +1217,15 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     }
   }
     for (auto syn_node: synth_lg->fast(true) ) {//FIXME: for DBG only; remove!
-    auto syn_node_dpin = get_dpin(syn_node);
-    auto syn_node_dpin_name = syn_node_dpin.has_name() ? syn_node_dpin.get_name() : "" ;
+    
+      for(const auto syn_node_dpin: syn_node.out_connected_pins()) {
+      auto syn_node_dpin_name = syn_node_dpin.has_name() ? syn_node_dpin.get_name() : "" ;
 
-    if(syn_node_dpin_name!="") {
-      fmt::print("synth_node_dpin_name: {} for lg: {}\n", syn_node_dpin_name, (syn_node.get_class_lgraph())->get_name());
-  }}
+      if(syn_node_dpin_name!="") {
+        fmt::print("synth_node_dpin_name: {} for lg: {}\n", syn_node_dpin_name, (syn_node.get_class_lgraph())->get_name());
+      }
+     }
+    }
 
 }
 
