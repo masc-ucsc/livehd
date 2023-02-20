@@ -43,8 +43,6 @@ private:
   setMap_pairKey                                                           cellIOMap_synth;
   bool                   probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
                                              setMap_pairKey &orig_map);
-  Node_pin::Compact_flat get_dpin_cf(const Node &node) const;
-  Node_pin get_dpin(const Node &node) const;
 
   template <typename T>
   std::set<T> getUnion(const std::set<T> &a, const std::set<T> &b) {

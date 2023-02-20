@@ -1099,10 +1099,9 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
     if (node.is_type_const()) {
       continue;
     }
-    //traverse_order.emplace_back(get_dpin_cf(node));//FIXME: since flops are already matched, do not keep them here for backward matching.
     for (const auto node_dpins: node.out_connected_pins()) {
       const auto node_dpin_cf = node_dpins.get_compact_flat();
-      traverse_order.emplace_back(node_dpin_cf);
+      traverse_order.emplace_back(node_dpin_cf);//FIXME: since flops are already matched, do not keep them here for backward matching.
       bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
@@ -1473,17 +1472,25 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
       dpin_vec.emplace_back(in_pin.get_compact_flat());
       continue;
     }
-    if(!n.is_type_const() && main_node_dpin!=get_dpin_cf(n)) {
-      dpin_vec.emplace_back( get_dpin_cf(n) );
+    if(!n.is_type_const() && main_node_dpin!=in_pin.get_compact_flat()) { //get_dpin_cf(n)) {
+      dpin_vec.emplace_back( in_pin.get_compact_flat() );
     }
   }
-  for(const auto &out_pin: node.out_sinks()) {
-    if (out_pin.get_node().is_type_io()) {
-      dpin_vec.emplace_back(out_pin.change_to_driver_from_graph_out_sink().get_compact_flat());
+  for(const auto &out_spin: node.out_sinks()) {
+    if (out_spin.get_node().is_type_io()) {
+      dpin_vec.emplace_back(out_spin.change_to_driver_from_graph_out_sink().get_compact_flat());
       continue;
     }
-    if(main_node_dpin!=get_dpin_cf(out_pin.get_node())) {
-      dpin_vec.emplace_back( get_dpin_cf(out_pin.get_node()) );
+    bool broken = false;
+    for (const auto &out_dpin:out_spin.get_node().out_connected_pins()) {
+      if (main_node_dpin==out_dpin.get_compact_flat()) {
+        broken=true;
+        break;//shouldn't match with any dpin of that node
+      }
+    }
+    if(!broken) {
+      for (const auto &out_dpin:out_spin.get_node().out_connected_pins()) 
+        dpin_vec.emplace_back(out_dpin.get_compact_flat());
     }
   }
 
@@ -1832,21 +1839,6 @@ std::vector<std::string> Traverse_lg::get_map_val(
   return ret_vec;
 }
 
-Node_pin::Compact_flat Traverse_lg::get_dpin_cf(const Node& node) const {
-  // only subs and mem can have o/p with pid different than 0. all the rest have o/p == 0
-  if (node.is_type_multi_driver()) {
-    return node.get_driver_pin_raw(0).get_compact_flat();
-  }
-  return node.get_driver_pin().get_compact_flat();
-}
-
-Node_pin Traverse_lg::get_dpin(const Node& node) const {
-  // only subs and mem can have o/p with pid different than 0. all the rest have o/p == 0
-  if (node.is_type_multi_driver()) {
-    return node.get_driver_pin_raw(0);
-  }
-  return node.get_driver_pin();
-}
 
 // void Traverse_lg::get_input_node(const Node_pin &node_pin, absl::btree_set<std::string>& in_set) {
 // Node_pin/*FIXME?: ::Compact_flat*/ Traverse_lg::get_input_node(const Node_pin &node_pin, std::set<std::string>& in_set,
