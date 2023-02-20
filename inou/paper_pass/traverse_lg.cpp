@@ -1092,6 +1092,18 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
     }
 
   }
+  if(!is_orig_lg) {
+    /*crit_node_vec is finally formed at this point and some default matches have already being recorded
+     * so remove those matched points from crit_node_vec*/
+    for (const auto& [node_pin_cf, set_pins_cf] : net_to_orig_pin_match_map) {
+      remove_from_crit_node_vec(node_pin_cf);
+    }
+    /*if nothing left in crit_node_vec then return with result*/
+    if(crit_node_vec.empty()) {
+      report_critical_matches_with_color();
+      return;
+    } 
+  }
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
