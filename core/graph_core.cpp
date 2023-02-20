@@ -10,57 +10,9 @@
 #include "iassert.hpp"
 #include "likely.hpp"
 
-void Graph_core::Master_entry::readjust_edges(uint32_t self_id, absl::InlinedVector<uint32_t, 40> &pending_inp,
-                                              absl::InlinedVector<uint32_t, 40> &pending_out) {
-  for (auto i = 0u; i < Num_sedges; ++i) {
-    if (sedge[i] == 0) {
-      continue;
-    }
+bool Graph_core::Master_entry::add_sedge(int16_t rel_id) {
+HERE: FIrst insert in sedge, then the other places
 
-    if (inp_mask & (1 << i)) {
-      pending_inp.emplace_back(self_id + sedge[i]);
-    } else {
-      pending_out.emplace_back(self_id + sedge[i]);
-    }
-    sedge[i] = 0;
-  }
-  if (is_node() && sedge2_or_pid) {
-    if (inp_mask & (1 << Num_sedges)) {
-      pending_inp.emplace_back(self_id + sedge2_or_pid);
-    } else {
-      pending_out.emplace_back(self_id + sedge2_or_pid);
-    }
-    sedge2_or_pid = 0;
-  }
-
-  if (is_node() && ledge0_or_prev) {
-    uint32_t tmp   = ledge0_or_prev;
-    ledge0_or_prev = 0;
-    if (inp_mask & (1 << (Num_sedges + 1))) {
-      pending_inp.emplace_back(tmp);
-    } else {
-      pending_out.emplace_back(tmp);
-    }
-  }
-  if (!overflow_link && ledge1_or_overflow) {
-    uint32_t tmp       = ledge1_or_overflow;
-    ledge1_or_overflow = 0;
-    if (inp_mask & (1 << (Num_sedges + 2))) {
-      pending_inp.emplace_back(tmp);
-    } else {
-      pending_out.emplace_back(tmp);
-    }
-  }
-}
-
-// Maybe use #define haszero(v) (((v) - 0x01010101UL) & ~(v) & 0x80808080UL)
-// to see that there is no space?
-// Moving: sedge after sedge2_or_pid could allow a faster 8 byte op check
-//
-// TODO: MOST of the time, there should be space (when out of space. It gets
-// empty, and moves to overflow)
-
-bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
 #if 1
   if (n_edges < Num_sedges) {
     I(sedge[n_edges]==0);
@@ -94,7 +46,7 @@ bool Graph_core::Master_entry::insert_sedge(int16_t rel_id, bool out) {
   return false;
 }
 
-bool Graph_core::Master_entry::insert_ledge(uint32_t id, bool out) {
+bool Graph_core::Master_entry::add_ledge(uint32_t id, bool out) {
   if (is_node() && ledge0_or_prev == 0) {
     ledge0_or_prev = id;
     ++n_edges;
@@ -179,422 +131,6 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
   return false;
 }
 
-void Graph_core::Overflow_entry::extract_all(absl::InlinedVector<uint32_t, 40> &expanded) {
-  I(ledge_min && ledge1 && ledge_max);
-
-  auto v = ledge_min;
-  expanded.emplace_back(v);
-
-  #pragma unroll
-  for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i] == 0) {
-      continue;
-    }
-
-    auto v2 = ledge_min + sedge0[i];
-    expanded.emplace_back(v2);
-  }
-
-  v = ledge1;
-  expanded.emplace_back(v);
-
-  #pragma unroll
-  for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i] == 0) {
-      continue;
-    }
-
-    auto v2 = ledge1 + sedge1[i];
-    expanded.emplace_back(v2);
-  }
-
-  v = ledge_max;
-  expanded.emplace_back(v);
-
-  std::sort(expanded.begin(), expanded.end(), std::greater<uint32_t>());  // sort reverse order
-
-  auto tmp_inputs           = inputs;
-  auto tmp_overflow_next_id = overflow_next_id;
-  clear();
-  inputs           = tmp_inputs;
-  overflow_next_id = tmp_overflow_next_id;
-}
-
-void Graph_core::Overflow_entry::readjust_edges(absl::InlinedVector<uint32_t, 40> &pending_inp,
-                                                absl::InlinedVector<uint32_t, 40> &pending_out) {
-  I(n_edges < max_edges);
-
-  absl::InlinedVector<uint32_t, 40> *pending = nullptr;
-
-  if (n_edges == 0) {
-    inputs = !pending_inp.empty();
-  }
-  if (inputs) {
-    pending = &pending_inp;
-  } else {
-    pending = &pending_out;
-  }
-  if (pending->empty()) {
-    I(n_edges);  // if n_edges==0, it should insert, and either inp/out should have edges
-    return;
-  }
-
-  if (n_edges || pending->size() <= 3) {
-    // First populate the 3 ledges
-    if (ledge_min == 0) {
-      ledge_min = pending->back();
-      I(ledge1 == 0);
-      I(ledge_max == 0);
-      pending->pop_back();
-      ++n_edges;
-      if (pending->empty()) {
-        return;
-      }
-    }
-    if (ledge_max == 0) {
-      ledge_max = pending->back();
-      pending->pop_back();
-      ++n_edges;
-      I(ledge1 == 0);
-      if (ledge_max < ledge_min) {
-        auto tmp  = ledge_min;
-        ledge_min = ledge_max;
-        ledge_max = tmp;
-      }
-      if (pending->empty()) {
-        return;
-      }
-    }
-    if (ledge1 == 0) {
-      ledge1 = pending->back();
-      if (ledge_max < ledge1) {
-        auto tmp  = ledge1;
-        ledge1    = ledge_max;
-        ledge_max = tmp;
-      } else if (ledge_min > ledge1) {
-        auto tmp  = ledge1;
-        ledge1    = ledge_min;
-        ledge_min = tmp;
-      }
-      pending->pop_back();
-      ++n_edges;
-      if (pending->empty()) {
-        return;
-      }
-    }
-
-    // TODO: Add the most common cases to avoid the large/slow expand case
-    extract_all(*pending);
-  }
-
-  I(ledge_min == 0);
-  I(ledge1 == 0);
-  I(ledge_max == 0);
-
-  auto     pos     = 0u;
-  uint32_t last_id = 0;
-
-  {
-    // First is easy to insert, just ledge_min
-    ledge_min = pending->back();
-    last_id   = ledge_min;
-    pending->pop_back();
-    ++n_edges;
-    ++pos;
-  }
-
-  while (pending->size() > 2) {
-    int32_t rel_id    = pending->back() - last_id;
-    bool    short_rel = INT16_MIN < rel_id && rel_id < INT16_MAX;
-    if (pos < (1 + sedge0_size)) {
-      I(last_id == ledge_min);
-      if (short_rel) {
-        sedge0[pos - 1] = rel_id;
-        ++pos;
-      } else {
-        ledge1  = pending->back();
-        last_id = ledge1;
-        pos     = 1 + 1 + sedge0_size;
-      }
-      // KEEP last_id per sedge group last_id = pending->back();
-      pending->pop_back();
-      ++n_edges;
-      continue;
-    }
-
-    if (pos == (1 + sedge0_size)) {
-      I(ledge1 == 0);
-      ledge1  = pending->back();
-      last_id = ledge1;
-
-      ++pos;
-
-      pending->pop_back();
-      ++n_edges;
-      continue;
-    }
-
-    if (pos < (1 + sedge0_size + 1 + sedge1_size)) {
-      I(last_id == ledge1);
-      if (!short_rel) {
-        ledge_max = pending->back();
-        pending->pop_back();
-        ++n_edges;
-        return;
-      }
-
-      sedge1[pos - (1 + sedge0_size + 1)] = rel_id;
-      ++pos;
-      // KEEP last_id per sedge group last_id = pending->back();
-      pending->pop_back();
-      ++n_edges;
-      continue;
-    }
-
-    if (pos == (1 + sedge0_size + 1 + sedge1_size)) {
-      ledge_max = pending->back();
-      pending->pop_back();
-      ++n_edges;
-      return;
-    }
-  }
-
-  I(ledge_max == 0);
-  if (ledge1 == 0) {
-    I(pending->size() == 2);
-    ledge1    = (*pending)[1];
-    ledge_max = (*pending)[0];
-    pending->clear();
-    n_edges += 2;
-  } else {
-    ledge_max = pending->back();
-    pending->pop_back();
-    ++n_edges;
-  }
-}
-
-bool Graph_core::Overflow_entry::delete_edge_rebalance_ledges(uint32_t other_id) {
-  if (n_edges <= 3) {
-    if (ledge_min == other_id) {
-      if (ledge1) {
-        ledge_min = ledge1;
-        ledge1    = 0;
-      } else {
-        ledge_min = ledge_max;
-        ledge_max = 0;
-      }
-      --n_edges;
-      return true;
-    }
-    if (ledge1 == other_id) {
-      I(n_edges == 3);
-      ledge1 = 0;
-      --n_edges;
-      return true;
-    }
-    if (ledge_max == other_id) {
-      ledge_max = ledge1;
-      ledge1    = 0;
-      --n_edges;
-      return true;
-    }
-    return false;
-  }
-
-  auto deleted_id = 0;
-  if (ledge_min == other_id) {
-    deleted_id = ledge_min;
-    ledge_min  = 0;
-  } else if (ledge1 == other_id) {
-    deleted_id = ledge1;
-    ledge1     = 0;
-  } else if (ledge_max == other_id) {
-    deleted_id = ledge_max;
-    ledge_max  = 0;
-  } else {
-    return false;
-  }
-  --n_edges;
-
-  if (ledge_min == 0) {  // Move something to ledge_min
-    I(ledge1 && ledge_max);
-
-    // Look for smallest delta in sedge0
-    int     pos      = -1;
-    int16_t smallest = INT16_MAX;
-    #pragma unroll
-    for (auto i = 0u; i < sedge0_size; ++i) {
-      if (sedge0[i] && sedge0[i] < smallest) {
-        smallest = sedge0[i];
-        pos      = i;
-      }
-    }
-    if (pos >= 0) {
-      ledge_min   = deleted_id + smallest;
-      sedge0[pos] = 0;
-
-      #pragma unroll
-      for (auto i = 0u; i < sedge0_size; ++i) {  // adjust deltas
-        if (sedge0[i] == 0) {
-          continue;
-        }
-
-        int32_t s = sedge0[i] - smallest;
-        if (INT16_MIN > s || s > INT16_MAX) {
-          I(false);  // FIXME: complex rebalance needed
-        }
-        sedge0[i] = static_cast<int16_t>(s);
-      }
-      return true;
-    }
-
-    deleted_id = ledge1;
-    ledge_min  = ledge1;
-    ledge1     = 0;
-  }
-
-  if (ledge1 == 0) {  // Move something to ledge
-    I(ledge_min && ledge_max);
-
-    // Look for smallest delta in sedge1
-    {
-      int     pos      = -1;
-      int16_t smallest = INT16_MAX;
-      #pragma unroll
-      for (auto i = 0u; i < sedge1_size; ++i) {
-        if (sedge1[i] && sedge1[i] < smallest) {
-          smallest = sedge1[i];
-          pos      = i;
-        }
-      }
-      if (pos >= 0) {
-        ledge1      = deleted_id + smallest;
-        sedge1[pos] = 0;
-
-        #pragma unroll
-        for (auto i = 0u; i < sedge1_size; ++i) {  // adjust deltas
-          if (sedge1[i] == 0) {
-            continue;
-          }
-
-          int32_t s = sedge1[i] - smallest;
-          if (INT16_MIN > s || s > INT16_MAX) {
-            I(false);  // FIXME: complex rebalance needed
-          }
-          sedge1[i] = static_cast<int16_t>(s);
-        }
-        return true;
-      }
-    }
-
-    // This means that there was nothing in sedge1. If so, there must be
-    // something in sedge0 to replace ledge1
-
-    // Look for largest delta in sedge0
-    {
-      int     pos     = -1;
-      int16_t largest = INT16_MIN;
-      #pragma unroll
-      for (auto i = 0u; i < sedge0_size; ++i) {
-        if (sedge0[i] && sedge0[i] > largest) {
-          largest = sedge0[i];
-          pos     = i;
-        }
-      }
-      I(pos >= 0);
-      ledge1      = ledge_min + largest;
-      sedge0[pos] = 0;
-    }
-    return true;
-  }
-
-  I(ledge_max == 0);  // Move something to ledge_max
-  I(ledge_min && ledge1);
-
-  // Look for largest delta in sedge1
-  int     pos     = -1;
-  int16_t largest = INT16_MIN;
-  #pragma unroll
-  for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i] && sedge1[i] > largest) {
-      largest = sedge1[i];
-      pos     = i;
-    }
-  }
-
-  if (pos >= 0) {
-    sedge1[pos] = 0;
-    ledge_max   = ledge1 + largest;
-    return true;
-  }
-
-  ledge_max = ledge1;
-
-  // Look for largest in sedge0 and move to ledge1
-  pos     = -1;
-  largest = INT16_MIN;
-  #pragma unroll
-  for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i] && sedge0[i] > largest) {
-      largest = sedge0[i];
-      pos     = i;
-    }
-  }
-  I(pos >= 0);
-  sedge0[pos] = 0;
-  ledge1      = ledge_min + largest;
-  return true;
-}
-
-bool Graph_core::Overflow_entry::delete_edge(uint32_t other_id, bool out) {
-  if (likely(inputs == out || other_id < ledge_min || (other_id > ledge_max && ledge_max))) {
-    return false;
-  }
-
-  bool done = delete_edge_rebalance_ledges(other_id);
-  if (done) {
-    return true;
-  }
-
-  {
-    int32_t rel_index = other_id - ledge_min;
-    bool    short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
-
-    if (short_rel) {
-      #pragma unroll
-      for (auto i = 0u; i < sedge0_size; ++i) {
-        if (sedge0[i] == static_cast<int16_t>(rel_index)) {
-          sedge0[i] = 0;
-          --n_edges;
-          ++i;
-          return true;
-        }
-      }
-    }
-  }
-  I(ledge1 != other_id);
-
-  {
-    int32_t rel_index = other_id - ledge1;
-    bool    short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
-
-    if (short_rel) {
-      #pragma unroll
-      for (auto i = 0u; i < sedge1_size; ++i) {
-        if (sedge1[i] == static_cast<int16_t>(rel_index)) {
-          sedge1[i] = 0;
-          --n_edges;
-          ++i;
-          return true;
-        }
-      }
-    }
-  }
-
-  I(ledge_max != other_id);
-
-  return false;
-}
 
 uint32_t Graph_core::allocate_overflow() {
   uint32_t oid;
@@ -620,13 +156,13 @@ void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
   bool          short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
 
   if (short_rel) {
-    bool ok = ent.insert_sedge(static_cast<int16_t>(rel_index), out);
+    bool ok = ent.add_sedge(static_cast<int16_t>(rel_index));
     if (ok) {
       return;
     }
   }
 
-  bool ok = ent.insert_ledge(other_id, out);
+  bool ok = ent.add_ledge(other_id, out);
   if (ok) {
     return;
   }
@@ -773,6 +309,9 @@ void Graph_core::del_pin(uint32_t self_id) {
     free_overflow_id = over_ptr_id;
   }
 
+  if (table[self_id].set_link)
+    delete table[self_id].set;
+
   table[self_id].clear();
 }
 
@@ -780,10 +319,10 @@ void Graph_core::del_node(uint32_t self_id) {
   if (table[self_id].is_pin()) {
     self_id = table[self_id].get_prev_ptr(); // point to master
   }
-  auto next_pin_id = table[self_id].next_ptr;
+  auto next_pin_id = table[self_id].next_pin_ptr;
   del_pin(self_id);
   while (next_pin_id) {
-    auto id = table[next_pin_id].next_ptr;
+    auto id = table[next_pin_id].next_pin_ptr;
     del_pin(next_pin_id);
     next_pin_id = id;
   }
@@ -885,23 +424,23 @@ uint32_t Graph_core::create_pin(const uint32_t node_id, const Port_ID pid) {
   auto &root_ent = table[node_id];
   I(root_ent.is_node());
 
-  if (root_ent.next_ptr == 0) {
-    root_ent.next_ptr = id;  // easy case, first pin
+  if (root_ent.next_pin_ptr == 0) {
+    root_ent.next_pin_ptr = id;  // easy case, first pin
     return id;
   }
 
   // Insert pin in pid order (easier search)
   auto prev_ptr = node_id;
-  auto ptr      = root_ent.next_ptr;
+  auto ptr      = root_ent.next_pin_ptr;
   while (ptr && table[ptr].get_pid() > pid) {
     prev_ptr = ptr;
-    ptr      = table[ptr].next_ptr;
+    ptr      = table[ptr].next_pin_ptr;
   }
   I(prev_ptr);
 
-  auto insert_ptr          = table[prev_ptr].next_ptr;
-  table[prev_ptr].next_ptr = id;
-  table[id].next_ptr       = insert_ptr;
+  auto insert_ptr          = table[prev_ptr].next_pin_ptr;
+  table[prev_ptr].next_pin_ptr = id;
+  table[id].next_pin_ptr       = insert_ptr;
 
   return id;
 }
@@ -935,7 +474,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
   const auto [n_i, n_o] = get_num_local_edges();
 
   if (node_vertex) {
-    fmt::print("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n", self_id, bits, n_i, n_o, next_ptr, get_overflow_id());
+    fmt::print("node:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{}\n", self_id, bits, n_i, n_o, next_pin_ptr, get_overflow_id());
   } else {
     fmt::print("pin:{} pid:{} bits:{} n_inputs:{} n_outputs:{} next:{} over:{} node:{}\n",
                self_id,
@@ -943,7 +482,7 @@ void Graph_core::Master_entry::dump(uint32_t self_id) const {
                bits,
                n_i,
                n_o,
-               next_ptr,
+               next_pin_ptr,
                get_overflow_id(),
                ledge0_or_prev);
   }
@@ -1002,66 +541,75 @@ void Graph_core::Master_entry::delete_node(uint32_t self_id, std::vector<Master_
   }
 }
 
-void Graph_core::Overflow_entry::delete_node(uint32_t self_id, std::vector<Master_entry> &mtable) {
-  if (inputs) {
-    return;
-  }
+bool Graph_core::Overflow_entry::del_sedge(uint16_t id) {
+  auto it = std::lower_bound(sedges.begin(), sedges.begin()+n_sedges, id);
+  if (*it != id)
+    return false;
 
-  auto v = ledge_min;
-  mtable[v].delete_edge(v, self_id, false);
+  --n_sedges;
 
-  #pragma unroll
-  for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i] == 0) {
-      continue;
-    }
+  int positions = sedges.end()-it-1;
+  if (positions>0) // no memmove for last element erase
+    memmove(it, it+1, sizeof(uint16_t)*positions);
 
-    auto v2 = ledge_min + sedge0[i];
-    mtable[v2].delete_edge(v2, self_id, false);
-  }
+  return true;
+}
 
-  v = ledge1;
-  mtable[v].delete_edge(v, self_id, false);
+bool Graph_core::Overflow_entry::del_ledge(uint32_t id) {
+  auto it = std::lower_bound(ledges.begin(), ledges.begin()+n_ledges, id);
+  if (*it != id)
+    return false;
 
-  #pragma unroll
-  for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i] == 0) {
-      continue;
-    }
+  --n_ledges;
 
-    auto v2 = ledge1 + sedge1[i];
-    mtable[v2].delete_edge(v2, self_id, false);
-  }
+  int positions = ledges.end()-it-1;
+  if (positions>0) // no memmove for last element erase
+    memmove(it, it+1, sizeof(uint32_t)*positions);
 
-  v = ledge_max;
-  mtable[v].delete_edge(v, self_id, false);
+  return true;
+}
+
+bool Graph_core::Overflow_entry::add_sedge(uint16_t id) {
+
+  auto it = std::lower_bound(sedges.begin(), sedges.begin()+n_sedges, id);
+  if (*it == id)
+    return true;
+
+  if (n_sedges >= max_sedges)
+    return false;
+
+  users.insert(it, id);
+  ++n_sedges;
+
+  return true;
+}
+
+bool Graph_core::Overflow_entry::add_ledge(uint32_t id) {
+
+  auto it = std::lower_bound(ledges.begin(), ledges.begin()+n_ledges, id);
+  if (*it == id)
+    return true;
+
+  if (n_ledges >= max_ledges)
+    return false;
+
+  users.insert(it, id);
+  ++n_ledges;
+
+  return true;
 }
 
 void Graph_core::Overflow_entry::dump(uint32_t self_id) const {
-  fmt::print("  over:{} {} n_edges:{} next_id:{}\n", self_id, inputs ? "inp" : "out", n_edges, overflow_next_id);
+  fmt::print("  over:{} n_ledges:{} n_sedges:{}\n", self_id, n_ledges, n_sedges);
 
-  fmt::print("    edges:");
-  if (ledge_min) {
-    fmt::print(" min:{}", ledge_min);
+  fmt::print("    sedges:");
+  for (auto i = 0u; i < n_sedges; ++i) {
+    fmt::print(" {:>8}", self_id + sedges[i]);
   }
-
-  #pragma unroll
-  for (auto i = 0u; i < sedge0_size; ++i) {
-    if (sedge0[i]) {
-      fmt::print(" f{}", ledge_min + sedge0[i]);
-    }
-  }
-  if (ledge1) {
-    fmt::print(" ledge1:{}", ledge1);
-  }
-  #pragma unroll
-  for (auto i = 0u; i < sedge1_size; ++i) {
-    if (sedge1[i]) {
-      fmt::print(" s{}", ledge1 + sedge1[i]);
-    }
-  }
-  if (ledge_max) {
-    fmt::print(" max:{}", ledge_max);
+  fmt::print("\n");
+  fmt::print("    ledges:");
+  for (auto i = 0u; i < n_ledges; ++i) {
+    fmt::print(" {:>8}", ledges[i]);
   }
   fmt::print("\n");
 }
@@ -1072,10 +620,8 @@ void Graph_core::dump(uint32_t id) const {
   table[id].dump(id);
 
   auto over_id = table[id].get_overflow_id();
-  while (over_id) {
-    auto *over_ptr = ref_overflow(over_id);
+  if (over_id) {
     over_ptr->dump(over_id);
-    over_id = over_ptr->get_overflow_id();
   }
 }
 

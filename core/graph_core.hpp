@@ -1,6 +1,8 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "hash_set8.hpp"
+
 // This is a graph representation optimized based on structure and use in
 // LiveHD.
 //
@@ -111,89 +113,66 @@ protected:
 
   class __attribute__((packed)) Overflow_entry {
   protected:
-    void extract_all(absl::InlinedVector<uint32_t, 40> &expanded);
-    bool delete_edge_rebalance_ledges(uint32_t other_id);
 
   public:
     Overflow_entry() { clear(); }
     void clear() {
-      bzero(this, sizeof(Overflow_entry));  // set zero everything
+      n_ledges = 0;
+      n_sedges = 0;
       overflow_vertex = 1;
     }
 
-    void delete_node(uint32_t self_id, std::vector<Master_entry> &table);
+    bool del_sedge(uint16_t other_id);
+    bool add_sedge(uint16_t other_id);
+    bool del_ledge(uint32_t other_id);
+    bool add_ledge(uint32_t other_id);
 
-    void readjust_edges(absl::InlinedVector<uint32_t, 40> &pending_inp,
-                        absl::InlinedVector<uint32_t, 40> &pending_out);
-
-    bool delete_edge(uint32_t other_id, bool out);
-
-    static inline constexpr size_t sedge0_size = 11;
-    static inline constexpr size_t sedge1_size = 12;
-    static inline constexpr size_t max_edges   = sedge0_size + sedge1_size + 3;
+    static inline constexpr size_t max_ledges   = 6;
+    static inline constexpr size_t max_sedges   = 19;
 
     // BEGIN cache line
-    uint8_t overflow_vertex : 1;  // Overflow or not overflow node
-    uint8_t node_vertex : 1;      // node or just pin
-    uint8_t inputs : 1;
-    uint8_t sedge0_full : 1;  // not used now
-    uint8_t sedge1_full : 1;  // not used now
-    uint8_t padding : 3;
+    uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
+    uint8_t  n_ledges:7;           // number of ledges (6 max)
+    uint8_t  n_sedges;             // number of sedges (19 max)
 
-    uint8_t n_edges;  // 0 to 18 (50 in compress)
+    std::array<uint16_t, max_sedges> sedges;
+    std::array<uint32_t, max_ledges> ledges;
 
-    int16_t sedge0[sedge0_size];  // between ledge_min..ledge1
-
-    // 4 byte aligned
-    uint32_t overflow_next_id;
-    uint32_t ledge_min;
-
-    // 2nd half cache line (bytes 32:63)
-    uint32_t ledge1;
-    uint32_t ledge_max;
-
-    int16_t sedge1[sedge1_size];  // between ledge1..ledge_max
-
-    uint32_t get_overflow_id() const { return overflow_next_id; }
-
-    bool has_local_edges() const { return n_edges > 0; }
-
-    std::pair<size_t, size_t> get_num_local_edges() const {
-      if (inputs) {
-        return std::pair(n_edges, 0);
-      }
-      return std::pair(0, n_edges);
-    }
-
-    bool is_full() const { return n_edges == max_edges; }
+    bool has_local_edges() const { return (n_ledges | n_sedges)!=0; }
+    size_t get_num_local_edges() const { return n_ledges+n_sedges; }
 
     void dump(uint32_t self_id) const;
   };
 
   class __attribute__((packed)) Master_entry {  // AKA pin or node entry
   public:
-    static inline constexpr size_t Num_sedges = 6;
+    static inline constexpr size_t Num_sedges = 3;
 
-    // CTRL: Byte 0:1
+    // CTRL: Byte 0
     uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
     uint8_t  node_vertex : 1;      // node or just pin
-    uint16_t inp_mask : 9;         // are the edges input or output edges (NOTE: only 6 needed)
-    uint8_t  n_edges : 4;          // input or output edges
+    uint8_t  input : 1;            // are the edges input or output edges
+    uint8_t  n_sedges : 3;         // number of input or output edges (excluding ledge0_or_prev ledge1_or_overflow bits_or_sedge0)
+    uint8_t  set_link: 1;          // set link, overflow is not set
     uint8_t  overflow_link : 1;    // When set, ledge_min points to overflow
-    // CTRL: Byte 2
-    uint8_t lpid_or_type;          // type in node, pid bits in pin
-    // CTRL: Byte 3:5
-    uint32_t bits : 24;
-    // SEDGE: Byte 6:7 (special case)
-    int16_t sedge2_or_pid;         // edge_store in node, 16 pid bits in pin
-    // LEDGE: Byte  8:11
-    uint32_t ledge0_or_prev;       // prev pointer (only for pin)
+    // CTRL: Byte 1:3
+    uint32_t bits_or_sedge0 : 23;  // bits or input sedge (bits only for output pin)
+    uint16_t always_pos:1;         // always positive or unsigned
+    // CTRL: Byte 4:5
+    uint16_t pid_or_type;         // type in node, pid bits in pin
+    // SEDGE: 6:11
+    int16_t  sedge[Num_sedges];
     // LEDGE: Byte 12:15
-    uint32_t ledge1_or_overflow;
+    uint32_t ledge0_or_prev;       // prev pointer (only for pin)
     // LEDGE: Byte 16:19
-    uint32_t next_ptr;             // next pointer (pin or node)
-    // SEDGE: Byte 20:31
-    int16_t sedge[Num_sedges];
+    uint32_t ledge1_or_overflow;
+    // LEDGE: Byte 20:23
+    uint32_t next_pin_ptr;         // next pointer (pin)
+    // void *: Byte 24:31
+    union {
+      emhash8::HashSet<uint32_t> *set;
+      uint32_t ledge[2];
+    };
 
     Master_entry() { clear(); }
 
@@ -201,11 +180,9 @@ protected:
       bzero(this, sizeof(Master_entry));  // set zero everything
     }
 
-    void readjust_edges(uint32_t self_id, absl::InlinedVector<uint32_t, 40> &pending_inp,
-                        absl::InlinedVector<uint32_t, 40> &pending_out);
-    bool insert_sedge(int16_t rel_id, bool out);
-    bool insert_ledge(uint32_t id, bool out);
-    bool delete_edge(uint32_t self_id, uint32_t other_id, bool out);
+    bool add_sedge(int16_t rel_id);
+    bool add_ledge(uint32_t id);
+    bool del_edge(uint32_t self_id, uint32_t other_id);
 
     void delete_node(uint32_t self_id, std::vector<Master_entry> &table);
 
@@ -219,11 +196,16 @@ protected:
       ledge1_or_overflow = oid;
     }
 
-    Bits_t get_bits() const { return bits; }
-    void   set_bits(Bits_t b) { bits = b; }
+    Bits_t get_bits() const {
+      I(!input);
+      return bits_or_sedge0; }
+    void   set_bits(Bits_t b) {
+      I(!input);
+      bits_or_sedge0 = b;
+    }
 
-    uint8_t get_type() const { return lpid_or_type; }
-    void    set_type(uint8_t type) { lpid_or_type = type; }
+    uint8_t get_type() const { I(is_node()); return pid_or_type; }
+    void    set_type(uint8_t type) { I(is_node()); pid_or_type = type; }
 
     constexpr uint32_t get_overflow() const;  // returns the next Entry64 if overflow, zero otherwise
 
@@ -232,22 +214,30 @@ protected:
       ledge0_or_prev = 0;
       return tmp;
     }
+
     void insert_free_next(uint32_t ptr) {
+      if (set_link)
+        delete set;
       clear();
       ledge0_or_prev = ptr;
     }
 
-    uint32_t get_prev_ptr() const {
+    [[nodiscard]] uint32_t get_prev_ptr() const {
       I(is_pin());
       return ledge0_or_prev;
     }
 
-    std::pair<size_t, size_t> get_num_local_edges() const {
-      auto n_inp = __builtin_popcount(inp_mask);
-      return std::pair(n_inp, n_edges-n_inp);
+    [[nodiscard]] size_t get_num_local_edges() const {
+      auto total = n_sedges
+        + (input        ? (bits_or_sedge0?1:0):0)
+        + (node_vertex  ? (ledge0_or_prev?1:0):0)
+        + (overflow_link? 0:(ledge1_or_overflow?1:0))
+        + (set_link     ? 0:((ledge[0]?1:0)+(ledge[1]?1:0)));
+
+      return total;
     }
 
-    bool has_edges() const { return overflow_link || n_edges; }
+    bool has_edges() const { return (overflow_link|n_sedges)!=0; }
 
     bool     has_overflow() const { return overflow_link; }
     uint32_t get_overflow_id() const {
@@ -258,9 +248,8 @@ protected:
     }
 
     void set_pid(const Port_ID pid) {
-      I(!node_vertex);
-      lpid_or_type  = static_cast<uint8_t>(pid);  // 8bits
-      sedge2_or_pid = pid >> 8;                   // upper 16bits
+      I(is_pin());
+      pid_or_type  = pid;
     }
 
     uint32_t get_pid() const {
@@ -268,11 +257,7 @@ protected:
         return 0;
       }
 
-      uint32_t pid = sedge2_or_pid;
-      pid <<= 8;
-      pid |= lpid_or_type;
-
-      return pid;
+      return pid_or_type;
     }
 
     void dump(uint32_t self_id) const;
@@ -402,4 +387,7 @@ public:
   void dump(uint32_t id) const;
 
   size_t size_bytes() const { return sizeof(Master_entry)*table.size(); }
+
+  static_assert(sizeof(Graph_core::Master_entry)==32);
+  static_assert(sizeof(Graph_core::Overflow_entry)==64);
 };

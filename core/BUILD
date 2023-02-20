@@ -12,7 +12,7 @@ cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = ["*test*.cpp","graph_core.*"],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -61,6 +61,7 @@ cc_test(
     srcs = [
         "tests/graph_core_bench.cpp",
     ],
+    tags = ["fixme"],
     deps = [
         ":core",
         "@com_google_benchmark//:benchmark",
@@ -72,6 +73,7 @@ cc_test(
         "tests/small_set_bench.cpp",
     ],
     deps = [
+        ":core",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_benchmark//:benchmark",
     ],

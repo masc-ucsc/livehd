@@ -35,8 +35,8 @@ void Traverse_lg::travers(Eprp_var& var) {
   // Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
   bool                        first_done = false;
-  Lgraph *synth_lg;
-  Lgraph *orig_lg;
+  Lgraph *synth_lg=nullptr;
+  Lgraph *orig_lg=nullptr;
   for (const auto& l : var.lgs) {
     if (l->get_name() == lg_synth_name) {
       synth_lg = l;
@@ -52,7 +52,7 @@ void Traverse_lg::travers(Eprp_var& var) {
     }
   }
   I(sec_done, "\nERROR:\n original LG not/incorrectly provided??\n");
-  
+
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig);//orig-boundary only
   fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
   p.print_everything();

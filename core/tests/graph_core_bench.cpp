@@ -1,12 +1,12 @@
 
 #include "fmt/format.h"
+#include "absl/container/flat_hash_set.h"
 #include "benchmark/benchmark.h"
+#include "hash_set8.hpp"
 
 #include "graph_core.hpp"
 
 static void BM_create_flops_100K(benchmark::State& state) {
-
-  size_t total_bytes = 0;
 
   for (auto _ : state) {
 
@@ -30,16 +30,16 @@ static void BM_create_flops_100K(benchmark::State& state) {
       gc.add_edge(rst_id, last_rst_id);
       gc.add_edge(din_id, last_id);
 
-      for(auto i=0;i<10000;++i) {
+      for(auto i=0;i<100000;++i) {
         auto new_id     = gc.create_node();
         auto new_clk_id = gc.create_pin(new_id, 1); // clk
         auto new_rst_id = gc.create_pin(new_id, 2); // reset
         gc.set_type(new_id, 33); // made up type id
 
-        //(void)new_clk_id;
-        //(void)new_rst_id;
-        gc.add_edge(clk_id , new_clk_id);
-        gc.add_edge(rst_id , new_rst_id);
+        (void)new_clk_id;
+        (void)new_rst_id;
+        //gc.add_edge(clk_id , new_clk_id);
+        //gc.add_edge(rst_id , new_rst_id);
         gc.add_edge(last_id, new_id);
 
         last_id = new_id;
@@ -48,16 +48,116 @@ static void BM_create_flops_100K(benchmark::State& state) {
       gc.add_edge(last_id, dout_id);
 
       //fmt::print("size:{}\n", gc.size_bytes());
-      total_bytes += gc.size_bytes();
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
-  state.counters["bytes"] = benchmark::Counter(total_bytes / (state.iterations() * state.range(0)), benchmark::Counter::kIsRate);
+}
+
+static void BM_create_flops_100Kemhash(benchmark::State& state) {
+
+
+  for (auto _ : state) {
+
+    for (int j = 0; j < state.range(0); ++j) {
+      emhash8::HashSet<uint32_t> clk_set;
+      emhash8::HashSet<uint32_t> rst_set;
+
+      Graph_core gc("lg_create_chain", "create_chain");
+
+      auto inputs = gc.create_node();
+      auto clk_id = gc.create_pin(inputs, 1);
+      auto rst_id = gc.create_pin(inputs, 2);
+      auto din_id = gc.create_pin(inputs, 3);
+
+      auto outputs  = gc.create_node();
+      auto dout_id  = gc.create_pin(outputs, 1);
+
+      auto last_id     = gc.create_node();
+      auto last_clk_id = gc.create_pin(last_id, 1); // clk
+      auto last_rst_id = gc.create_pin(last_id, 2); // reset
+      gc.set_type(last_id, 33); // made up type id
+
+      (void)clk_id;
+      (void)rst_id;
+      clk_set.insert(last_clk_id);
+      rst_set.insert(last_rst_id);
+      gc.add_edge(din_id, last_id);
+
+      for(auto i=0;i<100000;++i) {
+        auto new_id     = gc.create_node();
+        auto new_clk_id = gc.create_pin(new_id, 1); // clk
+        auto new_rst_id = gc.create_pin(new_id, 2); // reset
+        gc.set_type(new_id, 33); // made up type id
+
+        //(void)new_clk_id;
+        //(void)new_rst_id;
+        clk_set.insert(new_clk_id);
+        rst_set.insert(new_rst_id);
+        gc.add_edge(last_id, new_id);
+
+        last_id = new_id;
+      }
+
+      gc.add_edge(last_id, dout_id);
+
+      //fmt::print("size:{}\n", gc.size_bytes());
+    }
+  }
+  state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
+}
+static void BM_create_flops_100Kabsl(benchmark::State& state) {
+
+  for (auto _ : state) {
+
+    for (int j = 0; j < state.range(0); ++j) {
+      absl::flat_hash_set<uint32_t> clk_set;
+      absl::flat_hash_set<uint32_t> rst_set;
+
+      Graph_core gc("lg_create_chain", "create_chain");
+
+      auto inputs = gc.create_node();
+      auto clk_id = gc.create_pin(inputs, 1);
+      auto rst_id = gc.create_pin(inputs, 2);
+      auto din_id = gc.create_pin(inputs, 3);
+
+      auto outputs  = gc.create_node();
+      auto dout_id  = gc.create_pin(outputs, 1);
+
+      auto last_id     = gc.create_node();
+      auto last_clk_id = gc.create_pin(last_id, 1); // clk
+      auto last_rst_id = gc.create_pin(last_id, 2); // reset
+      gc.set_type(last_id, 33); // made up type id
+
+      (void)clk_id;
+      (void)rst_id;
+      clk_set.insert(last_clk_id);
+      rst_set.insert(last_rst_id);
+      gc.add_edge(din_id, last_id);
+
+      for(auto i=0;i<100000;++i) {
+        auto new_id     = gc.create_node();
+        auto new_clk_id = gc.create_pin(new_id, 1); // clk
+        auto new_rst_id = gc.create_pin(new_id, 2); // reset
+        gc.set_type(new_id, 33); // made up type id
+
+        //(void)new_clk_id;
+        //(void)new_rst_id;
+        clk_set.insert(new_clk_id);
+        rst_set.insert(new_rst_id);
+        gc.add_edge(last_id, new_id);
+
+        last_id = new_id;
+      }
+
+      gc.add_edge(last_id, dout_id);
+
+      //fmt::print("size:{}\n", gc.size_bytes());
+    }
+  }
+  state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
 }
 
 static void BM_create_chain_100K(benchmark::State& state) {
-
-  size_t total_bytes = 0;
 
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
@@ -73,14 +173,12 @@ static void BM_create_chain_100K(benchmark::State& state) {
         last_id = new_id;
       }
 
-      total_bytes += gc.size_bytes();
       //fmt::print("size:{}\n", gc.size_bytes());
       benchmark::DoNotOptimize(last_id);
     }
   }
 
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
-  state.counters["bytes"] = benchmark::Counter(total_bytes / (state.iterations() * state.range(0)), benchmark::Counter::kIsRate);
 }
 
 static void BM_delete_chain_100K(benchmark::State& state) {
@@ -149,6 +247,8 @@ static void BM_traverse_chain_1M(benchmark::State& state) {
 //--------------------------------------------------------------------
 
 BENCHMARK(BM_create_flops_100K)->Arg(32);
+BENCHMARK(BM_create_flops_100Kabsl)->Arg(32);
+BENCHMARK(BM_create_flops_100Kemhash)->Arg(32);
 BENCHMARK(BM_create_chain_100K)->Arg(32);
 BENCHMARK(BM_delete_chain_100K)->Arg(32);
 BENCHMARK(BM_traverse_chain_1M)->Arg(32);
