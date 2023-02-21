@@ -118,13 +118,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
    
 
-    // probabilistic_match_loopLast_only();
-    // fmt::print("9. Printing after flop probabilistic_match_loopLast_only matching!"); print_everything();
-    
-    if(flop_set.empty() && !crit_node_vec.empty()) { //all flops matched and still some crit cells left to map!
+    // set_theory_match_loopLast_only();
+    // fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
+
+    if(/*flop_set.empty() &&*/ !crit_node_vec.empty()) { //all flops matched and still some crit cells left to map!
       //move to combinational matching
       do {
         resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+        fmt::print("9._. Printing before resolution of out MoS!"); print_everything();
         resolution_of_synth_map_of_sets(out_map_of_sets_synth);
         change_done = complete_io_match(false);//alters crit_node_vec too
         fmt::print("Change done = {}\n", change_done);
@@ -148,10 +149,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       } while(unmatched_left && !crit_node_vec.empty());
     }
 #endif
-
 #if 1
     if(!crit_node_vec.empty()) {
-      probabilistic_match_final();
+      set_theory_match_final();
     }
 #endif
 
@@ -697,7 +697,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
             auto& map_entry = *it;
             auto  synth_set = getUnion(map_entry.first.first, map_entry.first.second);
             auto& synth_val = map_entry.second;
-            change_done     = probabilistic_match(synth_set, synth_val, full_orig_map);
+            change_done     = set_theory_match(synth_set, synth_val, full_orig_map);
             if (crit_flop_list.empty()) {
               req_flops_matched = true;
             }
@@ -936,6 +936,7 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
 
   /*in fwd, flops are visited last. Thus this fast pass:*/
   fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
+  fmt::print("9.1.0 Printing before fwd traversal!"); print_everything();
    // if(!is_orig_lg) {
    //  /*HACK : matching flops for the test case MaxPeriodFibonacciLFSR*/
    //  for (auto it = inp_map_of_sets_synth.begin(); it!= inp_map_of_sets_synth.end();) {
@@ -971,10 +972,20 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
   /*propagate sets. stop at sequential/IO... (_last)*/
   traverse_order.clear();
   fwd_traversal_for_inp_map(lg, inp_map_of_sets, is_orig_lg);
-  fmt::print("9.1 Printing after fwd traversal - synth!"); print_everything();
+  fmt::print("9.1 Printing after fwd traversal!"); print_everything();
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
   bwd_traversal_for_out_map(out_map_of_sets, is_orig_lg);
+
+  if(!is_orig_lg) {
+    /* during the traversals, the nodes which were matched getts re-inserted in MoS(s).
+     * Thus, remove those from inp_MoS and out_MoS*/
+    for (const auto& [node_pin_cf, set_pins_cf] : net_to_orig_pin_match_map) {
+      inp_map_of_sets.erase(node_pin_cf);
+      out_map_of_sets_synth.erase(node_pin_cf);
+    }
+  }
+
 }
 
 void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
@@ -1034,7 +1045,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
     }
   });
   fmt::print("\n:::: out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
-  print_io_map(out_map_of_sets);
+  //print_io_map(out_map_of_sets);
 }
 
 void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
@@ -1097,6 +1108,8 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
      * so remove those matched points from crit_node_vec*/
     for (const auto& [node_pin_cf, set_pins_cf] : net_to_orig_pin_match_map) {
       remove_from_crit_node_vec(node_pin_cf);
+      inp_map_of_sets.erase(node_pin_cf);
+      out_map_of_sets_synth.erase(node_pin_cf);
     }
     /*if nothing left in crit_node_vec then return with result*/
     if(crit_node_vec.empty()) {
@@ -1554,6 +1567,8 @@ void Traverse_lg::report_critical_matches_with_color(){
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
   for(auto &[synth_np, synth_set_np]:synth_map_of_set){
+    // auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
+    // fmt::print("------{} ({})\n",xx, synth_set_np.size());
     for(auto it = synth_set_np.begin(); it!=synth_set_np.end();){
       const auto set_np_val = *it;
       if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
@@ -1597,7 +1612,7 @@ void Traverse_lg::print_everything() {
 
 }
 
-void Traverse_lg::probabilistic_match_loopLast_only() {
+void Traverse_lg::set_theory_match_loopLast_only() {
 
   auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, true);
 	fmt::print("io_map_of_sets_orig: loop_last only\n"); print_io_map(io_map_of_sets_orig);
@@ -1607,12 +1622,12 @@ void Traverse_lg::probabilistic_match_loopLast_only() {
 	bool some_matching_done = false;
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
-	  some_matching_done = probabilistic_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
+	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
 	} while (some_matching_done);
 
 }
 
-void Traverse_lg::probabilistic_match_final() {
+void Traverse_lg::set_theory_match_final() {
 
   auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);//false: not loop_last
 	fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
@@ -1622,14 +1637,14 @@ void Traverse_lg::probabilistic_match_final() {
 	bool some_matching_done = false;
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
-	  some_matching_done = probabilistic_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
+	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
 	} while (some_matching_done && !crit_node_vec.empty());
 
 	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 }
 
-bool Traverse_lg::probabilistic_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
+bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
 
   bool some_matching_done = false;
 
@@ -1755,8 +1770,8 @@ void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::str
         print_MapOf_SetPairAndVec(cellIOMap_orig);
         // cellIOMap_orig.clear();
       } else {
-        //  probabilistic_match(iterator to cellIOMap_synth.this entry , cellIOMap_orig)
-        probabilistic_match(synth_set, synth_val, cellIOMap_orig);
+        //  set_theory_match(iterator to cellIOMap_synth.this entry , cellIOMap_orig)
+        set_theory_match(synth_set, synth_val, cellIOMap_orig);
         fmt::print("\ncellIOMap_orig for unresolved node is:\n");
         print_MapOf_SetPairAndVec(cellIOMap_orig);
         // cellIOMap_orig.clear();
@@ -2060,8 +2075,8 @@ void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey& MapOf_SetPairA
   }
 }
 
-// bool Traverse_lg::probabilistic_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map)
-bool Traverse_lg::probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat>& synth_val,
+// bool Traverse_lg::set_theory_match(setMap_pairKey::iterator &map_it, setMap_pairKey &orig_map)
+bool Traverse_lg::set_theory_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat>& synth_val,
                                       setMap_pairKey& orig_map) {
   // auto map_entry = *map_it;
   // auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);

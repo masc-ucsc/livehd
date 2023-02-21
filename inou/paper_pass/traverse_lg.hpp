@@ -41,7 +41,7 @@ private:
   absl::node_hash_map<Node::Compact_flat, int>                             crit_flop_map;
   absl::node_hash_map<Node::Compact_flat, int>                             crit_cell_map;
   setMap_pairKey                                                           cellIOMap_synth;
-  bool                   probabilistic_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
+  bool                   set_theory_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
                                              setMap_pairKey &orig_map);
 
   template <typename T>
@@ -92,9 +92,9 @@ private:
   void remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
-  void probabilistic_match_loopLast_only();
-  void probabilistic_match_final();
-  bool probabilistic_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
+  void set_theory_match_loopLast_only();
+  void set_theory_match_final();
+  bool set_theory_match(map_of_sets &io_map_of_sets_synth, map_of_sets &io_map_of_sets_orig);
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const ;
   void print_nodes_vec () const;
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
