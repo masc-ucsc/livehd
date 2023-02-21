@@ -6,5 +6,5 @@ module issue_057(a, y);
   // but verilator_3_864 sets y[3:1] = 'b000 instead.
 
   localparam [5:15] p = 51681708;
-  assign y = p[15 + a -: 5];
+  assign y = p[15 + a -: 5]; // [12:16]
 endmodule

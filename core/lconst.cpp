@@ -1408,7 +1408,7 @@ std::string Lconst::to_binary() const {
 
 std::string Lconst::to_verilog() const {
   if (num == 0) {
-    return "'b0";
+    return "'sb0";
   }
 
   if (explicit_str) {
