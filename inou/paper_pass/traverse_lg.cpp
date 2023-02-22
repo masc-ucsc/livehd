@@ -1125,8 +1125,12 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
       continue;
     }
     for (const auto node_dpins: node.out_connected_pins()) {
+      traverse_order.emplace_back(node_dpins.get_compact_flat());//FIXME: since flops are already matched, do not keep them here for backward matching.
+      break;//keeping any 1 dpin of the node in traverse_order to refer to the node in bwd_traversal
+            //not all dpins to avoid redundancy
+    }
+    for (const auto node_dpins: node.out_connected_pins()) {
       const auto node_dpin_cf = node_dpins.get_compact_flat();
-      traverse_order.emplace_back(node_dpin_cf);//FIXME: since flops are already matched, do not keep them here for backward matching.
       bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
