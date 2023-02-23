@@ -1634,6 +1634,7 @@ void Traverse_lg::set_theory_match_loopLast_only() {
 	bool some_matching_done = false;
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
+    fmt::print("\nINTERMEDIATE after resolution LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
 	} while (some_matching_done && !crit_node_vec.empty());
 
@@ -1681,13 +1682,17 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
          auto total      = (get_union(synth_set, orig_set)).size();
          auto mismatches = total-matches;
          if (matches> match_count)  {
-            matched_node_pins.insert(orig_key) ; 
-            match_count = matches;
-						mismatch_count = mismatches;
+           matched_node_pins.clear();
+           matched_node_pins.insert(orig_key) ; 
+           match_count = matches;
+					 mismatch_count = mismatches;
          } else if ((matches == match_count)  && ( mismatches < mismatch_count)) { 
-            matched_node_pins.insert(orig_key) ; 
-            match_count = matches ; 
-            mismatch_count = mismatches;
+           matched_node_pins.clear();
+           matched_node_pins.insert(orig_key) ; 
+           match_count = matches ; 
+           mismatch_count = mismatches;
+         } else  if ((matches == match_count)  && ( mismatches == mismatch_count)) {//matches and mismatches are same as prev. iteration
+           matched_node_pins.insert(orig_key);
          }
 
       }
