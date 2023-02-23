@@ -118,21 +118,28 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
    
 
-    // set_theory_match_loopLast_only();
-    // fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
+    set_theory_match_loopLast_only();
+    fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
 
-    if(/*flop_set.empty() &&*/ !crit_node_vec.empty()) { //all flops matched and still some crit cells left to map!
-      //move to combinational matching
-      do {
-        resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-        fmt::print("9._. Printing before resolution of out MoS!"); print_everything();
-        resolution_of_synth_map_of_sets(out_map_of_sets_synth);
-        change_done = complete_io_match(false);//alters crit_node_vec too
-        fmt::print("Change done = {}\n", change_done);
-        fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!"); print_everything();
+    I(flop_set.empty(),"\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
+    if(crit_node_vec.empty()) {
+      /*all required matching done*/
+      report_critical_matches_with_color();
+      return;
+    } 
+
+    //all flops matched and still some crit cells left to map!
+    //move to combinational matching
+    do {
+      resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+      fmt::print("9._. Printing before resolution of out MoS!"); print_everything();
+      resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+      change_done = complete_io_match(false);//alters crit_node_vec too
+      fmt::print("Change done = {}\n", change_done);
+      fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!"); print_everything();
     } while (change_done && !crit_node_vec.empty());
     fmt::print("10. Printing after all the combinational resolution and matching!"); print_everything();
-    }
+    
 
     if (!crit_node_vec.empty()) { //exact combinational matching could not resolve all crit nodes
       //surrounding cell loc-similarity matching
@@ -1110,6 +1117,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
       remove_from_crit_node_vec(node_pin_cf);
       inp_map_of_sets.erase(node_pin_cf);
       out_map_of_sets_synth.erase(node_pin_cf);
+      if(flop_set.find(node_pin_cf)!=flop_set.end()) { flop_set.erase(node_pin_cf); }
     }
     /*if nothing left in crit_node_vec then return with result*/
     if(crit_node_vec.empty()) {
@@ -1627,8 +1635,10 @@ void Traverse_lg::set_theory_match_loopLast_only() {
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
 	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
-	} while (some_matching_done);
+	} while (some_matching_done && !crit_node_vec.empty());
 
+	fmt::print("\nFINAL LL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
+	fmt::print("\nFINAL LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 }
 
 void Traverse_lg::set_theory_match_final() {
@@ -1684,6 +1694,8 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
       if (!matched_node_pins.empty()) {
          net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
          forced_match_vec.emplace_back(synth_key);
+         if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
+         remove_from_crit_node_vec(synth_key);
          inp_map_of_sets_synth.erase(synth_key);
          out_map_of_sets_synth.erase(synth_key);
          io_map_of_sets_synth.erase(it++);
