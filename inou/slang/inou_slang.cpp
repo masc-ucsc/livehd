@@ -38,9 +38,9 @@ void Inou_slang::work(Eprp_var &var) {
 
   argv.push_back(strdup("lgshell"));
 
-#ifdef NDEBUG
+//#ifdef NDEBUG
   argv.push_back(strdup("--quiet"));
-#endif
+//#endif
 
   argv.push_back(strdup("--ignore-unknown-modules"));
   // argv.push_back(strdup("--single-unit"));
@@ -71,11 +71,12 @@ void Inou_slang::work(Eprp_var &var) {
 
   std::mutex var_add_mutex;
 
-  for (const auto f : absl::StrSplit(p.files, ',')) {
-    std::string fname{f};
+  std::vector<std::string> file_list = absl::StrSplit(p.files, ',');
 
-    thread_pool.add([=, &var, &argv, &var_add_mutex]() -> void {
-      // const std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
+  for (const auto &fname : file_list) {
+
+    thread_pool.add([&fname, &var, &argv, &var_add_mutex]() -> void {
+      std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
       // TRACE_EVENT("verilog", perfetto::DynamicString{fname});
       TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) {
@@ -95,7 +96,7 @@ void Inou_slang::work(Eprp_var &var) {
       slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
 
       {
-        const std::lock_guard<std::mutex> guard(var_add_mutex);
+        //std::lock_guard<std::mutex> guard(var_add_mutex);
         for (auto &ln : tree.pick_lnast()) {
           var.add(ln);
         }

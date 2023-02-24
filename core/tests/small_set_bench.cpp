@@ -13,15 +13,22 @@
 
 #include "iassert.hpp"
 
-// mada4:
-// After 32 entries, emhash8 is best
+// Zen2:
+// After 32 entries, emhash7/emhash8 is best
 // Under 32 entries, linear is best
 //
 // Under 100, emhash7
-// Over 100, emhash8
+// Over 100, emhash8 unless very large (100K) emhash9
+//
+// Apple M1max
+// After 40 entries, emhash7 is best
+// Under 50 entries, linear is best
+//
+// emhash7 better always unless very large (10K) emhash9
 
-static constexpr int n=200;
-#define TYPE_SEARCH uint32_t
+
+static constexpr int n=40;
+#define TYPE_SEARCH uint16_t
 
 template <size_t Size>
 bool linear_erase_word(std::vector<TYPE_SEARCH> &arr , TYPE_SEARCH b) {
