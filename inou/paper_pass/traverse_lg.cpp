@@ -57,21 +57,31 @@ void Traverse_lg::travers(Eprp_var& var) {
   // p.debug_function(synth_lg);
   // return;
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig);//orig-boundary only
+#ifdef BASIC_DBG
   fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
   p.print_everything();
+#endif
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)
+#ifdef BASIC_DBG
   fmt::print("2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
+#endif
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching
+#ifdef BASIC_DBG
   fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
   p.print_everything();
+#endif
 
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
+#ifdef BASIC_DBG
   fmt::print("4. p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)\n");
   p.print_everything();
+#endif
   p.do_travers(synth_lg, map_post_synth, false);  // synth LG
+#ifdef BASIC_DBG
   fmt::print("\n5. p.do_travers(synth_lg, map_post_synth, false);  // synth LG\n");
   p.print_everything();
+#endif
 
 #endif
 }
@@ -80,8 +90,11 @@ void Traverse_lg::travers(Eprp_var& var) {
 // lg->dump(true);
 //   fmt::print("---------------------------------------------------\n");
 //   for (const auto& node : lg->fast(true)) {
-//     fmt::print("{}\n", node.debug_name());
-//     fmt::print("\t\t{}, {}\n",node.get_nid(), get_dpin(node).has_name()?(get_dpin(node).get_name()):(std::to_string(get_dpin(node).get_pid())));
+//     fmt::print("{}({})\n", node.debug_name(), node.get_nid());
+//     for (const auto dpin:node.out_connected_pins()) {
+//       fmt::print("\t {}",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())));
+//     }
+//     fmt::print("\n");
 //   }
 //   fmt::print("\n---------------------------------------------------");
 // }
@@ -97,29 +110,40 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (!is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);//has in-place resolution as well.
+#ifdef BASIC_DBG
     fmt::print("7.0. before 1st set of resolution -- synth"); print_everything();
+#endif
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+#ifdef BASIC_DBG
     fmt::print("7. before matching starts -- synth"); print_everything();
-    bool change_done = complete_io_match(true);//FIXME: do not need for flop only as matching flop already
+#endif
+    bool change_done = complete_io_match(true);//for flop only as matching flop first
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
       return;
     } 
+#ifdef BASIC_DBG
     fmt::print("8. before resolution + matching while loop starts -- synth"); print_everything();
+#endif
 
-    while (change_done && !crit_node_vec.empty()) {//FIXME: do not need for flop only as matching flop already
+    while (change_done && !crit_node_vec.empty() && !flop_set.empty()) {// for flop only as matching flop first 
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);//alters crit_node_vec too
 	    fmt::print("Change done = {}\n", change_done);
     }
+#ifdef BASIC_DBG
     fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
+#endif
    
-
-    set_theory_match_loopLast_only();
-    fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
+    if (!flop_set.empty()) {
+      set_theory_match_loopLast_only();
+#ifdef BASIC_DBG
+      fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
+#endif
+    }
 
     I(flop_set.empty(),"\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
     if(crit_node_vec.empty()) {
@@ -132,13 +156,19 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     //move to combinational matching
     do {
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+#ifdef BASIC_DBG
       fmt::print("9._. Printing before resolution of out MoS!"); print_everything();
+#endif
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(false);//alters crit_node_vec too
+#ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
       fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!"); print_everything();
+#endif
     } while (change_done && !crit_node_vec.empty());
+#ifdef BASIC_DBG
     fmt::print("10. Printing after all the combinational resolution and matching!"); print_everything();
+#endif
     
 
     if (!crit_node_vec.empty()) { //exact combinational matching could not resolve all crit nodes
@@ -146,7 +176,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       change_done = surrounding_cell_match();
       fmt::print("Change done = {}\n", change_done);
     }
+#ifdef BASIC_DBG
     fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
+#endif
 #if 0
     if(!crit_node_vec.empty()) {
       bool unmatched_left;
@@ -172,8 +204,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);
 
+#ifdef BASIC_DBG
     fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
     fmt::print("\n out_map_of_sets_orig.size() =  {}\n", out_map_of_sets_orig.size());
+#endif
     return;          //FIXME: for DBG; remove.
   }
 
@@ -183,7 +217,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   // }
 
   I(false, "\nintended exit!\n");
-
+  lg->dump(true);//FIXME: remove this
   for (const auto& node : lg->fast(true)) {
     dealing_flop = false;
     dealing_comb = false;
@@ -871,6 +905,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
           }
         });
       } else {
+        lg->dump(true);//FIXME: remove this
         for (const auto& startPoint_node : lg->fast(true)) {                                 // FIXME:REM
           if (std::to_string(startPoint_node.get_nid().value) == required_node.substr(5)) {  // FIXME:REM
             fmt::print("Found node {}\n", startPoint_node.get_nid());                        // FIXME:REM
@@ -921,7 +956,9 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
 
   /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
   boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);
+#ifdef BASIC_DBG
   fmt::print("3.0. boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);\n"); 
+#endif
   print_everything();
 
   /*For synth, set values were replaced using net_to_orig_pin_match_map. Thus these synth map_of_sets can be matched with orig map_of_sets for matching at the boundary of the design.*/
@@ -943,7 +980,9 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
 
   /*in fwd, flops are visited last. Thus this fast pass:*/
   fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
+#ifdef BASIC_DBG
   fmt::print("9.1.0 Printing before fwd traversal!"); print_everything();
+#endif
    // if(!is_orig_lg) {
    //  /*HACK : matching flops for the test case MaxPeriodFibonacciLFSR*/
    //  for (auto it = inp_map_of_sets_synth.begin(); it!= inp_map_of_sets_synth.end();) {
@@ -979,7 +1018,9 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
   /*propagate sets. stop at sequential/IO... (_last)*/
   traverse_order.clear();
   fwd_traversal_for_inp_map(lg, inp_map_of_sets, is_orig_lg);
+#ifdef BASIC_DBG
   fmt::print("9.1 Printing after fwd traversal!"); print_everything();
+#endif
 
   /*propagate sets. stop at sequential/IO/const... (_last & _first). this is like backward traversal*/
   bwd_traversal_for_out_map(out_map_of_sets, is_orig_lg);
@@ -1059,6 +1100,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
+  lg->dump(true);//FIXME: remove this
   for (const auto& node : lg->fast(true)) {
 
     if(!is_orig_lg) {
@@ -1128,6 +1170,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
+  lg->dump(true);//FIXME: remove this
   for (const auto& node : lg->forward(true)) {
     if (node.is_type_const()) {
       continue;
@@ -1173,8 +1216,10 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
 }
 
 void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool is_orig_lg) {
+#ifdef EXTENSIVE_DBG
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n");
   fmt::print("\t\tis_orig_lg: {}\n",is_orig_lg);
+#endif
   for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
        ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
@@ -1186,15 +1231,22 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
     auto                                               it       = out_map_of_sets.find(node_dpin_cf);
     if (it != out_map_of_sets.end()) {
       self_set = &it->second;
+#ifdef EXTENSIVE_DBG
       fmt::print("\tnode present in out_map_of_sets. It's SS:");
       print_set(*self_set);
       fmt::print("\n");
-    } else {
+#endif
+    } 
+#ifdef EXTENSIVE_DBG
+    else {
       fmt::print("\tnode NOT present in out_map_of_sets already.\n");
     }
+#endif
 
     for (auto in_dpin : node.inp_drivers()) {
+#ifdef EXTENSIVE_DBG
       fmt::print("\tParent driver of the node:\t\t {}(n{})\n",in_dpin.has_name()?in_dpin.get_name():std::to_string(in_dpin.get_pid()), in_dpin.get_node().get_nid());
+#endif
       if (in_dpin.get_node().is_type_loop_first()/*need not keep outputs of const/graphIO in out_map_of_sets*//*|| in_dpin.get_node().is_type_loop_last() is_type_loop_last - specifically flops -  processed in hackish matching*/) {
         continue;
       }
@@ -1203,21 +1255,31 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
         if(!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
           auto match_val = get_matching_map_val(node_dpin_cf);
           out_map_of_sets[inp_cf].insert(match_val.begin(), match_val.end());//resolution
+#ifdef EXTENSIVE_DBG
           fmt::print("\t\t\tmatch_val is the O/P! K[n{}]::V[-match_val_value-]\n", in_dpin.get_node().get_nid());
+#endif
         } else {
           out_map_of_sets[inp_cf].insert(node_dpin_cf);
+#ifdef EXTENSIVE_DBG
           fmt::print("\t\t\tnode itself is the O/P! K[n{}]::V[n{}]\n", in_dpin.get_node().get_nid(), node.get_nid());
+#endif
         }
       } else {
         if (self_set) {
           out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end());
+#ifdef EXTENSIVE_DBG
           fmt::print("\t\t\tSS is the O/P! K[n{}]::V[ss val]\n", in_dpin.get_node().get_nid());
+#endif
         }
       }
     }
+#ifdef EXTENSIVE_DBG
     print_io_map(out_map_of_sets);
+#endif
   }
+#ifdef EXTENSIVE_DBG
   fmt::print("\n&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n");
+#endif
 }
 
 void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg) {
@@ -1245,18 +1307,24 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
       auto orig_node_dpin_name = orig_node_dpin.has_name() ? orig_node_dpin.get_name() : "" ;
 
       if(orig_node_dpin_name!="") {
+#ifdef EXTENSIVE_DBG
         fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, orig_sub_lg_name);
+#endif
         /*see if the name matches to any in netlist LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
          * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy! #FIXME!!
          * */
         auto synth_sub_lg_name = orig_sub_lg_name.substr(std::size_t(9)); //removing "__firrtl_"
         auto *synth_sub_lg = library->try_ref_lgraph(synth_sub_lg_name);
+#ifdef EXTENSIVE_DBG
         fmt::print("\t\tFinding dpin for synth_sub_lg_name {}\n", synth_sub_lg->get_name());
+#endif
         auto synth_node_dpin = Node_pin::find_driver_pin( synth_sub_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
                                                                                               //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
         if ( !synth_node_dpin.is_invalid() )  {
+#ifdef EXTENSIVE_DBG
           fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
+#endif
           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
           remove_from_crit_node_vec(synth_node_dpin.get_compact_flat());
           out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
@@ -1266,6 +1334,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
     }
   }
+#ifdef EXTENSIVE_DBG
+  synth_lg->dump(true);
     for (auto syn_node: synth_lg->fast(true) ) {//FIXME: for DBG only; remove!
     
       for(const auto syn_node_dpin: syn_node.out_connected_pins()) {
@@ -1276,6 +1346,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
       }
      }
     }
+#endif
 
 }
 
@@ -1373,8 +1444,10 @@ bool Traverse_lg::surrounding_cell_match() {
     absl::flat_hash_set<Node_pin::Compact_flat> connected_cells_orig_set;
     Node_pin::Compact_flat connected_same_cell ;
     for (const auto &cc_s: connected_cells_synth_vec){
+#ifdef BASIC_DBG
       auto p = Node_pin("lgdb", cc_s);//FIXME: for debug only
       fmt::print("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());//FOR DEBUG
+#endif
 
       if(net_to_orig_pin_match_map.find(cc_s)!=net_to_orig_pin_match_map.end()){//connected_cell_synth is resolved.
         connected_cells_orig_set.insert(net_to_orig_pin_match_map[cc_s].begin(), net_to_orig_pin_match_map[cc_s].end());
@@ -1427,7 +1500,7 @@ bool Traverse_lg::surrounding_cell_match() {
         }
         inp_map_of_sets_synth.erase(it++);
       } else {
-        fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
+        fmt::print("  $$ Reporting cell n{}.\n", n_s.get_nid());
         any_matching_done=false;
         it++;
       }
@@ -1579,16 +1652,18 @@ void Traverse_lg::report_critical_matches_with_color(){
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
   for(auto &[synth_np, synth_set_np]:synth_map_of_set){
-    // auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
-    // fmt::print("------{} ({})\n",xx, synth_set_np.size());
+    //auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
+    //fmt::print("------{} ({})\n",xx, synth_set_np.size());
+    absl::flat_hash_set<Node_pin::Compact_flat> tmp_set;
     for(auto it = synth_set_np.begin(); it!=synth_set_np.end();){
       const auto set_np_val = *it;
       if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
         synth_set_np.erase(it++);
         auto equiv_val = net_to_orig_pin_match_map[set_np_val];
-        synth_set_np.insert(equiv_val.begin(),equiv_val.end());
+        tmp_set.insert(equiv_val.begin(),equiv_val.end());
       } else ++it;
     }
+    synth_set_np.insert(tmp_set.begin(), tmp_set.end());
   }
 
 }
