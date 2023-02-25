@@ -20,23 +20,22 @@ public:
 
   ~spool_ptr_pool() {
     while (!_pointer_queue.empty()) {
-      T*   raw_ptr   = nullptr;
-      bool something = _pointer_queue.dequeue(raw_ptr);
-      I(something);
-      delete raw_ptr;
+      auto raw_ptr = _pointer_queue.dequeue();
+      I(raw_ptr);
+      I(*raw_ptr);
+      delete *raw_ptr;
     }
   }
 
   T* get_ptr() {
-    T*   raw_retval      = nullptr;
-    bool recycle_success = _pointer_queue.dequeue(raw_retval);
-    (void)recycle_success;
-    if (raw_retval == nullptr) {
-      raw_retval = new T();
+    auto raw_retval = _pointer_queue.dequeue();
+    if (!raw_retval) {
+      return new T();
     }
     I(raw_retval);
-    raw_retval->shared_count = 1;
-    return raw_retval;
+    I(*raw_retval);
+    (*raw_retval)->shared_count = 1;
+    return *raw_retval;
   }
 
   void release_ptr(T* to_release) {

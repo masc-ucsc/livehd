@@ -20,6 +20,7 @@ Author: Farzaneh Rabiei, GitHub: https://github.com/rabieifk
 #include "node_pin.hpp"
 #include "yosys_json.hpp"
 
+// FIXME: Use std::unique_ptr so that there is no ASAN warning leak
 vector<Port*> LGtoYJson::primitive_2inp_ABY{new Port("A", pdInput), new Port("B", pdInput), new Port("Y", pdOutput)};
 vector<Port*> LGtoYJson::primitive_1inp_AY{new Port("A", pdInput), new Port("Y", pdOutput)};
 vector<Port*> LGtoYJson::primitive_mux{

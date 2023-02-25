@@ -75,8 +75,8 @@ void Inou_slang::work(Eprp_var &var) {
 
   for (const auto &fname : file_list) {
 
-    thread_pool.add([&fname, &var, &argv, &var_add_mutex]() -> void {
-      std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
+    thread_pool.add([fname, &var, &argv, &var_add_mutex]() -> void {
+      //std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang multithread fails
 
       // TRACE_EVENT("verilog", perfetto::DynamicString{fname});
       TRACE_EVENT("verilog", nullptr, [&fname](perfetto::EventContext ctx) {
@@ -96,7 +96,7 @@ void Inou_slang::work(Eprp_var &var) {
       slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
 
       {
-        //std::lock_guard<std::mutex> guard(var_add_mutex);
+        std::lock_guard<std::mutex> guard(var_add_mutex); // FIXME: slang
         for (auto &ln : tree.pick_lnast()) {
           var.add(ln);
         }

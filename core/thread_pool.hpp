@@ -86,7 +86,7 @@ class Thread_pool {
 
     if (!booting_lock.test_and_set(std::memory_order_acquire)) {
       for (unsigned i = 1; i < thread_count; ++i) {
-        threads.push_back(std::thread([this] { this->task(); }));
+        threads.emplace_back(std::thread([this] { this->task(); }));
       }
       started_lock = true;
     }
@@ -98,15 +98,14 @@ class Thread_pool {
   }
 
   std::function<void(void)> next_job() {
-    std::function<void(void)>    res;
     std::unique_lock<std::mutex> job_lock(queue_mutex);
 
     // Wait for a job if we don't have any.
     job_available_var.wait(job_lock, [this]() -> bool { return !queue.empty() || finishing; });
 
-    bool has_work = queue.dequeue(res);
-    if (has_work) {
-      return res;
+    auto res = queue.dequeue();
+    if (res) {
+      return *res;
     }
 
     jobs_left.fetch_add(1, std::memory_order_relaxed);
@@ -182,7 +181,7 @@ public:
 
     assert(thread_count);
 
-    threads.push_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
+    threads.emplace_back(std::thread([this] { this->task(); }));  // Just one thread in critical path
   }
 
   static int get_task_id() { return task_id; }
@@ -227,10 +226,9 @@ public:
 
   void wait_all() {
     while (jobs_left > 0) {
-      std::function<void(void)> res;
-      bool                      has_work = queue.dequeue(res);
-      if (has_work) {
-        res();
+      auto res = queue.dequeue();
+      if (res) {
+        (*res)();
         jobs_left.fetch_sub(1, std::memory_order_relaxed);
       }
     }

@@ -13,20 +13,19 @@ public:
 
   ~raw_ptr_pool() {
     while (!_pointer_queue.empty()) {
-      void *raw_ptr;
-      bool  something = _pointer_queue.dequeue(raw_ptr);
-      I(something);
-      free(raw_ptr);
+      auto raw_ptr = _pointer_queue.dequeue();
+      I(raw_ptr);
+      I(*raw_ptr);
+      free(*raw_ptr);
     }
   }
 
   void *get_ptr() {
-    void *raw_retval;
-    bool  recycle_success = _pointer_queue.dequeue(raw_retval);
-    if (!recycle_success) {
-      raw_retval = malloc(size);
+    auto raw_retval = _pointer_queue.dequeue();
+    if (!raw_retval) {
+      return malloc(size);
     }
-    return raw_retval;
+    return *raw_retval;
   }
 
   void release_ptr(void *to_release) {

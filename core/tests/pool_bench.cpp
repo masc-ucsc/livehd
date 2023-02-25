@@ -12,9 +12,8 @@ static void BM_mpmc(benchmark::State& state) {
 
     for (int j = 0; j < state.range(0); ++j) {
       benchmark::DoNotOptimize(queue.enqueue(j));
-      int data;
-      benchmark::DoNotOptimize(queue.dequeue(data));
-      assert(data == j);
+      auto data = queue.dequeue(data);
+      assert(*data == j);
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -26,9 +25,8 @@ static void BM_spmc(benchmark::State& state) {
 
     for (int j = 0; j < state.range(0); ++j) {
       benchmark::DoNotOptimize(queue.enqueue(j));
-      int data;
-      benchmark::DoNotOptimize(queue.dequeue(data));
-      assert(data == j);
+      auto data = queue.dequeue();
+      assert(*data == j);
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);
@@ -58,9 +56,8 @@ static void BM_spsc256(benchmark::State& state) {
 
     for (int j = 0; j < state.range(0); ++j) {
       benchmark::DoNotOptimize(queue.enqueue(j));
-      int data;
-      benchmark::DoNotOptimize(queue.dequeue(data));
-      assert(data == j);
+      auto data = queue.dequeue();
+      assert(*data == j);
     }
   }
 

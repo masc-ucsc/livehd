@@ -31,6 +31,7 @@
 
 #include <strings.h>
 
+#include <optional>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
@@ -91,7 +92,7 @@ public:
     return false;
   }
 
-  bool dequeue(T &data) {
+  std::optional<T> dequeue() {
     size_t tail_seq = _tail_seq.load(std::memory_order_relaxed);
 
     for (;;) {
@@ -101,12 +102,12 @@ public:
 
       if (dif == 0) {
         if (_tail_seq.compare_exchange_weak(tail_seq, tail_seq + 1, std::memory_order_relaxed)) {
-          data = node->data;
+          auto data = std::move(node->data);
           node->seq.store(tail_seq + _mask + 1, std::memory_order_release);
-          return true;
+          return data;
         }
       } else if (dif < 0) {
-        return false;
+        return {};
       } else {
         // under normal circumstances this branch should never be taken
         tail_seq = _tail_seq.load(std::memory_order_relaxed);
@@ -114,7 +115,7 @@ public:
     }
 
     // never taken
-    return false;
+    return {};
   }
 
   bool empty() const { return _head_seq.load() == _tail_seq.load(); }

@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <optional>
 #include <atomic>
 #include <cassert>
 #include <climits>  // for CHAR_BIT
@@ -154,15 +155,15 @@ public:
     return false;
   }
 
-  bool dequeue(T& output) {
+  std::optional<T> dequeue() {
     const size_t tail = _tail.load(std::memory_order_relaxed);
 
     if (((_head.load(std::memory_order_acquire) - tail) & 255) >= 1) {
-      output = _buffer[_tail & 255];
+      auto output = _buffer[_tail & 255];
       _tail.store(tail + 1, std::memory_order_release);
-      return true;
+      return output;
     }
-    return false;
+    return {};
   }
 
 private:
