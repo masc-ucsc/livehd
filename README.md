@@ -82,29 +82,33 @@ For more detailed information and paper reference, please refer to
 the following publications. If you are doing research or projects corresponding
 to LiveHD, please send us a notification, we are glad to add your paper.
 
-## Live techniques
-1. [LiveHD: A Productive Live Hardware Development Flow](docs/papers/LiveHD_IEEE_Micro20.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020.
+1. [A Multi-threaded Fast Hardware Compiler for HDLs](docs/papers/livehd_cc23.pdf), Sheng-Hong Wang, Hunter Coffman, Kenneth Mayer, Sakshi Garg, and Jose Renau. International Conference on Compiler Construction (CC), February 2023.
 
+2. [LiveHD: A Productive Live Hardware Development Flow](docs/papers/LiveHD_IEEE_Micro20.pdf), Sheng-Hong Wang, Rafael T. Possignolo, Haven Skinner, and Jose Renau, IEEE Micro Special Issue on Agile and Open-Source Hardware, July/August 2020.
 
-2. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
+3. [LiveSim: A Fast Hot Reload Simulator for HDLs](docs/papers/LiveSim_ISPASS20.pdf), Haven Skinner, Rafael T. Possignolo, Sheng-Hong Wang, and Jose Renau, International Symposium on Performance Analysis of Systems and Software (ISPASS), April 2020. **(Best Paper Nomination)**
 
-3. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/papers/SMatch_DAC19.pdf), Rafael T.
+4. [SMatch: Structural Matching for Fast Resynthesis in FPGAs](docs/papers/SMatch_DAC19.pdf), Rafael T.
    Possignolo and Jose Renau, Design Automation Conference (DAC), June 2019.
 
-4. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
+5. [LiveSynth: Towards an Interactive Synthesis Flow](docs/papers/LiveSynth_DAC17.pdf), Rafael T. Possignolo, and
    Jose Renau, Design Automation Conference (DAC), June 2017.
 
 ## LGraph
-5. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf),
+
+6. [LGraph: A Unified Data Model and API for Productive Open-Source Hardware Design](docs/papers/LGraph_WOSET19.pdf),
    Sheng-Hong Wang, Rafael T. Possignolo, Qian Chen, Rohan Ganpati, and
    Jose Renau, Second Workshop on Open-Source EDA Technology (WOSET), November 2019.
 
-6. [LGraph: A multi-language open-source database for VLSI](docs/papers/LGraph_WOSET18.pdf), Rafael T. Possignolo,
+7. [LGraph: A multi-language open-source database for VLSI](docs/papers/LGraph_WOSET18.pdf), Rafael T. Possignolo,
    Sheng-Hong Wang, Haven Skinner, and Jose Renau. First Workshop on Open-Source
    EDA Technology (WOSET), November 2018. **(Best Tool Nomination)**
 
 ## LNAST
-7. [LNAST: A Language Neutral Intermediate Representation for Hardware Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang, Akash Sridhar, and Jose Renau,
-   Second Workshop on Open-Source EDA Technology (WOSET), 2019.
+
+8. [LNAST: A Language Neutral Intermediate Representation for Hardware
+   Description Languages](docs/papers/LNAST_WOSET19.pdf), Sheng-Hong Wang,
+   Akash Sridhar, and Jose Renau, Second Workshop on Open-Source EDA Technology
+   (WOSET), 2019.
 
 
