@@ -132,7 +132,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);//alters crit_node_vec too
+#ifdef BASIC_DBG
 	    fmt::print("Change done = {}\n", change_done);
+#endif
     }
 #ifdef BASIC_DBG
     fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
@@ -174,21 +176,27 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if (!crit_node_vec.empty()) { //exact combinational matching could not resolve all crit nodes
       //surrounding cell loc-similarity matching
       change_done = surrounding_cell_match();
+#ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
+#endif
     }
 #ifdef BASIC_DBG
     fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
 #endif
-#if 0
+#if 1
     if(!crit_node_vec.empty()) {
       bool unmatched_left;
       do {
         unmatched_left = surrounding_cell_match_final();
         fmt::print("unmatched left = {}\n", unmatched_left);
+        if(unmatched_left) {
+          resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
+          resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+        }
       } while(unmatched_left && !crit_node_vec.empty());
     }
 #endif
-#if 1
+#if 0
     if(!crit_node_vec.empty()) {
       set_theory_match_final();
     }
@@ -197,6 +205,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     // print_io_map(out_map_of_sets_synth);
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
+    I(crit_node_vec.empty(), "crit_node_vec should have been empty by now!");
+    /*all required matching done*/
+    report_critical_matches_with_color();
     return;          //FIXME: for DBG; remove.
   }
   
@@ -1048,7 +1059,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
       }
     }
     for (auto sink_dpin : dpin.out_sinks()) {
-      for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//FIXME:??: nodes w/o any o/p will NOT appear in map now
+      for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//FIXME:??: nodes w/o any o/p will NOT appear in map now -- OK!
         if(dpin.get_pin_name()=="reset") continue;//do not want "reset" in inp-set (gives matching issues)
         if(!net_to_orig_pin_match_map.empty()){
           auto match_val = get_matching_map_val(dpin.get_compact_flat());//resolution attempt
@@ -1224,7 +1235,9 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
        ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
     auto node         = Node_pin("lgdb", node_dpin_cf).get_node();
+#ifdef BASIC_DBG
     fmt::print("node obtained from traverse_order: {},{} \n", node.get_nid(), Node_pin("lgdb", node_dpin_cf).get_pid());
+#endif
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
     const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
@@ -1312,7 +1325,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #endif
         /*see if the name matches to any in netlist LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
-         * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy! #FIXME!!
+         * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy!
          * */
         auto synth_sub_lg_name = orig_sub_lg_name.substr(std::size_t(9)); //removing "__firrtl_"
         auto *synth_sub_lg = library->try_ref_lgraph(synth_sub_lg_name);
@@ -1432,6 +1445,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
 bool Traverse_lg::surrounding_cell_match() {
 
   bool any_matching_done = false;
+  std::vector<Node_pin::Compact_flat> erase_values_vec; 
   for (auto it = inp_map_of_sets_synth.begin(); it!=inp_map_of_sets_synth.end(); ) {
     auto n_s = Node_pin("lgdb", it->first).get_node();
     bool orig_connected_cells_vec_formed = true;
@@ -1443,7 +1457,7 @@ bool Traverse_lg::surrounding_cell_match() {
     auto connected_cells_synth_vec = get_surrounding_pins(n_s);//list of all surrounding cells_node_dpins
     absl::flat_hash_set<Node_pin::Compact_flat> connected_cells_orig_set;
     Node_pin::Compact_flat connected_same_cell ;
-    for (const auto &cc_s: connected_cells_synth_vec){
+    for (const auto &cc_s: connected_cells_synth_vec){ 
 #ifdef BASIC_DBG
       auto p = Node_pin("lgdb", cc_s);//FIXME: for debug only
       fmt::print("  {}, {}, {}\n", p.get_node().get_or_create_name(), p.has_name(), p.get_pid());//FOR DEBUG
@@ -1457,7 +1471,8 @@ bool Traverse_lg::surrounding_cell_match() {
         auto it_syn_inp_cc = inp_map_of_sets_synth.find(cc_s);
         auto it_syn_out_cc = out_map_of_sets_synth.find(cc_s);
         auto it_out_syn    = out_map_of_sets_synth.find(it->first);
-        if (it!=inp_map_of_sets_synth.end() && it_syn_inp_cc!=inp_map_of_sets_synth.end() && (it->second == it_syn_inp_cc->second) && (it_out_syn->second == it_syn_out_cc->second)) {
+        if ( (it!=inp_map_of_sets_synth.end() && it_syn_inp_cc!=inp_map_of_sets_synth.end() && it->second == it_syn_inp_cc->second) && ((it_syn_out_cc!=out_map_of_sets_synth.end() &&  it_out_syn!=out_map_of_sets_synth.end() && it_out_syn->second == it_syn_out_cc->second) /*checkes both in & out*/ || (it_syn_out_cc==out_map_of_sets_synth.end() || it_out_syn==out_map_of_sets_synth.end()) /*no Outs available for matching*/ )) {
+          //^Not both In and Out are required. checking if both out are not available then atleast both in should be same.
           
           /*IO of the 2 cells matches. thus they can be collapsed as 1.*/
 
@@ -1470,14 +1485,19 @@ bool Traverse_lg::surrounding_cell_match() {
             if (net_to_orig_pin_match_map.find(same_cc_s)!=net_to_orig_pin_match_map.end()) {
               connected_cells_orig_set.insert(net_to_orig_pin_match_map[same_cc_s].begin(), net_to_orig_pin_match_map[same_cc_s].end());
             } else {
+#ifdef BASIC_DBG
               fmt::print("$$ Reporting cell n{}.\n", n_s.get_nid());
-              orig_connected_cells_vec_formed=false;
+#endif
+              orig_connected_cells_vec_formed=false;//if even 1 neighbor doesnt match, this will be false! so ALL have to be resolved.
               cell_collapsed = false;
             }
           }
 
+        
         } else {
+#ifdef BASIC_DBG
           fmt::print("$$ Reporting cell n{} due to no same IO with the connected n{}.\n", n_s.get_nid(), p_n.get_nid());
+#endif
           orig_connected_cells_vec_formed=false;
           cell_collapsed = false;
         }
@@ -1491,16 +1511,17 @@ bool Traverse_lg::surrounding_cell_match() {
         net_to_orig_pin_match_map[it->first].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
         any_matching_done=true;
         remove_from_crit_node_vec(it->first);
-        out_map_of_sets_synth.erase(it->first);
+        erase_values_vec.emplace_back(it->first);
         if (cell_collapsed && !connected_same_cell.is_invalid()) {//connected_same_cell present
           net_to_orig_pin_match_map[connected_same_cell].insert(connected_cells_orig_set.begin(), connected_cells_orig_set.end());
           remove_from_crit_node_vec(connected_same_cell);
-          out_map_of_sets_synth.erase(connected_same_cell);
-          inp_map_of_sets_synth.erase(connected_same_cell);
+          erase_values_vec.emplace_back(connected_same_cell);
         }
-        inp_map_of_sets_synth.erase(it++);
+        it++;
       } else {
+#ifdef BASIC_DBG
         fmt::print("  $$ Reporting cell n{}.\n", n_s.get_nid());
+#endif
         any_matching_done=false;
         it++;
       }
@@ -1510,6 +1531,12 @@ bool Traverse_lg::surrounding_cell_match() {
     }
 
   }
+
+  for (const auto &val_to_erase: erase_values_vec) {
+    out_map_of_sets_synth.erase(val_to_erase);
+    inp_map_of_sets_synth.erase(val_to_erase);
+  }
+
   return any_matching_done;
 }
 
@@ -1702,27 +1729,35 @@ void Traverse_lg::print_everything() {
 void Traverse_lg::set_theory_match_loopLast_only() {
 
   auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, true);
-	fmt::print("io_map_of_sets_orig: loop_last only\n"); print_io_map(io_map_of_sets_orig);
   auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, true);
+#ifdef BASIC_DBG
+	fmt::print("io_map_of_sets_orig: loop_last only\n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("io_map_of_sets_synth: loop_last only\n"); print_io_map(io_map_of_sets_synth);
+#endif
 
 	bool some_matching_done = false;
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
+#ifdef BASIC_DBG
     fmt::print("\nINTERMEDIATE after resolution LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+#endif
 	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
 	} while (some_matching_done && !crit_node_vec.empty());
 
+#ifdef BASIC_DBG
 	fmt::print("\nFINAL LL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nFINAL LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+#endif
 }
 
 void Traverse_lg::set_theory_match_final() {
 
   auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);//false: not loop_last
-	fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
   auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false);
+#ifdef BASIC_DBG
+	fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nio_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+#endif
 
 	bool some_matching_done = false;
 	do {
@@ -1730,8 +1765,10 @@ void Traverse_lg::set_theory_match_final() {
 	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
 	} while (some_matching_done && !crit_node_vec.empty());
 
+#ifdef BASIC_DBG
 	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+#endif
 }
 
 bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
