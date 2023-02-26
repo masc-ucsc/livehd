@@ -78,6 +78,7 @@ http_archive(
 http_archive(
     name = "slang",
     build_file = "slang.BUILD",
+    patches = ["//external:slang.patch"],
     sha256 = "28263ac3653b8b219ae4e9b9ab0e2b2603bb014c45399db8b85ff2a1ebf3e173",
     strip_prefix = "slang-6f2b66270064f40501754f64883f83bc5e7ca5a6",
     urls = [

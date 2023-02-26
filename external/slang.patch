@@ -1,0 +1,35 @@
+diff --git slang/tmp/Compilation.cpp slang/source/compilation/Compilation.cpp
+--- tmp/Compilation.cpp
++++ source/compilation/Compilation.cpp
+@@ -4,6 +4,8 @@
+ //
+ // File is under the MIT license; see LICENSE for details
+ //------------------------------------------------------------------------------
++#include <atomic>
++
+ #include "slang/compilation/Compilation.h"
+
+ #include "../text/CharInfo.h"
+@@ -156,12 +158,16 @@ Compilation::Compilation(const Bag& options) :
+     Builtins::registerGateTypes(*this);
+
+     // Set a default handler for printing types and symbol paths, for convenience.
+-    DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
+-    TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
+-        std::string str;
+-        sym.getHierarchicalPath(str);
+-        return str;
+-    });
++    static std::atomic<int> only_one=0;
++    auto only_one_counter = ++only_one;
++    if (only_one_counter==1) {
++      DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
++      TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
++          std::string str;
++          sym.getHierarchicalPath(str);
++          return str;
++      });
++    }
+
+     // Reset systemId counters that may have been changed due to creation of types
+     // in the std package.
