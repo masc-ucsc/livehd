@@ -29,7 +29,7 @@ bazel build -c dbg //main:all
 
 Sample command line:
 
-1- Read liberty file
+1-Read the liberty file
 ```
 livehd> inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib
 inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib
@@ -45,21 +45,30 @@ I 34368 22-09-04 11:57:22 unit.cpp:314] use celllib power unit 1e-09 W
 I 34368 22-09-04 11:57:22 celllib.cpp:66] added max celllib "sky130_fd_sc_hd__ff_100C_1v95" [cells:428]
 ```
 
-2- Read netlist and vcd:
+2-OPT1 Read verilog file(s) (OPTION 1 using the yosys input)
+```
+livehd> inou.liveparse files:counter.v |> inou.yosys.tolg |> pass.bitwidth
+```
+
+2-OPT2 Read Verilog file(s) using the experimental (has issues pending to fix in lnast2lg) slang backend
 
 ```
-livehd> inou.verilog files:counter.v |> pass.compiler |> pass.opentimer.power files:sky130_fd_sc_hd__ff_100C_1v95.lib,counter.vcd odir:tmp
+livehd> inou.verilog files:counter.v |> pass.compiler
 ```
 
-3-Check the result power trace: (divided in 100 chunks)
+3-Compute the power (using vcd, or MAX power if no VCD is provided)
+```
+livehd> lgraph.open name:counter |> pass.bitwidth |> pass.opentimer.power files:sky130_fd_sc_hd__ff_100C_1v95.lib,counter.vcd odir:tmp
+```
 
+4-Check the result power trace: (divided in 100 chunks)
 ```
 gnuplot> plot "tmp/counter.vcd_counter.power.trace" using 1:2 with lines
 ```
 
 ## trivial_and2 to generate VCD and power:
 
-1-Read the liberty file
+1-Read the liberty file (only once is needed)
 
 ```
 bazel build -c dbg //main:all
@@ -78,7 +87,7 @@ make -C ./obj_dir/ -f Vtest_and2.mk
 
 This generated output.vcd that has 3 levels of power activity
 
-3-Read the vcd and compute power trace
+3-Read the vcd and compute power trace (this using slang, `inou.yosys` should work too)
 
 ```
 livehd> inou.liveparse files:pass/opentimer/tests/test_and2.v |> inou.verilog |> pass.compiler |> pass.opentimer.power files:output.vcd,sky130_fd_sc_hd__ff_100C_1v95.lib
@@ -91,7 +100,7 @@ The MAX power (ignoring VCD) has dynamic switching W and internal power. The
 `output.vcd_test_and2.power.trace` file has a power trace for dynamic power.
 
 
-## Clock Gating
+## Clock Gating (TODO)
 
 CGE:   Clock Gating Efficiency
 DACGE: Data Aware Clock Gating Efficiency

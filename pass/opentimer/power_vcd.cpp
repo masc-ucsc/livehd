@@ -283,7 +283,7 @@ void Power_vcd::dump() const {
   }
 }
 
-void Power_vcd::compute(std::string_view odir) const {
+void Power_vcd::compute(std::string_view odir) {
   // FIXME:
   //
   // Now the VCD (id2channel) and hierarchy (hier_name2power) match. This is
@@ -378,10 +378,12 @@ void Power_vcd::compute(std::string_view odir) const {
       num_transitions += local_transitions;
       max_transitions += max_edges;
 
+#if 0
       fmt::print("average VCD {} transition {} power for {}\n"
           , static_cast<double>(local_transitions)/max_edges
           , it->second*static_cast<double>(local_transitions)/max_edges
           , hier_name);
+#endif
 
       const std::vector<std::string> m = absl::StrSplit(hier_name, ',');
       // top_1,imm1,imm2,lib,pin  // top_1 + imm1 + imm2 traces
@@ -407,6 +409,9 @@ void Power_vcd::compute(std::string_view odir) const {
     }
   }
 
+  double local_power_total   = 0;
+  size_t local_power_samples = 0;
+
   double time_step = timescale * max_timestamp / n_buckets;
   for (const auto &e : module_trace) {
     auto out_fname = absl::StrCat(odir, "/", fname, "_", e.first, ".power.trace");
@@ -420,12 +425,24 @@ void Power_vcd::compute(std::string_view odir) const {
     double x = 0;
     for (double v : e.second) {
       x += time_step;
-      fmt::print(f, "{} {}\n", x, v* n_buckets / max_edges);
+      auto p = v* n_buckets / max_edges;
+      local_power_total += p;
+      ++local_power_samples;
+      fmt::print(f, "{} {}\n", x, p);
     }
 
     std::fclose(f);
   }
 
-  // NOTE: 2x because clock does 2x transitions (max_timestamp)
-  fmt::print("average activity rate {} max_timestamp:{}\n", 2*num_transitions / max_transitions, timescale * max_timestamp);
+  power_total += local_power_total/static_cast<double>(local_power_samples);
+  ++power_samples;
+  if (local_power_samples==0) {
+    Pass::error("no samples to estimate average power from {}\n", get_filename());
+    return;
+  }
+
+  fmt::print("average activity:{} power:{} max_timestamp:{} \n"
+      ,2*num_transitions / max_transitions
+      , local_power_total/static_cast<double>(local_power_samples)
+      , timescale * static_cast<double>(max_timestamp));
 }

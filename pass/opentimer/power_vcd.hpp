@@ -28,6 +28,9 @@ protected:
   const char *map_end{nullptr};
   size_t      map_size{0};
 
+  double power_total{0};
+  size_t power_samples{0};
+
   std::vector<std::string_view> scope_stack;
 
   std::string fname;
@@ -36,6 +39,7 @@ protected:
     std::vector<std::string> hier_name;
     std::vector<size_t>      transitions;
   };
+
 
   size_t      deepest_vcd_hier_name_level{0};
   std::string deepest_vcd_hier_name;
@@ -81,5 +85,13 @@ public:
     hier_name2power.insert_or_assign(hier_name, 2*power);
   }
 
-  void compute(std::string_view odir) const;
+  void compute(std::string_view odir);
+
+  [[nodiscard]] std::string_view get_filename() const { return fname; }
+  [[nodiscard]] double get_power_average() const {
+    if (power_samples)
+      return power_total/static_cast<double>(power_samples);
+    return 0;
+  }
+
 };
