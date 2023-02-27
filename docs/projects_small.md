@@ -275,6 +275,27 @@ allow future integration with wavedrom.
 The idea is to have a hierarchy view/debug support. Some exmples in javascript:
 https://github.com/wavedrom/inspect or https://8bitworkshop.com "Debug Tree".
 
+## [small] thread_pool benchmark and locality
+
+thread_pool is designed to be quite efficient task queue. When there are too
+many tasks, the spawning task executes the code. This avoids the spawning
+overhead.
+
+There are 2 main enhancements:
+
+-Create a google benchmark against something like
+https://github.com/rkuchumov/staccato and generate plots to see how does it
+compare.
+
+-We loose a bit of performance due to locality. If the task spawn provides a
+"pointer" hint (lgraph and lnast), we could try to queue the task based on the
+pointer. This may require to change the code a bit. One possible option is to
+have a queue per CPU, and assign/insert on the queue based on address (hash to
+randomize). The main issue would be load invalance. If the queue is full, we
+could decide to insert in another queue with low work (but it will be good to
+remember that the hint has "migrated" to another queue. If all the queues have
+significant work, it may be better not to spawn. The idea is to try some of the
+CC benchmarks to decide the best thresholds across different cores/systems.)
 
 ## [medium] Generate Statecharts
 
