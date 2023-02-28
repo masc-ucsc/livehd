@@ -27,7 +27,7 @@
 // emhash7 better always unless very large (10K) emhash9
 
 
-static constexpr int n=40;
+static constexpr int n=32;
 #define TYPE_SEARCH uint16_t
 
 template <size_t Size>
@@ -472,7 +472,7 @@ BENCHMARK(emhash8_set_insert);
 BENCHMARK(emhash9_set_insert);
 
 BENCHMARK(linear_erase);
-BENCHMARK(binary_erase);
+//BENCHMARK(binary_erase);
 BENCHMARK(abseil_set_erase);
 BENCHMARK(emhash2_set_erase);
 BENCHMARK(emhash7_set_erase);
