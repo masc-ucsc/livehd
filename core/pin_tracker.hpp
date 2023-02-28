@@ -43,7 +43,7 @@ public:
       auto end   = p.first + p.second;  // [start,end)
       auto pos   = start;
       if (end > it->second.size()) {
-        end = it->second.size() - 1;
+        end = it->second.size();
       }
 
       while (pos < end) {
@@ -161,20 +161,49 @@ public:
     }
   }
 
-  void add_andor(Pin dst_pin, Pin a_pin) {
+  void add_or(Pin dst_pin, Pin a_pin) {
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
       return;
     }
     auto &pv = full_map[dst_pin];
-    it = full_map.find(a_pin); // WARNING: must issue find again because
-                               // full_map could corrupt the iterator
+    it = full_map.find(a_pin); // WARNING: insert could destroy iterator
 
     if (pv.size()< it->second.size()) {
       pv.resize(it->second.size(), {Zero_pin, 0});
     }
 
     for(auto i=0;i<it->second.size();++i) {
+      if (it->second[i].id == Zero_pin && it->second[i].pos == 0)
+        continue; // Nothing to do in this bit
+      if (pv[i].id == Zero_pin && pv[i].pos == 0) {
+        pv[i] = it->second[i];
+      }else{
+        pv[i].pos = -1;
+      }
+    }
+  }
+  void add_and(Pin dst_pin, Pin a_pin, Lconst a_mask) {
+    auto it = full_map.find(a_pin);
+    if (it == full_map.end()) {
+      return;
+    }
+    auto &pv = full_map[dst_pin];
+    it = full_map.find(a_pin); // WARNING: insert could destroy iterator
+
+    auto max_bits = a_mask.get_mask_range().second;
+    if (it->second.size() < max_bits)
+      max_bits = it->second.size();
+
+    if (pv.size()< max_bits) {
+      pv.resize(max_bits, {Zero_pin, 0});
+    }
+
+    for(auto i=0;i<max_bits;++i) {
+      if (it->second[i].id == Zero_pin && it->second[i].pos == 0)
+        continue; // Nothing to do in this bit
+      if (!a_mask.bit_test(i))
+        continue;
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {
         pv[i] = it->second[i];
       }else{

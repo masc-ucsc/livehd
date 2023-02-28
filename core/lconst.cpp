@@ -462,7 +462,9 @@ std::vector<std::pair<int, int>> Lconst::get_mask_range_pairs() const {
   }
 
   Number tmp_num = num;
+  bool neg_mask = false;
   if (num < 0) {
+    neg_mask = true;
     tmp_num = -num - 1;
     // There is no NOT in boost
     for (auto i = 0; i < get_bits(); ++i) {
@@ -484,7 +486,10 @@ std::vector<std::pair<int, int>> Lconst::get_mask_range_pairs() const {
       ++nones;
     }
     tmp_num >>= nones;
-    pairs.emplace_back(std::pair<int, int>(start_pos, nones));
+    if (tmp_num==0 && neg_mask)
+      pairs.emplace_back(std::pair<int, int>(start_pos, Bits_max));
+    else
+      pairs.emplace_back(std::pair<int, int>(start_pos, nones));
 
     start_pos += nones;
   }

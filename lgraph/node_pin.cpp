@@ -29,7 +29,7 @@ Node_pin::Node_pin(std::string_view path, const Compact_flat &comp) {
   I(current_g->is_valid_node_pin(idx));
 }
 
-Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(true) {
+Node_pin::Node_pin(Lgraph *_g, const Compact_driver &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(false) {
   I(!Hierarchy::is_invalid(hidx));
   current_g = top_g->ref_htree()->ref_lgraph(hidx);
   pid       = current_g->get_dst_pid(idx);

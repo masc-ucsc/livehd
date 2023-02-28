@@ -225,22 +225,33 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
           auto b_const = e.driver.get_type_const();
           pin_tracker.add_shl(wname, a_dpin.get_wire_name(), a_dpin.get_bits(), b_const);
         }
-      } else if (op == Ntype_op::Or || op == Ntype_op::And) {
+      } else if (op == Ntype_op::Or) {
         for(auto e:node.inp_edges()) {
-          pin_tracker.add_andor(wname, e.driver.get_wire_name());
+          pin_tracker.add_or(wname, e.driver.get_wire_name());
         }
+      } else if (op == Ntype_op::And) {
+        auto a_mask = Lconst(-1);
+        Node_pin a_dpin;
+        for(auto e:node.inp_edges()) {
+          if (e.driver.is_type_const()) {
+            a_mask = a_mask.and_op(e.driver.get_type_const());
+          }else{
+            if (!a_dpin.is_invalid()) {
+              node.dump();
+              Pass::error("pin_tracker needed for netlist can not handle multimple unknowns");
+              return;
+            }
+            a_dpin = e.driver;
+          }
+        }
+        if (!a_dpin.is_invalid())
+          pin_tracker.add_and(wname, a_dpin.get_wire_name(), a_mask);
       } else {
         node.dump();
         Pass::error("opentimer needs a tmap/synthesized netlist");
         return;
       }
-      continue;
     }
-    if (op != Ntype_op::Sub) {
-      node.dump();
-      Pass::error("opentimer needs a tmap/synthesized netlist");
-    }
-
 
     // setup driver pins and nets
     for (const auto &dpin : node.out_connected_pins()) {
@@ -273,8 +284,14 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     }
   }
 
-  //g->dump(true);
-  //pin_tracker.dump();
+#if 0
+  g->dump(true);
+  pin_tracker.dump();
+  for(auto &&it:overwrite_dpin2net) {
+    auto dpin = Node_pin(g, it.first);
+    fmt::print("node:{} pin:{} goes to {}\n", dpin.get_node().get_or_create_name(), dpin.get_wire_name(), it.second);
+  }
+#endif
 
   // 3rd: populate the cells
   for (const auto node : g->fast(true)) {
@@ -304,8 +321,8 @@ void Pass_opentimer::build_circuit(Lgraph *g) {  // Enhance this for build_circu
     for (const auto &dpin : node.out_connected_pins()) {
       auto pin_name  = absl::StrCat(instance_name, ":", dpin.get_pin_name());
       auto wire_name = get_driver_net_name(dpin);
-
       timer.connect_pin(pin_name, wire_name);
+
     }
 
     // connect input pins

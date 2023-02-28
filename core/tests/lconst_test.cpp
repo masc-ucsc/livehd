@@ -1784,17 +1784,17 @@ TEST_F(Lconst_test, mask_range_pairs) {
 
   EXPECT_EQ(Lconst(-1).get_mask_range_pairs().size(),    1);
   EXPECT_EQ(Lconst(-1).get_mask_range_pairs()[0].first,  0);
-  EXPECT_EQ(Lconst(-1).get_mask_range_pairs()[0].second, 1);
+  EXPECT_EQ(Lconst(-1).get_mask_range_pairs()[0].second, Bits_max);
 
   EXPECT_EQ(Lconst(-2).get_mask_range_pairs().size(),    1);
   EXPECT_EQ(Lconst(-2).get_mask_range_pairs()[0].first,  1);
-  EXPECT_EQ(Lconst(-2).get_mask_range_pairs()[0].second, 1);
+  EXPECT_EQ(Lconst(-2).get_mask_range_pairs()[0].second, Bits_max);
 
   auto neg1 = Lconst::from_pyrope("0sb1_0110");
   EXPECT_EQ(neg1.get_mask_range_pairs().size(),    2);
   EXPECT_EQ(neg1.get_mask_range_pairs()[0].first,  1);
   EXPECT_EQ(neg1.get_mask_range_pairs()[0].second, 2);
   EXPECT_EQ(neg1.get_mask_range_pairs()[1].first,  4);
-  EXPECT_EQ(neg1.get_mask_range_pairs()[1].second, 1);
+  EXPECT_EQ(neg1.get_mask_range_pairs()[1].second, Bits_max);
 }
 
