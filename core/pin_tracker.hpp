@@ -167,10 +167,12 @@ public:
       return;
     }
     auto &pv = full_map[dst_pin];
-    if (pv.size()< it->second.size())
-      pv.resize(it->second.size(), {Zero_pin, 0});
+    it = full_map.find(a_pin); // WARNING: must issue find again because
+                               // full_map could corrupt the iterator
 
-    it = full_map.find(a_pin); // The resize could destroy the iterator
+    if (pv.size()< it->second.size()) {
+      pv.resize(it->second.size(), {Zero_pin, 0});
+    }
 
     for(auto i=0;i<it->second.size();++i) {
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {
@@ -238,6 +240,7 @@ protected:
   }
 
   Pin Zero_pin;
+  // WARNING: Pin_vector MUST have pointer stability on resize of full_map
   absl::node_hash_map<Pin, Pin_vector> full_map;
 
 private:
