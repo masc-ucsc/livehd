@@ -1561,7 +1561,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   if (inp_edges_ordered[1].driver.is_type_const()) {
     auto v          = inp_edges_ordered[1].driver.get_type_const();
     false_path_zero = v == Lconst(0) || v.is_string();
-    false_path_one  = v == Lconst(1);
+    false_path_one  = v == Lconst(-1);
   }
 
   bool true_path_zero = false;
@@ -1569,7 +1569,7 @@ bool Cprop::scalar_mux(Node &node, XEdge_iterator &inp_edges_ordered) {
   if (inp_edges_ordered[2].driver.is_type_const()) {
     auto v         = inp_edges_ordered[2].driver.get_type_const();
     true_path_zero = v == Lconst(0) || v.is_string();
-    true_path_one  = v == Lconst(1) || v == Lconst(-1);
+    true_path_one  = v == Lconst(-1);
   }
 
   bool false_path_sel = inp_edges_ordered[0].driver == inp_edges_ordered[1].driver;

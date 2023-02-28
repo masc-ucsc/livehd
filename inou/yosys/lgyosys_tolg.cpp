@@ -1774,7 +1774,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
         auto not_node = g->create_node(Ntype_op::Not, 1);
         not_node.connect_sink(cmp_node);
 
-        exit_node.set_type(Ntype_op::Get_mask, y_bits);
+        exit_node.set_type(Ntype_op::Get_mask, 0);
         exit_node.setup_sink_pin("a").connect_driver(not_node);
         exit_node.setup_sink_pin("mask").connect_driver(g->create_node_const(-1));
       }
