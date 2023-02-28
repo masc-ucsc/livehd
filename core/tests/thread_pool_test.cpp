@@ -142,8 +142,9 @@ TEST_F(GTest1, bench) {
 
     for (int i = 0; i < 10000000; ++i) {
       queue.enqueue(i);
-      int a = queue.dequeue(a);
-      assert(a == i);
+      auto a = queue.dequeue();
+      EXPECT_TRUE(a);
+      EXPECT_EQ(*a, i);
     }
   }
   {
@@ -151,8 +152,9 @@ TEST_F(GTest1, bench) {
 
     for (int i = 0; i < 10000000; ++i) {
       queue.enqueue(i);
-      int a = queue.dequeue();
-      assert(a == i);
+      auto a = queue.dequeue();
+      EXPECT_TRUE(a);
+      EXPECT_EQ(*a,i);
     }
   }
   {

@@ -46,15 +46,15 @@ public:
   bool full() const { return (tail + 1) == head.load(std::memory_order_relaxed); }
   bool empty() const { return tail == head; }
 
-  bool dequeue(Type &data) {
+  std::optional<Type> dequeue() {
     for (;;) {
       IndexType head_copy = head.load(std::memory_order_acquire);
       if (head_copy == tail) {
-        return false;
+        return {};
       }
-      data = array[head_copy];
+      auto data = array[head_copy];
       if (head.compare_exchange_weak(head_copy, (IndexType)(head_copy + 1), std::memory_order_release)) {
-        return true;
+        return data;
       }
     }
   };

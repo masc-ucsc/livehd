@@ -12,7 +12,8 @@ static void BM_mpmc(benchmark::State& state) {
 
     for (int j = 0; j < state.range(0); ++j) {
       benchmark::DoNotOptimize(queue.enqueue(j));
-      auto data = queue.dequeue(data);
+      auto data = queue.dequeue();
+      assert(data);
       assert(*data == j);
     }
   }
