@@ -1,5 +1,5 @@
 
-module top(output logic [3:0] total);
+module punch(output logic [3:0] total);
 
   logic [2:0] out1;
   logic [2:0] out2;
