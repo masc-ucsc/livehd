@@ -4,8 +4,8 @@ module paramods(a, b, x, y);
 input [7:0] a, b;
 output [7:0] x, y;
 
-inc #(.step(3)) inc_a (.in(a), .out(x));
-inc #(.width(4), .step(7)) inc_b (b, y);
+//inc #(.step(3)) inc_a (.in(a), .out(x));
+inc #(.width(4),.step(7)) inc_b (b, y);
 
 endmodule
 

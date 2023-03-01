@@ -663,7 +663,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 
     Sub_node *sub = nullptr;
 
-    if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) {  // sub_cell type
+    if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 8) == 0) {  // sub_cell type
       std::string mod_name(&(cell->type.c_str()[1]));
 
       sub = g->ref_library()->ref_or_create_sub(mod_name, "-");
@@ -2226,7 +2226,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       log_error("Found complex yosys DFFs, run `techmap -map +/adff2dff.v` before calling the yosys2lg pass\n");
       I(false);
 
-    } else if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 9) == 0) {  // sub_cell type
+    } else if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 8) == 0) {  // sub_cell type
       I(exit_node.is_type_sub());
 
       absl::flat_hash_set<XEdge::Compact> added_edges;
