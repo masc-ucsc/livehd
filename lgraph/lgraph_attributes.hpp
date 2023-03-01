@@ -53,7 +53,7 @@ public:
   [[nodiscard]] const Node_name_map &get_node_name_map() const { return node_name_map; };
   [[nodiscard]] Node_name_map       *ref_node_name_map() { return &node_name_map; };
 
-  using Node_color_map = absl::flat_hash_map<Node::Compact, int>;
+  using Node_color_map = absl::flat_hash_map<Node::Compact_class, int>;
   [[nodiscard]] const Node_color_map &get_node_color_map() const { return node_color_map; };
   [[nodiscard]] Node_color_map       *ref_node_color_map() { return &node_color_map; };
 
