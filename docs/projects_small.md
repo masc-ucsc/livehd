@@ -162,8 +162,9 @@ Create a new Diagnostics class (static) to report/centralize errors. It should r
 that we have.
 
 The error/warning messages should leverage either of these:
-https://github.com/Excse/pretty_diagnostics
-https://github.com/QazmoQwerty/error-reporter
+
+* https://github.com/Excse/pretty_diagnostics
+* https://github.com/QazmoQwerty/error-reporter
 
 The pretty_diagnostics is an internal library, the API is not exposed.
 
