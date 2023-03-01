@@ -414,6 +414,7 @@ static void linear_insert(benchmark::State& state) {
   }
 }
 
+#if 0
 static void binary_erase(benchmark::State& state) {
   std::vector<TYPE_SEARCH> v;
 
@@ -441,6 +442,7 @@ static void binary_erase(benchmark::State& state) {
     benchmark::DoNotOptimize(v2);
   }
 }
+#endif
 
 static void binary_insert(benchmark::State& state) {
   std::vector<TYPE_SEARCH> v;

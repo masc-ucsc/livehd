@@ -2240,6 +2240,10 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
         }
 
         std::string name(&conn.first.c_str()[1]);
+        if (str_tools::is_i(name)) {
+          int pos = str_tools::to_i(name);
+          name = sub.get_name_from_graph_pos(pos);
+        }
 
         if (sub.is_output(name)) {
           continue;
