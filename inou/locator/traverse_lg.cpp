@@ -1187,11 +1187,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
       continue;
     }
     for (const auto node_dpins: node.out_connected_pins()) {
-      traverse_order.emplace_back(node_dpins.get_compact_flat());//FIXME: since flops are already matched, do not keep them here for backward matching.
-      break;//keeping any 1 dpin of the node in traverse_order to refer to the node in bwd_traversal
-            //not all dpins to avoid redundancy
-    }
-    for (const auto node_dpins: node.out_connected_pins()) {
+      traverse_order.emplace_back(node_dpins.get_compact_flat());//FIXME: since flops are already matched, do not keep them here for backward matching?
       const auto node_dpin_cf = node_dpins.get_compact_flat();
       bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
@@ -1231,10 +1227,15 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n");
   fmt::print("\t\tis_orig_lg: {}\n",is_orig_lg);
 #endif
+  absl::flat_hash_set<Node::Compact_flat> traversed_nodes;
   for (std::vector<Node_pin::Compact_flat>::const_reverse_iterator rit = traverse_order.rbegin(); rit != traverse_order.rend();
        ++rit) {  // const iter for const vec
     auto node_dpin_cf = *rit;
     auto node         = Node_pin("lgdb", node_dpin_cf).get_node();
+    if(traversed_nodes.find(node.get_compact_flat())!=traversed_nodes.end()) { 
+      continue;//we have processed for this node's inputs
+    }
+    traversed_nodes.insert(node.get_compact_flat());
 #ifdef BASIC_DBG
     fmt::print("node obtained from traverse_order: {},{} \n", node.get_nid(), Node_pin("lgdb", node_dpin_cf).get_pid());
 #endif
