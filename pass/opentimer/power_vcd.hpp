@@ -28,6 +28,20 @@ protected:
   const char *map_end{nullptr};
   size_t      map_size{0};
 
+  // vcd_hier_skip and vcd_hier_xtra_top are needed to match names between VCD
+  // and netlist because they have different top hierarchy.
+  //
+  // net_hier_name:  gcd,_333_,A
+  // vcd_hier_name:  foo,gcd1,_333_,A
+  //
+  // vcd_hier_skip is the number if characters to drop from vcd_hier_name
+  // vcd_hier_xtra_top is the hierarchy to add afterwards to vcd_hier to match net_hier_name
+  //
+  // vcd_hier_name goo,gcd1,_333_,A -> _333_,A -> gcd,_333_,A
+
+  size_t      vcd_hier_skip{0};
+  std::string vcd_hier_xtra_top;
+
   double power_total{0};
   size_t power_samples{0};
 
@@ -40,13 +54,8 @@ protected:
     std::vector<size_t>      transitions;
   };
 
-
-  size_t      deepest_vcd_hier_name_level{0};
-  std::string deepest_vcd_hier_name;
-
   absl::node_hash_map<std::string, Channel> id2channel;
-
-  absl::flat_hash_map<std::string, double> hier_name2power;
+  absl::flat_hash_map<std::string, double> net_hier_name2power;
 
   [[nodiscard]] size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
 
@@ -60,6 +69,7 @@ protected:
   const char *parse_sample(const char *ptr);
 
   void parse();
+  void find_hier_skip();
 
 public:
   Power_vcd() = default;
@@ -78,11 +88,11 @@ public:
 
   void set_tech_timeunit(double ts) { lib_timescale = ts; }
 
-  void clear_power() { hier_name2power.clear(); }
+  void clear_power() { net_hier_name2power.clear(); }
 
   void add(std::string_view hier_name, double power) {
     // x2 power because VCD uses transition (power for 1->0 and 0->1)
-    hier_name2power.insert_or_assign(hier_name, 2*power);
+    net_hier_name2power.insert_or_assign(hier_name, 2*power);
   }
 
   void compute(std::string_view odir);

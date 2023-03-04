@@ -129,16 +129,6 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     // fmt::print("scope:{}\n", scope_name);
     scope_stack.emplace_back(scope_name);
 
-    if (scope_stack.size() > deepest_vcd_hier_name_level) {
-      std::string hier_name;
-      for (auto &str : scope_stack) {
-        hier_name.append(str);
-        hier_name.append(",");
-      }
-      deepest_vcd_hier_name_level = scope_stack.size();
-      deepest_vcd_hier_name       = hier_name;
-    }
-
   } else if (strncmp("date", ptr, 4) == 0) {
     ptr += 4;
   } else if (strncmp("version", ptr, 7) == 0) {
@@ -289,59 +279,75 @@ void Power_vcd::dump() const {
   }
 }
 
-void Power_vcd::compute(std::string_view odir) {
-  // FIXME:
-  //
-  // Now the VCD (id2channel) and hierarchy (hier_name2power) match. This is
-  // because the "TOP" is dropped, and there is no weird hierarchy in the
-  // synthesis.
-  //
-  // A better approach is to find "what to drop" from
-  // id2channel.second.hier_name In the default is to drop TOP, if the
-  // testbench has more things it can drop more. It should always be a constant
-  // part
 
-  // Pick a random hier_name2power and decide how much from the deepest_vcd_hier_name must be dropped
-  size_t n_skip = 0;
-  {
-    absl::flat_hash_map<std::string, size_t> drop_count;
+// matchCount now contains the number of characters that match at the end of both strings
 
-    for (const auto &hname : hier_name2power) {
-      const char *top_level_end = strchr(hname.first.c_str(), ',');
-      if (top_level_end == nullptr) {
-        continue;
+
+void Power_vcd::find_hier_skip() {
+
+  // Find the minimum to drop from top (all the ones with common top hier)
+  if (net_hier_name2power.empty())
+    return;
+
+  vcd_hier_skip = 0;
+
+  for (const auto &e : id2channel) {
+    for (std::string_view vcd_hier_name : e.second.hier_name) {
+
+      if (vcd_hier_skip < vcd_hier_name.size()) {
+        std::string adjusted_vcd_hier_name = absl::StrCat(vcd_hier_xtra_top, vcd_hier_name.substr(vcd_hier_skip));
+
+        auto it = net_hier_name2power.find(adjusted_vcd_hier_name);
+        if (it != net_hier_name2power.end())
+          continue; // already works
       }
 
-      auto top_str = hname.first.substr(0, top_level_end - hname.first.c_str());
+      for (const auto &it2 : net_hier_name2power) {
+        std::string_view net_hier_name{it2.first};
 
-      const char *match_str = strstr(deepest_vcd_hier_name.c_str(), top_str.c_str());
+        auto nmatch = str_tools::ends_with_count(vcd_hier_name, net_hier_name);
+        if (nmatch==0)
+          continue;
 
-      if (match_str == nullptr) {
-        continue;
+        if (vcd_hier_skip == 0 || vcd_hier_skip > vcd_hier_name.size()-nmatch) {
+          vcd_hier_xtra_top = net_hier_name.substr(0,net_hier_name.size()-nmatch);
+          vcd_hier_skip = vcd_hier_name.size()-nmatch;
+
+          // fmt::print("vcd_hier_skip:{} vcd_hier_xtra_top:{} net:{} vcd:{}\n", vcd_hier_skip, vcd_hier_xtra_top, net_hier_name, vcd_hier_name);
+        }
       }
-
-      n_skip = match_str - deepest_vcd_hier_name.c_str();
-
-      // fmt::print("n_skip:{} hier_name:{} deepest_vcd_hier_name:{}\n", n_skip, hname.first, deepest_vcd_hier_name);
-      break;
     }
   }
 
-#if 1
+  //fmt::print("vcd_hier_skip:{} vcd_hier_xtra_top:{}\n", vcd_hier_skip, vcd_hier_xtra_top);
+
+#if 0
+  // WARNING: this creates quite a few false positives (mostly switching inside
+  // the cell) but useful for debugging
+
   {
     // This is to debug if there are not matching names in VCD and hier
-    for (const auto &hname : hier_name2power) {
-      auto hier_name = hname.first;
-      bool found     = false;
-      for (const auto &e : id2channel) {
-        for (const auto &e2 : e.second.hier_name) {
-          auto vcd_hier_name = e2.substr(n_skip);
-          if (vcd_hier_name == hier_name) {
-            found = true;
-            break;
-          }
+    for (const auto &e : id2channel) {
+      bool found = false;
+      for (const auto &vcd_full_hier : e.second.hier_name) {
+        if (vcd_hier_skip >= vcd_full_hier.size()) {
+          found = true;
+          // WARNING: this may be OK. Those are wires in top level testbench that are not in the netlist
+          fmt::print("vcd_hier_skip:{} vcd_hier_xtra_top:{} too short vcd:{}\n", vcd_hier_skip, vcd_hier_xtra_top, vcd_full_hier);
+          break;
         }
-        if (found) {
+
+        if (vcd_full_hier[vcd_hier_skip] != ',') {
+          found = true;
+          // OK for signals that are not to be propagated
+          fmt::print("vcd_hier_skip:{} vcd_hier_xtra_top:{} signal out of hierarchy vcd:{}\n", vcd_hier_skip, vcd_hier_xtra_top, vcd_full_hier);
+          break;
+        }
+
+        std::string adjusted_vcd_hier_name = absl::StrCat(vcd_hier_xtra_top, vcd_full_hier.substr(vcd_hier_skip));
+        auto it = net_hier_name2power.find(adjusted_vcd_hier_name);
+        if (it != net_hier_name2power.end()) {
+          found = true;
           break;
         }
       }
@@ -349,11 +355,25 @@ void Power_vcd::compute(std::string_view odir) {
         // WARNING: This may be OK if the VCD is partial, but not nice because the power
         // is not representative of the whole, just the sampled parts. It also
         // makes it hard to know if it is a bug in VCD or not.
-        fmt::print("pin with power not found in vcd trace v_hier:{}\n", hier_name);
+        size_t local_transitions = 0;
+        for (const auto &v : e.second.transitions) {
+          local_transitions += v;
+        }
+        if (local_transitions>0) {
+          for (const auto &vcd_full_hier : e.second.hier_name) {
+            fmt::print("pin with activity not found in net list vcd:{}\n", vcd_full_hier);
+          }
+        }
       }
     }
   }
 #endif
+
+}
+
+void Power_vcd::compute(std::string_view odir) {
+
+  find_hier_skip();
 
   absl::node_hash_map<std::string, std::vector<double>> module_trace;
 
@@ -364,13 +384,16 @@ void Power_vcd::compute(std::string_view odir) {
   trace_step.reserve(n_buckets);
 
   for (const auto &e : id2channel) {
-    for (const auto &hname : e.second.hier_name) {
-      auto hier_name = hname.substr(n_skip);
+    for (const auto &vcd_full_hier : e.second.hier_name) {
+      if (vcd_hier_skip >= vcd_full_hier.size())
+        continue;
 
-      // fmt::print("VCD transition for:{}\n", hier_name);
+      std::string adjusted_vcd_hier_name = absl::StrCat(vcd_hier_xtra_top, vcd_full_hier.substr(vcd_hier_skip));
 
-      auto it = hier_name2power.find(hier_name);
-      if (it == hier_name2power.end()) {
+      // fmt::print("VCD transition for:{}\n", vcd_name);
+
+      auto it = net_hier_name2power.find(adjusted_vcd_hier_name);
+      if (it == net_hier_name2power.end()) {
         continue;
       }
 
@@ -391,7 +414,7 @@ void Power_vcd::compute(std::string_view odir) {
           , hier_name);
 #endif
 
-      const std::vector<std::string> m = absl::StrSplit(hier_name, ',');
+      const std::vector<std::string> m = absl::StrSplit(adjusted_vcd_hier_name, ',');
       // top_1,imm1,imm2,lib,pin  // top_1 + imm1 + imm2 traces
 
       std::string hier_path;

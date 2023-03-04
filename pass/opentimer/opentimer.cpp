@@ -57,6 +57,7 @@ void Pass_opentimer::read_vcd() {
     if (!ok) {
       Pass::error("could not read vcd {} file", f);
     }
+    //vcd_list[i].dump();
   }
 }
 
