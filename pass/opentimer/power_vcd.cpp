@@ -169,6 +169,12 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
     ptr += 14;
   } else if (strncmp("dumpvars", ptr, 8) == 0) {
     ptr += 8;
+  } else if (strncmp("dumpall", ptr, 7) == 0) {
+    ptr += 7;
+  } else if (strncmp("dumpoff", ptr, 7) == 0) {
+    ptr += 7;
+  } else if (strncmp("dumpon", ptr, 6) == 0) {
+    ptr += 6;
   } else if (strncmp("end", ptr, 3) == 0) {
     ptr += 3;
   } else {
