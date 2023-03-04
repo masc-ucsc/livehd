@@ -2339,7 +2339,7 @@ void Inou_firrtl_module::setup_register_reset_init(Lnast& lnast, Lnast_nid& pare
   }
 
   if (!value_node.is_invalid()) {
-    create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset"), value_node, stmt);
+    create_tuple_add_from_str(lnast, parent_node, absl::StrCat("#", reg_raw_name, ".__reset_pin"), value_node, stmt);
   }
 
   if (tied0_reset) {

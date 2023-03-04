@@ -1653,7 +1653,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
           bool wants_negreset2 = cell->getParam(ID::CLR_POLARITY).as_int() == 0;
           I(wants_negreset2 == wants_negreset);  // both agree
         }
-        exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::CLR));
+        exit_node.setup_sink_pin("reset_pin").connect_driver(get_dpin(g, cell, ID::CLR));
       } else if (cell->hasPort(ID::SRST)) {
         if (cell->hasParam(ID::SRST_POLARITY)) {
           if (cell->getParam(ID::SRST_POLARITY).as_bool()) {
@@ -1663,7 +1663,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
           }
         }
 
-        exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::SRST));
+        exit_node.setup_sink_pin("reset_pin").connect_driver(get_dpin(g, cell, ID::SRST));
 
         if (cell->hasParam(ID::SRST_VALUE)) {
           const auto &v = cell->getParam(ID::SRST_VALUE);
@@ -1680,7 +1680,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
           }
         }
 
-        exit_node.setup_sink_pin("reset").connect_driver(get_dpin(g, cell, ID::ARST));
+        exit_node.setup_sink_pin("reset_pin").connect_driver(get_dpin(g, cell, ID::ARST));
 
         if (cell->hasParam(ID::ARST_VALUE)) {
           const auto &v = cell->getParam(ID::ARST_VALUE);
@@ -1707,7 +1707,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
         exit_node.setup_sink_pin("async").connect_driver(g->create_node_const(1));
       }
 
-      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell, ID::CLK));
+      exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
       exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::D));
       //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
@@ -2209,7 +2209,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_P_", 8) == 0) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
-      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell, ID::C));
+      exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::C));
       exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::D));
 
       //--------------------------------------------------------------
@@ -2217,7 +2217,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       exit_node.set_type(Ntype_op::Flop, get_output_size(cell));
 
       exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(0));
-      exit_node.setup_sink_pin("clock").connect_driver(get_dpin(g, cell, ID::C));
+      exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::C));
       exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::D));
 
     } else if (std::strncmp(cell->type.c_str(), "$_DFF_NN", 8) == 0 || std::strncmp(cell->type.c_str(), "$_DFF_NP", 8) == 0

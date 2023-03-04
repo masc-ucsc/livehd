@@ -127,11 +127,11 @@ void Firmap::clone_edges_flop(Lgraph *new_lg, Node &node, PinMap &pinmap) {
   // (2) remove redundant Or_op which comes from __fir_as_asyn
   if (is_async_rst) {
     auto new_const_dpin = new_lg->create_node_const(1).setup_driver_pin();
-    auto old_spin       = node.setup_sink_pin("clock");  // just pick old node clock to get the mapped new node
+    auto old_spin       = node.setup_sink_pin("clock_pin");  // just pick old node clock to get the mapped new node
     auto new_flop_node  = pinmap[old_spin].get_node();
     new_const_dpin.connect_sink(new_flop_node.setup_sink_pin("async"));
 
-    auto new_rst_spin = new_flop_node.setup_sink_pin("reset");
+    auto new_rst_spin = new_flop_node.setup_sink_pin("reset_pin");
     I(new_rst_spin.get_driver_pin().get_type_op() == Ntype_op::Or);
     auto new_or_spin        = new_rst_spin.get_driver_pin().get_node().get_sink_pin("A");
     auto new_or_spin_driver = new_or_spin.get_driver_pin();

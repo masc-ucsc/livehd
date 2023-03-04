@@ -1738,7 +1738,7 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
         ++n_rd_ports;
       }
     }
-    if (field == "clock") {
+    if (field == "clock_pin") {
       ++n_clocks;
     }
   }
@@ -1762,16 +1762,16 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
     }
   } else if (n_clocks == 1) {
     if (type_val == 2) {
-      Pass::error("memory {} is array but has clock", node.debug_name());
+      Pass::error("memory {} is array but has clock_pin", node.debug_name());
       return;
     }
-    reconnect_memory_port_const(node, "clock", tup);
+    reconnect_memory_port_const(node, "clock_pin", tup);
   } else {
     if (type_val == 2) {
-      Pass::error("memory {} is array but has clock", node.debug_name());
+      Pass::error("memory {} is array but has clock_pin", node.debug_name());
       return;
     }
-    reconnect_memory_port(node, n_clocks, "clock", tup);
+    reconnect_memory_port(node, n_clocks, "clock_pin", tup);
   }
 
   reconnect_memory_port_const(node, "bits", tup);
@@ -2318,37 +2318,39 @@ void Cprop::scalar_pass(Lgraph *lg) {
 }
 
 void Cprop::connect_clock_pin_if_needed(Node &node) {
-  auto spin_clock = node.setup_sink_pin("clock");
+  auto spin_clock = node.setup_sink_pin("clock_pin");
   if (spin_clock.is_connected()) {
     return;
   }
 
   auto *lg = node.get_class_lgraph();
 
-  Node_pin clock_pin;
+  Node_pin clock_io;
   if (lg->has_graph_input("clock")) {
-    clock_pin = lg->get_graph_input("clock");
+    clock_io = lg->get_graph_input("clock");
+  }else if (lg->has_graph_input("clk")) {
+    clock_io = lg->get_graph_input("clk");
   } else {
-    clock_pin = lg->add_graph_input("clock", Port_invalid, 1);
+    clock_io = lg->add_graph_input("clock", Port_invalid, 1);
   }
-  spin_clock.connect_driver(clock_pin);
+  spin_clock.connect_driver(clock_io);
 }
 
 void Cprop::connect_reset_pin_if_needed(Node &node) {
-  auto spin_reset = node.setup_sink_pin("reset");
+  auto spin_reset = node.setup_sink_pin("reset_pin");
   if (spin_reset.is_connected()) {
     return;
   }
 
   auto *lg = node.get_class_lgraph();
 
-  Node_pin reset_pin;
+  Node_pin reset_io;
   if (lg->has_graph_input("reset")) {
-    reset_pin = lg->get_graph_input("reset");
+    reset_io = lg->get_graph_input("reset");
   } else {
-    reset_pin = lg->add_graph_input("reset", Port_invalid, 1);
+    reset_io = lg->add_graph_input("reset", Port_invalid, 1);
   }
-  spin_reset.connect_driver(reset_pin);
+  spin_reset.connect_driver(reset_io);
 }
 
 void Cprop::tuple_pass(Lgraph *lg) {

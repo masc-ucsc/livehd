@@ -207,7 +207,7 @@ void Lgyosys_dump::create_memory(Lgraph *g, RTLIL::Module *mod, Node &node) {
 
   auto posedge_value = node.get_sink_pin("posclk").get_driver_node().get_type_const().to_i();
 
-  auto  clock_dpin = node.get_sink_pin("clock").get_driver_pin();
+  auto  clock_dpin = node.get_sink_pin("clock_pin").get_driver_pin();
   auto *clk_wire   = get_wire(clock_dpin);
 
   auto *addr_wire    = get_wire(addr_dpin);
@@ -741,14 +741,14 @@ void Lgyosys_dump::to_yosys(Lgraph *g) {
         Node_pin negreset_dpin;
         Node_pin async_dpin;
 
-        if (node.is_sink_connected("reset")) {
-          reset_dpin = node.get_sink_pin("reset").get_driver_pin();
+        if (node.is_sink_connected("reset_pin")) {
+          reset_dpin = node.get_sink_pin("reset_pin").get_driver_pin();
         }
         if (node.is_sink_connected("initial")) {
           initial_dpin = node.get_sink_pin("initial").get_driver_pin();
         }
-        if (node.is_sink_connected("clock")) {
-          clock_dpin = node.get_sink_pin("clock").get_driver_pin();
+        if (node.is_sink_connected("clock_pin")) {
+          clock_dpin = node.get_sink_pin("clock_pin").get_driver_pin();
         }
         if (node.is_sink_connected("din")) {
           din_dpin = node.get_sink_pin("din").get_driver_pin();

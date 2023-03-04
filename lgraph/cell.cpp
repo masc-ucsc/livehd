@@ -168,7 +168,7 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch (pid) {
         case 0: return "addr";     // runtime  x n_ports
         case 1: return "bits";     // comptime x 1
-        case 2: return "clock";    // runtime  x 1 or n_ports
+        case 2: return "clock_pin";// runtime  x 1 or n_ports
         case 3: return "din";      // runtime  x n_ports
         case 4: return "enable";   // runtime  x n_ports
         case 5: return "fwd";      // comptime x 1
@@ -184,12 +184,12 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch (pid) {
         case 0: return "async";
         case 1: return "initial";  // reset value
-        case 2: return "clock";
+        case 2: return "clock_pin";
         case 3: return "din";
         case 4: return "enable";
         case 5: return "negreset";
         case 6: return "posclk";
-        case 7: return "reset";
+        case 7: return "reset_pin";
         default: return "invalid";
       }
       break;
@@ -206,10 +206,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       switch (pid) {
         case 0: return "valid";
         case 1: return "initial";  // reset value
-        case 2: return "clock";
+        case 2: return "clock_pin";
         case 3: return "din";
         case 5: return "stop";  // stop from next cycle
-        case 7: return "reset";
+        case 7: return "reset_pin";
         default: return "invalid";
       }
       break;

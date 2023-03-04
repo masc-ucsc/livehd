@@ -181,7 +181,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
         return;
       }
       mem_fwd = e.driver.get_type_const().to_i();
-    } else if (str_tools::ends_with(pin_name, "clock")) {
+    } else if (str_tools::ends_with(pin_name, "clock_pin")) {
       port_vector[port_id].clock = e.driver;
     } else if (str_tools::ends_with(pin_name, "addr")) {
       port_vector[port_id].addr = e.driver;
@@ -828,14 +828,14 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
         edge = "negedge";
       }
     }
-    std::string clock = get_scaped_name(node.get_sink_pin("clock").get_wire_name());
+    std::string clock = get_scaped_name(node.get_sink_pin("clock_pin").get_wire_name());
 
     std::string reset_async;
     std::string reset;
     bool        negreset = false;
 
-    if (node.get_sink_pin("reset").is_connected()) {
-      auto reset_dpin = node.get_sink_pin("reset").get_driver_pin();
+    if (node.get_sink_pin("reset_pin").is_connected()) {
+      auto reset_dpin = node.get_sink_pin("reset_pin").get_driver_pin();
       if (reset_dpin.is_type_const()) {
         auto reset_const = reset_dpin.get_node().get_type_const();
         if (!reset_const.is_known_false() && reset_const != Lconst::from_string("false")) {
@@ -843,7 +843,7 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, Lgraph *l
           reset = reset_const.to_verilog();  // hardcoded value???
         }
       } else {
-        reset = get_wire_or_const(node.get_sink_pin("reset").get_driver_pin());
+        reset = get_wire_or_const(node.get_sink_pin("reset_pin").get_driver_pin());
 
         if (node.get_sink_pin("negreset").is_connected()) {
           negreset = node.get_sink_pin("negreset").get_driver_pin().get_type_const().to_i() != 0;

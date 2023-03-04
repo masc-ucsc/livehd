@@ -59,16 +59,16 @@ void Lgraph::each_sorted_graph_io(const std::function<void(Node_pin &pin, Port_I
       if (a.dpin.is_graph_input() && b.dpin.is_graph_input()) {
         auto a_name = a.dpin.get_name();
         auto b_name = b.dpin.get_name();
-        if (a_name == "clock" && b_name != "clock") {
+        if (a_name == "clock_pin" && b_name != "clock_pin") {
           return true;
         }
-        if (a_name == "reset" && b_name != "reset") {
+        if (a_name == "reset_pin" && b_name != "reset_pin") {
           return true;
         }
-        if (b_name == "clock") {
+        if (b_name == "clock_pin") {
           return false;
         }
-        if (b_name == "reset") {
+        if (b_name == "reset_pin") {
           return false;
         }
       }

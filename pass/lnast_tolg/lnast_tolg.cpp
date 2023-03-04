@@ -1621,25 +1621,25 @@ void Lnast_tolg::setup_lnast_to_lgraph_primitive_type_mapping() {
 
 void Lnast_tolg::setup_scalar_reg_clkrst(Lgraph *lg, Node &reg_node) {
   Node_pin clk_dpin;
-  if (!lg->has_graph_input("clock")) {
-    clk_dpin = lg->add_graph_input("clock", Port_invalid, 1);
+  if (!lg->has_graph_input("clock_pin")) {
+    clk_dpin = lg->add_graph_input("clock_pin", Port_invalid, 1);
   } else {
-    clk_dpin = lg->get_graph_input("clock");
+    clk_dpin = lg->get_graph_input("clock_pin");
   }
 
-  auto clk_spin = reg_node.setup_sink_pin("clock");
+  auto clk_spin = reg_node.setup_sink_pin("clock_pin");
   lg->add_edge(clk_dpin, clk_spin);
 
   /////////////////////////////////
 
   Node_pin rst_dpin;
-  if (!lg->has_graph_input("reset")) {
-    rst_dpin = lg->add_graph_input("reset", Port_invalid, 1);
+  if (!lg->has_graph_input("reset_pin")) {
+    rst_dpin = lg->add_graph_input("reset_pin", Port_invalid, 1);
   } else {
-    rst_dpin = lg->get_graph_input("reset");
+    rst_dpin = lg->get_graph_input("reset_pin");
   }
 
-  auto rst_spin = reg_node.setup_sink_pin("reset");
+  auto rst_spin = reg_node.setup_sink_pin("reset_pin");
   lg->add_edge(rst_dpin, rst_spin);
 }
 

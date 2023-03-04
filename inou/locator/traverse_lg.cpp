@@ -1060,7 +1060,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
     }
     for (auto sink_dpin : dpin.out_sinks()) {
       for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//FIXME:??: nodes w/o any o/p will NOT appear in map now -- OK!
-        if(dpin.get_pin_name()=="reset") continue;//do not want "reset" in inp-set (gives matching issues)
+        if(dpin.get_pin_name()=="reset_pin") continue;//do not want "reset" in inp-set (gives matching issues)
         if(!net_to_orig_pin_match_map.empty()){
           auto match_val = get_matching_map_val(dpin.get_compact_flat());//resolution attempt
           if(!match_val.empty()) {
@@ -2017,7 +2017,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
       return;
     } else if (node.is_graph_io()) {
       auto tmp_x = node_pin.has_name() ? node_pin.get_name() : node_pin.get_pin_name();
-      if (tmp_x != "reset" && tmp_x != "clock") {
+      if (tmp_x != "reset_pin" && tmp_x != "clock_pin") {
         in_set.insert(node_pin.has_name() ? node_pin.get_name() : node_pin.get_pin_name());
         io_set.insert(node_pin.has_name() ? node_pin.get_name() : node_pin.get_pin_name());
         // return node.get_compact_flat();

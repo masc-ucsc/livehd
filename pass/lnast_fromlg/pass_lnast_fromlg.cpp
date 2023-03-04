@@ -756,7 +756,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
   Node_pin clk_pin, din_pin, en_pin, reset_pin, pola_pin, init_pin, async_pin;
   for (const auto& inp : pin.get_node().inp_edges()) {
     auto pin_name = inp.sink.get_pin_name();
-    if (pin_name == "clock") {
+    if (pin_name == "clock_pin") {
       I(!has_clk);
       has_clk = true;
       clk_pin = inp.driver;
@@ -769,7 +769,7 @@ void Pass_lnast_fromlg::attach_flop_node(Lnast& lnast, Lnast_nid& parent_node, c
       has_en = true;
       en_pin = inp.driver;
 
-    } else if (pin_name == "reset") {
+    } else if (pin_name == "reset_pin") {
       I(!has_reset);
       has_reset = true;
       reset_pin = inp.driver;
