@@ -2227,47 +2227,52 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       I(false);
 
     } else if (cell->type.c_str()[0] == '\\' || strncmp(cell->type.c_str(), "$paramod\\", 8) == 0) {  // sub_cell type
-      I(exit_node.is_type_sub());
 
-      absl::flat_hash_set<XEdge::Compact> added_edges;
+      if (cell->connections().empty()) {
+        exit_node.set_type(Ntype_op::Or); // useless disconnected cell
+      }else{
+        I(exit_node.is_type_sub());
 
-      const auto &sub = exit_node.get_type_sub_node();
+        absl::flat_hash_set<XEdge::Compact> added_edges;
 
-      for (auto &conn : cell->connections()) {
-        RTLIL::SigSpec ss = conn.second;
-        if (ss.size() == 0) {
-          continue;
+        const auto &sub = exit_node.get_type_sub_node();
+
+        for (auto &conn : cell->connections()) {
+          RTLIL::SigSpec ss = conn.second;
+          if (ss.size() == 0) {
+            continue;
+          }
+
+          std::string name(&conn.first.c_str()[1]);
+          if (str_tools::is_i(name)) {
+            int pos = str_tools::to_i(name);
+            name = sub.get_name_from_graph_pos(pos);
+          }
+
+          if (sub.is_output(name)) {
+            continue;
+          }
+          if (!sub.is_input(name)) {
+            log_error("sub:%s does not have pin:%s as input\n", std::string(sub.get_name()).c_str(), name.c_str());
+          }
+
+          Node_pin spin = exit_node.setup_sink_pin(name);
+          if (spin.is_invalid()) {
+            continue;
+          }
+
+          Node_pin dpin = create_pick_concat_dpin(g, ss, true);
+
+          if (added_edges.find(XEdge(dpin, spin).get_compact()) != added_edges.end()) {
+            // there are two edges from dpin to spin
+            // this is not allowed in lgraph, add a Ntype_op::Or in between
+            auto or_node = g->create_node(Ntype_op::Or, ss.size());
+            g->add_edge(dpin, or_node.setup_sink_pin());
+            dpin = or_node.setup_driver_pin();
+          }
+          g->add_edge(dpin, spin);
+          added_edges.insert(XEdge(dpin, spin).get_compact());
         }
-
-        std::string name(&conn.first.c_str()[1]);
-        if (str_tools::is_i(name)) {
-          int pos = str_tools::to_i(name);
-          name = sub.get_name_from_graph_pos(pos);
-        }
-
-        if (sub.is_output(name)) {
-          continue;
-        }
-        if (!sub.is_input(name)) {
-          log_error("sub:%s does not have pin:%s as input\n", std::string(sub.get_name()).c_str(), name.c_str());
-        }
-
-        Node_pin spin = exit_node.setup_sink_pin(name);
-        if (spin.is_invalid()) {
-          continue;
-        }
-
-        Node_pin dpin = create_pick_concat_dpin(g, ss, true);
-
-        if (added_edges.find(XEdge(dpin, spin).get_compact()) != added_edges.end()) {
-          // there are two edges from dpin to spin
-          // this is not allowed in lgraph, add a Ntype_op::Or in between
-          auto or_node = g->create_node(Ntype_op::Or, ss.size());
-          g->add_edge(dpin, or_node.setup_sink_pin());
-          dpin = or_node.setup_driver_pin();
-        }
-        g->add_edge(dpin, spin);
-        added_edges.insert(XEdge(dpin, spin).get_compact());
       }
 
     } else {

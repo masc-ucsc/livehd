@@ -169,7 +169,7 @@ protected:
       }
     }
 
-    lib->each_lgraph([this, lib](Lg_type_id lgid, std::string_view name) {
+    lib->each_sub([this, lib](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
       Lgraph *lg = lib->open_lgraph(name);
       I(lg);

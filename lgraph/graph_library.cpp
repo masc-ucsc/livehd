@@ -714,13 +714,13 @@ void Graph_library::unregister_int(Lgraph *lg) {
   }
 }
 
-void Graph_library::each_lgraph(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
+void Graph_library::each_sub(const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   for (const auto &[name, id] : name2id) {
     f1(id, name);
   }
 }
 
-void Graph_library::each_lgraph(std::string_view                                                   match,
+void Graph_library::each_sub(std::string_view                                                   match,
                                 const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);

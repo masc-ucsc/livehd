@@ -110,7 +110,7 @@ void Meta_api::match(Eprp_var &var) {
   std::vector<Lgraph *> lgs;
 
   try {
-    library->each_lgraph(match, [&lgs, library](Lg_type_id lgid, std::string_view name) {
+    library->each_sub(match, [&lgs, library](Lg_type_id lgid, std::string_view name) {
       (void)lgid;
 
       auto *lg = library->open_lgraph(name);

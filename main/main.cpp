@@ -123,7 +123,7 @@ Replxx::completions_t hook_shared(std::string const& context, int index, std::ve
       std::vector<std::string> name_files;
       auto*                    library = Graph_library::instance("lgdb/");
 
-      library->each_lgraph([&name_files, path](Lg_type_id id, std::string_view name) {
+      library->each_sub([&name_files, path](Lg_type_id id, std::string_view name) {
         (void)id;
         name_files.emplace_back(name);
       });
