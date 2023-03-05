@@ -455,7 +455,7 @@ Lgraph *Graph_library::ref_or_create_lgraph_int(std::string_view name, std::stri
 
   auto lgid = reset_id_int(name, source);
 
-  lg = new Lgraph(path, name, lgid, this);
+  lg = new Lgraph(path, name, lgid, this, source);
 
   lg->clear_int();
 
@@ -497,7 +497,7 @@ Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
     return nullptr;
   }
 
-  auto *lg = new Lgraph(path, name, lgid, this);
+  auto *lg = new Lgraph(path, name, lgid, this, "");
 
   lg->load(hif);
 

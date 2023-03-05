@@ -31,7 +31,7 @@ protected:
 
   Hierarchy htree;
 
-  explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib);
+  explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source);
 
   Index_id get_root_idx(Index_id idx) const {
     // node_internal.ref_lock();

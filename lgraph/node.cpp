@@ -506,13 +506,18 @@ Node Node::create(Ntype_op op) const {
   auto node  = current_g->create_node(op);
   node.top_g = top_g;
   node.hidx  = hidx;
+
+  if (has_loc()) { // Keep LoC
+    node.set_loc(get_loc());
+    node.set_source(get_source());
+  }
   return node;
 }
 
 Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const {
   auto node  = current_g->create_node(op);
   node.set_loc(loc.first, loc.second);//pos1 and pos2
-  node.set_fname(fname);
+  node.set_source(fname);
   node.top_g = top_g;
   node.hidx  = hidx;
   return node;
@@ -625,13 +630,36 @@ Bits_t Node::get_bits() const {
 
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
-void Node::set_loc(const uint64_t &pos1, const uint64_t &pos2) {
-  if (pos1 == 0) {
-    current_g->ref_node_loc_map()->erase(get_compact_class());
+void Node::set_loc(uint64_t pos1, uint64_t pos2) {
+  if (pos1==0 && pos2==0) {
     return;
   }
   const auto &pos = std::make_pair(pos1, pos2);
   current_g->ref_node_loc_map()->insert_or_assign(get_compact_class(), pos);
+}
+
+void Node::set_loc1(uint64_t pos1) {
+
+  auto *ptr = current_g->ref_node_loc_map();
+  auto it   = ptr->find(get_compact_class());
+
+  if (it == ptr->end()) {
+    ptr->insert_or_assign(get_compact_class(), {pos1, 0});
+    return;
+  }
+  ptr->insert_or_assign(get_compact_class(), std::make_pair(pos1, it->second.second));
+}
+
+void Node::set_loc2(uint64_t pos2) {
+
+  auto *ptr = current_g->ref_node_loc_map();
+  auto it   = ptr->find(get_compact_class());
+
+  if (it == ptr->end()) {
+    ptr->insert_or_assign(get_compact_class(), {0, pos2});
+    return;
+  }
+  ptr->insert_or_assign(get_compact_class(), std::make_pair(it->second.first, pos2));
 }
 
 const std::pair<uint64_t, uint64_t> Node::get_loc() const {
@@ -643,23 +671,21 @@ const std::pair<uint64_t, uint64_t> Node::get_loc() const {
 
 bool Node::has_loc() const { return current_g->get_node_loc_map().contains(get_compact_class()); }
 
-void Node::set_fname(const std::string &fname) {
-  if (fname.empty()) {
-    current_g->ref_node_fname_map()->erase(get_compact_class());
-
+void Node::set_source(std::string_view fname) {
+  if (fname.empty() || current_g->get_source() == fname)
     return;
-  }
-  current_g->ref_node_fname_map()->insert_or_assign(get_compact_class(), fname);
+
+  current_g->ref_node_source_map()->insert_or_assign(get_compact_class(), fname);
 }
 
-const std::string Node::get_fname() const {
-  const auto &ptr = current_g->get_node_fname_map();
+std::string_view Node::get_source() const {
+  const auto &ptr = current_g->get_node_source_map();
   const auto  it  = ptr.find(get_compact_class());
-  I(it != ptr.end());
+  if (it == ptr.end())
+    return current_g->get_source();
+
   return it->second;
 }
-
-bool Node::has_fname() const { return current_g->get_node_fname_map().contains(get_compact_class()); }
 
 //----- Subject to changes in the future:
 void Node::del_color() { current_g->ref_node_color_map()->erase(get_compact_class()); }
@@ -687,12 +713,11 @@ void Node::dump() const {
     fmt::print(" color:{} ", get_color());
   }
   if (has_loc()) {
-    std::pair<uint64_t, uint64_t> loc = get_loc();
-    fmt::print(" loc:[{},{}] ", loc.first, loc.second);
+    auto [loc1, loc2] = get_loc();
+    fmt::print(" loc:[{},{}] ", loc1, loc2);
   }
-  if (has_fname()) {
-    fmt::print(" fname:{} ", get_fname());
-  }
+  fmt::print(" source:{} ", get_source());
+
   if (get_type_op() == Ntype_op::LUT) {
     fmt::print(" lut:{}\n", get_type_lut().to_pyrope());
   } else if (get_type_op() == Ntype_op::Const) {

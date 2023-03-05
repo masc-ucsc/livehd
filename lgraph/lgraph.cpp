@@ -17,10 +17,12 @@
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 
-Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib)
+Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_attributes(_path, _name, _lgid, _lib), htree(this) {
   I(!str_tools::contains(_name, '/'));  // No path in name
   I(_name == get_name());
+
+  source = _source;
 
   // load();
 }
@@ -97,26 +99,51 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
       }
       for (const auto &attr : stmt.attr) {
         I(attr.lhs_cat == Hif_base::ID_cat::String_cat);
-        I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);
 
         const auto &lhs = attr.lhs;
         const auto &rhs = attr.rhs;
 
-        auto lhs_pos = lhs.rfind('.');
-        I(lhs_pos != std::string::npos);
-        auto lhs_var = lhs.substr(0, lhs_pos);
+        if (lhs == "source") {
+          source = rhs;
+        }else{
+          I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);
+          auto lhs_pos = lhs.rfind('.');
+          I(lhs_pos != std::string::npos);
+          auto lhs_var = lhs.substr(0, lhs_pos);
 
-        auto bits = *reinterpret_cast<const int64_t *>(rhs.data());
-        I(bits > 0);
+          auto bits = *reinterpret_cast<const int64_t *>(rhs.data());
+          I(bits > 0);
 
-        auto dpin = Node_pin::find_driver_pin(this, lhs_var);
-        I(!dpin.is_invalid());
+          auto dpin = Node_pin::find_driver_pin(this, lhs_var);
+          I(!dpin.is_invalid());
 
-        dpin.set_bits(bits);
+          dpin.set_bits(bits);
+        }
       }
       return;
     } else {
       node = create_node(op);
+    }
+
+    for (const auto &attr : stmt.attr) {
+      if (attr.lhs == "loc1") {
+        auto loc = *reinterpret_cast<const int64_t *>(attr.rhs.data());
+        node.set_loc1(loc);
+      }else if (attr.lhs == "loc2") {
+        auto loc = *reinterpret_cast<const int64_t *>(attr.rhs.data());
+        node.set_loc2(loc);
+      }else if (attr.lhs == "source") {
+        node.set_source(attr.rhs);
+#ifndef NDEBUG
+      }else if (attr.lhs == "const" || attr.lhs == "subid" || attr.lhs == "lut") {
+        // Nothing to do
+      }else if (str_tools::ends_with(attr.lhs, ".bits")) {
+        // bit attribute
+      }else{
+        Lgraph::error("unknown saved attribute {} with value {}\n", attr.lhs, attr.rhs);
+        return;
+      }
+#endif
     }
 
     for (const auto &io : stmt.io) {
@@ -1536,6 +1563,8 @@ void Lgraph::save(std::string filename) {
       }
     }
 
+    ios.add_attr("source", source);
+
     // Check if the $ or % is still there (it will not show in sub)
     // It can be disconnected like in a tuple_add/get or anywhere but there
     // should be a driver pin with the name.
@@ -1567,6 +1596,16 @@ void Lgraph::save(std::string filename) {
       auto str = node.get_type_lut().serialize();
       n.add_attr("lut", str);
     }
+
+    if (node.has_loc()) {
+      auto [loc1, loc2] = node.get_loc();
+
+      n.add_attr("loc1", loc1);
+      n.add_attr("loc2", loc2);
+    }
+    auto src2 = node.get_source();
+    if (src2 != source)
+      n.add_attr("source", src2);
 
     if (Ntype::is_multi_driver(op)) {
       for (const auto &dpin : node.out_connected_pins()) {

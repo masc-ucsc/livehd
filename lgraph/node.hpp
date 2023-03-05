@@ -377,13 +377,15 @@ public:
 
   Bits_t get_bits() const;
 
-  void                                set_loc(const uint64_t &pos1, const uint64_t &pos2);
+  void                                set_loc1(uint64_t pos);
+  void                                set_loc2(uint64_t pos);
+  void                                set_loc(uint64_t pos1, uint64_t pos2);
+  void                                set_loc(std::pair<uint64_t, uint64_t> loc) { set_loc(loc.first, loc.second); };
   const std::pair<uint64_t, uint64_t> get_loc() const;
   bool                                has_loc() const;
 
-  void              set_fname(const std::string &fname);
-  const std::string get_fname() const;
-  bool              has_fname() const;
+  void             set_source(std::string_view fname);
+  std::string_view get_source() const;
 
   void set_color(int color);
   void del_color();

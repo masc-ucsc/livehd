@@ -66,12 +66,16 @@ protected:
 
   std::string       path;
   std::string       name;
+  std::string       source; // file name where it came from (there may be multiple, this is the main file)
+
   const std::string unique_name;
   const std::string long_name;
   const Lg_type_id  lgid;
 
   explicit Lgraph_base_core(std::string_view _path, std::string_view _name, Lg_type_id _lgid);
   virtual ~Lgraph_base_core() = default;
+
+  std::string_view get_source() const { return source; }
 
 public:
   Lgraph_base_core() = delete;

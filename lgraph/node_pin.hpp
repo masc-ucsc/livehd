@@ -363,7 +363,7 @@ public:
   void del();  // del self and all connections
 
   [[nodiscard]] Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
-  [[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
+  //[[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
   [[nodiscard]] Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
 
   void connect_sink(const Node_pin &dst) const;
