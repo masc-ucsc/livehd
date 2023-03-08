@@ -276,6 +276,8 @@ static void append_to_or_node(Lgraph *g, const Node &or_node, const Node_pin &dp
     }
   }
 
+  I(!dpin.is_invalid());
+
   Node tposs_node = g->create_node(Ntype_op::Get_mask);
 
   if (or_offset) {
@@ -824,7 +826,10 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                      chunk.offset,
                      chunk.offset + chunk.width - 1);
 
-// HERE: create dpin_name "pc_" chunk.offst "_" chunk.offset + chunk.width - 1;
+          if (!wire->port_input && !wire->port_output) {
+            auto pn = absl::StrCat(&wire->name.str()[1], "[", chunk.offset, ":", std::to_string(chunk.offset+chunk.width-1), "]");
+            src_pin.set_name(pn);
+          }
 
           partially_assigned[wire][chunk.offset]      = src_pin;
           partially_assigned_bits[wire][chunk.offset] = chunk.width;
