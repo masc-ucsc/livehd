@@ -758,8 +758,6 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       Node_pin driver_pin;
       if (node.is_type_sub()) {
         std::string pin_name(&(conn.first.c_str()[1]));
-        if (pin_name == "Q")
-          fmt::print("HERE\n");
         driver_pin = node.setup_driver_pin(pin_name);
       } else {
         driver_pin = node.setup_driver_pin();
@@ -819,12 +817,13 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 
           auto src_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
           offset += chunk.width;
-
+#if 0
           fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n",
                      driver_pin.get_node().debug_name(),
                      wire->name.str(),
                      chunk.offset,
                      chunk.offset + chunk.width - 1);
+#endif
 
           if (!wire->port_input && !wire->port_output) {
             auto pn = absl::StrCat(&wire->name.str()[1], "[", chunk.offset, ":", std::to_string(chunk.offset+chunk.width-1), "]");

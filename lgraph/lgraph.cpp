@@ -134,7 +134,6 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
         node.set_loc2(loc);
       }else if (attr.lhs == "source") {
         node.set_source(attr.rhs);
-#ifndef NDEBUG
       }else if (attr.lhs == "const" || attr.lhs == "subid" || attr.lhs == "lut") {
         // Nothing to do
       }else if (str_tools::ends_with(attr.lhs, ".bits")) {
@@ -143,7 +142,6 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
         Lgraph::error("unknown saved attribute {} with value {}\n", attr.lhs, attr.rhs);
         return;
       }
-#endif
     }
 
     for (const auto &io : stmt.io) {
@@ -174,9 +172,9 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
         auto dpin = node.setup_driver_pin(io.lhs);
 
         auto lhs_bits = io.lhs + ".bits";
-        for (const auto &attr : stmt.attr) {
-          if (attr.lhs == lhs_bits) {
-            auto bits = *reinterpret_cast<const int64_t *>(attr.rhs.data());
+        for (const auto &attr2 : stmt.attr) {
+          if (attr2.lhs == lhs_bits) {
+            auto bits = *reinterpret_cast<const int64_t *>(attr2.rhs.data());
             dpin.set_bits(bits);
             break;
           }
