@@ -1,0 +1,31 @@
+
+
+// CHECK:
+// similar to assert_ifelse2 but it should not generate a compile error because
+// there is no "else" with a return value
+// The assert protects against the else failure/optimization case.
+//
+
+let pick_max(a:u32,b:u32)->(x:u32) {
+  assert a!=b  // API require for pick_max
+
+  if a<b {
+    ret a
+  }elif a>b {
+    ret b
+  }
+}
+
+test "works" {
+
+  assert pick_max(3,50) == 50
+  assert pick_max(0,5) == 5
+
+  assert not assert.[failed]
+
+  pick_max(3,3)
+
+  assert assert.[failed]  // at least one assertion failure
+
+  assert.[failed] = false
+}

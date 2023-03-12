@@ -1,0 +1,33 @@
+
+
+// CHECK:
+// The match should trigger a compile or runtime error if not all the cases are
+// covered. BUT there is an 'assert' that says that that condition is not
+// possible. This means that it should not trigger a compile failure and check
+// at runtime.
+//
+
+let pick_max(a:u32,b:u32)->(x:u32) {
+  assert a!=b  // API require for pick_max
+
+  x = match (a<b, a>b) {
+   == (true, false)  { a }
+   == (false, true)  { b }
+   // No false, false for a==b case
+  }
+
+}
+
+test "works" {
+
+  assert pick_max(3,50) == 50
+  assert pick_max(0,5) == 5
+
+  assert not assert.[failed]
+
+  pick_max(3,3)
+
+  assert assert.[failed]  // at least one assertion failure
+
+  assert.[failed] = false
+}
