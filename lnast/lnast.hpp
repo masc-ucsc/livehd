@@ -179,7 +179,7 @@ public:
     auto s= get_subs(nid);
     if (get_type(nid).is_const() || s==0)
       return std::string(get_name(nid));
-    return absl::StrCat(get_name(nid), "_", s);
+    return absl::StrCat(get_name(nid), "|", s);
   }
 
   // bitwidth table functions

@@ -1014,7 +1014,7 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
 
 Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(std::string_view ref_vname, int16_t subs) {
   if (subs == 0) {
-    auto     ref_name = ref_vname; // absl::StrCat(ref_vname, "_", subs);
+    auto     ref_name = ref_vname;
     Node_pin invalid_dpin;
     name2dpin[ref_name] = invalid_dpin;
     return invalid_dpin;
@@ -1022,7 +1022,7 @@ Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(std::string_view ref_vname, int16
 
   std::string chain_tail_name;
   if (subs>1)
-    chain_tail_name = absl::StrCat(ref_vname, "_", subs - 1);  // try to concatenate after the TA(ssa-1)
+    chain_tail_name = absl::StrCat(ref_vname, "|", subs - 1);  // try to concatenate after the TA(ssa-1)
   else
     chain_tail_name = ref_vname;
 
@@ -1329,7 +1329,7 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
     auto aset_ancestor_subs = lnast->get_data(name_aset).subs - 1;
     std::string aset_ancestor_name;
     if (aset_ancestor_subs>0)
-      aset_ancestor_name = absl::StrCat(vname, "_", aset_ancestor_subs);
+      aset_ancestor_name = absl::StrCat(vname, "|", aset_ancestor_subs);
     else
       aset_ancestor_name = vname;
 
@@ -1357,7 +1357,7 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
       auto        value_subs  = lnast->get_data(val_aset).subs - 1;
       std::string value_name;
       if (value_subs>0)
-        value_name = absl::StrCat(value_nossa, "_", value_subs);
+        value_name = absl::StrCat(value_nossa, "|", value_subs);
       else
         value_name = value_nossa;
 
