@@ -66,6 +66,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
 #endif
+	I(false,"\n\nSTOP!\n\n");
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching
 #ifdef BASIC_DBG
   fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
@@ -86,18 +87,22 @@ void Traverse_lg::travers(Eprp_var& var) {
 #endif
 }
 
-// void Traverse_lg::debug_function(Lgraph *lg) {
-// lg->dump(true);
-//   fmt::print("---------------------------------------------------\n");
-//   for (const auto& node : lg->fast(true)) {
-//     fmt::print("{}({})\n", node.debug_name(), node.get_nid());
-//     for (const auto dpin:node.out_connected_pins()) {
-//       fmt::print("\t {}",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())));
-//     }
-//     fmt::print("\n");
-//   }
-//   fmt::print("\n---------------------------------------------------");
-// }
+void Traverse_lg::debug_function(Lgraph *lg) {
+lg->dump(true);
+  fmt::print("---------------------------------------------------\n");
+  for (const auto& node : lg->fast(true)) {
+    fmt::print("{}({})\n", node.debug_name(), node.get_nid());
+		if(node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const") {
+			auto node_sub_name = node.get_type_sub_node().get_name();
+		  fmt::print("\t\t\t\t{}\n", node_sub_name);
+		}
+    for (const auto dpin:node.out_connected_pins()) {
+      fmt::print("\t {}",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())));
+    }
+    fmt::print("\n");
+  }
+  fmt::print("\n---------------------------------------------------");
+}
 
 // FOR SET:
 // DE_DUP
@@ -183,7 +188,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #ifdef BASIC_DBG
     fmt::print("11. Printing after surrounding_cell matching!"); print_everything();
 #endif
-#if 1
+#if 0
     if(!crit_node_vec.empty()) {
       bool unmatched_left;
       do {
@@ -196,7 +201,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       } while(unmatched_left && !crit_node_vec.empty());
     }
 #endif
-#if 0
+#if 1
     if(!crit_node_vec.empty()) {
       set_theory_match_final();
     }
@@ -1183,7 +1188,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
   lg->dump(true);//FIXME: remove this
   for (const auto& node : lg->forward(true)) {
-    if (node.is_type_const()) {
+    if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const")) {
       continue;
     }
     for (const auto node_dpins: node.out_connected_pins()) {
@@ -1296,6 +1301,19 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
 #endif
 }
 
+void Traverse_lg::remove_pound_and_bus(std::string &dpin_name) {
+
+	//auto dpin_name = dpin.get_name();
+	if (dpin_name.find('#')== std::size_t(0)){                  // if dpin_name has # as start char
+		dpin_name.erase(dpin_name.begin());                       // remove it
+	}
+	if(dpin_name.find('[')!=std::string::npos) {                // if dpin_name has bus
+		dpin_name.erase(dpin_name.find('['), dpin_name.length()); // remove it
+	}
+	//return dpin_name;
+		
+}
+
 void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg) {
   
   auto *library = Graph_library::instance("lgdb");
@@ -1313,31 +1331,42 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
   });
 
   /*known points matching*/
-  orig_lg->dump(true);//FIXME: remove this
-  for (auto orig_node: orig_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
-    auto orig_sub_lg_name = orig_node.get_class_lgraph()->get_name();
+  synth_lg->dump(true);//FIXME: remove this
+  for (auto synth_node: synth_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
+   
+		if(synth_node.is_type_sub() && synth_node.get_type_sub_node().get_name()=="__fir_const"){
+			continue;
+		}
+		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
 
-    for (const auto orig_node_dpin: orig_node.out_connected_pins()) {//might be multi driver node
-      auto orig_node_dpin_name = orig_node_dpin.has_name() ? orig_node_dpin.get_name() : "" ;
+    for (const auto synth_node_dpin: synth_node.out_connected_pins()) {//might be multi driver node
+      auto synth_node_dpin_name = synth_node_dpin.has_name() ? synth_node_dpin.get_name() : "" ;
 
-      if(orig_node_dpin_name!="") {
+      if(synth_node_dpin_name!="") {
 #ifdef EXTENSIVE_DBG
-        fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, orig_sub_lg_name);
+        fmt::print("synth_node_dpin_name: {} for lg: {}\n", synth_node_dpin_name, synth_sub_lg_name);
 #endif
         /*see if the name matches to any in netlist LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
-         * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy!
+         * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of orig_lg, use synth_node.get_class_lgraph().get_name -- find equivalent orig for this guy!
          * */
-        auto synth_sub_lg_name = orig_sub_lg_name.substr(std::size_t(9)); //removing "__firrtl_"
-        auto *synth_sub_lg = library->try_ref_lgraph(synth_sub_lg_name);
+				std::string firrtl_prefix{"__firrtl_"};
+				std::string orig_sub_lg_name = firrtl_prefix +  std::string(synth_sub_lg_name);
+				// = "__firrtl_" + std::to_string(synth_sub_lg_name);//.substr(std::size_t(9)); //removing "__firrtl_"
+        auto *orig_sub_lg = library->try_ref_lgraph(orig_sub_lg_name);
 #ifdef EXTENSIVE_DBG
-        fmt::print("\t\tFinding dpin for synth_sub_lg_name {}\n", synth_sub_lg->get_name());
+        fmt::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
+				fmt::print("\t**synth_node_dpin_name before removal {}.**\n",synth_node_dpin_name);
 #endif
-        auto synth_node_dpin = Node_pin::find_driver_pin( synth_sub_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
-                                                                                              //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
-        if ( !synth_node_dpin.is_invalid() )  {
+				remove_pound_and_bus(synth_node_dpin_name);
 #ifdef EXTENSIVE_DBG
-          fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
+				fmt::print("\t\t**synth_node_dpin_name after removal {}.**\n",synth_node_dpin_name);
+#endif
+        auto orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);//orig LG with same name as that of synth node
+                                                                                              //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
+        if ( !orig_node_dpin.is_invalid() )  {
+#ifdef EXTENSIVE_DBG
+          fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.get_name());
 #endif
           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
           remove_from_crit_node_vec(synth_node_dpin.get_compact_flat());
@@ -1349,14 +1378,17 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     }
   }
 #ifdef EXTENSIVE_DBG
-  synth_lg->dump(true);
-    for (auto syn_node: synth_lg->fast(true) ) {//FIXME: for DBG only; remove!
-    
-      for(const auto syn_node_dpin: syn_node.out_connected_pins()) {
-      auto syn_node_dpin_name = syn_node_dpin.has_name() ? syn_node_dpin.get_name() : "" ;
+  orig_lg->dump(true);
+    for (auto original_node: orig_lg->fast(true) ) {//FIXME: for DBG only; remove!
 
-      if(syn_node_dpin_name!="") {
-        fmt::print("synth_node_dpin_name: {} for lg: {}\n", syn_node_dpin_name, (syn_node.get_class_lgraph())->get_name());
+			if(original_node.is_type_sub() && original_node.get_type_sub_node().get_name()=="__fir_const"){
+				continue;
+			}
+      for(const auto original_node_dpin: original_node.out_connected_pins()) {
+      auto original_node_dpin_name = original_node_dpin.has_name() ? original_node_dpin.get_name() : "" ;
+
+      if(original_node_dpin_name!="") {
+        fmt::print("orig_node_dpin_name: {} for lg: {}\n", original_node_dpin_name, (original_node.get_class_lgraph())->get_name());
       }
      }
     }
@@ -1610,7 +1642,7 @@ std::vector<Node_pin::Compact_flat> Traverse_lg::get_surrounding_pins(Node &node
       dpin_vec.emplace_back(in_pin.get_compact_flat());
       continue;
     }
-    if(!n.is_type_const() && main_node_dpin!=in_pin.get_compact_flat()) { //get_dpin_cf(n)) {
+    if(!n.is_type_const() && main_node_dpin!=in_pin.get_compact_flat() && !(node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const"))  { //get_dpin_cf(n)) {
       dpin_vec.emplace_back( in_pin.get_compact_flat() );
     }
   }
@@ -2011,7 +2043,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
   if (node.is_type_flop() || (!node.has_inputs())
       || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
       || node.is_type_loop_last() || node.is_type_loop_first()) {
-    if (node.is_type_const()) {
+    if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const")) {
       // do not keep const for future reference
       // return Node::Compact_flat();
       return;
