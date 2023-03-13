@@ -453,7 +453,7 @@ std::string Node_pin::get_wire_name() const {
   }
 
   // WARNING: Must start with "_" to indicate temp name
-  return absl::StrCat("_", root_name, "p", get_root_idx().value, "_", pid);
+  return absl::StrCat("_", root_name, "n", get_root_idx().value, "_p", pid);
 }
 
 std::string_view Node_pin::get_hier_name() const {

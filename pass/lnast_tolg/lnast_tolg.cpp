@@ -365,18 +365,19 @@ Node Lnast_tolg::process_ast_assign_op(Lgraph *lg, const Lnast_nid &lnidx_assign
 }
 
 void Lnast_tolg::process_ast_dp_assign_op(Lgraph *lg, const Lnast_nid &lnidx_dp_assign) {
+
   auto c0_dp       = lnast->get_first_child(lnidx_dp_assign);
   auto lhs_dp      = lnast->get_sibling_next(c0_dp);
   auto rhs_dp      = lnast->get_sibling_next(lhs_dp);
   auto rhs_dp_name = lnast->get_sname(rhs_dp);
-  auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
-  auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
-  auto attr_vname  = std::string("__dp_assign");
-
   if (name2dpin.find(rhs_dp_name) == name2dpin.end()) {
     process_ast_assign_op(lg, lnidx_dp_assign);
     return;
   }
+
+  auto c0_dp_name  = lnast->get_sname(c0_dp);  // ssa name
+  auto c0_dp_vname = lnast->get_vname(c0_dp);  // no-ssa name
+  auto attr_vname  = std::string("__dp_assign");
 
   auto        aset_node = lg->create_node(Ntype_op::AttrSet);
   const auto &tok2      = lnast->get_token(lnidx_dp_assign);
@@ -671,6 +672,7 @@ bool Lnast_tolg::is_hier_inp_bits_set(const Lnast_nid &lnidx_ta) {
 //          into a TA-chain for the future possible access.
 void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta) {
   std::string full_inp_hier_name;
+  std::string root_inp_sname;
 
   Port_ID io_pos = Port_invalid;
   for (const auto &child : lnast->children(lnidx_ta)) {
@@ -678,6 +680,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       const auto &c0_ta = child;
       I(is_input(lnast->get_vname(c0_ta)));
       std::tie(io_pos, full_inp_hier_name) = Lgtuple::convert_key_to_io(lnast->get_vname(c0_ta));
+      root_inp_sname  = Lgtuple::convert_key_to_io(lnast->get_sname(c0_ta)).second;
 
     } else if (lnast->get_vname(child) != "__ubits" && lnast->get_vname(child) != "__sbits") {
       I(child != lnast->get_last_child(lnidx_ta));
@@ -695,6 +698,7 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
       if (!lg->has_graph_input(full_inp_hier_name)) {
         flattened_inp = lg->add_graph_input(full_inp_hier_name, io_pos, bits);
       } else {
+        I(name2dpin.find(full_inp_hier_name) != name2dpin.end());
         flattened_inp = name2dpin[full_inp_hier_name];
         flattened_inp.set_bits(bits);
       }
@@ -721,8 +725,8 @@ void Lnast_tolg::process_hier_inp_bits_set(Lgraph *lg, const Lnast_nid &lnidx_ta
 
       av_dpin.connect(av_spin);
       auto aset_dpin                = aset_node.setup_driver_pin();
-      name2dpin[full_inp_hier_name] = aset_dpin;
-      create_inp_ta4runtime_idx(lg, aset_dpin, full_inp_hier_name);
+      name2dpin[root_inp_sname] = aset_dpin;
+      create_inp_ta4runtime_idx(lg, aset_dpin, root_inp_sname); // full_inp_hier_name);
       break;  // no need to iterate to last child
     }
   }
@@ -1010,13 +1014,18 @@ Node_pin Lnast_tolg::setup_tuple_ref(Lgraph *lg, std::string_view ref_name) {
 
 Node_pin Lnast_tolg::setup_ta_ref_previous_ssa(std::string_view ref_vname, int16_t subs) {
   if (subs == 0) {
-    auto     ref_name = absl::StrCat(ref_vname, "_", subs);
+    auto     ref_name = ref_vname; // absl::StrCat(ref_vname, "_", subs);
     Node_pin invalid_dpin;
     name2dpin[ref_name] = invalid_dpin;
     return invalid_dpin;
   }
 
-  auto chain_tail_name = absl::StrCat(ref_vname, "_", subs - 1);  // try to concatenate after the TA(ssa-1)
+  std::string chain_tail_name;
+  if (subs>1)
+    chain_tail_name = absl::StrCat(ref_vname, "_", subs - 1);  // try to concatenate after the TA(ssa-1)
+  else
+    chain_tail_name = ref_vname;
+
   I(name2dpin.find(chain_tail_name) != name2dpin.end());
   I(name2dpin[chain_tail_name].get_name() == chain_tail_name);
   return name2dpin[chain_tail_name];
@@ -1203,10 +1212,12 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
     ;
   } else if (is_input(name)) {
     // later the node_type should change to TupGet and connected to $
+    //if (name2din.find(name)!= name2dpin.end()) {
     node_dpin = lg->create_node(Ntype_op::Or).setup_driver_pin();
     // node_dpin.set_loc(std::make_pair( (lnast->get_token(lnidx_opd)).pos1 , (lnast->get_token(lnidx_opd)).pos2 ) );
-    node_dpin.set_name(name.substr(0, name.size() - 2));
+    node_dpin.set_name(name);
     name2dpin[name] = node_dpin;
+    //}
     return node_dpin;
   } else if (is_err_var_undefined(name)) {
     node_dpin = lg->create_node(Ntype_op::CompileErr).setup_driver_pin("Y");
@@ -1316,7 +1327,11 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
     auto vn_spin = aset_node.setup_sink_pin("parent");  // variable name
 
     auto aset_ancestor_subs = lnast->get_data(name_aset).subs - 1;
-    auto aset_ancestor_name = absl::StrCat(vname, "_", aset_ancestor_subs);
+    std::string aset_ancestor_name;
+    if (aset_ancestor_subs>0)
+      aset_ancestor_name = absl::StrCat(vname, "_", aset_ancestor_subs);
+    else
+      aset_ancestor_name = vname;
 
     Node_pin vn_dpin;
     if (is_input(name)) {
@@ -1338,9 +1353,14 @@ void Lnast_tolg::process_ast_attr_set_op(Lgraph *lg, const Lnast_nid &lnidx_aset
 
     Node_pin val_dpin;
     if (lnast->get_type(val_aset).is_ref()) {  // setup_ref_node_dpin does not handle SSA for LHS
-      auto        value_subs  = lnast->get_data(val_aset).subs - 1;
       auto        value_nossa = lnast->get_vname(val_aset);
-      auto        value_name  = absl::StrCat(value_nossa, "_", value_subs);
+      auto        value_subs  = lnast->get_data(val_aset).subs - 1;
+      std::string value_name;
+      if (value_subs>0)
+        value_name = absl::StrCat(value_nossa, "_", value_subs);
+      else
+        value_name = value_nossa;
+
       const auto &it          = name2dpin.find(value_name);
       if (it != name2dpin.end()) {
         val_dpin = it->second;

@@ -176,9 +176,10 @@ public:
   int16_t            get_subs(const Lnast_nid &nid) const { return get_data(nid).subs; }
   const State_token &get_token(const Lnast_nid &nid) const { return get_data(nid).token; }
   std::string        get_sname(const Lnast_nid &nid) const {  // sname = ssa name
-    if (get_type(nid).is_const())
+    auto s= get_subs(nid);
+    if (get_type(nid).is_const() || s==0)
       return std::string(get_name(nid));
-    return absl::StrCat(get_name(nid), "_", get_subs(nid));
+    return absl::StrCat(get_name(nid), "_", s);
   }
 
   // bitwidth table functions

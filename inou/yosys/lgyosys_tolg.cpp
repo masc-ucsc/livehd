@@ -826,8 +826,13 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 #endif
 
           if (!wire->port_input && !wire->port_output) {
-            auto pn = absl::StrCat(&wire->name.str()[1], "[", chunk.offset, ":", std::to_string(chunk.offset+chunk.width-1), "]");
-            src_pin.set_name(pn);
+            auto s = chunk.offset;
+            auto e = chunk.offset+chunk.width-1;
+
+            if (s==e)
+              src_pin.set_name(absl::StrCat(&wire->name.str()[1], "[", s, "]"));
+            else
+              src_pin.set_name(absl::StrCat(&wire->name.str()[1], "[", s, ":", e, "]"));
           }
 
           partially_assigned[wire][chunk.offset]      = src_pin;
