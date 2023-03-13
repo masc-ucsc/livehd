@@ -25,6 +25,7 @@ void Pass_lnast_tolg::dbg_lnast_ssa(Eprp_var &var) {
   }
 }
 
+
 void Pass_lnast_tolg::tolg(Eprp_var &var) {
   TRACE_EVENT("pass", "lnast_tolg.ssa");
 

@@ -53,7 +53,6 @@ void Pass_compiler::compile(Eprp_var &var) {
 
   if (!get_firrtl.empty()) {
     I(top != "", "firrtl front-end must specify the top firrtl name!");
-    setup_firmap_library(path);
     firrtl_compilation(var, compiler, only_cprop);
     // google::protobuf::ShutdownProtobufLibrary();
   } else {
@@ -78,65 +77,6 @@ void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, bool 
     compiler.do_fir_firbits();
     compiler.do_fir_firmap_bitwidth();
   }
-}
-
-Sub_node *Pass_compiler::setup_firmap_library_gen(Graph_library *lib, std::string_view cell_name,
-                                                  const std::vector<std::string> &inp, std::string_view out) {
-  auto *sub = lib->ref_or_create_sub(cell_name);
-  auto  pos = 0;
-  for (const auto &i : inp) {
-    sub->add_input_pin(i, pos++);
-  }
-  sub->add_output_pin(out, pos);
-  sub->clear_loop_last();
-
-  return sub;
-}
-
-void Pass_compiler::setup_firmap_library(std::string_view path) {
-  auto *lib = Graph_library::instance(path);
-  if (lib->exists("__fir_const")) {
-    return;
-  }
-
-  auto *sub_fir_const = setup_firmap_library_gen(lib, "__fir_const", {}, "Y");
-  sub_fir_const->set_loop_first();
-
-  setup_firmap_library_gen(lib, "__fir_bits", {"e1", "e2", "e3"}, "Y");
-
-  setup_firmap_library_gen(lib, "__fir_add", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_sub", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_mul", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_div", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_rem", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_lt", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_leq", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_gt", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_geq", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_eq", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_neq", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_pad", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_shl", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_shr", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_dshl", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_dshr", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_and", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_or", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_xor", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_cat", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_head", {"e1", "e2"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_tail", {"e1", "e2"}, "Y");
-
-  setup_firmap_library_gen(lib, "__fir_as_uint", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_as_sint", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_as_clock", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_as_async", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_cvt", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_neg", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_not", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_andr", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_orr", {"e1"}, "Y");
-  setup_firmap_library_gen(lib, "__fir_xorr", {"e1"}, "Y");
 }
 
 bool Pass_compiler::check_option_gviz(Eprp_var &var) {
