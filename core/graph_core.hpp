@@ -144,23 +144,63 @@ protected:
     void dump(uint32_t self_id) const;
   };
 
+  #if 0
+  USE THIS:
+  // Node (16 bytes)
+  // Byte 0:1
+  uint8_t  entry_type    : 2;    // Free, Node, Pin, Overflow
+  uint8_t  set_link      : 1;    // set link, ledge otherwise  not set (overflow_link should be false)
+  uint8_t  overflow_link : 1;    // When set, ledge points to overflow
+  uint8_t  n_sedge       : 2;
+  uint16_t type:10;               // type in node
+  // SEDGE: 2:7
+  int16_t  sedge[3];              // used if set_link?
+  // next_pin 8:11
+  uint32_t next_pin_ptr;         // next pointer (pin)
+  // void *: Byte 12:15
+  uint32_t ledge_or_overflow_or_set;  // ledge is overflow if overflow set
+
+  // Pin  (16 bytes)
+  // Byte 0:1
+  uint8_t  entry_type    : 2;    // Free, Node, Pin, Overflow
+  uint8_t  set_link      : 1;    // set link, ledge otherwise  not set (overflow_link should be false)
+  uint8_t  overflow_link : 1;    // When set, ledge points to overflow
+  uint32_t pid:12;               // pid in node
+  // SEDGE: 2:3
+  int16_t  sedge_0;              // used if set_link?
+  // next_pin 4:7
+  uint32_t node_pin_ptr;         // points to master node
+  // next_pin 8:11
+  uint32_t next_pin_ptr;         // next pointer (pin)
+  // void *: Byte 12:15
+  uint32_t ledge_or_overflow_or_set;  // ledge is overflow if overflow set
+
+  // Overflow (32 bytes) -- Always 32bytes aligned
+  // Byte 0:1
+  uint8_t  entry_type    : 2;    // Free, Node, Pin, Overflow
+  uint8_t  n_sedges      : 6;    // number of sedges (7 max)
+  uint8_t  n_ledges;             // number of ledges (4 max)
+  // sedges: 2:15
+  std::array<uint16_t, 7> sedges;
+  // ledges: 16:32
+  std::array<uint32_t, 4> ledges;
+  #endif
+
+
   class __attribute__((packed)) Master_entry {  // AKA pin or node entry
   public:
-    static inline constexpr size_t Num_sedges = 3;
+    static inline constexpr size_t Num_sedges = 4;
 
     // CTRL: Byte 0
     uint8_t  overflow_vertex : 1;  // Overflow or not overflow node
-    uint8_t  node_vertex : 1;      // node or just pin
+    uint8_t  node_vertex : 1;      // node or pin
     uint8_t  input : 1;            // are the edges input or output edges
     uint8_t  n_sedges : 3;         // number of input or output edges (excluding ledge0_or_prev ledge1_or_overflow bits_or_sedge0)
-    uint8_t  set_link: 1;          // set link, overflow is not set
+    uint8_t  set_link: 1;          // set link, ledge otherwise  not set
     uint8_t  overflow_link : 1;    // When set, ledge_min points to overflow
     // CTRL: Byte 1:3
-    uint32_t bits_or_sedge0 : 23;  // bits or input sedge (bits only for output pin)
-    uint16_t always_pos:1;         // always positive or unsigned
-    // CTRL: Byte 4:5
-    uint16_t pid_or_type;         // type in node, pid bits in pin
-    // SEDGE: 6:11
+    uint32_t pid_or_type:24;       // type in node, pid bits in pin
+    // SEDGE: 4:11
     int16_t  sedge[Num_sedges];
     // LEDGE: Byte 12:15
     uint32_t ledge0_or_prev;       // prev pointer (only for pin)
