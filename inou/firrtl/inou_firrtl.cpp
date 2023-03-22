@@ -87,8 +87,8 @@ Inou_firrtl::Inou_firrtl(const Eprp_var &var) : Pass("firrtl", var) {
 
 
   if (op2firsub.empty()) {
-    auto  path = get_path(var);
-    setup_firmap_library(path);
+    auto  path_2 = get_path(var);
+    setup_firmap_library(path_2);
 
     op2firsub.emplace(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_ADD, "__fir_add");
     op2firsub.emplace(firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SUB, "__fir_sub");
