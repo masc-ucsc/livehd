@@ -281,3 +281,155 @@ protected:
   }
 
 };
+
+//----
+// Graph_core_iterator
+
+#include <cstdint>
+#include <vector>
+#include <map>
+#include <iterator>
+
+class Graph_core_iterator {
+public:
+    using MapType = std::map<uint32_t, uint32_t>;
+
+    void push_back(const uint32_t& value) {
+        vec.push_back(value);
+    }
+
+    void insert(uint32_t key, const uint32_t& value) {
+        mp.insert({key, value});
+    }
+
+    // Iterator class definition
+    class iterator {
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = uint32_t;
+        using pointer = uint32_t*;
+        using reference = uint32_t&;
+
+        iterator(typename std::vector<uint32_t>::iterator vec_it,
+                 typename std::vector<uint32_t>::iterator vec_end,
+                 typename MapType::iterator map_it)
+            : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
+
+        reference operator*() const {
+            return vec_it != vec_end ? *vec_it : map_it->second;
+        }
+
+        pointer operator->() const {
+            return vec_it != vec_end ? &(*vec_it) : &(map_it->second);
+        }
+
+        iterator& operator++() {
+            if (vec_it != vec_end) {
+                ++vec_it;
+            } else {
+                ++map_it;
+            }
+            return *this;
+        }
+
+        const iterator operator++(int) {
+            iterator tmp = *this;
+            operator++();
+            return tmp;
+        }
+
+        bool operator==(const iterator& rhs) const {
+            return vec_it == rhs.vec_it && map_it == rhs.map_it;
+        }
+
+        bool operator!=(const iterator& rhs) const {
+            return !(*this == rhs);
+        }
+
+    private:
+        typename std::vector<uint32_t>::iterator vec_it;
+        typename std::vector<uint32_t>::iterator vec_end;
+        typename MapType::iterator map_it;
+    };
+
+    // Const iterator class definition
+    class const_iterator {
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = uint32_t;
+        using pointer = const uint32_t*;
+        using reference = const uint32_t&;
+
+        const_iterator(typename std::vector<uint32_t>::const_iterator vec_it,
+                       typename std::vector<uint32_t>::const_iterator vec_end,
+                       typename MapType::const_iterator map_it)
+            : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
+
+        reference operator*() const {
+            return vec_it != vec_end ? *vec_it : map_it->second;
+        }
+
+        pointer operator->() const {
+            return vec_it != vec_end ? &(*vec_it) : &(map_it->second);
+        }
+
+        const_iterator& operator++() {
+            if (vec_it != vec_end) {
+                ++vec_it;
+            } else {
+                ++map_it;
+            }
+            return *this;
+        }
+
+        const const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            operator++();
+            return tmp;
+        }
+
+        bool operator==(const const_iterator& rhs) const {
+            return vec_it == rhs.vec_it && map_it == rhs.map_it;
+        }
+
+        bool operator!=(const const_iterator& rhs) const {
+            return !(*this == rhs);
+        }
+
+    private:
+        typename std::vector<uint32_t>::const_iterator vec_it;
+        typename std::vector<uint32_t>::const_iterator vec_end;
+        typename MapType::const_iterator
+
+        map_it;
+    };
+
+    iterator begin() {
+        return iterator(vec.begin(), vec.end(), mp.begin());
+    }
+
+    iterator end() {
+        return iterator(vec.end(), vec.end(), mp.end());
+    }
+
+    const_iterator begin() const {
+        return const_iterator(vec.begin(), vec.end(), mp.begin());
+    }
+
+    const_iterator end() const {
+        return const_iterator(vec.end(), vec.end(), mp.end());
+    }
+
+    const_iterator cbegin() const {
+        return const_iterator(vec.begin(), vec.end(), mp.begin());
+    }
+
+    const_iterator cend() const {
+        return const_iterator(vec.end(), vec.end(), mp.end());
+    }
+};
+
+
+
