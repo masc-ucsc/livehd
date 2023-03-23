@@ -132,193 +132,49 @@ bool Graph_core::Master_entry::delete_edge(uint32_t self_id, uint32_t other_id, 
 }
 
 
-uint32_t Graph_core::allocate_overflow() {
+std::pair<Graph_core_overflow *, uint32_t> Graph_core::allocate_overflow() {
   uint32_t oid;
-  if (free_overflow_id) {
-    oid              = free_overflow_id;
-    free_overflow_id = table[oid].remove_free_next();
-
-  } else {
+  if (free_overflow_id==0) {
     oid = table.size();
     table.emplace_back();  // 2 spaces for one overflow
     table.emplace_back();
   }
 
-  Overflow_entry *ent  = (Overflow_entry *)&table[oid];
-  ent->overflow_vertex = 1;
+  Graph_core_free_overflow *free_ent  = (Graph_core_free_overflow *)&table[oid];
 
-  return oid;
+  free_overflow_id = free_ent->next_ptr;
+  auto *ov = free_ent->ref_overflow();
+  ov->clear();
+  return std::pair(ov,oid);
 }
 
-void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
-  Master_entry &ent       = table[self_id];
-  int32_t       rel_index = other_id - self_id;
-  bool          short_rel = INT16_MIN < rel_index && rel_index < INT16_MAX;
+void Graph_core::add_edge_int(uint32_t self_id, uint32_t other_id) {
+  Graph_core_free &ent = table[self_id];
 
-  if (short_rel) {
-    bool ok = ent.add_sedge(static_cast<int16_t>(rel_index));
-    if (ok) {
+  if (ent.is_node()) {
+    bool ok = ent.ref_node()->add_edge(self_id, other_id);
+    if (ok)
       return;
-    }
-  }
-
-  bool ok = ent.add_ledge(other_id, out);
-  if (ok) {
-    return;
-  }
-
-  absl::InlinedVector<uint32_t, 40> pending_inp;
-  absl::InlinedVector<uint32_t, 40> pending_out;
-
-  ent.readjust_edges(self_id, pending_inp, pending_out);
-
-  if (out) {
-    pending_out.emplace_back(other_id);
-  } else {
-    pending_inp.emplace_back(other_id);
-  }
-
-  std::sort(pending_inp.begin(), pending_inp.end(), std::greater<uint32_t>());  // sort reverse order
-  std::sort(pending_out.begin(), pending_out.end(), std::greater<uint32_t>());  // sort reverse order
-
-  ent.inp_mask  = 0;
-  ent.n_edges   = 0;
-
-  auto overflow_id = ent.get_overflow_id();
-  if (overflow_id == 0) {
-    I(ent.ledge1_or_overflow == 0);
-    overflow_id = allocate_overflow();
-    // Can not use ent, allocate_overflow can change pointers
-    table[self_id].set_overflow(overflow_id);
-  }
-  I(overflow_id);
-
-  std::vector<uint32_t> add_to_end;
-  uint32_t              prev_over_id = 0;
-
-  while (true) {
-    auto *over_ptr = ref_overflow(overflow_id);
-    I(over_ptr);
-
-    if (over_ptr->is_full()) {  // There was no space. The rest are full
-      auto new_over_id = allocate_overflow();
-      if (prev_over_id) {
-        // Before: A(nonfull) -> prev(nonfull)       ->         over (full) -> B(full)
-        // After : A(nonfull) -> prev(nonfull) -> new(empty) -> over (full) -> B(full)
-        ref_overflow(prev_over_id)->overflow_next_id = new_over_id;
-      } else {
-        // Before: master     ->    over(full) -> B(full)
-        // After : master -> new -> over(full) -> B(full)
-        I(table[self_id].ledge1_or_overflow == overflow_id);
-        table[self_id].ledge1_or_overflow = new_over_id;
-      }
-      over_ptr                   = ref_overflow(new_over_id);
-      over_ptr->overflow_next_id = overflow_id;
-      overflow_id                = new_over_id;
-    }
-
-    I(over_ptr->n_edges < Overflow_entry::max_edges);
-    over_ptr->readjust_edges(pending_inp, pending_out);
-
-    if (over_ptr->is_full()) {  // Move to the end. Where fulls start
-      auto next_id            = over_ptr->get_overflow_id();
-      bool should_move_to_end = true;
-      if (next_id == 0 || ref_overflow(next_id)->is_full()) {
-        // No need to move, if it is the last or next is full
-        should_move_to_end = false;
-      }
-
-      if (should_move_to_end) {
-        if (prev_over_id) {
-          // Before: A(nonfull) -> prev(nonfull) -> over (full) -> next(nonfull)
-          // After : A(nonfull) -> prev(nonfull)                -> next(nonfull)
-          ref_overflow(prev_over_id)->overflow_next_id = next_id;
-        } else {
-          // Before: master(??) -> over (full) -> next(nonfull)
-          // After : master(??)                -> next(nonfull)
-          table[self_id].ledge1_or_overflow = next_id;
-        }
-        // Add to pending and chain as needed
-        if (!add_to_end.empty()) {
-          ref_overflow(add_to_end.back())->overflow_next_id = overflow_id;
-        }
-        add_to_end.emplace_back(overflow_id);
-        overflow_id = next_id;
-        if (!pending_inp.empty() || !pending_out.empty()) {
-          // prev_over_id did not change
-          over_ptr = ref_overflow(next_id);
-          continue;
-        }
-      }
-    }
-
-    if (pending_inp.empty() && pending_out.empty()) {
-      if (add_to_end.empty()) {
-        return;  // Nothing to do
-      }
-
-      // Find the last or the first empty (start with overflow_id)
-      // enqueue the add_to_end
-      uint32_t next_id = overflow_id;
-      uint32_t last_id = 0;
-      while (true) {
-        last_id = next_id;
-        next_id = over_ptr->get_overflow_id();
-        if (next_id == 0) {
-          break;
-        }
-        over_ptr = ref_overflow(next_id);
-        if (over_ptr->is_full()) {
-          break;
-        }
-      }
-
-      ref_overflow(last_id)->overflow_next_id           = add_to_end.front();
-      ref_overflow(add_to_end.back())->overflow_next_id = next_id;
-
+  }else{
+    I(ent.is_pin());
+    bool ok = ent.ref_pin()->add_edge(self_id, other_id);
+    if (ok)
       return;
-    }
-
-    prev_over_id = overflow_id;
-    overflow_id  = over_ptr->get_overflow_id();
-    if (overflow_id == 0) {
-      overflow_id = allocate_overflow();
-      // readjust_edges can change the table (move it), so must recompute
-      ref_overflow(prev_over_id)->overflow_next_id = overflow_id;
-    }
   }
+
+HERE: Switch the node/pin to overflow or set
+
 }
 
 void Graph_core::del_pin(uint32_t self_id) {
-  table[self_id].delete_node(self_id, table);
-
-  auto            over_id  = table[self_id].get_overflow_id();
-
-  while (over_id) {
-    auto *over_ptr = ref_overflow(over_id);
-    auto over_ptr_id = over_id;
-    over_id  = over_ptr->get_overflow_id();
-
-    over_ptr->delete_node(self_id, table);
-
-    if (free_overflow_id) {
-      table[over_ptr_id].insert_free_next(free_overflow_id);
-    }else{
-      over_ptr->clear();
-    }
-    free_overflow_id = over_ptr_id;
-  }
-
-  if (table[self_id].set_link)
-    delete table[self_id].set;
-
-  table[self_id].clear();
 }
 
 void Graph_core::del_node(uint32_t self_id) {
   if (table[self_id].is_pin()) {
-    self_id = table[self_id].get_prev_ptr(); // point to master
+    self_id = table[self_id].get_node_id(); // point to master
   }
+
+HERE:
   auto next_pin_id = table[self_id].next_pin_ptr;
   del_pin(self_id);
   while (next_pin_id) {
@@ -328,119 +184,32 @@ void Graph_core::del_node(uint32_t self_id) {
   }
 }
 
-void Graph_core::del_edge_int(uint32_t self_id, uint32_t other_id, bool out) {
-  bool done1 = table[self_id].delete_edge(self_id, other_id, out);
-  if (done1) {
-    return;
-  }
-
-  auto            over_id  = table[self_id].get_overflow_id();
-  Overflow_entry *prev_ptr = nullptr;
-  while (over_id) {
-    auto *over_ptr = ref_overflow(over_id);
-    bool  done2    = over_ptr->delete_edge(other_id, out);
-    if (done2) {
-      if (over_ptr->has_local_edges()) {
-        if (prev_ptr == nullptr) {
-          return;
-        }
-
-        if (!prev_ptr->is_full()) {
-          return;
-        }
-
-        // If prev is full, move to first position (fulls must be at the end)
-        prev_ptr->overflow_next_id        = over_ptr->get_overflow_id();
-        auto tmp_id                       = table[self_id].get_overflow_id();
-        table[self_id].ledge1_or_overflow = over_id;
-        over_ptr->overflow_next_id        = tmp_id;
-        return;
-      }
-      if (prev_ptr) {
-        prev_ptr->overflow_next_id = over_ptr->overflow_next_id;
-      } else {
-        I(table[self_id].overflow_link);
-        table[self_id].ledge1_or_overflow = over_id;
-      }
-      return;
-    }
-    prev_ptr = over_ptr;
-    over_id  = over_ptr->get_overflow_id();
-  }
+void Graph_core::del_edge_int(uint32_t self_id, uint32_t other_id) {
 
   I(false);  // WARNING: trying to delete a node that does not exist!!
 }
 
-Graph_core::Graph_core(std::string_view path, std::string_view name) {
-  (void)path;
-  (void)name;
+Graph_core::Graph_core(std::string_view n) : name(n) {
 
   table.emplace_back();             // Reserve entry 0 as is_invalid
-  table[0].overflow_vertex = true;  // mark invalid type
+  table.emplace_back();             // allocation must be 32 bytes aligned
+  I(table[0].is_free());
 
   free_master_id   = 0;
   free_overflow_id = 0;
 }
 
-/*  Create a node node
- *
- *  @params uint8_t type
- *  @returns uint32_t of the node
- */
-
 uint32_t Graph_core::create_node() {
   uint32_t id;
 
   if (free_master_id) {
-    id             = free_master_id;
-    free_master_id = table[id].remove_free_next();
-  } else {
-    id = table.size();
-    table.emplace_back();
   }
-  I(!table[id].has_edges() && table[id].node_vertex == 0);  // initialized to zero
-
-  table[id].node_vertex = 1;
 
   return id;
 }
 
-/*  Create a pin and point to pin root m
- *
- *  @params const Index_ID node_id, const Port_ID pid
- *  @returns Index_ID of the node
- */
-
 uint32_t Graph_core::create_pin(const uint32_t node_id, const Port_ID pid) {
   I(node_id && node_id < table.size());
-
-  auto  id      = create_node();
-  auto &pin_ent = table[id];
-
-  pin_ent.node_vertex    = 0;
-  pin_ent.ledge0_or_prev = node_id;
-  pin_ent.set_pid(pid);
-
-  auto &root_ent = table[node_id];
-  I(root_ent.is_node());
-
-  if (root_ent.next_pin_ptr == 0) {
-    root_ent.next_pin_ptr = id;  // easy case, first pin
-    return id;
-  }
-
-  // Insert pin in pid order (easier search)
-  auto prev_ptr = node_id;
-  auto ptr      = root_ent.next_pin_ptr;
-  while (ptr && table[ptr].get_pid() > pid) {
-    prev_ptr = ptr;
-    ptr      = table[ptr].next_pin_ptr;
-  }
-  I(prev_ptr);
-
-  auto insert_ptr          = table[prev_ptr].next_pin_ptr;
-  table[prev_ptr].next_pin_ptr = id;
-  table[id].next_pin_ptr       = insert_ptr;
 
   return id;
 }
@@ -458,14 +227,13 @@ std::pair<size_t, size_t> Graph_core::get_num_pin_edges(uint32_t id) const {
   }
 
   auto over_id = table[id].get_overflow_id();
-  while (over_id) {
+  if (over_id) {
     auto *over_ptr      = ref_overflow(over_id);
     auto [l_inp, l_out] = over_ptr->get_num_local_edges();
     t_inp += l_inp;
     t_out += l_out;
-
-    over_id = over_ptr->get_overflow_id();
   }
+HERE: set
 
   return std::pair(t_inp, t_out);
 }
