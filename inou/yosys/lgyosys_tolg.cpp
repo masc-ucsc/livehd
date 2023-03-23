@@ -2063,16 +2063,30 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       auto wrports = cell->getParam(ID::WR_PORTS).as_int();
 
       // string parameters
-      RTLIL::Const transp  = cell->getParam(ID::RD_TRANSPARENT);
-      RTLIL::Const rd_clkp = cell->getParam(ID::RD_CLK_POLARITY);
-      RTLIL::Const rd_clke = cell->getParam(ID::RD_CLK_ENABLE);
-      RTLIL::Const wr_clkp = cell->getParam(ID::WR_CLK_POLARITY);
-      RTLIL::Const wr_clke = cell->getParam(ID::WR_CLK_ENABLE);
+      auto transp  = cell->getParam(ID::RD_TRANSPARENCY_MASK).as_int();
+      //auto rd_clkp = cell->getParam(ID::RD_CLK_POLARITY).as_int();
+      auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
+      auto wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
+      //auto wr_clke = cell->getParam(ID::WR_CLK_ENABLE).as_int();
 
       std::string name = cell->getParam(ID::MEMID).decode_string();
 
       fmt::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
 
+      // Use these!
+      //exit_node.setup_sink_pin("reset_pin").connect_driver(get_dpin(g, cell, ID::SRST));
+      exit_node.setup_sink_pin("addr").connect_driver(get_dpin(g, cell, ID::RD_ADDR));
+      exit_node.setup_sink_pin("addr").connect_driver(get_dpin(g, cell, ID::WR_ADDR));
+      exit_node.setup_sink_pin("bits").connect_driver(g->create_node_const(width));
+      exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::WR_CLK));
+      exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::WR_DATA));
+      exit_node.setup_sink_pin("enable").connect_driver(get_dpin(g, cell, ID::WR_EN));
+      exit_node.setup_sink_pin("fwd").connect_driver(g->create_node_const(transp));
+      exit_node.setup_sink_pin("posclk").connect_driver(g->create_node_const(wr_clkp));
+      exit_node.setup_sink_pin("type").connect_driver(g->create_node_const(rd_clke));
+      exit_node.setup_sink_pin("wensize").connect_driver(g->create_node_const(width));
+      exit_node.setup_sink_pin("size").connect_driver(g->create_node_const(depth));
+      exit_node.setup_sink_pin("rdport").connect_driver(g->create_node_const(2));
 #if 1
       fmt::print("FIXME: memory still pending in yosys\n");
 #else
