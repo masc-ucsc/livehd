@@ -83,14 +83,25 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.print_everything();
 #endif
 
+  I(p.crit_node_vec.empty(),"\n***********\nCHECK:\n\t\t All marked nodes still not resolved??\n***********\n");
+  p.report_critical_matches_with_color();
+
 #endif
 }
 
 void Traverse_lg::debug_function(Lgraph *lg) {
 lg->dump(true);
   fmt::print("---------------------------------------------------\n");
+
+  lg->each_graph_input([](const Node_pin dpin) {
+    fmt::print("   {}\n",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())));
+  });
+  lg->each_graph_output([](const Node_pin dpin) {
+    fmt::print("   {}\n",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())));
+  });
+
   for (const auto& node : lg->fast(true)) {
-    fmt::print("{}({})\n", node.debug_name(), node.get_nid());
+    fmt::print("{}(n{})\n", node.debug_name(), node.get_nid());
 		if(node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const") {
 			auto node_sub_name = node.get_type_sub_node().get_name();
 		  fmt::print("\t\t\t\t{}\n", node_sub_name);
@@ -126,7 +137,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
-      return;
+      exit(2);
     } 
 #ifdef BASIC_DBG
     fmt::print("8. before resolution + matching while loop starts -- synth"); print_everything();
@@ -155,7 +166,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if(crit_node_vec.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
-      return;
+      exit(2);
     } 
 
     //all flops matched and still some crit cells left to map!
@@ -212,7 +223,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     I(crit_node_vec.empty(), "crit_node_vec should have been empty by now!");
     /*all required matching done*/
     report_critical_matches_with_color();
-    return;          //FIXME: for DBG; remove.
+    exit(2);          //FIXME: for DBG; remove.
   }
   
   if (is_orig_lg) {
@@ -462,7 +473,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       }
       fmt::print("::: \t");
       for (const auto& n : n_list) {
-        fmt::print("{}\t", n.get_nid());
+        fmt::print("n{}\t", n.get_nid());
       }
       fmt::print("\n\n");
     }
@@ -482,7 +493,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       }
       fmt::print("::: \t");
       for (const auto& op : fn) {
-        fmt::print("{}\t", op.get_nid());
+        fmt::print("n{}\t", op.get_nid());
       }
       fmt::print("\n\n");
     }
@@ -493,7 +504,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     fmt::print("\n\n The unmatched flops are:\n");
     for (const auto& [fn, iov] : unmatched_map) {
-      fmt::print("{}\n", fn.get_nid());
+      fmt::print("n{}\n", fn.get_nid());
       for (const auto& ip : iov.first) {
         fmt::print("{}\t", ip);
       }
@@ -506,10 +517,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nmatched_map (matching done is):\n");
     for (const auto& [k, n_list] : matched_map) {
-      fmt::print("{}\t", k.get_nid());
+      fmt::print("n{}\t", k.get_nid());
       fmt::print("::: \t");
       for (const auto& n : n_list) {
-        fmt::print("{}\t", n.get_nid());
+        fmt::print("n{}\t", n.get_nid());
       }
       fmt::print("\n");
     }
@@ -517,10 +528,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("\n\n===============================\n");
     fmt::print("\n\nmatching_map (@matching done before pass_1 is):\n");
     for (const auto& [k, n_list] : matching_map) {
-      fmt::print("{}\t", k.get_nid());
+      fmt::print("n{}\t", k.get_nid());
       fmt::print("::: \t");
       for (const auto& n : n_list) {
-        fmt::print("{}\t", n.get_nid());
+        fmt::print("n{}\t", n.get_nid());
       }
       fmt::print("\n");
     }
@@ -771,9 +782,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     /*Printing "matching map"*/
     fmt::print("\n THE MATCHING_MAP is:\n");
     for (const auto& [k, v] : matching_map) {
-      fmt::print("\n{}\t:::\t", k.get_nid());
+      fmt::print("\nn{}\t:::\t", k.get_nid());
       for (const auto& v1 : v) {
-        fmt::print("{}\t", v1.get_nid());
+        fmt::print("n{}\t", v1.get_nid());
       }
     }
     fmt::print("\n");
@@ -790,7 +801,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       }
       fmt::print("::: \t");
       for (const auto& op : fn) {
-        fmt::print("{}\t", op.get_nid());
+        fmt::print("n{}\t", op.get_nid());
       }
       fmt::print("\n\n");
     }
@@ -808,7 +819,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // if(!req_flops_matched) { fmt::print("\nMESSAGE: crit_flop_list is not empty. Should have been empty by now.");}
     fmt::print("\n crit_flop_list at this point: \n");
     for (auto& n : crit_flop_list) {
-      fmt::print("{}\t", n.get_nid());
+      fmt::print("n{}\t", n.get_nid());
     }
     I(req_flops_matched, "\n crit_flop_list is not empty. Should have been empty by now.\n");
   }
@@ -881,7 +892,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // print crit_cell_list
     fmt::print("\n crit_cell_list at this point: \n");
     for (auto& n : crit_cell_list) {
-      fmt::print("{}\t", n.get_nid());
+      fmt::print("n{}\t", n.get_nid());
     }
   }  // if(do_matching && req_flops_matched && !cellIOMap_synth.empty()) ends here
 
@@ -923,7 +934,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
         lg->dump(true);//FIXME: remove this
         for (const auto& startPoint_node : lg->fast(true)) {                                 // FIXME:REM
           if (std::to_string(startPoint_node.get_nid().value) == required_node.substr(5)) {  // FIXME:REM
-            fmt::print("Found node {}\n", startPoint_node.get_nid());                        // FIXME:REM
+            fmt::print("Found node n{}\n", startPoint_node.get_nid());                        // FIXME:REM
             // keep traversing forward until you hit an EP
             Traverse_lg::setMap_pairKey cellIOMap_orig;
             path_traversal(startPoint_node, synth_set, synth_val, cellIOMap_orig);
@@ -936,9 +947,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     /*Printing "matching map"*/
     fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
     for (const auto& [k, v] : matching_map) {
-      fmt::print("\n{}\t:::\t", k.get_nid());
+      fmt::print("\nn{}\t:::\t", k.get_nid());
       for (const auto& v1 : v) {
-        fmt::print("{}\t", v1.get_nid());
+        fmt::print("n{}\t", v1.get_nid());
       }
     }
     fmt::print("\n");
@@ -948,13 +959,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     /*Printing "matched_color_map"*/
     fmt::print("\n THE matched_color_map is:\n");
     for (const auto& [k, v] : matched_color_map) {
-      fmt::print("\t{}\t:::\t{}\n", k.get_nid(), v);
+      fmt::print("\tn{}\t:::\t{}\n", k.get_nid(), v);
     }
     fmt::print("\n");
     // print crit_cell_list
     fmt::print("\n crit_cell_list at this point: \n");
     for (auto& n : crit_cell_list) {
-      fmt::print("{}\t", n.get_nid());
+      fmt::print("n{}\t", n.get_nid());
     }
   }
 }
@@ -1179,7 +1190,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
     /*if nothing left in crit_node_vec then return with result*/
     if(crit_node_vec.empty()) {
       report_critical_matches_with_color();
-      return;
+      exit(2);
     } 
   }
 }
@@ -1241,7 +1252,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
     }
     traversed_nodes.insert(node.get_compact_flat());
 #ifdef BASIC_DBG
-    fmt::print("node obtained from traverse_order: {},{} \n", node.get_nid(), Node_pin("lgdb", node_dpin_cf).get_pid());
+    fmt::print("node obtained from traverse_order: n{},{} \n", node.get_nid(), Node_pin("lgdb", node_dpin_cf).get_pid());
 #endif
     bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
 
@@ -1355,11 +1366,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
         auto *orig_sub_lg = library->try_ref_lgraph(orig_sub_lg_name);
 #ifdef EXTENSIVE_DBG
         fmt::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
-				fmt::print("\t**synth_node_dpin_name before removal {}.**\n",synth_node_dpin_name);
+				fmt::print("\t**synth_node_dpin_name {}  -->  ",synth_node_dpin_name);
 #endif
 				remove_pound_and_bus(synth_node_dpin_name);
 #ifdef EXTENSIVE_DBG
-				fmt::print("\t\t**synth_node_dpin_name after removal {}.**\n",synth_node_dpin_name);
+				fmt::print(" {}.**\n",synth_node_dpin_name);
 #endif
         auto orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);//orig LG with same name as that of synth node
                                                                                               //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
@@ -1697,12 +1708,17 @@ void Traverse_lg::remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_c
 }
 
 void Traverse_lg::report_critical_matches_with_color(){
-  fmt::print("\n\nReporting final critical resolved matches: \n");
+  fmt::print("\n\nReporting final critical resolved matches: \nsynth node and dpin :- node(src_code) -- color val -- source loc\n");
   for(const auto &[synth_np, color_val]:crit_node_map) {
     auto orig_NPs = net_to_orig_pin_match_map[synth_np];
+    auto synth_pin = Node_pin("lgdb",synth_np);
+    auto synth_dpin = synth_pin.has_name()?synth_pin.get_name():std::to_string(synth_pin.get_pid());
+    std::string synth_node = absl::StrCat("n",std::to_string(synth_pin.get_node().get_nid()));
     for(const auto &orig_np:orig_NPs) {
-      auto n = Node_pin("lgdb", orig_np).get_node();
-      fmt::print("{} -- {}\n", n.get_nid(), color_val);//FIXME: referring to nid for understandable message. 
+      auto orig_node = Node_pin("lgdb", orig_np).get_node();
+      auto loc_start = orig_node.has_loc()? (std::to_string(orig_node.get_loc().first+1)) : "xxx";
+      auto loc_end =  orig_node.has_loc()? (std::to_string(orig_node.get_loc().second+1)) : "xxx";
+      fmt::print("{},{}       :-    n{}    --   {}   --  [{},{}]{}\n",synth_node, synth_dpin, orig_node.get_nid(), color_val,loc_start ,loc_end, orig_node.get_source());//FIXME: referring to nid for understandable message. 
     }
   }
 
@@ -1751,7 +1767,7 @@ void Traverse_lg::print_everything() {
       if(p.has_name())
         fmt::print("{}\t ", p.get_name());
       else
-        fmt::print("{}\t ", n.get_nid());
+        fmt::print("n{}\t ", n.get_nid());
     }
   }
   fmt::print("\n-------------------\n");
@@ -1901,7 +1917,7 @@ void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::str
       get_input_node(s, nodes_in_set, nodes_io_set);
       get_output_node(s, nodes_out_set, nodes_io_set);
 
-      fmt::print("\n -- Entering check_in_cellIOMap_synth( {} ) with: --\n", this_node.get_nid());
+      fmt::print("\n -- Entering check_in_cellIOMap_synth( n{} ) with: --\n", this_node.get_nid());
       fmt::print("\t in_set:");
       for (const auto& i : nodes_in_set) {
         fmt::print("\t\t{}, ", i);
@@ -1925,7 +1941,7 @@ void Traverse_lg::path_traversal(const Node& start_node, const std::set<std::str
       cellIOMap_orig[std::make_pair(nodes_in_set, nodes_out_set)] = tmpVec;
 
       auto val = check_in_cellIOMap_synth(nodes_in_set, nodes_out_set, this_node);
-      fmt::print("Found the match for {} node?: {}", this_node.get_compact_flat().get_nid(), val);
+      fmt::print("Found the match for n{} node?: {}", this_node.get_compact_flat().get_nid(), val);
       // recursively go to this_node's sinks now (moving fwd in the path)
       path_traversal(this_node, synth_set, synth_val, cellIOMap_orig);
 
@@ -2157,7 +2173,7 @@ void Traverse_lg::print_nodes_vec() const {
     if(p.has_name())
       fmt::print("{}\t ", p.get_name());
     else
-      fmt::print("{}\t ", n.get_nid());
+      fmt::print("n{}\t ", n.get_nid());
 
   }
 }
@@ -2234,7 +2250,7 @@ void Traverse_lg::print_MapOf_SetPairAndVec(const setMap_pairKey& MapOf_SetPairA
     }
     fmt::print("::: \t");
     for (const auto& op : fn) {
-      fmt::print("{}\t", op.get_nid());
+      fmt::print("n{}\t", op.get_nid());
     }
     fmt::print("\n\n");
   }
