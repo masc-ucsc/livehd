@@ -225,16 +225,22 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
       Pass::error("memory {} should have a clock pin", node.debug_name());
       return;
     }
+
     // create name
-    fout->append(absl::StrCat("cgen_memory_", single_clock ? "" : "multiclock_"));
-    fout->append(absl::StrCat(n_rd_ports, "rd_"));
-    fout->append(absl::StrCat(n_wr_ports, "wr "));
+    std::string name;
+    name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
+    name = absl::StrCat(name, n_rd_ports, "rd_");
+    name = absl::StrCat(name, n_wr_ports, "wr");
+
+    //include
+    fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
+    fout->append(absl::StrCat(name));
 
     // parameters
     std::string parameters;
     bool        first_entry = true;
 
-    parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".LATENCY_0(", mem_type, ")");
+    parameters  = absl::StrCat(parameters, first_entry ? " " : " ,", ".LATENCY_0(", mem_type, ")");
     first_entry = false;
     parameters  = absl::StrCat(parameters, first_entry ? "" : " ,", ".BITS(", mem_bits, ")");
     first_entry = false;

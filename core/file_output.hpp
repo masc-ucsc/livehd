@@ -17,6 +17,10 @@ public:
   File_output(std::string_view fname);
   ~File_output();
 
+  void prepend(std::string s1) {
+    sequence.insert(sequence.begin(), s1);
+    sz += s1.size();
+  }
   void append(std::string_view s1) {
     sequence.emplace_back(s1);
     sz += s1.size();
