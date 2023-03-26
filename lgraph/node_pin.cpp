@@ -441,8 +441,8 @@ std::string Node_pin::get_wire_name() const {
 
   std::string root_name;
   if (is_hierarchical() && hidx != Hierarchy::hierarchical_root()) {
-    root_name = top_g->ref_htree()->get_name(hidx);
-    root_name.append(1, ',');
+    root_name = absl::StrCat(top_g->ref_htree()->get_name(hidx),
+        ",", current_g->get_name(),",");
   }
 
   const auto *ref = current_g->ref_node_pin_name_map();
