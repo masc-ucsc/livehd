@@ -11,9 +11,7 @@ module simple_rf2
 
    reg [1:0]                rf[8-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-   always @(*) begin
-     q0 = rf[raddr0];
-   end
+  assign q0 = rf[raddr0];
 
    always @(posedge clk) begin
      rf[waddr0] <= din0;

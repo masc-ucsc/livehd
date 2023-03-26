@@ -94,13 +94,13 @@ int main(int argc, char *argv[]) {
             << "    end\n"
             << std::endl;
 
-    outfile << "    always @(posedge clock) begin" << std::endl;
+    outfile << "    always_comb begin" << std::endl;
 
     for (i = 0; i < read_ports; i++) {
       outfile << "      if (rd_enable_" << i << ")\n"
-              << "        d" << i << "_mem <= data[rd_addr_" << i << "];\n"
+              << "        d" << i << "_mem = data[rd_addr_" << i << "];\n"
               << "      else\n"
-              << "        d" << i << "_mem <= {BITS{1'bx}};" << std::endl;
+              << "        d" << i << "_mem = {BITS{1'bx}};" << std::endl;
     }
 
     outfile << "    end\n"

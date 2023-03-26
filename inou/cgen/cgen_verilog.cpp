@@ -257,7 +257,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
 
     first_entry = true;
     if (single_clock) {
-      fout->append(absl::StrCat(".clock(", get_wire_or_const(base_clock_dpin), ")\n"));
+      fout->append(absl::StrCat(".clk(", get_wire_or_const(base_clock_dpin), ")\n"));
       first_entry = false;
     }
 
@@ -278,8 +278,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
           if (!single_clock) {
             fout->append("  ,.rd_clock_", std::to_string(n_rd_pos), "(", get_wire_or_const(p.clock), ")\n");
           }
-          auto dout_dpin = node.setup_driver_pin_raw(n_pos);  // rd data out
-          fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", get_wire_or_const(dout_dpin), ")\n");
+          for (auto &dpin2 : node.out_connected_pins()) {
+            auto name2 = get_scaped_name(dpin2.get_wire_name());
+            fout->append("  ,.rd_dout_", std::to_string(n_rd_pos), "(", name2, ")\n");
+          }
           ++n_rd_pos;
         } else {
           if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid() || p.din.is_invalid()) {
