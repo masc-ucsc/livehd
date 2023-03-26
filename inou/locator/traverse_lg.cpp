@@ -126,12 +126,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   if (!is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);//has in-place resolution as well.
 #ifdef BASIC_DBG
-    fmt::print("7.0. before 1st set of resolution -- synth"); print_everything();
+    fmt::print("7.0. Printing before 1st set of resolution -- synth"); print_everything();
 #endif
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
 #ifdef BASIC_DBG
-    fmt::print("7. before matching starts -- synth"); print_everything();
+    fmt::print("7. printing before matching starts -- synth"); print_everything();
 #endif
     bool change_done = complete_io_match(true);//for flop only as matching flop first
     if(crit_node_vec.empty()) {
@@ -222,6 +222,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
     I(crit_node_vec.empty(), "crit_node_vec should have been empty by now!");
     /*all required matching done*/
+#ifdef BASIC_DBG
+    fmt::print("20. Printing after crit_node_vec.empty assertion checked"); print_everything();
+#endif
     report_critical_matches_with_color();
     exit(2);          //FIXME: for DBG; remove.
   }
@@ -1007,6 +1010,19 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
   /*in fwd, flops are visited last. Thus this fast pass:*/
   fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
 #ifdef BASIC_DBG
+  fmt::print("\nPrinting the crit_node_map\n");
+  for (const auto& [node_pin_cf, color] : crit_node_map) {
+    auto n = Node_pin("lgdb", node_pin_cf).get_node();
+    auto p = Node_pin("lgdb", node_pin_cf);
+    if (p.has_name()) {
+      fmt::print("{},{} \t:: {} ", /*n.get_or_create_name(),*/ p.get_name(), p.get_pid(), std::to_string(color));
+    } else {
+      fmt::print("n{},{} \t:: {} ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(), std::to_string(color));
+    }
+    fmt::print("\n");
+  }
+  fmt::print("\n");
+
   fmt::print("9.1.0 Printing before fwd traversal!"); print_everything();
 #endif
    // if(!is_orig_lg) {
@@ -1134,6 +1150,9 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
       if(node.has_color()) {
         for(const auto dpins: node.out_connected_pins()){
           crit_node_map[dpins.get_compact_flat()]=node.get_color();
+#ifdef BASIC_DBG
+          fmt::print("Inserting in crit_node_map: n{} , {}\n", node.get_nid(), node.get_color());
+#endif
           crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
         }
       }
@@ -1744,6 +1763,7 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synt
 }
 
 void Traverse_lg::print_everything() {
+  fmt::print("\n-------------------\n");
   fmt::print("\norig lg in map:\n");
   print_io_map(inp_map_of_sets_orig);
   fmt::print("\norig lg out map:\n");
@@ -1776,8 +1796,8 @@ void Traverse_lg::print_everything() {
 
 void Traverse_lg::set_theory_match_loopLast_only() {
 
-  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, true);
-  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, true);
+  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, true, false);
+  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, true, false);
 #ifdef BASIC_DBG
 	fmt::print("io_map_of_sets_orig: loop_last only\n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("io_map_of_sets_synth: loop_last only\n"); print_io_map(io_map_of_sets_synth);
@@ -1800,18 +1820,18 @@ void Traverse_lg::set_theory_match_loopLast_only() {
 
 void Traverse_lg::set_theory_match_final() {
 
-  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false);//false: not loop_last
-  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false);
+  auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false, false);//MoS, false: not loop_last
+  auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false, true);//true for union of critical entries only
 #ifdef BASIC_DBG
 	fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nio_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 #endif
 
-	bool some_matching_done = false;
-	do {
-	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
-	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
-	} while (some_matching_done && !crit_node_vec.empty());
+	//bool some_matching_done = false;
+	//do {
+	//  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
+	/*some_matching_done = */set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
+	//} while (some_matching_done && !crit_node_vec.empty());
 
 #ifdef BASIC_DBG
 	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
@@ -1873,13 +1893,21 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
 
 }
 
-Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only) const {
+Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const {
 	/* make union of inp_map_of_sets and out_map_of_sets
 	 * if(loop_last_only):for only those keys that are is_type_loop_last
 	 * */
  
 	Traverse_lg::map_of_sets io_map;
 	for ( const auto &[in_key, in_val_set] : inp_map_of_sets) {
+
+    if (union_of_crit_entries_only) {
+      auto it = std::find(crit_node_vec.begin(), crit_node_vec.end(), in_key);
+      if(it==crit_node_vec.end()){//not found in crit_node_vec
+        /*need to work on this in_key only if it is ppresent in crit_node_vec*/
+        continue;
+      }
+    }
 
     auto o_s = Node_pin("lgdb", in_key).get_node();
     if ( (loop_last_only && !o_s.is_type_loop_last()) || (!loop_last_only && o_s.is_type_loop_last()) ) {
