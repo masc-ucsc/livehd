@@ -138,10 +138,10 @@ http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",
     patches = ["//external:cryptominisat.patch"],
-    sha256 = "f03e082c94bb20ed672eefab2fc6016192d9fd2eed3a81f40924867c86788494",
-    strip_prefix = "cryptominisat-f8b1da0eed202953912ff8cca10175eab61c0a1d",
+    sha256 = "6c76ba400d910a1977dc51674ee5e7eda7382d7e2a6137f02ccbbc13790efefa",
+    strip_prefix = "cryptominisat-fa66781f68abba27c33440602c51fb472dec2847",
     urls = [
-        "https://github.com/msoos/cryptominisat/archive/f8b1da0eed202953912ff8cca10175eab61c0a1d.zip",
+        "https://github.com/msoos/cryptominisat/archive/fa66781f68abba27c33440602c51fb472dec2847.zip",
     ],
 )
 
