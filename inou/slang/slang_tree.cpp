@@ -15,6 +15,8 @@
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/types/Type.h"
 
+//#define LNAST_NODE_POS 1
+
 Slang_tree::Slang_tree() { parsed_lnasts.clear(); }
 
 void Slang_tree::process_root(const slang::RootSymbol &root) {
@@ -63,7 +65,9 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
   lnast_create_obj.new_lnast(def.name);
 
   // symbol.resolvePortConnections();
+#ifdef LNAST_NODE_POS
   auto decl_pos = 0u;
+#endif
   for (const auto &p : symbol.body.getPortList()) {
     if (p->kind == slang::SymbolKind::Port) {
       const auto &port = p->as<slang::PortSymbol>();
@@ -72,14 +76,14 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
 
       std::string var_name;
       if (port.direction == slang::ArgumentDirection::In) {
-#ifdef LNAST_NODE
+#ifdef LNAST_NODE_POS
         var_name = absl::StrCat("$.:", decl_pos, ":", port.name);
 #else
         var_name = absl::StrCat("$", port.name);
 #endif
         lnast_create_obj.vname2lname.emplace(port.name, var_name);
       } else {
-#ifdef LNAST_NODE
+#ifdef LNAST_NODE_POS
         var_name = absl::StrCat("%.:", decl_pos, ":", port.name);
 #else
         var_name = absl::StrCat("%", port.name);
@@ -96,8 +100,9 @@ bool Slang_tree::process_top_instance(const slang::InstanceSymbol &symbol) {
       }
       lnast_create_obj.vname2lname.emplace(var_name, var_name);
       lnast_create_obj.create_declare_bits_stmts(var_name, type.isSigned(), type.getBitWidth());
+#ifdef LNAST_NODE_POS
       ++decl_pos;
-
+#endif
     } else if (p->kind == slang::SymbolKind::InterfacePort) {
       const auto &port = p->as<slang::InterfacePortSymbol>();
       (void)port;

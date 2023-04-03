@@ -264,7 +264,6 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
     {
       auto n_rd_pos = 0;
       auto n_wr_pos = 0;
-      auto n_pos    = 0;
       for (auto &p : port_vector) {
         if (p.rdport) {
           if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
@@ -303,7 +302,6 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
           fout->append("  ,.wr_din_", std::to_string(n_wr_pos), "(", get_wire_or_const(p.din), ")\n");
           ++n_wr_pos;
         }
-        ++n_pos;
       }
       I(n_rd_pos == n_rd_ports);
       I(n_wr_pos == n_wr_ports);

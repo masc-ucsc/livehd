@@ -153,6 +153,11 @@ public:
   size_t get_num_pin_outputs(uint32_t id) const { return get_num_pin_edges(id).second; }
   size_t get_num_pin_inputs(uint32_t id) const { return get_num_pin_edges(id).first; }
 
+  // A common operation while optimizing a graph is to move all the edges from a
+  // node_pin to another node_pin.  Both the current_pin and new_pin should be
+  // the same type (either both sink or both drivers).
+  void move_edges(uint32_t current_pin, uint32_t new_pin);
+
   void add_edge(uint32_t driver_id, uint32_t sink_id) {
     I(table[sink_id].is_pin());
 

@@ -1715,7 +1715,6 @@ void Cprop::reconnect_memory_port_const(Node &node, std::string_view field, std:
 
 void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
   auto n_ports    = 0u;
-  auto n_rd_ports = 0u;
   auto n_clocks   = 0u;
 
   std::vector<bool> read_map;
@@ -1735,7 +1734,6 @@ void Cprop::reconnect_memory(Node &node, std::shared_ptr<Lgtuple const> tup) {
         read_map.emplace_back(false);
       } else {
         read_map.emplace_back(true);
-        ++n_rd_ports;
       }
     }
     if (field == "clock_pin") {

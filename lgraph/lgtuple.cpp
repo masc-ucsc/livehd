@@ -980,7 +980,6 @@ Node_pin Lgtuple::flatten() const {
 
   if (all_const) {
     Lconst result;
-    int    i         = 0;
     Bits_t accu_bits = 0;
     for (auto &e : key_map) {
       if (is_attribute(e.first)) {
@@ -991,7 +990,6 @@ Node_pin Lgtuple::flatten() const {
       v      = v << accu_bits;
       result = result.or_op(v.get_mask_op());
       accu_bits += result.get_bits();
-      i++;
     }
     return a_dpin.get_node().create_const(result).get_driver_pin();
   }
