@@ -48,10 +48,10 @@ init()
 http_archive(
     name = "mustache",
     build_file = "mustache.BUILD",
-    sha256 = "c426178bf3fa0888a59c4d88977a9fc754a82039a2adad19239555466fb47a42",
-    strip_prefix = "Mustache-a7eebc9bec92676c1931eddfff7637d7e819f2d2",
+    sha256 = "d74b503baedd98a51bf8142355ef9ce55daf2268150e5897f6629f2d0f9205e2",
+    strip_prefix = "Mustache-04277d5552c6e46bee41a946b7d175a660ea1b3d",
     urls = [
-        "https://github.com/kainjow/Mustache/archive/a7eebc9bec92676c1931eddfff7637d7e819f2d2.zip",
+        "https://github.com/kainjow/Mustache/archive/04277d5552c6e46bee41a946b7d175a660ea1b3d.zip",
     ],
 )
 
