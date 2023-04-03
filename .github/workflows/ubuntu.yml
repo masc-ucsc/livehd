@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Mount Bazel cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /home/runner/.cache/bazel
           key: bazel-gcc-${{ github.sha }}
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Mount Bazel cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /home/runner/.cache/bazel
           key: bazel-gcc-instrumented-${{ github.sha }}
@@ -74,7 +74,7 @@ jobs:
           LLVM_VERSION: 12
 
       - name: Mount Bazel cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: /home/runner/.cache/bazel
           key: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}-${{ github.sha }}
