@@ -82,31 +82,15 @@ index d073d1b68..0fd445fa8 100644
      "compilation date time = " __DATE__ " " __TIME__
      ""
      ;
-diff --git src/cryptominisat.h.in include/cryptominisat5/cryptominisat.h
-similarity index 98%
-rename from src/cryptominisat.h.in
+diff --git src/cryptominisat.h include/cryptominisat5/cryptominisat.h
+similarity index 100%
+rename from src/cryptominisat.h
 rename to include/cryptominisat5/cryptominisat.h
-index a37498416..fda1eee1f 100644
---- src/cryptominisat.h.in
-+++ include/cryptominisat5/cryptominisat.h
-@@ -23,9 +23,9 @@ THE SOFTWARE.
- #ifndef __CRYPTOMINISAT5_H__
- #define __CRYPTOMINISAT5_H__
- 
--#define CRYPTOMINISAT_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
--#define CRYPTOMINISAT_VERSION_MINOR @PROJECT_VERSION_MINOR@
--#define CRYPTOMINISAT_VERSION_PATCH @PROJECT_VERSION_PATCH@
-+#define CRYPTOMINISAT_VERSION_MAJOR 5
-+#define CRYPTOMINISAT_VERSION_MINOR 8
-+#define CRYPTOMINISAT_VERSION_PATCH 0
- 
- #include <atomic>
- #include <vector>
-diff --git src/cryptominisat_c.h.in include/cryptominisat5/cryptominisat_c.h
+diff --git src/cryptominisat_c.h include/cryptominisat5/cryptominisat_c.h
 similarity index 100%
-rename from src/cryptominisat_c.h.in
+rename from src/cryptominisat_c.h
 rename to include/cryptominisat5/cryptominisat_c.h
-diff --git src/solvertypesmini.h.in include/cryptominisat5/solvertypesmini.h
+diff --git src/solvertypesmini.h include/cryptominisat5/solvertypesmini.h
 similarity index 100%
-rename from src/solvertypesmini.h.in
+rename from src/solvertypesmini.h
 rename to include/cryptominisat5/solvertypesmini.h

@@ -48,10 +48,10 @@ init()
 http_archive(
     name = "mustache",
     build_file = "mustache.BUILD",
-    sha256 = "c426178bf3fa0888a59c4d88977a9fc754a82039a2adad19239555466fb47a42",
-    strip_prefix = "Mustache-a7eebc9bec92676c1931eddfff7637d7e819f2d2",
+    sha256 = "d74b503baedd98a51bf8142355ef9ce55daf2268150e5897f6629f2d0f9205e2",
+    strip_prefix = "Mustache-04277d5552c6e46bee41a946b7d175a660ea1b3d",
     urls = [
-        "https://github.com/kainjow/Mustache/archive/a7eebc9bec92676c1931eddfff7637d7e819f2d2.zip",
+        "https://github.com/kainjow/Mustache/archive/04277d5552c6e46bee41a946b7d175a660ea1b3d.zip",
     ],
 )
 
@@ -138,10 +138,10 @@ http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",
     patches = ["//external:cryptominisat.patch"],
-    sha256 = "f03e082c94bb20ed672eefab2fc6016192d9fd2eed3a81f40924867c86788494",
-    strip_prefix = "cryptominisat-f8b1da0eed202953912ff8cca10175eab61c0a1d",
+    sha256 = "6c76ba400d910a1977dc51674ee5e7eda7382d7e2a6137f02ccbbc13790efefa",
+    strip_prefix = "cryptominisat-fa66781f68abba27c33440602c51fb472dec2847",
     urls = [
-        "https://github.com/msoos/cryptominisat/archive/f8b1da0eed202953912ff8cca10175eab61c0a1d.zip",
+        "https://github.com/msoos/cryptominisat/archive/fa66781f68abba27c33440602c51fb472dec2847.zip",
     ],
 )
 
@@ -161,10 +161,10 @@ http_archive(
 http_archive(
     name = "rapidjson",
     build_file = "rapidjson.BUILD",
-    sha256 = "a6b8da8f736b25689eb7fe36dff5d5ce8d491f1e08dd92f0729d6dd6da95e0ac",
-    strip_prefix = "rapidjson-6534506e829a489bda78bc5eac5faa34da0a2c51/include",
+    sha256 = "47028fc98b79aeebd44f349dd026e070b102ee78717e6157a167b1288dd271c5",
+    strip_prefix = "rapidjson-083f359f5c36198accc2b9360ce1e32a333231d9/include",
     urls = [
-        "https://github.com/Tencent/rapidjson/archive/6534506e829a489bda78bc5eac5faa34da0a2c51.zip",
+        "https://github.com/Tencent/rapidjson/archive/083f359f5c36198accc2b9360ce1e32a333231d9.zip",
     ],
 )
 
@@ -254,10 +254,10 @@ rules_proto_toolchains()
 # tcmalloc
 http_archive(
     name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
-    sha256 = "9df3dd144fba329ec454571082a6575007bfdfb1e7f2a63c59ceddbe168ed6f2",
-    strip_prefix = "tcmalloc-9c1481ff6aedc405086df899939c589776ba4d1d",
+    sha256 = "8350c0923a779270957b00289a45418ad5b0364e1ec0e899fa4dc47dcc6ab353",
+    strip_prefix = "tcmalloc-3814add5533f4a50baa6f8738efc1418d2f97fea",
     urls = [
-        "https://github.com/google/tcmalloc/archive/9c1481ff6aedc405086df899939c589776ba4d1d.zip",
+        "https://github.com/google/tcmalloc/archive/3814add5533f4a50baa6f8738efc1418d2f97fea.zip",
     ],
 )
 
@@ -285,3 +285,15 @@ http_archive(
     strip_prefix = "perfetto-28.0/sdk",
     urls = ["https://github.com/google/perfetto/archive/refs/tags/v28.0.tar.gz"],
 )
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Boost (bazel_rules_hdl)
+#http_archive(
+    #name = "com_github_nelhage_rules_boost",
+    #url = "https://github.com/nelhage/rules_boost/archive/96e9b631f104b43a53c21c87b01ac538ad6f3b48.tar.gz",
+    #strip_prefix = "rules_boost-96e9b631f104b43a53c21c87b01ac538ad6f3b48",
+#)
+#load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
+#boost_deps()
+
