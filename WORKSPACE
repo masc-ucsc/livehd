@@ -7,9 +7,9 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 
 http_archive(
     name = "rules_foreign_cc",
-    sha256 = "30c970bfaeda3485100c62b13093da2be2c70ed99ec8d30f4fac6dd37cb25f34",
-    strip_prefix = "rules_foreign_cc-0.6.0",
-    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/0.6.0.zip",
+    sha256 = "5303e3363fe22cbd265c91fce228f84cf698ab0f98358ccf1d95fba227b308f6",
+    strip_prefix = "rules_foreign_cc-0.9.0",
+    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/0.9.0.zip",
 )
 
 load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
@@ -19,8 +19,8 @@ rules_foreign_cc_dependencies()
 # rules_hdl
 http_archive(
     name = "rules_python",
-    sha256 = "b6d46438523a3ec0f3cead544190ee13223a52f6a6765a29eae7b7cc24cc83a0",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.1.0/rules_python-0.1.0.tar.gz",
+    sha256 = "a644da969b6824cc87f8fe7b18101a8a6c57da5db39caa6566ec6109f37d2141",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
 )
 
 #http_archive(
@@ -98,10 +98,10 @@ new_git_repository(
 http_archive(
     name = "tree-sitter",
     build_file = "tree-sitter.BUILD",
-    sha256 = "5dc3a775a41ee9592ffc324410d8cb56e4baa0607dda0fa18832d51f6538e75c",
-    strip_prefix = "tree-sitter-2bee7c9b75e3e0163b321502f1f73e2e38943a7e",
+    sha256 = "e4958bca90a4c1cb2039b641c1e7e1946d0a30b7f75b7bcdda673a8e951a8bb4",
+    strip_prefix = "tree-sitter-1b1c3974f789a9bfaa31f493e6eaa212f13bdfb9",
     urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/2bee7c9b75e3e0163b321502f1f73e2e38943a7e.zip",
+        "https://github.com/tree-sitter/tree-sitter/archive/1b1c3974f789a9bfaa31f493e6eaa212f13bdfb9.zip",
     ],
 )
 
@@ -264,9 +264,9 @@ http_archive(
 # Fuzzing (required by tcmalloc)
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
-    strip_prefix = "rules_fuzzing-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
+    sha256 = "d9002dd3cd6437017f08593124fdd1b13b3473c7b929ceb0e60d317cb9346118",
+    strip_prefix = "rules_fuzzing-0.3.2",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.3.2.zip"],
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
