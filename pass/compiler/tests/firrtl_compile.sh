@@ -52,8 +52,12 @@ firrtl_test() {
         exit 1
     fi
     rm -rf ./lgdb_${pt}
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> lnast.dump " > ${pt}.lnast.raw.txt
-    ${LGSHELL} "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
+    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> lnast.dump |> lnast.save odir:hif_${pt}.${FIRRTL_LEVEL} " > ${pt}.lnast.raw.txt
+    echo "inou.firrtl.tolnast files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> lnast.dump |> lnast.save odir:hif_${pt}.${FIRRTL_LEVEL}"
+    ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:inou/firrtl/tests/proto/${pt}.${FIRRTL_LEVEL}.pb |> pass.lnast_tolg.dbg_lnast_ssa |> lnast.dump " > ${pt}.lnast.txt
+    # FIXME: This should work too (the lnast.load to re-use)
+    #${LGSHELL} "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+    #echo "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
     ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
     # ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt}"
     ret_val=$?
