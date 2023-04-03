@@ -109,8 +109,8 @@ http_archive(
 http_archive(
     name = "json",
     build_file = "json.BUILD",
-    sha256 = "6bea5877b1541d353bd77bdfbdb2696333ae5ed8f9e8cc22df657192218cad91",
-    urls = ["https://github.com/nlohmann/json/releases/download/v3.9.1/include.zip"],
+    sha256 = "e5c7a9f49a16814be27e4ed0ee900ecd0092bfb7dbfca65b5a421b774dccaaed",
+    urls = ["https://github.com/nlohmann/json/releases/download/v3.11.2/include.zip"],
 )
 
 # iassert
