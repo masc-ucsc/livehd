@@ -5,6 +5,19 @@ Those are simpler than MS thesis but useful for LiveHD. They are ranked from
 "most" to less "urgent". Each has a easy/medium/hard level. Easy should take a
 few days to implement, hard could take a quarter.
 
+## [small] List of "older" version
+
+This is a list of "packages" that we do not have the latest version but that we
+should patch some parts of LiveHD to use them.
+
+* fmt: The latest 9.? version does not compile in OS X?? (Why)
+
+* bazel: We are stuck in 5.4 due to bazel_rules_hdl. Once they update....
+
+* bazel_rules_hdl: We should not have our fork with patches. We should try to push
+to top bazel_rules_hdl.
+
+
 ## [small] C++ switch terminal library
 
 Switch from replxx to https://github.com/jcwangxp/Crossline
