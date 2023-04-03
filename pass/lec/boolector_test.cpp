@@ -7,6 +7,8 @@
 
 #include <cassert>
 
+double wallclock_time_started=0.0;
+
 #define BV1_EXAMPLE_NUM_BITS 8
 
 /* We verify the XOR swap algorithm. The XOR bitwise operation can

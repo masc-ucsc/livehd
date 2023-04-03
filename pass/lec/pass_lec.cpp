@@ -22,6 +22,8 @@
 #include "node_pin.hpp"
 #include "sub_node.hpp"
 
+double wallclock_time_started=0.0;
+
 static Pass_plugin sample("pass_lec", Pass_lec::setup);
 
 void Pass_lec::setup() {

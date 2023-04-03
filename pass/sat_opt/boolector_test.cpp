@@ -9,6 +9,8 @@
 
 #define BV1_EXAMPLE_NUM_BITS 8
 
+double wallclock_time_started=0.0;
+
 /* We verify the XOR swap algorithm. The XOR bitwise operation can
  * be used to swap variables without using a temporary variable:
  * int x, y;

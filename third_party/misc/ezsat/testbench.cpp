@@ -21,6 +21,8 @@
 
 #include "lezminisat.hpp"
 
+double wallclock_time_started=0; // needed for crytominisat
+
 struct xorshift128 {
   uint32_t x, y, z, w;
   xorshift128() {
