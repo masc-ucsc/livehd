@@ -981,30 +981,6 @@ absl::flat_hash_set<Node_pin::Compact_flat> Traverse_lg::get_matching_map_val(co
   return absl::flat_hash_set<Node_pin::Compact_flat>();
 }
 
-void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
-
-  /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
-  boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);
-#ifdef BASIC_DBG
-  fmt::print("3.0. boundary_traversal(lg, inp_map_of_sets, out_map_of_sets);\n"); 
-#endif
-  print_everything();
-
-  /*For synth, set values were replaced using net_to_orig_pin_match_map. Thus these synth map_of_sets can be matched with orig map_of_sets for matching at the boundary of the design.*/
-  // if(!net_to_orig_pin_match_map.empty()) {
-  //   /* 1. match map_of_sets-synth to map_of_sets-orig (both in and out)
-  //    * 2. put matches in net_to_orig_pin_match_map.
-  //    * 3. remove the matched entries from map_of_sets-synth; to keep the time complexity of further matching-passes lowered.*/
-  //   /*For inputs*/
-  //   matching_pass_io_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
-  //   /*Same as above for output*/
-  //   matching_pass_io_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
-  // 
-  // }
-  // ^Commented this because: matching right after boundary traversal gives more matches with less IO to match. example: incorrect matching in case of flops. all flops were directly connected to clock in orig and registered as equivalent to each other just due to the "clock" input.
-
-}
-
 void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets, bool is_orig_lg) {
 
   /*in fwd, flops are visited last. Thus this fast pass:*/
@@ -1078,7 +1054,8 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
 
 }
 
-void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
+/*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
+void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
   lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
@@ -1097,7 +1074,7 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
     }
 #endif
     for (auto sink_dpin : dpin.out_sinks()) {
-      for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//FIXME:??: nodes w/o any o/p will NOT appear in map now -- OK!
+      for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//nodes w/o any o/p will NOT appear in map now 
         if(dpin.get_pin_name()=="reset_pin") continue;//do not want "reset" in inp-set (gives matching issues)
         if(!net_to_orig_pin_match_map.empty()){
           auto match_val = get_matching_map_val(dpin.get_compact_flat());//resolution attempt
@@ -1113,8 +1090,10 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
       }
     }
   });
+#ifdef BASIC_DBG
   fmt::print("\n:::: inp_map_of_sets.size() =  {}\n", inp_map_of_sets.size());
   print_io_map(inp_map_of_sets);
+#endif
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
   lg->each_graph_output([&out_map_of_sets, this](const Node_pin dpin) {
@@ -1148,8 +1127,22 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
       }
     }
   });
+#ifdef BASIC_DBG
   fmt::print("\n:::: out_map_of_sets.size() =  {}\n", out_map_of_sets.size());
-  //print_io_map(out_map_of_sets);
+  print_io_map(out_map_of_sets);
+#endif
+  /*For synth, set values were replaced using net_to_orig_pin_match_map. Thus these synth map_of_sets can be matched with orig map_of_sets for matching at the boundary of the design.*/
+  // if(!net_to_orig_pin_match_map.empty()) {
+  //   /* 1. match map_of_sets-synth to map_of_sets-orig (both in and out)
+  //    * 2. put matches in net_to_orig_pin_match_map.
+  //    * 3. remove the matched entries from map_of_sets-synth; to keep the time complexity of further matching-passes lowered.*/
+  //   /*For inputs*/
+  //   matching_pass_io_boundary_only(inp_map_of_sets_synth, inp_map_of_sets_orig);
+  //   /*Same as above for output*/
+  //   matching_pass_io_boundary_only(out_map_of_sets_synth, out_map_of_sets_orig);
+  // 
+  // }
+  // ^Commented this because: matching right after boundary traversal gives more matches with less IO to match. example: incorrect matching in case of flops. all flops were directly connected to clock in orig and registered as equivalent to each other just due to the "clock" input.
 }
 
 void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets, bool is_orig_lg) {
