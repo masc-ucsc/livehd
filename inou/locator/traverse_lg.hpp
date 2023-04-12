@@ -19,6 +19,7 @@
 #define DE_DUP  // use set
 #define BASIC_DBG
 // #define EXTENSIVE_DBG
+#define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 
 class Traverse_lg : public Pass {
 public:

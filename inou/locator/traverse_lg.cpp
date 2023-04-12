@@ -220,12 +220,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // fmt::print("\n inp_map_of_sets_synth.size() =  {}\nout_map_of_sets_synth:\n", inp_map_of_sets_synth.size());
     // print_io_map(out_map_of_sets_synth);
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
-    I(crit_node_vec.empty(), "crit_node_vec should have been empty by now!");
     /*all required matching done*/
 #ifdef BASIC_DBG
     fmt::print("20. Printing after crit_node_vec.empty assertion checked"); print_everything();
 #endif
     report_critical_matches_with_color();
+    I(crit_node_vec.empty(), "crit_node_vec should have been empty by now!");
     exit(2);          //FIXME: for DBG; remove.
   }
   
@@ -1083,12 +1083,19 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
   lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
     auto node = dpin.get_node();
+#ifndef FULL_RUN_FOR_EVAL
     if(node.has_color()) {
       for(const auto dpins: node.out_connected_pins()) {
         crit_node_map[dpins.get_compact_flat()]=node.get_color();//keep till end for color data
         crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
       }
     }
+#else
+    for(const auto dpins: node.out_connected_pins()) {
+      crit_node_map[dpins.get_compact_flat()]=0;//keep till end for color data
+      crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
+    }
+#endif
     for (auto sink_dpin : dpin.out_sinks()) {
       for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//FIXME:??: nodes w/o any o/p will NOT appear in map now -- OK!
         if(dpin.get_pin_name()=="reset_pin") continue;//do not want "reset" in inp-set (gives matching issues)
@@ -1113,12 +1120,19 @@ void Traverse_lg::boundary_traversal(Lgraph* lg, map_of_sets &inp_map_of_sets, m
   lg->each_graph_output([&out_map_of_sets, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
     auto node = dpin.get_node();
+#ifndef FULL_RUN_FOR_EVAL
     if(node.has_color()) {
       for(const auto dpins: node.out_connected_pins()) {
         crit_node_map[dpins.get_compact_flat()]=node.get_color();
         crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
       }
     }
+#else
+    for(const auto dpins: node.out_connected_pins()) {
+      crit_node_map[dpins.get_compact_flat()]=0;
+      crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
+    }
+#endif
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
       if(!net_to_orig_pin_match_map.empty()){
@@ -1147,6 +1161,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 
     if(!is_orig_lg) {
     /*capture the colored nodes*/
+#ifndef FULL_RUN_FOR_EVAL
       if(node.has_color()) {
         for(const auto dpins: node.out_connected_pins()){
           crit_node_map[dpins.get_compact_flat()]=node.get_color();
@@ -1156,6 +1171,15 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
           crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
         }
       }
+#else
+      for(const auto dpins: node.out_connected_pins()){
+        crit_node_map[dpins.get_compact_flat()]=0;
+#ifdef BASIC_DBG
+        fmt::print("Inserting in crit_node_map: n{} , 0\n", node.get_nid() );
+#endif
+        crit_node_vec.emplace_back(dpins.get_compact_flat());//keep on deleting as matching takes place 
+      }
+#endif
       if(node.is_type_loop_last()) {
         for(const auto dpins: node.out_connected_pins()){
           flop_set.insert(dpins.get_compact_flat());
@@ -1366,7 +1390,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 		if(synth_node.is_type_sub() && synth_node.get_type_sub_node().get_name()=="__fir_const"){
 			continue;
 		}
+#ifndef FULL_RUN_FOR_EVAL
 		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
+#endif
 
     for (const auto synth_node_dpin: synth_node.out_connected_pins()) {//might be multi driver node
       auto synth_node_dpin_name = synth_node_dpin.has_name() ? synth_node_dpin.get_name() : "" ;
@@ -1379,8 +1405,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
          * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of orig_lg, use synth_node.get_class_lgraph().get_name -- find equivalent orig for this guy!
          * */
+#ifndef FULL_RUN_FOR_EVAL
 				std::string firrtl_prefix{"__firrtl_"};
 				std::string orig_sub_lg_name = firrtl_prefix +  std::string(synth_sub_lg_name);
+#else
+        std::string orig_sub_lg_name = "MaxPeriodFibonacciLFSR_1";
+#endif
 				// = "__firrtl_" + std::to_string(synth_sub_lg_name);//.substr(std::size_t(9)); //removing "__firrtl_"
         auto *orig_sub_lg = library->try_ref_lgraph(orig_sub_lg_name);
 #ifdef EXTENSIVE_DBG
