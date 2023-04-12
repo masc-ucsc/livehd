@@ -91,7 +91,7 @@ private:
   bool surrounding_cell_match_final();//matches any unmatched cell with resolved surrounding cells. returns T if unmatched still left.
   std::vector<Node_pin::Compact_flat> get_surrounding_pins(Node &node, Node_pin::Compact_flat main_node_dpin = Node_pin::Compact_flat(0,0,0)) const;
   std::vector<std::pair<uint64_t, uint64_t>> get_loc_vec(absl::flat_hash_set<Node_pin::Compact_flat> &orig_node_pin_vec) const ;//FIXME: should have fnmae as well?
-  void remove_from_crit_node_vec(const Node_pin::Compact_flat &dpin_cf);
+  void remove_from_crit_node_set(const Node_pin::Compact_flat &dpin_cf);
   void report_critical_matches_with_color();
   void resolution_of_synth_map_of_sets(map_of_sets &synth_map_of_set);
   void set_theory_match_loopLast_only();
@@ -104,7 +104,7 @@ private:
   void print_everything() ;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
-  std::vector<Node_pin::Compact_flat> crit_node_vec;
+  absl::flat_hash_set<Node_pin::Compact_flat> crit_node_set;
   absl::flat_hash_set<Node_pin::Compact_flat> flop_set;
   map_of_sets inp_map_of_sets_synth;
   map_of_sets out_map_of_sets_synth;
