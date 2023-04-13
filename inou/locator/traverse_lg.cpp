@@ -1065,13 +1065,19 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
       if(node.has_color()) {
         for(const auto dpins: node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()]=node.get_color();//keep till end for color data
-          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+          if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+            crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                           //need not stor in set if already a matched entry
+          }
         }
       }
 #else
       for(const auto dpins: node.out_connected_pins()) {
         crit_node_map[dpins.get_compact_flat()]=0;//keep till end for color data
-        crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+          if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+            crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                           //need not stor in set if already a matched entry
+          }
       }
 #endif
     }
@@ -1106,13 +1112,19 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
       if(node.has_color()) {
          for(const auto dpins: node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()]=node.get_color();
-          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+          if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+            crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                           //need not stor in set if already a matched entry
+          }
         }
       }
 #else
       for(const auto dpins: node.out_connected_pins()) {
         crit_node_map[dpins.get_compact_flat()]=0;
-        crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+          if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+            crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                           //need not stor in set if already a matched entry
+          }
       }
 #endif
     }
@@ -1165,7 +1177,10 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 #ifdef BASIC_DBG
           fmt::print("Inserting in crit_node_map: n{} , {}\n", node.get_nid(), node.get_color());
 #endif
-          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+          if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+            crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                           //need not stor in set if already a matched entry
+          }
         }
       }
 #else
@@ -1174,7 +1189,10 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
 #ifdef BASIC_DBG
         fmt::print("Inserting in crit_node_map: n{} , 0\n", node.get_nid() );
 #endif
-        crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+        if(net_to_orig_pin_match_map.find(dpins.get_compact_flat())==net_to_orig_pin_match_map.end()) {
+          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+                                                         //need not stor in set if already a matched entry
+        }
       }
 #endif
       if(node.is_type_loop_last()) {
