@@ -82,7 +82,7 @@ private:
   std::vector<Node_pin::Compact_flat> forced_match_vec;
   void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets , bool is_orig_lg);
   void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets , bool is_orig_lg);
-  void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets );
+  void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets, bool is_orig_lg );
   void  print_io_map( const map_of_sets &the_map_of_sets) const;
   void  netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);

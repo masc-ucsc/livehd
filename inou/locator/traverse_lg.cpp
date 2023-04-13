@@ -56,7 +56,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   // p.debug_function(orig_lg);
   // p.debug_function(synth_lg);
   // return;
-  p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig);//orig-boundary only
+  p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);//orig-boundary only
 #ifdef BASIC_DBG
   fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
   p.print_everything();
@@ -66,7 +66,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
 #endif
-  p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching
+  p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth, false);//synth-boundary only + matching
 #ifdef BASIC_DBG
   fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
   p.print_everything();
@@ -1055,24 +1055,26 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
 }
 
 /*parse the IO of LG. coz fast/fwd pass does not cover IO.*/
-void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets) {
+void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets, bool is_orig_lg) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
-  lg->each_graph_input([&inp_map_of_sets, this](const Node_pin dpin) {
+  lg->each_graph_input([&inp_map_of_sets, &is_orig_lg, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
     auto node = dpin.get_node();
+    if(!is_orig_lg) {
 #ifndef FULL_RUN_FOR_EVAL
-    if(node.has_color()) {
+      if(node.has_color()) {
+        for(const auto dpins: node.out_connected_pins()) {
+          crit_node_map[dpins.get_compact_flat()]=node.get_color();//keep till end for color data
+          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+        }
+      }
+#else
       for(const auto dpins: node.out_connected_pins()) {
-        crit_node_map[dpins.get_compact_flat()]=node.get_color();//keep till end for color data
+        crit_node_map[dpins.get_compact_flat()]=0;//keep till end for color data
         crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
       }
-    }
-#else
-    for(const auto dpins: node.out_connected_pins()) {
-      crit_node_map[dpins.get_compact_flat()]=0;//keep till end for color data
-      crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
-    }
 #endif
+    }
     for (auto sink_dpin : dpin.out_sinks()) {
       for (const auto dpins : sink_dpin.get_node().out_connected_pins()) {//nodes w/o any o/p will NOT appear in map now 
         if(dpin.get_pin_name()=="reset_pin") continue;//do not want "reset" in inp-set (gives matching issues)
@@ -1096,22 +1098,24 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets &inp_map_of
 #endif
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
-  lg->each_graph_output([&out_map_of_sets, this](const Node_pin dpin) {
+  lg->each_graph_output([&out_map_of_sets, &is_orig_lg, this](const Node_pin dpin) {
     /*capture the colored nodes in the process.*/
     auto node = dpin.get_node();
+    if(!is_orig_lg) {
 #ifndef FULL_RUN_FOR_EVAL
-    if(node.has_color()) {
+      if(node.has_color()) {
+         for(const auto dpins: node.out_connected_pins()) {
+          crit_node_map[dpins.get_compact_flat()]=node.get_color();
+          crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
+        }
+      }
+#else
       for(const auto dpins: node.out_connected_pins()) {
-        crit_node_map[dpins.get_compact_flat()]=node.get_color();
+        crit_node_map[dpins.get_compact_flat()]=0;
         crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
       }
-    }
-#else
-    for(const auto dpins: node.out_connected_pins()) {
-      crit_node_map[dpins.get_compact_flat()]=0;
-      crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
-    }
 #endif
+    }
     auto spin = dpin.change_to_sink_from_graph_out_driver();
     for (auto driver_dpin : spin.inp_drivers()) {
       if(!net_to_orig_pin_match_map.empty()){
@@ -1369,7 +1373,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
 #ifdef EXTENSIVE_DBG
-    fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+    fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
 #endif
     remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   });
@@ -1377,7 +1381,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
 #ifdef EXTENSIVE_DBG
-    fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+    fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
 #endif
     remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   });
