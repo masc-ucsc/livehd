@@ -1368,11 +1368,17 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
   orig_lg->each_graph_input([synth_lg, this](const Node_pin dpin) {
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+#ifdef EXTENSIVE_DBG
+    fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+#endif
     remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   });
   orig_lg->each_graph_output([synth_lg, this](const Node_pin dpin) {
     auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
     net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+#ifdef EXTENSIVE_DBG
+    fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+#endif
     remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   });
 
@@ -1384,6 +1390,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 			continue;
 		}
 #ifndef FULL_RUN_FOR_EVAL
+		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
+#endif
+#ifdef EXTENSIVE_DBG
 		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
 #endif
 
@@ -1419,6 +1428,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
         if ( !orig_node_dpin.is_invalid() )  {
 #ifdef EXTENSIVE_DBG
           fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.get_name());
+          fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
 #endif
           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
           remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
@@ -1740,8 +1750,31 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat &dpin_c
    * 1.  delete from crit_node_set
    * 2.  if upon deletion, vec becomes empty (all crit nodes matched) return true else return false*/
   if(crit_node_set.find(dpin_cf)!=crit_node_set.end()) {
+#ifdef EXTENSIVE_DBG
+    auto p = Node_pin("lgdb", dpin_cf);
+    fmt::print("\t\tREMOVING FROM crit_node_set: {}, {}\n", p.has_name()?p.get_name():std::to_string(p.get_pid()), std::to_string(p.get_pid()));
+#endif
     crit_node_set.erase(dpin_cf);
   } 
+#ifdef EXTENSIVE_DBG
+  else {
+    auto p = Node_pin("lgdb", dpin_cf);
+    fmt::print("\t\tNOT REMOVING FROM crit_node_set: {}, {}\n", p.has_name()?p.get_name():std::to_string(p.get_pid()), std::to_string(p.get_pid()));
+    fmt::print("\t crit_node_set: "); print_set(crit_node_set);
+    fmt::print("\n");
+    for(auto & pin_cf: crit_node_set){
+      auto p_ = Node_pin("lgdb", pin_cf);
+      //fmt::print("\t COMPARING: {}, {} \t", p.has_name()?p.get_name():std::to_string(p.get_pid()), p_.has_name()?p_.get_name():std::to_string(p_.get_pid()));
+      fmt::print("\t COMPARING {} {}: {}, {} \t", p.get_top_lgraph()->get_name(), p_.get_top_lgraph()->get_name(), p.get_wire_name(), p_.get_wire_name());
+      if(pin_cf == dpin_cf) { 
+        fmt::print("=>EQUAL!");
+      } else {
+        fmt::print("=>NOT EQUAL!");
+      }
+    }
+    fmt::print("\n");
+  }
+#endif
   // if (crit_node_set.empty())
   //   return false;
   // else
@@ -1796,8 +1829,8 @@ void Traverse_lg::print_everything() {
   print_io_map(out_map_of_sets_synth);
   fmt::print("\nmatching map:\n");
   print_io_map(net_to_orig_pin_match_map);
-  fmt::print("\ncrit nodes vec:\n");
-  print_nodes_vec();
+  fmt::print("\ncrit nodes set:\n");
+  print_set(crit_node_set);
   fmt::print("\nflop set:\n");
   print_set(flop_set);
   fmt::print("\nforced_match_vec:\n");
@@ -2214,27 +2247,15 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
   }
 }
 
-void Traverse_lg::print_nodes_vec() const {
-  for(const auto &v: crit_node_set){
-
-    auto n = Node_pin("lgdb", v).get_node();
-    auto p = Node_pin("lgdb", v);
-    if(p.has_name())
-      fmt::print("{}\t ", p.get_name());
-    else
-      fmt::print("n{}\t ", n.get_nid());
-
-  }
-}
 void Traverse_lg::print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const {
   for(const auto &v: set_of_dpins){
 
     auto n = Node_pin("lgdb", v).get_node();
     auto p = Node_pin("lgdb", v);
     if(p.has_name())
-      fmt::print("\t {} ", p.get_name());
+      fmt::print("\t {},{} ", p.get_name(),p.get_pid());
     else
-      fmt::print("\t n{} ", n.get_nid());
+      fmt::print("\t n{},{} ", n.get_nid(), p.get_pid());
 
   }
 }
