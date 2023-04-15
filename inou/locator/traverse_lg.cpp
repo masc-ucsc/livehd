@@ -1171,7 +1171,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
     if(!is_orig_lg) {
     /*capture the colored nodes*/
 #ifndef FULL_RUN_FOR_EVAL
-      if(node.has_color()) {
+      if(node.has_color() && !node.is_type_const()) {
         for(const auto dpins: node.out_connected_pins()){
           crit_node_map[dpins.get_compact_flat()]=node.get_color();
 #ifdef BASIC_DBG
@@ -1184,6 +1184,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
         }
       }
 #else
+      if ( !node.is_type_const()) {
       for(const auto dpins: node.out_connected_pins()){
         crit_node_map[dpins.get_compact_flat()]=0;
 #ifdef BASIC_DBG
@@ -1193,6 +1194,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
           crit_node_set.insert(dpins.get_compact_flat());//keep on deleting as matching takes place 
                                                          //need not stor in set if already a matched entry
         }
+      }
       }
 #endif
       if(node.is_type_loop_last()) {
@@ -1297,7 +1299,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
 
 void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool is_orig_lg) {
 #ifdef EXTENSIVE_DBG
-  fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n");
+  fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
   fmt::print("\t\tis_orig_lg: {}\n",is_orig_lg);
 #endif
   absl::flat_hash_set<Node::Compact_flat> traversed_nodes;
@@ -1420,6 +1422,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
     for (const auto synth_node_dpin: synth_node.out_connected_pins()) {//might be multi driver node
       auto synth_node_dpin_name = synth_node_dpin.has_name() ? synth_node_dpin.get_name() : "" ;
+      if(synth_node_dpin_name==""){
+        synth_node_dpin_name=synth_node_dpin.get_wire_name();
+      }
 
       if(synth_node_dpin_name!="") {
 #ifdef EXTENSIVE_DBG
@@ -1450,7 +1455,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
         if ( !orig_node_dpin.is_invalid() )  {
 #ifdef EXTENSIVE_DBG
           fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.get_name());
-          fmt::print("DEFAULT INSERTION AND REMOVAL OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+          fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
 #endif
           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
           remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
@@ -1458,7 +1463,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
           inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
         }
       }
-
+#ifdef BASIC_DBG
+      else {
+        fmt::print("IN DEFAULT MATCH: dpin not named for {}\n", synth_node_dpin.get_wire_name() );
+      }
+#endif
     }
   }
 #ifdef EXTENSIVE_DBG
