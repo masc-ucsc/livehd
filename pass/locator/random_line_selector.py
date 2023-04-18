@@ -19,33 +19,40 @@ for synthLines in SynthFile.readlines():
 # print(synthVarSet)
 # print(len(synthVarSet))
 
-chiselAssignments = open(os.getcwd() + '/eval_files_tmp/all_grepped_for_pipelinedCPU.log','r')
+chiselAssignments = open(os.getcwd() + '/eval_files_tmp/all_grepped_for_pipelinedCPU1.log','r')
 
 optimizedEntriesDict = {}
-count =0
+
 for chiselAssignment in chiselAssignments.readlines():
-
+    chiselLHS = []
     # print(chiselAssignment)
-    chiselLHS = chiselAssignment.split(": ")[1].split(":=")[0].strip()
-    if chiselLHS.replace(".","_")  not in synthVarSet:
-        # print(chiselLHS)
-        fName = chiselAssignment.split(":",1)[0].strip() #fname is file name 
-        fData = chiselAssignment.split(":",1)[1].strip() #line number: assignment op with LHS and RHS
+    if ":=" in chiselAssignment:
+        chiselLHS.append(chiselAssignment.split(": ")[1].split(":=")[0].strip())
+    else:
+        chiselList = re.split('===|=/=',chiselAssignment)
+        if len(chiselList) > 1:
+            chiselList = chiselList[:-1]
+        
+        print(chiselAssignment)
+        print(chiselList)
+    for eachChiselLHS in chiselLHS:
 
-        if fName not in optimizedEntriesDict: 
-            optimizedEntriesDict[fName] = [fData]
-            count = count+1
-        else:
-            optimizedEntriesDict[fName].append(fData)
-            count = count+1
-        # print(chiselAssignment)
+        if eachChiselLHS.replace(".","_")  not in synthVarSet:
+            # print(eachChiselLHS)
+            fName = chiselAssignment.split(":",1)[0].strip() #fname is file name 
+            fData = chiselAssignment.split(":",1)[1].strip() #line number: assignment op with LHS and RHS
+
+            if fName not in optimizedEntriesDict: 
+                optimizedEntriesDict[fName] = set()
+            
+            optimizedEntriesDict[fName].add(fData)
+            # print(chiselAssignment)
 # print(optimizedEntriesDict)
-print(count)
-
+exit(0)
 for key, val in optimizedEntriesDict.items():
     print(key)
 #     roundVal = round(0.02 * len(val))
-    print(random.sample(val,1))
+    print(random.sample(list(val),1))
 #     print(random.sample(val,int(roundVal)))
 
 ##To insert DT on a random line per file in dictionary:-
