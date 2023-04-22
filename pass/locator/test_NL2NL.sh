@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #INPUTS:
-FILENAME=MaxPeriodFibonacciLFSR
-MODULE_NAME=MaxPeriodFibonacciLFSR
-PERCENTAGE_CHANGE=10
+FILENAME=PipelinedCPU_flattened #PipelinedCPU_flattened #MaxPeriodFibonacciLFSR
+MODULE_NAME=PipelinedCPU #PipelinedCPU #MaxPeriodFibonacciLFSR
+PERCENTAGE_CHANGE=0
 
 
 SRCLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests
@@ -37,7 +37,18 @@ echo "FIRST: ${SRCLOCATION}/${FILENAME}.v -- ${ORIG_NL}"
 echo "SECOND: ${DESTLOCATION}/${FILENAME}_1_new.v -- ${NEW_NL}"
 echo "LOG: ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log"
 
-./bazel-bin/main/lgshell " inou.yosys.tolg files:${SRCLOCATION}/${FILENAME}.v |> pass.bitwidth |> pass.cprop |> pass.bitwidth                           
-inou.yosys.tolg files:${DESTLOCATION}/${FILENAME}_1_new.v |> pass.bitwidth |> pass.cprop |> pass.bitwidth                                                           
+# ## for MaxPeriodFibonacciLFSR:
+# rm -r lgdb/
+# ./bazel-bin/main/lgshell "inou.liberty files:sky130.lib" 
+# ./bazel-bin/main/lgshell " inou.yosys.tolg files:${SRCLOCATION}/${FILENAME}.v |> pass.bitwidth |> pass.cprop |> pass.bitwidth                           
+# inou.yosys.tolg files:${DESTLOCATION}/${FILENAME}_1_new.v |> pass.bitwidth |> pass.cprop |> pass.bitwidth                                                           
+# lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> inou.graphviz.from odir:tmp_1 |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
+# " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log   
+
+## for pipelined_flattened:
+rm -r lgdb/ 
+./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
+./bazel-bin/main/lgshell " inou.yosys.tolg files:${SRCLOCATION}/${FILENAME}.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                           
+inou.yosys.tolg files:${DESTLOCATION}/${FILENAME}_1_new.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                                                           
 lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> inou.graphviz.from odir:tmp_1 |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-" > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log                                                                                                                                                                                                                                                                                              
+" > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log 

@@ -1466,15 +1466,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
     for (const auto synth_node_dpin: synth_node.out_connected_pins()) {//might be multi driver node
       auto synth_node_dpin_name = synth_node_dpin.has_name() ? synth_node_dpin.get_name() : "" ;
-      if(synth_node_dpin_name==""){
-        synth_node_dpin_name=synth_node_dpin.get_wire_name();
-      }
-
+     
       if(synth_node_dpin_name!="") {
 #ifdef EXTENSIVE_DBG
         fmt::print("synth_node_dpin_name: {} for lg: {}\n", synth_node_dpin_name, synth_sub_lg_name);
 #endif
-        /*see if the name matches to any in netlist LG.
+        /*see if the name matches to any in original LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
          * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of orig_lg, use synth_node.get_class_lgraph().get_name -- find equivalent orig for this guy!
          * */
@@ -1814,7 +1811,9 @@ std::vector<std::pair<uint64_t, uint64_t>> Traverse_lg::get_loc_vec(absl::flat_h
       loc_val = n_o.get_loc();
       loc_vec.emplace_back(loc_val);
     } else {
+      #ifdef BASIC_DBG //inserted this ifdef to speed up and lessen log dump
       fmt::print("FIXME: No Location found for n{}.\n", n_o.get_nid());
+      #endif
     }
   }
   return loc_vec;
@@ -1857,17 +1856,22 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat &dpin_c
 }
 
 void Traverse_lg::report_critical_matches_with_color(){
-  fmt::print("\n\nReporting final critical resolved matches: \nsynth node and dpin :- node(src_code) -- color val -- source loc\n");
+  #ifdef FULL_RUN_FOR_EVAL
+    print_everything();
+  #endif
+  fmt::print("\n\nReporting final critical resolved matches: \nsynth node and dpin     :- original node and dpin      -- color val -- source loc\n");
   for(const auto &[synth_np, color_val]:crit_node_map) {
     auto orig_NPs = net_to_orig_pin_match_map[synth_np];
     auto synth_pin = Node_pin("lgdb",synth_np);
     auto synth_dpin = synth_pin.has_name()?synth_pin.get_name():std::to_string(synth_pin.get_pid());
     std::string synth_node = absl::StrCat("n",std::to_string(synth_pin.get_node().get_nid()));
     for(const auto &orig_np:orig_NPs) {
-      auto orig_node = Node_pin("lgdb", orig_np).get_node();
+      auto orig_pin = Node_pin("lgdb", orig_np);
+      auto orig_node = orig_pin.get_node();
+      auto orig_dpin = orig_pin.has_name()?orig_pin.get_name():std::to_string(orig_pin.get_pid());
       auto loc_start = orig_node.has_loc()? (std::to_string(orig_node.get_loc().first+1)) : "xxx";
       auto loc_end =  orig_node.has_loc()? (std::to_string(orig_node.get_loc().second+1)) : "xxx";
-      fmt::print("{},{}       :-    n{}    --   {}   --  [{},{}]{}\n",synth_node, synth_dpin, orig_node.get_nid(), color_val,loc_start ,loc_end, orig_node.get_source());//FIXME: referring to nid for understandable message. 
+      fmt::print("{},{}       :-    n{},{}    --   {}   --  [{},{}]{}\n",synth_node, synth_dpin, orig_node.get_nid(), orig_dpin, color_val,loc_start ,loc_end, orig_node.get_source());//FIXME: referring to nid for understandable message. 
     }
   }
 
