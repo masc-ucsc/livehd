@@ -1976,16 +1976,12 @@ void Traverse_lg::set_theory_match_final() {
 bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {
 
   bool some_matching_done = false;
-#if 0 
 
-  Traverse_lg::map_of_sets io_map_of_sets_orig_sorted;
+  absl::node_hash_map<Node_pin::Compact_flat, std::set<Node_pin::Compact_flat>> io_map_of_sets_orig_sorted;
   for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
-    std::set<Node_pin::Compact_flat> orig_sorted_set; // = sort_set(orig_set) ;
-    for(const auto &set_val:orig_set) {orig_sorted_set.insert(set_val);}//FIXME: make another sorted map to make linear
-    io_map_of_sets_orig_sorted[orig_key].insert(orig_sorted_set.begin(), orig_sorted_set.end());
-  }    
+    for(const auto &set_val:orig_set) {io_map_of_sets_orig_sorted[orig_key].insert(set_val);}//FIXED: make another sorted map to make linear
+  }
 
-#endif
 	for ( auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
 	  unsigned long match_count = 0;
 	  unsigned long mismatch_count = 0;
@@ -1997,18 +1993,12 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
       auto counter=0;
       auto counter_total=0;
       for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
-      for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
-#if 1
-         std::set<Node_pin::Compact_flat> orig_sorted_set; // = sort_set(orig_set) ;
-         for(const auto &set_val:orig_set) {orig_sorted_set.insert(set_val);}//FIXME: make another sorted map to make linear
-#endif
+      for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig_sorted) {
          std::vector<Node_pin::Compact_flat> setIntersectionVec;
-         get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_sorted_set.begin(), orig_sorted_set.end(), std::back_inserter(setIntersectionVec));
-#if 0
          get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_set.begin(), orig_set.end(), std::back_inserter(setIntersectionVec));
-#endif
+
          auto matches = setIntersectionVec.size();  
-         auto total      = (get_union(synth_set, orig_set)).size();
+         auto total      = (getUnion(synth_sorted_set, orig_set)).size();
          auto mismatches = total-matches;
          if (matches> match_count)  {
            matched_node_pins.clear();
