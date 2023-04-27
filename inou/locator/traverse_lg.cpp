@@ -247,6 +247,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   // }
 
   I(false, "\nintended exit!\n");
+  
   lg->dump(true);//FIXME: remove this
   for (const auto& node : lg->fast(true)) {
     dealing_flop = false;
@@ -973,6 +974,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     }
   }
 }
+
 
 absl::flat_hash_set<Node_pin::Compact_flat> Traverse_lg::get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const {
   auto it_match = net_to_orig_pin_match_map.find(dpin_cf);
@@ -1977,10 +1979,12 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
 
   bool some_matching_done = false;
 
+#if 0
   absl::node_hash_map<Node_pin::Compact_flat, std::set<Node_pin::Compact_flat>> io_map_of_sets_orig_sorted;
   for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
     for(const auto &set_val:orig_set) {io_map_of_sets_orig_sorted[orig_key].insert(set_val);}//FIXED: make another sorted map to make linear
   }
+#endif
 
 	for ( auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
 	  unsigned long match_count = 0;
@@ -1989,10 +1993,25 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
     const auto &synth_set = it->second;
       some_matching_done = false;
       absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
-      std::set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
       auto counter=0;
       auto counter_total=0;
+#if 0
+      std::set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
       for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
+#endif
+#if 1
+      for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
+        unsigned long matches     = 0;
+        const auto &smallest = synth_set.size() <orig_set.size()? synth_set:orig_set;
+        const auto &largest  = synth_set.size()>=orig_set.size()? synth_set:orig_set;
+
+        for(const auto &it_set:smallest) {
+          if (largest.contains(it_set)) {
+            ++matches;
+          }
+        }
+        unsigned long mismatches = synth_set.size() + orig_set.size() - matches - matches;
+#else
       for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig_sorted) {
          std::vector<Node_pin::Compact_flat> setIntersectionVec;
          get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_set.begin(), orig_set.end(), std::back_inserter(setIntersectionVec));
@@ -2000,6 +2019,7 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
          auto matches = setIntersectionVec.size();  
          auto total      = (getUnion(synth_sorted_set, orig_set)).size();
          auto mismatches = total-matches;
+#endif
          if (matches> match_count)  {
            matched_node_pins.clear();
            matched_node_pins.insert(orig_key) ; 
@@ -2019,7 +2039,9 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
 
       }
       if (!matched_node_pins.empty()) {
+        #ifdef BASIC_DBG
         fmt::print("1-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+        #endif
          net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
          forced_match_vec.emplace_back(synth_key);
          if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
@@ -2030,7 +2052,9 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
          some_matching_done = true;
       } else {
         it++;
+        #ifdef BASIC_DBG
         fmt::print("2-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+        #endif
 
       }
       
@@ -2424,9 +2448,9 @@ bool Traverse_lg::set_theory_match(std::set<std::string> synth_set, const std::v
                                       setMap_pairKey& orig_map) {
   // auto map_entry = *map_it;
   // auto synth_set = getUnion(map_entry.first.first, map_entry.first.second);
-  int match_count = 0;
+  unsigned long match_count = 0;
   // auto mismatch_count = synth_set.size(); mismatch_count = 0;
-  unsigned long                   mismatch_count = 0;
+  unsigned long  mismatch_count = 0;
   std::vector<Node::Compact_flat> orig_nodes_matched;
 
   for (auto& [k, v] : orig_map) {
@@ -2440,8 +2464,8 @@ bool Traverse_lg::set_theory_match(std::set<std::string> synth_set, const std::v
     auto unionSet = getUnion(synth_set, orig_set);
     auto unionVal = unionSet.size();
 
-    auto new_match_count = intersectionVal;
-    auto new_mismatch_count
+    unsigned long new_match_count = intersectionVal;
+    unsigned long new_mismatch_count
         = 3 * (unionVal - intersectionVal);  // 3 is the penalty number. coz mismatch is worse than less matches. (i.e we want a
                                              // subset rather than the synth node with added inputs)
 
@@ -2504,3 +2528,4 @@ bool Traverse_lg::set_theory_match(std::set<std::string> synth_set, const std::v
     return false;
   }
 }
+
