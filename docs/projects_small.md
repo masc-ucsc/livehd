@@ -138,10 +138,12 @@ It would be more LLM consistent something like:
 
   %___t3 = ln.gt %x, 0                               // Assume a LNAST node
   if (%___t3) {
-    %___t1 = ln.some_fun %x, 0 { some_other_attr=33 }
+    %___t1 = ln.some_fun arg_name: %x, also_named: 0 { some_other_attr=33 }
   }
 ```
 
+Some differences is that it allows named arguments to function call (and/or
+position too).
 
 The same way that the HIF can be serialiazed to text, the same text should
 create a valid HIF. This allows for edit/debug HIF files more easily.
