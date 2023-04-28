@@ -18,13 +18,19 @@ should patch some parts of LiveHD to use them.
 to top bazel_rules_hdl.
 
 
-## [small] C++ switch terminal library
+## [small] C++ switch terminal library and remove exceptions
 
 Switch from replxx to https://github.com/jcwangxp/Crossline
 
 The reason is OSX failures and replxx is not longer mantained.
 
 This affects main/main.cpp and nothing else.
+
+The terminal is the only system using exceptions. The only thing using
+exceptions are the error notification. To avoid exceptions (google issue) the
+idea is to poll the error each terminal line and report error accordingly. This
+avoid the terminal exit on error that we have, and avoids exceptions
+completely.
 
 ## [medium] C++ Cell library (dops)
 
@@ -100,6 +106,45 @@ There are a few differences with inou/codegen:
 
 Not much testing on large HIF files that require multiple IDs (0.??, 1.??). It
 may not be even supported (unclear about the status). If not supported, fix it.
+
+## [medium] Parallel HIF read
+
+HIF is designed to have a parallel read (0.??, 1.??....) but it is not implemented.
+
+## [medium] Cleanup HIF print
+
+It would be good to follow a bit closer the LLVM node print for HIF files.
+Currently, we have a print for LNAST and another for Lgraph. It should be
+unified (just need to provide a "string" for each type). This should be part of the
+HIF file format.
+
+Currently, it prints things like:
+
+```
+  %{___t0} = add(%{a}, %{b})
+  %{c} = %{___t0}
+
+  %{___t3} = gt(%{x}, 0)
+  if (%{___t3}) {
+    %{___t1} = some_fun(%{x}, 0)
+  }
+```
+
+It would be more LLM consistent something like:
+
+```
+  %___t0 = lg.add %a, %b { LoC=30, attribute3=foo }  // Assume an LGraph node
+  %c = %___t0 { file=barbar.prp }
+
+  %___t3 = ln.gt %x, 0                               // Assume a LNAST node
+  if (%___t3) {
+    %___t1 = ln.some_fun %x, 0 { some_other_attr=33 }
+  }
+```
+
+
+The same way that the HIF can be serialiazed to text, the same text should
+create a valid HIF. This allows for edit/debug HIF files more easily.
 
 ## [hard] Fix lnast_fromlg 
 
@@ -242,10 +287,6 @@ Main features:
 * Benchmark the OpenWare against FPGA and ASIC default (designWare) targets
 * Specific target implementations for FPGA (Xilinx) and ASIC (generic)
 * Several speeds/trade-offs for each major block. E.g: adder RCA/Kogge/...
-
-## [medium] Parallel HIF read
-
-HIF is designed to have a parallel read (0.??, 1.??....) but it is not implemented.
 
 ## [medium] Dynamic Power Model
 
