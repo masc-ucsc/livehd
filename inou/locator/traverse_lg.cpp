@@ -32,6 +32,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   Traverse_lg p(var);
 
 	p.orig_lg_name = std::string(lg_orig_name);
+	// p.synth_lg_name = std::string(lg_synth_name);
 #ifdef DE_DUP
   // Traverse_lg::setMap map_pre_synth;
   Traverse_lg::setMap_pairKey map_post_synth;
@@ -132,8 +133,24 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
 #ifdef BASIC_DBG
-    fmt::print("7. printing before matching starts -- synth"); print_everything();
+    fmt::print("7. printing before matching starts (after 1st resolution) -- synth"); print_everything();
 #endif
+    /* everything in sets of synth_MoS must have been resolved to some orig lg reference.
+       If not then need to know and debug.
+       Hence this assertion: */
+    for (const auto & [k,v_set]: inp_map_of_sets_synth) {
+      for (const auto & v : v_set) {
+        auto lg_name = Node_pin("lgdb", v).get_node().get_class_lgraph()->get_name();
+        I(lg_name==orig_lg_name,"\n\n inp-synth-set has some unresolved entry???\n\n ");
+      }
+    }
+    for (const auto & [k,v_set]: out_map_of_sets_synth) {
+      for (const auto & v : v_set) {
+        auto lg_name = Node_pin("lgdb", v).get_node().get_class_lgraph()->get_name();
+        I(lg_name==orig_lg_name,"\n\n out-synth-set has some unresolved entry???\n\n ");
+      }
+    }
+
     bool change_done = complete_io_match(true);//for flop only as matching flop first
     if(crit_node_set.empty()) {
       /*all required matching done*/
@@ -1493,14 +1510,19 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
         auto *orig_sub_lg = library->try_ref_lgraph(orig_sub_lg_name);
 #ifdef EXTENSIVE_DBG
         fmt::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
-				fmt::print("\t**synth_node_dpin_name {}  -->  ",synth_node_dpin_name);
-#endif
-				remove_pound_and_bus(synth_node_dpin_name);
-#ifdef EXTENSIVE_DBG
-				fmt::print(" {}.**\n",synth_node_dpin_name);
+				fmt::print("\t**  synth_node_dpin_name {}  -->  ",synth_node_dpin_name);
 #endif
         auto orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);//orig LG with same name as that of synth node
-                                                                                              //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
+        if (orig_node_dpin.is_invalid()) {
+          /* reason with example case: 
+             both regs_12 and regs_12[0] might be present. so for accuracy, first try without removing bus 
+             then if that does not work out, try with removing bus.*/
+          remove_pound_and_bus(synth_node_dpin_name);
+          orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);
+        }
+#ifdef EXTENSIVE_DBG
+				fmt::print(" {}  .**\n",synth_node_dpin_name);
+#endif
         if ( !orig_node_dpin.is_invalid() )  {
 #ifdef EXTENSIVE_DBG
           fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.get_name());
@@ -1519,6 +1541,68 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #endif
     }
   }
+//   /*known points matching - 2*/
+//   /* in the above segment, the pound and bus is removed from synth lg. 
+//    * but what of pound and bus is in orig lg instead??
+//    * So, following loop for this case! */
+//   orig_lg->dump(true);//FIXME: remove this
+//   for (auto orig_node: orig_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
+   
+// 		if(orig_node.is_type_sub() && orig_node.get_type_sub_node().get_name()=="__fir_const"){
+// 			continue;
+// 		}
+// #ifndef FULL_RUN_FOR_EVAL
+// 		auto orig_sub_lg_name = orig_node.get_class_lgraph()->get_name();
+// #endif
+// #ifdef EXTENSIVE_DBG
+// 		auto orig_sub_lg_name = orig_node.get_class_lgraph()->get_name();
+// #endif
+
+//     for (const auto orig_node_dpin: orig_node.out_connected_pins()) {//might be multi driver node
+//       auto orig_node_dpin_name = orig_node_dpin.has_name() ? orig_node_dpin.get_name() : "" ;
+     
+//       if(orig_node_dpin_name!="") {
+// #ifdef EXTENSIVE_DBG
+//         fmt::print("orig_node_dpin_name: {} for lg: {}\n", orig_node_dpin_name, orig_sub_lg_name);
+// #endif
+//         /*see if the name matches to any in synth LG.
+//          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
+//          * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of synth_lg, use orig_node.get_class_lgraph().get_name -- find equivalent synth for this guy!
+//          * */
+// #ifndef FULL_RUN_FOR_EVAL
+// 				std::string synth_sub_lg_name = orig_sub_lg_name.substr(std::size_t(9)); //removing "__firrtl_"
+// #else
+//         std::string synth_sub_lg_name = synth_lg_name;
+// #endif
+//         auto *synth_sub_lg = library->try_ref_lgraph(synth_sub_lg_name);
+// #ifdef EXTENSIVE_DBG
+//         fmt::print("\t\tFinding dpin for synth_sub_lg_name {}\n", synth_sub_lg->get_name());
+// 				fmt::print("\t**orig_node_dpin_name {}  -->  ",orig_node_dpin_name);
+// #endif
+// 				remove_pound_and_bus(orig_node_dpin_name);
+// #ifdef EXTENSIVE_DBG
+// 				fmt::print(" {}.**\n",orig_node_dpin_name);
+// #endif
+//         auto synth_node_dpin = Node_pin::find_driver_pin( synth_sub_lg , orig_node_dpin_name);//synth LG with same name as that of orig node
+//                                                                                               //FIXME: CONFIRM: this way, the module name as well as the pin name matches, right?
+//         if ( !synth_node_dpin.is_invalid() )  {
+// #ifdef EXTENSIVE_DBG
+//           fmt::print("\t\tFound synth_node_dpin {}\n", synth_node_dpin.get_name());
+//           fmt::print("DEFAULT INSERTION OF: {}, {}\n", orig_node_dpin.has_name()?orig_node_dpin.get_name():std::to_string(orig_node_dpin.get_pid()), std::to_string(orig_node_dpin.get_pid()) );
+// #endif
+//           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(orig_node_dpin.get_compact_flat());
+//           remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+//           out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+//           inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+//         }
+//       }
+// #ifdef BASIC_DBG
+//       else {
+//         fmt::print("IN DEFAULT MATCH: dpin not named for {}\n", orig_node_dpin.get_wire_name() );
+//       }
+// #endif
+//     }
+//   }
   remove_resolved_from_orig_MoS();
 #ifdef EXTENSIVE_DBG
   orig_lg->dump(true);
@@ -1996,67 +2080,128 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
 
   bool some_matching_done = false;
 
+  // /* make another map (io_map_of_sets_orig --> io_map_of_sets_orig_str)
+  //    reason: remove_pound_and_bus for more matches. */
+  // absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<std::string>> io_map_of_sets_orig_str;
+  // for (const auto &[orig_key, orig_set] : io_map_of_sets_orig) {
+  //   for(const auto & orig_set_val: orig_set) {
+  //     auto pin = Node_pin("lgdb", orig_set_val);
+  //     if (pin.has_name()) {
+  //       auto p_name = pin.get_name();
+  //       remove_pound_and_bus(p_name);
+  //       io_map_of_sets_orig_str[orig_key].insert(p_name);
+  //     } else {
+  //       io_map_of_sets_orig_str[orig_key].insert(pin.debug_name());
+  //     }
+  //   }
+  // }
+  // /* make another map (io_map_of_sets_synth --> io_map_of_sets_synth_str)
+  //    reason: remove_pound_and_bus for more matches. */
+  // absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<std::string>> io_map_of_sets_synth_str;
+  // for (const auto &[synth_key, synth_set] : io_map_of_sets_synth) {
+  //   for(const auto & synth_set_val: synth_set) {
+  //     auto pin = Node_pin("lgdb", synth_set_val);
+  //     if (pin.has_name()) {
+  //       auto p_name = pin.get_name();
+  //       remove_pound_and_bus(p_name);
+  //       io_map_of_sets_synth_str[synth_key].insert(p_name);
+  //     } else {
+  //       io_map_of_sets_synth_str[synth_key].insert(pin.debug_name());
+  //     }
+  //   }
+  // }
+
 	for ( auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
 	  unsigned long match_count = 0;
 	  unsigned long mismatch_count = 0;
     const auto & synth_key = it->first;
     const auto &synth_set = it->second;
-      some_matching_done = false;
-      absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
-      auto counter=0;
-      auto counter_total=0;
-      for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
-        unsigned long matches     = 0;
-        const auto &smallest = synth_set.size() <orig_set.size()? synth_set:orig_set;
-        const auto &largest  = synth_set.size()>=orig_set.size()? synth_set:orig_set;
+    some_matching_done = false;
+    absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
+    auto counter=0;
+    auto counter_total=0;
+    for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
+      #ifdef BASIC_DBG
+      auto synth_key_name = Node_pin("lgdb", synth_key);
+      auto orig_key_name = Node_pin("lgdb", orig_key);
+      fmt::print("-- checking for synth key: {} VS. orig key: {} -- ", synth_key_name.has_name()? synth_key_name.get_name() : ('n'+std::to_string(synth_key_name.get_node().get_nid())) , orig_key_name.has_name()? orig_key_name.get_name() : ('n'+std::to_string(orig_key_name.get_node().get_nid())) );
+      #endif
+      unsigned long matches     = 0;
+      const auto &smallest = synth_set.size() <  orig_set.size() ? synth_set : orig_set;
+      const auto &largest  = synth_set.size() >= orig_set.size() ? synth_set : orig_set;
 
-        for(const auto &it_set:smallest) {
-          if (largest.contains(it_set)) {
-            ++matches;
-          }
+      for(const auto &it_set:smallest) {
+        if (largest.contains(it_set)) {
+          ++matches;
         }
-        unsigned long mismatches = synth_set.size() + orig_set.size() - matches - matches;
-         if (matches> match_count)  {
-           matched_node_pins.clear();
-           matched_node_pins.insert(orig_key) ; 
-           match_count = matches;
-					 mismatch_count = mismatches;
-         } else if ((matches == match_count)  && ( mismatches < mismatch_count)) { 
-           matched_node_pins.clear();
-           matched_node_pins.insert(orig_key) ; 
-           match_count = matches ; 
-           mismatch_count = mismatches;
-         } else  if ((matches == match_count)  && ( mismatches == mismatch_count)) {//matches and mismatches are same as prev. iteration
-           matched_node_pins.insert(orig_key);
-         } else {
-          counter++;
-         }
-         counter_total++;
-
       }
-      if (!matched_node_pins.empty()) {
+      unsigned long mismatches = synth_set.size() + orig_set.size() - matches - matches;
+      if (matches> match_count)  {
+        matched_node_pins.clear();
+        matched_node_pins.insert(orig_key) ; 
+        match_count = matches;
+        mismatch_count = mismatches;
         #ifdef BASIC_DBG
-        fmt::print("1-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+        fmt::print(" more matches.\n");
         #endif
-         net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
-         forced_match_vec.emplace_back(synth_key);
-         if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
-         remove_from_crit_node_set(synth_key);
-         inp_map_of_sets_synth.erase(synth_key);
-         out_map_of_sets_synth.erase(synth_key);
-         io_map_of_sets_synth.erase(it++);
-         //FIXME: add erase from orig Maps here also?
-         some_matching_done = true;
+      } else if ((matches == match_count)  && ( mismatches < mismatch_count)) { 
+        matched_node_pins.clear();
+        matched_node_pins.insert(orig_key) ; 
+        match_count = matches ; 
+        mismatch_count = mismatches;
+        #ifdef BASIC_DBG
+        fmt::print(" lesser mismatches.\n");
+        #endif
+      } else  if ((matches == match_count)  && ( mismatches == mismatch_count)) {//matches and mismatches are same as prev. iteration
+        matched_node_pins.insert(orig_key);
+        #ifdef BASIC_DBG
+        fmt::print(" same num of matches/mismatches.\n");
+        #endif
       } else {
-        it++;
-        #ifdef BASIC_DBG
-        fmt::print("2-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
-        #endif
-
+      counter++;
+      #ifdef BASIC_DBG
+      fmt::print(" counter incremented. \n");
+      #endif
       }
-   }
+      counter_total++;
+      #ifdef BASIC_DBG
+      if(synth_key_name.has_name()) {
+        fmt::print("\t\t\t ss: \t\t\t ");
+        for (auto ss : synth_set) {
+          fmt::print(" {}, ", Node_pin("lgdb",ss).has_name() ? Node_pin("lgdb",ss).get_name() : std::to_string(Node_pin("lgdb",ss).get_node().get_nid()) );
+        }
+        fmt::print("\n");
+        fmt::print("\t\t\t Os: \t\t\t ");
+        for (auto os : orig_set) {
+          fmt::print(" {}, ", Node_pin("lgdb",os).has_name() ? Node_pin("lgdb",os).get_name() : std::to_string(Node_pin("lgdb",os).get_node().get_nid()) );
+        }
+        fmt::print("\n");
+      }
+      #endif
+    }
+    if (!matched_node_pins.empty()) {
+      #ifdef BASIC_DBG
+      fmt::print("1-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+      #endif
+        net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
+        forced_match_vec.emplace_back(synth_key);
+        if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
+        remove_from_crit_node_set(synth_key);
+        inp_map_of_sets_synth.erase(synth_key);
+        out_map_of_sets_synth.erase(synth_key);
+        io_map_of_sets_synth.erase(it++);
+        //FIXME: add erase from orig Maps here also?
+        some_matching_done = true;
+    } else {
+      it++;
+      #ifdef BASIC_DBG
+      fmt::print("2-- matches:{}, mism:{}, counter:{}, c_t:{}\n", match_count, mismatch_count, counter, counter_total);
+      #endif
 
-   return some_matching_done; 
+    }
+  }
+
+  return some_matching_done; 
 }
 
 Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const {
