@@ -17,7 +17,7 @@
 #include "pass.hpp"
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
-// #define BASIC_DBG
+#define BASIC_DBG
 // #define EXTENSIVE_DBG
 #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
@@ -27,6 +27,7 @@ class Traverse_lg : public Pass {
 public:
 private:
 	std::string orig_lg_name;
+	// std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat>>
       setMap_pairKey;
@@ -114,6 +115,7 @@ private:
   map_of_sets out_map_of_sets_orig;
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
   void remove_pound_and_bus(std::string &dpin_name);
+  void remove_resolved_from_orig_MoS();
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
   //  io_set, bool addToCFL = false);
   void get_input_node(const Node_pin &pin, std::set<std::string> &in_set, std::set<std::string> &io_set, bool addToCFL = false);

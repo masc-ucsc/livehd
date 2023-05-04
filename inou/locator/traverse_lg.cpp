@@ -161,6 +161,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #ifdef BASIC_DBG
       fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
 #endif
+      remove_resolved_from_orig_MoS();
     }
 
     I(flop_set.empty(),"\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
@@ -1054,6 +1055,11 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
       remove_from_crit_node_set(node_pin_cf);
       inp_map_of_sets.erase(node_pin_cf);
       out_map_of_sets_synth.erase(node_pin_cf);
+      for(const auto &orig_pin : set_pins_cf){      
+        /* further accuracy attempt: remove the nodes used from orig as well*/
+        inp_map_of_sets_orig.erase(orig_pin);
+        out_map_of_sets_orig.erase(orig_pin);
+      }
       if(flop_set.find(node_pin_cf)!=flop_set.end()) { flop_set.erase(node_pin_cf); }
     }
     /*if nothing left in crit_node_set then return with result*/
@@ -1513,6 +1519,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #endif
     }
   }
+  remove_resolved_from_orig_MoS();
 #ifdef EXTENSIVE_DBG
   orig_lg->dump(true);
     for (auto original_node: orig_lg->fast(true) ) {//FIXME: for DBG only; remove!
@@ -1530,6 +1537,15 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
     }
 #endif
 
+}
+
+void Traverse_lg::remove_resolved_from_orig_MoS() {
+  for (const auto &[synth_np_cf, orig_np_cf_set]: net_to_orig_pin_match_map) {
+    for (const auto & orig_np_cf:  orig_np_cf_set) {
+      inp_map_of_sets_orig.erase(orig_np_cf);
+      out_map_of_sets_orig.erase(orig_np_cf);
+    }
+  }
 }
 
 void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig) {//FIXME: no more used-- remove?
@@ -1552,6 +1568,7 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth,
     }
     if(matched) {
       map_of_sets_synth.erase(it++);//Reason: if synth_np in matching map then why keep it in map_of_sets. Smaller the map of sets, lesser iterations in further matching passes.
+      //FIXME: add erase from orig Maps here also?
     } else it++;
   }
 
@@ -1604,6 +1621,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
       if(flop_set.find(it->first)!=flop_set.end()) { flop_set.erase(it->first); }
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
+      //FIXME: add erase from orig Maps here also?
     } else it++;
 
   }
@@ -1705,7 +1723,7 @@ bool Traverse_lg::surrounding_cell_match() {
     out_map_of_sets_synth.erase(val_to_erase);
     inp_map_of_sets_synth.erase(val_to_erase);
   }
-
+  remove_resolved_from_orig_MoS();
   return any_matching_done;
 }
 
@@ -1731,6 +1749,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
       forced_match_vec.emplace_back(it->first);
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
+      //FIXME: add erase from orig maps here also?
     } else { //no resolved connected cell present.
       it++;
       unmatched_left=true;
@@ -1758,6 +1777,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
         remove_from_crit_node_set(it->first);
         forced_match_vec.emplace_back(it->first);
         out_map_of_sets_synth.erase(it++);
+        //FIXME: add erase from orig Maps here also?
       } else { //no resolved connected cell present.
         it++;
         unmatched_left=true;
@@ -1889,6 +1909,7 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synt
       const auto set_np_val = *it;
       if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
         synth_set_np.erase(it++);
+        //FIXME: add erase from orig Maps here also?
         auto equiv_val = net_to_orig_pin_match_map[set_np_val];
         tmp_set.insert(equiv_val.begin(),equiv_val.end());
       } else ++it;
@@ -1963,11 +1984,7 @@ void Traverse_lg::set_theory_match_final() {
 	fmt::print("\nio_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
 #endif
 
-	//bool some_matching_done = false;
-	//do {
-	//  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
-	/*some_matching_done = */set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
-	//} while (some_matching_done && !crit_node_set.empty());
+set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
 
 #ifdef BASIC_DBG
 	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
@@ -1979,13 +1996,6 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
 
   bool some_matching_done = false;
 
-#if 0
-  absl::node_hash_map<Node_pin::Compact_flat, std::set<Node_pin::Compact_flat>> io_map_of_sets_orig_sorted;
-  for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
-    for(const auto &set_val:orig_set) {io_map_of_sets_orig_sorted[orig_key].insert(set_val);}//FIXED: make another sorted map to make linear
-  }
-#endif
-
 	for ( auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
 	  unsigned long match_count = 0;
 	  unsigned long mismatch_count = 0;
@@ -1995,11 +2005,6 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
       absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
       auto counter=0;
       auto counter_total=0;
-#if 0
-      std::set<Node_pin::Compact_flat> synth_sorted_set;// = sort_set(synth_set);
-      for(const auto &set_val:synth_set) {synth_sorted_set.insert(set_val);}
-#endif
-#if 1
       for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig) {
         unsigned long matches     = 0;
         const auto &smallest = synth_set.size() <orig_set.size()? synth_set:orig_set;
@@ -2011,15 +2016,6 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
           }
         }
         unsigned long mismatches = synth_set.size() + orig_set.size() - matches - matches;
-#else
-      for ( const auto &[ orig_key, orig_set ] : io_map_of_sets_orig_sorted) {
-         std::vector<Node_pin::Compact_flat> setIntersectionVec;
-         get_intersection(synth_sorted_set.begin(), synth_sorted_set.end(), orig_set.begin(), orig_set.end(), std::back_inserter(setIntersectionVec));
-
-         auto matches = setIntersectionVec.size();  
-         auto total      = (getUnion(synth_sorted_set, orig_set)).size();
-         auto mismatches = total-matches;
-#endif
          if (matches> match_count)  {
            matched_node_pins.clear();
            matched_node_pins.insert(orig_key) ; 
@@ -2049,6 +2045,7 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
          inp_map_of_sets_synth.erase(synth_key);
          out_map_of_sets_synth.erase(synth_key);
          io_map_of_sets_synth.erase(it++);
+         //FIXME: add erase from orig Maps here also?
          some_matching_done = true;
       } else {
         it++;
@@ -2057,12 +2054,9 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
         #endif
 
       }
-      
    }
 
    return some_matching_done; 
-
-I(false,"");
 }
 
 Traverse_lg::map_of_sets Traverse_lg::make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const {
