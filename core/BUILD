@@ -57,6 +57,17 @@ cc_test(
 )
 
 cc_test(
+    name = "hashset_test",
+    srcs = [
+        "tests/hashset_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "attribute_test",
     srcs = [
         "tests/attribute_test.cpp",
