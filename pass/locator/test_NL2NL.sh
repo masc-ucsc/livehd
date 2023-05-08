@@ -1,9 +1,13 @@
 #!/bin/bash
 
+# NOTE:
+# This script works for flattened netlists only. 
+# The python script will need to be adjusted for multiple modules in single file.
+
 #INPUTS:
-FILENAME=SingleCycleCPU_flattened #SingleCycleCPU_flattened #PipelinedCPU_flattened #MaxPeriodFibonacciLFSR
-MODULE_NAME=SingleCycleCPU #SingleCycleCPU #PipelinedCPU #MaxPeriodFibonacciLFSR
-PERCENTAGE_CHANGE=0
+FILENAME=PipelinedCPU_flattened #SingleCycleCPU_flattened #PipelinedCPU_flattened #MaxPeriodFibonacciLFSR
+MODULE_NAME=PipelinedCPU        #SingleCycleCPU           #PipelinedCPU           #MaxPeriodFibonacciLFSR
+PERCENTAGE_CHANGE=100
 
 
 SRCLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests
