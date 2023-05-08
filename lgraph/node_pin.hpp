@@ -7,6 +7,7 @@ class Node;
 
 #include <vector>
 
+#include "woothash.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
 
@@ -67,7 +68,7 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact(const Compact &obj) : hidx(obj.hidx), idx(obj.idx), sink(obj.sink) {}
+    Compact(const Compact &obj) = default;
     Compact(const Hierarchy_index _hidx, Index_id _idx, bool _sink) : hidx(_hidx), idx(_idx), sink(_sink) {
       I(!Hierarchy::is_invalid(hidx));
     };
@@ -93,6 +94,9 @@ public:
     friend H AbslHashValue(H h, const Compact &s) {
       return H::combine(std::move(h), s.hidx, s.idx, s.sink);
     };
+
+    [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact)); }
+
   };
   class __attribute__((packed)) Compact_flat {
   protected:
@@ -113,7 +117,7 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_flat(const Compact_flat &obj) : lgid(obj.lgid), idx(obj.idx), sink(obj.sink) {}
+    Compact_flat(const Compact_flat &obj) = default;
     constexpr Compact_flat(const Lg_type_id _lgid, Index_id _idx, bool _sink) : lgid(_lgid), idx(_idx), sink(_sink){};
     constexpr Compact_flat() : lgid(0), idx(0), sink(0){};
 
@@ -140,6 +144,7 @@ public:
     friend H AbslHashValue(H h, const Compact_flat &s) {
       return H::combine(std::move(h), s.lgid, s.idx, s.sink);
     };
+    [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_flat)); }
   };
 
   class __attribute__((packed)) Compact_driver {
@@ -160,7 +165,7 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_driver(const Compact_driver &obj) : hidx(obj.hidx), idx(obj.idx) {}
+    Compact_driver(const Compact_driver &obj) = default;
     Compact_driver(const Hierarchy_index _hidx, Index_id _idx) : hidx(_hidx), idx(_idx) { I(!Hierarchy::is_invalid(hidx)); };
     Compact_driver() : idx(0){};
     Compact_driver &operator=(const Compact_driver &obj) {
@@ -182,6 +187,7 @@ public:
     friend H AbslHashValue(H h, const Compact_driver &s) {
       return H::combine(std::move(h), s.hidx, s.idx);
     };
+    [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_driver)); }
   };
 
   class __attribute__((packed)) Compact_class {
@@ -203,7 +209,7 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_class(const Compact_class &obj) : idx(obj.idx), sink(obj.sink) {}
+    Compact_class(const Compact_class &obj) = default;
     Compact_class(Index_id _idx, bool _sink) : idx(_idx), sink(_sink) {}
     Compact_class() : idx(0), sink(0) {}
     Compact_class &operator=(const Compact_class &obj) {
@@ -214,7 +220,7 @@ public:
       return *this;
     }
 
-    constexpr bool is_invalid() const { return idx == 0; }
+    [[nodiscard]] constexpr bool is_invalid() const { return idx == 0; }
 
     constexpr bool operator==(const Compact_class &other) const { return idx == other.idx && sink == other.sink; }
     constexpr bool operator!=(const Compact_class &other) const { return !(*this == other); }
@@ -223,6 +229,7 @@ public:
     friend H AbslHashValue(H h, const Compact_class &s) {
       return H::combine(std::move(h), s.idx, s.sink);
     }
+    [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_class)); }
   };
 
   class __attribute__((packed)) Compact_class_driver {
@@ -242,7 +249,7 @@ public:
   public:
     // constexpr operator size_t() const { I(0); return idx|(sink<<31); }
 
-    Compact_class_driver(const Compact_class_driver &obj) : idx(obj.idx) {}
+    Compact_class_driver(const Compact_class_driver &obj) = default;
     Compact_class_driver(Index_id _idx) : idx(_idx) {}
     Compact_class_driver() : idx(0) {}
     Compact_class_driver &operator=(const Compact_class_driver &obj) {
@@ -261,12 +268,13 @@ public:
     friend H AbslHashValue(H h, const Compact_class_driver &s) {
       return H::combine(std::move(h), s.idx);
     }
+    [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact_class_driver)); }
   };
 
   template <typename H>
   friend H AbslHashValue(H h, const Node_pin &s) {
     return H::combine(std::move(h), s.hidx, (int)s.idx, s.sink);  // Ignore lgraph pointer in hash
-  }
+  };
 
   constexpr Node_pin() : top_g(nullptr), current_g(nullptr), hidx(-1), idx(0), pid(0), sink(false) {}
   // rest can not be constexpr (find pid)
@@ -281,21 +289,21 @@ public:
 
   [[nodiscard]] Compact get_compact() const {
     if (Hierarchy::is_invalid(hidx)) {
-      return Compact(Hierarchy::hierarchical_root(), get_root_idx(), sink);
+      return {Hierarchy::hierarchical_root(), get_root_idx(), sink};
     }
-    return Compact(hidx, get_root_idx(), sink);
+    return {hidx, get_root_idx(), sink};
   }
   [[nodiscard]] Compact_flat   get_compact_flat() const;
   [[nodiscard]] Compact_driver get_compact_driver() const;
   [[nodiscard]] Compact_class  get_compact_class() const {
     // OK to pick a hierarchical to avoid replication of info like names
-    return Compact_class(idx, sink);
+    return {idx, sink};
   }
 
   [[nodiscard]] Compact_class_driver get_compact_class_driver() const {
     // OK to pick a hierarchical to avoid replication of info like names
     I(!sink);  // Only driver pin allowed
-    return Compact_class_driver(get_root_idx());
+    return {get_root_idx()};
   }
 
   [[nodiscard]] Lgraph         *get_top_lgraph() const { return top_g; };
