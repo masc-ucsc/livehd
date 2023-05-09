@@ -67,10 +67,10 @@ http_archive(
 http_archive(
     name = "fmt",
     build_file = "fmt.BUILD",
-    sha256 = "fccfc86e4aff6c33bff9a1d907b2ba2de2a5a8ab84349be4964a93f8d8c21b62",
-    strip_prefix = "fmt-7bdf0628b1276379886c7f6dda2cef2b3b374f0b",
+    sha256 = "92bc581b097705a1e5d72232edaffdbb2cf7847d882f8ccc22f9bcadfa209e98",
+    strip_prefix = "fmt-fe9d39d7cbbf3ae5a90b0553e741937a1c521a8a",
     urls = [
-        "https://github.com/fmtlib/fmt/archive/7bdf0628b1276379886c7f6dda2cef2b3b374f0b.zip",
+        "https://github.com/fmtlib/fmt/archive/fe9d39d7cbbf3ae5a90b0553e741937a1c521a8a.zip",
     ],
 )
 
