@@ -1,4 +1,6 @@
 /*
+   Based on woothash (small changes for C++)
+
     Woothash takes (optimally) 64-bit inputs and produces a 64-bit hash as its result.
     It is an edited version of wyhash that uses at most 64-bit math instead of 128-bit.
     Version 2 is a little slower than version 1, but the reverse is true on the JVM.
@@ -8,8 +10,8 @@
 
 #pragma once
 
-#include <math.h>
-#include <stdint.h>
+#include <cstdint>
+#include <cstring>
 
 namespace lh {
 
@@ -26,22 +28,22 @@ static inline constexpr uint64_t _wootmum(const uint64_t A, const uint64_t B) {
 
 static inline uint64_t _wootr08(const uint8_t *p) {
   uint8_t v = 0;
-  memcpy(&v, p, 1);
+  std::memcpy(&v, p, 1);
   return v;
 }
 static inline uint64_t _wootr16(const uint8_t *p) {
   uint16_t v = 0;
-  memcpy(&v, p, 2);
+  std::memcpy(&v, p, 2);
   return v;
 }
 static inline uint64_t _wootr32(const uint8_t *p) {
   uint32_t v = 0;
-  memcpy(&v, p, 4);
+  std::memcpy(&v, p, 4);
   return v;
 }
 static inline uint64_t _wootr64(const uint8_t *p) {
   uint64_t v = 0;
-  memcpy(&v, p, 8);
+  std::memcpy(&v, p, 8);
   return v;
 }
 static inline uint64_t __wootr64(const uint8_t *p) { return (_wootr32(p) << 32) | _wootr32(p + 4); }
