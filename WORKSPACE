@@ -107,10 +107,10 @@ new_git_repository(
 http_archive(
     name = "tree-sitter",
     build_file = "tree-sitter.BUILD",
-    sha256 = "4ec90f851dc21cfa5bf11ce9293514edda2d172bace12e1876cc96ea4baebe1a",
-    strip_prefix = "tree-sitter-25680274ccc8f45eb4c61b277bcbd71c55b75a4e",
+    sha256 = "5f04d75f2b2b9424131e4b769c1e64f7a82bfcf930c79a87c118d251d44ef6e2",
+    strip_prefix = "tree-sitter-0.20.8",
     urls = [
-        "https://github.com/tree-sitter/tree-sitter/archive/25680274ccc8f45eb4c61b277bcbd71c55b75a4e.zip",
+      "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.20.8.zip"
     ],
 )
 
@@ -118,8 +118,11 @@ http_archive(
 http_archive(
     name = "json",
     build_file = "json.BUILD",
-    sha256 = "e5c7a9f49a16814be27e4ed0ee900ecd0092bfb7dbfca65b5a421b774dccaaed",
-    urls = ["https://github.com/nlohmann/json/releases/download/v3.11.2/include.zip"],
+    sha256 = "95651d7d1fcf2e5c3163c3d37df6d6b3e9e5027299e6bd050d157322ceda9ac9",
+    strip_prefix = "json-3.11.2",
+    urls = [
+      "https://github.com/nlohmann/json/archive/refs/tags/v3.11.2.zip"
+    ]
 )
 
 # iassert
@@ -147,10 +150,13 @@ http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",
     patches = ["//external:cryptominisat.patch"],
-    sha256 = "0d73716528bbd09637c0483f272b65dd1c827899d316adfffbb67fb57dec99a7",
-    strip_prefix = "cryptominisat-92c4a2878c2d7b80aef510ba81086f9befd7e465",
+    #sha256 = "0d73716528bbd09637c0483f272b65dd1c827899d316adfffbb67fb57dec99a7",
+    #strip_prefix = "cryptominisat-92c4a2878c2d7b80aef510ba81086f9befd7e465",
+    sha256 = "9a3298bf8b7eebb7ab1fa19ae6a83fda194b3e8d2dd409db0bb8fbc7e73cff1e",
+    strip_prefix = "cryptominisat-5.11.4",
     urls = [
-        "https://github.com/msoos/cryptominisat/archive/92c4a2878c2d7b80aef510ba81086f9befd7e465.zip",
+      "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.4.zip",
+        #"https://github.com/msoos/cryptominisat/archive/92c4a2878c2d7b80aef510ba81086f9befd7e465.zip",
     ],
 )
 

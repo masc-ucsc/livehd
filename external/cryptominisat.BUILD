@@ -26,6 +26,8 @@ cc_library(
             "src/datasyncserver.cpp",  # No MPI
             "src/cms_breakid.cpp",  # No breakid compile option
             "src/picosat/main.c",
+            "src/picosat/picomcs.cpp",
+            "src/picosat/picomus.cpp",
         ],
     ),
     deps = [
