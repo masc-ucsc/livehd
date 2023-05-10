@@ -83,7 +83,8 @@ static void BM_blop_add2(benchmark::State& state) {
 static void BM_dlop_create(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
-      benchmark::DoNotOptimize(Dlop::create_integer(j));
+      auto v = Dlop::create_integer(j);
+      benchmark::DoNotOptimize(v);
     }
   }
   state.counters["speed"] = benchmark::Counter(state.iterations() * state.range(0), benchmark::Counter::kIsRate);

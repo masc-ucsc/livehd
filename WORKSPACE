@@ -64,13 +64,22 @@ http_archive(
 )
 
 # fmt
+# http_archive(
+#     name = "fmt",
+#     build_file = "fmt.BUILD",
+#     sha256 = "fccfc86e4aff6c33bff9a1d907b2ba2de2a5a8ab84349be4964a93f8d8c21b62",
+#     strip_prefix = "fmt-7bdf0628b1276379886c7f6dda2cef2b3b374f0b",
+#     urls = [
+#         "https://github.com/fmtlib/fmt/archive/7bdf0628b1276379886c7f6dda2cef2b3b374f0b.zip",
+#     ],
+# )
 http_archive(
     name = "fmt",
     build_file = "fmt.BUILD",
-    sha256 = "fccfc86e4aff6c33bff9a1d907b2ba2de2a5a8ab84349be4964a93f8d8c21b62",
-    strip_prefix = "fmt-7bdf0628b1276379886c7f6dda2cef2b3b374f0b",
+    sha256 = "cdc885473510ae0ea909b5589367f8da784df8b00325c55c7cbbab3058424120",
+    strip_prefix = "fmt-9.1.0",
     urls = [
-        "https://github.com/fmtlib/fmt/archive/7bdf0628b1276379886c7f6dda2cef2b3b374f0b.zip",
+        "https://github.com/fmtlib/fmt/archive/refs/tags/9.1.0.zip",
     ],
 )
 

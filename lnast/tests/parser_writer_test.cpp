@@ -16,7 +16,7 @@ class Lnast_parser_writer_test : public ::testing::Test {
 
 TEST_F(Lnast_parser_writer_test, parse_then_write_eq) {
   for (const auto & entry : std::filesystem::directory_iterator("./lnast/tests/ln")) {
-    fmt::print("\nTest - {}\n", entry.path());
+    fmt::print("\nTest - {}\n", std::string{entry.path()});
 
     // Parser test
     std::ifstream fs;

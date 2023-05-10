@@ -11,7 +11,8 @@ static void BM_mpmc(benchmark::State& state) {
     mpmc<int> queue(1024);
 
     for (int j = 0; j < state.range(0); ++j) {
-      benchmark::DoNotOptimize(queue.enqueue(j));
+      auto b = queue.enqueue(j);
+      benchmark::DoNotOptimize(b);
       auto data = queue.dequeue();
       assert(data);
       assert(*data == j);
@@ -25,7 +26,8 @@ static void BM_spmc(benchmark::State& state) {
     spmc256<int> queue;
 
     for (int j = 0; j < state.range(0); ++j) {
-      benchmark::DoNotOptimize(queue.enqueue(j));
+      queue.enqueue(j);
+      benchmark::DoNotOptimize(queue);
       auto data = queue.dequeue();
       assert(*data == j);
     }
@@ -56,7 +58,8 @@ static void BM_spsc256(benchmark::State& state) {
     spsc256<int> queue;
 
     for (int j = 0; j < state.range(0); ++j) {
-      benchmark::DoNotOptimize(queue.enqueue(j));
+      queue.enqueue(j);
+      benchmark::DoNotOptimize(queue);
       auto data = queue.dequeue();
       assert(*data == j);
     }
@@ -70,9 +73,11 @@ static void BM_moodycamel(benchmark::State& state) {
     moodycamel::ConcurrentQueue<int> queue(256);
 
     for (int j = 0; j < state.range(0); ++j) {
-      benchmark::DoNotOptimize(queue.try_enqueue(j));
+      queue.try_enqueue(j);
+      benchmark::DoNotOptimize(queue);
       int data;
-      benchmark::DoNotOptimize(queue.try_dequeue(data));
+      queue.try_dequeue(data);
+      benchmark::DoNotOptimize(queue);
       assert(data == j);
     }
   }
@@ -103,7 +108,8 @@ static void BM_make_shared_ptr(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       auto ptr = std::make_shared<int>(j);
-      benchmark::DoNotOptimize(*ptr = j);
+      *ptr = j;
+      benchmark::DoNotOptimize(*ptr);
     }
   }
 
@@ -114,7 +120,8 @@ static void BM_make_unique_ptr(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       auto ptr = std::make_unique<int>(j);
-      benchmark::DoNotOptimize(*ptr = j);
+      *ptr = j;
+      benchmark::DoNotOptimize(*ptr);
     }
   }
 

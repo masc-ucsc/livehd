@@ -133,7 +133,7 @@ void Pass_sample::compute_histogram(Lgraph *g) {
   }
 
   for (auto &e : histogram) {
-    fmt::print("{} {}\n", e.first, e.second);
+    fmt::print("{} {}\n", (int)e.first, e.second);
   }
 
   fmt::print("Pass: cells {}\n", cells);

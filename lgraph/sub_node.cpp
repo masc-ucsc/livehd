@@ -140,7 +140,17 @@ void Sub_node::dump() const {
       pos++;
       continue;
     }
-    fmt::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, pin.dir);
+    std::string_view dir;
+    if (pin.dir == Direction::Invalid)
+      dir = "invalid";
+    else if (pin.dir == Direction::Output)
+      dir = "out";
+    else if (pin.dir == Direction::Input)
+      dir = "inp";
+    else
+      dir = "ERROR";
+
+    fmt::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, dir);
     pos++;
   }
 }
