@@ -11,7 +11,7 @@
   },
   "devDependencies": {
     "jest": "^29.0.0",
-    "prettier": "2.8.7",
+    "prettier": "2.8.8",
     "set-value": ">=4.0.1"
   }
 }
