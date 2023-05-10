@@ -1445,6 +1445,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
   });
 
   /*known points matching*/
+
+  /* map to capture all possible dpin names in the hierarchy*/ //TODO with instance name API
+  
   synth_lg->dump(true);//FIXME: remove this
   for (auto synth_node: synth_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
    
@@ -1454,7 +1457,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #ifndef FULL_RUN_FOR_EVAL
 		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
 #endif
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
 		auto synth_sub_lg_name = synth_node.get_class_lgraph()->get_name();
 #endif
 
@@ -1462,7 +1465,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
       auto synth_node_dpin_name = synth_node_dpin.has_name() ? synth_node_dpin.get_name() : "" ;
      
       if(synth_node_dpin_name!="") {
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
         fmt::print("synth_node_dpin_name: {} for lg: {}\n", synth_node_dpin_name, synth_sub_lg_name);
 #endif
         /*see if the name matches to any in original LG.
@@ -1477,7 +1480,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #endif
 				// = "__firrtl_" + std::to_string(synth_sub_lg_name);//.substr(std::size_t(9)); //removing "__firrtl_"
         auto *orig_sub_lg = library->try_ref_lgraph(orig_sub_lg_name);
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
         fmt::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
 				fmt::print("\t**  synth_node_dpin_name {}  -->  ",synth_node_dpin_name);
 #endif
@@ -1489,11 +1492,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
           remove_pound_and_bus(synth_node_dpin_name);
           orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);
         }
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
 				fmt::print(" {}  .**\n",synth_node_dpin_name);
 #endif
         if ( !orig_node_dpin.is_invalid() )  {
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
           fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.get_name());
           fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
 #endif
@@ -1513,7 +1516,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
   remove_resolved_from_orig_MoS();
 
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
   orig_lg->dump(true);
     for (auto original_node: orig_lg->fast(true) ) {//FIXME: for DBG only; remove!
 
@@ -1869,8 +1872,9 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat &dpin_c
 
 void Traverse_lg::report_critical_matches_with_color(){
   #ifdef FULL_RUN_FOR_EVAL
-    print_everything();
-  #endif
+    fmt::print("\nmatching map:\n");
+    print_io_map(net_to_orig_pin_match_map);
+  #else
   fmt::print("\n\nReporting final critical resolved matches: \nsynth node and dpin     :- original node and dpin      -- color val -- source loc\n");
   for(const auto &[synth_np, color_val]:crit_node_map) {
     auto orig_NPs = net_to_orig_pin_match_map[synth_np];
@@ -1888,6 +1892,7 @@ void Traverse_lg::report_critical_matches_with_color(){
   }
 
   fmt::print("\n");
+  #endif
 }
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
@@ -2394,21 +2399,33 @@ void Traverse_lg::print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &s
 void Traverse_lg::print_io_map(
     const Traverse_lg::map_of_sets &the_map_of_sets) const {
   for (const auto& [node_pin_cf, set_pins_cf] : the_map_of_sets) {
-    auto n = Node_pin("lgdb", node_pin_cf).get_node();
     auto p = Node_pin("lgdb", node_pin_cf);
+    #ifndef FULL_RUN_FOR_EVAL
+    auto n = Node_pin("lgdb", node_pin_cf).get_node();
     if (p.has_name()) {
       fmt::print("{},{} \t::: ", /*n.get_or_create_name(),*/ p.get_name(), p.get_pid());
     } else {
       fmt::print("n{},{} \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid());
     }
+    #else
+    if (p.has_name()) {
+      fmt::print("{} ::: ",  p.get_name());
+    }
+    #endif
     for (const auto& pin_cf : set_pins_cf) {
       const auto pin = Node_pin("lgdb", pin_cf);
+      #ifndef FULL_RUN_FOR_EVAL
       auto       n_s = Node_pin("lgdb", pin_cf).get_node();
       if (pin.has_name()) {
         fmt::print("{},{} \t",/* n_s.get_or_create_name(),*/ pin.get_name(), pin.get_pid());
       } else {
         fmt::print("n{},{} \t",/* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid());
       }
+      #else
+      if (pin.has_name()) {
+        fmt::print("{} ", pin.get_name());
+      }
+      #endif
     }
     fmt::print("\n");
   }
