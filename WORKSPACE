@@ -58,9 +58,9 @@ http_archive(
 # google benchmark
 http_archive(
     name = "com_google_benchmark",
-    sha256 = "2d6c797dbd21bd230afca4080731c49a71307de0985c63cb69ccde1a41e7148d",
-    strip_prefix = "benchmark-b177433f3ee2513b1075140c723d73ab8901790f",
-    urls = ["https://github.com/google/benchmark/archive/b177433f3ee2513b1075140c723d73ab8901790f.zip"],
+    sha256 = "927475805a19b24f9c67dd9765bb4dcc8b10fd7f0e616905cc4fee406bed81a7",
+    strip_prefix = "benchmark-1.8.0",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.8.0.zip"],
 )
 
 # fmt
