@@ -150,17 +150,15 @@ http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",
     patches = ["//external:cryptominisat.patch"],
-    #sha256 = "0d73716528bbd09637c0483f272b65dd1c827899d316adfffbb67fb57dec99a7",
-    #strip_prefix = "cryptominisat-92c4a2878c2d7b80aef510ba81086f9befd7e465",
     sha256 = "9a3298bf8b7eebb7ab1fa19ae6a83fda194b3e8d2dd409db0bb8fbc7e73cff1e",
     strip_prefix = "cryptominisat-5.11.4",
     urls = [
       "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.4.zip",
-        #"https://github.com/msoos/cryptominisat/archive/92c4a2878c2d7b80aef510ba81086f9befd7e465.zip",
     ],
 )
 
 # boolector
+# The last release is quite old. So top of tree
 http_archive(
     name = "boolector",
     build_file = "boolector.BUILD",
@@ -173,6 +171,7 @@ http_archive(
 )
 
 # rapidjson
+# The last release is quite old. So top of tree
 http_archive(
     name = "rapidjson",
     build_file = "rapidjson.BUILD",
@@ -184,14 +183,10 @@ http_archive(
 )
 
 # replxx
+# The last release is quite old. So top of tree
 http_archive(
     name = "replxx",
     build_file = "replxx.BUILD",
-    #sha256 = "3c8c2fc2c4236ac730a4bfe022db51e1c3cd108ac0b44d4dbad4e7c5a2cf1205",
-    #strip_prefix = "replxx-1f149bfe20bf6e49c1afd4154eaf0032c8c2fda2",
-    #urls = [
-    #    "https://github.com/AmokHuginnsson/replxx/archive/1f149bfe20bf6e49c1afd4154eaf0032c8c2fda2.zip",
-    #],
     sha256 = "d8d6eca00efa464089c0240f1a898449938d3f00f53e12e1dd09c55b60e4fbb8",
     strip_prefix = "replxx-5d04501f93a4fb7f0bb8b73b8f614bc986f9e25b",
     urls = [
@@ -204,9 +199,10 @@ http_archive(
     name = "verilator",
     build_file = "verilator.BUILD",
     patches = ["//external:verilator.patch"],
-    strip_prefix = "replxx-97d89cce35142d1a1f4c08571d436d5a65e34901",
+    sha256 = "1b42e2638080155d1aaa4b26012818a855a448afc718f79cb2b0fe6e610b9de2",
+    strip_prefix = "verilator-5.010",
     urls = [
-        "https://github.com/verilator/verilator/archive/97d89cce35142d1a1f4c08571d436d5a65e34901.zip",
+      "https://github.com/verilator/verilator/archive/refs/tags/v5.010.zip"
     ],
 )
 
