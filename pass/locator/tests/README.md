@@ -86,10 +86,9 @@ script is required:
 7.  cd firrtl    ; sbt compile ; sbt assembly    ; sbt publishLocal
 8.  cd ../ 
 9.  make -C chisel3 compile
-10. cd chisel3 ; sbt compile
-11. sbt publishLocal       
-12. cd ../../fir_regression
-13. ../tools/firrtl/utils/bin/firrtl -i chirrtl_src/SingleCycleCPU.fir -X none --custom-transforms firrtl.transforms.WriteChPB
-14. mv circuit.ch.pb generated/SingleCycleCPU.ch.pb
+10. cd chisel3 ; sbt compile ; sbt publishLocal       
+11. cd ../../fir_regression
+12. ../tools/firrtl/utils/bin/firrtl -i chirrtl_src/SingleCycleCPU.fir -X none --custom-transforms firrtl.transforms.WriteChPB
+13. mv circuit.ch.pb generated/SingleCycleCPU.ch.pb
     mv SingleCycleCPU.fir  SingleCycleCPU.fir [do not use this fir file. some LoC are not present in this file]
-15. 
+ 

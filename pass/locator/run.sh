@@ -2,7 +2,7 @@
 #export VERILOG_FILES=../../opentimer_tests/arith.v
 #export DESIGN_NAME=arith
 
-name=firrtl_gcd_3bits
+name=counter_no_if
 
 export VERILOG_FILES=../../pre_synth/${name}.v
 export DESIGN_NAME=$name
@@ -30,7 +30,7 @@ export SYNTH_NO_FLAT=0
 
 export SYNTH_SHARE_RESOURCES=0
 
-export SAVE_NETLIST=netlist.v
+export SAVE_NETLIST=${DESIGN_NAME}.v
 
 mkdir -p out
 
