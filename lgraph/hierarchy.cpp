@@ -71,11 +71,17 @@ std::string_view Hierarchy::get_name(const Hierarchy_index hidx) const {
     return up_vector[hidx].name;
   }
 
-  auto        i = up_vector[hidx].parent_hidx;
-  std::string name{up_vector[hidx].parent_lg->get_name()};
+  //auto    i = up_vector[hidx].parent_hidx;
+  auto i = hidx;
+  std::string name;
   while (i > 0) {
-    name = absl::StrCat(up_vector[hidx].parent_lg->get_name(), ",", name);
-    i    = up_vector[hidx].parent_hidx;
+    Node parent_node(up_vector[i].parent_lg, up_vector[i].parent_lg, 0, up_vector[i].parent_nid);
+    I(parent_node.is_type_sub());
+    if (name.empty())
+      name = parent_node.default_instance_name();
+    else
+      name = absl::StrCat(parent_node.default_instance_name(), ".", name);
+    i    = up_vector[i].parent_hidx;
   }
 
   up_vector[hidx].name = name;
