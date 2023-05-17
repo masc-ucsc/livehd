@@ -2039,11 +2039,13 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synt
         #endif
       } else {
       counter++;
+        (void)counter;
       #ifdef BASIC_DBG
       fmt::print(" counter incremented. \n");
       #endif
       }
       counter_total++;
+      (void)counter_total;
       #ifdef BASIC_DBG
       if(synth_key_name.has_name()) {
         fmt::print("\t\t\t ss: \t\t\t ");
