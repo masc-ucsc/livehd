@@ -175,10 +175,10 @@ http_archive(
 http_archive(
     name = "rapidjson",
     build_file = "rapidjson.BUILD",
-    sha256 = "47028fc98b79aeebd44f349dd026e070b102ee78717e6157a167b1288dd271c5",
-    strip_prefix = "rapidjson-083f359f5c36198accc2b9360ce1e32a333231d9/include",
+    sha256 = "d556fa2bc7bf650e4ec61668e46b8acc04959d23e9f429dd69c6d1e945b3ab5c",
+    strip_prefix = "rapidjson-973dc9c06dcd3d035ebd039cfb9ea457721ec213/include",
     urls = [
-        "https://github.com/Tencent/rapidjson/archive/083f359f5c36198accc2b9360ce1e32a333231d9.zip",
+        "https://github.com/Tencent/rapidjson/archive/973dc9c06dcd3d035ebd039cfb9ea457721ec213.zip",
     ],
 )
 
