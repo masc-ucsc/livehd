@@ -1306,6 +1306,12 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
               fmt::print("\t\t\tmatch_val is the I/P! K[n{}]::V[-match_val_value-]\n", out_cfs.get_node().get_nid());
 #endif
               inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());//resolution
+            /*} else if (self_set) { //this is a trial for accuracy (inserting the inputs of unresolved loop_stop instead of the l9oops top itself)
+              inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
+#ifdef EXTENSIVE_DBG
+              fmt::print("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
+#endif
+            */
             } else {
               inp_map_of_sets[out_cf].insert(node_dpin_cf);
 #ifdef EXTENSIVE_DBG
@@ -1385,6 +1391,12 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets &out_map_of_sets, bool i
 #ifdef EXTENSIVE_DBG
           fmt::print("\t\t\tmatch_val is the O/P! K[n{}]::V[-match_val_value-]\n", in_dpin.get_node().get_nid());
 #endif
+     /*   } else if (self_set) { //this is a trial for accuracy (inserting the inputs of unresolved loop_stop instead of the loops top itself)
+          out_map_of_sets[inp_cf].insert(self_set->begin(), self_set->end());
+#ifdef EXTENSIVE_DBG
+          fmt::print("\t\t\tSS is the O/P! K[n{}]::V[ss val]\n", in_dpin.get_node().get_nid());
+#endif
+    */
         } else {
           out_map_of_sets[inp_cf].insert(node_dpin_cf);
 #ifdef EXTENSIVE_DBG
