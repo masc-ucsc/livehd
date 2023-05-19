@@ -28,6 +28,7 @@ cc_library(
             "src/picosat/main.c",
             "src/picosat/picomcs.c",
             "src/picosat/picomus.c",
+            "src/picosat/picogcnf.c",
         ],
     ),
     deps = [
@@ -48,6 +49,7 @@ cc_library(
     defines = [
         "USE_GAUSS",
         "YALSAT_FPU",
+        "TRACE", # needed for PicoSAT
         "cryptominisat5_EXPORTS",
     ],
     includes = [

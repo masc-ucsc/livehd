@@ -123,7 +123,7 @@ void test_xorshift32() {
   printf("==== %s ====\n\n", __PRETTY_FUNCTION__);
 
   lezMiniSAT sat;
-  sat.keep_cnf();
+  //sat.keep_cnf();
 
   xorshift128 rng;
 
