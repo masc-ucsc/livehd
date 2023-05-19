@@ -77,10 +77,13 @@ std::string_view Hierarchy::get_name(const Hierarchy_index hidx) const {
   while (i > 0) {
     Node parent_node(up_vector[i].parent_lg, up_vector[i].parent_lg, 0, up_vector[i].parent_nid);
     I(parent_node.is_type_sub());
+
+    auto parent_name = parent_node.default_instance_name();
     if (name.empty())
-      name = parent_node.default_instance_name();
-    else
-      name = absl::StrCat(parent_node.default_instance_name(), ".", name);
+      name = parent_name;
+    else if (!parent_name.empty())
+      name = absl::StrCat(parent_name, ".", name);
+
     i    = up_vector[i].parent_hidx;
   }
 
