@@ -265,10 +265,10 @@ rules_proto_toolchains()
 # tcmalloc
 http_archive(
     name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
-    sha256 = "1491a386c932a5dbdaa6751f642120ad7b841ff7c3d0bc67782d932fe3d350de",
-    strip_prefix = "tcmalloc-08d376214eadc8b9fc3e9244b590e29e1bb9c395",
+    sha256 = "7e63ba5b3b9750dcfd744bbdc2f71b2d052e632a393d350dcaacd9ddb005a681",
+    strip_prefix = "tcmalloc-4d37e6780a321896f2b00d67c7f854e95599ac6a",
     urls = [
-        "https://github.com/google/tcmalloc/archive/08d376214eadc8b9fc3e9244b590e29e1bb9c395.zip",
+        "https://github.com/google/tcmalloc/archive/4d37e6780a321896f2b00d67c7f854e95599ac6a.zip",
     ],
 )
 
