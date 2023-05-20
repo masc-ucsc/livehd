@@ -32,7 +32,7 @@ def main():
 
     n = len(sys.argv)
 
-    if n != 5:
+    if n != 4:
         print("Enter time.log, perf.log and the output file path")
         exit(1)
 
@@ -41,24 +41,16 @@ def main():
     full_time = float(time.split(':')[0]) * 60 + float(time.split(':')[1])
     print(full_time)
     ppath = sys.argv[2] 
-    time_plot_data_collection_file=sys.argv[3]
-    time_flop_plot_data_collection_file=sys.argv[4]
+    time_flop_plot_data_collection_file=sys.argv[3]
     try:
         percent_fromPerf = getPercFromRepo(ppath)
         print(percent_fromPerf)
-
-        file_time_plot_data = open(time_plot_data_collection_file, "a")
-        file_time_plot_data.write(str(full_time * (percent_fromPerf/100)))
-        file_time_plot_data.close
 
         file_time_flop_plot_data = open(time_flop_plot_data_collection_file, "a")
         file_time_flop_plot_data.write(str(full_time * (percent_fromPerf/100)))
         file_time_flop_plot_data.close
     except:
-        file_time_plot_data = open(time_plot_data_collection_file, "a")
-        file_time_plot_data.write(str(full_time* (1/100)))
-        file_time_plot_data.close
-
+        
         file_time_flop_plot_data = open(time_flop_plot_data_collection_file, "a")
         file_time_flop_plot_data.write(str(full_time* (1/100)))
         file_time_flop_plot_data.close

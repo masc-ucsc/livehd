@@ -77,8 +77,8 @@ def getDPins(fname):
             for each_io in all_io_list:
                 graph_io.add(each_io.strip()) 
 
-        elif 'sky130' in data and 'dfxtp' not in data: #do not change the flops (dummy_withoutFlopsChanged)
-        # elif 'sky130' in data: #change the flops as well (dummy_withFlopsChanged)
+        # elif 'sky130' in data and 'dfxtp' not in data: #do not change the flops (dummy_withoutFlopsChanged)
+        elif 'sky130' in data: #change the flops as well (dummy_withFlopsChanged)
             isComboCell = True
             if "dfxtp" in data:
                 isFlopCell = True

@@ -99,19 +99,14 @@ def main():
 
     n = len(sys.argv)
 
-    if n != 4:
+    if n != 3:
         print("Enter path to obtain the matching map and noise percentage value to serve as x-val.")
         exit(1)
 
     path = sys.argv[1] #'/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy/MaxPeriodFibonacciLFSR_100.log' #SingleCycleCPU_flattened_100.for_graphs.log'
-    accuracy_plot_data_collection_file = sys.argv[2]
-    accuracy_flop_plot_data_collection_file = sys.argv[3]
+    accuracy_flop_plot_data_collection_file = sys.argv[2]
 
     x_val = log_accuracy_data(path)
-
-    file_acc_plot_data = open(accuracy_plot_data_collection_file, "a")
-    file_acc_plot_data.write(str(x_val))
-    file_acc_plot_data.close
 
     file_acc_flop_plot_data = open(accuracy_flop_plot_data_collection_file, "a")
     file_acc_flop_plot_data.write(str(x_val))

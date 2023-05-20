@@ -11,7 +11,7 @@
 # bbm with opt:
 CXX=clang++ CC=clang bazel build --define=profiling=1 -c opt //main:lgshell
 SRCLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests
-DESTLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy_withoutFlopsChanged #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+DESTLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy_withSelfSetChangeTrial #change line 80/81 in test_NL2NL.py for flops/no_flops as well
 export LIVEHD_THREADS=1
 
 if [ ! -d "$DESTLOCATION" ]; then
@@ -19,8 +19,6 @@ if [ ! -d "$DESTLOCATION" ]; then
 fi
 
 #starting the file for plots:
-echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
@@ -43,8 +41,6 @@ do
     MODULE_NAME=PipelinedCPU  
   fi
 
-  printf "\ny${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-  printf "\ny${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
   printf "\ny${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   printf "\ny${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
@@ -56,8 +52,6 @@ do
     echo "************${PERCENTAGE_CHANGE}**********"
     if [ ${PERCENTAGE_CHANGE} != 0 ];
       then
-      printf "," >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-      printf "," >> ${DESTLOCATION}/nl2nl_time_plot_data.py
       printf "," >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
       printf "," >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
     fi
@@ -80,8 +74,24 @@ do
     sed -z 's/\([^;]\)\n/\1 /g' ${DESTLOCATION}/${FILENAME}_1_new.v > ${DESTLOCATION}/${FILENAME}_1_new_fileChangedForFlopCountOnly.v
     flops_changed_count=`grep "dfxtp.*\.Q.*changedForEval" ${DESTLOCATION}/${FILENAME}_1_new_fileChangedForFlopCountOnly.v | wc -l`
     total_cells_changed_count=`grep "sky130.*changedForEval.[^,]*;" ${DESTLOCATION}/${FILENAME}_1_new_fileChangedForFlopCountOnly.v | wc -l`
-    num_flop_calculated_arr+=( "${flops_changed_count}" )
-    num_cells_calculated_arr+=( "${total_cells_changed_count}" )
+    echo "flops_changed_count: ${flops_changed_count}"
+    flops_changed_perc=0.0
+    total_cells_changed_perc=0.0
+    if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
+    then 
+      flops_changed_perc=`python -c "print((${flops_changed_count}/3)*100.0)"`
+      total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/16)*100.0)"`
+    elif [ ${FILENAME} == "SingleCycleCPU_flattened" ]
+    then
+      flops_changed_perc=`python -c "print((${flops_changed_count}/1056)*100.0)"`
+      total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/8371)*100.0)"`
+    elif [ ${FILENAME} == "PipelinedCPU_flattened" ]
+    then
+      flops_changed_perc=`python -c "print((${flops_changed_count}/2810)*100.0)"`
+      total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/19241)*100.0)"`
+    fi
+    num_flop_calculated_arr+=( "${flops_changed_perc}" )
+    num_cells_calculated_arr+=( "${total_cells_changed_perc}" )
     echo "num_flop_calculated_arr: ${num_flop_calculated_arr[@]}"
     echo "num_cells_calculated_arr: ${num_cells_calculated_arr[@]}"
     total_flops=`grep "dfxtp" ${DESTLOCATION}/${FILENAME}_1_new_fileChangedForFlopCountOnly.v | wc -l`
@@ -129,19 +139,11 @@ do
     fi
     perf report > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_perf_report.log
     echo "--done matching--"
-    python3 pass/locator/nl2nlPlots.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log ${DESTLOCATION}/nl2nl_acc_plot_data.py ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-    python3 pass/locator/nl2nlTimePlot.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_perf_report.log ${DESTLOCATION}/nl2nl_time_plot_data.py ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-    rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log 
-    rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_perf_report.log
+    python3 pass/locator/nl2nlPlots.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+    python3 pass/locator/nl2nlTimePlot.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_perf_report.log ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+    # rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log 
+    # rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_perf_report.log #just for this run. to get the split.
   done
-
-  echo "]" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-  echo "x${MODULE_NAME} = [0, 20, 40, 60, 80, 100]" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-  echo "plt.plot(x${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed')" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-
-  echo "]" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-  echo "x${MODULE_NAME} = [0, 20, 40, 60, 80, 100]" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-  echo "plt.plot(x${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed')" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
 
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   printf "x${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -176,7 +178,7 @@ do
     i=`expr $i + 1`
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  echo "plt.plot(x${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+  echo "plt.plot(w${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
   echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
   printf "x${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
@@ -211,34 +213,27 @@ do
     i=`expr $i + 1`
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  echo "plt.plot(x${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+  echo "plt.plot(w${MODULE_NAME}, y${MODULE_NAME}, label = \"${MODULE_NAME}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
 done
 
-echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "plt.title('Accuracy graph for netlist to netlist analysis. (Without flops preserved)')" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-echo "plt.show()" >> ${DESTLOCATION}/nl2nl_acc_plot_data.py
-
-echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-echo "plt.title('Time graph for netlist to netlist analysis. (Without flops preserved)')" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-echo "plt.show()" >> ${DESTLOCATION}/nl2nl_time_plot_data.py
-
-echo "plt.xlabel('Noise in flops (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-echo "plt.title('Accuracy graph for netlist to netlist analysis. (Without flops preserved)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.svg\", format=\"svg\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.show()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
-echo "plt.xlabel(' Noise in flops (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-echo "plt.title('Time graph for netlist to netlist analysis. (Without flops preserved)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.svg\", format=\"svg\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.show()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+
+python3 ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+python3 ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
