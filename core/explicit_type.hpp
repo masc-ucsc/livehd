@@ -1,6 +1,10 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstddef>
+#include <string>
+#include "fmt/format.h"
+
 // #include "absl/hash/hash.h"
 
 template <typename T, typename Meaning, T inv_val>
@@ -16,14 +20,25 @@ struct Explicit_type {
 
   //! The actual fundamental value.
   T         value;
-  typedef T type;
+  using type=T;
 
-  bool is_invalid() const { return value == inv_val; }
+  [[nodiscard]] bool is_invalid() const { return value == inv_val; }
   void invalidate() { value = inv_val; }
 
   [[nodiscard]] constexpr size_t hash() const { return value; }
 
   // bool operator==(const Explicit_type<T,Meaning> &other) const { return value == other.value; }
+};
+
+template <typename T, typename Meaning, T inv_val>
+struct fmt::formatter<Explicit_type<T,Meaning,inv_val>> : fmt::formatter<std::string> {
+  // parse is inherited from formatter<string_view>.
+
+  auto format(Explicit_type<T,Meaning,inv_val> t, format_context& ctx) const {
+    auto txt = std::to_string(t.value);
+
+    return formatter<std::string>::format(txt, ctx);
+  }
 };
 
 #if 0

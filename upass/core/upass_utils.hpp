@@ -6,8 +6,8 @@
 namespace upass {
 
 template <typename... Args>
-void error(const char *format, const Args &...args) {
-  fmt::print(format, args...);
+void error(fmt::format_string<Args...> format, Args &&...args) {
+  fmt::print(format, std::forward<Args>(args)...);
 }
 
 }  // namespace upass

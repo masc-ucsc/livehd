@@ -158,7 +158,7 @@ public:
       a = s->ridx;
     }
 
-    fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), get_page_idx(), a, (uint64_t)this);
+    fmt::print("snode:{} page_idx:{} a:{} addr:{:x}", is_snode(), (int)get_page_idx(), (int)a, (uint64_t)this);
   }
 
   [[nodiscard]] bool is_page_align() const {

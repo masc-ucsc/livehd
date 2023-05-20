@@ -7,17 +7,15 @@
 #include <iostream>
 
 class err_tracker {
+protected:
+  static inline int logger_fd = -1;
+
 public:
-  static void logger(const std::string &text);
-  static void sot_logger(const std::string &text);
+  static void logger(std::string_view text);
+  static void sot_logger(std::string_view text);
 
-  template <typename S, typename... Args>
-  static void err_logger(const S &format, Args &&...args) {
-    logger(fmt::format(format, args...));
-  }
-
-  template <typename S, typename... Args>
-  static void sot_log(const S &format, Args &&...args) {
-    sot_logger(fmt::format(format, args...));
+  template <typename... Args>
+  static void logger(fmt::format_string<Args...> format, Args &&...args) {
+    logger(fmt::format(format, std::forward<Args>(args)...));
   }
 };

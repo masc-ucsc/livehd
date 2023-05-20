@@ -140,18 +140,18 @@ public:
   static void warn_int(std::string_view text);
   static void info_int(std::string_view text);
 
-  template <typename S, typename... Args>
-  static void error(const S &format, Args &&...args) {
-    error_int(fmt::format(format, args...));
+  template <typename... Args>
+  static void error(fmt::format_string<Args...> format, Args &&...args) {
+    error_int(fmt::format(format, std::forward<Args>(args)...));
   }
 
-  template <typename S, typename... Args>
-  static void warn(const S &format, Args &&...args) {
-    warn_int(fmt::format(format, args...));
+  template <typename... Args>
+  static void warn(fmt::format_string<Args...> format, Args &&...args) {
+    warn_int(fmt::format(format, std::forward<Args>(args)...));
   }
 
-  template <typename S, typename... Args>
-  static void info(const S &format, Args &&...args) {
-    info_int(fmt::format(format, args...));
+  template <typename... Args>
+  static void info(fmt::format_string<Args...> format, Args &&...args) {
+    info_int(fmt::format(format, std::forward<Args>(args)...));
   }
 };

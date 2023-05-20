@@ -428,13 +428,13 @@ uint32_t Elab_scanner::scan_line() const {
 }
 
 void Elab_scanner::scan_error_int(std::string_view text) const {
-  err_tracker::err_logger(text);
+  err_tracker::logger(text);
   scan_raw_msg("error", text, true);
   n_errors++;
 }
 
 void Elab_scanner::scan_warn_int(std::string_view text) const {
-  err_tracker::err_logger(text);
+  err_tracker::logger(text);
   scan_raw_msg("warning", text, true);
   n_warnings++;
   if (n_warnings > max_warnings)
@@ -442,12 +442,12 @@ void Elab_scanner::scan_warn_int(std::string_view text) const {
 }
 
 void Elab_scanner::parser_info_int(std::string_view text) const {
-  err_tracker::err_logger(text);
+  err_tracker::logger(text);
   scan_raw_msg("info", text, true);
 }
 
 void Elab_scanner::parser_error_int(std::string_view text) const {
-  err_tracker::err_logger(text);
+  err_tracker::logger(text);
   scan_raw_msg("error", text, false);
   n_errors++;
   // if (n_errors > max_errors) exit(-3);
@@ -459,7 +459,7 @@ void Elab_scanner::parser_error_int(std::string_view text) const {
 }
 
 void Elab_scanner::parser_warn_int(std::string_view text) const {
-  err_tracker::err_logger(text);
+  err_tracker::logger(text);
   scan_raw_msg("warning", text, false);
   n_warnings++;
   if (max_warnings && n_warnings > max_warnings)
@@ -467,7 +467,7 @@ void Elab_scanner::parser_warn_int(std::string_view text) const {
 }
 
 void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, bool third) const {
-  // err_tracker::err_logger( text);
+  // err_tracker::logger( text);
   if (token_list.size() <= 1) {
     fmt::print("{}:{}:{} {}: {}\n", filename, 0, 0, cat, text);
     return;
@@ -531,7 +531,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
 
   std::string third_1(col, ' ');
   std::string third_2(len, '^');
-  fmt::print(third_1 + third_2 + "\n");
+  fmt::print("{}{}\n", third_1 , third_2);
 }
 
 void Elab_scanner::dump_token() const {

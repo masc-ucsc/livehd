@@ -2000,14 +2000,14 @@ void Inou_firrtl_module::list_prime_op_info(Lnast& lnast, const firrtl::FirrtlPB
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_INCREASE_PRECISION:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_DECREASE_PRECISION:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SET_PRECISION: {
-      Pass::error("PrimOp: {} not yet supported (related to FloatingPoint type)", op.op());
+      Pass::error("PrimOp: {} not yet supported (related to FloatingPoint type)", (int)op.op());
       break;
     }
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_WRAP:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_CLIP:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_SQUEEZE:
     case firrtl::FirrtlPB_Expression_PrimOp_Op_OP_AS_INTERVAL: {
-      Pass::error("PrimOp: {} not yet supported (related to Interavls)", op.op());
+      Pass::error("PrimOp: {} not yet supported (related to Interavls)", (int)op.op());
       break;
     }
     default: Pass::error("Unknown PrimaryOp");
@@ -2112,7 +2112,7 @@ void Inou_firrtl_module::init_expr_add(Lnast& lnast, const firrtl::FirrtlPB_Expr
       I(false);
       break;
     }
-    default: Pass::error("In init_expr_add, found unknown expression type: {}", rhs_expr.expression_case());
+    default: Pass::error("In init_expr_add, found unknown expression type: {}", (int)rhs_expr.expression_case());
   }
 }
 
@@ -2785,7 +2785,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     default:
-      Pass::error("Unknown statement type: {}.", stmt.statement_case());
+      Pass::error("Unknown statement type: {}", (int)stmt.statement_case());
       I(false);
       return;
   }

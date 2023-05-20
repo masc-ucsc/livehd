@@ -480,7 +480,7 @@ void Bitwidth::process_memory(Node &node) {
         }
 
         if (!it->second.get_range().is_i()) {
-          Pass::error("memory {} size {} exceeds limit", it->second.get_range().to_pyrope());
+          Pass::error("memory {} size exceeds limit", it->second.get_range().to_pyrope());
           return;
         }
 

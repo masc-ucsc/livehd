@@ -4,14 +4,14 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 cc_library(
     name = "fmt",
-    hdrs = glob(["include/fmt/*.h"]),
+    hdrs = glob(["include/fmt/*.h"]) + glob(["src/*.cc"]),
     copts = [
         "-w",
         "-O2",
     ],
     # WARNING: Yosys dynamic library was giving problems without FMT_HEADER_ONLY
-    defines = ["FMT_HEADER_ONLY"],
-    #srcs = glob(["src/*.cc"]),
-    includes = ["include"],
+    #defines = ["FMT_HEADER_ONLY"],
+    srcs = glob(["src/format.cc"]),
+    includes = ["include", "src"],
     visibility = ["//visibility:public"],
 )

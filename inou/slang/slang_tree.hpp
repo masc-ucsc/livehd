@@ -1,10 +1,11 @@
 
 #pragma once
 
+#include <vector>
+#include <memory>
+
 // clang-format off
 #include "slang/symbols/ASTVisitor.h"
-
-#include <vector>
 
 #include "pass.hpp"
 #include "lnast_create.hpp"

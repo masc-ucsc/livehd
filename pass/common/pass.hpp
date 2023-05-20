@@ -51,25 +51,25 @@ public:
   }
 
   template <typename... Args>
-  static void error(const char *format, const Args &...args) {
-    auto tmp = fmt::format(format, args...);
-    err_tracker::err_logger(tmp.data());
-    error(std::string_view(tmp.data(), tmp.size()));
+  static void error(fmt::format_string<Args...> format, Args &&...args) {
+    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+    err_tracker::logger(tmp);
+    error(tmp);
   }
 
   template <typename... Args>
-  static void warn(std::string_view format, const Args &...args) {
-    auto tmp = fmt::format(format, args...);
-    err_tracker::err_logger(tmp.data());
-    eprp.parser_warn(std::string_view(tmp.data(), tmp.size()));
+  static void warn(fmt::format_string<Args...> format, Args &&...args) {
+    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+    err_tracker::logger(tmp);
+    eprp.parser_warn(tmp);
   }
 
   template <typename... Args>
-  static void info(std::string_view format, const Args &...args) {
+  static void info(fmt::format_string<Args...> format, Args &&...args) {
 #ifndef NDEBUG
-    auto tmp = fmt::format(format, args...);
-    err_tracker::err_logger(tmp.data());
-    eprp.parser_info(std::string_view(tmp.data(), tmp.size()));
+    auto tmp = fmt::format(format, std::forward<Args>(args)...);
+    err_tracker::logger(tmp);
+    eprp.parser_info(tmp);
 #else
     (void)format;
     ((void)args, ...);

@@ -299,33 +299,43 @@ public:
 
   class scan_error : public std::runtime_error {
   public:
-    template <typename S, typename... Args>
-    scan_error(const Elab_scanner &scanner, const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+    template <typename... Args>
+    scan_error(const Elab_scanner &scanner, fmt::format_string<Args...> format, Args &&...args)
+    : std::runtime_error(fmt::format(format, std::forward<Args>(args)...)) {
       scanner.scan_error_int(what());
     };
   };
 
-  template <typename S, typename... Args>
-  void scan_warn(const S &format, Args &&...args) const {
-    scan_warn_int(fmt::format(format, args...));
+  template <typename... Args>
+  void scan_warn(fmt::format_string<Args...> format, Args &&...args) const {
+    scan_warn_int(fmt::format(format, std::forward<Args>(args)...));
   }
 
   class parser_error : public std::runtime_error {
   public:
-    template <typename S, typename... Args>
-    parser_error(const Elab_scanner &scanner, const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+    template <typename... Args>
+    parser_error(const Elab_scanner &scanner, fmt::format_string<Args...> format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+      scanner.parser_error_int(what());
+    };
+    parser_error(const Elab_scanner &scanner, std::string_view txt) : std::runtime_error(std::string(txt)) {
       scanner.parser_error_int(what());
     };
   };
 
-  template <typename S, typename... Args>
-  void parser_warn(const S &format, Args &&...args) const {
+  template <typename... Args>
+  void parser_warn(fmt::format_string<Args...> format, Args &&...args) const {
     parser_warn_int(fmt::format(format, args...));
   }
+  void parser_warn(std::string_view txt) const {
+    parser_warn_int(txt);
+  }
 
-  template <typename S, typename... Args>
-  void parser_info(const S &format, Args &&...args) const {
+  template <typename... Args>
+  void parser_info(fmt::format_string<Args...> format, Args &&...args) const {
     parser_info_int(fmt::format(format, args...));
+  }
+  void parser_info(std::string_view txt) const {
+    parser_warn_int(txt);
   }
 
   bool scan_next();

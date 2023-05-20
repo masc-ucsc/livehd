@@ -147,12 +147,12 @@ void Lnast_writer::write_func_def() {
   is_func_name = true;
   write_lnast();
   is_func_name = false;
-  print(" = {\n");
+  print(" = {{\n");
   ++depth;
   move_to_sibling();
   write_lnast();
   --depth;
-  print_line("}");
+  print_line("}}");
   move_to_parent();
 }
 
@@ -221,9 +221,9 @@ void Lnast_writer::write_mask_xor()      { write_n_ary("mask_xor");      }
 
 void Lnast_writer::write_ref() {
   if (is_func_name) {
-    print("!{{{}}}", current_text());
+    os << fmt::format("!{{{}}}", current_text());
   } else {
-    print("%{{{}}}", current_text());
+    os << fmt::format("%{{{}}}", current_text());
   }
 }
 

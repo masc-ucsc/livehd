@@ -13,12 +13,12 @@ public:
   static void warn(const std::string &msg) { Pass::eprp.parser_warn(msg); }
 
   template <typename... Args>
-  static void error(std::string_view format, const Args &...args) {
-    throw Eprp::parser_error(Pass::eprp, format, args...);
+  static void error(fmt::format_string<Args...> fmt, Args &&...args) {
+    throw Eprp::parser_error(Pass::eprp, fmt, std::forward<Args>(args)...);
   }
   template <typename... Args>
-  static void warn(std::string_view format, const Args &...args) {
-    Pass::eprp.parser_warn(format, args...);
+  static void warn(fmt::format_string<Args...> fmt, Args &&...args) {
+    Pass::eprp.parser_warn(fmt, std::forward<Args>(args)...);
   }
 
   static void setup(const std::function<void(Eprp &)> &fn) { fn(Pass::eprp); }

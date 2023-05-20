@@ -75,7 +75,7 @@ bool runPreprocessor(SourceManager& sourceManager, const Bag& options, const std
   // Only print diagnostics if actual errors occurred.
   for (auto& diag : diagnostics) {
     if (diag.isError()) {
-      Pass::error("{}", DiagnosticEngine::reportAll(sourceManager, diagnostics));
+      Pass::error("{}", std::string(DiagnosticEngine::reportAll(sourceManager, diagnostics)));
       return false;
     }
   }

@@ -132,7 +132,7 @@ void Sub_node::from_json(const rapidjson::Value &entry) {
 
 /* LCOV_EXCL_START */
 void Sub_node::dump() const {
-  fmt::print("lgid:{} name:{} #iopins:{}\n", lgid, name, io_pins.size());
+  fmt::print("lgid:{} name:{} #iopins:{}\n", (int)lgid, name, io_pins.size());
 
   int pos = 0;
   for (const auto &pin : io_pins) {

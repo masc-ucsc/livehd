@@ -62,8 +62,8 @@ protected:
   }
 
   template <typename... Args>
-  void print(const Args&... args) {
-    os << fmt::format(args...);
+  void print(fmt::format_string<Args...> fmt, Args&&... args) {
+    os << fmt::format(fmt, args...);
   }
 
   template <typename... Args>
@@ -73,9 +73,9 @@ protected:
   }
 
   template <typename... Args>
-  void print_line(const Args&... args) {
+  void print_line(fmt::format_string<Args...> fmt, Args&&... args) {
     os << fmt::format("{}", std::string(depth * 2, ' '));
-    os << fmt::format(args...);
+    os << fmt::format(fmt, args...);
   }
 
   void write_metadata();

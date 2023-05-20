@@ -99,7 +99,7 @@ void bagLayout::outputHotSpotLayout(std::ostream& o, double startX, double start
       << ", area=" << area << "mm²\n";
     o << "# start " << groupName << " " << Ntype::get_name(getType()) << " bag " << itemCount << "\n";
   }
-  for (int i = 0; i < getComponentCount(); i++) {
+  for (auto i = 0u; i < getComponentCount(); i++) {
     FPObject* obj = getComponent(i);
     obj->outputHotSpotLayout(o, x + startX, y + startY);
   }

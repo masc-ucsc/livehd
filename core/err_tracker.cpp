@@ -1,43 +1,22 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "err_tracker.hpp"
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "iassert.hpp"
+#include "err_tracker.hpp"
 
-void err_tracker::logger(const std::string &text) {
-  const std::string &log_file = "logger_ErrMsg.log";
+void err_tracker::logger(std::string_view text) {
 
-  FILE *f;
-  f = fopen(log_file.c_str(), "a+");
-
-  if (f == NULL) {
-    I(false, "Cannot open log_file");
+  if (logger_fd<0) {
+    logger_fd = open("logger_err.log", O_WRONLY|O_APPEND|O_CREAT, 0644);
+    if (logger_fd<0) {
+      fmt::print("ERROR: could not open logger_err.log file for logging [{}]\n", text);
+      exit(-3);
+    }
   }
 
-  fprintf(f, "%s", text.c_str());
-  fprintf(f, "\n----\n");
-  // if(std::filesystem::exists(log_file)) {
-  //   fmt::print("------logger.log exists ------ \n");
-  //   ofile = fopen(log_file, "a");
-  // } else {
-  //   fmt::print("------Creating a new file. logger.log does not exist ------ \n");
-  // }
-  // fmt::print("{}", text);
-  fclose(f);
+  write(logger_fd, text.data(), text.size());
+  write(logger_fd,"\n----\n", 6*sizeof(char));
 }
 
-void err_tracker::sot_logger(const std::string &text) {
-  const std::string &log_file = "logger_TokSeq.log";
-
-  FILE *f;
-  f = fopen(log_file.c_str(), "a+");
-
-  if (f == NULL) {
-    I(false, "Cannot open log_file");
-  }
-
-  fprintf(f, "%s", text.c_str());
-  fprintf(f, "\n----\n");
-
-  fclose(f);
-}

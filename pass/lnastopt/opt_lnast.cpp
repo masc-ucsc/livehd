@@ -81,7 +81,7 @@ Opt_lnast::Opt_lnast(const Eprp_var &var) {
 
 void Opt_lnast::set_needs_hierarchy() { needs_hierarchy = true; }
 
-void Opt_lnast::hierarchy_info_int(const std::string &msg) {
+void Opt_lnast::hierarchy_info_int(std::string_view msg) {
   needs_hierarchy = true;
   if (hier_mode) {
     throw Lnast::error(msg);

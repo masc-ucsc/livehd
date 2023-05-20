@@ -1881,7 +1881,7 @@ void Prp::elaborate() {
     PRINT_DBG_AST("terminal token: {}\n", scan_text(term_token + base_token));
     ast_dump(lh::Tree_index::root());
     fmt::print("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
-    err_tracker::err_logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
+    err_tracker::logger("Parsing error line {}\n", get_token(term_token + base_token).line + 1);
     exit(1);
   }
 

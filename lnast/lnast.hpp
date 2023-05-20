@@ -190,18 +190,27 @@ public:
   void dump(const Lnast_nid &root) const;
   void dump() const { dump(Lnast_nid::root()); }
 
-  template <typename S, typename... Args>
-  static void info(const S &format, Args &&...args) {
-    auto txt = fmt::format(format, args...);
+  template <typename... Args>
+  static void info(fmt::format_string<Args...> format, Args &&...args) {
+    auto txt = fmt::format(format, std::forward<Args>(args)...);
+    fmt::print("info:{}\n", txt);
+  }
+  static void info(std::string_view txt) {
     fmt::print("info:{}\n", txt);
   }
 
   class error : public std::runtime_error {
   public:
-    template <typename S, typename... Args>
-    error(const S &format, Args &&...args) : std::runtime_error(fmt::format(format, args...)) {
+    template <typename... Args>
+    error(fmt::format_string<Args...> format, Args &&...args)
+    : std::runtime_error(fmt::format(format, std::forward<Args>(args)...)) {
       fmt::print("error:lnast {}\n", what());
       throw std::runtime_error(std::string(what()));
-    };
+    }
+    error(std::string_view txt)
+    : std::runtime_error(std::string(txt)) {
+      fmt::print("error:lnast {}\n", what());
+      throw std::runtime_error(std::string(what()));
+    }
   };
 };
