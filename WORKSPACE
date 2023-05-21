@@ -264,31 +264,16 @@ rules_proto_toolchains()
 # rules_proto_dependencies()
 # rules_proto_toolchains()
 
-# tcmalloc
+# mimalloc
 http_archive(
-    name = "com_google_tcmalloc",  # 2021-11-11T17:55:46Z
-    sha256 = "12c0aae3186df45b4d410ebbfed3f08e0d1f564f2a583148d3fa0a32b44d1d1b",
-    strip_prefix = "tcmalloc-7e57981ac8d66351aadeb7f736296bca9dcf6f8a",
+    name = "mimalloc",
+    build_file = "mimalloc.BUILD",
+    sha256 = "86281c918921c1007945a8a31e5ad6ae9af77e510abfec20d000dd05d15123c7",
+    strip_prefix = "mimalloc-2.1.2",
     urls = [
-        "https://github.com/google/tcmalloc/archive/7e57981ac8d66351aadeb7f736296bca9dcf6f8a.zip",
+      "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.zip",
     ],
 )
-
-# Fuzzing (required by tcmalloc)
-http_archive(
-    name = "rules_fuzzing",
-    sha256 = "d9002dd3cd6437017f08593124fdd1b13b3473c7b929ceb0e60d317cb9346118",
-    strip_prefix = "rules_fuzzing-0.3.2",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.3.2.zip"],
-)
-
-load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
-
-rules_fuzzing_dependencies()
-
-load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
-
-rules_fuzzing_init()
 
 # Perfetto
 http_archive(

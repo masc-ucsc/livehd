@@ -26,6 +26,7 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
+        "@mimalloc",
         "@boost//:multiprecision",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
