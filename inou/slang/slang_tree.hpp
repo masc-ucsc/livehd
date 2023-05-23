@@ -5,7 +5,7 @@
 #include <memory>
 
 // clang-format off
-#include "slang/symbols/ASTVisitor.h"
+#include "slang/ast/ASTVisitor.h"
 
 #include "pass.hpp"
 #include "lnast_create.hpp"
@@ -15,7 +15,7 @@ class Slang_tree {
 public:
   Slang_tree();
 
-  void process_root(const slang::RootSymbol& root);
+  void process_root(const slang::ast::RootSymbol& root);
 
   std::vector<std::shared_ptr<Lnast>> pick_lnast();
 
@@ -28,13 +28,13 @@ protected:
 
   bool has_lnast(std::string_view name) { return parsed_lnasts.find(name) != parsed_lnasts.end(); }
 
-  bool process_top_instance(const slang::InstanceSymbol& symbol);
-  bool process(const slang::AssignmentExpression& expr);
+  bool process_top_instance(const slang::ast::InstanceSymbol& symbol);
+  bool process(const slang::ast::AssignmentExpression& expr);
 
-  void process_lhs(const slang::Expression& lhs, const std::string& rhs_var, bool last_value);
+  void process_lhs(const slang::ast::Expression& lhs, const std::string& rhs_var, bool last_value);
 
-  std::string process_expression(const slang::Expression& expr, bool last_value);
-  std::string process_mask_and(const slang::UnaryExpression& uexpr, bool last_value);
-  std::string process_mask_popcount(const slang::UnaryExpression& uexpr, bool last_value);
-  std::string process_mask_xor(const slang::UnaryExpression& uexpr, bool last_value);
+  std::string process_expression(const slang::ast::Expression& expr, bool last_value);
+  std::string process_mask_and(const slang::ast::UnaryExpression& uexpr, bool last_value);
+  std::string process_mask_popcount(const slang::ast::UnaryExpression& uexpr, bool last_value);
+  std::string process_mask_xor(const slang::ast::UnaryExpression& uexpr, bool last_value);
 };

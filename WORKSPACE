@@ -16,19 +16,8 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 
 rules_foreign_cc_dependencies()
 
-# rules_hdl
-#http_archive(
-    #name = "rules_python",
-    #sha256 = "a644da969b6824cc87f8fe7b18101a8a6c57da5db39caa6566ec6109f37d2141",
-    #url = "https://github.com/bazelbuild/rules_python/releases/download/0.20.0/rules_python-0.20.0.tar.gz",
-#)
 
-#http_archive(
-#    name = "rules_hdl",
-#    sha256 = "2326431c5eb66c7e4be8a2d2f89ad6aa929e99727a487e092d9d78e23485ec25",
-#    strip_prefix = "bazel_rules_hdl-89b7ff96dfbc69dc653dac2e4015bb39221b2715",
-#    url = "https://github.com/masc-ucsc/bazel_rules_hdl/archive/89b7ff96dfbc69dc653dac2e4015bb39221b2715.zip",
-#)
+# bazel_rules_hdl
 http_archive(
     name = "rules_hdl",
     sha256 = "9b3ef2d8e0603de6c689077b75b1fbfa42a24b1410423dd69271130586e2d8ee",
@@ -90,10 +79,10 @@ http_archive(
     name = "slang",
     build_file = "slang.BUILD",
     patches = ["//external:slang.patch"],
-    sha256 = "28263ac3653b8b219ae4e9b9ab0e2b2603bb014c45399db8b85ff2a1ebf3e173",
-    strip_prefix = "slang-6f2b66270064f40501754f64883f83bc5e7ca5a6",
+    sha256 = "27a5137c6d4da3293e86ce6cf585924d71be7def7c6250e910428a81c2929551",
+    strip_prefix = "slang-08a7c51030981b0721da9054b83468a2b20d8c0e",
     urls = [
-        "https://github.com/masc-ucsc/slang/archive/6f2b66270064f40501754f64883f83bc5e7ca5a6.zip",
+      "https://github.com/MikePopoloski/slang/archive/08a7c51030981b0721da9054b83468a2b20d8c0e.zip"
     ],
 )
 
@@ -284,14 +273,13 @@ http_archive(
     urls = ["https://github.com/google/perfetto/archive/refs/tags/v28.0.tar.gz"],
 )
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+# Boost
+http_archive(
+    name = "com_github_nelhage_rules_boost",
 
-# Boost (bazel_rules_hdl)
-#http_archive(
-    #name = "com_github_nelhage_rules_boost",
-    #url = "https://github.com/nelhage/rules_boost/archive/96e9b631f104b43a53c21c87b01ac538ad6f3b48.tar.gz",
-    #strip_prefix = "rules_boost-96e9b631f104b43a53c21c87b01ac538ad6f3b48",
-#)
-#load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
-#boost_deps()
+    url = "https://github.com/nelhage/rules_boost/archive/96e9b631f104b43a53c21c87b01ac538ad6f3b48.tar.gz",
+    strip_prefix = "rules_boost-96e9b631f104b43a53c21c87b01ac538ad6f3b48",
+)
+load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
+boost_deps()
 

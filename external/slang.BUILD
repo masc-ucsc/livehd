@@ -18,24 +18,31 @@ cmake(
     cache_entries = {
         "SLANG_INCLUDE_TESTS": "OFF",
         "SLANG_INCLUDE_TOOLS": "OFF",
-        "SLANG_INCLUDE_LLVM": "OFF",
         "SLANG_INCLUDE_DOCS": "OFF",
+        "SLANG_INCLUDE_PYLIB": "OFF",
+        #"SLANG_INCLUDE_INSTALL": "OFF",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
         "CMAKE_BUILD_TYPE": "Release",
+         "SLANG_USE_BOOST": "OFF",
+         "SLANG_USE_MIMALLOC": "OFF",
     },
-    generate_args = select({
-        "@platforms//os:macos": [
-        ],
-        "//conditions:default": [
-            "-GNinja",
-        ],
-    }),
+#    generate_args = select({
+#        "@platforms//os:macos": [
+#        ],
+#        "//conditions:default": [
+#            "-GNinja",
+#        ],
+#    }),
     lib_source = ":all",
     out_static_libs = [
-        "libslangruntime.a",
-        "libslangparser.a",
-        "libslangcompiler.a",
-        "libslangcore.a",
+        "libsvlang.a",
     ],
     visibility = ["//visibility:public"],
+    data = [
+        "@mimalloc//:all",
+        "@fmt//:all",
+    ],
+    deps = [
+        "@fmt",
+    ]
 )

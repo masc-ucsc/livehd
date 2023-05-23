@@ -1,19 +1,36 @@
-diff --git slang/tmp/Compilation.cpp slang/source/compilation/Compilation.cpp
---- tmp/Compilation.cpp
-+++ source/compilation/Compilation.cpp
-@@ -4,6 +4,8 @@
- //
- // File is under the MIT license; see LICENSE for details
- //------------------------------------------------------------------------------
+diff --git CMakeLists.txt CMakeLists.txt
+index 81752e02..33886ba0 100644
+--- CMakeLists.txt
++++ CMakeLists.txt
+@@ -162,7 +162,9 @@ else()
+   message(STATUS "Build STATIC library as: ${SLANG_LIB_NAME}")
+ endif()
+
+-include(external/CMakeLists.txt)
++#include(external/CMakeLists.txt)
++add_subdirectory(../fmt fmt EXCLUDE_FROM_ALL)
++add_subdirectory(../mimalloc mimalloc EXCLUDE_FROM_ALL)
+ add_subdirectory(source)
+
+ if(SLANG_INCLUDE_TOOLS)
+diff --git source/ast/Compilation.cpp source/ast/Compilation.cpp
+index b1dc4c50..4cac5fdd 100644
+--- source/ast/Compilation.cpp
++++ source/ast/Compilation.cpp
+@@ -24,6 +24,8 @@
+ #include "slang/text/SourceManager.h"
+ #include "slang/util/TimeTrace.h"
+
 +#include <atomic>
 +
- #include "slang/compilation/Compilation.h"
+ using namespace slang::parsing;
 
- #include "../text/CharInfo.h"
-@@ -156,12 +158,16 @@ Compilation::Compilation(const Bag& options) :
-     Builtins::registerGateTypes(*this);
+ namespace slang::ast::builtins {
+@@ -159,13 +161,17 @@ Compilation::Compilation(const Bag& options) :
+     // Register the built-in gate types.
+     builtins::registerGateTypes(*this);
 
-     // Set a default handler for printing types and symbol paths, for convenience.
+-    // Set a default handler for printing types and symbol paths, for convenience.
 -    DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
 -    TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
 -        std::string str;
@@ -23,12 +40,13 @@ diff --git slang/tmp/Compilation.cpp slang/source/compilation/Compilation.cpp
 +    static std::atomic<int> only_one=0;
 +    auto only_one_counter = ++only_one;
 +    if (only_one_counter==1) {
-+      DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
-+      TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
-+          std::string str;
-+          sym.getHierarchicalPath(str);
-+          return str;
-+      });
++        // Set a default handler for printing types and symbol paths, for convenience.
++        DiagnosticEngine::setDefaultFormatter<const Type*>(std::make_unique<TypeArgFormatter>());
++        TextDiagnosticClient::setDefaultSymbolPathCB([](const Symbol& sym) {
++            std::string str;
++            sym.getHierarchicalPath(str);
++            return str;
++        });
 +    }
 
      // Reset systemId counters that may have been changed due to creation of types

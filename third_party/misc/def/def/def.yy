@@ -54,7 +54,6 @@
 %lex-param {defrData *defData}
 %parse-param {defrData *defData}
 
-
 %{
 #include <stdlib.h>
 #include <string.h>

@@ -2,6 +2,12 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "fmt",
     hdrs = glob(["include/fmt/*.h"]) + glob(["src/*.cc"]),
@@ -14,4 +20,5 @@ cc_library(
     srcs = glob(["src/format.cc"]),
     includes = ["include", "src"],
     visibility = ["//visibility:public"],
+    data = glob(["**"]),
 )

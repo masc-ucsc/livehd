@@ -138,7 +138,7 @@ public:
 
         if (token == "module") {
           if (!module_name.empty()) {
-            throw scan_error(*this, fmt::format("unexpected nested modules"));
+            throw scan_error(*this, "unexpected nested modules");
           }
           scan_next();
           module_name = scan_text();
@@ -148,7 +148,7 @@ public:
           last_output = true;
         } else if (token == "endmodule") {
           if (module_name.empty()) {
-            throw scan_error(*this, fmt::format("found endmodule without corresponding module"));
+            throw scan_error(*this, "found endmodule without corresponding module");
           }
           fmt::print("{}={}\n", token, module_name);
           module_name = "";

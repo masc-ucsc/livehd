@@ -3,27 +3,29 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
-cc_library(
-    name = "pass_mockturtle",
-    srcs = ["pass_mockturtle.cpp"],
-    hdrs = ["pass_mockturtle.hpp"],
-    copts = COPTS,
-    includes = ["."],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//pass/common:pass",
-        "@mockturtle",
-    ],
-)
+# Update to latest, current does not compile with c++20
 
-cc_test(
-    name = "mock_test",
-    srcs = ["mock_test.cpp"],
-    deps = [
-        "//core",
-        "@mockturtle",
-    ],
-)
+# cc_library(
+#     name = "pass_mockturtle",
+#     srcs = ["pass_mockturtle.cpp"],
+#     hdrs = ["pass_mockturtle.hpp"],
+#     copts = COPTS,
+#     includes = ["."],
+#     visibility = ["//visibility:public"],
+#     deps = [
+#         "//pass/common:pass",
+#         "@mockturtle",
+#     ],
+# )
+
+# cc_test(
+#     name = "mock_test",
+#     srcs = ["mock_test.cpp"],
+#     deps = [
+#         "//core",
+#         "@mockturtle",
+#     ],
+# )
 
 # sh_test(
 #     name = "mt_test.sh",
