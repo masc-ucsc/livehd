@@ -686,14 +686,13 @@ public:
 
         return i;
       };
-      bool operator!=(const CTree_sibling_iterator &other) {
-        I(t == other.t);
-        return ti != other.ti;
+      bool operator==(const CTree_sibling_iterator &other) const {
+        return !(ti != other.ti);
       }
 
-      bool operator==(const CTree_sibling_iterator &other) {
+      bool operator!=(const CTree_sibling_iterator &other) const {
         I(t == other.t);
-        return ti == other.ti;
+        return ti != other.ti;
       }
       const Tree_index &operator*() const { return ti; }
 

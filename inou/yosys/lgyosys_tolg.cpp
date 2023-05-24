@@ -2357,7 +2357,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
     auto *library = Graph_library::instance(path);
 
-    for (auto &it : design->modules_) {
+    for (const auto &it : design->modules_) {
       RTLIL::Module *mod = it.second;
       std::string    mod_name(&mod->name.c_str()[1]);
 
