@@ -27,7 +27,7 @@ Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid,
   // load();
 }
 
-void Lgraph::load(std::shared_ptr<Hif_read> hif) {
+void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
   I(hif);
 
   clear();
@@ -105,7 +105,7 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
 
         if (lhs == "source") {
           source = rhs;
-        }else{
+        } else {
           I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);
           auto lhs_pos = lhs.rfind('.');
           I(lhs_pos != std::string::npos);
@@ -129,16 +129,16 @@ void Lgraph::load(std::shared_ptr<Hif_read> hif) {
       if (attr.lhs == "loc1") {
         auto loc = *reinterpret_cast<const int64_t *>(attr.rhs.data());
         node.set_loc1(loc);
-      }else if (attr.lhs == "loc2") {
+      } else if (attr.lhs == "loc2") {
         auto loc = *reinterpret_cast<const int64_t *>(attr.rhs.data());
         node.set_loc2(loc);
-      }else if (attr.lhs == "source") {
+      } else if (attr.lhs == "source") {
         node.set_source(attr.rhs);
-      }else if (attr.lhs == "const" || attr.lhs == "subid" || attr.lhs == "lut") {
+      } else if (attr.lhs == "const" || attr.lhs == "subid" || attr.lhs == "lut") {
         // Nothing to do
-      }else if (str_tools::ends_with(attr.lhs, ".bits")) {
+      } else if (str_tools::ends_with(attr.lhs, ".bits")) {
         // bit attribute
-      }else{
+      } else {
         Lgraph::error("unknown saved attribute {} with value {}\n", attr.lhs, attr.rhs);
         return;
       }
@@ -1602,8 +1602,9 @@ void Lgraph::save(std::string filename) {
       n.add_attr("loc2", loc2);
     }
     auto src2 = node.get_source();
-    if (src2 != source)
+    if (src2 != source) {
       n.add_attr("source", src2);
+    }
 
     if (Ntype::is_multi_driver(op)) {
       for (const auto &dpin : node.out_connected_pins()) {

@@ -53,7 +53,6 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":lgyosys",
-        "//core",
     ],
 )
 

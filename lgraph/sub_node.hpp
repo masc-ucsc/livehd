@@ -11,6 +11,14 @@
 // populate graph_pos for verilog interoperativity. E.g: alphabetical order, or
 // declaration order or ??
 
+#if 0
+#include "mimalloc.h"
+
+#define RAPIDJSON_MALLOC(sz)       malloc(sz)
+#define RAPIDJSON_FREE(ptr)        free(ptr)
+#define RAPIDJSON_REALLOC(ptr, sz) realloc(ptr, sz)
+#endif
+
 #include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
 #include "lgraph_base_core.hpp"
@@ -208,7 +216,7 @@ public:
 
     Port_ID instance_pid = name2id[io_name];
     I(io_pins[instance_pid].name == io_name);
-    //I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
+    // I(io_pins[instance_pid].graph_io_pos == graph_pos || !has_graph_pos_pin(graph_pos));
     io_pins[instance_pid].dir = dir;
 
     if (io_pins[instance_pid].graph_io_pos != Port_invalid) {

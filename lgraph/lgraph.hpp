@@ -172,7 +172,7 @@ protected:
                             std::vector<Lgraph *> &leafs);
 
   void clear_int();  // same as clear but when called by graph_library to avoid locks
-  void load(std::shared_ptr<Hif_read> hif);
+  void load(const std::shared_ptr<Hif_read> hif);
 
 public:
   Lgraph()               = delete;
