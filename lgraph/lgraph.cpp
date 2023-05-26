@@ -106,7 +106,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
         if (lhs == "source") {
           source = rhs;
         } else {
-          I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);
+          I(attr.rhs_cat == Hif_base::ID_cat::Base2_cat);  // int64_t
           auto lhs_pos = lhs.rfind('.');
           I(lhs_pos != std::string::npos);
           auto lhs_var = lhs.substr(0, lhs_pos);
@@ -117,7 +117,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
           auto dpin = Node_pin::find_driver_pin(this, lhs_var);
           I(!dpin.is_invalid());
 
-          dpin.set_bits(bits);
+          dpin.set_bits(static_cast<Bits_t>(bits));
         }
       }
       return;
@@ -305,7 +305,7 @@ bool Lgraph::has_graph_output(std::string_view io_name) const {
   return (idx != 0);
 }
 
-Node_pin Lgraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_input(std::string_view str, Port_ID pos, Bits_t bits) {
   I(str != "$");
   I(!has_graph_output(str));
 
@@ -331,7 +331,7 @@ Node_pin Lgraph::add_graph_input(std::string_view str, Port_ID pos, uint32_t bit
   return pin;
 }
 
-Node_pin Lgraph::add_graph_output(std::string_view str, Port_ID pos, uint32_t bits) {
+Node_pin Lgraph::add_graph_output(std::string_view str, Port_ID pos, Bits_t bits) {
   I(str != "%");
   I(!has_graph_input(str));
 

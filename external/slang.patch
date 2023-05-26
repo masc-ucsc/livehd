@@ -9,7 +9,7 @@ index 81752e02..33886ba0 100644
 -include(external/CMakeLists.txt)
 +#include(external/CMakeLists.txt)
 +add_subdirectory(../fmt fmt EXCLUDE_FROM_ALL)
-+add_subdirectory(../mimalloc mimalloc EXCLUDE_FROM_ALL)
++#add_subdirectory(../mimalloc mimalloc EXCLUDE_FROM_ALL)
  add_subdirectory(source)
 
  if(SLANG_INCLUDE_TOOLS)

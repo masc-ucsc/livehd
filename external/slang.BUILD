@@ -39,7 +39,6 @@ cmake(
     ],
     visibility = ["//visibility:public"],
     data = [
-        "@mimalloc//:all",
         "@fmt//:all",
     ],
     deps = [

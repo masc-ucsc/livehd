@@ -253,7 +253,7 @@ rules_proto_toolchains()
 # rules_proto_dependencies()
 # rules_proto_toolchains()
 
-# mimalloc
+# mimalloc (only seems to work in Linux)
 http_archive(
     name = "mimalloc",
     build_file = "mimalloc.BUILD",

@@ -186,7 +186,7 @@ public:
   const Hierarchy &get_htree() { return htree; }
 
   void add_edge(const Node_pin &dpin, const Node_pin &spin);
-  void add_edge(const Node_pin &dpin, const Node_pin &spin, uint32_t bits) {
+  void add_edge(const Node_pin &dpin, const Node_pin &spin, Bits_t bits) {
     add_edge(dpin, spin);
     set_bits(dpin.get_root_idx(), bits);
   }
@@ -208,8 +208,8 @@ public:
 
   void clear() override;
 
-  Node_pin add_graph_input(std::string_view str, Port_ID pos, uint32_t bits);
-  Node_pin add_graph_output(std::string_view str, Port_ID pos, uint32_t bits);
+  Node_pin add_graph_input(std::string_view str, Port_ID pos, Bits_t bits);
+  Node_pin add_graph_output(std::string_view str, Port_ID pos, Bits_t bits);
 
   Node create_node();
 
