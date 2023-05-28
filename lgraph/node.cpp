@@ -707,7 +707,6 @@ bool Node::has_color() const {
 
 // LCOV_EXCL_START
 void Node::dump() const {
-#ifndef NDEBUG
   fmt::print("nid:{} type:{} lgraph:{} ", nid, get_type_name(), current_g->get_name());
   if (has_color()) {
     fmt::print(" color:{} ", get_color());
@@ -751,7 +750,6 @@ void Node::dump() const {
                edge.driver.get_wire_name()
                );
   }
-#endif
 }
 // LCOV_EXCL_STOP
 //
