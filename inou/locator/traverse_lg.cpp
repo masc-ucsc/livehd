@@ -59,27 +59,32 @@ void Traverse_lg::travers(Eprp_var& var) {
   // p.debug_function(synth_lg);
   // return;
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);//orig-boundary only
+  fmt::print("\n make_io_maps_boundary_only - orig done.\n");
 #ifdef BASIC_DBG
   fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
   p.print_everything();
 #endif
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)
+  fmt::print("\n netpin_to_origpin_default_match done.\n");
 #ifdef BASIC_DBG
   fmt::print("2. p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)\n");
   p.print_everything();
 #endif
   p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth, false);//synth-boundary only + matching
+  fmt::print("\n make_io_maps_boundary_only - synth done.\n");
 #ifdef BASIC_DBG
   fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
   p.print_everything();
 #endif
 
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
+  fmt::print("\n do_travers - orig done.\n");
 #ifdef BASIC_DBG
   fmt::print("4. p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)\n");
   p.print_everything();
 #endif
   p.do_travers(synth_lg, map_post_synth, false);  // synth LG
+  fmt::print("\n do_travers - synth done.\n");
 #ifdef BASIC_DBG
   fmt::print("\n5. p.do_travers(synth_lg, map_post_synth, false);  // synth LG\n");
   p.print_everything();
@@ -127,6 +132,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (!is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);//has in-place resolution as well.
+    fmt::print("\n make_io_maps - synth done.\n");
 #ifdef BASIC_DBG
     fmt::print("7.0. Printing before 1st set of resolution -- synth"); print_everything();
 #endif
@@ -152,10 +158,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     }
 
     bool change_done = complete_io_match(true);//for flop only as matching flop first
+    fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
     if(crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
-      exit(2);
     } 
 #ifdef BASIC_DBG
     fmt::print("8. before resolution + matching while loop starts -- synth"); print_everything();
@@ -165,6 +171,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);//alters crit_node_set too
+      fmt::print("\n complete_io_match - synth - flop only (inside while) done.\n");
 #ifdef BASIC_DBG
 	    fmt::print("Change done = {}\n", change_done);
 #endif
@@ -175,6 +182,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
    
     if (!flop_set.empty()) {
       set_theory_match_loopLast_only();
+      fmt::print("\n set_theory_match_loopLast_only - synth done.\n");
 #ifdef BASIC_DBG
       fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
 #endif
@@ -185,7 +193,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if(crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
-      exit(2);
     } 
 
     //all flops matched and still some crit cells left to map!
@@ -197,6 +204,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #endif
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(false);//alters crit_node_set too
+      fmt::print("\n complete_io_match - synth - combinational done.\n");
 #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
       fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!"); print_everything();
@@ -210,6 +218,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     if (!crit_node_set.empty()) { //exact combinational matching could not resolve all crit nodes
       //surrounding cell loc-similarity matching
       change_done = surrounding_cell_match();
+      fmt::print("\n surrounding_cell_match - synth done.\n");
 #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
 #endif
@@ -222,6 +231,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       bool unmatched_left;
       do {
         unmatched_left = surrounding_cell_match_final();
+        fmt::print("\n surrounding_cell_match_final - synth done.\n");
         fmt::print("unmatched left = {}\n", unmatched_left);
         if(unmatched_left) {
           resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
@@ -233,6 +243,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #if 1
     if(!crit_node_set.empty()) {
       set_theory_match_final();
+      fmt::print("\n set_theory_match_final - synth done.\n");
     }
 #endif
 
@@ -245,12 +256,13 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #endif
     report_critical_matches_with_color();
     I(crit_node_set.empty(), "crit_node_set should have been empty by now!");
-    exit(2);          //FIXME: for DBG; remove.
+    return;          //FIXME: for DBG; remove.
   }
   
   if (is_orig_lg) {
 
     make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);
+    fmt::print("\n make_io_maps - orig done.\n");
 
 #ifdef BASIC_DBG
     fmt::print("\n inp_map_of_sets_orig.size() =  {}\nout_map_of_sets_orig:\n", inp_map_of_sets_orig.size());
@@ -1051,7 +1063,6 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets &inp_map_of_sets, map_of_
     /*if nothing left in crit_node_set then return with result*/
     if(crit_node_set.empty()) {
       report_critical_matches_with_color();
-      exit(2);
     } 
   }
 }
@@ -1249,7 +1260,6 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets &inp_map_of_sets,
     /*if nothing left in crit_node_set then return with result*/
     if(crit_node_set.empty()) {
       report_critical_matches_with_color();
-      exit(2);
     } 
   }
 }
@@ -1910,6 +1920,7 @@ void Traverse_lg::report_critical_matches_with_color(){
 
   fmt::print("\n");
   #endif
+  exit(2);
 }
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
