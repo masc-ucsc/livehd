@@ -41,7 +41,7 @@ grep -E "pipelined/cpu.scala|pipelined/stage-register.scala|components/control.s
 #:now we have all relevant chisel assignments and comparisons
 rm all_grepped.log
 
-#file: default_matching_map.log : the matching map from default_match in PipelinedCPU_23mar_critOnlyOptimization.log
+#file: default_matching_map.log : the matching map from default_match in PipelinedCPU_23mar_critOnlyOptimization.log -- update: PipelinedCPU_18may.log
 
 cd ../
 python3 ./pass/locator/random_line_selector.py > eval_files_tmp/random_line_selector.log
@@ -110,5 +110,5 @@ next_steps() {
 }
 
 
-#random_line_selector_for_pipelinedCPU
-next_steps
+random_line_selector_for_pipelinedCPU
+#next_steps
