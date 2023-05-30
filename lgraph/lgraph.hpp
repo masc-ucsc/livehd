@@ -33,7 +33,7 @@ protected:
 
   explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source);
 
-  Index_id get_root_idx(Index_id idx) const {
+  [[nodiscard]] Index_id get_root_idx(Index_id idx) const {
     // node_internal.ref_lock();
     const auto *ref = &node_internal[idx];
     if (ref->is_root()) {
@@ -46,7 +46,7 @@ protected:
     return ret;
   }
 
-  Index_id get_node_nid(Index_id idx) const {
+  [[nodiscard]] Index_id get_node_nid(Index_id idx) const {
     // node_internal.ref_lock();
 
     while (!node_internal[idx].is_master_root()) {
@@ -57,11 +57,11 @@ protected:
     return idx;
   }
 
-  Node_pin_iterator out_connected_pins(const Node &node) const;
-  Node_pin_iterator inp_connected_pins(const Node &node) const;
+  [[nodiscard]] Node_pin_iterator out_connected_pins(const Node &node) const;
+  [[nodiscard]] Node_pin_iterator inp_connected_pins(const Node &node) const;
 
-  Node_pin_iterator inp_drivers(const Node &node) const;
-  Node_pin_iterator out_sinks(const Node &node) const;
+  [[nodiscard]] Node_pin_iterator inp_drivers(const Node &node) const;
+  Node_pin_iterator               out_sinks(const Node &node) const;
 
   XEdge_iterator out_edges(const Node &node) const;
   XEdge_iterator inp_edges(const Node &node) const;

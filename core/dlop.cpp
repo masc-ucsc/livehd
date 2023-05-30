@@ -237,6 +237,22 @@ spool_ptr<Dlop> Dlop::from_pyrope(std::string_view orig_txt) {
   return dlop;
 }
 
+#if 0
+spool_ptr<Dlop> Dlop::and_op(spool_ptr<Dlop> other) {
+
+  res.base = self.base & other.base;
+  res.extra = (self.extra|other.extra) & res.base;
+
+}
+
+spool_ptr<Dlop> Dlop::or_op(spool_ptr<Dlop> other) {
+
+  res.base = self.base | other.base;
+  res.extra = (self.extra|other.extra) & (~res.base);
+
+}
+#endif
+
 spool_ptr<Dlop> Dlop::add_op(spool_ptr<Dlop> other) {
   // TODO: deal with extra
   auto dlop = spool_ptr<Dlop>::make(Type::Integer, size);  // TODO: it can be size+1 (get_bits)

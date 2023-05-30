@@ -163,7 +163,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
         }
 
         if (dpin.is_invalid()) {
-          pending.emplace_back(std::make_pair(node.setup_sink_pin(io.lhs), io.rhs));
+          pending.emplace_back(node.setup_sink_pin(io.lhs), io.rhs);
         } else {
           node.setup_sink_pin(io.lhs).connect_driver(dpin);
         }
@@ -175,7 +175,7 @@ void Lgraph::load(const std::shared_ptr<Hif_read> hif) {
         for (const auto &attr2 : stmt.attr) {
           if (attr2.lhs == lhs_bits) {
             auto bits = *reinterpret_cast<const int64_t *>(attr2.rhs.data());
-            dpin.set_bits(bits);
+            dpin.set_bits(static_cast<Bits_t>(bits));
             break;
           }
         }
@@ -353,7 +353,7 @@ Node_pin Lgraph::add_graph_output(std::string_view str, Port_ID pos, Bits_t bits
   dpin.set_name(str);
   dpin.set_bits(bits);
 
-  return Node_pin(this, this, Hierarchy::hierarchical_root(), idx, inst_pid, true);
+  return {this, this, Hierarchy::hierarchical_root(), idx, inst_pid, true};
 }
 
 Node_pin_iterator Lgraph::out_connected_pins(const Node &node) const {
@@ -1357,7 +1357,7 @@ void Lgraph::del_edge(const Node_pin &dpin, const Node_pin &spin) {
 
 Node Lgraph::create_node() {
   Index_id nid = create_node_int();
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return {this, Hierarchy::hierarchical_root(), nid};
 }
 
 Node Lgraph::create_node(const Node &old_node) {
@@ -1397,7 +1397,7 @@ Node Lgraph::create_node(const Ntype_op op) {
   I(op != Ntype_op::IO);   // Special case, must use add input/output API
   I(op != Ntype_op::Sub);  // Do not build by steps. call create_node_sub
 
-  return Node(this, Hierarchy::hierarchical_root(), nid);
+  return {this, Hierarchy::hierarchical_root(), nid};
 }
 
 Node Lgraph::create_node(const Ntype_op op, Bits_t bits) {

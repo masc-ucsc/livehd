@@ -9,7 +9,39 @@
 #include <cstdint>
 #include <iostream>
 
-// Base-inline lop use by dlop and slop
+// lop: Logic Operation Library
+//
+// blop: Base Logic Operation
+// dlop: Dynamic Logic Operation
+// slop: Static Logic Operation
+//
+// slop needs of an external pass to "BOUND" the maximum number of bits needed to perform the operation. Hence, it does not need
+// memory allocation and it is much faster. As a result, the goal of slop is for simulation.
+//
+// dlop adjusts at run-time the number of bits needed. Ideal for emulation inside the compiler to avoid prepasses with max/min
+// sizing.
+//
+// Both dlop/slop use the blop (base) class for all the operations. They are fairly close, the main difference is the memory
+// allocation.
+//
+// Both dlop/slop can handle unknowns (?). The semantics are NOT compatible with Verilog, but they have more accuracy.
+//
+// The "unknowns" (extra field) are a runtime (dlop) or compile (slop) option. If disabled, the unknowns ('?') are randomly
+// translated to zero or one when importing to lop.
+//
+// When unknowns are supported, each number is encoded with a "base" and an "extra" blop. The extra is true for each bit with
+// unknowns. The corresponding bit in the "base" is set to 1. Then, assert(base == (base|extra)) should hold always.
+//
+// The lop is anways SIGNED. All the operations are always signed and behave like having unlimited accuracy. This means that for
+// numbers that can be encoding in 13 bits, we can use 32 bit signed, and we do not need to drop bits. The logical optimization is
+// to have 8 bit, 64bit, and multiples of 64bits for all the numbers. (32bit is reasonable)
+//
+// It may make sense to move the lop to a separate repo so that other projects could use the library.
+//
+// jop is the javascript version of this project (should be semantically equivalent in operations and results)
+//
+// For development and benchmarking, most of the operations (pyrope strings) should be equivalent to Lconst, but the idea is to
+// replace lconst for the new lop library.
 
 class Blop {
 protected:
