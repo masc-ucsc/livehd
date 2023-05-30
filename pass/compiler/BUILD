@@ -206,9 +206,9 @@ cc_library(
     "ForwardingAgeLogic",
     "PMPChecker_1",
     "HellaCacheArbiter",
-    "NullLocalBranchPredictorBank",                                                                                                                                                        
+    "NullLocalBranchPredictorBank",
     "RegisterFile",
-    "StageReg", 
+    "StageReg",
     "HazardUnitBP",
     "Adder",
     "AlwaysNotTakenPredictor",
@@ -232,7 +232,6 @@ sh_test(
     ],
 )
 
-
 # note: patterns with tag of "firrtl_compile_compiles" are either compiles or long LEC time
 [sh_test(
     name = "firrtl_compile_compiles-%s" % t,
@@ -250,22 +249,22 @@ sh_test(
         "//inou/yosys:scripts",
     ],
 ) for t in [
-    "FetchBuffer",                   # LEC-? (long)
-    "BranchDecode",                  # LEC-x (1st priority)
-    "BoomRAS",                       # LEC-x (1st priority, no bits set on some mux!?)
-    "RVCExpander_2",                 # LEC-o
-    "BoomProbeUnit",                 # LEC-? (long)
-    "BoomIOMSHR",                    # LEC-? (long)
-    "FMADecoder_1",                  # LEC-o
-    "Mul54",                         # LEC-?
-    "PipelinedMultiplier",           # LEC-o
-    "RecFNToIN",                     # LEC-o
-    "PredRenameStage",               # LEC-o
-    "RenameMapTable",                # LEC-x
-    "RenameFreeList",                # LEC-x
-    "IssueUnitCollapsing",           # LEC-?
-    "NBDTLB",                        # LEC-x (all leave pass!?)
-    "NullPrefetcher",                # LEC-x (FIXME: previous passing, talk to Jose on is_fir_invalid constant string)                                                                                                                                                               
+    "FetchBuffer",  # LEC-? (long)
+    "BranchDecode",  # LEC-x (1st priority)
+    "BoomRAS",  # LEC-x (1st priority, no bits set on some mux!?)
+    "RVCExpander_2",  # LEC-o
+    "BoomProbeUnit",  # LEC-? (long)
+    "BoomIOMSHR",  # LEC-? (long)
+    "FMADecoder_1",  # LEC-o
+    "Mul54",  # LEC-?
+    "PipelinedMultiplier",  # LEC-o
+    "RecFNToIN",  # LEC-o
+    "PredRenameStage",  # LEC-o
+    "RenameMapTable",  # LEC-x
+    "RenameFreeList",  # LEC-x
+    "IssueUnitCollapsing",  # LEC-?
+    "NBDTLB",  # LEC-x (all leave pass!?)
+    "NullPrefetcher",  # LEC-x (FIXME: previous passing, talk to Jose on is_fir_invalid constant string)
     "BoomDuplicatedDataArray",
     "FPUFMAPipe_1",
     "MulAddRecFNPipe_1",
@@ -289,10 +288,10 @@ sh_test(
     "PipelinedMulUnit",
     "RecFNToRecFN",
     "RegisterRead",
-    "ALUExeUnit",                    # ?LEC
-    "IntToFP",                       # !LEC
-    "IntToFPUnit",                   #  LEC
-    "FPToFP",                        #  LEC
+    "ALUExeUnit",  # ?LEC
+    "IntToFP",  # !LEC
+    "IntToFPUnit",  #  LEC
+    "FPToFP",  #  LEC
     "Smem",
     "SmemStruct",
     "MaskedSmem",
@@ -301,19 +300,19 @@ sh_test(
     "ALU",
     "DCombinMemPort",
     "ICombinMemPort",
-    "DualPortedCombinMemory",       # LEC-o: memory can't and don't need LEC
+    "DualPortedCombinMemory",  # LEC-o: memory can't and don't need LEC
 ]]
 
 # FIXME:
 # issue#1: memory
 # issue#2: bitwidth mismatch on memory output *****
 #          assertion it->second.get_sbits() <= addr_sbits *****
-# "Rob" 
+# "Rob"
 # "FPUExeUnit"
 
 # issue#4: non-of the TupAdds are solved after cprop because if
 #          tuple_issues flag remains. And the reason is that the
-#          n150_mux tries to use TGs to get result from Mem 
+#          n150_mux tries to use TGs to get result from Mem
 # "MemBranchSimplified"
 # "BranchKillableQueue_3"
 # "BranchKillableQueue_4"
@@ -323,71 +322,69 @@ sh_test(
 
 # Intro
 # Related
-# LNAST + eval  
+# LNAST + eval
 # LGrph + eval
 # Para + eval
 # Conclusion
 
-
 # BoomTile
-# - D1: BoomNonBlockingDCache ----------------------------------------- (x) // wait for mem                                                                                                                                                                       
-# - D1: IntSyncSyncCrossingSink --------------------------------------- (o)                                                                 
-# - D1: IntSyncAsyncCrossingSink -------------------------------------- (o)                                                                 
-#     - D2: SynchronizerShiftReg_w1_d3                                                           
+# - D1: BoomNonBlockingDCache ----------------------------------------- (x) // wait for mem
+# - D1: IntSyncSyncCrossingSink --------------------------------------- (o)
+# - D1: IntSyncAsyncCrossingSink -------------------------------------- (o)
+#     - D2: SynchronizerShiftReg_w1_d3
 #         - D3: NonSyncResetSynchronizerPrimitiveShiftReg_d3
-# - D1: BundleBroadcast_2 --------------------------------------------- (o)                                          
-# - D1: LSU                                
-#     - D2: ForwardingAgeLogic ---------------------------------------- (o)                                                                   
-#     - D2: NBDTLB ---------------------------------------------------- (o)                                                                               
-#         - D3: package_Anon_43 --------------------------------------- (o)                                                                  
+# - D1: BundleBroadcast_2 --------------------------------------------- (o)
+# - D1: LSU
+#     - D2: ForwardingAgeLogic ---------------------------------------- (o)
+#     - D2: NBDTLB ---------------------------------------------------- (o)
+#         - D3: package_Anon_43 --------------------------------------- (o)
 #         - D3: PMPChecker_1 ------------------------------------------ (o)
 # - D1: HellaCacheArbiter --------------------------------------------- (o)
 
-# - D1: TLBuffer_11                                                                                                                                                                                 
-#     - D2: Queue_37 -------------------------------------------------- (x) // wait for mem                                                                                                                                                                                
-#     - D2: TLMonitor_59                                                                                                                                                                            
-#         - D3: plusarg_reader_59 (*EXTERNAL) ------------------------- (x) // wait for external                                                                                                                                                          
-# - D1: TLXbar_8                         
-#     - D2: TLMonitor_57                 
+# - D1: TLBuffer_11
+#     - D2: Queue_37 -------------------------------------------------- (x) // wait for mem
+#     - D2: TLMonitor_59
+#         - D3: plusarg_reader_59 (*EXTERNAL) ------------------------- (x) // wait for external
+# - D1: TLXbar_8
+#     - D2: TLMonitor_57
 #         - D3: plusarg_reader_57 (*EXTERNAL) ------------------------- (x) // wait for external
-# - D1: BoomNonBlockingDCache                                                                                                                                                                       
-#     - D2: BoomMSHRFile                                                                                                                                                                            
-#         - D3: NullPrefetcher ---------------------------------------- (o)                                                                                                                                                                      
-#         - D3: Arbiter ----------------------------------------------- (o)                                                                                                                                                                            
-#         - D3: BoomIOMSHR -------------------------------------------- (o)                                                                                                                                                                          
-#         - D3: BranchKillableQueue_2 --------------------------------- (x) // wait for mem                                                                                                                                                               
-#         - D3: BoomMSHR ---------------------------------------------- (x) // wait for mem                                                                                                                                                                           
-#             - D4: BranchKillableQueue ------------------------------- (x) // wait for mem                                                                                                                                                           
-#     - D2: AMOALU ---------------------------------------------------- (o)                                                                                                                                                                                  
+# - D1: BoomNonBlockingDCache
+#     - D2: BoomMSHRFile
+#         - D3: NullPrefetcher ---------------------------------------- (o)
+#         - D3: Arbiter ----------------------------------------------- (o)
+#         - D3: BoomIOMSHR -------------------------------------------- (o)
+#         - D3: BranchKillableQueue_2 --------------------------------- (x) // wait for mem
+#         - D3: BoomMSHR ---------------------------------------------- (x) // wait for mem
+#             - D4: BranchKillableQueue ------------------------------- (x) // wait for mem
+#     - D2: AMOALU ---------------------------------------------------- (o)
 #     - D2: MaxPeriodFibonacciLFSR_1 ---------------------------------- (o)
 #     - D2: BoomWritebackUnit ----------------------------------------- (i) // TODO
 #     - D2: BoomDuplicatedDataArray ----------------------------------- (i) // TODO
-#     - D2: BoomProbeUnit --------------------------------------------- (o)   
+#     - D2: BoomProbeUnit --------------------------------------------- (o)
 #     - D2: L1MetadataArray ------------------------------------------- (x) // wait for mem
-# - D1: BoomFrontend                                                                                                                                                                                
-#     - D2: RVCExpander_2 --------------------------------------------- (o)                                                                                                                                                                           
-#     - D2: Queue_30 -------------------------------------------------- (x) // wait for mem                                                                                                                                                                                   
-#     - D2: BranchPredictor                                                                                                                                                                         
-#         - D3: ComposedBranchPredictorBank                                                                                                                                                         
-#             - D4: TageBranchPredictorBank --------------------------- (x) // wait for mem: some inputs of __fir_cat is not ready                                                                                                                                                         
+# - D1: BoomFrontend
+#     - D2: RVCExpander_2 --------------------------------------------- (o)
+#     - D2: Queue_30 -------------------------------------------------- (x) // wait for mem
+#     - D2: BranchPredictor
+#         - D3: ComposedBranchPredictorBank
+#             - D4: TageBranchPredictorBank --------------------------- (x) // wait for mem: some inputs of __fir_cat is not ready
 #                 - D5: TageTable ------------------------------------- (x) // wait for mem and ""!!!unknown IO bits"
 #             - D4: BTBBranchPredictorBank ---------------------------- (i) // TODO: fir2ln assignment issue, solvable
 #             - D4: BIMBranchPredictorBank ---------------------------- (i) // TODO: fir2ln assignment issue, solvable
-#             - D4: FAMicroBTBBranchPredictorBank --------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                 
-#             - D4: LoopBranchPredictorBank --------------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??                                                                                                                                                          
-#                 - D5: LoopBranchPredictorColumn --------------------- (o) // no-bits register!!!?                                                                                                                                                 
-#         - D3: NullLocalBranchPredictorBank -------------------------- (o)                                                                                                                                                        
-#     - D2: TLB                                                                                                                                                                                     
-#         - D3: package_Anon_1 ---------------------------------------- (o) 
+#             - D4: FAMicroBTBBranchPredictorBank --------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??
+#             - D4: LoopBranchPredictorBank --------------------------- (i) // TODO: ***** hard one ***** TA sink-pin multiple-drivers??
+#                 - D5: LoopBranchPredictorColumn --------------------- (o) // no-bits register!!!?
+#         - D3: NullLocalBranchPredictorBank -------------------------- (o)
+#     - D2: TLB
+#         - D3: package_Anon_1 ---------------------------------------- (o)
 #         - D3: PMPChecker -------------------------------------------- (o)
 #     - D2: BreakpointUnit_3 ------------------------------------------ (o)
 #     - D2: FetchBuffer
 #     - D2: ICache -----------------------------------------------------(x) // wait for mem: some inputs of __fir_eq is not ready
 #         - D3: MaxPeriodFibonacciLFSR_2 ------------------------------ (o)
-#     - D2: BoomRAS --------------------------------------------------- (o) 
+#     - D2: BoomRAS --------------------------------------------------- (o)
 #     - D2: FetchTargetQueue ------------------------------------------ (x) // wait for mem
-#     - D2: BranchDecode ---------------------------------------------- (o) 
-
+#     - D2: BranchDecode ---------------------------------------------- (o)
 
 # - D0: DinoPipelinedBP
 #     - D1: PipelinedCPUBP
@@ -416,14 +413,13 @@ sh_test(
 #         - D2: StageReg_3 -------------------------------------------- (o) # LEC-o
 #         - D2: StageReg_4 -------------------------------------------- (o) # LEC-o
 #         - D2: StageReg_5 -------------------------------------------- (o) # LEC-o
-#         - D2: StageReg_6 -------------------------------------------- (o) # LEC-o 
+#         - D2: StageReg_6 -------------------------------------------- (o) # LEC-o
 #     - D1: DualPortedCombinMemory ------------------------------------ (o) # LEC-o: memory don't need LEC
-#     - D1: DCombinMemPort -------------------------------------------- (o) # LEC-x: discuss with Jose 
-#                                                                             The golden verilog is apparently wrong, "io_bus_request_bits_address = io_pipeline_address" without 
+#     - D1: DCombinMemPort -------------------------------------------- (o) # LEC-x: discuss with Jose
+#                                                                             The golden verilog is apparently wrong, "io_bus_request_bits_address = io_pipeline_address" without
 #                                                                             any condition in firrtl code??
-#                                                                             follow-up: still !LEC from the other places, the mux doesn't get simplified away in cprop.cpp:scalar_mux(). 
+#                                                                             follow-up: still !LEC from the other places, the mux doesn't get simplified away in cprop.cpp:scalar_mux().
 #     - D1: ICombinMemPort -------------------------------------------- (o) # LEC-x: same as above
-
 
 # Thesis Discussion:
 # (1) LGraph mmap?
@@ -432,8 +428,3 @@ sh_test(
 # TODO:
 # (1) termination flag for firbits, firmap, cprop, BW   ---> 20% ~ 30% improvement for DINO? (maybe)
 # (2) launch new thread for protobuffer object clean up ---> 5% improvement?
-
-
-
-
-

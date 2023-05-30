@@ -15,7 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//lnast",
-        "//upass/core:upass"
+        "//upass/core:upass",
     ],
     alwayslink = True,
 )

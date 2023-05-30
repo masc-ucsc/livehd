@@ -15,11 +15,11 @@ cc_library(
     deps = [
         "//lnast",
         "//pass/common:pass",
+        "//upass/assert:upass_assert",
+        "//upass/constprop:upass_constprop",
         "//upass/core:upass",
         "//upass/runner:upass_runner",
         "//upass/verifier:upass_verifier",
-        "//upass/constprop:upass_constprop",
-        "//upass/assert:upass_assert",
     ],
     alwayslink = True,  # Needed to have constructor called
 )

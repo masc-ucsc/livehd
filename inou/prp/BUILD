@@ -14,9 +14,9 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//lnast",
         "//pass/common:pass",
-        "//core:core",
         "@tree-sitter-pyrope//:tree-sitter-pyrope",
     ],
     alwayslink = True,
@@ -47,5 +47,8 @@ cc_binary(
             "//main:lgshell",
         ],
     )
-    for prp_file in glob(["tests/pyrope/*.prp", "tests/comptime/*.prp"])
+    for prp_file in glob([
+        "tests/pyrope/*.prp",
+        "tests/comptime/*.prp",
+    ])
 ]

@@ -13,7 +13,7 @@ cc_binary(
     srcs = ["main.cpp"],
     copts = COPTS,
     malloc = select({
-#        ":use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
+        #        ":use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
         "//conditions:default": "@bazel_tools//tools/cpp:malloc",
     }),
     visibility = ["//visibility:public"],

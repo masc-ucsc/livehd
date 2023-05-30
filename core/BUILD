@@ -12,7 +12,10 @@ cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp","graph_core.*"],
+        exclude = [
+            "*test*.cpp",
+            "graph_core.*",
+        ],
     ),
     hdrs = glob(["*.hpp"]),
     copts = COPTS,
@@ -27,18 +30,18 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@boost//:multiprecision",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
         "@com_google_absl//absl/container:btree",
-        "@com_google_absl//absl/container:node_hash_map",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
         "@fmt",
         "@iassert",
     ] + select({
         ":use_profiling": [
-            "@mimalloc",     # This only works in Linux, comment for yosys2
             "@com_google_perfetto//:perfetto",
+            "@mimalloc",  # This only works in Linux, comment for yosys2
         ],
         "//conditions:default": [],
     }),
@@ -90,6 +93,7 @@ cc_test(
         "@com_google_benchmark//:benchmark",
     ],
 )
+
 cc_test(
     name = "small_set_bench",
     srcs = [

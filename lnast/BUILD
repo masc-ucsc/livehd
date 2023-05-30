@@ -9,7 +9,10 @@ cc_library(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
     ),
-    hdrs = glob(["*.hpp", "*.def"]),
+    hdrs = glob([
+        "*.hpp",
+        "*.def",
+    ]),
     copts = COPTS,
     includes = ["."],
     linkopts = ["-lpthread"],
@@ -17,8 +20,8 @@ cc_library(
     deps = [
         "//core",
         "//parser",
-        "@hif//hif",
         "@com_google_absl//absl/strings",
+        "@hif//hif",
     ],
 )
 
@@ -121,21 +124,21 @@ cc_test(
 
 cc_test(
     name = "parser_writer_test",
+    timeout = "short",  # to avoid infinite loops
     srcs = ["tests/parser_writer_test.cpp"],
     data = glob(["tests/ln/*.ln"]),
     deps = [
         ":lnast",
         "@com_google_googletest//:gtest_main",
     ],
-    timeout="short", # to avoid infinite loops
 )
 
 cc_binary(
     name = "bench",
     srcs = ["tests/bench.cpp"],
     deps = [
-      ":lnast",
-      "@hif//hif",
-      "@com_google_benchmark//:benchmark",
+        ":lnast",
+        "@com_google_benchmark//:benchmark",
+        "@hif//hif",
     ],
 )

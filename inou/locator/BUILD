@@ -18,4 +18,3 @@ cc_library(
     ],
     alwayslink = True,
 )
-

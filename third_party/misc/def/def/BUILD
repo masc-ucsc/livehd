@@ -8,8 +8,8 @@ licenses(["notice"])  # Apache License 2.0
 genyacc(
     name = "def_y",
     src = "def.yy",
-    prefix = "defyy",
     header_out = "def.tab.hpp",
+    prefix = "defyy",
     source_out = "def.tab.cpp",
 )
 

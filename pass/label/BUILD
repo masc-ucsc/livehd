@@ -20,7 +20,6 @@ cc_library(
     alwayslink = True,  # Needed to have constructor called
 )
 
-
 cc_test(
     name = "acyclic_test",
     srcs = ["acyclic_test.cpp"],
@@ -46,8 +45,8 @@ cc_test(
     srcs = ["mincut_test.cpp"],
     deps = [
         ":pass_label",
+        "//third_party/viecut",
         "@com_google_googletest//:gtest_main",
         "@fmt",
-        "//third_party/viecut",
     ],
 )

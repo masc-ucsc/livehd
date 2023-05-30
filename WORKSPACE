@@ -16,7 +16,6 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 
 rules_foreign_cc_dependencies()
 
-
 # bazel_rules_hdl
 http_archive(
     name = "rules_hdl",
@@ -82,7 +81,7 @@ http_archive(
     sha256 = "eea4b20751fa6394647330518c9b0c46c8248fea984c91a8a8bfe01a8a04567e",
     strip_prefix = "slang-458be618a58aa1896398eccc1ddf75b880afaab6",
     urls = [
-      "https://github.com/MikePopoloski/slang/archive/458be618a58aa1896398eccc1ddf75b880afaab6.zip"
+        "https://github.com/MikePopoloski/slang/archive/458be618a58aa1896398eccc1ddf75b880afaab6.zip",
     ],
 )
 
@@ -101,7 +100,7 @@ http_archive(
     sha256 = "5f04d75f2b2b9424131e4b769c1e64f7a82bfcf930c79a87c118d251d44ef6e2",
     strip_prefix = "tree-sitter-0.20.8",
     urls = [
-      "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.20.8.zip"
+        "https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.20.8.zip",
     ],
 )
 
@@ -112,8 +111,8 @@ http_archive(
     sha256 = "95651d7d1fcf2e5c3163c3d37df6d6b3e9e5027299e6bd050d157322ceda9ac9",
     strip_prefix = "json-3.11.2",
     urls = [
-      "https://github.com/nlohmann/json/archive/refs/tags/v3.11.2.zip"
-    ]
+        "https://github.com/nlohmann/json/archive/refs/tags/v3.11.2.zip",
+    ],
 )
 
 # iassert
@@ -144,7 +143,7 @@ http_archive(
     sha256 = "9a3298bf8b7eebb7ab1fa19ae6a83fda194b3e8d2dd409db0bb8fbc7e73cff1e",
     strip_prefix = "cryptominisat-5.11.4",
     urls = [
-      "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.4.zip",
+        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.4.zip",
     ],
 )
 
@@ -193,7 +192,7 @@ http_archive(
     sha256 = "1b42e2638080155d1aaa4b26012818a855a448afc718f79cb2b0fe6e610b9de2",
     strip_prefix = "verilator-5.010",
     urls = [
-      "https://github.com/verilator/verilator/archive/refs/tags/v5.010.zip"
+        "https://github.com/verilator/verilator/archive/refs/tags/v5.010.zip",
     ],
 )
 
@@ -212,8 +211,8 @@ http_archive(
     name = "opentimer",
     build_file = "opentimer.BUILD",
     patches = ["//external:opentimer.patch"],
-    strip_prefix = "OpenTimer-5a6af16c5443e2eedc697e86d3fb88e2b487eaa3",
     sha256 = "cf828f8c43422869124ebe601966a2c2763b7f1d7363dca1b6aeddc84ae91ef3",
+    strip_prefix = "OpenTimer-5a6af16c5443e2eedc697e86d3fb88e2b487eaa3",
     urls = [
         "https://github.com/masc-ucsc/OpenTimer/archive/5a6af16c5443e2eedc697e86d3fb88e2b487eaa3.zip",
     ],
@@ -239,16 +238,19 @@ http_archive(
         "https://github.com/bazelbuild/rules_proto/archive/refs/tags/5.3.0-21.7.tar.gz",
     ],
 )
+
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+
 rules_proto_dependencies()
+
 rules_proto_toolchains()
 # http_archive(
-    # name = "rules_proto",
-    # sha256 = "e017528fd1c91c5a33f15493e3a398181a9e821a804eb7ff5acdd1d2d6c2b18d",
-    # strip_prefix = "rules_proto-4.0.0-3.20.0",
-    # urls = [
-    #     "https://github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0-3.20.0.tar.gz",
-    # ],
+# name = "rules_proto",
+# sha256 = "e017528fd1c91c5a33f15493e3a398181a9e821a804eb7ff5acdd1d2d6c2b18d",
+# strip_prefix = "rules_proto-4.0.0-3.20.0",
+# urls = [
+#     "https://github.com/bazelbuild/rules_proto/archive/refs/tags/4.0.0-3.20.0.tar.gz",
+# ],
 # )
 # load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
 # rules_proto_dependencies()
@@ -261,7 +263,7 @@ http_archive(
     sha256 = "86281c918921c1007945a8a31e5ad6ae9af77e510abfec20d000dd05d15123c7",
     strip_prefix = "mimalloc-2.1.2",
     urls = [
-      "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.zip",
+        "https://github.com/microsoft/mimalloc/archive/refs/tags/v2.1.2.zip",
     ],
 )
 
@@ -277,10 +279,10 @@ http_archive(
 # Boost
 http_archive(
     name = "com_github_nelhage_rules_boost",
-
-    url = "https://github.com/nelhage/rules_boost/archive/96e9b631f104b43a53c21c87b01ac538ad6f3b48.tar.gz",
     strip_prefix = "rules_boost-96e9b631f104b43a53c21c87b01ac538ad6f3b48",
+    url = "https://github.com/nelhage/rules_boost/archive/96e9b631f104b43a53c21c87b01ac538ad6f3b48.tar.gz",
 )
-load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
-boost_deps()
 
+load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
+
+boost_deps()
