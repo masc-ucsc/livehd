@@ -5,37 +5,41 @@ on:
   pull_request:
 
 jobs:
-  build:
-    runs-on: ubuntu-20.04
-
+  test-opt:
+    name: Build everything
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Mount Bazel cache
+      - name: Install bazelisk
+        uses: bazelbuild/setup-bazelisk@v2
+
+      - name: Mount bazel cache
         uses: actions/cache@v3
         with:
-          path: /home/runner/.cache/bazel
-          key: bazel-gcc-${{ github.sha }}
-          restore-keys: bazel-gcc
+          path: "~/.cache/bazel"
+          key: bazel-gcc
 
-      - run: sudo apt install -y build-essential
-      - run: sudo wget https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 -O /usr/local/bin/bazel
-      - run: sudo chmod +x /usr/local/bin/bazel
+      #      - run: sudo apt install -y build-essential
+      - run: bazel test -c opt -s //...
 
-      - run: bazel build -s //...
-
-  test-and-coverage:
-    runs-on: ubuntu-20.04
+  coverage:
+    name: Gather coverage metrics
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Mount Bazel cache
+      - name: Install bazelisk
+        uses: bazelbuild/setup-bazelisk@v2
+
+      - name: Mount bazel cache
         uses: actions/cache@v3
         with:
-          path: /home/runner/.cache/bazel
-          key: bazel-gcc-instrumented-${{ github.sha }}
-          restore-keys: bazel-gcc-instrumented
+          path: "~/.cache/bazel"
+          key: bazel-cgcc
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
@@ -46,38 +50,22 @@ jobs:
         with:
           directory: ./bazel-out/_coverage
 
-  clang:
-    runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        action: ["build", "test"]
-
+  clang-dbg:
+    name: clang tests everything
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Configure LLVM
-        id: configure_llvm
-        run: |
-          sudo apt-get autoremove -y libgcc-11-dev gcc-11 || true
-          sudo ln -sf /usr/bin/clang-$LLVM_VERSION /usr/bin/clang
-          sudo ln -sf /usr/bin/ld.lld-$LLVM_VERSION /usr/bin/ld.lld
-          sudo ln -sf /usr/bin/llvm-ar-$LLVM_VERSION /usr/bin/llvm-ar
-          sudo ln -sf /usr/bin/llvm-nm-$LLVM_VERSION /usr/bin/llvm-nm
-          sudo ln -sf /usr/bin/llvm-objcopy-$LLVM_VERSION /usr/bin/llvm-objcopy
-          sudo ln -sf /usr/bin/llvm-objdump-$LLVM_VERSION /usr/bin/llvm-objdump
-          sudo ln -sf /usr/bin/llvm-strip-$LLVM_VERSION /usr/bin/llvm-strip
-          sudo ln -sf /usr/bin/llvm-config-$LLVM_VERSION /usr/bin/llvm-config
-          echo ::set-output name=clang_hash::`find /usr/lib/clang/$LLVM_VERSION/include/ -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d " " -f 1`
-          echo ::set-output name=llvm_hash::`find /usr/lib/llvm-$LLVM_VERSION/include/ -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d " " -f 1`
-        env:
-          LLVM_VERSION: 12
+      - name: Install bazelisk
+        uses: bazelbuild/setup-bazelisk@v2
 
-      - name: Mount Bazel cache
+      - name: Mount bazel cache
         uses: actions/cache@v3
         with:
-          path: /home/runner/.cache/bazel
-          key: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}-${{ github.sha }}
-          restore-keys: bazel-clang-${{ steps.configure_llvm.outputs.clang_hash }}-${{ steps.configure_llvm.outputs.llvm_hash }}
+          path: "~/.cache/bazel"
+          key: bazel-clang
 
-      - run: bazel ${{ matrix.action }} --config=clang --test_tag_filters=-fixme --test_output=all -s //...
+      #      - run: sudo apt install -y build-essential
+      - run: CXX=clang++ CC=clang bazel test -c dbg //...
+
