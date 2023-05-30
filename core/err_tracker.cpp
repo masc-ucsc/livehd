@@ -16,7 +16,9 @@ void err_tracker::logger(std::string_view text) {
     }
   }
 
-  write(logger_fd, text.data(), text.size());
-  write(logger_fd,"\n----\n", 6*sizeof(char));
+  auto sz1 = write(logger_fd, text.data(), text.size());
+  auto sz2 = write(logger_fd,"\n----\n", 6*sizeof(char));
+  I(sz1);
+  I(sz2);
 }
 

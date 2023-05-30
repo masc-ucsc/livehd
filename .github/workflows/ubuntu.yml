@@ -22,7 +22,7 @@ jobs:
           key: bazel-gcc
 
       #      - run: sudo apt install -y build-essential
-      - run: bazel test -c opt -s //...
+      - run: bazel test -c dbg -s //...
 
   coverage:
     name: Gather coverage metrics
@@ -67,5 +67,5 @@ jobs:
           key: bazel-clang
 
       #      - run: sudo apt install -y build-essential
-      - run: CXX=clang++ CC=clang bazel test -c dbg //...
+      - run: CXX=clang++ CC=clang bazel test -c opt //...
 
