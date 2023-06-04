@@ -20,7 +20,7 @@
     "camelcase": "^7.0.0",
     "case-sensitive-paths-webpack-plugin": "2.4.0",
     "css-loader": "6.7.4",
-    "dotenv": "16.0.3",
+    "dotenv": "16.1.4",
     "dotenv-expand": "10.0.0",
     "eslint": "^8.0.0",
     "eslint-config-react-app": "^7.0.0",
