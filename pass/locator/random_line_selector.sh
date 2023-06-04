@@ -1,5 +1,46 @@
 #!/bin/bash
 
+random_line_selector_for_singlecycleCPU() {
+  echo ""
+echo "*********************************"
+echo "Running random_line_selector_for_singlecycleCPU (hardcoded for singlecycle CPU)"
+echo "************"
+echo ""
+mkdir eval_files_tmp_SCCPU
+cd ../dinocpu/src/main/scala/
+#get chisel assignments from all .scala files 
+grep -rHEn " := |===|=/=" * | grep ".scala" > all_grepped.log
+mv all_grepped.log ../../../../livehd/eval_files_tmp_SCCPU/.
+#get the list of scala files used from original verilog
+cd ../../../../bazel_rules_hdl_test/dino/
+grep ".scala" top.v > ../../livehd/eval_files_tmp_SCCPU/src_file_list_from_orig_ver.txt
+cd ../../livehd/eval_files_tmp_SCCPU/
+sed -i 's/^.*@\[//g' src_file_list_from_orig_ver.txt
+sed -i 's/\.scala.*//g' src_file_list_from_orig_ver.txt
+sort -o src_file_list_from_orig_ver.txt src_file_list_from_orig_ver.txt
+# modules used in pipelined cpu:
+uniq src_file_list_from_orig_ver.txt > src_file_list_from_orig_ver_uniq.txt
+rm src_file_list_from_orig_ver.txt
+
+# modules used in singlecycle cpu:(with the help of src_file_list_from_orig_ver_uniq.txt)
+# added import dontTouch to all these files (one time process so did manually)
+#    components/alu.scala
+#    components/alucontrol.scala
+#    memory/base-memory-components.scala
+#    components/control.scala
+#    single-cycle/cpu.scala
+#    components/helpers.scala
+#    memory/memory.scala
+#    memory/memory-combin-ports.scala
+#    components/nextpc.scala
+#    components/register-file.scala
+grep -E "single-cycle/cpu.scala|components/control.scala|components/register-file.scala|components/alu.scala|components/alucontrol.scala|components/helpers.scala|components/nextpc.scala|memory/base-memory-components.scala|memory/memory-combin-ports.scala|memory/memory.scala" all_grepped.log > all_grepped_for_singlecycleCPU.log
+#:now we have all relevant chisel assignments and comparisons
+rm all_grepped.log
+}
+
+
+
 random_line_selector_for_pipelinedCPU() {
 echo ""
 echo "*********************************"
