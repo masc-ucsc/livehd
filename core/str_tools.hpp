@@ -159,7 +159,7 @@ namespace str_tools {
 [[nodiscard]] inline size_t ends_with_count(std::string_view str1, std::string_view str2) {
   auto str1_pos = std::mismatch(str1.rbegin(), str1.rend(), str2.rbegin()).first;
 
-  return str1_pos-str1.rbegin();
+  return str1_pos - str1.rbegin();
 }
 
 [[nodiscard]] inline bool contains(std::string_view str, std::string_view start) {

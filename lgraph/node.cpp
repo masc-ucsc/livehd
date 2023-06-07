@@ -507,7 +507,7 @@ Node Node::create(Ntype_op op) const {
   node.top_g = top_g;
   node.hidx  = hidx;
 
-  if (has_loc()) { // Keep LoC
+  if (has_loc()) {  // Keep LoC
     node.set_loc(get_loc());
     node.set_source(get_source());
   }
@@ -515,8 +515,8 @@ Node Node::create(Ntype_op op) const {
 }
 
 Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const {
-  auto node  = current_g->create_node(op);
-  node.set_loc(loc.first, loc.second);//pos1 and pos2
+  auto node = current_g->create_node(op);
+  node.set_loc(loc.first, loc.second);  // pos1 and pos2
   node.set_source(fname);
   node.top_g = top_g;
   node.hidx  = hidx;
@@ -631,7 +631,7 @@ Bits_t Node::get_bits() const {
 bool Node::has_place() const { return top_g->get_node_place_map().contains(get_compact()); }
 
 void Node::set_loc(uint64_t pos1, uint64_t pos2) {
-  if (pos1==0 && pos2==0) {
+  if (pos1 == 0 && pos2 == 0) {
     return;
   }
   const auto &pos = std::make_pair(pos1, pos2);
@@ -639,9 +639,8 @@ void Node::set_loc(uint64_t pos1, uint64_t pos2) {
 }
 
 void Node::set_loc1(uint64_t pos1) {
-
   auto *ptr = current_g->ref_node_loc_map();
-  auto it   = ptr->find(get_compact_class());
+  auto  it  = ptr->find(get_compact_class());
 
   if (it == ptr->end()) {
     ptr->insert_or_assign(get_compact_class(), {pos1, 0});
@@ -651,9 +650,8 @@ void Node::set_loc1(uint64_t pos1) {
 }
 
 void Node::set_loc2(uint64_t pos2) {
-
   auto *ptr = current_g->ref_node_loc_map();
-  auto it   = ptr->find(get_compact_class());
+  auto  it  = ptr->find(get_compact_class());
 
   if (it == ptr->end()) {
     ptr->insert_or_assign(get_compact_class(), {0, pos2});
@@ -672,8 +670,9 @@ const std::pair<uint64_t, uint64_t> Node::get_loc() const {
 bool Node::has_loc() const { return current_g->get_node_loc_map().contains(get_compact_class()); }
 
 void Node::set_source(std::string_view fname) {
-  if (fname.empty() || current_g->get_source() == fname)
+  if (fname.empty() || current_g->get_source() == fname) {
     return;
+  }
 
   current_g->ref_node_source_map()->insert_or_assign(get_compact_class(), fname);
 }
@@ -681,8 +680,9 @@ void Node::set_source(std::string_view fname) {
 std::string_view Node::get_source() const {
   const auto &ptr = current_g->get_node_source_map();
   const auto  it  = ptr.find(get_compact_class());
-  if (it == ptr.end())
+  if (it == ptr.end()) {
     return current_g->get_source();
+  }
 
   return it->second;
 }
@@ -747,8 +747,7 @@ void Node::dump() const {
                edge.sink.get_node().nid,
                edge.sink.get_pid(),
                edge.sink.debug_name(),
-               edge.driver.get_wire_name()
-               );
+               edge.driver.get_wire_name());
   }
 }
 // LCOV_EXCL_STOP

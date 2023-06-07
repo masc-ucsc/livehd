@@ -42,6 +42,10 @@
 //
 // For development and benchmarking, most of the operations (pyrope strings) should be equivalent to Lconst, but the idea is to
 // replace lconst for the new lop library.
+//
+// The slop class should compile with tcc  (https://repo.or.cz/w/tinycc.git) (not C++, but C99) so that a faster compiler for code
+// generation can be used.
+//
 
 class Blop {
 protected:

@@ -31,11 +31,11 @@
 
 #include <strings.h>
 
-#include <optional>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
+#include <optional>
 
 template <typename T>
 class mpmc {

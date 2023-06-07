@@ -33,12 +33,12 @@
 
 #pragma once
 
-#include <optional>
 #include <atomic>
 #include <cassert>
 #include <climits>  // for CHAR_BIT
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 
 #if 0
 template <typename T>

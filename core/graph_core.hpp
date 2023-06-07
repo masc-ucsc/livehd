@@ -70,18 +70,16 @@
 // The overflow are just a continuous (not sorted) array. Scanning is needed if
 // overflow is used.
 
+#include <array>
 #include <cassert>
 #include <string_view>
 #include <vector>
-#include <array>
-
-#include "iassert.hpp"
-#include "graph_sizing.hpp"
 
 #include "graph_core_node.hpp"
-#include "graph_core_pin.hpp"
 #include "graph_core_overflow.hpp"
-
+#include "graph_core_pin.hpp"
+#include "graph_sizing.hpp"
+#include "iassert.hpp"
 
 class Graph_core {
 public:
@@ -184,75 +182,74 @@ public:
 
   // Delete edges and pin itself (if pin is node, then it is kept as empty because pins need a node)
   void del_pin(uint32_t id);
-  void del_node(uint32_t id);            // delete all the pins and edges in the node
+  void del_node(uint32_t id);  // delete all the pins and edges in the node
 
   // Delete edges between pins
   void del_edges(uint32_t id);
 
   void dump(uint32_t id) const;
 
-  size_t size_bytes() const { return sizeof(Master_entry)*table.size(); }
+  size_t size_bytes() const { return sizeof(Master_entry) * table.size(); }
 
-  static_assert(sizeof(Graph_core::Master_entry)==32);
-  static_assert(sizeof(Graph_core::Overflow_entry)==64);
+  static_assert(sizeof(Graph_core::Master_entry) == 32);
+  static_assert(sizeof(Graph_core::Overflow_entry) == 64);
 
 protected:
-
   class __attribute__((packed)) Graph_core_free {
   public:
-    uint8_t data[12];
+    uint8_t  data[12];
     uint32_t next_ptr;
 
-    Graph_core_free() { bzero(this, sizeof(Graph_core_free));}
+    Graph_core_free() { bzero(this, sizeof(Graph_core_free)); }
 
     [[nodiscard]] Graph_core_node *ref_node() {
-      next_ptr = 0;
+      next_ptr              = 0;
       Graph_core_node *node = (Graph_core_node *)(data);
       node->clear();
       return node;
     }
     [[nodiscard]] Graph_core_pin *ref_pin() {
-      next_ptr = 0;
+      next_ptr            = 0;
       Graph_core_pin *pin = (Graph_core_pin *)(data);
       pin->clear();
       return pin;
     }
 
-    [[nodiscard]] bool is_node()     const { return static_cast<Entry_type>(data[0]) == Entry_type::Node    ; }
-    [[nodiscard]] bool is_pin()      const { return static_cast<Entry_type>(data[0]) == Entry_type::Pin     ; }
+    [[nodiscard]] bool is_node() const { return static_cast<Entry_type>(data[0]) == Entry_type::Node; }
+    [[nodiscard]] bool is_pin() const { return static_cast<Entry_type>(data[0]) == Entry_type::Pin; }
     [[nodiscard]] bool is_overflow() const { return static_cast<Entry_type>(data[0]) == Entry_type::Overflow; }
-    [[nodiscard]] bool is_free()     const { return static_cast<Entry_type>(data[0]) == Entry_type::Free    ; }
+    [[nodiscard]] bool is_free() const { return static_cast<Entry_type>(data[0]) == Entry_type::Free; }
   };
 
   class __attribute__((packed)) Graph_core_free_overflow {
   public:
-    uint8_t data[12+16];
+    uint8_t  data[12 + 16];
     uint32_t next_ptr;
 
-    Graph_core_free_overflow() { bzero(this, sizeof(Graph_core_free_overflow));}
+    Graph_core_free_overflow() { bzero(this, sizeof(Graph_core_free_overflow)); }
 
     std::pair<Graph_core_node *, Graph_core_free *> ref_node() {
-      next_ptr = 0;
+      next_ptr              = 0;
       Graph_core_node *node = (Graph_core_node *)(data);
       node->clear();
 
       Graph_core_free *f = (Graph_core_free *)&data[16];
 
-      return std::pair(node,f);
+      return std::pair(node, f);
     }
 
     std::pair<Graph_core_pin *, Graph_core_free *> ref_pin() {
-      next_ptr = 0;
+      next_ptr            = 0;
       Graph_core_pin *pin = (Graph_core_pin *)(data);
       pin->clear();
 
       Graph_core_free *f = (Graph_core_free *)&data[16];
 
-      return std::pair(pin,f);
+      return std::pair(pin, f);
     }
 
     Graph_core_overflow *ref_overflow() {
-      next_ptr = 0;
+      next_ptr                = 0;
       Graph_core_overflow *ov = (Graph_core_overflow *)(data);
       ov->clear();
       return ov;
@@ -260,7 +257,7 @@ protected:
   };
 
   std::vector<Graph_core_free> table;
-  const std::string name;
+  const std::string            name;
 
   uint32_t free_master_id;
   uint32_t free_overflow_id;
@@ -284,157 +281,119 @@ protected:
 
     return (const Overflow_entry *)&table[id];
   }
-
 };
 
 //----
 // Graph_core_iterator
 
 #include <cstdint>
-#include <vector>
-#include <map>
 #include <iterator>
+#include <map>
+#include <vector>
 
 class Graph_core_iterator {
 public:
-    using MapType = std::map<uint32_t, uint32_t>;
+  using MapType = std::map<uint32_t, uint32_t>;
 
-    void push_back(const uint32_t& value) {
-        vec.push_back(value);
+  void push_back(const uint32_t &value) { vec.push_back(value); }
+
+  void insert(uint32_t key, const uint32_t &value) { mp.insert({key, value}); }
+
+  // Iterator class definition
+  class iterator {
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = uint32_t;
+    using pointer           = uint32_t *;
+    using reference         = uint32_t &;
+
+    iterator(typename std::vector<uint32_t>::iterator vec_it, typename std::vector<uint32_t>::iterator vec_end,
+             typename MapType::iterator map_it)
+        : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
+
+    reference operator*() const { return vec_it != vec_end ? *vec_it : map_it->second; }
+
+    pointer operator->() const { return vec_it != vec_end ? &(*vec_it) : &(map_it->second); }
+
+    iterator &operator++() {
+      if (vec_it != vec_end) {
+        ++vec_it;
+      } else {
+        ++map_it;
+      }
+      return *this;
     }
 
-    void insert(uint32_t key, const uint32_t& value) {
-        mp.insert({key, value});
+    const iterator operator++(int) {
+      iterator tmp = *this;
+      operator++();
+      return tmp;
     }
 
-    // Iterator class definition
-    class iterator {
-    public:
-        using iterator_category = std::input_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = uint32_t;
-        using pointer = uint32_t*;
-        using reference = uint32_t&;
+    bool operator==(const iterator &rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
 
-        iterator(typename std::vector<uint32_t>::iterator vec_it,
-                 typename std::vector<uint32_t>::iterator vec_end,
-                 typename MapType::iterator map_it)
-            : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
+    bool operator!=(const iterator &rhs) const { return !(*this == rhs); }
 
-        reference operator*() const {
-            return vec_it != vec_end ? *vec_it : map_it->second;
-        }
+  private:
+    typename std::vector<uint32_t>::iterator vec_it;
+    typename std::vector<uint32_t>::iterator vec_end;
+    typename MapType::iterator               map_it;
+  };
 
-        pointer operator->() const {
-            return vec_it != vec_end ? &(*vec_it) : &(map_it->second);
-        }
+  // Const iterator class definition
+  class const_iterator {
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+    using value_type        = uint32_t;
+    using pointer           = const uint32_t *;
+    using reference         = const uint32_t &;
 
-        iterator& operator++() {
-            if (vec_it != vec_end) {
-                ++vec_it;
-            } else {
-                ++map_it;
-            }
-            return *this;
-        }
+    const_iterator(typename std::vector<uint32_t>::const_iterator vec_it, typename std::vector<uint32_t>::const_iterator vec_end,
+                   typename MapType::const_iterator map_it)
+        : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
 
-        const iterator operator++(int) {
-            iterator tmp = *this;
-            operator++();
-            return tmp;
-        }
+    reference operator*() const { return vec_it != vec_end ? *vec_it : map_it->second; }
 
-        bool operator==(const iterator& rhs) const {
-            return vec_it == rhs.vec_it && map_it == rhs.map_it;
-        }
+    pointer operator->() const { return vec_it != vec_end ? &(*vec_it) : &(map_it->second); }
 
-        bool operator!=(const iterator& rhs) const {
-            return !(*this == rhs);
-        }
+    const_iterator &operator++() {
+      if (vec_it != vec_end) {
+        ++vec_it;
+      } else {
+        ++map_it;
+      }
+      return *this;
+    }
 
-    private:
-        typename std::vector<uint32_t>::iterator vec_it;
-        typename std::vector<uint32_t>::iterator vec_end;
-        typename MapType::iterator map_it;
-    };
+    const const_iterator operator++(int) {
+      const_iterator tmp = *this;
+      operator++();
+      return tmp;
+    }
 
-    // Const iterator class definition
-    class const_iterator {
-    public:
-        using iterator_category = std::input_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = uint32_t;
-        using pointer = const uint32_t*;
-        using reference = const uint32_t&;
+    bool operator==(const const_iterator &rhs) const { return vec_it == rhs.vec_it && map_it == rhs.map_it; }
 
-        const_iterator(typename std::vector<uint32_t>::const_iterator vec_it,
-                       typename std::vector<uint32_t>::const_iterator vec_end,
-                       typename MapType::const_iterator map_it)
-            : vec_it(vec_it), vec_end(vec_end), map_it(map_it) {}
+    bool operator!=(const const_iterator &rhs) const { return !(*this == rhs); }
 
-        reference operator*() const {
-            return vec_it != vec_end ? *vec_it : map_it->second;
-        }
-
-        pointer operator->() const {
-            return vec_it != vec_end ? &(*vec_it) : &(map_it->second);
-        }
-
-        const_iterator& operator++() {
-            if (vec_it != vec_end) {
-                ++vec_it;
-            } else {
-                ++map_it;
-            }
-            return *this;
-        }
-
-        const const_iterator operator++(int) {
-            const_iterator tmp = *this;
-            operator++();
-            return tmp;
-        }
-
-        bool operator==(const const_iterator& rhs) const {
-            return vec_it == rhs.vec_it && map_it == rhs.map_it;
-        }
-
-        bool operator!=(const const_iterator& rhs) const {
-            return !(*this == rhs);
-        }
-
-    private:
-        typename std::vector<uint32_t>::const_iterator vec_it;
-        typename std::vector<uint32_t>::const_iterator vec_end;
-        typename MapType::const_iterator
+  private:
+    typename std::vector<uint32_t>::const_iterator vec_it;
+    typename std::vector<uint32_t>::const_iterator vec_end;
+    typename MapType::const_iterator
 
         map_it;
-    };
+  };
 
-    iterator begin() {
-        return iterator(vec.begin(), vec.end(), mp.begin());
-    }
+  iterator begin() { return iterator(vec.begin(), vec.end(), mp.begin()); }
 
-    iterator end() {
-        return iterator(vec.end(), vec.end(), mp.end());
-    }
+  iterator end() { return iterator(vec.end(), vec.end(), mp.end()); }
 
-    const_iterator begin() const {
-        return const_iterator(vec.begin(), vec.end(), mp.begin());
-    }
+  const_iterator begin() const { return const_iterator(vec.begin(), vec.end(), mp.begin()); }
 
-    const_iterator end() const {
-        return const_iterator(vec.end(), vec.end(), mp.end());
-    }
+  const_iterator end() const { return const_iterator(vec.end(), vec.end(), mp.end()); }
 
-    const_iterator cbegin() const {
-        return const_iterator(vec.begin(), vec.end(), mp.begin());
-    }
+  const_iterator cbegin() const { return const_iterator(vec.begin(), vec.end(), mp.begin()); }
 
-    const_iterator cend() const {
-        return const_iterator(vec.end(), vec.end(), mp.end());
-    }
+  const_iterator cend() const { return const_iterator(vec.end(), vec.end(), mp.end()); }
 };
-
-
-

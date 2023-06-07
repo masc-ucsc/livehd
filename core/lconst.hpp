@@ -5,8 +5,8 @@
 
 #include "absl/types/span.h"
 #include "boost/multiprecision/cpp_int.hpp"
-#include "iassert.hpp"
 #include "graph_sizing.hpp"
+#include "iassert.hpp"
 
 class Lconst {
 private:

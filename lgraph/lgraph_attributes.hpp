@@ -85,10 +85,10 @@ protected:
   Node_pin_delay_map    node_pin_delay_map;
   Node_pin_unsigned_map node_pin_unsigned_map;
 
-  Node_name_map  node_name_map;
-  Node_color_map node_color_map;
-  Node_place_map node_place_map;
-  Node_loc_map   node_loc_map;
+  Node_name_map   node_name_map;
+  Node_color_map  node_color_map;
+  Node_place_map  node_place_map;
+  Node_loc_map    node_loc_map;
   Node_source_map node_source_map;
 
   void clear() override;

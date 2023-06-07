@@ -686,9 +686,7 @@ public:
 
         return i;
       };
-      bool operator==(const CTree_sibling_iterator &other) const {
-        return !(ti != other.ti);
-      }
+      bool operator==(const CTree_sibling_iterator &other) const { return !(ti != other.ti); }
 
       bool operator!=(const CTree_sibling_iterator &other) const {
         I(t == other.t);

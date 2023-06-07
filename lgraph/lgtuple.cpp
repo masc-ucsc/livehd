@@ -896,14 +896,12 @@ std::pair<Node, Node_pin> Lgtuple::flatten_field(Node &result_node, Node_pin &dp
     if (!sbits_dpin.is_invalid()) {
       bits_dpin = sbits_dpin;
     } else if (!ubits_dpin.is_invalid()) {
-
       auto add_node = result_node.create(Ntype_op::Sum);
       add_node.setup_sink_pin("A").connect_driver(ubits_dpin);
       add_node.setup_sink_pin("A").connect_driver(result_node.create_const(1));
 
       bits_dpin = add_node.setup_driver_pin();
     } else {
-
       auto attr_node = result_node.create(Ntype_op::AttrGet);
       attr_node.setup_sink_pin("field").connect_driver(result_node.create_const(Lconst::from_string("__sbits")));
       attr_node.setup_sink_pin("parent").connect_driver(dpin);

@@ -356,9 +356,9 @@ public:
 
   void del_node();
 
-  Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
-  Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const; // create a new node, keep same hierarchy
-  Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
+  Node create(Ntype_op op) const;                                                        // create a new node, keep same hierarchy
+  Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const;  // create a new node, keep same hierarchy
+  Node create_const(const Lconst &value) const;                                          // create a new node, keep same hierarchy
 
   // BEGIN ATTRIBUTE ACCESSORS
   std::string debug_name() const;

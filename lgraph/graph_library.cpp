@@ -476,7 +476,7 @@ Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view
   lg->clear_int();
   clear_int(lg->get_lgid());
 
-  graph_library_clean      = false;
+  graph_library_clean                = false;
   attributes[lg->get_lgid()].version = max_next_version++;
 
   return lg;
@@ -720,8 +720,7 @@ void Graph_library::each_sub(const std::function<void(Lg_type_id lgid, std::stri
   }
 }
 
-void Graph_library::each_sub(std::string_view                                                   match,
-                                const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
+void Graph_library::each_sub(std::string_view match, const std::function<void(Lg_type_id lgid, std::string_view name)> &f1) const {
   const std::string string_match(match);  // NOTE: regex does not support string_view, c++20 may fix this missing feature
   const std::regex  txt_regex(string_match);
 

@@ -209,7 +209,13 @@ void Node_internal::xxx(const Edge_raw *edge_raw) {
 
 // LCOV_EXCL_START
 void Node_internal::dump() const {
-  fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n", (int)nid, (int)dst_pid, (int)state, (int)inp_pos, out_pos, root);
+  fmt::print("nid:{} pid:{} state:{} inp_pos:{} out_pos:{} root:{}\n",
+             (int)nid,
+             (int)dst_pid,
+             (int)state,
+             (int)inp_pos,
+             out_pos,
+             root);
 
   const Edge_raw *out = get_output_begin();
   while (out != get_output_end()) {

@@ -29,7 +29,7 @@ std::string Lconst::serialize() const {
   boost::multiprecision::import_bits(res_num1, v.begin() + 4, v.end());
 
   std::vector<unsigned char> v2;
-  for (const auto c2:str) {
+  for (const auto c2 : str) {
     v2.emplace_back(c2);
   }
   Number res_num2;
@@ -42,7 +42,7 @@ Lconst Lconst::unserialize(std::string_view v) {
   I(v.size() > 4);  // invalid otherwise
 
   std::vector<unsigned char> v2;
-  for (const auto c2:v) {
+  for (const auto c2 : v) {
     v2.emplace_back(c2);
   }
 
@@ -461,11 +461,11 @@ std::vector<std::pair<int, int>> Lconst::get_mask_range_pairs() const {
     return pairs;
   }
 
-  Number tmp_num = num;
-  bool neg_mask = false;
+  Number tmp_num  = num;
+  bool   neg_mask = false;
   if (num < 0) {
     neg_mask = true;
-    tmp_num = -num - 1;
+    tmp_num  = -num - 1;
     // There is no NOT in boost
     for (auto i = 0; i < get_bits(); ++i) {
       tmp_num = boost::multiprecision::bit_flip(tmp_num, i);
@@ -486,10 +486,11 @@ std::vector<std::pair<int, int>> Lconst::get_mask_range_pairs() const {
       ++nones;
     }
     tmp_num >>= nones;
-    if (tmp_num==0 && neg_mask)
+    if (tmp_num == 0 && neg_mask) {
       pairs.emplace_back(std::pair<int, int>(start_pos, Bits_max));
-    else
+    } else {
       pairs.emplace_back(std::pair<int, int>(start_pos, nones));
+    }
 
     start_pos += nones;
   }

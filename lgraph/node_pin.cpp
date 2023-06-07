@@ -2,10 +2,11 @@
 
 #include "node_pin.hpp"
 
+#include <cstdint>
+
 #include "lgraph.hpp"
 #include "lgtuple.hpp"
 #include "node.hpp"
-#include <cstdint>
 
 Node_pin::Node_pin(Lgraph *_g, const Compact &comp) : top_g(_g), hidx(comp.hidx), idx(comp.idx), sink(comp.sink) {
   I(!Hierarchy::is_invalid(comp.hidx));  // Why to Compact. Use Compact_class
@@ -309,8 +310,9 @@ void Node_pin::del_delay() { top_g->ref_node_pin_delay_map()->erase(get_compact_
 void Node_pin::set_name(std::string_view wname) {
   I(wname.size());  // empty names not allowed
 
-  if (wname == "regs_26_2")
+  if (wname == "regs_26_2") {
     fmt::print("HERE\n");
+  }
 
   auto *ref = current_g->ref_node_pin_name_map();
   ref->insert_or_assign(get_compact_class_driver(), wname);

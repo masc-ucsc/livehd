@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <string>
+
 #include "fmt/format.h"
 
 // #include "absl/hash/hash.h"
@@ -13,17 +14,17 @@ struct Explicit_type {
   constexpr inline Explicit_type() : value(inv_val) {}
 
   //! Construction from a fundamental value.
-  constexpr inline Explicit_type(const T &_value) : value(_value) {}
+  constexpr inline Explicit_type(const T& _value) : value(_value) {}
 
   //! Implicit conversion back to the fundamental data type.
   [[nodiscard]] constexpr inline operator T() const noexcept { return value; }
 
   //! The actual fundamental value.
-  T         value;
-  using type=T;
+  T value;
+  using type = T;
 
   [[nodiscard]] bool is_invalid() const { return value == inv_val; }
-  void invalidate() { value = inv_val; }
+  void               invalidate() { value = inv_val; }
 
   [[nodiscard]] constexpr size_t hash() const { return value; }
 
@@ -31,10 +32,10 @@ struct Explicit_type {
 };
 
 template <typename T, typename Meaning, T inv_val>
-struct fmt::formatter<Explicit_type<T,Meaning,inv_val>> : fmt::formatter<std::string> {
+struct fmt::formatter<Explicit_type<T, Meaning, inv_val>> : fmt::formatter<std::string> {
   // parse is inherited from formatter<string_view>.
 
-  auto format(Explicit_type<T,Meaning,inv_val> t, format_context& ctx) const {
+  auto format(Explicit_type<T, Meaning, inv_val> t, format_context& ctx) const {
     auto txt = std::to_string(t.value);
 
     return formatter<std::string>::format(txt, ctx);

@@ -141,14 +141,15 @@ void Sub_node::dump() const {
       continue;
     }
     std::string_view dir;
-    if (pin.dir == Direction::Invalid)
+    if (pin.dir == Direction::Invalid) {
       dir = "invalid";
-    else if (pin.dir == Direction::Output)
+    } else if (pin.dir == Direction::Output) {
       dir = "out";
-    else if (pin.dir == Direction::Input)
+    } else if (pin.dir == Direction::Input) {
       dir = "inp";
-    else
+    } else {
       dir = "ERROR";
+    }
 
     fmt::print(" pin:{} name:{} pos:{} dir:{}\n", pos, pin.name, pin.graph_io_pos, dir);
     pos++;

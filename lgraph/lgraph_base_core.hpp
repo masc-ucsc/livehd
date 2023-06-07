@@ -9,11 +9,11 @@
 #include "absl/strings/str_cat.h"
 #include "explicit_type.hpp"
 #include "fmt/format.h"
+#include "graph_sizing.hpp"
 #include "iassert.hpp"
 #include "lconst.hpp"
 #include "lhtree.hpp"
 #include "likely.hpp"
-#include "graph_sizing.hpp"
 
 using Lg_id_t = uint32_t;
 
@@ -45,8 +45,8 @@ struct Index_id_hash {
 constexpr Index_id Hardcoded_input_nid  = 1;
 constexpr Index_id Hardcoded_output_nid = 2;
 
-constexpr int Index_bits = std::numeric_limits<Lg_id_t>::digits - 1;  // 31 bit to have Sink/Driver + Index in 32 bits
-constexpr int     LUT_input_bits = 4;
+constexpr int Index_bits     = std::numeric_limits<Lg_id_t>::digits - 1;  // 31 bit to have Sink/Driver + Index in 32 bits
+constexpr int LUT_input_bits = 4;
 
 class Graph_library;
 
@@ -64,9 +64,9 @@ protected:
 
   const char* version = "0.1.0";  // LGraph semantic version (increase when store format becomes incompatible)
 
-  std::string       path;
-  std::string       name;
-  std::string       source; // file name where it came from (there may be multiple, this is the main file)
+  std::string path;
+  std::string name;
+  std::string source;  // file name where it came from (there may be multiple, this is the main file)
 
   const std::string unique_name;
   const std::string long_name;

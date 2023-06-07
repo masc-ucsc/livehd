@@ -1,10 +1,9 @@
 // See LICENSE for details
 
-
 #pragma once
 
-#include <iostream>
 #include <cstdint>
+#include <iostream>
 
 class Hashset {
 private:
@@ -22,8 +21,5 @@ public:
   }
 
   // Method to get the hash value of h1 and h2
-  uint64_t get_value() const {
-    return h1 ^ h2;
-  }
+  uint64_t get_value() const { return h1 ^ h2; }
 };
-

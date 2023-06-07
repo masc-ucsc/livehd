@@ -30,7 +30,7 @@ public:
   T* get_ptr() {
     auto raw_retval = _pointer_queue.dequeue();
     if (!raw_retval) {
-      T *raw_ptr = new T();
+      T* raw_ptr            = new T();
       raw_ptr->shared_count = 1;
       return raw_ptr;
     }

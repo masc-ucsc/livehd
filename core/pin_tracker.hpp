@@ -11,16 +11,15 @@ public:
     int pos = -1;
   };
 
-
   using Pin_vector = std::vector<Pin_pos>;
 
-  Pin_tracker(Pin zero_pin) :Zero_pin(zero_pin) {}
+  Pin_tracker(Pin zero_pin) : Zero_pin(zero_pin) {}
 
   void add_input(Pin wname, Bits_t bits) {
     auto &pv = full_map[wname];
     I(pv.empty());  // Why to double insert inputs??
 
-    pv.resize(bits, {Zero_pin,-1});
+    pv.resize(bits, {Zero_pin, -1});
     for (auto i = 0; i < bits; ++i) {
       pv[i].id  = wname;
       pv[i].pos = i;
@@ -89,36 +88,12 @@ public:
 
   void add_shl(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
     auto &pv = full_map[dst_pin];
-    pv.resize(a_sbits+amount.to_i(), {Zero_pin, -1});
+    pv.resize(a_sbits + amount.to_i(), {Zero_pin, -1});
 
-    for(auto i=0;i<amount.to_i();++i) {
-      pv[i].id = Zero_pin;
+    for (auto i = 0; i < amount.to_i(); ++i) {
+      pv[i].id  = Zero_pin;
       pv[i].pos = 0;
     }
-
-    auto it = full_map.find(a_pin);
-    if (it==full_map.end()) {
-      add_input(a_pin, a_sbits);
-      it = full_map.find(a_pin);
-    }
-
-    for(auto i=0;i<a_sbits;++i) {
-      if (i>=it->second.size()) {
-        pv[amount.to_i()+i].id  = it->second.back().id;
-        pv[amount.to_i()+i].pos = it->second.back().pos;
-      }else{
-        pv[amount.to_i()+i].id  = it->second[i].id;
-        pv[amount.to_i()+i].pos = it->second[i].pos;
-      }
-    }
-  }
-
-  void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
-    I(a_sbits>0);
-    I(amount.to_i()>=0);
-
-    auto &pv = full_map[dst_pin];
-    pv.resize(a_sbits-amount.to_i(), {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
@@ -126,11 +101,35 @@ public:
       it = full_map.find(a_pin);
     }
 
-    for(auto i=0;i<a_sbits-amount.to_i();++i) {
-      if (i>=it->second.size()) {
+    for (auto i = 0; i < a_sbits; ++i) {
+      if (i >= it->second.size()) {
+        pv[amount.to_i() + i].id  = it->second.back().id;
+        pv[amount.to_i() + i].pos = it->second.back().pos;
+      } else {
+        pv[amount.to_i() + i].id  = it->second[i].id;
+        pv[amount.to_i() + i].pos = it->second[i].pos;
+      }
+    }
+  }
+
+  void add_sra(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
+    I(a_sbits > 0);
+    I(amount.to_i() >= 0);
+
+    auto &pv = full_map[dst_pin];
+    pv.resize(a_sbits - amount.to_i(), {Zero_pin, -1});
+
+    auto it = full_map.find(a_pin);
+    if (it == full_map.end()) {
+      add_input(a_pin, a_sbits);
+      it = full_map.find(a_pin);
+    }
+
+    for (auto i = 0; i < a_sbits - amount.to_i(); ++i) {
+      if (i >= it->second.size()) {
         pv[i].id  = it->second.back().id;
         pv[i].pos = it->second.back().pos;
-      }else{
+      } else {
         pv[i].id  = it->second[i].id;
         pv[i].pos = it->second[i].pos;
       }
@@ -138,8 +137,8 @@ public:
   }
 
   void add_sext(Pin dst_pin, Pin a_pin, Bits_t a_sbits, Lconst amount) {
-    I(a_sbits>0);
-    I(amount.to_i()>=0);
+    I(a_sbits > 0);
+    I(amount.to_i() >= 0);
 
     auto &pv = full_map[dst_pin];
     pv.resize(amount.to_i(), {Zero_pin, -1});
@@ -150,11 +149,11 @@ public:
       it = full_map.find(a_pin);
     }
 
-    for(auto i=0;i<amount.to_i();++i) {
-      if (i>=it->second.size()) {
+    for (auto i = 0; i < amount.to_i(); ++i) {
+      if (i >= it->second.size()) {
         pv[i].id  = it->second.back().id;
         pv[i].pos = it->second.back().pos;
-      }else{
+      } else {
         pv[i].id  = it->second[i].id;
         pv[i].pos = it->second[i].pos;
       }
@@ -167,18 +166,19 @@ public:
       return;
     }
     auto &pv = full_map[dst_pin];
-    it = full_map.find(a_pin); // WARNING: insert could destroy iterator
+    it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
-    if (pv.size()< it->second.size()) {
+    if (pv.size() < it->second.size()) {
       pv.resize(it->second.size(), {Zero_pin, 0});
     }
 
-    for(auto i=0;i<it->second.size();++i) {
-      if (it->second[i].id == Zero_pin && it->second[i].pos == 0)
-        continue; // Nothing to do in this bit
+    for (auto i = 0; i < it->second.size(); ++i) {
+      if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
+        continue;  // Nothing to do in this bit
+      }
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {
         pv[i] = it->second[i];
-      }else{
+      } else {
         pv[i].pos = -1;
       }
     }
@@ -189,24 +189,27 @@ public:
       return;
     }
     auto &pv = full_map[dst_pin];
-    it = full_map.find(a_pin); // WARNING: insert could destroy iterator
+    it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
     auto max_bits = a_mask.get_mask_range().second;
-    if (it->second.size() < max_bits)
+    if (it->second.size() < max_bits) {
       max_bits = it->second.size();
+    }
 
-    if (pv.size()< max_bits) {
+    if (pv.size() < max_bits) {
       pv.resize(max_bits, {Zero_pin, 0});
     }
 
-    for(auto i=0;i<max_bits;++i) {
-      if (it->second[i].id == Zero_pin && it->second[i].pos == 0)
-        continue; // Nothing to do in this bit
-      if (!a_mask.bit_test(i))
+    for (auto i = 0; i < max_bits; ++i) {
+      if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
+        continue;  // Nothing to do in this bit
+      }
+      if (!a_mask.bit_test(i)) {
         continue;
+      }
       if (pv[i].id == Zero_pin && pv[i].pos == 0) {
         pv[i] = it->second[i];
-      }else{
+      } else {
         pv[i].pos = -1;
       }
     }

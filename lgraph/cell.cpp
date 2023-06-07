@@ -166,17 +166,17 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, int pid) {
       break;
     case Ntype_op::Memory:
       switch (pid) {
-        case 0: return "addr";     // runtime  x n_ports
-        case 1: return "bits";     // comptime x 1
-        case 2: return "clock_pin";// runtime  x 1 or n_ports
-        case 3: return "din";      // runtime  x n_ports
-        case 4: return "enable";   // runtime  x n_ports
-        case 5: return "fwd";      // comptime x 1
-        case 6: return "posclk";   // comptime x 1
-        case 7: return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
-        case 8: return "wensize";  // comptime x 1  -- number of Write Enable bits
-        case 9: return "size";     // comptime x 1
-        case 10: return "rdport";  // comptime x n_ports (1 rd, 0 wr)
+        case 0: return "addr";       // runtime  x n_ports
+        case 1: return "bits";       // comptime x 1
+        case 2: return "clock_pin";  // runtime  x 1 or n_ports
+        case 3: return "din";        // runtime  x n_ports
+        case 4: return "enable";     // runtime  x n_ports
+        case 5: return "fwd";        // comptime x 1
+        case 6: return "posclk";     // comptime x 1
+        case 7: return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
+        case 8: return "wensize";    // comptime x 1  -- number of Write Enable bits
+        case 9: return "size";       // comptime x 1
+        case 10: return "rdport";    // comptime x n_ports (1 rd, 0 wr)
         default: return "invalid";
       }
       break;

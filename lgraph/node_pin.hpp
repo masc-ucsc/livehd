@@ -7,9 +7,9 @@ class Node;
 
 #include <vector>
 
-#include "woothash.hpp"
 #include "hierarchy.hpp"
 #include "lgedge.hpp"
+#include "woothash.hpp"
 
 using XEdge_iterator    = std::vector<XEdge>;
 using Node_pin_iterator = std::vector<Node_pin>;
@@ -96,7 +96,6 @@ public:
     };
 
     [[nodiscard]] uint64_t get_hash() const { return lh::woothash64(this, sizeof(Compact)); }
-
   };
   class __attribute__((packed)) Compact_flat {
   protected:
@@ -370,7 +369,7 @@ public:
   }
   void del();  // del self and all connections
 
-  [[nodiscard]] Node create(Ntype_op op) const;                // create a new node, keep same hierarchy
+  [[nodiscard]] Node create(Ntype_op op) const;  // create a new node, keep same hierarchy
   //[[nodiscard]] Node create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const ;
   [[nodiscard]] Node create_const(const Lconst &value) const;  // create a new node, keep same hierarchy
 
