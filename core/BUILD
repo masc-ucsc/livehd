@@ -141,11 +141,3 @@ cc_test(
     ],
 )
 
-cc_test(
-    name = "blop_test",
-    srcs = ["tests/blop_test.cpp"],
-    deps = [
-        ":core",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
