@@ -22,7 +22,7 @@
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
                           // used in nl2nl match
-#define FOR_EVAL
+#define FOR_EVAL // used in orig-to-NL match
 
 class Traverse_lg : public Pass {
 public:
@@ -83,7 +83,7 @@ private:
   void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
   void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   void                                fwd_traversal_for_inp_map(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
-  std::vector<Node_pin::Compact_flat> traverse_order;
+  std::vector<Node_pin> traverse_order;
   std::vector<Node_pin::Compact_flat> forced_match_vec;
   void                                bwd_traversal_for_out_map( map_of_sets &out_map_of_sets , bool is_orig_lg);
   void                                make_io_maps(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets , bool is_orig_lg);
@@ -107,6 +107,7 @@ private:
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const ;
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
+  double get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   absl::flat_hash_set<Node_pin::Compact_flat> crit_node_set;
