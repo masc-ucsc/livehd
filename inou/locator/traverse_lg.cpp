@@ -181,11 +181,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #endif
    
     if (!flop_set.empty()) {
-      set_theory_match_loopLast_only();
-      fmt::print("\n set_theory_match_loopLast_only - synth done.\n");
-#ifdef BASIC_DBG
-      fmt::print("9. Printing after flop set_theory_match_loopLast_only matching!"); print_everything();
-#endif
+      weighted_match_LoopLastOnly(); // crit_entries_only=f, loopLast_only=t
+      // set_theory_match_loopLast_only();
+      fmt::print("\n weighted_match_LoopLastOnly - synth done.\n");
+      #ifdef BASIC_DBG
+        fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching!"); print_everything();
+      #endif
       remove_resolved_from_orig_MoS();
     }
 
@@ -199,9 +200,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     //move to combinational matching
     do {
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-#ifdef BASIC_DBG
-      fmt::print("9._. Printing before resolution of out MoS!"); print_everything();
-#endif
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(false);//alters crit_node_set too
       fmt::print("\n complete_io_match - synth - combinational done.\n");
@@ -242,8 +240,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #endif
 #if 1
     if(!crit_node_set.empty()) {
-      set_theory_match_final();
-      fmt::print("\n set_theory_match_final - synth done.\n");
+      // set_theory_match_final();
+      weighted_match(); // crit_entries_only=t, loopLast_only=f
+      fmt::print("\n weighted_match - synth (crit_entries_only) done.\n");
     }
 #endif
 
@@ -1612,7 +1611,7 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth,
 
 }
 
-double Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, 
+float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, 
                                         const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const {
   const auto &smallest = synth_set.size() <  orig_set.size() ? synth_set : orig_set;
   const auto &largest  = synth_set.size() >= orig_set.size() ? synth_set : orig_set;
@@ -1628,7 +1627,7 @@ double Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Comp
   
   /* 5 points for a full match for this set part 
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
-  double matching_weight = 50 * ( double(2*matches) / double(synth_set.size() + orig_set.size()));
+  float matching_weight = 5 * ( float(2*matches) / float(synth_set.size() + orig_set.size()));
   #ifdef FOR_EVAL
     fmt::print("\t\t\t\t matching_weight = {} (set1_size={}, set2_size={})\n",matching_weight, synth_set.size(), orig_set.size());
   #endif
@@ -1657,7 +1656,7 @@ bool Traverse_lg::complete_io_match(bool flop_only ) {
     }}
     bool out_matched = false; //FIXME: declaration can be shifted IN the following for loop?
     auto keep_partial_match_checking_on = true;
-    std::map<double, absl::flat_hash_set<Node_pin::Compact_flat>> partial_out_match_map;
+    std::map<float, absl::flat_hash_set<Node_pin::Compact_flat>> partial_out_match_map;
     for(const auto &[orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
       auto o_s = Node_pin("lgdb", orig_in_np).get_node();
       if(flop_only) {
@@ -2140,12 +2139,12 @@ void Traverse_lg::set_theory_match_loopLast_only() {
 	bool some_matching_done = false;
 	do {
 	  resolution_of_synth_map_of_sets(io_map_of_sets_synth);
-#ifdef BASIC_DBG
-    fmt::print("\nINTERMEDIATE after resolution LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
-#endif
+    #ifdef BASIC_DBG
+      fmt::print("\nINTERMEDIATE after resolution LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+    #endif
 	  some_matching_done = set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//loop last only maps
 	} while (some_matching_done && !crit_node_set.empty());
-
+//FIXME: what is the point of having do while here...set_theory will always match something to something!!
 #ifdef BASIC_DBG
 	fmt::print("\nFINAL LL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
 	fmt::print("\nFINAL LL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
@@ -2156,17 +2155,147 @@ void Traverse_lg::set_theory_match_final() {
 
   auto io_map_of_sets_orig = make_in_out_union(inp_map_of_sets_orig, out_map_of_sets_orig, false, false);//MoS, false: not loop_last
   auto io_map_of_sets_synth = make_in_out_union(inp_map_of_sets_synth, out_map_of_sets_synth, false, true);//true for union of critical entries only
-#ifdef BASIC_DBG
-	fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
-	fmt::print("\nio_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
-#endif
+  #ifdef BASIC_DBG
+    fmt::print("\nio_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
+    fmt::print("\nio_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+  #endif
 
-set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
+  set_theory_match(io_map_of_sets_synth, io_map_of_sets_orig);//not loop last only maps
 
-#ifdef BASIC_DBG
-	fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
-	fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
-#endif
+  #ifdef BASIC_DBG
+    fmt::print("\nFINAL io_map_of_sets_orig: \n"); print_io_map(io_map_of_sets_orig);
+    fmt::print("\nFINAL io_map_of_sets_synth: \n"); print_io_map(io_map_of_sets_synth);
+  #endif
+}
+
+void Traverse_lg::weighted_match_LoopLastOnly() {//FIXME: no return needed!?
+  #ifdef BASIC_DBG
+    fmt::print("In weighted_match_LoopLastOnly:\n\n");
+  #endif
+
+  for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
+    const auto &synth_key = it->first;
+    const auto &synth_set = it->second;
+    /*if(loop_last_only):for only those keys that are is_type_loop_last
+      time complexity with loop_last_only will be num_of_flops-synth into num_of_flops-orig
+      otherwise, time complexity will be num_of_combi-synth into num_of_combi-orig*/
+    auto node_s = Node_pin("lgdb", synth_key).get_node();
+    if ( !node_s.is_type_loop_last() ) {
+      #ifdef BASIC_DBG
+          fmt::print("\t\t continuing due to datatype mismatch in loop_last_only (node is looplast:{}) \n",node_s.is_type_loop_last());
+      #endif
+      continue; //flop node should be matched with flop node only! else datatype mismatch!
+    }
+
+    float match_prev = 0.0;
+    absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
+    for(const auto &[ orig_key, orig_set ] : inp_map_of_sets_orig) {
+
+      /*if(loop_last_only):for only those keys that are is_type_loop_last*/
+      auto node_o = Node_pin("lgdb", synth_key).get_node();
+      if ( !node_o.is_type_loop_last()  ) {
+        continue; //flop node should be matched with flop node only! else datatype mismatch!
+      }
+
+      const auto &in_match = get_matching_weight(synth_set , orig_set);
+      auto out_match = 0.0;
+      if ( out_map_of_sets_synth.find(synth_key)!=out_map_of_sets_synth.end() && out_map_of_sets_orig.find(orig_key)!= out_map_of_sets_orig.end() ) {//both outs are present
+        out_match = get_matching_weight(out_map_of_sets_synth[synth_key], out_map_of_sets_orig[orig_key]);
+      } else if (out_map_of_sets_synth.find(synth_key)!=out_map_of_sets_synth.end() || out_map_of_sets_orig.find(orig_key)!= out_map_of_sets_orig.end()) {//only 1 out is present
+        out_match = 0.0; //no match at all
+      } else {//no out is present
+        out_match = 5.0; // complete match
+      }
+      
+      float match_curr = in_match + out_match;
+
+      if(match_curr>match_prev) {
+        matched_node_pins.clear();
+        matched_node_pins.insert(orig_key);
+        match_prev=match_curr;
+      } else if (match_curr == match_prev) {
+        matched_node_pins.insert(orig_key);
+      }
+    }
+
+    if (!matched_node_pins.empty()) {
+      net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
+      #ifdef FOR_EVAL
+        auto np_s = Node_pin("lgdb", synth_key);
+        fmt::print("Inserting in weighted_match_LoopLastOnly : {}  :::  ",np_s.has_name()?np_s.get_name():("n"+std::to_string(np_s.get_node().get_nid())));
+        for (auto np_o_set: matched_node_pins) {
+          auto np_o = Node_pin("lgdb", np_o_set);
+          fmt::print("    {} ",  np_o.has_name()?np_o.get_name():("n"+std::to_string(np_o.get_node().get_nid())));
+        }
+        fmt::print("\n");
+      #endif
+      forced_match_vec.emplace_back(synth_key);
+      if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
+      remove_from_crit_node_set(synth_key);
+      out_map_of_sets_synth.erase(synth_key);
+      inp_map_of_sets_synth.erase(it++);
+    } else {
+      it++;
+    }
+  }
+
+}
+
+void Traverse_lg::weighted_match() {//only for the crit_node_entries remaining!
+  #ifdef BASIC_DBG
+    fmt::print("In weighted_match:\n\n");
+  #endif
+  for (const auto &synth_key: crit_node_set) {
+
+    I(inp_map_of_sets_synth.find(synth_key)!=inp_map_of_sets_synth.end(), "\n synth_key NOT in inp_Map_of_sets_synth!! check!\n");
+    const auto &synth_set = inp_map_of_sets_synth[synth_key];
+
+    float match_prev = 0.0;
+    absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
+    for(const auto &[ orig_key, orig_set ] : inp_map_of_sets_orig) {
+
+      const auto &in_match = get_matching_weight(synth_set , orig_set);
+      auto out_match = 0.0;
+      if ( out_map_of_sets_synth.find(synth_key)!=out_map_of_sets_synth.end() && out_map_of_sets_orig.find(orig_key)!= out_map_of_sets_orig.end() ) {//both outs are present
+        out_match = get_matching_weight(out_map_of_sets_synth[synth_key], out_map_of_sets_orig[orig_key]);
+      } else if (out_map_of_sets_synth.find(synth_key)!=out_map_of_sets_synth.end() || out_map_of_sets_orig.find(orig_key)!= out_map_of_sets_orig.end()) {//only 1 out is present
+        out_match = 0.0; //no match at all
+      } else {//no out is present
+        out_match = 5.0; // complete match
+      }
+      
+      float match_curr = in_match + out_match;
+
+      if(match_curr>match_prev) {
+        matched_node_pins.clear();
+        matched_node_pins.insert(orig_key);
+        match_prev=match_curr;
+      } else if (match_curr == match_prev) {
+        matched_node_pins.insert(orig_key);
+      }
+    }
+
+    if (!matched_node_pins.empty()) {
+      net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
+      #ifdef FOR_EVAL
+        auto np_s = Node_pin("lgdb", synth_key);
+        fmt::print("Inserting in weighted_match : {}  :::  ",np_s.has_name()?np_s.get_name():("n"+std::to_string(np_s.get_node().get_nid())));
+        for (auto np_o_set: matched_node_pins) {
+          auto np_o = Node_pin("lgdb", np_o_set);
+          fmt::print("    {} ",  np_o.has_name()?np_o.get_name():("n"+std::to_string(np_o.get_node().get_nid())));
+        }
+        fmt::print("\n");
+      #endif
+      forced_match_vec.emplace_back(synth_key);
+      if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
+      remove_from_crit_node_set(synth_key);
+      out_map_of_sets_synth.erase(synth_key);
+      inp_map_of_sets_synth.erase(synth_key);
+    } else {
+      fmt::print("In weighted_match -- unexpected entry to else...Is it a no match whatsoever??");
+    }
+  }
+
 }
 
 bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets &io_map_of_sets_synth, Traverse_lg::map_of_sets &io_map_of_sets_orig) {

@@ -51,7 +51,8 @@ private:
   setMap_pairKey                                                           cellIOMap_synth;
   bool                   set_theory_match(std::set<std::string> synth_set, const std::vector<Node::Compact_flat> &synth_val,
                                              setMap_pairKey &orig_map);
-
+  void weighted_match_LoopLastOnly() ;
+  void weighted_match() ;
   template <typename T>
   std::set<T> getUnion(const std::set<T> &a, const std::set<T> &b) {
     std::set<T> result = a;
@@ -107,7 +108,7 @@ private:
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const ;
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
-  double get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;
+  float get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   absl::flat_hash_set<Node_pin::Compact_flat> crit_node_set;
