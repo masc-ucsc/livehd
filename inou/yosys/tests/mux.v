@@ -1,6 +1,4 @@
-module mux(input a, input b, input sel, output f);
-
-reg f;
+module mux(input a, input b, input sel, output reg f);
 
 always @ (sel or a or b) 
 begin:MUX
