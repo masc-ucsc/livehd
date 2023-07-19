@@ -61,13 +61,13 @@ firrtl_test() {
 		# FIXME: This should work too (the lnast.load to re-use)
 		#${LGSHELL} "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
 		#echo "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
-		#${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
-		## ${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt}"
-		#ret_val=$?
-		#if [ $ret_val -ne 0 ]; then
-		#	echo "ERROR: 2.could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
-		#	exit $ret_val
-		#fi
+		${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+		${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt}"
+		ret_val=$?
+		if [ $ret_val -ne 0 ]; then
+			echo "ERROR: 2.could not compile with pattern: ${pt}.${FIRRTL_LEVEL}.pb!"
+			exit $ret_val
+		fi
 	done #end of for
 
 	# Verilog code generation
