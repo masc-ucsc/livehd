@@ -60,7 +60,8 @@ firrtl_test() {
 		fi
 		#${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt}"
 		# FIXME: This should work too (the lnast.load to re-use)
-		#echo "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
+		${LGSHELL} "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> lnast.dump" >${pt}.lnast.raw_load.txt
+		#echo "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> lnast.dump |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
 		#${LGSHELL} "lnast.load files:hif_${pt}.${FIRRTL_LEVEL}/${pt} |> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
 		${LGSHELL} "inou.firrtl.tolnast path:lgdb_${pt} files:${PATTERN_PATH}/${pt}.${FIRRTL_LEVEL}.pb|> pass.compiler gviz:false top:${pt} firrtl:true path:lgdb_${pt} |> lgraph.save hier:true"
 		ret_val=$?
