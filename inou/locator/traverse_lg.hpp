@@ -18,16 +18,17 @@
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
 #define BASIC_DBG
-// #define EXTENSIVE_DBG
+#define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
                           // used in nl2nl match
-#define FOR_EVAL // used in orig-to-NL match
+#define FOR_EVAL // used in orig-to-NL match (just soime prints)
 
 class Traverse_lg : public Pass {
 public:
 private:
 	std::string orig_lg_name;
+  std::string synth_tool;
 	// std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat>>

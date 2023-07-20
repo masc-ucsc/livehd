@@ -19,6 +19,7 @@ void Traverse_lg::setup() {
   // m1.add_label_optional("odir", "path to print the text to", ".");
   m1.add_label_required("LGorig", "LG name of the original or pre-synth LG.");
   m1.add_label_required("LGsynth", "LG name of synthesized or post-synth LG.");
+  m1.add_label_optional("synth_tool", "if synth done via Design Compiler, then enter synth_tool:DC");
   register_pass(m1);
 }
 
@@ -27,10 +28,11 @@ Traverse_lg::Traverse_lg(const Eprp_var& var) : Pass("inou.traverse_lg", var) {}
 void Traverse_lg::travers(Eprp_var& var) {
   TRACE_EVENT("inou", "traverse_lg");
 
-  auto        lg_orig_name  = var.get("LGorig");
-  auto        lg_synth_name = var.get("LGsynth");
+  auto lg_orig_name  = var.get("LGorig");
+  auto lg_synth_name = var.get("LGsynth");
+  
   Traverse_lg p(var);
-
+  p.synth_tool    = var.get("synth_tool");
 	p.orig_lg_name = std::string(lg_orig_name);
 	// p.synth_lg_name = std::string(lg_synth_name);
 #ifdef DE_DUP
@@ -64,6 +66,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("1. p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig)//orig-boundary only\n");
   p.print_everything();
 #endif
+
   p.netpin_to_origpin_default_match(orig_lg, synth_lg);//know all the inputs and outputs match by name (known points.)
   fmt::print("\n netpin_to_origpin_default_match done.\n");
 #ifdef BASIC_DBG
@@ -76,7 +79,6 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("3. p.make_io_maps_boundary_only(synth_lg, p.inp_map_of_sets_synth, p.out_map_of_sets_synth);//synth-boundary only + matching\n");
   p.print_everything();
 #endif
-
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
   fmt::print("\n do_travers - orig done.\n");
 #ifdef BASIC_DBG
@@ -108,15 +110,17 @@ lg->dump(true);
   });
 
   for (const auto& node : lg->fast(true)) {
-    fmt::print("{}(n{})\n", node.debug_name(), node.get_nid());
-		if(node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const") {
-			auto node_sub_name = node.get_type_sub_node().get_name();
-		  fmt::print("\t\t\t\t {}\n", node_sub_name);
-		}
-    for (const auto dpin:node.out_connected_pins()) {
-      fmt::print("\t {}({})",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())), dpin.get_wire_name());
+    if(node.has_outputs()) {
+      fmt::print("{}(n{})\n", node.debug_name(), node.get_nid());
+      if(node.is_type_sub() && node.get_type_sub_node().get_name()=="__fir_const") {
+        auto node_sub_name = node.get_type_sub_node().get_name();
+        fmt::print("\t\t\t\t {}\n", node_sub_name);
+      }
+      for (const auto dpin:node.out_connected_pins()) {
+        fmt::print("\t {}({})",dpin.has_name()?dpin.get_name():(std::to_string(dpin.get_pid())), dpin.get_wire_name());
+      }
+      fmt::print("\n");
     }
-    fmt::print("\n");
   }
   fmt::print("\n---------------------------------------------------");
 }
@@ -1352,7 +1356,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets &inp_map_of_
               fmt::print("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
               #endif
             }
-            #ifdef EXTENSIVE_DBG
+            #ifdef BASIC_DBG
             else {
               fmt::print("\tNot inserting anyhting in inp_map_of_sets\n");
             }
@@ -1474,6 +1478,12 @@ void Traverse_lg::remove_pound_and_bus(std::string &dpin_name) {
   if(isdigit(dpin_name.back()) && (dpin_name[dpin_name.size() - 2]=='.')) { //for cases like pc.0
     dpin_name.erase(dpin_name.end() -2, dpin_name.end() );
   }
+  if(dpin_name.find("%")!=std::string::npos) { //for cases like registers.%io_readdata2|63
+    dpin_name.erase(dpin_name.find("%"), 1);
+  }
+  if(synth_tool == "DC" && dpin_name.find(".")!=std::string::npos) { //in case the synth tool is DC, then "." in LGorig will have to be converted to "_"
+    dpin_name[dpin_name.find(".")] = '_';
+  }
 		
 }
 
@@ -1533,6 +1543,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
   #ifdef BASIC_DBG
   print_name2dpin(name2dpin);
   #endif
+
   /*known points matching*/
   synth_lg->dump(true);//FIXME: remove this
   for (auto synth_node: synth_lg->fast(true) ) { // FIXME : do NOT use hier true here !?
@@ -1590,7 +1601,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 #endif
     }
   }
-
+  
   remove_resolved_from_orig_MoS();
 }
 
