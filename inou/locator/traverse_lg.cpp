@@ -137,14 +137,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   if (!is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);//has in-place resolution as well.
     fmt::print("\n make_io_maps - synth done.\n");
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("7.0. Printing before 1st set of resolution -- synth"); print_everything();
-#endif
+    #endif
     resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("7. printing before matching starts (after 1st resolution) -- synth"); print_everything();
-#endif
+    #endif
     /* everything in sets of synth_MoS must have been resolved to some orig lg reference.
        If not then need to know and debug.
        Hence this assertion: */
@@ -167,22 +167,22 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       /*all required matching done*/
       report_critical_matches_with_color();
     } 
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("8. before resolution + matching while loop starts -- synth"); print_everything();
-#endif
+    #endif
 
     while (change_done && !crit_node_set.empty() && !flop_set.empty()) {// for flop only as matching flop first 
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);//alters crit_node_set too
       fmt::print("\n complete_io_match - synth - flop only (inside while) done.\n");
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
 	    fmt::print("Change done = {}\n", change_done);
-#endif
+      #endif
     }
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("6. Printing after all the flop resolution and matching!"); print_everything();
-#endif
+    #endif
    
     if (!flop_set.empty()) {
       weighted_match_LoopLastOnly(); // crit_entries_only=f, loopLast_only=t
@@ -2239,7 +2239,7 @@ void Traverse_lg::set_theory_match_final() {
   #endif
 }
 
-void Traverse_lg::weighted_match_LoopLastOnly() {//FIXME: no return needed!?
+void Traverse_lg::weighted_match_LoopLastOnly() {
   #ifdef BASIC_DBG
     fmt::print("In weighted_match_LoopLastOnly:\n\n");
   #endif
