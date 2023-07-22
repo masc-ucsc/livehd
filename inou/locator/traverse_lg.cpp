@@ -1515,6 +1515,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
   /* map to capture all possible dpin names in the hierarchy*/ //TODO with instance name API
 	absl::flat_hash_map<std::string, Node_pin::Compact_flat> name2dpin;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> name2dpins; 
   orig_lg->dump(true);
 	for (const auto &original_node: orig_lg->fast(true) ) {
     if(original_node.is_type_sub() && original_node.get_type_sub_node().get_name()=="__fir_const"){
@@ -1527,21 +1528,33 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
         #endif
         auto original_node_dpin_wire = original_node_dpin.get_wire_name();
         remove_pound_and_bus(original_node_dpin_wire);
-        #ifdef BASIC_DBG
-        if(name2dpin.find(original_node_dpin_wire)!=name2dpin.end()) {
-          fmt::print("WARNING: overwriting!\n");
+
+        if(original_node_dpin_wire.find('|')!=std::string::npos){// if original_node_dpin_wire has "|"
+          /* In case of buses like reg|2, reg|3, reg|7; all will have "reg"key for diff values.*/
+          original_node_dpin_wire.erase(original_node_dpin_wire.find('|'), original_node_dpin_wire.length());
+          name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
+          #ifdef BASIC_DBG
+          fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
+          #endif
+        } else {
+          #ifdef BASIC_DBG
+          if(name2dpin.find(original_node_dpin_wire)!=name2dpin.end()) {
+            fmt::print("WARNING: overwriting!\n");
+          }
+          #endif
+          name2dpin[original_node_dpin_wire]=original_node_dpin.get_compact_flat();
+
+          #ifdef BASIC_DBG
+          fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
+          #endif
         }
-        #endif
-        name2dpin[original_node_dpin_wire]=original_node_dpin.get_compact_flat();
-        #ifdef BASIC_DBG
-        fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
-        #endif
       }
     }
 	}
   
   #ifdef BASIC_DBG
   print_name2dpin(name2dpin);
+  print_name2dpins(name2dpins);
   #endif
 
   /*known points matching*/
@@ -1554,18 +1567,18 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
 
     for (const auto synth_node_dpin: synth_node.out_connected_pins()) {//might be multi driver node      
       if(synth_node_dpin.has_name()) {
-#ifdef BASIC_DBG
+        #ifdef BASIC_DBG
         fmt::print("synth_node_dpin_name: {}\n", synth_node_dpin.get_name());
-#endif
+        #endif
         /*see if the name matches to any in original LG.
          * if module gets instantiated in 2 places, find_driver_pin won't work with fast(true); as in who it points to - with same name - you don't know.
          * you have to provide for what LG you are trying to find this thing. get the current graph using get_class_lgraph . so instead of orig_lg, use synth_node.get_class_lgraph().get_name -- find equivalent orig for this guy!
          * */
         auto synth_node_dpin_wire = synth_node_dpin.get_wire_name();
-#ifdef BASIC_DBG
+        #ifdef BASIC_DBG
         // fmt::print("\t\tFinding dpin for orig_sub_lg_name {}\n", orig_sub_lg->get_name());
 				fmt::print("\t**  synth_node_dpin_wire {}  -->  ",synth_node_dpin_wire);
-#endif
+        #endif
         // auto orig_node_dpin = Node_pin::find_driver_pin( orig_sub_lg , synth_node_dpin_name);//orig LG with same name as that of synth node
         auto map_it = name2dpin.find(synth_node_dpin_wire);
         if ( map_it == name2dpin.end()) {
@@ -1575,15 +1588,15 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
           remove_pound_and_bus(synth_node_dpin_wire);
         } 
         auto map_itt = name2dpin.find(synth_node_dpin_wire);
-#ifdef BASIC_DBG
+        #ifdef BASIC_DBG
 				fmt::print(" {}  .**\n",synth_node_dpin_wire);
-#endif
+        #endif
         if ( map_itt != name2dpin.end() )  {
-#ifdef BASIC_DBG
+          #ifdef BASIC_DBG
           auto orig_node_dpin = Node_pin("lgdb", map_itt->second);
           fmt::print("\t\tFound orig_node_dpin {}\n", orig_node_dpin.has_name()?orig_node_dpin.get_name():std::to_string(orig_node_dpin.get_pid()));
           fmt::print("\tDEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
-#endif
+          #endif
           net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert(map_itt->second);
           #ifdef FOR_EVAL
           auto orig_node_dpin1 = Node_pin("lgdb", map_itt->second);
@@ -1592,13 +1605,37 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth
           remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
           out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
           inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+        } else if (name2dpins.find(synth_node_dpin_wire) != name2dpins.end() ) {
+          /* map_itt was not found in name2dpin; maybe it can be found in name2dpins instead. If so then use this!*/
+          auto map_itt_s = name2dpins.find(synth_node_dpin_wire);
+          #ifdef BASIC_DBG
+          fmt::print("\t\tFound orig_node_dpin");
+          for (const auto &orig_node_dpin_cf: map_itt_s->second) {
+            auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
+            fmt::print("  {}  ", orig_node_dpin.has_name()?orig_node_dpin.get_name():std::to_string(orig_node_dpin.get_pid()));
+          }
+          fmt::print("\n");
+          fmt::print("\tDEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+          #endif
+          net_to_orig_pin_match_map[ synth_node_dpin.get_compact_flat() ].insert((map_itt_s->second).begin(), (map_itt_s->second).end());
+          #ifdef FOR_EVAL
+          fmt::print("Inserting in netpin_to_origpin_default_match s : {}  ",synth_node_dpin.has_name()?synth_node_dpin.get_name():("n"+std::to_string(synth_node_dpin.get_node().get_nid())));
+          for(const auto &orig_node_dpin1_cf: (map_itt_s)->second) {
+            auto orig_node_dpin1 = Node_pin("lgdb", orig_node_dpin1_cf);
+            fmt::print("  {}  ",  orig_node_dpin1.has_name()?orig_node_dpin1.get_name():("n"+std::to_string(orig_node_dpin1.get_node().get_nid())));
+          }
+          fmt::print("\n");
+          #endif
+          remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+          out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+          inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
         }
       }
-#ifdef EXTENSIVE_DBG
+      #ifdef EXTENSIVE_DBG
       else {
         fmt::print("IN DEFAULT MATCH: dpin not named for {}\n", synth_node_dpin.get_wire_name() );
       }
-#endif
+      #endif
     }
   }
   
@@ -2758,7 +2795,17 @@ void Traverse_lg::print_name2dpin (const absl::flat_hash_map<std::string, Node_p
     fmt::print("\t\t {} -:- {},n{}\n", str, p.get_wire_name(),p.get_node().get_nid());
   }
 }
-
+ void Traverse_lg::print_name2dpins(const absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> &name2dpins) const {
+  fmt::print("\n Printing name2dpins \n");
+  for (const auto & [str, node_pin_cfs] : name2dpins) {
+    fmt::print("\t\t {} -:- ", str);
+    for (const auto & node_pin_cf : node_pin_cfs) {
+      auto p = Node_pin("lgdb", node_pin_cf);
+      fmt::print(" {},n{}\t\t", p.get_wire_name(),p.get_node().get_nid());
+    }
+    fmt::print("\n");
+  }
+ }
 void Traverse_lg::print_io_map(
     const Traverse_lg::map_of_sets &the_map_of_sets) const {
   for (const auto& [node_pin_cf, set_pins_cf] : the_map_of_sets) {

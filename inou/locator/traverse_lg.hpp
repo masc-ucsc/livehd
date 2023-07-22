@@ -18,7 +18,7 @@
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
 #define BASIC_DBG
-#define EXTENSIVE_DBG
+// #define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
                           // used in nl2nl match
@@ -92,6 +92,7 @@ private:
   void                                make_io_maps_boundary_only(Lgraph *lg, map_of_sets &inp_map_of_sets, map_of_sets &out_map_of_sets, bool is_orig_lg );
   void print_io_map( const map_of_sets &the_map_of_sets) const;
   void print_name2dpin(const absl::flat_hash_map<std::string, Node_pin::Compact_flat> &name2dpin) const;
+  void print_name2dpins(const absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> &name2dpins) const;
   void netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
