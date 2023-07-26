@@ -17,7 +17,7 @@
 #include "pass.hpp"
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
-#define BASIC_DBG
+// #define BASIC_DBG
 // #define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
@@ -109,6 +109,7 @@ private:
   /* If you are making io union for synth MoS for combinational matching, then why not make the union of only crit nodes' dpins from the synth MoS. We need not resolve other synth MoS entries and thus need not make union for them*/
   map_of_sets make_in_out_union(const map_of_sets &inp_map_of_sets, const  map_of_sets &out_map_of_sets, bool loop_last_only, bool union_of_crit_entries_only) const ;
   map_of_sets convert_io_MoS_to_node_MoS_LLonly(const map_of_sets &io_map_of_sets);
+  map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets);
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
   float get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;

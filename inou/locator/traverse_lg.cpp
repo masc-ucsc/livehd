@@ -2266,6 +2266,30 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   return node_map_of_set_LoopLastOnly;
 }
 
+Traverse_lg::map_of_sets Traverse_lg::obtain_MoS_LLonly(const map_of_sets &io_map_of_sets) {
+  #ifdef BASIC_DBG
+    fmt::print("obtain_MoS_LLonly:  MoS with LoopLast only nodes.");
+  #endif
+
+  Traverse_lg::map_of_sets map_of_set_LoopLastOnly;
+  for ( const auto &[node_key, io_vals_set]: io_map_of_sets) {
+
+    /*if(loop_last_only):for only those keys that are is_type_loop_last*/
+    auto node = Node_pin("lgdb", node_key).get_node();
+    if ( node.is_type_loop_last()  ) { //flop node should be matched with flop node only! else datatype mismatch!
+      //we need flop nodes only in this case 
+      map_of_set_LoopLastOnly.insert({node_key,io_vals_set});
+    }
+  
+  }
+
+  #ifdef BASIC_DBG
+    fmt::print("\n Printing map_of_set_LoopLastOnly \n"); 
+    print_io_map(map_of_set_LoopLastOnly);
+  #endif
+
+  return map_of_set_LoopLastOnly;
+}
 
 void Traverse_lg::weighted_match_LoopLastOnly() {
   #ifdef BASIC_DBG
@@ -2277,19 +2301,24 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
    * map : |input | <nodes (flop only)>    | */
   Traverse_lg::map_of_sets inp_map_of_node_sets_orig = convert_io_MoS_to_node_MoS_LLonly(inp_map_of_sets_orig);
   
-  for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
-    const auto &synth_key = it->first;
-    const auto &synth_set = it->second;
+  Traverse_lg::map_of_sets inp_map_of_sets_synth_LLonlly = obtain_MoS_LLonly(inp_map_of_sets_synth);
+  // for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
+  for (const auto &[node_ll, node_io]: inp_map_of_sets_synth_LLonlly) {
+    // const auto &synth_key = it->first;
+    // const auto &synth_set = it->second;
+    const auto &synth_key = (inp_map_of_sets_synth.find(node_ll))->first;
+    const auto &synth_set = (inp_map_of_sets_synth.find(node_ll))->second;
+
     /*if(loop_last_only):for only those keys that are is_type_loop_last
       time complexity with loop_last_only will be num_of_flops-synth into num_of_flops-orig
       otherwise, time complexity will be num_of_combi-synth into num_of_combi-orig*/
-    auto node_s = Node_pin("lgdb", synth_key).get_node();
-    if ( !node_s.is_type_loop_last() ) {
-      #ifdef BASIC_DBG
-        fmt::print("\t\t continuing due to datatype mismatch in loop_last_only (node is looplast:{}) \n",node_s.is_type_loop_last());
-      #endif
-      continue; //flop node should be matched with flop node only! else datatype mismatch!
-    }
+    // auto node_s = Node_pin("lgdb", synth_key).get_node();
+    // if ( !node_s.is_type_loop_last() ) {
+    //   #ifdef BASIC_DBG
+    //     fmt::print("\t\t continuing due to datatype mismatch in loop_last_only (node is looplast:{}) \n",node_s.is_type_loop_last());
+    //   #endif
+    //   continue; //flop node should be matched with flop node only! else datatype mismatch!
+    // }
 
     /* which orig_MoS entries do we need to match it with?
      * I want those flop nodes only which has atleast 1 input matching with this synth_set.
@@ -2362,10 +2391,12 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
       if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
       remove_from_crit_node_set(synth_key);
       out_map_of_sets_synth.erase(synth_key);
-      inp_map_of_sets_synth.erase(it++);
-    } else {
-      it++;
-    }
+      // inp_map_of_sets_synth.erase(it++);
+      inp_map_of_sets_synth.erase(synth_key);
+    } 
+    // else {
+    //   it++;
+    // }
   }
 }
 
