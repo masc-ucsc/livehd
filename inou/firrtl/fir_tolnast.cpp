@@ -3089,7 +3089,7 @@ void Inou_firrtl::populate_all_modules_io(Eprp_var& var, const firrtl::FirrtlPB_
       });
 
     } else if (circuit.module(i).has_external_module()) {
-      Pass::error("ext_module have not implemented");
+      Pass::error("ext_module have not implemented: {}", circuit.module(i).external_module().defined_name());
     } else {
       Pass::error("Module not set.");
     }
