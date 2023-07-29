@@ -2523,12 +2523,18 @@ void Cprop::do_trans(Lgraph *lg) {
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
     ctx.event()->set_name(absl::StrCat(converted_str , lg->get_name()));
-  });
+  });get_name
 
-  scalar_pass(lg);
+#ifndef NDEBUG
+  Pass::warn("Warning: commented \"scalar_pass(lg)\" to enable RocketTile LG generation.");
+#endif
+  //scalar_pass(lg);
   tuple_pass(lg);
   if (tuple_found && !tuple_issues) {
-    scalar_pass(lg);
+#ifndef NDEBUG
+    Pass::warn("Warning: commented \"scalar_pass(lg)\" to enable RocketTile LG generation.");
+#endif
+    //scalar_pass(lg);
     tuple_pass(lg);
   }
 }

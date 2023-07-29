@@ -245,7 +245,13 @@ void Inou_firrtl_module::handle_rhs_runtime_idx(Lnast& lnast, Lnast_nid& parent_
 uint16_t Inou_firrtl_module::get_vector_size(const Lnast& lnast, std::string_view vec_name) {
   if (var2vec_size.find(vec_name) == var2vec_size.end()) {
     auto module_name = lnast.get_top_module_name();
-    I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
+#ifndef NDEBUG
+    Pass::warn("Warning: the \"if\" statement below is to enable RocketTile LG generation. Remove the if block and use the assertion above it instead.\n");
+#endif
+    //I(Inou_firrtl::glob_info.module_var2vec_size.find(module_name) != Inou_firrtl::glob_info.module_var2vec_size.end());
+    if (Inou_firrtl::glob_info.module_var2vec_size.find(module_name) == Inou_firrtl::glob_info.module_var2vec_size.end()) {
+      return 1;
+    }
     auto& io_var2vec_size = Inou_firrtl::glob_info.module_var2vec_size[module_name];
 
     // I(io_var2vec_size.find(vec_name) != io_var2vec_size.end());
@@ -2785,8 +2791,11 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     default:
-      Pass::error("Unknown statement type: {}", (int)stmt.statement_case());
-      I(false);
+#ifndef
+      Pass::warn("Warning: commented \"I(false)\" to enable RocketTile LG generation.");
+#endif
+      Pass::warn("Unknown statement type: {}, at line {} in file {}", (int)stmt.statement_case(), line_pos, fname);
+      //I(false);
       return;
   }
   // TODO: Attach source info into node creation (line #, col #).
@@ -3089,7 +3098,7 @@ void Inou_firrtl::populate_all_modules_io(Eprp_var& var, const firrtl::FirrtlPB_
       });
 
     } else if (circuit.module(i).has_external_module()) {
-      Pass::error("ext_module have not implemented: {}", circuit.module(i).external_module().defined_name());
+      Pass::warn("ext_module have not implemented: {}", circuit.module(i).external_module().defined_name());
     } else {
       Pass::error("Module not set.");
     }

@@ -1227,6 +1227,10 @@ Node_pin Lnast_tolg::setup_ref_node_dpin(Lgraph *lg, const Lnast_nid &lnidx_opd,
   } else if (is_bool_false(name)) {
     node_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
   } else {
+#ifndef NDEBUG
+    Pass::warn("node_dpin creation added in this \"else\" to enable RocketTile LG generation.");
+#endif
+    node_dpin = lg->create_node_const(Lconst(0)).setup_driver_pin();
     return node_dpin;  // return empty node_pin and trigger compile error
   }
 
