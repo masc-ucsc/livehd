@@ -150,14 +150,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
        Hence this assertion: */
     for (const auto & [k,v_set]: inp_map_of_sets_synth) {
       for (const auto & v : v_set) {
-        auto lg_name = Node_pin("lgdb", v).get_node().get_class_lgraph()->get_name();
-        I(lg_name==orig_lg_name,"\n\n inp-synth-set has some unresolved entry???\n\n ");
+        auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
+        fmt::print("\n\n{}=={}\n\n",lg_name,orig_lg_name);
+        I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n inp-synth-set has some unresolved entry???\n\n ");
       }
     }
     for (const auto & [k,v_set]: out_map_of_sets_synth) {
       for (const auto & v : v_set) {
-        auto lg_name = Node_pin("lgdb", v).get_node().get_class_lgraph()->get_name();
-        I(lg_name==orig_lg_name,"\n\n out-synth-set has some unresolved entry???\n\n ");
+        auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
+        I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n out-synth-set has some unresolved entry???\n\n ");
       }
     }
 
@@ -2148,6 +2149,9 @@ void Traverse_lg::report_critical_matches_with_color(){
 }
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synth_map_of_set){
+#ifdef EXTENSIVE_DBG
+  fmt::print("\n In resolution_of_synth_map_of_sets:\n");
+#endif
   for(auto &[synth_np, synth_set_np]:synth_map_of_set){
     //auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
     //fmt::print("------{} ({})\n",xx, synth_set_np.size());
@@ -2155,11 +2159,20 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets &synt
     for(auto it = synth_set_np.begin(); it!=synth_set_np.end();){
       const auto set_np_val = *it;
       if(net_to_orig_pin_match_map.find(set_np_val)!=net_to_orig_pin_match_map.end()){
+#ifdef EXTENSIVE_DBG
+        fmt::print("Found match \n");
+#endif
         synth_set_np.erase(it++);
         //FIXME: add erase from orig Maps here also?
         auto equiv_val = net_to_orig_pin_match_map[set_np_val];
         tmp_set.insert(equiv_val.begin(),equiv_val.end());
-      } else ++it;
+      } else {
+#ifdef EXTENSIVE_DBG
+        auto snv = Node_pin("lgdb", set_np_val);
+        fmt::print("Tried finding {},n{},p{}({}) in mm \n",snv.has_name()?snv.get_name():("n"+std::to_string(snv.get_node().get_nid())), snv.get_node().get_nid(), snv.get_pid(), snv.get_top_lgraph()->get_name() );
+#endif
+        ++it;
+      }
     }
     synth_set_np.insert(tmp_set.begin(), tmp_set.end());
   }
@@ -2447,12 +2460,16 @@ void Traverse_lg::weighted_match() {//only for the crit_node_entries remaining!
       #endif
       forced_match_vec.emplace_back(synth_key);
       if(flop_set.find(synth_key)!=flop_set.end()) { flop_set.erase(synth_key); }
-      remove_from_crit_node_set(synth_key);
+      //remove_from_crit_node_set(synth_key); // might lead to the error:
+                                              // && \"operator++ called on invalid iterator.\""' failed.
       out_map_of_sets_synth.erase(synth_key);
       inp_map_of_sets_synth.erase(synth_key);
     } else {
       fmt::print("In weighted_match -- unexpected entry to else...Is it a no match whatsoever??");
     }
+  }
+  for (const auto &np:forced_match_vec) {
+    remove_from_crit_node_set(np);
   }
 
 }
@@ -2901,9 +2918,9 @@ void Traverse_lg::print_io_map(
     #ifndef FULL_RUN_FOR_EVAL
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
     if (p.has_name()) {
-      fmt::print("{},n{},{} \t::: ", /*n.get_or_create_name(),*/ p.get_name(),n.get_nid(), p.get_pid());
+      fmt::print("{},n{},{}({}) \t::: ", /*n.get_or_create_name(),*/ p.get_name(),n.get_nid(), p.get_pid(),p.get_top_lgraph()->get_name());
     } else {
-      fmt::print("n{},{} \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid());
+      fmt::print("n{},{}({}) \t::: ", /*n.get_or_create_name(),*/ n.get_nid(), p.get_pid(),p.get_top_lgraph()->get_name());
     }
     #else
     if (p.has_name()) {
@@ -2915,9 +2932,9 @@ void Traverse_lg::print_io_map(
       #ifndef FULL_RUN_FOR_EVAL
       auto       n_s = Node_pin("lgdb", pin_cf).get_node();
       if (pin.has_name()) {
-        fmt::print("{},n{},{} \t",/* n_s.get_or_create_name(),*/ pin.get_name(),n_s.get_nid(), pin.get_pid());
+        fmt::print("{},n{},{}({}) \t",/* n_s.get_or_create_name(),*/ pin.get_name(),n_s.get_nid(), pin.get_pid(), pin.get_top_lgraph()->get_name());
       } else {
-        fmt::print("n{},{} \t",/* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid());
+        fmt::print("n{},{}({}) \t",/* n_s.get_or_create_name(),*/ n_s.get_nid(), pin.get_pid(), pin.get_top_lgraph()->get_name());
       }
       #else
       if (pin.has_name()) {

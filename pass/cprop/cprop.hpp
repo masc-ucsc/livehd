@@ -86,7 +86,7 @@ protected:
 
   std::tuple<std::string, std::string> get_tuple_name_key(const Node &node) const;
 
-  void scalar_pass(Lgraph *orig);
+  void scalar_pass(Lgraph *orig, bool tup_pass_only = false);
   void tuple_pass(Lgraph *orig);
   void clean_io(Lgraph *orig);
 

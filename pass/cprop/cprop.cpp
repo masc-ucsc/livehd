@@ -2255,7 +2255,7 @@ bool Cprop::scalar_get_mask(Node &node) {
   return false;
 }
 
-void Cprop::scalar_pass(Lgraph *lg) {
+void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
   tuple_found = false;
 
   for (auto node : lg->forward()) {
@@ -2301,17 +2301,19 @@ void Cprop::scalar_pass(Lgraph *lg) {
       continue;
     }
 
-    auto replaced_some = try_constant_prop(node, inp_edges_ordered);
+    if (!tup_pass_only) {
+      auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
-    if (node.is_invalid()) {
-      continue;  // It got deleted
+      if (node.is_invalid()) {
+        continue;  // It got deleted
+      }
+
+      if (replaced_some) {
+        inp_edges_ordered = node.inp_edges_ordered();
+      }
+
+      try_collapse_forward(node, inp_edges_ordered);
     }
-
-    if (replaced_some) {
-      inp_edges_ordered = node.inp_edges_ordered();
-    }
-
-    try_collapse_forward(node, inp_edges_ordered);
   }
 }
 
@@ -2525,14 +2527,10 @@ void Cprop::do_trans(Lgraph *lg, bool tup_pass_only) {
     ctx.event()->set_name(absl::StrCat(converted_str , lg->get_name()));
   });
 
-  if(!tup_pass_only) {
-    scalar_pass(lg);
-  }
+  scalar_pass(lg, tup_pass_only);
   tuple_pass(lg);
   if (tuple_found && !tuple_issues) {
-    if(!tup_pass_only) {
-      scalar_pass(lg);
-    }
+    scalar_pass(lg, tup_pass_only);
     tuple_pass(lg);
   }
 }
