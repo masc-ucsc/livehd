@@ -379,7 +379,7 @@ Elab_scanner::Elab_scanner() {
   setup_translate();
   max_errors   = 1;
 #ifndef NDEBUG
-  Pass::warn("Warning:max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.");
+  fmt::print("\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n");
 #endif
   max_warnings = 10240;
   n_errors     = 0;

@@ -46,7 +46,7 @@ public:
   void prp_thread_ln2lg(const std::shared_ptr<Lnast> &lnast);
 
   void do_fir_lnast2lgraph(std::vector<std::shared_ptr<Lnast>> &);
-  void do_fir_cprop();
+  void do_fir_cprop(bool tup_pass_only = false);
   void do_fir_firbits();
   void do_fir_firmap_bitwidth();
   void fir_thread_cprop(Lgraph *lg);

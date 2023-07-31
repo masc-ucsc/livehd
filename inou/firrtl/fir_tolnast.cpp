@@ -2791,7 +2791,7 @@ void Inou_firrtl_module::list_statement_info(Lnast& lnast, const firrtl::FirrtlP
       break;
     }
     default:
-#ifndef
+#ifndef NDEBUG
       Pass::warn("Warning: commented \"I(false)\" to enable RocketTile LG generation.");
 #endif
       Pass::warn("Unknown statement type: {}, at line {} in file {}", (int)stmt.statement_case(), line_pos, fname);

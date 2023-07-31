@@ -2518,23 +2518,21 @@ void Cprop::clean_io(Lgraph *lg) {
   });
 }
 
-void Cprop::do_trans(Lgraph *lg) {
+void Cprop::do_trans(Lgraph *lg, bool tup_pass_only) {
   // note: tricks to make perfetto display different color on sub-modules
   TRACE_EVENT("pass", nullptr, [&lg](perfetto::EventContext ctx) {
     std::string converted_str{(char)('A' + (trace_module_cnt++ % 25))};
     ctx.event()->set_name(absl::StrCat(converted_str , lg->get_name()));
-  });get_name
+  });
 
-#ifndef NDEBUG
-  Pass::warn("Warning: commented \"scalar_pass(lg)\" to enable RocketTile LG generation.");
-#endif
-  //scalar_pass(lg);
+  if(!tup_pass_only) {
+    scalar_pass(lg);
+  }
   tuple_pass(lg);
   if (tuple_found && !tuple_issues) {
-#ifndef NDEBUG
-    Pass::warn("Warning: commented \"scalar_pass(lg)\" to enable RocketTile LG generation.");
-#endif
-    //scalar_pass(lg);
+    if(!tup_pass_only) {
+      scalar_pass(lg);
+    }
     tuple_pass(lg);
   }
 }

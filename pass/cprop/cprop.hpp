@@ -95,6 +95,6 @@ public:
 
   void dump_node2tuples() const;
 
-  void do_trans(Lgraph *orig);
+  void do_trans(Lgraph *orig, bool tup_pass_only = false);
   bool has_tuple_issues() const { return tuple_issues; }
 };

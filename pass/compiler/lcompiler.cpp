@@ -166,7 +166,7 @@ void Lcompiler::fir_thread_ln2lg(const std::shared_ptr<Lnast> &ln) {
   // fmt::print("Yo2 {}, mod_name:{}\n", (tp2-tp).count(), mod_name);
 }
 
-void Lcompiler::do_fir_cprop() {
+void Lcompiler::do_fir_cprop(bool tup_pass_only) {
   TRACE_EVENT("pass", "cprop");
 
   auto lgcnt                   = 0;
@@ -178,10 +178,10 @@ void Lcompiler::do_fir_cprop() {
     ++lgcnt;
     if (lg->get_name() == top_name_before_mapping) {
       hit = true;
-      lg->each_hier_unique_sub_bottom_up_parallel2([this](Lgraph *lg_sub) {
+      lg->each_hier_unique_sub_bottom_up_parallel2([this, tup_pass_only](Lgraph *lg_sub) {
         Cprop cp(false);
 
-        cp.do_trans(lg_sub);
+        cp.do_trans(lg_sub, tup_pass_only);
         gviz == true ? gv.do_from_lgraph(lg_sub, "cprop-ed") : void();
       });
       break;
