@@ -217,7 +217,7 @@ void LGtoYJson::import_io_ports(Lgraph* lg, yjson::Module* module) {
   // add aliases for newly created output wires
   auto internal_out_edges = lg->get_graph_output_node().inp_edges();
   for (auto& out_edge : internal_out_edges) {
-    module->add_wire_alias(out_edge.driver.get_wire_name(), out_edge.sink.get_name());
+    module->add_wire_alias(out_edge.driver.get_wire_name(), out_edge.sink.get_wire_name());
   }
 }
 

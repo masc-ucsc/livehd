@@ -129,9 +129,9 @@ http_archive(
 http_archive(
     name = "hif",
     # sha256 = "9eee32fcb0ec4bbe9ed945de55c7161e294e76958af2461c8544ea5c1e484d02",
-    strip_prefix = "hif-aef1cb9b1b72ad6a0edd58685c657f6eafef7446",
+    strip_prefix = "hif-1dce9ab63a13fb93285dedce58e93010d0c4db66",
     urls = [
-        "https://github.com/masc-ucsc/hif/archive/aef1cb9b1b72ad6a0edd58685c657f6eafef7446.zip",
+        "https://github.com/masc-ucsc/hif/archive/1dce9ab63a13fb93285dedce58e93010d0c4db66.zip",
     ],
 )
 
