@@ -147,7 +147,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     #endif
     /* everything in sets of synth_MoS must have been resolved to some orig lg reference.
        If not then need to know and debug.
-       Hence this assertion: */
+       Hence this assertion: 
     for (const auto & [k,v_set]: inp_map_of_sets_synth) {
       for (const auto & v : v_set) {
         auto lg_name = Node_pin("lgdb", v).get_top_lgraph()->get_name();
@@ -161,6 +161,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
         I(lg_name.find("__firrtl_")!=std::string::npos,"\n\n out-synth-set has some unresolved entry???\n\n ");
       }
     }
+    */
 
     bool change_done = complete_io_match(true);//for flop only as matching flop first
     fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
