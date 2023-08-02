@@ -1492,32 +1492,84 @@ void Traverse_lg::remove_pound_and_bus(std::string &dpin_name) {
 void Traverse_lg::netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg) {
   
   /*keep top graph IO as well on the net_to_orig_pin_match_map */
-  orig_lg->each_graph_input([synth_lg, this](const Node_pin dpin) {
-    auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
-    net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
-    #ifdef FOR_EVAL
-    fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",synth_node_dpin.has_name()?synth_node_dpin.get_name():("n"+std::to_string(synth_node_dpin.get_node().get_nid())),  dpin.has_name()?dpin.get_name():("n"+std::to_string(dpin.get_node().get_nid())));
-    #endif
-#ifdef EXTENSIVE_DBG
-    fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
-#endif
-    remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
-  });
-  orig_lg->each_graph_output([synth_lg, this](const Node_pin dpin) {
-    auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
-    net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
-    #ifdef FOR_EVAL
-    fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",synth_node_dpin.has_name()?synth_node_dpin.get_name():("n"+std::to_string(synth_node_dpin.get_node().get_nid())),  dpin.has_name()?dpin.get_name():("n"+std::to_string(dpin.get_node().get_nid())));
-    #endif
-#ifdef EXTENSIVE_DBG
-    fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
-#endif
-    remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
-  });
+  // orig_lg->each_graph_input([synth_lg, this](const Node_pin dpin) {
+  //   auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
+  //   net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+  //   #ifdef FOR_EVAL
+  //   fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",synth_node_dpin.has_name()?synth_node_dpin.get_name():("n"+std::to_string(synth_node_dpin.get_node().get_nid())),  dpin.has_name()?dpin.get_name():("n"+std::to_string(dpin.get_node().get_nid())));
+  //   #endif
+  // #ifdef EXTENSIVE_DBG
+  //   fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+  // #endif
+  //   remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+  // });
 
   /* map to capture all possible dpin names in the hierarchy*/ //TODO with instance name API
 	absl::flat_hash_map<std::string, Node_pin::Compact_flat> name2dpin;
   absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> name2dpins; 
+
+  orig_lg->each_graph_input([&name2dpin, this] (const Node_pin &dpin) {
+      auto orig_in_dpin_name = dpin.get_name();
+      name2dpin[orig_in_dpin_name]=dpin.get_compact_flat();
+      #ifdef FOR_EVAL
+        fmt::print("Inserting orig-in-dpin {} in name2dpin\n", orig_in_dpin_name);
+      #endif
+  });
+  synth_lg->each_graph_input([&name2dpin, this] (const Node_pin &dpin) {
+      auto synth_in_dpin_name = dpin.get_name();
+      if( name2dpin.find(synth_in_dpin_name)!=name2dpin.end()){
+        net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_in_dpin_name)->second);
+        #ifdef FOR_EVAL
+          fmt::print("DEFAULT INSERTION OF: {}, {}\n", dpin.has_name()?dpin.get_name():std::to_string(dpin.get_pid()), std::to_string(dpin.get_pid()) );
+        #endif
+        remove_from_crit_node_set(dpin.get_compact_flat());
+      } 
+      #ifdef FOR_EVAL
+        else {
+        fmt::print("NOT inserting {}, {}\n", dpin.has_name()?dpin.get_name():std::to_string(dpin.get_pid()), std::to_string(dpin.get_pid()));
+      }
+      #endif
+  });
+
+  #ifdef FOR_EVAL
+  fmt::print("\n OUT:\n");
+  #endif
+  orig_lg->each_graph_output([&name2dpin, this] (const Node_pin &dpin) {
+      auto orig_out_dpin_name = dpin.get_name();
+      name2dpin[orig_out_dpin_name]=dpin.get_compact_flat();
+      #ifdef FOR_EVAL
+      fmt::print("Inserting orig-out-dpin {} in name2dpin\n", dpin.get_name());
+      #endif
+  });
+  synth_lg->each_graph_output([&name2dpin, this] (const Node_pin &dpin) {
+      auto synth_out_dpin_name = dpin.get_name();
+      if( name2dpin.find(synth_out_dpin_name)!=name2dpin.end()){
+        net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_out_dpin_name)->second);
+        #ifdef FOR_EVAL
+        fmt::print("DEFAULT INSERTION OF: {}, {}\n", dpin.has_name()?dpin.get_name():std::to_string(dpin.get_pid()), std::to_string(dpin.get_pid()) );
+        #endif
+        remove_from_crit_node_set(dpin.get_compact_flat());
+      }
+      #ifdef FOR_EVAL
+      else {
+        fmt::print("NOT inserting {}, {}\n", dpin.has_name()?dpin.get_name():std::to_string(dpin.get_pid()), std::to_string(dpin.get_pid()));
+      }
+      #endif
+  });
+
+  // orig_lg->each_graph_output([synth_lg, this](const Node_pin dpin) {
+  //   auto synth_node_dpin = Node_pin::find_driver_pin( synth_lg , dpin.get_name() );//synth LG with same name as that of orig node
+  //   net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(dpin.get_compact_flat());
+  //   #ifdef FOR_EVAL
+  //   fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",synth_node_dpin.has_name()?synth_node_dpin.get_name():("n"+std::to_string(synth_node_dpin.get_node().get_nid())),  dpin.has_name()?dpin.get_name():("n"+std::to_string(dpin.get_node().get_nid())));
+  //   #endif
+  //   #ifdef EXTENSIVE_DBG
+  //     fmt::print("DEFAULT INSERTION OF: {}, {}\n", synth_node_dpin.has_name()?synth_node_dpin.get_name():std::to_string(synth_node_dpin.get_pid()), std::to_string(synth_node_dpin.get_pid()) );
+  //   #endif
+  //   remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+  // });
+
+
   orig_lg->dump(true);
 	for (const auto &original_node: orig_lg->fast(true) ) {
     if(original_node.is_type_sub() && original_node.get_type_sub_node().get_name()=="__fir_const"){
