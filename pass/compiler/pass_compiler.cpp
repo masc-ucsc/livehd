@@ -72,7 +72,7 @@ void Pass_compiler::pyrope_compilation(Eprp_var &var, Lcompiler &compiler) {
 void Pass_compiler::firrtl_compilation(Eprp_var &var, Lcompiler &compiler, bool &only_tup_cprop) {
   (void)only_tup_cprop;
   compiler.do_fir_lnast2lgraph(var.lnasts);
-  compiler.do_fir_cprop(only_tup_cprop);
+	compiler.do_fir_cprop(only_tup_cprop);
   if (!only_tup_cprop) {
     compiler.do_fir_firbits();
     compiler.do_fir_firmap_bitwidth();
