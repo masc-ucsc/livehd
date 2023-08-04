@@ -1,5 +1,42 @@
 #!/bin/bash
 
+
+random_line_selector_for_RocketTile() {
+  echo ""
+echo "*********************************"
+echo "Running random_line_selector_for_RocketTile (hardcoded for RocketTile)"
+echo "************"
+echo ""
+mkdir eval_files_tmp_RT
+cd ../rocket-chip/src/main/scala/
+#get chisel assignments from all .scala files 
+grep -rHEn " := |===|=/=" * | grep ".scala" > all_grepped.log
+mv all_grepped.log ../../../../livehd/eval_files_tmp_RT/.
+#get the list of scala files used from original verilog
+cd ../../../vsim/generated-src-asicNfpga-mada0/
+grep ".scala" freechips.rocketchip.system.DefaultConfig.v > ../../../livehd/eval_files_tmp_RT/src_file_list_from_orig_ver.txt
+cd ../../../livehd/eval_files_tmp_RT/
+#manually did:    :v:\/\/ @\[:d
+#                 :g:Monitor.scala:d
+#                 :%s:.*src/main/scala/\(.[^ ]*.scala\).*:\1:g
+sort -o src_file_list_from_orig_ver.txt src_file_list_from_orig_ver.txt
+# modules used in pipelined cpu:
+uniq src_file_list_from_orig_ver.txt > src_file_list_from_orig_ver_uniq.txt
+rm src_file_list_from_orig_ver.txt
+
+# modules used in RT:(with the help of src_file_list_from_orig_ver_uniq.txt)
+# :%s:\n:|:g
+# added import dontTouch to all these files (one time process so did manually)
+# grep -E "..." all_grepped.log > all_grepped_for_RT.log
+#:now we have all relevant chisel assignments and comparisons
+rm all_grepped.log
+#manually, in all_grepped_for_RT:
+#:g: \:= true.B:d
+#:g: \:= false:B:d
+#
+}
+
+
 random_line_selector_for_singlecycleCPU() {
   echo ""
 echo "*********************************"
