@@ -483,14 +483,10 @@ Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view
 }
 
 Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
-  auto name = get_name_int(lgid);
-
+  auto name  = get_name_int(lgid);
   auto &attr = attributes[lgid];
 
-  std::shared_ptr<Hif_read> hif;
-  if (name.substr(0, 2) != "__") {
-    hif = Hif_read::open(absl::StrCat(path, "/", name));
-  }
+  auto hif = Hif_read::open(absl::StrCat(path, "/", name));
   if (hif == nullptr) {
     attr.lg            = nullptr;
     attr.tried_to_load = true;

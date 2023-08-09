@@ -753,7 +753,8 @@ void Cprop::tuple_mux_mut(Node &node) {
     }
     return;
   }
-  I(tup->is_correct());
+  if (!tup->is_correct())
+    return;
 
   auto cmux_list                 = tup->make_mux(node, sel_dpin, tup_list);
   node2tuple[node.get_compact()] = tup;
@@ -1016,7 +1017,7 @@ void Cprop::tuple_subgraph(const Node &node) {
                 I(tuple_issues);  // should be set already
               }
               for (const auto &e : parent_tup->get_map()) {
-                if (Lgtuple::is_attribute(e.first)) {
+                if (Lgtuple::is_attribute(e.first) || e.second.is_invalid()) {
                   continue;
                 }
 
@@ -2266,6 +2267,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
     }
     // fmt::print("scalar node:{}\n", node.debug_name());
 
+    if (!tup_pass_only) { // this if starts for rockettile, comment for dino
     auto inp_edges_ordered = node.inp_edges_ordered();
 
     if (op == Ntype_op::Sext) {
@@ -2301,7 +2303,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
       continue;
     }
 
-    if (!tup_pass_only) {
+    //if (!tup_pass_only) { //commented for rocketTile, uncomment for dino
       auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
       if (node.is_invalid()) {
