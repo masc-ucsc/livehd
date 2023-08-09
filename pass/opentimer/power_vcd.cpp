@@ -179,6 +179,12 @@ const char *Power_vcd::parse_instruction(const char *ptr) {
 const char *Power_vcd::parse_timestamp(const char *ptr) {
   auto [end_ptr, ec] = std::from_chars(ptr, map_end, timestamp, 10);
 
+  // Update num_vcd_cycles
+  if (ec == std::errc()) {
+    num_vcd_cycles = std::max(num_vcd_cycles, timestamp + 1);  // Adding 1 to count the cycle at this timestamp
+    fmt::print("VCD CYCLES {}\n", num_vcd_cycles);
+  }
+
   // fmt::print("timestamp:{}\n", timestamp);
 
   return end_ptr;
