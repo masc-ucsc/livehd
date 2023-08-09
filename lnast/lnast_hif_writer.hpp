@@ -29,27 +29,18 @@ protected:
   Lnast_nid current_nid;
 
   auto current_text() {
-    const auto &node = lnast->get_data(current_nid);
-    const auto &tok = node.token;
-    return tok.get_text();
+    return lnast->get_data(current_nid).token.get_text();
   }
   auto current_pos1() {
-    const auto &node = lnast->get_data(current_nid);
-    const auto &tok = node.token;
-    return tok.pos1;
+    return lnast->get_data(current_nid).token.pos1;
   }
   auto current_pos2() {
-    const auto &node = lnast->get_data(current_nid);
-    const auto &tok = node.token;
-    return tok.pos2;
+    return lnast->get_data(current_nid).token.pos2;
   }
 
   auto current_fname() {
-    const auto &node = lnast->get_data(current_nid);
-    const auto &tok = node.token;
-    return tok.fname;
+    return lnast->get_data(current_nid).token.fname;
   }
-
 
 
   bool move_to_child()   {
