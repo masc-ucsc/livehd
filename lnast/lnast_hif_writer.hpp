@@ -29,8 +29,28 @@ protected:
   Lnast_nid current_nid;
 
   auto current_text() {
-    return lnast->get_data(current_nid).token.get_text();
+    const auto &node = lnast->get_data(current_nid);
+    const auto &tok = node.token;
+    return tok.get_text();
   }
+  auto current_pos1() {
+    const auto &node = lnast->get_data(current_nid);
+    const auto &tok = node.token;
+    return tok.pos1;
+  }
+  auto current_pos2() {
+    const auto &node = lnast->get_data(current_nid);
+    const auto &tok = node.token;
+    return tok.pos2;
+  }
+
+  auto current_fname() {
+    const auto &node = lnast->get_data(current_nid);
+    const auto &tok = node.token;
+    return tok.fname;
+  }
+
+
 
   bool move_to_child()   {
     nid_stack.push(current_nid);
@@ -144,18 +164,27 @@ protected:
     auto hif_stmt = Hif_write::create_node();
     hif_stmt.type = static_cast<uint16_t>(get_raw_ntype());
     hif_stmt.instance = current_text();
+    hif_stmt.add_attr("loc1", current_pos1());
+    hif_stmt.add_attr("loc2", current_pos2());
+    hif_stmt.add_attr("file", current_fname());
     wr->add(hif_stmt);
   }
 
   void write_leaf() {
     auto hif_stmt = Hif_write::create_node();
     hif_stmt.type = static_cast<uint16_t>(get_raw_ntype());
+    hif_stmt.add_attr("loc1", current_pos1());
+    hif_stmt.add_attr("loc2", current_pos2());
+    hif_stmt.add_attr("file", current_fname());
     wr->add(hif_stmt);
   }
 
   void write_tree() {
     auto hif_stmt = Hif_write::create_open_call();
     hif_stmt.type = static_cast<uint16_t>(get_raw_ntype());
+    hif_stmt.add_attr("loc1", current_pos1());
+    hif_stmt.add_attr("loc2", current_pos2());
+    hif_stmt.add_attr("file", current_fname());
     wr->add(hif_stmt);
     move_to_child();
     while (!is_invalid()) {
