@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <iostream>
 
 #include <sys/mman.h>
 
@@ -22,6 +23,7 @@ protected:
   double timescale{1e-12};
   double lib_timescale{1e-9};
   size_t n_buckets{100};
+  size_t num_vcd_cycles{0};
 
   int         map_fd{-1};
   const char *map_buffer{nullptr};
@@ -57,7 +59,15 @@ protected:
   absl::node_hash_map<std::string, Channel> id2channel;
   absl::flat_hash_map<std::string, double> net_hier_name2power;
 
-  [[nodiscard]] size_t get_current_bucket() const { return (n_buckets * timestamp) / max_timestamp; }
+  [[nodiscard]] size_t get_current_bucket() const {
+    if (num_vcd_cycles < n_buckets) {
+         std::cout << "VCD < BUCKET" << std::endl;
+        return timestamp;
+    } else {
+      std::cout << "VCD > BUCKET" << std::endl;
+        return (n_buckets * timestamp) / max_timestamp;
+    }
+  }
 
   bool                                      find_max_time();
   const char                               *skip_command(const char *ptr) const;
