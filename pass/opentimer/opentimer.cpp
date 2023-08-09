@@ -515,7 +515,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
         pvcd.add(pin_name, ipwr + cap);
       }
 
-      // fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
+      fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 
