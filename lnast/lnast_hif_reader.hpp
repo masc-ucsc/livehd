@@ -2,7 +2,6 @@
 #pragma once
 
 #include <string>
-#include <iostream>
 #include "hif/hif_read.hpp"
 #include "lhtree.hpp"
 #include "lnast.hpp"
