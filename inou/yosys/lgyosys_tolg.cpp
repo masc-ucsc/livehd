@@ -669,6 +669,14 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       std::string mod_name(&(cell->type.c_str()[1]));
 
       sub = g->ref_library()->ref_or_create_sub(mod_name, "-");
+
+      if (sub && !node.is_type_sub()) { // Not set already
+        node.set_type_sub(sub->get_lgid());
+        std::string inst_name{cell->name.str()};
+        if (!inst_name.empty()) {
+          node.set_name(inst_name.substr(1));
+        }
+      }
     }
 
     for (const auto &conn : cell->connections()) {
@@ -717,7 +725,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           }
           auto io_pin = sub->get_io_pin_from_graph_pos(pos);
           if (io_pin.dir == Sub_node::Direction::Input) {
-            continue;
+            continue; // NOTICE: If all the sub are inputs, it would not be added to cell
           }
 
 #ifndef NDEBUG
@@ -742,11 +750,6 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 #endif
         }
 
-        node.set_type_sub(sub->get_lgid());
-        std::string inst_name{cell->name.str()};
-        if (!inst_name.empty()) {
-          node.set_name(inst_name.substr(1));
-        }
       } else {
         node.set_type(Ntype_op::Or);  // it will be updated later. Just a generic 1 output cell
 
