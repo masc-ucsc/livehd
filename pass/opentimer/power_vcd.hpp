@@ -61,10 +61,8 @@ protected:
 
   [[nodiscard]] size_t get_current_bucket() const {
     if (num_vcd_cycles < n_buckets) {
-         std::cout << "VCD < BUCKET" << std::endl;
         return timestamp;
     } else {
-      std::cout << "VCD > BUCKET" << std::endl;
         return (n_buckets * timestamp) / max_timestamp;
     }
   }
