@@ -476,7 +476,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
   for (auto &pvcd : vcd_list) {
     pvcd.set_tech_timeunit(timeunit);
   }
-
+  fmt::print("================================\n");
   for (const auto node : g->fast(true)) {
     auto op = node.get_type_op();
     if (op != Ntype_op::Sub) {
@@ -490,7 +490,7 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
       node.dump();
       fmt::print("WEIRD. Where is the gate? named {}\n", instance_name);
     }
-
+    
     for(const auto *pin:it2->second.pins()) {
       auto [cap, ipwr] = pin->power();
 
@@ -515,16 +515,18 @@ void Pass_opentimer::compute_power(Lgraph *g) {  // Expand this method to comput
         pvcd.add(pin_name, ipwr + cap);
       }
 
+      
       fmt::print("iname:{} pin:{} ipwr:{} cap:{}\n", instance_name, pin_name, ipwr, cap);
     }
   }
 
+  fmt::print("================================\n");
   for (auto &pvcd : vcd_list) {
     pvcd.compute(odir);
     fmt::print("AVG power:{} for {}\n", pvcd.get_power_average(), pvcd.get_filename());
   }
 
-  fmt::print("MAX power:{} switch:{} W internal:{} W voltage:{} V freq={}MHz\n"
+  fmt::print("TOTAL power:{} DYNAMIC power:{} INTERNAL power:{} W voltage:{} V freq={}MHz\n"
       ,total_cap+total_ipwr
       ,total_cap, total_ipwr
       ,voltage, freq/1e6);
