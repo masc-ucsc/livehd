@@ -121,6 +121,7 @@ private:
   map_of_sets out_map_of_sets_synth;
   map_of_sets inp_map_of_sets_orig;
   map_of_sets out_map_of_sets_orig;
+  absl::flat_hash_set<Node_pin::Compact_flat> mark_loop_stop;//known points can be reliably treated as ins and outs. Thus these entries can be inserted in MoSs.
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
   void remove_pound_and_bus(std::string &dpin_name);
   void remove_resolved_from_orig_MoS();

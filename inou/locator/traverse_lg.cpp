@@ -1257,7 +1257,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 
     for (const auto dpins : node.out_connected_pins()) {
       const auto node_dpin_cf = dpins.get_compact_flat();
-      bool       is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+      bool       is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin_cf)!=mark_loop_stop.end()); //FIXME: need not do this because all nodes reaching here are of type_loop_last?
 
       const auto self_set = inp_map_of_sets.find(node_dpin_cf);
 
@@ -1320,7 +1320,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
                  node.get_nid(),
                  node_dpins.has_name() ? node_dpins.get_name() : std::to_string(node_dpins.get_pid()));
 #endif
-      bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+      bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin_cf)!=mark_loop_stop.end());
 
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
       auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
@@ -1413,7 +1413,7 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool i
 #ifdef BASIC_DBG
     fmt::print("node obtained from traverse_order: n{},{} \n", node.get_nid(), node_dpin.get_pid());
 #endif
-    bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first();
+    bool is_loop_stop = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin.get_compact_flat())!=mark_loop_stop.end());
 
     const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
     auto                                               it       = out_map_of_sets.find(node_dpin.get_compact_flat());
@@ -1546,6 +1546,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     auto synth_in_dpin_name = dpin.get_name();
     if (name2dpin.find(synth_in_dpin_name) != name2dpin.end()) {
       net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_in_dpin_name)->second);
+			mark_loop_stop.insert(dpin.get_compact_flat());
+			mark_loop_stop.insert(name2dpin.find(synth_in_dpin_name)->second);
 #ifdef FOR_EVAL
       fmt::print("DEFAULT INSERTION OF: {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
@@ -1576,6 +1578,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     auto synth_out_dpin_name = dpin.get_name();
     if (name2dpin.find(synth_out_dpin_name) != name2dpin.end()) {
       net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_out_dpin_name)->second);
+			mark_loop_stop.insert(dpin.get_compact_flat());
+			mark_loop_stop.insert(name2dpin.find(synth_out_dpin_name)->second);
 #ifdef FOR_EVAL
       fmt::print("DEFAULT INSERTION OF: {}, {}\n",
                  dpin.has_name() ? dpin.get_name() : std::to_string(dpin.get_pid()),
@@ -1697,6 +1701,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
                      std::to_string(synth_node_dpin.get_pid()));
 #endif
           net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(map_itt->second);
+					mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
+					mark_loop_stop.insert(map_itt->second);
 #ifdef FOR_EVAL
           auto orig_node_dpin1 = Node_pin("lgdb", map_itt->second);
           fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
@@ -1724,6 +1730,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #endif
           net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert((map_itt_s->second).begin(),
                                                                                (map_itt_s->second).end());
+					mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
+					mark_loop_stop.insert((map_itt_s->second).begin(),(map_itt_s->second).end());
 #ifdef FOR_EVAL
           fmt::print("Inserting in netpin_to_origpin_default_match s : {}  ",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
@@ -2625,12 +2633,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       }
     }
 
-    if (!matched_node_pins.empty()) {
+    if (!matched_node_pins.empty() && (match_prev>0.00) ) {
       net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
-      fmt::print("Inserting in weighted_match : {}  :::  ",
-                 np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
+      fmt::print("Inserting in weighted_match : {} with wt {}  :::  ",
+                 np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())), match_prev);
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
         fmt::print("    {} ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())));
@@ -2645,7 +2653,10 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       //  && \"operator++ called on invalid iterator.\""' failed.
       out_map_of_sets_synth.erase(synth_key);
       inp_map_of_sets_synth.erase(synth_key);
-    } else {
+    } else if (!matched_node_pins.empty()) {
+			auto np_s = Node_pin("lgdb", synth_key);
+			fmt::print("\nReporting {} entry does not match with any orig_node.\n", np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())) );//If you want to check what was not matched with anything, this is the place.
+		} else {
       fmt::print("In weighted_match -- unexpected entry to else...Is it a no match whatsoever??");
     }
   }
