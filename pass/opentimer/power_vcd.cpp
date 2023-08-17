@@ -182,7 +182,6 @@ const char *Power_vcd::parse_timestamp(const char *ptr) {
   // Update num_vcd_cycles
   if (ec == std::errc()) {
     num_vcd_cycles = std::max(num_vcd_cycles, timestamp + 1);  // Adding 1 to count the cycle at this timestamp
-    fmt::print("VCD CYCLES {}\n", num_vcd_cycles);
   }
 
   // fmt::print("timestamp:{}\n", timestamp);
