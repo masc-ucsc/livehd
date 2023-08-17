@@ -46,9 +46,9 @@ http_archive(
 # google benchmark
 http_archive(
     name = "com_google_benchmark",
-    sha256 = "927475805a19b24f9c67dd9765bb4dcc8b10fd7f0e616905cc4fee406bed81a7",
-    strip_prefix = "benchmark-1.8.0",
-    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.8.0.zip"],
+    sha256 = "0094b77c01e9973876f1831f76cbae43fdaf09b424e467dc4171abaa6884e455",
+    strip_prefix = "benchmark-1.8.2",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.8.2.zip"],
 )
 
 # fmt
@@ -140,10 +140,10 @@ http_archive(
     name = "cryptominisat",
     build_file = "cryptominisat.BUILD",
     patches = ["//external:cryptominisat.patch"],
-    sha256 = "9a3298bf8b7eebb7ab1fa19ae6a83fda194b3e8d2dd409db0bb8fbc7e73cff1e",
-    strip_prefix = "cryptominisat-5.11.4",
+    sha256 = "70f846f00fa01e64682bfcdcbdde217be168c4aebc861aefc96d6853234507f7",
+    strip_prefix = "cryptominisat-5.11.11",
     urls = [
-        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.4.zip",
+        "https://github.com/msoos/cryptominisat/archive/refs/tags/5.11.11.zip",
     ],
 )
 
@@ -165,10 +165,10 @@ http_archive(
 http_archive(
     name = "rapidjson",
     build_file = "rapidjson.BUILD",
-    sha256 = "d556fa2bc7bf650e4ec61668e46b8acc04959d23e9f429dd69c6d1e945b3ab5c",
-    strip_prefix = "rapidjson-973dc9c06dcd3d035ebd039cfb9ea457721ec213/include",
+    sha256 = "8ea39c59b37bfd1888b262daa75e70ccd2b60790f9f841d2f44b41df417f75b7",
+    strip_prefix = "rapidjson-a95e013b97ca6523f32da23f5095fcc9dd6067e5/include",
     urls = [
-        "https://github.com/Tencent/rapidjson/archive/973dc9c06dcd3d035ebd039cfb9ea457721ec213.zip",
+        "https://github.com/Tencent/rapidjson/archive/a95e013b97ca6523f32da23f5095fcc9dd6067e5.zip",
     ],
 )
 
@@ -271,9 +271,9 @@ http_archive(
 http_archive(
     name = "com_google_perfetto",
     build_file = "perfetto.BUILD",
-    sha256 = "06eec38d02f99d225cdad9444102e77d9da717f8cc55f84a3b212abe94a5fc5a",
-    strip_prefix = "perfetto-28.0/sdk",
-    urls = ["https://github.com/google/perfetto/archive/refs/tags/v28.0.tar.gz"],
+    sha256 = "39d7b3635834398828cfd189bd61afb0657ca2a3a08efbfd9866bfbcd440810b",
+    strip_prefix = "perfetto-37.0/sdk",
+    urls = ["https://github.com/google/perfetto/archive/refs/tags/v37.0.tar.gz"],
 )
 
 # Boost

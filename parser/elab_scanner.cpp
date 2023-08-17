@@ -381,11 +381,11 @@ Elab_scanner::Elab_scanner() {
 #ifndef NDEBUG
   fmt::print("\n Warning: max_warnings changed from 1024 to 10240 to enable RocketTile LG generation.\n");
 #endif
-  max_warnings = 10240;
+  max_warnings = 0; // 0 disables max_warnings
   n_errors     = 0;
   n_warnings   = 0;
 
-  memblock      = 0;
+  memblock      = nullptr;
   memblock_size = 0;
   memblock_fd   = -1;
 }
@@ -440,7 +440,7 @@ void Elab_scanner::scan_warn_int(std::string_view text) const {
   err_tracker::logger(text);
   scan_raw_msg("warning", text, true);
   n_warnings++;
-  if (n_warnings > max_warnings)
+  if (max_warnings && n_warnings > max_warnings)
     throw scan_error(*this, "too many warnings");
 }
 
@@ -481,7 +481,7 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
     max_pos = token_list.size() - 1;
 
   size_t line_pos_start = 0;
-  for (int i = token_list[max_pos].pos1; i > 0; i--) {
+  for (auto i = token_list[max_pos].pos1; i > 0; i--) {
     if (is_newline(memblock[i])) {
       line_pos_start = i;
       break;
@@ -496,9 +496,8 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   }
 
   auto line  = scan_line();
-  int  s_col = token_list[max_pos].pos1 - line_pos_start;
-  I(s_col >= 0);
-  size_t col = s_col;
+  size_t col = token_list[max_pos].pos1 - line_pos_start;
+  I(token_list[max_pos].pos1 >= line_pos_start);
 
   std::string line_txt;
 
@@ -528,9 +527,11 @@ void Elab_scanner::scan_raw_msg(std::string_view cat, std::string_view text, boo
   if (!third)
     return;
 
-  int len = token_list[max_pos].get_text().size();
-  if ((token_list[max_pos].pos1 + len) > line_pos_end)
+  size_t len = token_list[max_pos].get_text().size();
+  if ((token_list[max_pos].pos1 + len) > line_pos_end) {
+    I(line_pos_end >= token_list[max_pos].pos1);
     len = line_pos_end - token_list[max_pos].pos1;
+  }
 
   std::string third_1(col, ' ');
   std::string third_2(len, '^');

@@ -2,7 +2,6 @@
 #pragma once
 
 #include <string>
-
 #include "hif/hif_read.hpp"
 #include "lhtree.hpp"
 #include "lnast.hpp"
@@ -49,13 +48,27 @@ protected:
 
   void process_hif_stmt() {
     cur_stmt = rd->get_current_stmt();
+    uint64_t pos1 = 0;
+    uint64_t pos2 = 0;
+    std::string fname = "";
+
+    for (const auto& te: cur_stmt.attr) {
+      if(te.lhs == "loc1") {
+        pos1 = te.get_rhs_int64();
+      }
+      if(te.lhs == "loc2") {
+        pos2 = te.get_rhs_int64();
+      }
+      if(te.lhs == "file") {
+        fname = te.get_rhs_string();
+      }
+    }
     if (cur_stmt.is_end()) {
       tree_index.pop();
       return;
     }
     auto           n = Lnast_node(Lnast_ntype(static_cast<Lnast_ntype::Lnast_ntype_int>(cur_stmt.type & 0x00FF)),
-                        State_token(0, 0, 0, 0, cur_stmt.instance));
-
+                        State_token(0, pos1, pos2, 0, cur_stmt.instance, fname));
     lh::Tree_index i;
     if (is_top) {
       lnast->set_root(n);

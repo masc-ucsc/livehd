@@ -37,7 +37,7 @@ cc_library(
     hdrs = glob(
         [
             "src/*.h",
-            "src/oracle/*.hpp",
+            "src/oracle/*.h",
             "src/picosat/*.h",
             "include/cryptominisat5/*.h",
         ],

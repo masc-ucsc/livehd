@@ -94,3 +94,87 @@ diff --git src/solvertypesmini.h include/cryptominisat5/solvertypesmini.h
 similarity index 100%
 rename from src/solvertypesmini.h
 rename to include/cryptominisat5/solvertypesmini.h
+diff -bBdNrw -U5 --exclude=*.orig --exclude=.git --exclude=.svn --exclude=esesc.xcode --exclude=build --exclude=CVS --exclude=CVSmain --exclude=cscope.files --exclude=cscope.out --exclude=ChangeLog cryptominisat-5.11.11/src/satzilla_features.h cryptominisat-5.11.11-path/src/satzilla_features.h
+--- src/satzilla_features.h	2023-06-25 07:10:12
++++ src/satzilla_features.h	2023-08-10 10:05:11
+@@ -21,20 +21,19 @@
+ ***********************************************/
+ 
+ #ifndef SOLVE_FEATURES_H_
+ #define SOLVE_FEATURES_H_
+ 
+-#include <limits>
++#include <cmath>
+ #include <cstdint>
++#include <limits>
+ #include <string>
+-#include <cmath>
+ #include "constants.h"
+ 
+ namespace CMSat {
+ 
+-struct SatZillaFeatures
+-{
++struct SatZillaFeatures {
+     void print_stats() const;
+ 
+     //Some parameter
+     double eps = 0.00001;
+ 
+@@ -47,36 +46,36 @@
+     //Clause distribution
+     double binary = 0;
+     double horn = 0;
+     double horn_mean = 0;
+     double horn_std = 0;
+-    double horn_min = numeric_limits<double>::max();
+-    double horn_max = numeric_limits<double>::min();
++    double horn_min = std::numeric_limits<double>::max();
++    double horn_max = std::numeric_limits<double>::min();
+     double horn_spread = 0;
+ 
+     double vcg_var_mean = 0;
+     double vcg_var_std = 0;
+-    double vcg_var_min = numeric_limits<double>::max();
+-    double vcg_var_max = numeric_limits<double>::min();
++    double vcg_var_min = std::numeric_limits<double>::max();
++    double vcg_var_max = std::numeric_limits<double>::min();
+     double vcg_var_spread = 0;
+ 
+     double vcg_cls_mean = 0;
+     double vcg_cls_std = 0;
+-    double vcg_cls_min = numeric_limits<double>::max();
+-    double vcg_cls_max = numeric_limits<double>::min();
++    double vcg_cls_min = std::numeric_limits<double>::max();
++    double vcg_cls_max = std::numeric_limits<double>::min();
+     double vcg_cls_spread = 0;
+ 
+     double pnr_var_mean = 0;
+     double pnr_var_std = 0;
+-    double pnr_var_min = numeric_limits<double>::max();
+-    double pnr_var_max = numeric_limits<double>::min();
++    double pnr_var_min = std::numeric_limits<double>::max();
++    double pnr_var_max = std::numeric_limits<double>::min();
+     double pnr_var_spread = 0;
+ 
+     double pnr_cls_mean = 0;
+     double pnr_cls_std = 0;
+-    double pnr_cls_min = numeric_limits<double>::max();
+-    double pnr_cls_max = numeric_limits<double>::min();
++    double pnr_cls_min = std::numeric_limits<double>::max();
++    double pnr_cls_max = std::numeric_limits<double>::min();
+     double pnr_cls_spread = 0;
+ 
+     //Conflict clauses
+     double avg_confl_size = 0.0;
+     double confl_size_min = 0.0;
+@@ -118,8 +117,8 @@
+     //High-level satzilla_features
+     uint64_t num_gates_found_last = 0;
+     uint64_t num_xors_found_last = 0;
+ };
+ 
+-}
++} // namespace CMSat
+ 
+ #endif //SOLVE_FEATURES_H_
