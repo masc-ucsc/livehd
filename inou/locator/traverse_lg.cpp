@@ -1491,6 +1491,9 @@ void Traverse_lg::remove_pound_and_bus(std::string& dpin_name) {
   if (dpin_name.find("otup_") == std::size_t(0)) {  // if dpin_name has otup_ in the beginning
     dpin_name.erase(std::size_t(0), 5);             // remove it
   }
+	if (dpin_name.find("otup_") != std::string::npos) {  //if dpin_name has otup_ in the middle
+		dpin_name.erase(dpin_name.find("otup_"), 5);       //like otup_frontend.otup_btb.io_ras_head_valid: otup_ with tbt should be removed too
+	}
   if (dpin_name.find('[') != std::string::npos) {              // if dpin_name has bus
     dpin_name.erase(dpin_name.find('['), dpin_name.length());  // remove it
   }
@@ -2651,8 +2654,8 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       }
       // remove_from_crit_node_set(synth_key); // might lead to the error:
       //  && \"operator++ called on invalid iterator.\""' failed.
-      out_map_of_sets_synth.erase(synth_key);
-      inp_map_of_sets_synth.erase(synth_key);
+      //out_map_of_sets_synth.erase(synth_key);//commenting this should not impact anything because it is not iterated
+      //inp_map_of_sets_synth.erase(synth_key);
     } else if (!matched_node_pins.empty()) {
 			auto np_s = Node_pin("lgdb", synth_key);
 			fmt::print("\nReporting {} entry does not match with any orig_node.\n", np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())) );//If you want to check what was not matched with anything, this is the place.
