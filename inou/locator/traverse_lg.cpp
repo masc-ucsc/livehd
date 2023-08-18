@@ -1631,8 +1631,18 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 
         if (original_node_dpin_wire.find('|') != std::string::npos) {  // if original_node_dpin_wire has "|"
           /* In case of buses like reg|2, reg|3, reg|7; all will have "reg"key for diff values.*/
+					/* correction: |2 is not bus. It is SSA form*/
           original_node_dpin_wire.erase(original_node_dpin_wire.find('|'), original_node_dpin_wire.length());
           name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
+					auto name2dpin_it = name2dpin.find(original_node_dpin_wire);
+					if(name2dpin_it != name2dpin.end()) {
+						/* after removing SSA, pin in name2dpin, then remove from name2dpin and put here*/
+						#ifdef BASIC_DBG
+						  fmt::print("\t\t\t\t\terasing from name2dpin: {}", name2dpin_it->first);
+            #endif
+						name2dpins[original_node_dpin_wire].insert(name2dpin_it->second);
+						name2dpin.erase(name2dpin_it);
+					}
 #ifdef BASIC_DBG
           fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
 #endif
@@ -1641,12 +1651,20 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
             fmt::print("WARNING: overwriting!\n");
           }
+					fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
 #endif
-          name2dpin[original_node_dpin_wire] = original_node_dpin.get_compact_flat();
-
-#ifdef BASIC_DBG
-          fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
-#endif
+					if (name2dpins.find(original_node_dpin_wire) != name2dpins.end()) {
+						/* if entry already in name2dpins, then append to that only*/
+						name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
+						#ifdef BASIC_DBG
+						fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
+            #endif
+					} else {
+						name2dpin[original_node_dpin_wire] = original_node_dpin.get_compact_flat();
+						#ifdef BASIC_DBG
+						fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
+						#endif
+					}
         }
       }
     }
