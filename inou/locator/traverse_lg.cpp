@@ -181,7 +181,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     print_everything();
 #endif
 
-    while (change_done && !crit_node_set.empty() && !flop_set.empty()) {  // for flop only as matching flop first
+    while (change_done && !crit_node_set.empty() && !flop_set_synth.empty()) {  // for flop only as matching flop first
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
       change_done = complete_io_match(true);  // alters crit_node_set too
@@ -195,7 +195,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     print_everything();
 #endif
 
-    if (!flop_set.empty()) {
+    if (!flop_set_synth.empty()) {
       weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
       // set_theory_match_loopLast_only();
       fmt::print("\n weighted_match_LoopLastOnly - synth done.\n");
@@ -206,7 +206,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       remove_resolved_from_orig_MoS();
     }
 
-    I(flop_set.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
+    I(flop_set_synth.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
     if (crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
@@ -1076,8 +1076,8 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
         inp_map_of_sets_orig.erase(orig_pin);
         out_map_of_sets_orig.erase(orig_pin);
       }
-      if (flop_set.find(node_pin_cf) != flop_set.end()) {
-        flop_set.erase(node_pin_cf);
+      if (flop_set_synth.find(node_pin_cf) != flop_set_synth.end()) {
+        flop_set_synth.erase(node_pin_cf);
       }
     }
     /*if nothing left in crit_node_set then return with result*/
@@ -1246,13 +1246,17 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 #endif
       if (node.is_type_loop_last()) {
         for (const auto dpins : node.out_connected_pins()) {
-          flop_set.insert(dpins.get_compact_flat());
+          flop_set_synth.insert(dpins.get_compact_flat());
         }
       }
     }
 
     if (!node.is_type_loop_last()) {
       continue;  // process flops only in this lg->fast
+    } else if (is_orig_lg) {//flops in orig_lg to be inserted in flop_set_orig
+      for (const auto dpins : node.out_connected_pins()) {
+        flop_set_orig.insert(dpins.get_compact_flat());
+      }
     }
 
     for (const auto dpins : node.out_connected_pins()) {
@@ -1875,11 +1879,14 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     auto keep_partial_match_checking_on = true;
     std::map<float, absl::flat_hash_set<Node_pin::Compact_flat>> partial_out_match_map;
     for (const auto& [orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
-      auto o_s = Node_pin("lgdb", orig_in_np).get_node();
+      //auto o_s = Node_pin("lgdb", orig_in_np).get_node();
       if (flop_only) {
-        if (!o_s.is_type_loop_last()) {
-          continue;  // flop node should be matched with flop node only! else datatype mismatch!
+        if(flop_set_orig.find(orig_in_np)==flop_set_orig.end()) {
+          continue; //orig_in_np is not in flop_set_orig, then the node is not type loop last
         }
+        //if (!o_s.is_type_loop_last()) {
+        //  continue;  // flop node should be matched with flop node only! else datatype mismatch!
+        //}
       }
 
       out_matched              = false;
@@ -1923,6 +1930,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 #ifdef BASIC_DBG
         else {  // inputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
+          auto o_s = Node_pin("lgdb", orig_in_np).get_node();
           fmt::print("\t\tMatch? : {},n{}\n",
                      p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
                      std::to_string(o_s.get_nid()));
@@ -1958,8 +1966,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 
     if (io_matched) {  // in+out matched. complete exact match.  remove from synth map_of_sets
       remove_from_crit_node_set(it->first);
-      if (flop_set.find(it->first) != flop_set.end()) {
-        flop_set.erase(it->first);
+      if (flop_set_synth.find(it->first) != flop_set_synth.end()) {
+        flop_set_synth.erase(it->first);
       }
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
@@ -1991,8 +1999,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 
 #endif
       remove_from_crit_node_set(it->first);
-      if (flop_set.find(it->first) != flop_set.end()) {
-        flop_set.erase(it->first);
+      if (flop_set_synth.find(it->first) != flop_set_synth.end()) {
+        flop_set_synth.erase(it->first);
       }
       out_map_of_sets_synth.erase(it->first);
       inp_map_of_sets_synth.erase(it++);
@@ -2390,7 +2398,7 @@ void Traverse_lg::print_everything() {
   fmt::print("\ncrit nodes set:\n");
   print_set(crit_node_set);
   fmt::print("\nflop set:\n");
-  print_set(flop_set);
+  print_set(flop_set_synth);
   fmt::print("\nforced_match_vec:\n");
   {
     for (const auto& v : forced_match_vec) {
@@ -2609,8 +2617,8 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
       fmt::print("\n");
 #endif
       forced_match_vec.emplace_back(synth_key);
-      if (flop_set.find(synth_key) != flop_set.end()) {
-        flop_set.erase(synth_key);
+      if (flop_set_synth.find(synth_key) != flop_set_synth.end()) {
+        flop_set_synth.erase(synth_key);
       }
       remove_from_crit_node_set(synth_key);
       out_map_of_sets_synth.erase(synth_key);
@@ -2670,8 +2678,8 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       fmt::print("\n");
 #endif
       forced_match_vec.emplace_back(synth_key);
-      if (flop_set.find(synth_key) != flop_set.end()) {
-        flop_set.erase(synth_key);
+      if (flop_set_synth.find(synth_key) != flop_set_synth.end()) {
+        flop_set_synth.erase(synth_key);
       }
       // remove_from_crit_node_set(synth_key); // might lead to the error:
       //  && \"operator++ called on invalid iterator.\""' failed.
@@ -2786,8 +2794,8 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
       fmt::print("\n");
 #endif
       forced_match_vec.emplace_back(synth_key);
-      if (flop_set.find(synth_key) != flop_set.end()) {
-        flop_set.erase(synth_key);
+      if (flop_set_synth.find(synth_key) != flop_set_synth.end()) {
+        flop_set_synth.erase(synth_key);
       }
       remove_from_crit_node_set(synth_key);
       inp_map_of_sets_synth.erase(synth_key);

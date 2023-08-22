@@ -116,7 +116,8 @@ private:
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
   absl::flat_hash_set<Node_pin::Compact_flat> crit_node_set;
-  absl::flat_hash_set<Node_pin::Compact_flat> flop_set;
+  absl::flat_hash_set<Node_pin::Compact_flat> flop_set_synth;
+  absl::flat_hash_set<Node_pin::Compact_flat> flop_set_orig;
   map_of_sets inp_map_of_sets_synth;
   map_of_sets out_map_of_sets_synth;
   map_of_sets inp_map_of_sets_orig;
