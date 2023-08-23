@@ -1851,7 +1851,7 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
   float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
 #ifdef FOR_EVAL
-  fmt::print("\t\t\t\t matching_weight = {} (set1_size={}, set2_size={})\n", matching_weight, synth_set.size(), orig_set.size());
+  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={})\n", matching_weight, synth_set.size(), orig_set.size());
 #endif
   return matching_weight;
 }
@@ -2642,6 +2642,10 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     for (const auto& [orig_key, orig_set] : inp_map_of_sets_orig) {
+#ifdef FOR_EVAL
+      auto np_o = Node_pin("lgdb", orig_key);
+      fmt::print("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
+#endif
       const auto& in_match  = get_matching_weight(synth_set, orig_set);
       auto        out_match = 0.0;
       if (out_map_of_sets_synth.find(synth_key) != out_map_of_sets_synth.end()
@@ -2660,8 +2664,14 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         matched_node_pins.clear();
         matched_node_pins.insert(orig_key);
         match_prev = match_curr;
+#ifdef FOR_EVAL
+        fmt::print("\t\t\t\t -- Found better match\n");
+#endif
       } else if (match_curr == match_prev) {
         matched_node_pins.insert(orig_key);
+#ifdef FOR_EVAL
+        fmt::print("\t\t\t\t -- Found similar match\n");
+#endif
       }
     }
 
