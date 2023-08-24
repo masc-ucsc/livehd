@@ -147,7 +147,7 @@ void Graph_library::clean_library_int() {
 
 Graph_library *Graph_library::instance_int(std::string_view path) {
   auto it1 = Graph_library::global_instances.find(path);
-  if (it1 != Graph_library::global_instances.end()) {
+  if (likely(it1 != Graph_library::global_instances.end())) {
     return it1->second;
   }
 
@@ -483,7 +483,7 @@ Lgraph *Graph_library::create_lgraph_int(std::string_view name, std::string_view
 }
 
 Lgraph *Graph_library::do_pending_load_int(Lg_id_t lgid) {
-  auto name  = get_name_int(lgid);
+  auto  name = get_name_int(lgid);
   auto &attr = attributes[lgid];
 
   auto hif = Hif_read::open(absl::StrCat(path, "/", name));
