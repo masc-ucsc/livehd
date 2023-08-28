@@ -1085,12 +1085,12 @@ static uint32_t get_output_size(const RTLIL::Cell *cell) {
 }
 
 static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, Bits_t nbits, const Node_pin &current_dpin) {
-  fmt::print("connect_partial_dpin to:{} or_offset:{} from pin:{} bits:{}\n",
+  /*fmt::print("connect_partial_dpin to:{} or_offset:{} from pin:{} bits:{}\n",
              or_node.debug_name(),
              or_offset,
              current_dpin.debug_name(),
              nbits);
-
+  */
   I(or_node.get_type_op() == Ntype_op::Or);
 
   if (current_dpin.get_node().is_type(Ntype_op::Const)) {  // just use the dpin with zero/sign extend

@@ -150,7 +150,8 @@ if [ "${CELLLIB}" != "" ]; then
     echo "cell library ${CELLLIB} not found"
     exit 1
   fi
-  lib="read_verilog -sv ${CELLLIB}"
+ # lib="read_verilog -sv ${CELLLIB}"
+  lib="read_liberty ${CELLLIB}"
 fi
 
 #exit 2

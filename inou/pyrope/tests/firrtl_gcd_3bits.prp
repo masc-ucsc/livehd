@@ -12,6 +12,11 @@ x = x.__create_flop
 x_q = x
 x.__ubits = 3
 
+tmp_x = tmp_x.__create_flop
+tmp_x_q = tmp_x
+tmp_x.__ubits = 3
+tmp_x = x_q
+
 y = y.__create_flop
 y_q = y
 y.__ubits = 3
@@ -55,7 +60,7 @@ if ($io_loading_values) {
 
 _i_T_5 = y_q == 0
 
-%io_output_gcd = x_q
+%io_output_gcd = tmp_x_q
 %io_output_valid = _i_T_5
 x = _i_GEN_2
 y = _i_GEN_3

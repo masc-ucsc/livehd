@@ -1,8 +1,8 @@
 $clock.__sbits = 1
 $reset.__ubits = 1
 // $io.in.__ubits = 4  // parse error??
-$io.inp.__ubits = 4
-%io.out.__ubits = 4
+$io_inp.__ubits = 4
+%io_out.__ubits = 4
 
 _T.0 = 0;
 _T.1 = 0;
@@ -34,7 +34,7 @@ delays_q = #delays
 #delays.3 = delays_q.2
 #delays.2 = delays_q.1
 #delays.1 = delays_q.0
-#delays.0 = $io.inp
-%io.out   = delays_q.7
+#delays.0 = $io_inp
+%io_out   = delays_q.7
 
 
