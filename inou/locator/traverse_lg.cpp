@@ -1330,6 +1330,9 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       bool is_loop_stop
           = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end());
 
+#ifdef BASIC_DBG
+			fmt::print("\t\tnode is loop stop: LL?{}, LF?{}, MLS?{} \n", node.is_type_loop_last(), node.is_type_loop_first(), (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end()) );
+#endif
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
       auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
       if (it != inp_map_of_sets.end()) {
@@ -1359,7 +1362,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
         // }
         for (const auto out_cfs : e.sink.get_node().out_connected_pins()) {
 #ifdef EXTENSIVE_DBG
-          fmt::print("\tChild node's driver:\t\t {}(n{})\n",
+          fmt::print("\tChild node's dpin:\t\t {}(n{})\n",
                      out_cfs.has_name() ? out_cfs.get_name() : std::to_string(out_cfs.get_pid()),
                      out_cfs.get_node().get_nid());
 #endif
@@ -1649,34 +1652,35 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
           auto name2dpin_it = name2dpin.find(original_node_dpin_wire);
           if (name2dpin_it != name2dpin.end()) {
-/* after removing SSA, pin in name2dpin, then remove from name2dpin and put here*/
-#ifdef BASIC_DBG
-            fmt::print("\t\t\t\t\terasing from name2dpin: {}", name2dpin_it->first);
-#endif
+            /* after removing SSA, pin in name2dpin, then remove from name2dpin and put here*/
+            #ifdef BASIC_DBG
+              //fmt::print("\t\t\t\t\terasing from name2dpin: {}", name2dpin_it->first);
+						  fmt::print("\t\t\t\t\tputiing in name2dpins: {}", name2dpin_it->first);
+            #endif
             name2dpins[original_node_dpin_wire].insert(name2dpin_it->second);
             name2dpin.erase(name2dpin_it);
           }
-#ifdef BASIC_DBG
-          fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
-#endif
+          #ifdef BASIC_DBG
+            fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
+          #endif
         } else {
-#ifdef BASIC_DBG
-          if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
-            fmt::print("WARNING: overwriting!\n");
-          }
-          fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
-#endif
+          #ifdef BASIC_DBG
+            if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
+              fmt::print("WARNING: overwriting!\n");
+            }
+            fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
+          #endif
           if (name2dpins.find(original_node_dpin_wire) != name2dpins.end()) {
             /* if entry already in name2dpins, then append to that only*/
             name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
-#ifdef BASIC_DBG
+            #ifdef BASIC_DBG
             fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
-#endif
+            #endif
           } else {
             name2dpin[original_node_dpin_wire] = original_node_dpin.get_compact_flat();
-#ifdef BASIC_DBG
+            #ifdef BASIC_DBG
             fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
-#endif
+            #endif
           }
         }
       }
