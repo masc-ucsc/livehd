@@ -1310,7 +1310,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_sets, bool is_orig_lg) {
   lg->dump(true);  // FIXME: remove this
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
   fmt::print("\t\tis_orig_lg: {}\n", is_orig_lg);
 #endif
@@ -1337,13 +1337,13 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
       if (it != inp_map_of_sets.end()) {
         self_set = &it->second;
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
         fmt::print("\tnode present in inp_map_of_sets. It's SS:");
         print_set(*self_set);
         fmt::print("\n");
 #endif
       }
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
       else {
         fmt::print("\tnode NOT present in inp_map_of_sets already.\n");
       }
@@ -1351,7 +1351,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().is_type_loop_first() /*need not keep outputs of const/graphIO in in_map_of_sets*/
             /*|| e.sink.get_node().is_type_loop_last() is_type_loop_last processed in previous fast pass*/) {
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
           fmt::print("\tChild node is loop_first. continuing!\n");
 #endif
           continue;
@@ -1361,7 +1361,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
         //   continue;
         // }
         for (const auto out_cfs : e.sink.get_node().out_connected_pins()) {
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
           fmt::print("\tChild node's dpin:\t\t {}(n{})\n",
                      out_cfs.has_name() ? out_cfs.get_name() : std::to_string(out_cfs.get_pid()),
                      out_cfs.get_node().get_nid());
@@ -1370,7 +1370,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
           if (is_loop_stop) {
             if (!is_orig_lg && !(get_matching_map_val(node_dpin_cf)).empty()) {
               auto match_val = get_matching_map_val(node_dpin_cf);
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
               fmt::print("\t\t\tmatch_val is the I/P! K[n{}]::V[-match_val_value-]\n", out_cfs.get_node().get_nid());
 #endif
               inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());  // resolution
@@ -1381,14 +1381,14 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
               */
             } else {
               inp_map_of_sets[out_cf].insert(node_dpin_cf);
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
               fmt::print("\t\t\tnode itself is the I/P! K[n{}]::V[n{}]\n", out_cfs.get_node().get_nid(), node.get_nid());
 #endif
             }
           } else {
             if (self_set) {
               inp_map_of_sets[out_cf].insert(self_set->begin(), self_set->end());
-#ifdef EXTENSIVE_DBG
+#ifdef BASIC_DBG
               fmt::print("\t\t\tSS is the I/P! K[n{}]::V[ss val]\n", out_cfs.get_node().get_nid());
 #endif
             }
@@ -1771,7 +1771,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
           mark_loop_stop.insert((map_itt_s->second).begin(), (map_itt_s->second).end());
 #ifdef FOR_EVAL
-          fmt::print("Inserting in netpin_to_origpin_default_match s : {}  ",
+          fmt::print("Inserting in netpin_to_origpin_default_match s : {} ::: ",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
           for (const auto& orig_node_dpin1_cf : (map_itt_s)->second) {
