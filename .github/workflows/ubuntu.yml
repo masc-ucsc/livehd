@@ -46,7 +46,7 @@ jobs:
 
       - run: bazel coverage --instrument_test_targets --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all //...
 
-      - uses: codecov/codecov-action@v3
+      - uses: codecov/codecov-action@v4
         with:
           directory: ./bazel-out/_coverage
 
