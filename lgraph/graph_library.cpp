@@ -389,6 +389,7 @@ void Graph_library::reload_int() {
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
   if (document.HasParseError()) {
+    fclose(pFile);
     Lgraph::error("graph_library::reload {} Error(offset {}): {}",
                   library_file,
                   static_cast<unsigned>(document.GetErrorOffset()),
@@ -445,6 +446,8 @@ void Graph_library::reload_int() {
       recycled_id.insert(id);
     }
   }
+
+  fclose(pFile);
 }
 
 Lgraph *Graph_library::ref_or_create_lgraph_int(std::string_view name, std::string_view source) {

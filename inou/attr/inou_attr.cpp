@@ -49,6 +49,7 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
   document.ParseStream<0, rapidjson::UTF8<>, rapidjson::FileReadStream>(is);
 
   if (document.HasParseError()) {
+    fclose(pFile);
     Pass::error("input file: relaod {} Error(offset {}): {}",
                 filename,
                 static_cast<unsigned>(document.GetErrorOffset()),
@@ -93,6 +94,8 @@ void Inou_attr::read_json(const std::string &filename, Lgraph *lg) {
       continue;
     }
   }
+
+  fclose(pFile);
 }
 
 void Inou_attr::color_lg(Lgraph *lg) {
