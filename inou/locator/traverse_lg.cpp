@@ -2340,8 +2340,8 @@ void Traverse_lg::report_critical_matches_with_color() {
       auto orig_pin  = Node_pin("lgdb", orig_np);
       auto orig_node = orig_pin.get_node();
       auto orig_dpin = orig_pin.has_name() ? orig_pin.get_name() : ("p" + std::to_string(orig_pin.get_pid()));
-      auto loc_start = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().first + 1)) : "xxx";
-      auto loc_end   = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().second + 1)) : "xxx";
+      auto loc_start = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().first)) : "xxx";
+      auto loc_end   = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().second)) : "xxx";
       fmt::print("{},{}       :-    n{},{}    --   {}   --  [{},{}]{}\n",
                  synth_node,
                  synth_dpin,
