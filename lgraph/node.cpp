@@ -711,6 +711,8 @@ void Node::dump() const {
   if (has_color()) {
     fmt::print(" color:{} ", get_color());
   }
+  fmt::print("is_type_loop_last:{} ", is_type_loop_last());
+  fmt::print("node_name:{} ", has_name()?get_name():"N.A");
   if (has_loc()) {
     auto [loc1, loc2] = get_loc();
     fmt::print(" loc:[{},{}] ", loc1, loc2);

@@ -45,7 +45,7 @@ static void setup_firmap_library(std::string_view path) {
 
   auto *sub_fir_const = setup_firmap_library_gen(lib, "__fir_const", {}, "Y");
   sub_fir_const->set_loop_first();
-
+  I(!sub_fir_const->is_loop_last());
   setup_firmap_library_gen(lib, "__fir_bits", {"e1", "e2", "e3"}, "Y");
 
   setup_firmap_library_gen(lib, "__fir_add", {"e1", "e2"}, "Y");

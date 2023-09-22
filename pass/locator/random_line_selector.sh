@@ -33,7 +33,10 @@ rm all_grepped.log
 #manually, in all_grepped_for_RT:
 #:g: \:= true.B:d
 #:g: \:= false:B:d
-#
+#:g:= \d.U\n:d
+#g:plic.scala:d --> as learned by DT1 trial
+#:g:assert(:d
+#:g:edges.scala:d
 }
 
 

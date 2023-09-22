@@ -311,7 +311,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // fmt::print("{}\n", node.debug_name());
 
     /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
-    if (node.is_type_register()
+    if (node.is_type_flop()
         || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
         || node.is_type_loop_last()) {
       dealing_flop = true;
@@ -2342,11 +2342,14 @@ void Traverse_lg::report_critical_matches_with_color() {
       auto orig_dpin = orig_pin.has_name() ? orig_pin.get_name() : ("p" + std::to_string(orig_pin.get_pid()));
       auto loc_start = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().first)) : "xxx";
       auto loc_end   = orig_node.has_loc() ? (std::to_string(orig_node.get_loc().second)) : "xxx";
-      fmt::print("{},{}       :-    n{},{}    --   {}   --  [{},{}]{}\n",
+      fmt::print("{},{}       :-    n{},{}({},{},{})    --   {}   --  [{},{}]{}\n",
                  synth_node,
                  synth_dpin,
                  orig_node.get_nid(),
                  orig_dpin,
+								 orig_node.get_type_name(), 
+								 orig_node.has_name()?orig_node.get_name():"",
+								 (orig_node.get_class_lgraph())->get_name(),
                  color_val,
                  loc_start,
                  loc_end,
@@ -2483,7 +2486,7 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   for (const auto& [node_key, io_vals_set] : io_map_of_sets) {
     /*if(loop_last_only):for only those keys that are is_type_loop_last*/
     auto node = Node_pin("lgdb", node_key).get_node();
-    if (node.is_type_loop_last()) {  // flop node should be matched with flop node only! else datatype mismatch!
+    if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
       for (const auto& io_val : io_vals_set) {
         node_map_of_set_LoopLastOnly[io_val].insert(node_key);
@@ -2623,7 +2626,7 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
                  np_s.has_name() ? np_s.get_name() : ("n" + std::to_string(np_s.get_node().get_nid())));
       for (auto np_o_set : matched_node_pins) {
         auto np_o = Node_pin("lgdb", np_o_set);
-        fmt::print("    {}({},{}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name());
+        fmt::print("    {}({},{},{}) ", np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())), np_o.get_node().is_type_loop_last(), np_o.get_node().get_type_name(), np_o.get_node().has_name()?np_o.get_node().get_name():"" );
       }
       fmt::print("\n");
 #endif
@@ -2985,7 +2988,7 @@ bool Traverse_lg::check_in_cellIOMap_synth(std::set<std::string>& in_set, std::s
 
 bool Traverse_lg::is_startpoint(const Node& node_to_eval) const {
   /*if (node is flop or graph input) return true else return false*/
-  if (node_to_eval.is_type_register()
+  if (node_to_eval.is_type_flop()
       || (node_to_eval.is_type_sub() ? ((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df") != std::string::npos)
                                      : false)
       || node_to_eval.is_graph_input() || node_to_eval.is_type_loop_last() || node_to_eval.is_type_loop_first()) {
@@ -2996,7 +2999,7 @@ bool Traverse_lg::is_startpoint(const Node& node_to_eval) const {
 
 bool Traverse_lg::is_endpoint(const Node& node_to_eval) const {
   /*if (node is flop or graph output) return true else return false*/
-  if (node_to_eval.is_type_register()
+  if (node_to_eval.is_type_flop()
       || (node_to_eval.is_type_sub() ? ((std::string(node_to_eval.get_type_sub_node().get_name())).find("_df") != std::string::npos)
                                      : false)
       || node_to_eval.is_graph_output() || node_to_eval.is_type_loop_last() || node_to_eval.is_type_loop_first()) {
@@ -3027,7 +3030,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
                                  bool addToCFL) {
   auto node = node_pin.get_node();
 
-  if (node.is_type_register() || (!node.has_inputs())
+  if (node.is_type_flop() || (!node.has_inputs())
       || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
       || node.is_type_loop_last() || node.is_type_loop_first()) {
     if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {
@@ -3043,7 +3046,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
       }
       // return Node::Compact_flat();
     } else {
-      bool        isFlop = (node.is_type_register()
+      bool        isFlop = (node.is_type_flop()
                      || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos)
                                                    : false));
       std::string temp_str(isFlop ? "flop"
@@ -3088,7 +3091,7 @@ void Traverse_lg::get_input_node(const Node_pin& node_pin, std::set<std::string>
 void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string>& out_set, std::set<std::string>& io_set,
                                   bool addToCFL) {
   auto node = node_pin.get_node();
-  if (node.is_type_register() || (!node.has_outputs())
+  if (node.is_type_flop() || (!node.has_outputs())
       || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
       || node.is_type_loop_last() || node.is_type_loop_first()) {
     if (node.is_graph_io()) {
@@ -3096,7 +3099,7 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
       out_set.insert(node_pin.get_pin_name());
       io_set.insert(node_pin.get_pin_name());
     } else {
-      bool        isFlop = (node.is_type_register()
+      bool        isFlop = (node.is_type_flop()
                      || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos)
                                                    : false));
       std::string temp_str(isFlop ? "flop"
