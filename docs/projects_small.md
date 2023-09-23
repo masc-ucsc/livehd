@@ -5,6 +5,17 @@ Those are simpler than MS thesis but useful for LiveHD. They are ranked from
 "most" to less "urgent". Each has a easy/medium/hard level. Easy should take a
 few days to implement, hard could take a quarter.
 
+## [small] json to glaze
+
+Replace the rapidjson class to glaze. The reason is speed and that it supports
+bynary (BEVE) format.
+
+
+It would be interesting to benchmark glaze BEVE against HIF. If the performance
+is "close", it makes sense to convert use BEVE because it reduces code size and
+allows to interface with external json tools more easily
+
+
 ## [small] List of "older" version
 
 This is a list of "packages" that we do not have the latest version but that we
