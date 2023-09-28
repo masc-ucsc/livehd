@@ -1523,6 +1523,9 @@ void Traverse_lg::remove_pound_and_bus(std::string& dpin_name) {
   if (dpin_name.find("%") != std::string::npos) {  // for cases like registers.%io_readdata2|63
     dpin_name.erase(dpin_name.find("%"), 1);
   }
+	if (dpin_name.find(".") != std::string::npos) { // to address: The "pmp.io.addr" in DT2 yosys trial
+		std::replace( dpin_name.begin(), dpin_name.end(), '.', '_');// convert all '.' to '_'
+	}
   if (synth_tool == "DC"
       && dpin_name.find(".")
              != std::string::npos) {  // in case the synth tool is DC, then "." in LGorig will have to be converted to "_"
