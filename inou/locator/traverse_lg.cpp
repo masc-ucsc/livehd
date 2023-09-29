@@ -279,6 +279,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);
+		remove_resolved_from_orig_MoS();//so that the nodes matched in default matching do not go for matching again!
     fmt::print("\n make_io_maps - orig done.\n");
 
 #ifdef BASIC_DBG
@@ -1667,19 +1668,23 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
             fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
           #endif
         } else {
-          #ifdef BASIC_DBG
-            if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
-              fmt::print("WARNING: overwriting!\n");
-            }
-            fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
-          #endif
           if (name2dpins.find(original_node_dpin_wire) != name2dpins.end()) {
             /* if entry already in name2dpins, then append to that only*/
             name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
             #ifdef BASIC_DBG
             fmt::print("\t\t\t inserting {} in name2dpinss.\n", original_node_dpin_wire);
             #endif
-          } else {
+          } else if (name2dpin.find(original_node_dpin_wire) != name2dpin.end()) {
+						/* entry already in name2dpin. Instead of overwriting, move it to name2dpins*/
+						auto name2dpin_it = name2dpin.find(original_node_dpin_wire);
+						name2dpins[original_node_dpin_wire].insert(name2dpin_it->second);
+            name2dpin.erase(name2dpin_it);
+						/* now write the new entry as well to name2dpins */
+						name2dpins[original_node_dpin_wire].insert(original_node_dpin.get_compact_flat());
+            #ifdef BASIC_DBG
+					  	fmt::print("\t\t\t moving {} to name2dpinss.\n", original_node_dpin_wire);
+            #endif
+					} else {
             name2dpin[original_node_dpin_wire] = original_node_dpin.get_compact_flat();
             #ifdef BASIC_DBG
             fmt::print("\t\t\t inserting {} in name2dpin.\n", original_node_dpin_wire);
@@ -1802,6 +1807,9 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 }
 
 void Traverse_lg::remove_resolved_from_orig_MoS() {
+#ifdef BASIC_DBG
+	fmt::print("\n\nIn remove_resolved_from_orig_MoS.\n\n");
+#endif
   for (const auto& [synth_np_cf, orig_np_cf_set] : net_to_orig_pin_match_map) {
     for (const auto& orig_np_cf : orig_np_cf_set) {
       inp_map_of_sets_orig.erase(orig_np_cf);
@@ -1941,7 +1949,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 #endif
         }
 #ifdef BASIC_DBG
-        else {  // inputs did not match
+        else {  // outputs did not match
           auto p_o = Node_pin("lgdb", orig_in_np);
           auto o_s = Node_pin("lgdb", orig_in_np).get_node();
           fmt::print("\t\tMatch? : {},n{}\n",
