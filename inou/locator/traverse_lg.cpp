@@ -83,6 +83,8 @@ void Traverse_lg::travers(Eprp_var& var) {
       "matching\n");
   p.print_everything();
 #endif
+	p.remove_lib_loc_from_orig_lg(orig_lg);
+
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
   fmt::print("\n do_travers - orig done.\n");
 #ifdef BASIC_DBG
@@ -100,6 +102,23 @@ void Traverse_lg::travers(Eprp_var& var) {
   p.report_critical_matches_with_color();
 
 #endif
+}
+
+void Traverse_lg::remove_lib_loc_from_orig_lg(Lgraph* orig_lg) {
+	/* This is to remove loc and source file information from nodes having source files like Reg.scala
+	 * These files are like liberty files and we never mark DT on these files for Eval*/
+	fmt::print("\n\n BEFORE running remove_lib_loc_from_orig_lg \n\n");
+	orig_lg->dump(true);
+  for (auto node : orig_lg->fast(true)) {
+		if(node.has_loc()){
+			auto fname = node.get_source();
+			if (fname == "Reg.scala") {
+				node.del_source();
+			}
+		}
+	}
+	fmt::print("\n\n AFTER running remove_lib_loc_from_orig_lg \n\n");
+	orig_lg->dump(true);
 }
 
 void Traverse_lg::debug_function(Lgraph* lg) {
@@ -203,7 +222,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       fmt::print("9. Printing after flop weighted_match_LoopLastOnly matching!");
       print_everything();
 #endif
-      remove_resolved_from_orig_MoS();
+      //remove_resolved_from_orig_MoS();
     }
 
     I(flop_set_synth.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
@@ -279,7 +298,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (is_orig_lg) {
     make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);
-		remove_resolved_from_orig_MoS();//so that the nodes matched in default matching do not go for matching again!
+		//remove_resolved_from_orig_MoS();//so that the nodes matched in default matching do not go for matching again!
     fmt::print("\n make_io_maps - orig done.\n");
 
 #ifdef BASIC_DBG
@@ -1803,7 +1822,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     }
   }
 
-  remove_resolved_from_orig_MoS();
+  //remove_resolved_from_orig_MoS();
 }
 
 void Traverse_lg::remove_resolved_from_orig_MoS() {
@@ -2152,7 +2171,7 @@ bool Traverse_lg::surrounding_cell_match() {
     out_map_of_sets_synth.erase(val_to_erase);
     inp_map_of_sets_synth.erase(val_to_erase);
   }
-  remove_resolved_from_orig_MoS();
+  //remove_resolved_from_orig_MoS();
   return any_matching_done;
 }
 
@@ -2549,11 +2568,11 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
 
   Traverse_lg::map_of_sets inp_map_of_sets_synth_LLonlly = obtain_MoS_LLonly(inp_map_of_sets_synth);
   // for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
-  for (const auto& [node_ll, node_io] : inp_map_of_sets_synth_LLonlly) {
+  for (const auto& [synth_key, synth_set] : inp_map_of_sets_synth_LLonlly) {
     // const auto &synth_key = it->first;
     // const auto &synth_set = it->second;
-    const auto& synth_key = (inp_map_of_sets_synth.find(node_ll))->first;
-    const auto& synth_set = (inp_map_of_sets_synth.find(node_ll))->second;
+    /*const auto& synth_key = (inp_map_of_sets_synth.find(node_ll))->first;
+    const auto& synth_set = (inp_map_of_sets_synth.find(node_ll))->second;*/
 
     /*if(loop_last_only):for only those keys that are is_type_loop_last
       time complexity with loop_last_only will be num_of_flops-synth into num_of_flops-orig

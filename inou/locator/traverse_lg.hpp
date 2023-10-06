@@ -126,6 +126,7 @@ private:
   absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat> > net_to_orig_pin_match_map;
   void remove_pound_and_bus(std::string &dpin_name);
   void remove_resolved_from_orig_MoS();
+  void remove_lib_loc_from_orig_lg(Lgraph* orig_lg);
   //  Node_pin/*FIXME?: ::Compact_flat*/ get_input_node(const Node_pin &pin, std::set<std::string>& in_set, std::set<std::string>&
   //  io_set, bool addToCFL = false);
   void get_input_node(const Node_pin &pin, std::set<std::string> &in_set, std::set<std::string> &io_set, bool addToCFL = false);
