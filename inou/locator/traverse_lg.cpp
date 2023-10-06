@@ -2516,7 +2516,8 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   for (const auto& [node_key, io_vals_set] : io_map_of_sets) {
     /*if(loop_last_only):for only those keys that are is_type_loop_last*/
     auto node = Node_pin("lgdb", node_key).get_node();
-    if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
+    if (node.is_type_loop_last() && (!node.is_type_sub()) && node.has_loc()) {  // flop node should be matched with flop node only! else datatype mismatch!
+																																								// also, nodes with valid LoC should be used for matching
       // we need flop nodes only in this case
       for (const auto& io_val : io_vals_set) {
         node_map_of_set_LoopLastOnly[io_val].insert(node_key);
@@ -2685,7 +2686,8 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
 
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
-    for (const auto& [orig_key, orig_set] : inp_map_of_sets_orig) {
+    for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
+			if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
 #ifdef FOR_EVAL
       auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
