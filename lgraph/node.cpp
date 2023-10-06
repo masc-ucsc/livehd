@@ -669,6 +669,8 @@ const std::pair<uint64_t, uint64_t> Node::get_loc() const {
 
 bool Node::has_loc() const { return current_g->get_node_loc_map().contains(get_compact_class()); }
 
+void Node::del_loc() { current_g->ref_node_loc_map()->erase(get_compact_class()); }
+
 void Node::set_source(std::string_view fname) {
   if (fname.empty() || current_g->get_source() == fname) {
     return;
@@ -685,6 +687,11 @@ std::string_view Node::get_source() const {
   }
 
   return it->second;
+}
+
+void Node::del_source() {
+  current_g->ref_node_source_map()->erase(get_compact_class());
+  del_loc(); //since source file information has been deleted, what i sth epoint of keeping LoC information
 }
 
 //----- Subject to changes in the future:

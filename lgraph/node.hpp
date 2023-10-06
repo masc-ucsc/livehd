@@ -383,9 +383,11 @@ public:
   void                                set_loc(std::pair<uint64_t, uint64_t> loc) { set_loc(loc.first, loc.second); };
   const std::pair<uint64_t, uint64_t> get_loc() const;
   bool                                has_loc() const;
+  void                                del_loc();
 
   void             set_source(std::string_view fname);
   std::string_view get_source() const;
+  void             del_source();
 
   void set_color(int color);
   void del_color();
