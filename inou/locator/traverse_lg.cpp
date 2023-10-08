@@ -1091,11 +1091,11 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
       remove_from_crit_node_set(node_pin_cf);
       inp_map_of_sets.erase(node_pin_cf);
       out_map_of_sets_synth.erase(node_pin_cf);
-      for (const auto& orig_pin : set_pins_cf) {
-        /* further accuracy attempt: remove the nodes used from orig as well*/
-        inp_map_of_sets_orig.erase(orig_pin);
-        out_map_of_sets_orig.erase(orig_pin);
-      }
+      // for (const auto& orig_pin : set_pins_cf) {
+      //   /* further accuracy attempt: remove the nodes used from orig as well*/
+      //   inp_map_of_sets_orig.erase(orig_pin);
+      //   out_map_of_sets_orig.erase(orig_pin);
+      // }
       if (flop_set_synth.find(node_pin_cf) != flop_set_synth.end()) {
         flop_set_synth.erase(node_pin_cf);
       }
