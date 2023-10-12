@@ -107,18 +107,14 @@ void Traverse_lg::travers(Eprp_var& var) {
 void Traverse_lg::remove_lib_loc_from_orig_lg(Lgraph* orig_lg) {
 	/* This is to remove loc and source file information from nodes having source files like Reg.scala
 	 * These files are like liberty files and we never mark DT on these files for Eval*/
-	fmt::print("\n\n BEFORE running remove_lib_loc_from_orig_lg \n\n");
-	orig_lg->dump(true);
   for (auto node : orig_lg->fast(true)) {
 		if(node.has_loc()){
 			auto fname = node.get_source();
-			if (fname == "Reg.scala") {
+			if ( (fname == "Reg.scala") || (fname == "Interrupts.scala") || (fname == "Mux.scala") ) {
 				node.del_source();
 			}
 		}
 	}
-	fmt::print("\n\n AFTER running remove_lib_loc_from_orig_lg \n\n");
-	orig_lg->dump(true);
 }
 
 void Traverse_lg::debug_function(Lgraph* lg) {
@@ -1889,9 +1885,12 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 
   /* 5 points for a full match for this set part
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
-  float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
+  float mismatches = smallest.size() - matches ;
+  //float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
+	float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
+	float matching_weight_ = ( (matching_weight < 0.0) ? 0 : matching_weight ) ;
 #ifdef FOR_EVAL
-  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={})\n", matching_weight, synth_set.size(), orig_set.size());
+  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{}, matching_weight_={}\n", matching_weight, synth_set.size(), orig_set.size(),matches, mismatches, matching_weight_);
 #endif
   return matching_weight;
 }
@@ -2625,7 +2624,10 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
       // if ( !node_o.is_type_loop_last()  ) {
       //   continue; //flop node should be matched with flop node only! else datatype mismatch!
       // }
-
+      #ifdef FOR_EVAL
+        auto np_o = Node_pin("lgdb", orig_key);
+        fmt::print("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
+      #endif
       const auto& in_match  = get_matching_weight(synth_set, orig_set);
       auto        out_match = 0.0;
       if (out_map_of_sets_synth.find(synth_key) != out_map_of_sets_synth.end()
