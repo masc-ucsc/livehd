@@ -434,6 +434,23 @@ bool Node::is_root() const {
   return ans;
 }
 
+bool Node::is_combinationally_connected(const Node &n2) const {
+  bool is_comb_conn = false;
+  for (const auto &e : out_edges()) {
+    auto n = e.sink.get_node();
+    if ( n == n2 ) {
+      //n2 IS connected to the node's out.
+      is_comb_conn = true;
+      break;
+    } else if ( n.is_type_flop() ) {
+      is_comb_conn = false;
+    } else {
+      is_comb_conn = n.is_combinationally_connected(n2);
+    }
+  }
+  return is_comb_conn;
+}
+
 Node Node::get_up_node() const {
   I(!is_root());
   I(!Hierarchy::is_invalid(hidx));
