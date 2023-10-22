@@ -83,7 +83,9 @@ void Traverse_lg::travers(Eprp_var& var) {
       "matching\n");
   p.print_everything();
 #endif
+#ifndef FULL_RUN_FOR_EVAL
 	p.remove_lib_loc_from_orig_lg(orig_lg);
+#endif
 
   p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
   fmt::print("\n do_travers - orig done.\n");
@@ -1647,9 +1649,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 
   orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
+#ifndef FULL_RUN_FOR_EVAL
     if (!original_node.has_loc()) {
       continue;  // this way non loc nodes will not get matched in default matching
     }
+#endif
     if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
       continue;
     }
@@ -2515,12 +2519,19 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
   for (const auto& [node_key, io_vals_set] : io_map_of_sets) {
     /*if(loop_last_only):for only those keys that are is_type_loop_last*/
     auto node = Node_pin("lgdb", node_key).get_node();
-    if (node.is_type_loop_last() && (!node.is_type_sub()) && node.has_loc()) {  // flop node should be matched with flop node only! else datatype mismatch!
-																																								// also, nodes with valid LoC should be used for matching
+    if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
-      for (const auto& io_val : io_vals_set) {
-        node_map_of_set_LoopLastOnly[io_val].insert(node_key);
-      }
+#ifndef FULL_RUN_FOR_EVAL
+			if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
+        for (const auto& io_val : io_vals_set) {
+          node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+        }
+			}
+#else
+			for (const auto& io_val: io_vals_set) {
+				node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+			}
+#endif
     }
   }
 
@@ -2689,7 +2700,9 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
+#ifndef FULL_RUN_FOR_EVAL
 			if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
+#endif
 #ifdef FOR_EVAL
       auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{}\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid() );
