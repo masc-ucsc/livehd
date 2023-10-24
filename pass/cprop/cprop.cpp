@@ -2267,7 +2267,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
     }
     // fmt::print("scalar node:{}\n", node.debug_name());
 
-    //if (!tup_pass_only) { // this if starts for rockettile, comment for dino
+    if (!tup_pass_only) { // this if starts for rockettile, comment for dino
     auto inp_edges_ordered = node.inp_edges_ordered();
 
     if (op == Ntype_op::Sext) {
@@ -2303,7 +2303,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
       continue;
     }
 
-    if (!tup_pass_only) { //commented for rocketTile, uncomment for dino
+    // if (!tup_pass_only) { //commented for rocketTile, uncomment for dino
       auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
       if (node.is_invalid()) {
