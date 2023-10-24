@@ -138,6 +138,7 @@ private:
   bool check_in_cellIOMap_synth(std::set<std::string> &in_set, std::set<std::string> &out_set, Node &start_node);
   bool is_startpoint(const Node &node_to_eval) const;
   bool is_endpoint(const Node &node_to_eval) const;
+  bool is_combinationally_connected(const Node &n1, const Node &n2, absl::flat_hash_set<Node> &traversed_nodes);
 
 public:
   static void travers(Eprp_var &var);

@@ -2364,6 +2364,10 @@ void Traverse_lg::report_critical_matches_with_color() {
   fmt::print(
       "\n\nReporting final critical resolved matches: \nsynth node and dpin     :- original node and dpin      -- color val -- "
       "source loc\n");
+#ifdef FOR_EVAL
+	Node from_node_synth, from_node_orig;
+  Node to_node_synth, to_node_orig;
+#endif
   for (const auto& [synth_np, color_val] : crit_node_map) {
     auto        orig_NPs   = net_to_orig_pin_match_map[synth_np];
     auto        synth_pin  = Node_pin("lgdb", synth_np);
@@ -2387,10 +2391,30 @@ void Traverse_lg::report_critical_matches_with_color() {
                  loc_start,
                  loc_end,
                  orig_node.get_source());  // FIXME: referring to nid for understandable message.
+
+#ifdef FOR_EVAL
+			if(color_val==37){
+				to_node_synth = synth_pin.get_node();
+				to_node_orig = orig_node;
+			}
+			if(color_val==38) {
+				from_node_synth = synth_pin.get_node();
+				from_node_orig = orig_node;
+			}
+#endif
     }
   }
 
   fmt::print("\n");
+
+#ifdef FOR_EVAL
+	absl::flat_hash_set<Node> traversed_nodes = {};
+	fmt::print("\ncolor 38 in synth LG is connected to color 37 in synth LG ? {}\n",is_combinationally_connected(from_node_synth, to_node_synth, traversed_nodes) );
+	traversed_nodes.clear();
+  fmt::print("\ncolor 38 in orig LG is connected to color 37 in orig LG ? {}\n\n",is_combinationally_connected(from_node_orig, to_node_orig, traversed_nodes) );
+	traversed_nodes.clear();
+	fmt::print("\ncolor 37 in orig LG is connected to color 38 in orig LG ? {}\n\n",is_combinationally_connected(to_node_orig, from_node_orig, traversed_nodes) );
+#endif
 
   exit(2);
 }
@@ -3186,6 +3210,36 @@ void Traverse_lg::get_output_node(const Node_pin& node_pin, std::set<std::string
     }
   }
 }
+
+bool Traverse_lg::is_combinationally_connected(const Node &n1, const Node &n2, absl::flat_hash_set<Node> &traversed_nodes) {
+  //This checks that the node n2 is somewhere in the output of n1 
+  //And the path to n2 is purely combinational
+	traversed_nodes.insert(n1);
+	fmt::print("{}({}) ----> {}({}) ??", std::to_string(n1.get_nid()),n1.get_class_lgraph()->get_name(), std::to_string(n2.get_nid()), n2.get_class_lgraph()->get_name());
+	bool is_comb_conn = false;
+  for (const auto &e : n1.out_edges()) {
+    auto n = e.sink.get_node();
+    if ( n == n2 ) {
+      fmt::print("FOUND!!!!!!!!\n");
+      //n2 IS connected to the node's out.
+      is_comb_conn = true;
+      break;
+    } else if ( n.is_type_flop() || (n.is_type_loop_last() && (!n.is_type_sub())) ) {
+      fmt::print("FLOP.\n");
+      is_comb_conn = false;
+    } else if (traversed_nodes.find(n)!= traversed_nodes.end()) {
+			//combinational loop?
+			fmt::print("LOOP!\n");
+			is_comb_conn=false;
+			break;
+		} else {
+      fmt::print("Going iteratively\n");
+      is_comb_conn = is_combinationally_connected(n,n2, traversed_nodes);
+    }
+  }
+  return is_comb_conn;
+}
+
 
 void Traverse_lg::print_set(const absl::flat_hash_set<Node_pin::Compact_flat>& set_of_dpins) const {
   for (const auto& v : set_of_dpins) {

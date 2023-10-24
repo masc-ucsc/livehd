@@ -313,7 +313,6 @@ public:
   Hierarchy_index hierarchy_go_up() const;
   Node            get_up_node() const;
   bool            is_root() const;
-  bool            is_combinationally_connected(const Node &n2) const;
 
   void            set_type_sub(Lg_type_id subid);
   void            set_type_const(const Lconst &val);
