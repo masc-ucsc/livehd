@@ -32,7 +32,8 @@ cc_library(
         ],
     ),
     deps = [
-      "@boost//:serialization",
+      # No need to have boost
+      #      "@boost//:serialization",
     ],
     hdrs = glob(
         [
