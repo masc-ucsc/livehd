@@ -219,11 +219,13 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
         return dpin;
       }
 
+#if 0
       fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n",  // due to extra tposs
                  wire->name.c_str(),
                  wire->width,
                  dpin.get_pid(),
                  dpin.get_bits());
+#endif
       // I(false);  // WHY?
       // wire2pin[wire].set_bits(wire->width);
       // I(wire->width == wire2pin[wire].get_bits());
