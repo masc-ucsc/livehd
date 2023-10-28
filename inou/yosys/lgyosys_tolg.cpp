@@ -1642,7 +1642,8 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       if (cell->hasPort(ID::Q)) {
         const RTLIL::Wire *wire = cell->getPort(ID::Q).chunks()[0].wire;
         if (wire) {
-          exit_node.setup_driver_pin().set_name(std::string(wire->name.str()));
+          std::string wname(&wire->name.c_str()[1]);
+          exit_node.setup_driver_pin().set_name(wname);
         }
       }
 
@@ -2072,7 +2073,7 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       auto wr_clkp = cell->getParam(ID::WR_CLK_POLARITY).as_int();
       //auto wr_clke = cell->getParam(ID::WR_CLK_ENABLE).as_int();
 
-      std::string name = cell->getParam(ID::MEMID).decode_string();
+      std::string name(&cell->getParam(ID::MEMID).decode_string().c_str()[1]);
 
       fmt::print("name:{} depth:{} wrports:{} rdports:{}\n", name, depth, wrports, rdports);
 
@@ -2371,7 +2372,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         RTLIL::Wire *wire = mod->wire(port);
         std::string  wire_name(&wire->name.c_str()[1]);
 
-        auto cell_port = absl::StrCat(mod->name.str(), "_:_", wire->name.str());
+        auto cell_port = absl::StrCat(mod_name, "_:_", wire_name);
         if (wire->port_input && !wire->port_output) {
           // fmt::print("mod:{} inp:{}\n", mod->name.str(), wire->name.str());
           cell_port_inputs.insert(cell_port);
@@ -2415,7 +2416,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
 
         for (const auto &port : mod->ports) {
           RTLIL::Wire *wire = mod->wire(port);
-          std::string  wire_name(&wire->name.c_str()[1]);
+          //std::string  wire_name(&wire->name.c_str()[1]);
           if (wire->port_output) {
             pending_outputs.emplace_back(wire);
           }
