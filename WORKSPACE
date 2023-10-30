@@ -271,9 +271,9 @@ http_archive(
 http_archive(
     name = "com_google_perfetto",
     build_file = "perfetto.BUILD",
-    sha256 = "39d7b3635834398828cfd189bd61afb0657ca2a3a08efbfd9866bfbcd440810b",
-    strip_prefix = "perfetto-37.0/sdk",
-    urls = ["https://github.com/google/perfetto/archive/refs/tags/v37.0.tar.gz"],
+    sha256 = "92160b0fbeb8c4992cc0690d832dd923cee1dda466f3364ef4ed26a835e55e40",
+    strip_prefix = "perfetto-38.0/sdk",
+    urls = ["https://github.com/google/perfetto/archive/refs/tags/v38.0.tar.gz"],
 )
 
 # Boost
