@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/strings/str_cat.h"
 #include "fmt/format.h"
 #include "gtest/gtest.h"
 #include "lrand.hpp"

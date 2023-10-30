@@ -4,6 +4,7 @@
 #include <stack>
 
 #include "absl/container/node_hash_map.h"
+#include "absl/strings/str_cat.h"
 
 #include "elab_scanner.hpp"
 #include "lhtree.hpp"

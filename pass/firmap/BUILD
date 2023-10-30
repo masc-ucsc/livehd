@@ -15,7 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pass/common:pass",
-        "@com_google_absl//absl/container:node_hash_map",
+        "@com_google_absl2//absl/container:node_hash_map",
     ],
     alwayslink = True,
 )

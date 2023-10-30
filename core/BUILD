@@ -30,12 +30,12 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@boost//:multiprecision",
-        "@com_google_absl//absl/container:btree",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/container:node_hash_map",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:span",
+        "@com_google_absl2//absl/container:btree",
+        "@com_google_absl2//absl/container:flat_hash_map",
+        "@com_google_absl2//absl/container:flat_hash_set",
+        "@com_google_absl2//absl/container:node_hash_map",
+        "@com_google_absl2//absl/strings",
+        "@com_google_absl2//absl/types:span",
         "@fmt",
         "@iassert",
     ] + select({
@@ -101,7 +101,7 @@ cc_test(
     ],
     deps = [
         ":core",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl2//absl/container:flat_hash_set",
         "@com_google_benchmark//:benchmark",
     ],
 )
@@ -124,8 +124,8 @@ cc_test(
     deps = [
         ":core",
         "//simlib:headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl2//absl/container:flat_hash_map",
+        "@com_google_absl2//absl/container:flat_hash_set",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -135,8 +135,8 @@ cc_test(
     srcs = ["tests/lconst_bench.cpp"],
     deps = [
         ":core",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl2//absl/container:flat_hash_map",
+        "@com_google_absl2//absl/container:flat_hash_set",
         "@com_google_benchmark//:benchmark",
     ],
 )

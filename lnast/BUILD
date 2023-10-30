@@ -20,7 +20,7 @@ cc_library(
     deps = [
         "//core",
         "//parser",
-        "@com_google_absl//absl/strings",
+        "@com_google_absl2//absl/strings",
         "@hif//hif",
     ],
 )

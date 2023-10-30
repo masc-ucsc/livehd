@@ -285,4 +285,11 @@ http_archive(
 
 load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 
+# Abseil (bazel_rules_hdl provides com_google_absl)
+http_archive(
+  name = "com_google_absl2",
+  urls = ["https://github.com/abseil/abseil-cpp/archive/6c8338c252116e429307361ff4fdc1fd0532902d.zip"],
+  strip_prefix = "abseil-cpp-6c8338c252116e429307361ff4fdc1fd0532902d",
+)
+
 boost_deps()
