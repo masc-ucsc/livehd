@@ -17,12 +17,12 @@
 #include "pass.hpp"
 #include "absl/container/internal/raw_hash_set.h"
 #define DE_DUP  // use set
-#define BASIC_DBG
+// #define BASIC_DBG
 // #define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
 													//possible to compare matching map for every node
                           // used in nl2nl match
-#define FOR_EVAL // used in orig-to-NL match (just soime prints)
+// #define FOR_EVAL // used in orig-to-NL match (just soime prints)
 
 class Traverse_lg : public Pass {
 public:
@@ -118,6 +118,7 @@ private:
   absl::flat_hash_set<Node_pin::Compact_flat> crit_node_set;
   absl::flat_hash_set<Node_pin::Compact_flat> flop_set_synth;
   absl::flat_hash_set<Node_pin::Compact_flat> flop_set_orig;
+  absl::flat_hash_set<Node_pin::Compact_flat> unwanted_orig_NPs;
   map_of_sets inp_map_of_sets_synth;
   map_of_sets out_map_of_sets_synth;
   map_of_sets inp_map_of_sets_orig;

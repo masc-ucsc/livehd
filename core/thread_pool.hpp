@@ -23,7 +23,7 @@
 
 #include "perf_tracing.hpp"
 
-// #define DISABLE_THREAD_POOL
+#define DISABLE_THREAD_POOL 1
 //
 //
 
