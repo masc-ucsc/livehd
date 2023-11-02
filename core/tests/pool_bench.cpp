@@ -14,6 +14,7 @@ static void BM_mpmc(benchmark::State& state) {
       auto b = queue.enqueue(j);
       benchmark::DoNotOptimize(b);
       auto data = queue.dequeue();
+      benchmark::DoNotOptimize(data);
       assert(data);
       assert(*data == j);
     }
@@ -29,6 +30,7 @@ static void BM_spmc(benchmark::State& state) {
       queue.enqueue(j);
       benchmark::DoNotOptimize(queue);
       auto data = queue.dequeue();
+      benchmark::DoNotOptimize(data);
       assert(*data == j);
     }
   }
@@ -61,6 +63,7 @@ static void BM_spsc256(benchmark::State& state) {
       queue.enqueue(j);
       benchmark::DoNotOptimize(queue);
       auto data = queue.dequeue();
+      benchmark::DoNotOptimize(data);
       assert(*data == j);
     }
   }
@@ -108,7 +111,7 @@ static void BM_make_shared_ptr(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       auto ptr = std::make_shared<int>(j);
-      *ptr = j;
+      *ptr     = j;
       benchmark::DoNotOptimize(*ptr);
     }
   }
@@ -120,7 +123,7 @@ static void BM_make_unique_ptr(benchmark::State& state) {
   for (auto _ : state) {
     for (int j = 0; j < state.range(0); ++j) {
       auto ptr = std::make_unique<int>(j);
-      *ptr = j;
+      *ptr     = j;
       benchmark::DoNotOptimize(*ptr);
     }
   }
