@@ -385,9 +385,9 @@ public:
   bool                                has_loc() const;
   void                                del_loc();
 
-  void             set_source(std::string_view fname);
-  std::string_view get_source() const;
-  void             del_source();
+  void        set_source(std::string_view fname);
+  std::string get_source() const;
+  void        del_source();
 
   void set_color(int color);
   void del_color();

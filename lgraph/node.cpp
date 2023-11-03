@@ -371,7 +371,6 @@ void Node::set_type(const Ntype_op op, Bits_t bits) {
   current_g->set_type(nid, op);
 
   I(!Ntype::is_multi_driver(op));  // bits only possible when the cell has a single output
-
   setup_driver_pin().set_bits(bits);
 }
 
@@ -503,7 +502,10 @@ void Node::del_node() {
 }
 
 Node Node::create(Ntype_op op) const {
-  auto node  = current_g->create_node(op);
+  auto node = current_g->create_node(op);
+  if (node.nid == 16) {
+    current_g->dump_source_map();
+  }
   node.top_g = top_g;
   node.hidx  = hidx;
 
@@ -517,6 +519,9 @@ Node Node::create(Ntype_op op) const {
 Node Node::create(Ntype_op op, std::pair<uint64_t, uint64_t> loc, std::string fname) const {
   auto node = current_g->create_node(op);
   node.set_loc(loc.first, loc.second);  // pos1 and pos2
+  if (fname.empty()) {
+    printf("HERE2\n");
+  }
   node.set_source(fname);
   node.top_g = top_g;
   node.hidx  = hidx;
@@ -679,11 +684,11 @@ void Node::set_source(std::string_view fname) {
   current_g->ref_node_source_map()->insert_or_assign(get_compact_class(), fname);
 }
 
-std::string_view Node::get_source() const {
+std::string Node::get_source() const {
   const auto &ptr = current_g->get_node_source_map();
   const auto  it  = ptr.find(get_compact_class());
   if (it == ptr.end()) {
-    return current_g->get_source();
+    return std::string(current_g->get_source());
   }
 
   return it->second;
@@ -691,7 +696,7 @@ std::string_view Node::get_source() const {
 
 void Node::del_source() {
   current_g->ref_node_source_map()->erase(get_compact_class());
-  del_loc(); //since source file information has been deleted, what i sth epoint of keeping LoC information
+  del_loc();  // since source file information has been deleted, what i sth epoint of keeping LoC information
 }
 
 //----- Subject to changes in the future:
@@ -719,7 +724,7 @@ void Node::dump() const {
     fmt::print(" color:{} ", get_color());
   }
   fmt::print("is_type_loop_last:{} ", is_type_loop_last());
-  fmt::print("node_name:{} ", has_name()?get_name():"N.A");
+  fmt::print("node_name:{} ", has_name() ? get_name() : "N.A");
   if (has_loc()) {
     auto [loc1, loc2] = get_loc();
     fmt::print(" loc:[{},{}] ", loc1, loc2);

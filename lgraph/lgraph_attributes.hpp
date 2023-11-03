@@ -69,6 +69,8 @@ public:
   [[nodiscard]] const Node_source_map &get_node_source_map() const { return node_source_map; };
   [[nodiscard]] Node_source_map       *ref_node_source_map() { return &node_source_map; };
 
+  void dump_source_map() const;
+
 protected:
   using Node_value_map = absl::flat_hash_map<Node::Compact_class, std::string>;
   using Node_lut_map   = absl::flat_hash_map<Node::Compact_class, std::string>;

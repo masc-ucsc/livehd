@@ -152,3 +152,9 @@ void Lgraph_attributes::set_type_const(Index_id nid, const Lconst &value) {
 void Lgraph_attributes::set_type_const(Index_id nid, std::string_view sv) { set_type_const(nid, Lconst::from_pyrope(sv)); }
 
 void Lgraph_attributes::set_type_const(Index_id nid, int64_t value) { set_type_const(nid, Lconst(value)); }
+
+void Lgraph_attributes::dump_source_map() const {
+  for (const auto &it : node_source_map) {
+    fmt::print("n:{} src:{}\n", it.first.get_nid(), it.second);
+  }
+}
