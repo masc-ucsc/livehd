@@ -1113,28 +1113,32 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
     /*capture the colored nodes in the process.*/
     auto node = dpin.get_node();
     if (!is_orig_lg) {
-#ifndef FULL_RUN_FOR_EVAL
+      #ifndef FULL_RUN_FOR_EVAL
       if (node.has_color()) {
         for (const auto dpins : node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()] = node.get_color();  // keep till end for color data
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
+            #ifdef BASIC_DBG
             fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
           }
         }
       }
-#else
+      #else
       for (const auto &dpins : node.out_connected_pins()) {
         auto cf = dpins.get_compact_flat();
         crit_node_map[cf] = 0;  // keep till end for color data
         if (net_to_orig_pin_match_map.find(cf) == net_to_orig_pin_match_map.end()) {
+          #ifdef BASIC_DBG
           fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+          #endif
           crit_node_set.insert(cf);  // keep on deleting as matching takes place
                                      // need not stor in set if already a matched entry
         }
       }
-#endif
+      #endif
     }
     for (auto sink_dpin : dpin.out_sinks()) {
       // if ( is_orig_lg && !sink_dpin.get_node().has_loc() ) {
@@ -1175,7 +1179,9 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
         for (const auto dpins : node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()] = node.get_color();
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
+            #ifdef BASIC_DBG
             fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
           }
@@ -1185,7 +1191,9 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
       for (const auto dpins : node.out_connected_pins()) {
         crit_node_map[dpins.get_compact_flat()] = 0;
         if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
+          #ifdef BASIC_DBG
           fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+          #endif
           crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                            // need not stor in set if already a matched entry
         }
@@ -1239,7 +1247,9 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   lg->dump(true);  // FIXME: remove this
   fmt::print("\nIn fast pass for inputs\n");
   for (const auto& node : lg->fast(true)) {
+    #ifdef BASIC_DBG
     fmt::print("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
+    #endif
     if (!is_orig_lg) {
       /*capture the colored nodes*/
       #ifndef FULL_RUN_FOR_EVAL
@@ -1250,7 +1260,9 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
           fmt::print("Inserting in crit_node_map: n{} , {}\n", node.get_nid(), node.get_color());
           #endif
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
+            #ifdef BASIC_DBG
             fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
           }
@@ -1260,17 +1272,19 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
       if (!node.is_type_const()) {
         for (const auto dpins : node.out_connected_pins()) {
           crit_node_map[dpins.get_compact_flat()] = 0;
-#ifdef BASIC_DBG
+          #ifdef BASIC_DBG
           fmt::print("Inserting in crit_node_map: n{} , 0\n", node.get_nid());
-#endif
+          #endif
           if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
+            #ifdef BASIC_DBG
             fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
+            #endif
             crit_node_set.insert(dpins.get_compact_flat());  // keep on deleting as matching takes place
                                                              // need not stor in set if already a matched entry
           }
         }
       }
-#endif
+      #endif
       if (node.is_type_loop_last()) {
         for (const auto dpins : node.out_connected_pins()) {
           flop_set_synth.insert(dpins.get_compact_flat());
@@ -1286,15 +1300,18 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 			}}
 		}
     if (!node.is_type_loop_last() || (is_orig_lg && node.is_type_sub())) {
+      #ifdef BASIC_DBG
       fmt::print("\t\t\t CONTINUING (node is not LL {}, or node is type sub {})... \n", !node.is_type_loop_last(), node.is_type_sub());
+      #endif
       continue;               // process flops only in this lg->fast (sub type loopLast are not flops)
     } else if (is_orig_lg) {  // flops in orig_lg to be inserted in flop_set_orig
       for (const auto dpins : node.out_connected_pins()) {
         flop_set_orig.insert(dpins.get_compact_flat());
       }
     }
-
+    #ifdef BASIC_DBG
     fmt::print("\nNOT CONTINUING...\n");
+    #endif
     for (const auto dpins : node.out_connected_pins()) {
       const auto node_dpin_cf = dpins.get_compact_flat();
       bool       is_loop_stop
@@ -1303,12 +1320,15 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
                 != mark_loop_stop.end());  // FIXME: need not do this because all nodes reaching here are of type_loop_last?
 
       const auto self_set = inp_map_of_sets.find(node_dpin_cf);
-
+      #ifdef BASIC_DBG
       fmt::print("\t Working on node's dpin: {},p{} (is LL?{}) \n", dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()), std::to_string(dpins.get_pid()), is_loop_stop);
+      #endif
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().is_type_loop_first()) {
           /*need not keep outputs of const/graphIO in in_map_of_sets*/
+          #ifdef BASIC_DBG
           fmt::print("\t\t Child node is type Loop first. continuing...\n");
+          #endif
           continue;
         }
         for (const auto out_cfs : e.sink.get_node().out_connected_pins()) {
@@ -1321,17 +1341,26 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
           if (is_loop_stop) {
             if (!is_orig_lg && !(get_matching_map_val(dpins.get_compact_flat())).empty()) {
               auto match_val = get_matching_map_val(dpins.get_compact_flat());
+              #ifdef BASIC_DBG
               fmt::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [some match_val]\n" );
+              #endif
               inp_map_of_sets[out_cf].insert(match_val.begin(), match_val.end());  // resolution
             } else {
+              #ifdef BASIC_DBG
               fmt::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [{}]\n",dpins.has_name()?dpins.get_name():std::to_string(dpins.get_pid()) );
+              #endif
               inp_map_of_sets[out_cf].insert(dpins.get_compact_flat());
             }
           } else {
             if (self_set != inp_map_of_sets.end()) {
+              #ifdef BASIC_DBG
               fmt::print("\t\t\t\t\t inserting in inp_map_of_sets this \"child node's dpin\" = [self set]\n");
+              #endif
               inp_map_of_sets[out_cf].insert(self_set->second.begin(), self_set->second.end());
-            } else {fmt::print("\t\t\t\t\t IN LAST ELSE\n");}
+            }
+            #ifdef BASIC_DBG
+            else {fmt::print("\t\t\t\t\t IN LAST ELSE\n");}
+            #endif
           }
         }
       }
@@ -2342,12 +2371,10 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
   if (crit_node_set.find(dpin_cf) != crit_node_set.end()) {
 #ifdef EXTENSIVE_DBG
     auto p = Node_pin("lgdb", dpin_cf);
-    fmt::print("\t\tREMOVING FROM crit_node_set: {}, {}\n",
+    fmt::print("\t\tREMOVING FROM crit_node_set: {},n{},{}\n",
                p.has_name() ? p.get_name() : std::to_string(p.get_pid()),
-               std::to_string(p.get_pid()));
+               p.get_node().get_nid(), p.get_node().get_class_lgraph()->get_name());
 #endif
-    auto p = Node_pin("lgdb", dpin_cf);
-    fmt::print("removing from crit_node_set: {},n{},{}\n", p.has_name()?p.get_name():(std::to_string(p.get_pid())), p.get_node().get_nid(), p.get_node().get_class_lgraph()->get_name() );
     crit_node_set.erase(dpin_cf);
   }
 #ifdef EXTENSIVE_DBG
@@ -2757,13 +2784,17 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
   fmt::print("In weighted_match:\n\n");
 #endif
   for (const auto& synth_key : crit_node_set) {
+    #ifdef BASIC_DBG
     auto synth_key_pin = Node_pin("lgdb", synth_key);
     fmt::print("\nsynth_key_pin name:{}, pid:{}\n", synth_key_pin.has_name()?synth_key_pin.get_name():("p"+std::to_string(synth_key_pin.get_pid())), std::to_string(synth_key_pin.get_pid()));
+    #endif
     I(inp_map_of_sets_synth.find(synth_key) != inp_map_of_sets_synth.end(), "\n synth_key NOT in inp_Map_of_sets_synth!! check!\n");
     const auto& synth_set = inp_map_of_sets_synth[synth_key];
+    #ifdef BASIC_DBG
     fmt::print("|||||||| synth_set|||||||\n");
     print_set(synth_set);
     fmt::print("\n||||---||||\n");
+    #endif
 
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
