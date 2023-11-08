@@ -1702,11 +1702,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 
   orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
-// #ifndef FULL_RUN_FOR_EVAL
-//     if (!original_node.has_loc()) {
-//       continue;  // this way non loc nodes will not get matched in default matching
-//     }
-// #endif
+#ifndef FULL_RUN_FOR_EVAL
+    if (!original_node.has_loc()) {
+      continue;  // this way non loc nodes will not get matched in default matching
+    }
+#endif
     if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
       continue;
     }
@@ -1944,12 +1944,13 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
   float mismatches = smallest.size() - matches ;
   //float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
-	float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
+  float mismatch_weight =  mismatches / float(synth_set.size() + orig_set.size());
+  float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
 #ifdef FOR_EVAL
-	float matching_weight_ = ( (matching_weight < 0.0) ? 0 : matching_weight ) ;
+  float matching_weight_ = ( (matching_weight < 0.0) ? 0 : matching_weight ) ;
   fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{}, matching_weight_={}\n", matching_weight, synth_set.size(), orig_set.size(),matches, mismatches, matching_weight_);
 #endif
-  return matching_weight;
+  return (matching_weight - mismatch_weight);
 }
 
 bool Traverse_lg::complete_io_match(bool flop_only) {
@@ -2611,17 +2612,17 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
     auto node = Node_pin("lgdb", node_key).get_node();
     if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
-// #ifndef FULL_RUN_FOR_EVAL
-// 			if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
-//         for (const auto& io_val : io_vals_set) {
-//           node_map_of_set_LoopLastOnly[io_val].insert(node_key);
-//         }
-// 			}
-// #else
+#ifndef FULL_RUN_FOR_EVAL
+			if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
+        for (const auto& io_val : io_vals_set) {
+          node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+        }
+			}
+#else
 			for (const auto& io_val: io_vals_set) {
 				node_map_of_set_LoopLastOnly[io_val].insert(node_key);
 			}
-// #endif
+#endif
     }
   }
 
@@ -2799,14 +2800,14 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
-			if(unwanted_orig_NPs.contains(orig_key)) { continue; }
-// #ifndef FULL_RUN_FOR_EVAL
-// 			if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
-// #endif
-#ifdef FOR_EVAL
+      if(unwanted_orig_NPs.contains(orig_key)) { continue; }
+      #ifndef FULL_RUN_FOR_EVAL
+      if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
+      #endif
+      #ifdef FOR_EVAL
       auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
-#endif
+      #endif
       const auto& in_match  = get_matching_weight(synth_set, orig_set);
       auto        out_match = 0.0;
       if (out_map_of_sets_synth.find(synth_key) != out_map_of_sets_synth.end()
@@ -2825,9 +2826,9 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         matched_node_pins.clear();
         matched_node_pins.insert(orig_key);
         match_prev = match_curr;
-#ifdef FOR_EVAL
+        #ifdef FOR_EVAL
         fmt::print("\t\t\t\t -- Found better match\n");
-#endif
+        #endif
       } else if (match_curr == match_prev) {
         matched_node_pins.insert(orig_key);
 #ifdef FOR_EVAL

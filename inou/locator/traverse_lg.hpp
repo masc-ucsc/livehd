@@ -20,7 +20,7 @@
 // #define BASIC_DBG
 // #define EXTENSIVE_DBG
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
-													//possible to compare matching map for every node
+   		          //possible to compare matching map for every node
                           // used in nl2nl match
 // #define FOR_EVAL // used in orig-to-NL match (just soime prints)
 
