@@ -286,11 +286,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // fmt::print("\n out_map_of_sets_synth.size() =  {}\n", out_map_of_sets_synth.size());
     /*all required matching done*/
 #ifdef BASIC_DBG
+    I(crit_node_set.empty(), "crit_node_set should have been empty by now!");
     fmt::print("20. Printing after crit_node_set.empty assertion checked");
     print_everything();
 #endif
+    I(crit_node_set.empty(), "crit_node_set should have been empty by now!!");
     report_critical_matches_with_color();
-    I(crit_node_set.empty(), "crit_node_set should have been empty by now!");
     return;  // FIXME: for DBG; remove.
   }
 
