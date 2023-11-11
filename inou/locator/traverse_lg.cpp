@@ -120,7 +120,11 @@ void Traverse_lg::remove_lib_loc_from_orig_lg(Lgraph* orig_lg) {
 }
 
 void Traverse_lg::debug_function(Lgraph* lg) {
+  fmt::print("lg->dump(true):\n");
   lg->dump(true);
+  fmt::print("---------------------------------------------------\n");
+  fmt::print("lg->dump():\n");
+  lg->dump();
   fmt::print("---------------------------------------------------\n");
 
   lg->each_graph_input([](const Node_pin dpin) {
@@ -1245,6 +1249,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
+  fmt::print("In fast -- lg->dump(true):\n");
   lg->dump(true);  // FIXME: remove this
   fmt::print("\nIn fast pass for inputs\n");
   for (const auto& node : lg->fast(true)) {
@@ -2835,7 +2840,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
 #ifdef FOR_EVAL
         fmt::print("\t\t\t\t -- Found similar match\n");
 #endif
+      } 
+      #ifdef FOR_EVAL 
+      else {
+        fmt::print("\t\t\t\t -- It is worse match?\n");
       }
+      #endif
     }
 
     if (!matched_node_pins.empty() && (match_prev > 0.00)) {
