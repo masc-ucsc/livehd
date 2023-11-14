@@ -31,6 +31,9 @@ protected:
 
   Hierarchy htree;
 
+  void setup_hierarchy_down(Hierarchy_index parent_hidx, Lg_id_t lgid);
+  void setup_hierarchy_for_traversal();
+
   explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source);
 
   [[nodiscard]] Index_id get_root_idx(Index_id idx) const {
@@ -128,11 +131,8 @@ protected:
         return 0;
       }
 
-      // node_internal.ref_lock();
       const auto *ref   = &node_internal[nid];
       bool        valid = ref->is_valid();
-      auto        mroot = valid ? ref->is_master_root() : false;
-      // node_internal.ref_unlock();
 
       if (!valid) {
         continue;
@@ -140,7 +140,7 @@ protected:
       if (has_graph_io(nid)) {
         continue;
       }
-      if (mroot) {
+      if (ref->is_master_root()) {
         return nid;
       }
     }

@@ -59,6 +59,10 @@ Fast_edge_iterator::Fast_iter Fast_edge_iterator::begin() const {
   auto nid = top_g->fast_first();
 
   if (nid) {
+    if (visit_sub) {
+      top_g->setup_hierarchy_for_traversal();
+    }
+
     Fast_iter it(top_g, top_g, visit_sub ? Hierarchy::hierarchical_root() : Hierarchy::non_hierarchical(), nid, visit_sub);
     if (visit_sub) {  // && top_g->is_type_sub(nid)) {
       Node node(top_g, top_g, Hierarchy::hierarchical_root(), nid);
@@ -355,3 +359,4 @@ void Bwd_edge_iterator::Bwd_iter::bwd_first(Lgraph *lg) {
 void Bwd_edge_iterator::Bwd_iter::bwd_next() {
   I(false);  // FIXME: forward works, now do backward
 }
+Node Fast_edge_iterator::Fast_iter::operator*() const { return Node(top_g, current_g, hidx, nid); }

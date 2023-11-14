@@ -17,10 +17,46 @@
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 
+void Lgraph::setup_hierarchy_down(Hierarchy_index parent_hidx, Lg_id_t lgid) {
+  auto *sub_lg = library->open_lgraph(lgid);
+  if (sub_lg == nullptr || sub_lg->get_down_nodes_map().empty()) {
+    return;
+  }
+
+  for (const auto &e : sub_lg->get_down_nodes_map()) {
+    I(e.first.nid);
+
+    auto child_hidx = htree.add_go_down(parent_hidx, sub_lg, e.first.nid);
+
+    setup_hierarchy_down(child_hidx, e.second);
+  }
+}
+
+void Lgraph::setup_hierarchy_for_traversal() {
+  if (htree.size() > 1) {  // done already
+    return;
+  }
+
+  auto parent_hidx = Hierarchy::hierarchical_root();
+
+  for (const auto &e : get_down_nodes_map()) {
+    I(e.first.nid);
+
+    auto child_hidx = htree.add_go_down(parent_hidx, this, e.first.nid);
+
+    setup_hierarchy_down(child_hidx, e.second);
+  }
+
+  // htree.dump();
+}
+
 Lgraph::Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source)
     : Lgraph_Base(_path, _name, _lgid, _lib), Lgraph_attributes(_path, _name, _lgid, _lib), htree(this) {
   I(!str_tools::contains(_name, '/'));  // No path in name
   I(_name == get_name());
+
+  // WARNING: We can not setup hierarchy here because lgraphs can be loaded out of order.
+  // Not possible until all the lgraphs are valid. Hence, we need to wait until traversal.
 
   source = _source;
 
@@ -1387,7 +1423,12 @@ Node Lgraph::create_node(const Node &old_node) {
     new_dpin.set_bits(old_dpin.get_bits());
   }
 
-  return new_node;
+  if (old_node.is_hierarchical()) {
+    I(new_node.is_hierarchical());
+    return new_node;
+  }
+
+  return new_node.get_non_hierarchical();
 }
 
 Node Lgraph::create_node(const Ntype_op op) {

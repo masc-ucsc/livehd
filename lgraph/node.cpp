@@ -457,11 +457,7 @@ bool Node::is_type_sub_present() const {
   }
 
   auto *sub_lg = ref_type_sub_lgraph();
-  if (sub_lg) {
-    return !sub_lg->is_empty();
-  }
-
-  return false;
+  return sub_lg != nullptr;
 }
 
 void Node::set_type_lut(const Lconst &lutid) { current_g->set_type_lut(nid, lutid); }

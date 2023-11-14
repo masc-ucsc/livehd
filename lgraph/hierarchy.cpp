@@ -18,6 +18,12 @@ Hierarchy::Hierarchy(Lgraph *_top) : top(_top) {
   up_vector.emplace_back(h_entry);
 }
 
+void Hierarchy::clear() {
+  I(up_vector.size() >= 1);
+  up_vector.resize(1);
+  down_map.clear();
+}
+
 Lgraph *Hierarchy::ref_lgraph(const Hierarchy_index hidx) const {
   if (hidx <= 0) {  // -1 if no hierarchical
     return top;
@@ -105,14 +111,14 @@ std::tuple<Hierarchy_index, Lgraph *> Hierarchy::get_next(const Hierarchy_index 
   return std::make_tuple(h, ref_lgraph(h));
 }
 
-Hierarchy_index Hierarchy::go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id parent_nid) {
+Hierarchy_index Hierarchy::add_go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id parent_nid) {
   // Look for a up_vector that has parent_hidx == hidx and parent_nid == nid
   // down_map
 
   key_entry_t key(parent_nid, parent_hidx);
 
   auto it = down_map.find(key);
-  if (it != down_map.end()) {
+  if (likely(it != down_map.end())) {
     return it->second;
   }
 
@@ -133,7 +139,7 @@ Hierarchy_index Hierarchy::go_down(Hierarchy_index parent_hidx, Lgraph *parent_l
 Hierarchy_index Hierarchy::go_down(const Node &node) {
   I(node.is_type_sub_present());
 
-  return go_down(node.get_hidx(), node.get_class_lgraph(), node.get_nid());
+  return add_go_down(node.get_hidx(), node.get_class_lgraph(), node.get_nid());
 }
 
 bool Hierarchy::is_root(const Node &node) { return is_root(node.get_hidx()); }

@@ -70,16 +70,17 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     Node_pin    pin;
     std::string wname(&wire->name.c_str()[1]);
     if (g->has_graph_input(wname)) {
-      pin = g->get_graph_input(wname);
+      pin = g->get_graph_input(wname).get_non_hierarchical();
       I(pin.get_bits() == wire->width);
     } else {
-      pin = g->add_graph_input(wname, wire->port_id, wire->width);
+      pin = g->add_graph_input(wname, wire->port_id, wire->width).get_non_hierarchical();
     }
     if (wire->start_offset) {
       pin.set_offset(wire->start_offset);
     }
     auto node = pin.get_node();
     set_loc(node, wire->get_src_attribute());
+    I(!pin.is_hierarchical());
     wire2pin[wire] = pin;
     // NOTE: can not convert to unsidned. In yosys/verilog is use dependent (still undecided)
   } else if (wire->port_output) {
@@ -95,12 +96,13 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
       dpin.set_offset(wire->start_offset);
     }
 #else
-    auto node = g->create_node(Ntype_op::Or, wire->width);
+    auto node = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();
     set_loc(node, wire->get_src_attribute());
     auto dpin = node.setup_driver_pin();
     pending_outputs.emplace_back(wire);
 #endif
 
+    I(!dpin.is_hierarchical());
     wire2pin[wire] = dpin;
   }
 }
@@ -279,7 +281,7 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
   I(!wire->port_input);  // Added before at look_for_wire
   I(!wire->port_output);
 
-  auto node = g->create_node(Ntype_op::Or, wire->width);  // Just a placeholder/connect gate
+  auto node = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();  // Just a placeholder/connect gate
   set_loc(node, wire->get_src_attribute());
 
   wire2pin[wire] = node.setup_driver_pin();
@@ -341,7 +343,7 @@ static Node_pin create_pick_concat_dpin(Lgraph *g, const RTLIL::SigSpec &ss, boo
 
   Node_pin dpin;
   if (inp_pins.size() > 1) {
-    auto or_node = g->create_node(Ntype_op::Or, ss.size());
+    auto or_node = g->create_node(Ntype_op::Or, ss.size()).get_non_hierarchical();
 
     int offset = 0;
     for (auto i = 0u; i < chunk_list.size(); ++i) {
@@ -537,7 +539,7 @@ static Node_pin get_partial_dpin(Lgraph *g, const RTLIL::Wire *wire) {
 }
 
 static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
-  auto node = g->create_node(Ntype_op::Memory);
+  auto node = g->create_node(Ntype_op::Memory).get_non_hierarchical();
   set_loc(node, cell->get_src_attribute());
 
   uint32_t rdports = cell->getParam(ID::RD_PORTS).as_int();
@@ -698,7 +700,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
       continue;
     }
 
-    cell2node[cell] = g->create_node();
+    cell2node[cell] = g->create_node().get_non_hierarchical();
     auto &node      = cell2node[cell];
     set_loc(node, cell->get_src_attribute());
 
@@ -844,7 +846,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             partially_assigned[wire].resize(wire->width);
             partially_assigned_bits[wire].resize(wire->width);
 
-            auto n2 = g->create_node(Ntype_op::Or, wire->width);
+            auto n2 = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();
             set_loc(n2, wire->get_src_attribute());
 
             if (wire2pin.find(wire) != wire2pin.end()) {
@@ -966,7 +968,7 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
           partially_assigned_bits[lhs_wire].resize(lhs_wire->width);
 
           if (wire2pin.find(lhs_wire) == wire2pin.end()) {
-            auto or_node = g->create_node(Ntype_op::Or, lhs_wire->width);
+            auto or_node = g->create_node(Ntype_op::Or, lhs_wire->width).get_non_hierarchical();
             set_loc(or_node, lhs_wire->get_src_attribute());
             wire2pin[lhs_wire] = or_node.setup_driver_pin();
           } else {
@@ -1046,14 +1048,14 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
             if (rchunk.wire == nullptr) {
               dpin = resolve_constant(g, rchunk.data, false);
               if (from_in_rchunk > 0) {
-                auto sra_node = g->create_node(Ntype_op::SRA, bits_needed);
+                auto sra_node = g->create_node(Ntype_op::SRA, bits_needed).get_non_hierarchical();
                 sra_node.setup_sink_pin("a").connect_driver(dpin);
                 auto c_node = g->create_node_const(Lconst(from_in_rchunk));
                 sra_node.setup_sink_pin("b").connect_driver(c_node);
                 dpin = sra_node.setup_driver_pin();
               }
               if (to_in_rchunk < rchunk.width) {
-                auto and_node = g->create_node(Ntype_op::And, bits_needed);
+                auto and_node = g->create_node(Ntype_op::And, bits_needed).get_non_hierarchical();
                 and_node.connect_sink(dpin);
                 auto c_node = g->create_node_const((Lconst(1) << Lconst(bits_needed)) - Lconst(1));
                 and_node.connect_sink(c_node);
@@ -1241,7 +1243,7 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
       auto master_or_dpin = get_partial_dpin(g, wire);
       auto master_or_node = master_or_dpin.get_node();
 
-      auto pre_or_node = g->create_node(Ntype_op::Or, wire->width);
+      auto pre_or_node = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();
       set_loc(pre_or_node, wire->get_src_attribute());
 
       // Move all the inputs to the new pre

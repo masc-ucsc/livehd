@@ -176,24 +176,6 @@ void Lgraph::each_local_sub_fast_direct(const std::function<bool(Node &, Lg_type
   }
 }
 
-#if 0
-// deprecated: Use for(const auto node:lg->fast(true))
-void Lgraph::each_hier_fast(const std::function<bool(Node &)>& f) {
-  const auto ht = ref_htree();
-
-  for (const auto &hidx : ht->depth_preorder()) {
-    Lgraph *lg = ht->ref_lgraph(hidx);
-    for (auto fn : lg->fast()) {
-      Node hn(this, lg, hidx, fn.nid);
-
-      if (!f(hn)) {
-        return;
-      }
-    }
-  }
-}
-#endif
-
 void Lgraph::each_local_unique_sub_fast(const std::function<bool(Lgraph *sub_lg)> &fn) {
   std::set<Lg_type_id> visited;
   for (const auto &e : get_down_nodes_map()) {

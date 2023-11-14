@@ -25,10 +25,9 @@ public:
   public:
     constexpr Fast_iter(Lgraph *_g, Lgraph *_cg, const Hierarchy_index &_hidx, const Index_id _nid, bool _visit_sub)
         : top_g(_g), current_g(_cg), hidx(_hidx), nid(_nid), visit_sub(_visit_sub) {}
-    constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), hidx(-1), visit_sub(_visit_sub) {}
+    constexpr Fast_iter(bool _visit_sub) : top_g(nullptr), current_g(nullptr), hidx(-1), nid(0), visit_sub(_visit_sub) {}
 
-    constexpr Fast_iter(const Fast_iter &it)
-        : top_g(it.top_g), current_g(it.current_g), hidx(it.hidx), nid(it.nid), visit_sub(it.visit_sub) {}
+    constexpr Fast_iter(const Fast_iter &it) = default;
 
     constexpr Fast_iter &operator=(const Fast_iter &it) {
       // TO allow rewind/recover the iterator
@@ -53,16 +52,16 @@ public:
       return nid == other.nid && hidx == other.hidx;
     }
 
-    Node operator*() const { return Node(top_g, current_g, hidx, nid); }
+    Node operator*() const;
 
-    bool is_invalid() const { return nid == 0; }
+    [[nodiscard]] bool is_invalid() const { return nid == 0; }
   };
 
   Fast_edge_iterator() = delete;
   explicit Fast_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
-  Fast_iter begin() const;
-  Fast_iter end() const { return Fast_iter(visit_sub); }
+  [[nodiscard]] Fast_iter begin() const;
+  [[nodiscard]] Fast_iter end() const { return {visit_sub}; }
 };
 
 class Flow_base_iterator {
@@ -141,14 +140,17 @@ public:
   Fwd_edge_iterator() = delete;
   explicit Fwd_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
-  Fwd_iter begin() const {
+  [[nodiscard]] Fwd_iter begin() const {
     if (top_g->is_empty()) {
       return end();
     }
-    return Fwd_iter(top_g, visit_sub);
+    if (visit_sub) {
+      top_g->setup_hierarchy_for_traversal();
+    }
+    return {top_g, visit_sub};
   }
 
-  Fwd_iter end() const { return Fwd_iter(visit_sub); }
+  [[nodiscard]] Fwd_iter end() const { return {visit_sub}; }
 };
 
 class Bwd_edge_iterator {
@@ -183,7 +185,7 @@ public:
   Bwd_edge_iterator() = delete;
   explicit Bwd_edge_iterator(Lgraph *_g, bool _visit_sub) : top_g(_g), visit_sub(_visit_sub) {}
 
-  Bwd_iter begin() const { return Bwd_iter(top_g, visit_sub); }
+  [[nodiscard]] Bwd_iter begin() const { return {top_g, visit_sub}; }
 
-  Bwd_iter end() const { return Bwd_iter(visit_sub); }
+  [[nodiscard]] Bwd_iter end() const { return {visit_sub}; }
 };

@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -45,11 +46,12 @@ protected:
   std::vector<up_entry_t>                           up_vector;
   absl::flat_hash_map<key_entry_t, Hierarchy_index> down_map;
 
-  [[nodiscard]] Hierarchy_index go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id nid);
   [[nodiscard]] std::tuple<Hierarchy_index, Lgraph *, Index_id> get_instance_up(const Hierarchy_index hidx) const;
 
 public:
   Hierarchy(Lgraph *top);
+
+  void clear();
 
   [[nodiscard]] Lgraph *ref_lgraph(const Hierarchy_index hidx) const;
 
@@ -57,6 +59,7 @@ public:
 
   [[nodiscard]] Node get_instance_up_node(const Hierarchy_index hidx) const;
 
+  [[nodiscard]] Hierarchy_index add_go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id nid);
   [[nodiscard]] Hierarchy_index go_up(const Hierarchy_index hidx) const;
   [[nodiscard]] Hierarchy_index go_down(const Node &node);
   [[nodiscard]] Hierarchy_index go_up(const Node &node) const;
@@ -69,6 +72,8 @@ public:
   static bool           is_root(const Node &node);
   static constexpr bool is_root(const Hierarchy_index hidx) { return hidx == 0; }
   static constexpr bool is_invalid(const Hierarchy_index hidx) { return hidx == -1; }
+
+  [[nodiscard]] size_t size() const { return up_vector.size(); }
 
   void dump() const;
 };
