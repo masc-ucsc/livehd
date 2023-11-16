@@ -319,7 +319,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   I(false, "\nintended exit!\n");
 
-  lg->dump(true);  // FIXME: remove this
   for (const auto& node : lg->fast(true)) {
     dealing_flop = false;
     dealing_comb = false;
@@ -1007,7 +1006,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
           }
         });
       } else {
-        lg->dump(true);                                                                      // FIXME: remove this
         for (const auto& startPoint_node : lg->fast(true)) {                                 // FIXME:REM
           if (std::to_string(startPoint_node.get_nid().value) == required_node.substr(5)) {  // FIXME:REM
             fmt::print("Found node n{}\n", startPoint_node.get_nid());                       // FIXME:REM
@@ -1249,8 +1247,10 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
+  #ifdef BASIC_DBG
   fmt::print("In fast -- lg->dump(true):\n");
   lg->dump(true);  // FIXME: remove this
+  #endif
   fmt::print("\nIn fast pass for inputs\n");
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
@@ -1386,7 +1386,6 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_sets, bool is_orig_lg) {
-  lg->dump(true);  // FIXME: remove this
 #ifdef BASIC_DBG
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
   fmt::print("\t\tis_orig_lg: {}\n", is_orig_lg);
@@ -1706,7 +1705,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   //   remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   // });
 
-  orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
 #ifndef FULL_RUN_FOR_EVAL
     if (!original_node.has_loc()) {
@@ -1779,7 +1777,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #endif
 
   /*known points matching*/
-  synth_lg->dump(true);                           // FIXME: remove this
   for (auto synth_node : synth_lg->fast(true)) {  // FIXME : do NOT use hier true here !?
 
     if (synth_node.is_type_sub() && synth_node.get_type_sub_node().get_name() == "__fir_const") {
