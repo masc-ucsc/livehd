@@ -36,7 +36,11 @@ void Fast_edge_iterator::Fast_iter::go_next() {
     return;
   }
 
-  std::tie(hidx, current_g) = top_g->get_htree().get_next(hidx);
+  auto [hidx2, current_g2] = top_g->get_htree().get_next(hidx);
+  I(current_g2);
+  hidx      = hidx2;
+  current_g = current_g2;
+
   while (current_g != top_g) {
     nid = current_g->fast_first();
     if (!nid.is_invalid()) {

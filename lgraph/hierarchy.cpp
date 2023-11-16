@@ -114,6 +114,7 @@ std::tuple<Hierarchy_index, Lgraph *> Hierarchy::get_next(const Hierarchy_index 
 Hierarchy_index Hierarchy::add_go_down(Hierarchy_index parent_hidx, Lgraph *parent_lg, Index_id parent_nid) {
   // Look for a up_vector that has parent_hidx == hidx and parent_nid == nid
   // down_map
+  I(parent_nid);
 
   key_entry_t key(parent_nid, parent_hidx);
 

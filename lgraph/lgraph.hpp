@@ -31,7 +31,7 @@ protected:
 
   Hierarchy htree;
 
-  void setup_hierarchy_down(Hierarchy_index parent_hidx, Lg_id_t lgid);
+  void setup_hierarchy_down(Lgraph *sub_lg, Hierarchy_index parent_hidx);
   void setup_hierarchy_for_traversal();
 
   explicit Lgraph(std::string_view _path, std::string_view _name, Lg_type_id _lgid, Graph_library *_lib, std::string_view _source);

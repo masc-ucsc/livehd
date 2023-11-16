@@ -17,18 +17,18 @@
 #include "lgraph_base_core.hpp"
 #include "str_tools.hpp"
 
-void Lgraph::setup_hierarchy_down(Hierarchy_index parent_hidx, Lg_id_t lgid) {
-  auto *sub_lg = library->open_lgraph(lgid);
-  if (sub_lg == nullptr || sub_lg->get_down_nodes_map().empty()) {
-    return;
-  }
+void Lgraph::setup_hierarchy_down(Lgraph *sub_lg, Hierarchy_index parent_hidx) {
+  I(sub_lg);
 
   for (const auto &e : sub_lg->get_down_nodes_map()) {
     I(e.first.nid);
 
-    auto child_hidx = htree.add_go_down(parent_hidx, sub_lg, e.first.nid);
+    auto *sub_lg2 = ref_library()->open_lgraph(e.second);
+    if (sub_lg2 && !sub_lg2->get_down_nodes_map().empty()) {
+      auto child_hidx = htree.add_go_down(parent_hidx, sub_lg, e.first.nid);
 
-    setup_hierarchy_down(child_hidx, e.second);
+      setup_hierarchy_down(sub_lg2, child_hidx);
+    }
   }
 }
 
@@ -42,9 +42,12 @@ void Lgraph::setup_hierarchy_for_traversal() {
   for (const auto &e : get_down_nodes_map()) {
     I(e.first.nid);
 
-    auto child_hidx = htree.add_go_down(parent_hidx, this, e.first.nid);
+    auto *sub_lg2 = ref_library()->open_lgraph(e.second);
+    if (sub_lg2 && !sub_lg2->get_down_nodes_map().empty()) {
+      auto child_hidx = htree.add_go_down(parent_hidx, this, e.first.nid);
 
-    setup_hierarchy_down(child_hidx, e.second);
+      setup_hierarchy_down(sub_lg2, child_hidx);
+    }
   }
 
   // htree.dump();
