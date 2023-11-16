@@ -4,14 +4,21 @@
 # This script works for flattened netlists only. 
 # The python script will need to be adjusted for multiple modules in single file.
 
-
 #CONSTANT ENTITIES:
 # #bbmdbg:
 # CXX=clang++ CC=clang bazel build -c dbg //main:lgshell
 # bbm with opt:
-CXX=clang++ CC=clang bazel build --define=profiling=1 -c opt //main:lgshell
+# CXX=clang++ CC=clang bazel build --define=profiling=1 -c opt //main:lgshell
+# currentl;y working bbm with opt:
+#CXX=g++-11 CC=gcc-11 bazel build -c opt //main:all
+CXX=clang++-14 CC=clang-14 bazel build -c opt //...
+ret_val=$?
+if [ $ret_val -ne 0 ]; then
+  echo "\n--------Compilation failed!--------\n\n"
+  exit $ret_val
+fi
 SRCLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests
-DESTLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy_withSelfSetChangeTrial #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+DESTLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy_SCdino_FlopChange_8nov2023 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
 export LIVEHD_THREADS=1
 
 if [ ! -d "$DESTLOCATION" ]; then
@@ -22,7 +29,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in SingleCycleCPU_flattened PipelinedCPU_flattened MaxPeriodFibonacciLFSR
+for FILENAME in SingleCycleCPU_flattened #RocketTile_yosys_DT2 SingleCycleCPU_flattened PipelinedCPU_flattened MaxPeriodFibonacciLFSR 
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -39,6 +46,11 @@ do
     rm -r lgdb/ 
     ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
     MODULE_NAME=PipelinedCPU  
+  elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
+    then
+    rm -r lgdb/
+    ./bazel-bin/main/lgshell "inou.liberty files:sky130_fd_sc_hd__ff_100C_1v95.lib"
+    MODULE_NAME=RocketTile
   fi
 
   printf "\ny${MODULE_NAME} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -66,7 +78,7 @@ do
     sed -i 's/\/\/.*//g' ${DESTLOCATION}/${FILENAME}_1.v #remove //...
 
     #This is to incorporate noise in the file:
-    flops_changed_percentage=`python3 pass/locator/test_NL2NL.py ${DESTLOCATION}/${FILENAME}_1 ${PERCENTAGE_CHANGE}`
+    flops_changed_percentage=`python3 pass/locator/test_NL2NL.py ${DESTLOCATION}/${FILENAME}_1 ${PERCENTAGE_CHANGE} ${FILENAME}`
     # python3 pass/locator/test_NL2NL.py ${DESTLOCATION}/${FILENAME}_1 ${PERCENTAGE_CHANGE}
     perc_flop_change_arr+=( "${flops_changed_percentage}" )
     echo "perc_flop_change_arr: ${perc_flop_change_arr[@]}"
@@ -89,6 +101,10 @@ do
     then
       flops_changed_perc=`python -c "print((${flops_changed_count}/2810)*100.0)"`
       total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/19241)*100.0)"`
+    elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
+    then
+      flops_changed_perc=`python -c "print((${flops_changed_count}/15254)*100.0)"`
+      total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/116550)*100.0)"`
     fi
     num_flop_calculated_arr+=( "${flops_changed_perc}" )
     num_cells_calculated_arr+=( "${total_cells_changed_perc}" )
@@ -98,7 +114,12 @@ do
     echo "total_flops=${total_flops}"
     #new file generated: @ DESTLOCATION : FILENAME_1_new.v
     rm ${DESTLOCATION}/${FILENAME}_1.v ${DESTLOCATION}/${FILENAME}_1_new_fileChangedForFlopCountOnly.v
-    sed -i 's/module \(.*\)(/module \1_changedForEval(/g' ${DESTLOCATION}/${FILENAME}_1_new.v
+    if [ ${FILENAME} == "RocketTile_yosys_DT2" ]
+    then
+      sed -i 's/module R\(.*\)(/module R\1_changedForEval(/g' ${DESTLOCATION}/${FILENAME}_1_new.v
+    else
+      sed -i 's/module \(.*\)(/module \1_changedForEval(/g' ${DESTLOCATION}/${FILENAME}_1_new.v
+    fi
 
     if [ ! -f "${DESTLOCATION}/${FILENAME}_1_new.v" ];
     then
@@ -132,6 +153,14 @@ do
     then
       echo ""
       echo "Running for SingleCycleCPU_flattened:"
+      perf record -g /usr/bin/time -o ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log ./bazel-bin/main/lgshell " inou.yosys.tolg files:${SRCLOCATION}/${FILENAME}.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                           
+      inou.yosys.tolg files:${DESTLOCATION}/${FILENAME}_1_new.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                                                           
+      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> inou.graphviz.from odir:tmp_1 |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
+      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
+    elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
+    then
+      echo ""
+      echo "Running for RocketTile_yosys_DT2:"
       perf record -g /usr/bin/time -o ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log ./bazel-bin/main/lgshell " inou.yosys.tolg files:${SRCLOCATION}/${FILENAME}.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                           
       inou.yosys.tolg files:${DESTLOCATION}/${FILENAME}_1_new.v |> pass.cprop |> pass.bitwidth |> pass.cprop |> pass.bitwidth                                                           
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> inou.graphviz.from odir:tmp_1 |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 

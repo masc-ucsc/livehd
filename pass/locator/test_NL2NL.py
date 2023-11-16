@@ -10,8 +10,8 @@ import subprocess
 
 n = len(sys.argv)
 
-if n != 3:
-    print("Enter netlist file name and noise percentage value.")
+if n != 4:
+    print("Enter netlist file name and noise percentage value, and design name.")
     exit(1)
 
 cell_dict = {}
@@ -60,17 +60,21 @@ def createGraphJsonDict():
                     cell_dict[eachCell['name']] = set()
                 cell_dict[eachCell['name']].add(eachPin['name'])     
     
-def getDPins(fname):
+def getDPins(fname, designName):
     f = open(fname,'r')
     allDPins = set()
     isComboCell = False
     currCell = ''
     graph_io = set()
     
+    module_string = "module "
+    if designName == "RocketTile_yosys_DT2":
+        module_string = "module RocketTile"
+
     isFlopCell = False
     for data in f.readlines():
 
-        if "module" in data and "(" in data:
+        if module_string in data and "(" in data:
             all_io = data.split("(")[1].split(")")[0].strip()
             all_io_list = all_io.split(",")
 
@@ -119,7 +123,8 @@ writeNetList(newNetListName, nlistData)#Removes multi line comments
 
 createGraphJsonDict()
 
-dpins = getDPins(newNetListName)
+designName = sys.argv[3]
+dpins = getDPins(newNetListName, designName)
 # print(dpins)
 ceilVal = math.ceil((int(sys.argv[2])/100) * len(dpins)) #sys.argv[2] % dpins will be changed
 randomDPins = random.sample(dpins,int(ceilVal))
