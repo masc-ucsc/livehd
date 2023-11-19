@@ -1937,9 +1937,6 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
   for (const auto& it_set : smallest) {
     if (largest.contains(it_set)) {
       ++matches;
-#ifdef FOR_EVAL
-      fmt::print("\t\t\t\t ++ matches\n");
-#endif
     }
   }
 
@@ -1950,8 +1947,7 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
   float mismatch_weight =  mismatches / float(synth_set.size() + orig_set.size());
   float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
 #ifdef FOR_EVAL
-  float matching_weight_ = ( (matching_weight < 0.0) ? 0 : matching_weight ) ;
-  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{}, matching_weight_={}\n", matching_weight, synth_set.size(), orig_set.size(),matches, mismatches, matching_weight_);
+  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{}, mismatch_weight={}, returning:{}\n", matching_weight, synth_set.size(), orig_set.size(),matches, mismatches, mismatch_weight, (matching_weight-mismatch_weight));
 #endif
   return (matching_weight - mismatch_weight);
 }
@@ -2751,9 +2747,18 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
         matched_node_pins.clear();
         matched_node_pins.insert(orig_key);
         match_prev = match_curr;
+        #ifdef FOR_EVAL
+	fmt::print("\t\t\t\t----Beter match found! match num: {} \n", match_curr);
+        #endif
       } else if (match_curr == match_prev) {
         matched_node_pins.insert(orig_key);
-      }
+        #ifdef FOR_EVAL
+	fmt::print("\t\t\t\t----SAME match found! match num: {} \n", match_curr);
+        #endif
+      } 
+      #ifdef FOR_EVAL
+      else { fmt::print("\t\t\t\t----worse match found!match num: {} \n", match_curr);}
+      #endif
     }
 
     if (!matched_node_pins.empty()) {
