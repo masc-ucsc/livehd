@@ -1942,14 +1942,11 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 
   /* 5 points for a full match for this set part
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
-  float mismatches = smallest.size() - matches ;
-  //float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
-  float mismatch_weight =  mismatches / float(synth_set.size() + orig_set.size());
-  float matching_weight = 5 * (float(2 * matches) / float(synth_set.size() + orig_set.size()));
+  float mismatches = synth_set.size() - matches ;
 #ifdef FOR_EVAL
-  fmt::print("\t\t\t\t matching_weight = {} (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{}, mismatch_weight={}, returning:{}\n", matching_weight, synth_set.size(), orig_set.size(),matches, mismatches, mismatch_weight, (matching_weight-mismatch_weight));
+  fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,(matches/mismatches));
 #endif
-  return (matching_weight - mismatch_weight);
+  return (matches/mismatches);
 }
 
 bool Traverse_lg::complete_io_match(bool flop_only) {
