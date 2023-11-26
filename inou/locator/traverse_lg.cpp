@@ -1343,7 +1343,9 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
           //   continue;
           // }
           auto out_cf = out_cfs.get_compact_flat();
+	  #ifdef BASIC_DBG
           fmt::print("\t\t\t Child node's (n{})  dpin:{}\n",std::to_string(out_cfs.get_node().get_nid()), out_cfs.has_name()?out_cfs.get_name():std::to_string(out_cfs.get_pid()));
+          #endif
           if (is_loop_stop) {
             if (!is_orig_lg && !(get_matching_map_val(dpins.get_compact_flat())).empty()) {
               auto match_val = get_matching_map_val(dpins.get_compact_flat());
