@@ -27,9 +27,8 @@
 class Traverse_lg : public Pass {
 public:
 private:
-	std::string orig_lg_name;
-  std::string synth_tool;
-	// std::string synth_lg_name;
+  std::string orig_lg_name;
+  // std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat>>
       setMap_pairKey;
