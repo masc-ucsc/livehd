@@ -953,7 +953,8 @@ void Pass_lnast_fromlg::attach_latch_node(Lnast& lnast, Lnast_nid& parent_node, 
 }
 
 void Pass_lnast_fromlg::attach_subgraph_node(Lnast& lnast, Lnast_nid& parent_node, const Node_pin& pin) {
-  const auto& sub = pin.get_node().get_type_sub_node();
+  auto node4pin = pin.get_node();
+  const auto& sub = node4pin.get_type_sub_node();
 
   // Create tuple names for submodule IO.
   std::string out_tup_name;
