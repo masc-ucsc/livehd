@@ -134,7 +134,7 @@ void Traverse_lg::debug_function(Lgraph* lg) {
 
   for (const auto& node : lg->fast(true)) {
     if (node.has_outputs()) {
-      fmt::print("{}(n{})\n", node.debug_name(), node.get_nid());
+      fmt::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
       if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
         auto node_sub_name = node.get_type_sub_node().get_name();
         fmt::print("\t\t\t\t {}\n", node_sub_name);
@@ -1296,13 +1296,16 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
       }
     }
 
-		if(is_orig_lg) {
-			auto node_op_type = node.get_type_op();
-			if(node_op_type==Ntype_op::Get_mask || node_op_type==Ntype_op::Set_mask || node_op_type==Ntype_op::TupAdd || node_op_type==Ntype_op::TupGet) {
-				for (const auto dpins : node.out_connected_pins()){
-				  unwanted_orig_NPs.insert(dpins.get_compact_flat());
-			}}
-		}
+    if(is_orig_lg) {
+      auto node_op_type = node.get_type_op();
+      if(node_op_type==Ntype_op::Get_mask || node_op_type==Ntype_op::Set_mask || node_op_type==Ntype_op::TupAdd || node_op_type==Ntype_op::TupGet || (!node.has_loc())) {
+        for (const auto dpins : node.out_connected_pins()){
+          unwanted_orig_NPs.insert(dpins.get_compact_flat());
+          #ifdef FOR_EVAL
+	  fmt::print("Inserting in unwanted_orig_NPs: "); get_node_pin_compact_flat_details(dpins.get_compact_flat());
+          #endif
+      }}
+    }
     if (!node.is_type_loop_last() || (is_orig_lg && node.is_type_sub())) {
       #ifdef BASIC_DBG
       fmt::print("\t\t\t CONTINUING (node is not LL {}, or node is type sub {})... \n", !node.is_type_loop_last(), node.is_type_sub());
@@ -1968,7 +1971,14 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     std::map<float, absl::flat_hash_set<Node_pin::Compact_flat>> partial_out_match_map;
     for (const auto& [orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
       // auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-			if(unwanted_orig_NPs.contains(orig_in_np)) { continue; }
+      if(unwanted_orig_NPs.contains(orig_in_np) ) { 
+        #ifdef FOR_EVAL
+        get_node_pin_compact_flat_details(orig_in_np);
+        #endif
+        continue; }
+      #ifdef FOR_EVAL
+      fmt::print("working on: "); get_node_pin_compact_flat_details(orig_in_np);
+      #endif
       if (flop_only) {
         if (!flop_set_orig.contains(orig_in_np)) {
           continue;  // orig_in_np is not in flop_set_orig, then the node is not type loop last
@@ -2396,6 +2406,11 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
     fmt::print("\n");
   }
 #endif
+}
+
+void Traverse_lg::get_node_pin_compact_flat_details(const Node_pin::Compact_flat &np_cf) const {
+  auto np = Node_pin("lgdb",np_cf);
+  fmt::print("Details of node n{},{} are: {},{}\n", std::to_string(np.get_node().get_nid()), np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
 }
 
 void Traverse_lg::report_critical_matches_with_color() {
