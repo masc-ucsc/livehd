@@ -52,24 +52,13 @@ http_archive(
 )
 
 # fmt
-# http_archive(
-#     name = "fmt",
-#     build_file = "fmt.BUILD",
-#     sha256 = "fccfc86e4aff6c33bff9a1d907b2ba2de2a5a8ab84349be4964a93f8d8c21b62",
-#     strip_prefix = "fmt-7bdf0628b1276379886c7f6dda2cef2b3b374f0b",
-#     urls = [
-#         "https://github.com/fmtlib/fmt/archive/7bdf0628b1276379886c7f6dda2cef2b3b374f0b.zip",
-#     ],
-# )
 http_archive(
     name = "fmt",
     build_file = "fmt.BUILD",
-    #sha256 = "cdc885473510ae0ea909b5589367f8da784df8b00325c55c7cbbab3058424120",
-    sha256 = "5bf4d5358301fdf3bd100c01b9d4c1fbb2091dc2267fb4fa6d7cd522b3e47179",
-    #strip_prefix = "fmt-9.1.0",
-    strip_prefix = "fmt-10.0.0",
+    sha256 = "3c2e73019178ad72b0614a3124f25de454b9ca3a1afe81d5447b8d3cbdb6d322",
+    strip_prefix = "fmt-10.1.1",
     urls = [
-        "https://github.com/fmtlib/fmt/archive/refs/tags/10.0.0.zip",
+        "https://github.com/fmtlib/fmt/archive/refs/tags/10.1.1.zip",
     ],
 )
 
@@ -283,9 +272,9 @@ http_archive(
 http_archive(
     name = "com_google_perfetto",
     build_file = "perfetto.BUILD",
-    sha256 = "92160b0fbeb8c4992cc0690d832dd923cee1dda466f3364ef4ed26a835e55e40",
-    strip_prefix = "perfetto-38.0/sdk",
-    urls = ["https://github.com/google/perfetto/archive/refs/tags/v38.0.tar.gz"],
+    sha256 = "bd78f0165e66026c31c8c39221ed2863697a8bba5cd39b12e4b43d0b7f71626f",
+    strip_prefix = "perfetto-40.0/sdk",
+    urls = ["https://github.com/google/perfetto/archive/refs/tags/v40.0.tar.gz"],
 )
 
 # Boost
@@ -300,8 +289,9 @@ load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 # Abseil (bazel_rules_hdl provides com_google_absl)
 http_archive(
   name = "com_google_absl2",
-  urls = ["https://github.com/abseil/abseil-cpp/archive/6c8338c252116e429307361ff4fdc1fd0532902d.zip"],
-  strip_prefix = "abseil-cpp-6c8338c252116e429307361ff4fdc1fd0532902d",
+  strip_prefix = "abseil-cpp-20230802.1",
+  urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
+  sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
 )
 
 boost_deps()
