@@ -316,7 +316,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
   // }
 
   I(false, "\nintended exit!\n");
-
+  lg->dump(true);  // FIXME: remove this
   for (const auto& node : lg->fast(true)) {
     dealing_flop = false;
     dealing_comb = false;
@@ -1004,6 +1004,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
           }
         });
       } else {
+        lg->dump(true);  // FIXME: remove this
         for (const auto& startPoint_node : lg->fast(true)) {                                 // FIXME:REM
           if (std::to_string(startPoint_node.get_nid().value) == required_node.substr(5)) {  // FIXME:REM
             fmt::print("Found node n{}\n", startPoint_node.get_nid());                       // FIXME:REM
@@ -1245,10 +1246,8 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
-  #ifdef BASIC_DBG
   fmt::print("In fast -- lg->dump(true):\n");
   lg->dump(true);  // FIXME: remove this
-  #endif
   fmt::print("\nIn fast pass for inputs\n");
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
@@ -1389,10 +1388,11 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_sets, bool is_orig_lg) {
-#ifdef BASIC_DBG
+  lg->dump(true);  // FIXME: remove this
+  #ifdef BASIC_DBG
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
   fmt::print("\t\tis_orig_lg: {}\n", is_orig_lg);
-#endif
+  #endif
   for (const auto& node : lg->forward(true)) {
     if (node.is_type_const() || (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const")) {
       continue;
@@ -1401,38 +1401,38 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       traverse_order.emplace_back(
           node_dpins);  // FIXME: since flops are already matched, do not keep them here for backward matching?
       const auto node_dpin_cf = node_dpins.get_compact_flat();
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       fmt::print("node obtained from fwd traversal: n{},{} \n",
                  node.get_nid(),
                  node_dpins.has_name() ? node_dpins.get_name() : std::to_string(node_dpins.get_pid()));
-#endif
+      #endif
       bool is_loop_stop
           = node.is_type_loop_last() || node.is_type_loop_first() || (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end());
 
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       fmt::print("\t\tnode is loop stop: LL?{}, LF?{}, MLS?{} \n", node.is_type_loop_last(), node.is_type_loop_first(), (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end()) );
-#endif
+      #endif
       const absl::flat_hash_set<Node_pin::Compact_flat>* self_set = nullptr;
       auto                                               it       = inp_map_of_sets.find(node_dpin_cf);
       if (it != inp_map_of_sets.end()) {
         self_set = &it->second;
-#ifdef BASIC_DBG
+        #ifdef BASIC_DBG
         fmt::print("\tnode present in inp_map_of_sets. It's SS:");
         print_set(*self_set);
         fmt::print("\n");
-#endif
+        #endif
       }
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       else {
         fmt::print("\tnode NOT present in inp_map_of_sets already.\n");
       }
-#endif
+      #endif
       for (auto e : node.out_edges()) {
         if (e.sink.get_node().is_type_loop_first() /*need not keep outputs of const/graphIO in in_map_of_sets*/
             /*|| e.sink.get_node().is_type_loop_last() is_type_loop_last processed in previous fast pass*/) {
-#ifdef BASIC_DBG
+          #ifdef BASIC_DBG
           fmt::print("\tChild node is loop_first. continuing!\n");
-#endif
+          #endif
           continue;
         }
         // if ( is_orig_lg && !e.sink.get_node().has_loc() ) {
@@ -1702,7 +1702,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   //   #endif
   //   remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   // });
-
+  orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
 #ifndef FULL_RUN_FOR_EVAL
     if (!original_node.has_loc()) {
@@ -1775,6 +1775,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #endif
 
   /*known points matching*/
+  synth_lg->dump(true);                           // FIXME: remove this
   for (auto synth_node : synth_lg->fast(true)) {  // FIXME : do NOT use hier true here !?
 
     if (synth_node.is_type_sub() && synth_node.get_type_sub_node().get_name() == "__fir_const") {
