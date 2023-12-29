@@ -616,7 +616,7 @@ static Node resolve_memory(Lgraph *g, RTLIL::Cell *cell) {
   return node;
 }
 
-static bool is_black_box_output(const RTLIL::Module *mod, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
+static bool is_black_box_output(const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
@@ -644,17 +644,10 @@ static bool is_black_box_output(const RTLIL::Module *mod, const RTLIL::Cell *cel
     return false;
   }
 
-  ::Lgraph::error(
-      "Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an output",
-      cell->type.str(),
-      port_name.str());
-
-  log_error("output unknown port %s at module %s cell %s\n", port_name.c_str(), mod->name.c_str(), cell->type.c_str());
-  I(false);  // TODO: is it possible to resolve this case?
   return false;
 }
 
-static bool is_black_box_input(const RTLIL::Module *mod, const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
+static bool is_black_box_input(const RTLIL::Cell *cell, const RTLIL::IdString &port_name) {
   const RTLIL::Wire *wire = cell->getPort(port_name).chunks()[0].wire;
 
   // constant
@@ -683,13 +676,6 @@ static bool is_black_box_input(const RTLIL::Module *mod, const RTLIL::Cell *cell
     return true;
   }
 
-  ::Lgraph::error(
-      "Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an input",
-      cell->type.str(),
-      port_name.str());
-
-  log_error("input unknown port %s at module %s cell %s\n", port_name.c_str(), mod->name.c_str(), cell->type.c_str());
-  I(false);  // TODO: is it possible to resolve this case?
   return false;
 }
 
@@ -774,10 +760,43 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
 #endif
         } else {
           if (!sub->has_pin(pin_name)) {
-            if (cell->input(conn.first) || is_black_box_input(mod, cell, conn.first)) {
+            if (cell->input(conn.first) || is_black_box_input(cell, conn.first)) {
               sub->add_input_pin(pin_name);
-            } else if (cell->output(conn.first) || is_black_box_output(mod, cell, conn.first)) {
+            } else if (cell->output(conn.first) || is_black_box_output(cell, conn.first)) {
               sub->add_output_pin(pin_name);
+            } else if (conn.second.is_fully_undef()) {
+              sub->add_output_pin(pin_name);
+            } else if (conn.second.is_fully_const()) {
+              sub->add_input_pin(pin_name);
+            } else {
+              bool is_input  = false;
+              bool is_output = false;
+              for (auto &chunk : conn.second.chunks()) {
+                const RTLIL::Wire *wire = chunk.wire;
+                if (wire->port_input) {
+                  is_input = true;
+                }
+                // WARNING: Not always
+                if (wire->port_output) {
+                  is_output = true;
+                }
+                if (driven_signals.count(wire->hash()) != 0) {
+                  is_input = true;
+                }
+              }
+              if (is_input && !is_output) {
+                sub->add_input_pin(pin_name);
+              } else if (!is_input && is_output) {
+                sub->add_output_pin(pin_name);
+              } else {
+                log_error("unknown port %s at module %s cell %s\n", conn.first.c_str(), mod->name.c_str(), cell->type.c_str());
+
+                ::Lgraph::error(
+                    "Could not find a definition for module {}, treating as a blackbox but could not determine whether {} is an "
+                    "output",
+                    cell->type.str(),
+                    conn.first.str());
+              }
             }
           }
 
@@ -2513,6 +2532,20 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         partially_assigned_fwd.clear();
 
         TRACE_EVENT("inou", nullptr, [&mod_name](perfetto::EventContext ctx) { ctx.event()->set_name("YOSYS_tolg_" + mod_name); });
+
+        // Populate the driven_signals (only needed for unknown modules)
+        for (const auto &conn : mod->connections()) {
+          const RTLIL::SigSpec lhs = conn.first;
+          for (auto &lchunk : lhs.chunks()) {
+            const RTLIL::Wire *lhs_wire = lchunk.wire;
+
+            if (lchunk.width == 0) {
+              continue;
+            }
+            // fmt::print("Assignment to {}\n", lhs_wire->name.c_str());
+            driven_signals.insert(lhs_wire->hash());
+          }
+        }
 
         for (const auto &port : mod->ports) {
           RTLIL::Wire *wire = mod->wire(port);
