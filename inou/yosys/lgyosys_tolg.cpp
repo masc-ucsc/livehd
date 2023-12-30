@@ -775,14 +775,14 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                 const RTLIL::Wire *wire = chunk.wire;
                 if (wire->port_input) {
                   is_input = true;
+                  continue;
                 }
-                // WARNING: Not always
-                if (wire->port_output) {
-                  is_output = true;
-                }
+                // WARNING: Not always if (wire->port_output) { is_output = true; }
                 if (driven_signals.count(wire->hash()) != 0) {
                   is_input = true;
                 }
+                // WARNING: If not in drive_signal, it is not guaranteed to be a is_output. The problem is shown in sky130_trivial
+                // where it is not possible to know res0 direction.
               }
               if (is_input && !is_output) {
                 sub->add_input_pin(pin_name);
@@ -805,7 +805,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           }
 
 #ifndef NDEBUG
-          printf("module %s submodule %s has pin_name %s\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
+          fmt::print("module {} submodule {} has output pin_name {}\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
 #endif
         }
 
@@ -2542,7 +2542,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             if (lchunk.width == 0) {
               continue;
             }
-            // fmt::print("Assignment to {}\n", lhs_wire->name.c_str());
+            fmt::print("Assignment to {}\n", lhs_wire->name.c_str());
             driven_signals.insert(lhs_wire->hash());
           }
         }
