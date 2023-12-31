@@ -707,6 +707,10 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
     }
 
     for (const auto &conn : cell->connections()) {
+      if (conn.second.chunks().empty()) {
+        continue;  // Some cells may have no connected IOs (LogPerfHelper in Xiangshan)
+      }
+
       if (sub) {
         std::string pin_name(&(conn.first.c_str()[1]));
 
@@ -962,12 +966,41 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto dpin = wire2pin[lhs_wire];
           I(!dpin.get_node().has_inputs());
+          /* Previous assertion fails sometimes because Yosys creates this weird Verilog:
+                always @(posedge clock) begin
+                    topdown_stages_0_reasons_35 <= _001475_;
+                end
+                always @(posedge reset) begin
+                    topdown_stages_0_reasons_35 <= _001475_;
+                end
+          */
+
           I(dpin.get_bits() == lhs_wire->width);
         }
 #endif
         Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto prev_dpin = wire2pin[lhs_wire];
+#ifndef NDEBUG
+          if (lhs_wire->port_output) {
+            auto it = std::find(pending_outputs.begin(), pending_outputs.end(), lhs_wire);
+            I(it != pending_outputs.end());
+          }
+          if (wire2pin.find(lhs_wire) != wire2pin.end()) {
+            auto dpin2 = wire2pin[lhs_wire];
+            I(!dpin2.get_node().has_inputs());
+            /* Previous assertion fails sometimes because Yosys creates this weird Verilog:
+                  always @(posedge clock) begin
+                      topdown_stages_0_reasons_35 <= _001475_;
+                  end
+                  always @(posedge reset) begin
+                      topdown_stages_0_reasons_35 <= _001475_;
+                  end
+            */
+
+            I(dpin2.get_bits() == lhs_wire->width);
+          }
+#endif
           if (true || prev_dpin.has_outputs()) {  // OOPS, got used out of order (lack of topo here)
             I(prev_dpin.get_node().is_type(Ntype_op::Or));
             I(!prev_dpin.get_node().has_inputs());
