@@ -808,9 +808,7 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
             continue;
           }
 
-#ifndef NDEBUG
-          fmt::print("module {} submodule {} has output pin_name {}\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
-#endif
+          // fmt::print("module {} submodule {} has output pin_name {}\n", mod->name.c_str(), cell->type.c_str(), pin_name.c_str());
         }
 
       } else {
@@ -2575,7 +2573,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
             if (lchunk.width == 0) {
               continue;
             }
-            fmt::print("Assignment to {}\n", lhs_wire->name.c_str());
+            // fmt::print("Assignment to {}\n", lhs_wire->name.c_str());
             driven_signals.insert(lhs_wire->hash());
           }
         }

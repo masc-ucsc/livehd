@@ -232,7 +232,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, Node &node)
     name = absl::StrCat(name, n_rd_ports, "rd_");
     name = absl::StrCat(name, n_wr_ports, "wr");
 
-    //include
+    // include
     fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
     fout->append(absl::StrCat(name));
 
@@ -675,6 +675,10 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
   if (final_expr.empty()) {
     Pass::info("likely issue in node:{} that has no compute value", node.debug_name());
     final_expr = "'hx";
+  }
+
+  if (node.has_color()) {
+    absl::StrAppend(&final_expr, " /* color:", std::to_string(node.get_color()), "*/");
   }
 
   auto var_it = pin2var.find(dpin.get_compact_class());
