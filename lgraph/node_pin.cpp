@@ -310,10 +310,6 @@ void Node_pin::del_delay() { top_g->ref_node_pin_delay_map()->erase(get_compact_
 void Node_pin::set_name(std::string_view wname) {
   I(wname.size());  // empty names not allowed
 
-  if (wname == "regs_26_2") {
-    fmt::print("HERE\n");
-  }
-
   auto *ref = current_g->ref_node_pin_name_map();
   ref->insert_or_assign(get_compact_class_driver(), wname);
 
