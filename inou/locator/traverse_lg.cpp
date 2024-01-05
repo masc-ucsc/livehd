@@ -2411,7 +2411,14 @@ void Traverse_lg::remove_from_crit_node_set(const Node_pin::Compact_flat& dpin_c
 
 void Traverse_lg::get_node_pin_compact_flat_details(const Node_pin::Compact_flat &np_cf) const {
   auto np = Node_pin("lgdb",np_cf);
-  fmt::print("Details of node n{},{} are: {},{}\n", std::to_string(np.get_node().get_nid()), np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
+  if (np.get_node().get_nid() == 31) {
+    fmt::print("HERE\n");
+  }
+  if ( np.is_graph_io() ) { 
+    fmt::print("-IO node-\t");
+  }
+  fmt::print("Details of node n{}", np.get_node().get_nid());
+  fmt::print(",{} are: {},{}\n", np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
 }
 
 void Traverse_lg::report_critical_matches_with_color() {
@@ -2610,27 +2617,41 @@ void Traverse_lg::set_theory_match_final() {
 
 Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const map_of_sets& io_map_of_sets) {
 #ifdef BASIC_DBG
-  fmt::print("converting in/out map_of_sets to the shortened MoS with LoopLast only nodes in values(set).");
+  fmt::print("converting in/out map_of_sets to the shortened MoS with LoopLast only nodes in values(set).\n");
 #endif
 
   Traverse_lg::map_of_sets node_map_of_set_LoopLastOnly;
   for (const auto& [node_key, io_vals_set] : io_map_of_sets) {
     /*if(loop_last_only):for only those keys that are is_type_loop_last*/
     auto node = Node_pin("lgdb", node_key).get_node();
+    #ifdef BASIC_DBG
+    fmt::print("### working on node: "); get_node_pin_compact_flat_details(node_key);
+    #endif
     if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
-#ifndef FULL_RUN_FOR_EVAL
-			if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
+      #ifndef FULL_RUN_FOR_EVAL
+      if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
         for (const auto& io_val : io_vals_set) {
+	  #ifdef BASIC_DBG
+	  fmt::print("\t\t\t inserting node against: "); get_node_pin_compact_flat_details(io_val);
+	  #endif
           node_map_of_set_LoopLastOnly[io_val].insert(node_key);
         }
-			}
-#else
-			for (const auto& io_val: io_vals_set) {
-				node_map_of_set_LoopLastOnly[io_val].insert(node_key);
-			}
-#endif
+      }
+      #ifdef BASIC_DBG
+      else {fmt::print("\t\t\t not processing this node (no loc in node)!\n");}
+      #endif
+      #else
+      for (const auto& io_val: io_vals_set) {
+        node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+      }
+      #endif
+    } 
+    #ifdef BASIC_DBG
+    else {
+      fmt::print("\t\t\t not processing this node (not LL)!\n");
     }
+    #endif
   }
 
 #ifdef BASIC_DBG
