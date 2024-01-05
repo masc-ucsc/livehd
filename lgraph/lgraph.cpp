@@ -1735,7 +1735,7 @@ void Lgraph::dump(bool hier) {
     return true;
   });
 
-  for (const auto cit : color_count) {
+  for (const auto &cit : color_count) {
     fmt::print("color:{} count:{}\n", cit.first, cit.second);
   }
 }

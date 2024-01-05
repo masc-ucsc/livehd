@@ -430,6 +430,11 @@ std::string Node_pin::debug_name() const {
 
 std::string Node_pin::get_wire_name() const {
   if (is_sink()) {
+    if (is_graph_io()) {
+      auto dpin = change_to_driver_from_graph_out_sink();
+      I(dpin.is_driver());
+      return dpin.get_wire_name();
+    }
     auto dpin = get_driver_pin();
     if (dpin.is_invalid()) {
       return "";
