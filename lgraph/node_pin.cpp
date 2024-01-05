@@ -104,6 +104,12 @@ bool Node_pin::is_type_tup() const {
   return op == Ntype_op::TupAdd || op == Ntype_op::TupGet;
 }
 
+bool Node_pin::is_type_sub() const {
+  auto nid = current_g->get_node_nid(idx);
+  auto op  = current_g->get_type_op(nid);
+  return op == Ntype_op::Sub;
+}
+
 bool Node_pin::is_type_flop() const {
   auto nid = current_g->get_node_nid(idx);
   auto op  = current_g->get_type_op(nid);

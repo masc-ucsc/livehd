@@ -115,6 +115,8 @@ void Fwd_edge_iterator::Fwd_iter::topo_add_chain_fwd(const Node_pin &dst_pin) {
   const auto dst_node = dst_pin.get_node();
   I(unvisited.count(dst_node.get_compact()));
 
+  // fmt::print("1.trying {}\n", dst_node.debug_name());
+
   if (visit_sub) {
     if (dst_node.is_type_sub_present()) {  // DOWN??
       topo_add_chain_down(dst_pin);
@@ -161,7 +163,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
     }
 
     bool is_topo_sorted = true;
-    if (!next_node.is_type_loop_first()) {              // NOTE: !next_node.has_inputs() may be nicer but a bit slower
+    if (!next_node.is_type_loop_first()) {  // NOTE: !next_node.has_inputs() may be nicer but a bit slower
+
       for (const auto &edge : next_node.inp_edges()) {  // NOTE: possible to have a "inp_edges_forward" iterator 1/2 nodes on avg
         auto driver_node = edge.driver.get_node();
 
@@ -188,12 +191,14 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
       current_node.update(next_node);
       return;
     }
+
     unvisited.insert(next_node.get_compact());
   }
 
   if (current_node.is_invalid()) {
     linear_first_phase = false;
     I(linear_last_phase == false);
+
     global_it = top->fast(visit_sub).begin();
   }
 }
@@ -207,6 +212,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_last() {
   while (!global_it.is_invalid()) {
     auto next_node = *global_it;
     ++global_it;
+
+    // fmt::print("xxx {}\n", next_node.debug_name());
 
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
       if (visit_sub && next_node.is_type_sub_present()) {
@@ -235,7 +242,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
         continue;
       }
 
-      // fmt::print("trying {}\n",node.debug_name());
+      // fmt::print("trying {}\n", node.debug_name());
 
       bool any_propagated = false;
       if (visit_sub && node.is_type_sub_present()) {
@@ -316,6 +323,18 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
   I(!lg->is_empty());
   I(current_node.is_invalid());
   I(linear_first_phase);
+
+#if 1
+  if (visit_sub) {
+    lg->each_graph_output([this](Node_pin &out_dpin) {
+      auto dpin = out_dpin.change_to_sink_from_graph_out_driver().get_driver_pin();
+      I(!dpin.is_hierarchical());
+      if (dpin.is_type_sub()) {
+        topo_add_chain_down(dpin.get_hierarchical());
+      }
+    });
+  }
+#endif
 
   fwd_get_from_linear_first(lg);
   if (current_node.is_invalid()) {

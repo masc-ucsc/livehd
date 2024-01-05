@@ -1720,6 +1720,7 @@ void Lgraph::dump(bool hier) {
 
   absl::flat_hash_map<int, int> color_count;
 
+  // for (auto node : forward(hier)) {
   for (auto node : fast(hier)) {
     if (node.has_color()) {
       ++color_count[node.get_color()];
