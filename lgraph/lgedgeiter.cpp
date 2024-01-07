@@ -156,6 +156,8 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
     auto next_node = *global_it;
     ++global_it;
 
+    // fmt::print("1.linear_first {}\n", next_node.debug_name());
+
     if (next_node.is_type_loop_last() || !next_node.has_outputs()) {
       if (!visit_sub || !next_node.is_type_sub_present()) {
         continue;  // Keep it for linear_last_phase
@@ -186,6 +188,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
         }
       }
     }
+    // fmt::print("linear_first {}\n", next_node.debug_name());
 
     if (is_topo_sorted) {
       current_node.update(next_node);
@@ -196,6 +199,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_linear_first(Lgraph *top) {
   }
 
   if (current_node.is_invalid()) {
+    // fmt::print("exit linear_first_phase\n");
     linear_first_phase = false;
     I(linear_last_phase == false);
 

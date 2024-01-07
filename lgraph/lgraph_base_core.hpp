@@ -22,16 +22,6 @@ using Lg_type_id  = Explicit_type<Lg_id_t, struct Lg_type_id_struct, 0>;  // Glo
 using Index_id    = Explicit_type<Lg_id_t, struct Index_id_struct, 0>;
 using Lut_type_id = Explicit_type<Lg_id_t, struct Lut_type_id_struct, 0>;
 
-class Hierarchy_data {  // 64bits total
-public:
-  Lg_type_id lgid;
-  Index_id   up_nid;
-  Hierarchy_data() : lgid(0), up_nid(0) {}
-  Hierarchy_data(const Lg_type_id& _class_id, const Index_id& _nid) : lgid(_class_id), up_nid(_nid) {}
-
-  bool is_invalid() const { return lgid == 0; }
-};
-
 using Hierarchy_index = int32_t;  // -1 is invalid, 0 is root
 
 struct Lg_type_id_hash {

@@ -43,7 +43,7 @@ void Lgraph::setup_hierarchy_for_traversal() {
     I(e.first.nid);
 
     auto *sub_lg2 = ref_library()->open_lgraph(e.second);
-    if (sub_lg2 && !sub_lg2->get_down_nodes_map().empty()) {
+    if (sub_lg2) {  // && !sub_lg2->get_down_nodes_map().empty()) {
       auto child_hidx = htree.add_go_down(parent_hidx, this, e.first.nid);
 
       setup_hierarchy_down(sub_lg2, child_hidx);
@@ -1720,8 +1720,8 @@ void Lgraph::dump(bool hier) {
 
   absl::flat_hash_map<int, int> color_count;
 
-  // for (auto node : forward(hier)) {
-  for (auto node : fast(hier)) {
+  for (auto node : forward(hier)) {
+    // for (auto node : fast(hier)) {
     if (node.has_color()) {
       ++color_count[node.get_color()];
     }
