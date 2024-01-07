@@ -39,6 +39,52 @@ rm all_grepped.log
 #:g:edges.scala:d
 }
 
+random_line_selector_for_XSCore() {
+echo ""
+echo "*********************************"
+echo "Running random_line_selector_for_XSCore (hardcoded for XSCore)"
+echo "************"
+echo ""
+#start in livehd/
+mkdir eval_files_tmp_XSCore
+#get chisel assignments from all .scala files 
+cd ../XiangShan/xs-env/XiangShan/src/main/scala/xiangshan/
+grep -rHEn " := |===|=/=" * | grep ".scala" > /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../rocket-chip/src/main/scala/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../huancun/src/main/scala/huancun/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../../src/main/scala/system/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../device/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../utils/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../utility/src/main/scala/utility/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../../coupledL2/src/main/scala/coupledL2/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../../difftest/src/main/scala
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+cd ../../../../fudian/src/main/scala/fudian/
+grep -rHEn " := |===|=/=" * | grep ".scala" >> /home/sgarg3/livehd/eval_files_tmp_XSCore/all_grepped.log
+#get the list of scala files used from original verilog
+cd ../../../../../build_XSTop/
+grep ".scala" XSTop_orig.v > /home/sgarg3/livehd/eval_files_tmp_XSCore/src_file_list_from_orig_ver.txt
+cd ../../../../livehd/eval_files_tmp_XSCore/
+#manually did:   :%s:^.*// @\[::g
+#                :%s: .*\]::g
+sort -o src_file_list_from_orig_ver.txt src_file_list_from_orig_ver.txt
+# modules used in XSCore:
+uniq src_file_list_from_orig_ver.txt > src_file_list_from_orig_ver_uniq.txt
+rm src_file_list_from_orig_ver.txt
+
+#in all_grepped.log, :g: \:= true.B:d    , :g: \:= false.B:d    ,   :g:= \d.U\n:d    , :g:= \d\d.U\n:d    ,   g:\:  //:d    ,   :g:CryptoUtils.scala:d
+#select lines from all_grepped.log and see the actual file location with the help of src_file_list_from_orig_ver_uniq.txt
+#and mark DTs
+
+}
+
 
 random_line_selector_for_singlecycleCPU() {
   echo ""
@@ -52,9 +98,10 @@ cd ../dinocpu/src/main/scala/
 grep -rHEn " := |===|=/=" * | grep ".scala" > all_grepped.log
 mv all_grepped.log ../../../../livehd/eval_files_tmp_SCCPU/.
 #get the list of scala files used from original verilog
-cd ../../../../bazel_rules_hdl_test/dino/
-grep ".scala" top.v > ../../livehd/eval_files_tmp_SCCPU/src_file_list_from_orig_ver.txt
-cd ../../livehd/eval_files_tmp_SCCPU/
+#for mada# cd ../../../../bazel_rules_hdl_test/dino/
+scp sgarg3@mada4.cse.ucsc.edu:/mada/users/sgarg3/code_gen/new_dir/bazel_rules_hdl_test/dino/top.v src/main/scala/SCCPU.default.v
+grep ".scala" SCCPU.default.v > ../../../../livehd/eval_files_tmp_SCCPU/src_file_list_from_orig_ver.txt
+cd ../../../../livehd/eval_files_tmp_SCCPU/
 sed -i 's/^.*@\[//g' src_file_list_from_orig_ver.txt
 sed -i 's/\.scala.*//g' src_file_list_from_orig_ver.txt
 sort -o src_file_list_from_orig_ver.txt src_file_list_from_orig_ver.txt

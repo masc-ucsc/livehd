@@ -17,8 +17,8 @@ if [ $ret_val -ne 0 ]; then
   echo "\n--------Compilation failed!--------\n\n"
   exit $ret_val
 fi
-SRCLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests
-DESTLOCATION=/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy_SCdino_FlopChange_8nov2023 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+SRCLOCATION=/home/sgarg3/livehd/pass/locator/tests
+DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_SCdino_FlopChange_8nov2023 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
 export LIVEHD_THREADS=1
 
 if [ ! -d "$DESTLOCATION" ]; then
