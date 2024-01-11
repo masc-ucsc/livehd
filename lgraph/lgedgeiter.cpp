@@ -328,17 +328,15 @@ void Fwd_edge_iterator::Fwd_iter::fwd_first(Lgraph *lg) {
   I(current_node.is_invalid());
   I(linear_first_phase);
 
-#if 1
   if (visit_sub) {
     lg->each_graph_output([this](Node_pin &out_dpin) {
       auto dpin = out_dpin.change_to_sink_from_graph_out_driver().get_driver_pin();
       I(!dpin.is_hierarchical());
-      if (dpin.is_type_sub()) {
+      if (dpin.is_type_sub() && dpin.get_node().is_type_sub_present()) {
         topo_add_chain_down(dpin.get_hierarchical());
       }
     });
   }
-#endif
 
   fwd_get_from_linear_first(lg);
   if (current_node.is_invalid()) {
