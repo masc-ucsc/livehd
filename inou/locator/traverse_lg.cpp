@@ -231,6 +231,20 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       report_critical_matches_with_color();
     }
 
+    /* Since all flops are matched now, remove these from orig_mos*/
+    for (const auto& origpin_cf: flop_set_orig) {
+      inp_map_of_sets_orig.erase(origpin_cf);
+      out_map_of_sets_orig.erase(origpin_cf);
+    }
+    #ifdef BASIC_DBG
+    fmt::print("\n------after removing flops from inp_map_of_sets_orig and out_map_of_sets_orig-------------\n");
+    fmt::print("\norig lg in map:\n");
+    print_io_map(inp_map_of_sets_orig);
+    fmt::print("\norig lg out map:\n");
+    print_io_map(out_map_of_sets_orig);
+    fmt::print("\n");
+    #endif
+
     // all flops matched and still some crit cells left to map!
     // move to combinational matching
     do {
@@ -1250,7 +1264,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   fmt::print("In fast -- lg->dump(true):\n");
   lg->dump(true);  // FIXME: remove this
   #endif
-  fmt::print("\nIn fast pass for inputs\n");
+  fmt::print("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
     fmt::print("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
@@ -1313,6 +1327,9 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
       #endif
       continue;               // process flops only in this lg->fast (sub type loopLast are not flops)
     } else if (is_orig_lg) {  // flops in orig_lg to be inserted in flop_set_orig
+      #ifdef BASIC_DBG
+      fmt::print("Inserting in flop_set_orig, dpins of node: {} \n", node.get_nid());
+      #endif
       for (const auto dpins : node.out_connected_pins()) {
         flop_set_orig.insert(dpins.get_compact_flat());
       }
