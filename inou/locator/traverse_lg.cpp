@@ -125,13 +125,50 @@ void Traverse_lg::debug_function(Lgraph* lg) {
   // lg->dump();
   // fmt::print("---------------------------------------------------\n");
 
-  lg->each_graph_input([](const Node_pin dpin) {
+  lg->each_graph_input([this](const Node_pin dpin) {
     fmt::print("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+
+    auto hdpin = dpin.get_hierarchical();
+    for(const auto sink_dpin: hdpin.out_sinks()){
+      for (const auto p: sink_dpin.get_node().out_connected_pins()){
+	      fmt::print("-GI- ");get_node_pin_compact_flat_details(p.get_compact_flat());
+      }
+    }
   });
-  lg->each_graph_output([](const Node_pin dpin) {
+  lg->each_graph_output([this](const Node_pin dpin) {
     fmt::print("   {}({})\n", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+    auto hdpin = dpin.get_hierarchical();
+    auto spin = hdpin.change_to_sink_from_graph_out_driver();
+    for(const auto driver_dpin: spin.inp_drivers()){
+      fmt::print("-GO- ");get_node_pin_compact_flat_details(driver_dpin.get_compact_flat());
+    }
   });
 
+  fmt::print("--------graph IO done -------------------------------------------\n");
+  for (const auto& node : lg->forward(true)) {
+    if (node.has_outputs()) {
+      fmt::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
+      if (node.is_type_sub() && node.get_type_sub_node().get_name() == "__fir_const") {
+        auto node_sub_name = node.get_type_sub_node().get_name();
+        fmt::print("\t\t\t\t {}\n", node_sub_name);
+      }
+      for (const auto dpin : node.out_connected_pins()) {
+        fmt::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+	get_node_pin_compact_flat_details(dpin.get_compact_flat());
+      }
+      fmt::print("\n");
+    }
+    for (const auto dpin : node.out_connected_pins()) {
+      get_node_pin_compact_flat_details(dpin.get_compact_flat());
+    }
+   
+    for(const auto e: node.out_edges()){
+      for (const auto p: e.sink.get_node().out_connected_pins()){
+	      fmt::print("---");get_node_pin_compact_flat_details(p.get_compact_flat());
+      }
+    }
+  }
+  fmt::print("\n--------------------fast:-------------------------------");
   for (const auto& node : lg->fast(true)) {
     if (node.has_outputs()) {
       fmt::print("{}(n{})({})\n", node.debug_name(), node.get_nid(), (node.get_class_lgraph())->get_name());
@@ -141,8 +178,18 @@ void Traverse_lg::debug_function(Lgraph* lg) {
       }
       for (const auto dpin : node.out_connected_pins()) {
         fmt::print("\t {}({})", dpin.has_name() ? dpin.get_name() : (std::to_string(dpin.get_pid())), dpin.get_wire_name());
+	get_node_pin_compact_flat_details(dpin.get_compact_flat());
       }
       fmt::print("\n");
+    }
+    for (const auto dpin : node.out_connected_pins()) {
+      get_node_pin_compact_flat_details(dpin.get_compact_flat());
+    }
+   
+    for(const auto e: node.out_edges()){
+      for (const auto p: e.sink.get_node().out_connected_pins()){
+	      fmt::print("---");get_node_pin_compact_flat_details(p.get_compact_flat());
+      }
     }
   }
   fmt::print("\n---------------------------------------------------");
@@ -1009,7 +1056,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       // for (const auto &required_node : allSPs) {
       if ((required_node).substr(0, 4) != "flop") {  // then it is graph IO
         // Node startPoint_node(lg, required_node );
-        lg->each_graph_input([required_node, synth_set, synth_val, this](Node_pin& dpin) {
+        lg->each_graph_input([required_node, synth_set, synth_val, this](Node_pin& non_h_dpin) {
+	  const auto& dpin = non_h_dpin.get_hierarchical();//to get hierarchical traversal
           const auto& in_node   = dpin.get_node();
           std::string comp_name = (dpin.has_name() ? dpin.get_name() : dpin.get_pin_name());
           if (comp_name == required_node) {
@@ -1125,8 +1173,9 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
 void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_sets& out_map_of_sets,
                                              bool is_orig_lg) {
   /*add inputs of nodes touching the graphInput, to initialize inp_map_of_sets*/
-  lg->each_graph_input([&inp_map_of_sets, &is_orig_lg, this](const Node_pin dpin) {
+  lg->each_graph_input([&inp_map_of_sets, &is_orig_lg, this](const Node_pin non_h_dpin) {
     /*capture the colored nodes in the process.*/
+    const auto& dpin = non_h_dpin.get_hierarchical();//to get hierarchical traversal
     auto node = dpin.get_node();
     if (!is_orig_lg) {
       #ifndef FULL_RUN_FOR_EVAL
@@ -1186,8 +1235,9 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
 #endif
 
   /*add outputs of nodes touching the graphOutput, to initialize out_map_of_sets*/
-  lg->each_graph_output([&out_map_of_sets, &is_orig_lg, this](const Node_pin dpin) {
+  lg->each_graph_output([&out_map_of_sets, &is_orig_lg, this](const Node_pin non_h_dpin) {
     /*capture the colored nodes in the process.*/
+    const auto& dpin = non_h_dpin.get_hierarchical();//for hierarchical traversal
     auto node = dpin.get_node();
     if (!is_orig_lg) {
 #ifndef FULL_RUN_FOR_EVAL
@@ -1647,14 +1697,16 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   absl::flat_hash_map<std::string, Node_pin::Compact_flat>                      name2dpin;
   absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> name2dpins;
 
-  orig_lg->each_graph_input([&name2dpin](const Node_pin& dpin) {
+  orig_lg->each_graph_input([&name2dpin](const Node_pin& non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();// to get hierarchical traversal
     auto orig_in_dpin_name       = dpin.get_name();
     name2dpin[orig_in_dpin_name] = dpin.get_compact_flat();
 #ifdef BASIC_DBG
     fmt::print("Inserting orig-in-dpin {} in name2dpin\n", orig_in_dpin_name);
 #endif
   });
-  synth_lg->each_graph_input([&name2dpin, this](const Node_pin& dpin) {
+  synth_lg->each_graph_input([&name2dpin, this](const Node_pin& non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();// to get hierarchical traversal
     auto synth_in_dpin_name = dpin.get_name();
     if (name2dpin.find(synth_in_dpin_name) != name2dpin.end()) {
       net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_in_dpin_name)->second);
@@ -1679,14 +1731,16 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
 #ifdef BASIC_DBG
   fmt::print("\n OUT:\n");
 #endif
-  orig_lg->each_graph_output([&name2dpin](const Node_pin& dpin) {
+  orig_lg->each_graph_output([&name2dpin](const Node_pin& non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();//for hierarchical traversal
     auto orig_out_dpin_name       = dpin.get_name();
     name2dpin[orig_out_dpin_name] = dpin.get_compact_flat();
 #ifdef BASIC_DBG
     fmt::print("Inserting orig-out-dpin {} in name2dpin\n", dpin.get_name());
 #endif
   });
-  synth_lg->each_graph_output([&name2dpin, this](const Node_pin& dpin) {
+  synth_lg->each_graph_output([&name2dpin, this](const Node_pin& non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();//for hierarchical traversal
     auto synth_out_dpin_name = dpin.get_name();
     if (name2dpin.find(synth_out_dpin_name) != name2dpin.end()) {
       net_to_orig_pin_match_map[dpin.get_compact_flat()].insert(name2dpin.find(synth_out_dpin_name)->second);
@@ -2436,8 +2490,8 @@ void Traverse_lg::get_node_pin_compact_flat_details(const Node_pin::Compact_flat
   if ( np.is_graph_io() ) { 
     fmt::print("-IO node-\t");
   }
-  fmt::print("Details of node n{}", np.get_node().get_nid());
-  fmt::print(",{} are: {},{}\n", np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
+  fmt::print("Details of node nid:{}", np.get_node().get_nid());
+  fmt::print(",pin:{} are:: type:{}, lg:{}\n", np.has_name()?np.get_name():("p"+std::to_string(np.get_pid())), np.get_node().get_type_name(),  (np.get_node().get_class_lgraph())->get_name() );
 }
 
 void Traverse_lg::report_critical_matches_with_color() {
