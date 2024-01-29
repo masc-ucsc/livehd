@@ -16,6 +16,8 @@
 #include "node.hpp"
 #include "pass.hpp"
 #include "absl/container/internal/raw_hash_set.h"
+#include <chrono>
+
 #define DE_DUP  // use set
 // #define BASIC_DBG
 // #define EXTENSIVE_DBG
