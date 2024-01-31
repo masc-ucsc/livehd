@@ -140,4 +140,3 @@ cc_test(
         "@com_google_benchmark//:benchmark",
     ],
 )
-

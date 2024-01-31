@@ -2,8 +2,8 @@
 
 workspace(name = "livehd")
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "rules_foreign_cc",
@@ -226,12 +226,16 @@ http_archive(
     urls = ["https://github.com/rules-proto-grpc/rules_proto_grpc/releases/download/4.5.0/rules_proto_grpc-4.5.0.tar.gz"],
 )
 
-load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_toolchains", "rules_proto_grpc_repos")
+load("@rules_proto_grpc//:repositories.bzl", "rules_proto_grpc_repos", "rules_proto_grpc_toolchains")
+
 rules_proto_grpc_toolchains()
+
 rules_proto_grpc_repos()
 
 load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_proto_toolchains")
+
 rules_proto_dependencies()
+
 rules_proto_toolchains()
 # http_archive(
 #     name = "rules_proto",
@@ -288,10 +292,10 @@ load("@com_github_nelhage_rules_boost//:boost/boost.bzl", "boost_deps")
 
 # Abseil (bazel_rules_hdl provides com_google_absl)
 http_archive(
-  name = "com_google_absl2",
-  strip_prefix = "abseil-cpp-20230802.1",
-  urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
-  sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
+    name = "com_google_absl2",
+    sha256 = "497ebdc3a4885d9209b9bd416e8c3f71e7a1fb8af249f6c2a80b7cbeefcd7e21",
+    strip_prefix = "abseil-cpp-20230802.1",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.zip"],
 )
 
 boost_deps()
