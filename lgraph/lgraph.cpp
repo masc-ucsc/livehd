@@ -1720,14 +1720,38 @@ void Lgraph::dump(bool hier) {
 
   absl::flat_hash_map<int, int> color_count;
 
-  // for (auto node : forward(hier)) {
-  for (auto node : fast(hier)) {
+ //for (auto node : forward(hier)) {
+ for (auto node : fast(hier)) {
     if (node.has_color()) {
       ++color_count[node.get_color()];
     }
 
     node.dump();
   }
+
+#if 0
+  absl::flat_hash_set<Node::Compact> visited;
+
+  for (auto node : forward(true)) {
+    visited.insert(node.get_compact());
+    if (node.is_type_loop_last())
+      continue;
+    for(auto e:node.inp_edges()) {
+      auto inp_node = e.driver.get_node();
+      if (visited.contains(inp_node.get_compact())) {
+        continue;
+      }
+      if (inp_node.is_type_loop_last())
+        continue;
+
+      fmt::print("PROBLEM node:\n");
+      node.dump();
+      fmt::print("VISITED before node:\n");
+      inp_node.dump();
+      exit(-3);
+    }
+  }
+#endif
 
   fmt::print("\n");
   each_local_unique_sub_fast([](Lgraph *sub_lg) -> bool {
@@ -1739,6 +1763,7 @@ void Lgraph::dump(bool hier) {
   for (const auto &cit : color_count) {
     fmt::print("color:{} count:{}\n", cit.first, cit.second);
   }
+
 }
 
 void Lgraph::dump_down_nodes() {

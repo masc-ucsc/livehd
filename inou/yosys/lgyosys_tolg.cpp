@@ -244,13 +244,6 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
         return dpin;
       }
 
-#if 0
-      fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n",  // due to extra tposs
-                 wire->name.c_str(),
-                 wire->width,
-                 dpin.get_pid(),
-                 dpin.get_bits());
-#endif
       // I(false);  // WHY?
       // wire2pin[wire].set_bits(wire->width);
       // I(wire->width == wire2pin[wire].get_bits());
@@ -261,6 +254,14 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
     }
 
     auto node = dpin.get_node();
+#if 0
+      fmt::print("w_name:{} w_w:{} | pid:{} bits:{}\n",  // due to extra tposs
+                 wire->name.c_str(),
+                 wire->width,
+                 dpin.get_pid(),
+                 dpin.get_bits());
+      node.dump();
+#endif
 
     if (node.is_type(Ntype_op::Get_mask)) {
       return dpin;
@@ -292,6 +293,21 @@ static Node_pin get_edge_pin(Lgraph *g, const RTLIL::Wire *wire, bool is_signed)
 static Node_pin create_pick_operator(Lgraph *g, const RTLIL::Wire *wire, int offset, int width, bool is_signed) {
   if (wire->width == width && offset == 0) {
     return get_edge_pin(g, wire, is_signed);
+  }
+  if (auto it = partially_assigned.find(wire) ; it != partially_assigned.end()) {
+    const auto it_bits = partially_assigned_bits.find(wire);
+    I(it_bits != partially_assigned_bits.end()); // if partially_assigned, it should be in partially_assigned_bits too
+    Bits_t bits = 0;
+    auto pos = 0u;
+    for(const auto &b:it_bits->second) {
+      if (bits == offset) {
+        I(it->second.size()>pos);
+        return it->second[pos];
+      }
+
+      bits += b;
+      ++pos;
+    }
   }
 
   return create_pick_operator(get_edge_pin(g, wire, is_signed), offset, width, is_signed);
