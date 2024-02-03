@@ -2303,7 +2303,7 @@ void Cprop::scalar_pass(Lgraph *lg, bool tup_pass_only) {
       continue;
     }
 
-    // if (!tup_pass_only) { //commented for rocketTile, uncomment for dino
+    //if (!tup_pass_only) { //commented for rocketTile, uncomment for dino
       auto replaced_some = try_constant_prop(node, inp_edges_ordered);
 
       if (node.is_invalid()) {

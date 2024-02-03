@@ -55,9 +55,9 @@ void Traverse_lg::travers(Eprp_var& var) {
   }
   I(sec_done, "\nERROR:\n original LG not/incorrectly provided??\n");
 
-  // p.debug_function(orig_lg);
-  // p.debug_function(synth_lg);
-  // return;
+  p.debug_function(orig_lg);
+  p.debug_function(synth_lg);
+  return;
   
   auto start = std::chrono::system_clock::now();
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);  // orig-boundary only
@@ -135,9 +135,9 @@ void Traverse_lg::remove_lib_loc_from_orig_lg(Lgraph* orig_lg) {
 }
 
 void Traverse_lg::debug_function(Lgraph* lg) {
-  // fmt::print("lg->dump(true):\n");
-  // lg->dump(true);
-  // fmt::print("---------------------------------------------------\n");
+  fmt::print("lg->dump(true):\n");
+  lg->dump(true);
+  fmt::print("---------------------------------------------------\n");
   // fmt::print("lg->dump():\n");
   // lg->dump();
   // fmt::print("---------------------------------------------------\n");
@@ -341,7 +341,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     // all flops matched and still some crit cells left to map!
     // move to combinational matching
-    do {
       start = std::chrono::system_clock::now();
       resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);
@@ -355,12 +354,6 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       elapsed_seconds = end-start;
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
       fmt::print("\n complete_io_match - synth - combinational done.\n");
-#ifdef BASIC_DBG
-      fmt::print("Change done = {}\n", change_done);
-      fmt::print("10.0. Printing within do-while for all the combinational resolution and matching!");
-      print_everything();
-#endif
-    } while (change_done && !crit_node_set.empty());
 #ifdef BASIC_DBG
     fmt::print("10. Printing after all the combinational resolution and matching!");
     print_everything();
@@ -2093,6 +2086,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 #endif
   bool io_matched        = false;
   bool any_matching_done = false;
+  int count = 0;
   for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
     io_matched = false;
     auto n_s   = Node_pin("lgdb", it->first).get_node();
@@ -2139,8 +2133,10 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         /*it->first == orig_in_np for inputs. see if their output sets match as well.
          * 1. both might not have outputs and thus not be present in out_map_of_sets_<>
          * 2. if both are present, then compare the output sets.*/
-        if (out_map_of_sets_synth.find(it->first) != out_map_of_sets_synth.end()
-            && out_map_of_sets_orig.find(orig_in_np) != out_map_of_sets_orig.end()) {  // both present
+	auto find_in_out_MoS_synth = out_map_of_sets_synth.find(it->first);
+	auto find_in_out_MoS_orig = out_map_of_sets_orig.find(orig_in_np);
+        if (find_in_out_MoS_synth != out_map_of_sets_synth.end()
+            && find_in_out_MoS_orig != out_map_of_sets_orig.end()) {  // both present
 #ifdef BASIC_DBG
           fmt::print("\t\t Outputs present for both \n");
 #endif
@@ -2159,8 +2155,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
             matching_wt         = get_matching_weight(out_map_of_sets_synth[it->first], out_map_of_sets_orig[orig_in_np]);
             partial_out_matched = true;
           }
-        } else if (out_map_of_sets_synth.find(it->first) == out_map_of_sets_synth.end()
-                   && out_map_of_sets_orig.find(orig_in_np) == out_map_of_sets_orig.end()) {  // both absent. thus a match!?
+        } else if (find_in_out_MoS_synth == out_map_of_sets_synth.end()
+                   && find_in_out_MoS_orig == out_map_of_sets_orig.end()) {  // both absent. thus a match!?
           out_matched = true;
 #ifdef BASIC_DBG
           fmt::print("\t\t matching due to absence !!\n");
@@ -2179,6 +2175,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 
       if (out_matched) {  // in+out matched. complete exact match. put in matching map
         net_to_orig_pin_match_map[it->first].insert(orig_in_np);
+	count++;
 #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
         auto np_o = Node_pin("lgdb", orig_in_np);
@@ -2214,6 +2211,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     } else if (partial_out_match_map.size() /*&& (((partial_out_match_map.end())->first)!=0) */) {
       net_to_orig_pin_match_map[it->first].insert(((partial_out_match_map.rbegin())->second).begin(),
                                                   ((partial_out_match_map.rbegin())->second).end());
+      count++;
 #ifdef FOR_EVAL
       fmt::print("Partial_out_match_map:\n");
       for (auto [a, b] : partial_out_match_map) {
@@ -2247,6 +2245,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       it++;
     }
   }
+  fmt::print("# of matches in complete_io_match: {}\n", count);
   return any_matching_done;
 }
 
