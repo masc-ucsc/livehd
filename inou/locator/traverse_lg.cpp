@@ -2106,11 +2106,11 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     for (const auto& [orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
       // auto o_s = Node_pin("lgdb", orig_in_np).get_node();
       if(unwanted_orig_NPs.contains(orig_in_np) ) { 
-        #ifdef FOR_EVAL
+        #ifdef BASIC_DBG
         get_node_pin_compact_flat_details(orig_in_np);
         #endif
         continue; }
-      #ifdef FOR_EVAL
+      #ifdef BASIC_DBG
       fmt::print("working on: "); get_node_pin_compact_flat_details(orig_in_np);
       #endif
       if (flop_only) {
@@ -2212,7 +2212,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       net_to_orig_pin_match_map[it->first].insert(((partial_out_match_map.rbegin())->second).begin(),
                                                   ((partial_out_match_map.rbegin())->second).end());
       count++;
-#ifdef FOR_EVAL
+      #ifdef BASIC_DBG
       fmt::print("Partial_out_match_map:\n");
       for (auto [a, b] : partial_out_match_map) {
         fmt::print("{} ---- ", a);
@@ -2222,6 +2222,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         }
         fmt::print("\n");
       }
+      #endif
+      #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", it->first);
       fmt::print("Inserting in complete_io_match (parttial output matched) : n{},{}  :::  ",
                  np_s.get_node().get_nid(),
@@ -2234,7 +2236,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       }
       fmt::print("\n");
 
-#endif
+      #endif
       remove_from_crit_node_set(it->first);
       if (flop_set_synth.find(it->first) != flop_set_synth.end()) {
         flop_set_synth.erase(it->first);
