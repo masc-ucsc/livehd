@@ -294,14 +294,14 @@ static Node_pin create_pick_operator(Lgraph *g, const RTLIL::Wire *wire, int off
   if (wire->width == width && offset == 0) {
     return get_edge_pin(g, wire, is_signed);
   }
-  if (auto it = partially_assigned.find(wire) ; it != partially_assigned.end()) {
+  if (auto it = partially_assigned.find(wire); it != partially_assigned.end()) {
     const auto it_bits = partially_assigned_bits.find(wire);
-    I(it_bits != partially_assigned_bits.end()); // if partially_assigned, it should be in partially_assigned_bits too
+    I(it_bits != partially_assigned_bits.end());  // if partially_assigned, it should be in partially_assigned_bits too
     Bits_t bits = 0;
-    auto pos = 0u;
-    for(const auto &b:it_bits->second) {
+    auto   pos  = 0u;
+    for (const auto &b : it_bits->second) {
       if (bits == offset) {
-        I(it->second.size()>pos);
+        I(it->second.size() > pos);
         return it->second[pos];
       }
 
@@ -939,9 +939,10 @@ static void dump_partially_assigned() {
         continue;
       }
       const auto &dpin = it.second[i];
-      if(dpin.is_invalid()) {
-	      fmt::print("OOPSY! 1st: {}\n",dpin.debug_name());
-	      i+=width; continue;
+      if (dpin.is_invalid()) {
+        fmt::print("OOPSY! 1st: {}\n", dpin.debug_name());
+        i += width;
+        continue;
       }
 
       fmt::print("   [{}:{}] name:{}\n", i, i + width - 1, dpin.debug_name());
@@ -1252,11 +1253,10 @@ static void process_partially_assigned_other(Lgraph *g) {
         continue;
       }
       const auto &dpin = it.second[i];
-      if(!dpin.is_invalid()){
-
-      connect_partial_dpin(g, or_node, i, width, dpin);
+      if (!dpin.is_invalid()) {
+        connect_partial_dpin(g, or_node, i, width, dpin);
       } else {
-	      fmt::print("OOPSY! 2nd: {}\n",dpin.debug_name());
+        fmt::print("OOPSY! 2nd: {}\n", dpin.debug_name());
       }
 
       i += width;
