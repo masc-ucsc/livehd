@@ -2226,7 +2226,8 @@ Node_pin Cprop::try_find_single_driver_pin(Node &node, int pos) {
 bool Cprop::scalar_get_mask(Node &node) {
   auto a_spin    = node.get_sink_pin("a");
   auto mask_spin = node.get_sink_pin("mask");
-  if (!a_spin.is_connected() || !mask_spin.is_connected()) {
+  auto node_dpin = node.get_driver_pin();
+  if (!a_spin.is_connected() || !mask_spin.is_connected() || !node_dpin.is_connected()) {
     node.del_node();
     return true;
   }
