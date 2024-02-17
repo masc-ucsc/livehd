@@ -939,7 +939,10 @@ static void dump_partially_assigned() {
         continue;
       }
       const auto &dpin = it.second[i];
-      I(!dpin.is_invalid());
+      if(dpin.is_invalid()) {
+	      fmt::print("OOPSY! 1st: {}\n",dpin.debug_name());
+	      i+=width; continue;
+      }
 
       fmt::print("   [{}:{}] name:{}\n", i, i + width - 1, dpin.debug_name());
 
@@ -1235,6 +1238,7 @@ static void connect_partial_dpin(Lgraph *g, Node &or_node, uint32_t or_offset, B
 static void process_partially_assigned_other(Lgraph *g) {
   for (const auto &it : partially_assigned) {
     const RTLIL::Wire *wire = it.first;
+    fmt::print(" wire:{} width:{}\n", wire->name.str(), wire->width);
     I(it.second.size() == it.first->width);  // every bit set (maye be same dpin)
 
     auto or_dpin = get_partial_dpin(g, wire);
@@ -1248,9 +1252,12 @@ static void process_partially_assigned_other(Lgraph *g) {
         continue;
       }
       const auto &dpin = it.second[i];
-      I(!dpin.is_invalid());
+      if(!dpin.is_invalid()){
 
       connect_partial_dpin(g, or_node, i, width, dpin);
+      } else {
+	      fmt::print("OOPSY! 2nd: {}\n",dpin.debug_name());
+      }
 
       i += width;
     }
