@@ -211,10 +211,10 @@ http_archive(
 http_archive(
     name = "mockturtle",
     build_file = "mockturtle.BUILD",
-    sha256 = "562579061863772362856258f2be0984b3c503a497fab8e093bbb10fa1a8ace0",
-    strip_prefix = "mockturtle-0.2",
+    sha256 = "1883cce6ce7f33b7753ed37d642be390d6411438d6643814d713871ea7d763a3",
+    strip_prefix = "mockturtle-0.3",
     urls = [
-        "https://github.com/lsils/mockturtle/archive/refs/tags/v0.2.zip",
+        "https://github.com/lsils/mockturtle/archive/refs/tags/v0.3.zip",
     ],
 )
 
