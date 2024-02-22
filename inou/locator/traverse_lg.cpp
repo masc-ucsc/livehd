@@ -1179,7 +1179,7 @@ absl::flat_hash_set<Node_pin::Compact_flat> Traverse_lg::get_matching_map_val(co
 void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_sets& out_map_of_sets, bool is_orig_lg) {
   /*in fwd, flops are visited last. Thus this fast pass:*/
   fast_pass_for_inputs(lg, inp_map_of_sets, is_orig_lg);
-#ifdef BASIC_DBG
+  #ifdef BASIC_DBG
   fmt::print("\nPrinting the crit_node_map\n");
   for (const auto& [node_pin_cf, color] : crit_node_map) {
     auto n = Node_pin("lgdb", node_pin_cf).get_node();
@@ -1195,7 +1195,7 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
 
   fmt::print("9.1.0 Printing before fwd traversal! (with {} origLG) ",is_orig_lg);
   print_everything();
-#endif
+  #endif
 
   /*propagate sets. stop at sequential/IO... (_last)*/
   traverse_order.clear();
@@ -1378,11 +1378,13 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   lg->dump(true);  // FIXME: remove this
   #endif
   fmt::print("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
+  unsigned long int num_of_nodes = 0;
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
     fmt::print("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
     #endif
     if (!is_orig_lg) {
+      num_of_nodes+=1;
       /*capture the colored nodes*/
       #ifndef FULL_RUN_FOR_EVAL
       if (node.has_color() && !node.is_type_const()) {
@@ -1516,11 +1518,12 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
     if (crit_node_set.empty()) {
       report_critical_matches_with_color();
     }
+    fmt::print("num_of_nodes in this netlist = {}\n", num_of_nodes);
   }
+
 }
 
 void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_sets, bool is_orig_lg) {
-  //lg->dump(true);  // FIXME: remove this
   #ifdef BASIC_DBG
   fmt::print("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
   fmt::print("\t\tis_orig_lg: {}\n", is_orig_lg);
@@ -1756,6 +1759,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   //   remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
   // });
 
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
   /* map to capture all possible dpin names in the hierarchy*/  // TODO with instance name API
   absl::flat_hash_map<std::string, Node_pin::Compact_flat>                      name2dpin;
   absl::flat_hash_map<std::string, absl::flat_hash_set<Node_pin::Compact_flat>> name2dpins;
@@ -2013,6 +2017,8 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
     }
   }
 
+  fmt::print("num_of_matches: {}, IN_FUNC: netpin_to_origpin_default_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+
   //remove_resolved_from_orig_MoS();
 }
 
@@ -2030,6 +2036,8 @@ void Traverse_lg::remove_resolved_from_orig_MoS() {
 
 void Traverse_lg::matching_pass_io_boundary_only(map_of_sets& map_of_sets_synth,
                                                  map_of_sets& map_of_sets_orig) {  // FIXME: no more used-- remove?
+
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
 
   for (auto it = map_of_sets_synth.begin(); it != map_of_sets_synth.end();) {
     auto n_s = Node_pin("lgdb", it->first).get_node();
@@ -2062,6 +2070,9 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets& map_of_sets_synth,
       it++;
     }
   }
+
+  fmt::print("num_of_matches: {}, IN_FUNC: matching_pass_io_boundary_only \n",net_to_orig_pin_match_map.size()-num_of_matches);
+
 }
 
 float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat>& synth_set,
@@ -2085,6 +2096,9 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 }
 
 bool Traverse_lg::complete_io_match(bool flop_only) {
+
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
+
 #ifdef BASIC_DBG
   fmt::print("\n\n In complete_io_match : \n");
 #endif
@@ -2251,11 +2265,14 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       it++;
     }
   }
+  fmt::print("num_of_matches: {}, IN_FUNC: complete_io_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
   //fmt::print("# of matches in complete_io_match: {}\n", count);
   return any_matching_done;
 }
 
 bool Traverse_lg::surrounding_cell_match() {
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
+
   bool                                any_matching_done = false;
   std::vector<Node_pin::Compact_flat> erase_values_vec;
   for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
@@ -2375,11 +2392,13 @@ bool Traverse_lg::surrounding_cell_match() {
     out_map_of_sets_synth.erase(val_to_erase);
     inp_map_of_sets_synth.erase(val_to_erase);
   }
+  fmt::print("num_of_matches: {}, IN_FUNC: surrounding_cell_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
   //remove_resolved_from_orig_MoS();
   return any_matching_done;
 }
 
 bool Traverse_lg::surrounding_cell_match_final() {
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
   bool unmatched_left = false;
   for (auto it = inp_map_of_sets_synth.begin(); it != inp_map_of_sets_synth.end();) {
     auto n_s = Node_pin("lgdb", it->first).get_node();
@@ -2454,7 +2473,7 @@ bool Traverse_lg::surrounding_cell_match_final() {
       }
     }
   }
-
+  fmt::print("num_of_matches: {}, IN_FUNC: surrounding_cell_match_final \n",net_to_orig_pin_match_map.size()-num_of_matches);
   return unmatched_left;
 }
 
@@ -2838,6 +2857,7 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
 #ifdef BASIC_DBG
   fmt::print("In weighted_match_LoopLastOnly:\n\n");
 #endif
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
 
   /* map : | node | < inputs >             |
    * convert to
@@ -2963,12 +2983,14 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
     //   it++;
     // }
   }
+  fmt::print("num_of_matches: {}, IN_FUNC: weighted_match_LoopLastOnly \n",net_to_orig_pin_match_map.size()-num_of_matches);
 }
 
 void Traverse_lg::weighted_match() {  // only for the crit_node_entries remaining!
 #ifdef BASIC_DBG
   fmt::print("In weighted_match:\n\n");
 #endif
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
   for (const auto& synth_key : crit_node_set) {
     #ifdef BASIC_DBG
     auto synth_key_pin = Node_pin("lgdb", synth_key);
@@ -3061,11 +3083,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
   for (const auto& np : forced_match_vec) {
     remove_from_crit_node_set(np);
   }
+  fmt::print("num_of_matches: {}, IN_FUNC: weighted_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
 }
 
 bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synth, Traverse_lg::map_of_sets& io_map_of_sets_orig) {
   bool some_matching_done = false;
-
+  const auto num_of_matches = net_to_orig_pin_match_map.size();
   for (auto it = io_map_of_sets_synth.begin(); it != io_map_of_sets_synth.end();) {
     unsigned long match_count    = 0;
     unsigned long mismatch_count = 0;
@@ -3176,7 +3199,7 @@ bool Traverse_lg::set_theory_match(Traverse_lg::map_of_sets& io_map_of_sets_synt
 #endif
     }
   }
-
+  fmt::print("num_of_matches: {}, IN_FUNC: set_theory_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
   return some_matching_done;
 }
 
