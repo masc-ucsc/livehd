@@ -1378,13 +1378,11 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   lg->dump(true);  // FIXME: remove this
   #endif
   fmt::print("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
-  unsigned long int num_of_nodes = 0;
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
     fmt::print("main node: {}(n{})\n",node.get_type_name() ,node.get_nid());
     #endif
     if (!is_orig_lg) {
-      num_of_nodes+=1;
       /*capture the colored nodes*/
       #ifndef FULL_RUN_FOR_EVAL
       if (node.has_color() && !node.is_type_const()) {
@@ -1518,7 +1516,6 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
     if (crit_node_set.empty()) {
       report_critical_matches_with_color();
     }
-    fmt::print("num_of_nodes in this netlist = {}\n", num_of_nodes);
   }
 
 }
