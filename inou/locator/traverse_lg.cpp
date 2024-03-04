@@ -32,6 +32,7 @@ void Traverse_lg::travers(Eprp_var& var) {
 
   Traverse_lg p(var);
   p.orig_lg_name = std::string(lg_orig_name);
+  p.start_time_of_algo = std::chrono::system_clock::now();
   // p.synth_lg_name = std::string(lg_synth_name);
 #ifdef DE_DUP
   // Traverse_lg::setMap map_pre_synth;
@@ -2653,8 +2654,10 @@ void Traverse_lg::report_critical_matches_with_color() {
 	traversed_nodes.clear();
 	fmt::print("\ncolor 34 in orig LG is connected to color 33 in orig LG ? {}\n\n",is_combinationally_connected(orig_34, orig_33, traversed_nodes) );
 #endif
-
-  exit(2);
+  auto end_time_of_algo = std::chrono::system_clock::now();
+  std::chrono::duration<double> elapsed_seconds = end_time_of_algo-start_time_of_algo;
+  fmt::print("TOTAL_TIME_OF_ALGO: {}s\n", elapsed_seconds.count());
+  exit(0);
 }
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets& synth_map_of_set) {
