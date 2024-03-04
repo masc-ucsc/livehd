@@ -2679,7 +2679,7 @@ void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets& synt
         #endif
         synth_set_np.erase(it++);
         // FIXME: add erase from orig Maps here also?
-        auto equiv_val = net_to_orig_pin_match_map[set_np_val];
+        const auto &equiv_val = net_to_orig_pin_match_map[set_np_val];
         tmp_set.insert(equiv_val.begin(), equiv_val.end());
         #ifdef BASIC_DBG
 	fmt::print("replacing "); get_node_pin_compact_flat_details(set_np_val);
