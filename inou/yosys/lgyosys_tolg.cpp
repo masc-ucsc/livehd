@@ -1438,6 +1438,10 @@ static void process_connect_outputs(RTLIL::Module *mod, Lgraph *g) {
     Node_pin spin = g->get_graph_output(wname);
     g->add_edge(dpin3, spin);  // , wire->width);
 
+    if (!dpin3.has_name()) {
+      dpin3.set_name(wname);  // redundant name, but otherwise we could loose names in hierarchical
+    }
+
     auto dpin = spin.change_to_driver_from_graph_out_sink();
     if (wire->start_offset) {
       dpin.set_offset(wire->start_offset);
