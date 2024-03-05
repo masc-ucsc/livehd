@@ -142,10 +142,10 @@ http_archive(
     name = "boolector",
     build_file = "boolector.BUILD",
     patches = ["//external:boolector.patch"],
-    sha256 = "d955193f3b32f1a86646d744b8cb688d00d2e2c1c690d249b1041dc481315bbe",
-    strip_prefix = "boolector-13a8a06d561041cafcaf5458e404c1ec354b2841",
+    sha256 = "482bfb2e2e2a9b2ceada3dd689d6d419dab1a2596623aeaf4ea4eadb473f666a",
+    strip_prefix = "boolector-6603ed7b8d401f9bf387f32c702e3e938c50924d",
     urls = [
-        "https://github.com/Boolector/boolector/archive/13a8a06d561041cafcaf5458e404c1ec354b2841.zip",
+        "https://github.com/Boolector/boolector/archive/6603ed7b8d401f9bf387f32c702e3e938c50924d.zip",
     ],
 )
 
