@@ -4,6 +4,8 @@
 read_liberty {{liberty_file}}
 {{/liberty_tmap}}
 
+verilog_defines -DSYNTHESIS=1
+
 {{#filelist}}
 read_verilog -sv -nomeminit {{input}}
 {{/filelist}}
