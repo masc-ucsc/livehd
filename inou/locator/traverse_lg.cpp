@@ -234,12 +234,12 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("7.0. Printing before 1st set of resolution -- synth");
     print_everything();
 #endif
-    start = std::chrono::system_clock::now();
-    resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-    resolution_of_synth_map_of_sets(out_map_of_sets_synth);
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-after-make_io_mapsSynth\n", elapsed_seconds.count()); 
+    // start = std::chrono::system_clock::now();
+    // resolution_of_synth_map_of_sets(inp_map_of_sets_synth); /*Not required because make_io_maps has in-place resolution*/
+    // resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+    // end = std::chrono::system_clock::now();
+    // elapsed_seconds = end-start;
+    // fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-after-make_io_mapsSynth\n", elapsed_seconds.count()); 
 #ifdef BASIC_DBG
     fmt::print("7. printing before matching starts (after 1st resolution) -- synth");
     print_everything();
@@ -279,8 +279,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     while (change_done && !crit_node_set.empty() && !flop_set_synth.empty()) {  // for flop only as matching flop first
       start = std::chrono::system_clock::now();
-      resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-      resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+      make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth); //if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
+      resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
       end = std::chrono::system_clock::now();
       elapsed_seconds = end-start;
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inWhile-flopOnly\n", elapsed_seconds.count());
@@ -343,8 +344,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // all flops matched and still some crit cells left to map!
     // move to combinational matching
     start = std::chrono::system_clock::now();
-    resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-    resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+    /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
+    resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
     fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inLoopForCombo\n", elapsed_seconds.count());
@@ -388,8 +390,9 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
         fmt::print("\n surrounding_cell_match_final - synth done.\n");
         fmt::print("unmatched left = {}\n", unmatched_left);
         if(unmatched_left) {
-          resolution_of_synth_map_of_sets(inp_map_of_sets_synth);
-          resolution_of_synth_map_of_sets(out_map_of_sets_synth);
+  	  make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+          /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
+          resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
         }
       } while(unmatched_left && !crit_node_set.empty());
     }
@@ -1455,8 +1458,7 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
       const auto node_dpin_cf = dpins.get_compact_flat();
       bool       is_loop_stop
           = node.is_type_loop_last() || node.is_type_loop_first()
-            || (mark_loop_stop.find(node_dpin_cf)
-                != mark_loop_stop.end());  // FIXME: need not do this because all nodes reaching here are of type_loop_last?
+            || (mark_loop_stop.find(node_dpin_cf) != mark_loop_stop.end());
 
       const auto self_set = inp_map_of_sets.find(node_dpin_cf);
       #ifdef BASIC_DBG
@@ -2661,9 +2663,7 @@ void Traverse_lg::report_critical_matches_with_color() {
 }
 
 void Traverse_lg::resolution_of_synth_map_of_sets(Traverse_lg::map_of_sets& synth_map_of_set) {
-  #ifdef BASIC_DBG
   fmt::print("\n In resolution_of_synth_map_of_sets:\n");
-  #endif
   for (auto& [synth_np, synth_set_np] : synth_map_of_set) {
     // auto xx = Node_pin("lgdb", synth_np).get_node().get_nid();
     // fmt::print("------{} ({})\n",xx, synth_set_np.size());
