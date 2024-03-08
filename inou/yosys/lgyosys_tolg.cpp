@@ -939,11 +939,13 @@ static void dump_partially_assigned() {
         continue;
       }
       const auto &dpin = it.second[i];
+      
       if (dpin.is_invalid()) {
         fmt::print("OOPSY! 1st: {}\n", dpin.debug_name());
-        i += width;
-        continue;
+      //   i += width;
+      //   continue;
       }
+      I(!dpin.is_invalid());
 
       fmt::print("   [{}:{}] name:{}\n", i, i + width - 1, dpin.debug_name());
 
@@ -1253,11 +1255,11 @@ static void process_partially_assigned_other(Lgraph *g) {
         continue;
       }
       const auto &dpin = it.second[i];
-      if (!dpin.is_invalid()) {
-        connect_partial_dpin(g, or_node, i, width, dpin);
-      } else {
+      if (dpin.is_invalid()) {
         fmt::print("OOPSY! 2nd: {}\n", dpin.debug_name());
       }
+      I(!dpin.is_invalid());
+      connect_partial_dpin(g, or_node, i, width, dpin);
 
       i += width;
     }
