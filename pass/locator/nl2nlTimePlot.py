@@ -17,11 +17,9 @@ def getPercFromRepo(path):
 def getTimeFromRepo(path):
     time_file = open(path,'r')
     
-    count = 0
     my_time = ''
     for data in time_file.readlines():
-        if count == 0:
-            count += 1
+        if "elapsed" not in data:
             continue
         else:
             my_time = data.split('system ')[1].split('elapsed')[0].strip()
@@ -59,3 +57,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
