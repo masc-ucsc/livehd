@@ -363,30 +363,27 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     #ifdef BASIC_DBG
     print_everything();
     #endif
-    int iters=0;
-    do {
-      iters+=1;
-      
-      start = std::chrono::system_clock::now();
-      change_done = complete_io_match(false);  // alters crit_node_set too
-      end = std::chrono::system_clock::now();
-      elapsed_seconds = end-start;
-      
-      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
-      fmt::print("\n complete_io_match - synth - combinational done.\n");
-      #ifdef BASIC_DBG
-      fmt::print("10. Printing after all the combinational resolution and matching!");
-      print_everything();
-      #endif
 
+    start = std::chrono::system_clock::now();
+    change_done = complete_io_match(false);  // alters crit_node_set too
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end-start;
+    
+    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
+    fmt::print("\n complete_io_match - synth - combinational done.\n");
+    #ifdef BASIC_DBG
+    fmt::print("10. Printing after all the combinational resolution and matching!");
+    print_everything();
+    #endif
+
+    if(change_done) {
       make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
       make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       for (const auto& origpin_cf: flop_set_orig) {
         inp_map_of_sets_orig.erase(origpin_cf);
         out_map_of_sets_orig.erase(origpin_cf);
       }
-
-    } while (!crit_node_set.empty() && iters<3 && change_done);
+    }
 
     #ifndef FULL_RUN_FOR_EVAL
     if (!crit_node_set.empty()) {  // exact combinational matching could not resolve all crit nodes
