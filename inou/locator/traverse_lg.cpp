@@ -282,6 +282,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     while (change_done && !crit_node_set.empty() && !flop_set_synth.empty()) {  // for flop only as matching flop first
       start = std::chrono::system_clock::now();
       make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth); //if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
       end = std::chrono::system_clock::now();
@@ -305,6 +306,10 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 #endif
 
     if (!flop_set_synth.empty()) {
+      if(change_done){
+        make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+        make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+      }
       start = std::chrono::system_clock::now();
       weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
       // set_theory_match_loopLast_only();
@@ -325,6 +330,17 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       report_critical_matches_with_color();
     }
 
+    // all flops matched and still some crit cells left to map!
+    // move to combinational matching
+    start = std::chrono::system_clock::now();
+    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+    /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
+    resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
+    end = std::chrono::system_clock::now();
+    elapsed_seconds = end-start;
+    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inLoopForCombo\n", elapsed_seconds.count());
+
     /* Since all flops are matched now, remove these from orig_mos*/
     start = std::chrono::system_clock::now();
     for (const auto& origpin_cf: flop_set_orig) {
@@ -343,30 +359,34 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     fmt::print("\n");
     #endif
 
-    // all flops matched and still some crit cells left to map!
-    // move to combinational matching
-    start = std::chrono::system_clock::now();
-    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-    /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
-    resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inLoopForCombo\n", elapsed_seconds.count());
 
     #ifdef BASIC_DBG
     print_everything();
     #endif
+    int iters=0;
+    do {
+      iters+=1;
+      
+      start = std::chrono::system_clock::now();
+      change_done = complete_io_match(false);  // alters crit_node_set too
+      end = std::chrono::system_clock::now();
+      elapsed_seconds = end-start;
+      
+      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
+      fmt::print("\n complete_io_match - synth - combinational done.\n");
+      #ifdef BASIC_DBG
+      fmt::print("10. Printing after all the combinational resolution and matching!");
+      print_everything();
+      #endif
 
-    start = std::chrono::system_clock::now();
-    change_done = complete_io_match(false);  // alters crit_node_set too
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
-    fmt::print("\n complete_io_match - synth - combinational done.\n");
-    #ifdef BASIC_DBG
-    fmt::print("10. Printing after all the combinational resolution and matching!");
-    print_everything();
-    #endif
+      make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+      for (const auto& origpin_cf: flop_set_orig) {
+        inp_map_of_sets_orig.erase(origpin_cf);
+        out_map_of_sets_orig.erase(origpin_cf);
+      }
+
+    } while (!crit_node_set.empty() && iters<3 && change_done);
 
     #ifndef FULL_RUN_FOR_EVAL
     if (!crit_node_set.empty()) {  // exact combinational matching could not resolve all crit nodes
@@ -2202,6 +2222,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 
       if (out_matched) {  // in+out matched. complete exact match. put in matching map
         net_to_orig_pin_match_map[it->first].insert(orig_in_np);
+	mark_loop_stop.insert(it->first);
+	mark_loop_stop.insert(orig_in_np);
 	//count++;
 #ifdef FOR_EVAL
         auto np_s = Node_pin("lgdb", it->first);
@@ -2238,6 +2260,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     } else if (partial_out_match_map.size() /*&& (((partial_out_match_map.end())->first)!=0) */) {
       net_to_orig_pin_match_map[it->first].insert(((partial_out_match_map.rbegin())->second).begin(),
                                                   ((partial_out_match_map.rbegin())->second).end());
+      mark_loop_stop.insert(it->first);
+      mark_loop_stop.insert(((partial_out_match_map.rbegin())->second).begin(),((partial_out_match_map.rbegin())->second).end());
       //count++;
       #ifdef BASIC_DBG
       fmt::print("Partial_out_match_map:\n");
@@ -2969,6 +2993,8 @@ void Traverse_lg::weighted_match_LoopLastOnly() {
 
     if (!matched_node_pins.empty()) {
       net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
+      mark_loop_stop.insert(synth_key);
+      mark_loop_stop.insert(matched_node_pins.begin(), matched_node_pins.end());
 #ifdef FOR_EVAL
       auto np_s = Node_pin("lgdb", synth_key);
       fmt::print("Inserting in weighted_match_LoopLastOnly : {}(n{})  :::  ",
