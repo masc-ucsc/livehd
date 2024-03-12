@@ -261,13 +261,15 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       }
     }
     */
-
-    start = std::chrono::system_clock::now();
-    bool change_done = complete_io_match(true);  // for flop only as matching flop first
-    fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
-    end = std::chrono::system_clock::now();
-    elapsed_seconds = end-start;
-    fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
+    bool change_done=false;
+    if (!crit_node_set.empty() && !flop_set_synth.empty()){
+      start = std::chrono::system_clock::now();
+      change_done = complete_io_match(true);  // for flop only as matching flop first
+      fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
+      end = std::chrono::system_clock::now();
+      elapsed_seconds = end-start;
+      fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-flopsOnly-1stTime\n", elapsed_seconds.count());
+    }
     if (crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
