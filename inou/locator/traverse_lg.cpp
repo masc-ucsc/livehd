@@ -366,6 +366,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     print_everything();
     #endif
 
+    #ifndef FULL_RUN_FOR_EVAL
     if (!crit_node_set.empty()) {  // exact combinational matching could not resolve all crit nodes
       // surrounding cell loc-similarity matching
       start = std::chrono::system_clock::now();
@@ -374,10 +375,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       elapsed_seconds = end-start;
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: surrounding_cell_match\n", elapsed_seconds.count());
       fmt::print("\n surrounding_cell_match - synth done.\n");
-#ifdef BASIC_DBG
+      #ifdef BASIC_DBG
       fmt::print("Change done = {}\n", change_done);
-#endif
+      #endif
     }
+    #endif
 #ifdef BASIC_DBG
     fmt::print("11. Printing after surrounding_cell matching!");
     print_everything();
@@ -1710,6 +1712,9 @@ void Traverse_lg::bwd_traversal_for_out_map(map_of_sets& out_map_of_sets, bool i
 }
 
 void Traverse_lg::remove_pound_and_bus(std::string& dpin_name) {
+#ifdef FULL_RUN_FOR_EVAL
+	return;
+#endif
   // auto dpin_name = dpin.get_name();
   if (dpin_name.find('#') == std::size_t(0)) {  // if dpin_name has # as start char
     dpin_name.erase(dpin_name.begin());         // remove it
@@ -1844,11 +1849,11 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   // });
   //orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
-#ifndef FULL_RUN_FOR_EVAL
+    //#ifndef FULL_RUN_FOR_EVAL
     if (!original_node.has_loc()) {
       continue;  // this way non loc nodes will not get matched in default matching
     }
-#endif
+    //#endif
     if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
       continue;
     }
@@ -2088,10 +2093,12 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 
   /* 5 points for a full match for this set part
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
+
   float mismatches = synth_set.size() - matches ;
-#ifdef BASIC_DBG
+  if (mismatches<=0.0) mismatches=1;
+  #ifdef BASIC_DBG
   fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,(matches/mismatches));
-#endif
+  #endif
   return (matches/mismatches);
 }
 
@@ -2796,7 +2803,7 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
     #endif
     if (node.is_type_loop_last() && (!node.is_type_sub()) ) {  // flop node should be matched with flop node only! else datatype mismatch!
       // we need flop nodes only in this case
-      #ifndef FULL_RUN_FOR_EVAL
+      // #ifndef FULL_RUN_FOR_EVAL
       if (node.has_loc()) {// also, nodes with valid LoC should be used for matching
         for (const auto& io_val : io_vals_set) {
 	  #ifdef BASIC_DBG
@@ -2808,11 +2815,11 @@ Traverse_lg::map_of_sets Traverse_lg::convert_io_MoS_to_node_MoS_LLonly(const ma
       #ifdef BASIC_DBG
       else {fmt::print("\t\t\t not processing this node (no loc in node)!\n");}
       #endif
-      #else
-      for (const auto& io_val: io_vals_set) {
-        node_map_of_set_LoopLastOnly[io_val].insert(node_key);
-      }
-      #endif
+      // #else
+      // for (const auto& io_val: io_vals_set) {
+      //   node_map_of_set_LoopLastOnly[io_val].insert(node_key);
+      // }
+      // #endif
     } 
     #ifdef BASIC_DBG
     else {
@@ -3008,9 +3015,9 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
       if(unwanted_orig_NPs.contains(orig_key)) { continue; }
-      #ifndef FULL_RUN_FOR_EVAL
+      //#ifndef FULL_RUN_FOR_EVAL
       if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
-      #endif
+      //#endif
       #ifdef BASIC_DBG
       auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
