@@ -5,11 +5,11 @@ import json
 import sys
 
 
-def log_accuracy_data(path):
+def log_accuracy_data(log_file_path):
 
     log_acc_dict = {}
     accuracy_index = [0,0,0,0]
-    graph_flatten_file = open(path,'r')
+    graph_flatten_file = open(log_file_path,'r')
     pass_flag = True
     count = 0
     for data in graph_flatten_file.readlines():
@@ -46,7 +46,9 @@ def log_accuracy_data(path):
                             
                             log_acc_dict[str(val_set)].add(key)
                         else:
-                            # print(my_data) #:print no matches
+                            #print("no matches:")
+                            #print(my_data) #:print no matches
+                            #print("--")
                             accuracy_index[3] += 1
 
 
@@ -100,13 +102,13 @@ def main():
     n = len(sys.argv)
 
     if n != 3:
-        print("Enter path to obtain the matching map and noise percentage value to serve as x-val.")
+        print("Enter log_file_path to obtain the matching map and noise percentage value to serve as x-val.")
         exit(1)
 
-    path = sys.argv[1] #'/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy/MaxPeriodFibonacciLFSR_100.log' #SingleCycleCPU_flattened_100.for_graphs.log'
+    log_file_path = sys.argv[1] #'/soe/sgarg3/code_gen/new_dir/livehd/pass/locator/tests/dummy/MaxPeriodFibonacciLFSR_100.log' #SingleCycleCPU_flattened_100.for_graphs.log'
     accuracy_flop_plot_data_collection_file = sys.argv[2]
 
-    x_val = log_accuracy_data(path)
+    x_val = log_accuracy_data(log_file_path)
 
     file_acc_flop_plot_data = open(accuracy_flop_plot_data_collection_file, "a")
     file_acc_flop_plot_data.write(str(x_val))
