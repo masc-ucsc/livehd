@@ -33,6 +33,7 @@ void Traverse_lg::travers(Eprp_var& var) {
   Traverse_lg p(var);
   p.orig_lg_name = std::string(lg_orig_name);
   p.start_time_of_algo = std::chrono::system_clock::now();
+  p.crossover_count=0;
   // p.synth_lg_name = std::string(lg_synth_name);
 #ifdef DE_DUP
   // Traverse_lg::setMap map_pre_synth;
@@ -2099,6 +2100,15 @@ void Traverse_lg::matching_pass_io_boundary_only(map_of_sets& map_of_sets_synth,
 
 }
 
+bool Traverse_lg::common_element_present(const absl::flat_hash_set<Node_pin::Compact_flat>& set1, const absl::flat_hash_set<Node_pin::Compact_flat>& set2) const {
+
+  for (const auto& np: set1) {
+    if(set2.contains(np)) return true;
+  }
+  return false;
+
+}
+
 float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat>& synth_set,
                                        const absl::flat_hash_set<Node_pin::Compact_flat>& orig_set) const {
   const auto& smallest = synth_set.size() < orig_set.size() ? synth_set : orig_set;
@@ -2112,13 +2122,15 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
 
   /* 5 points for a full match for this set part
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
-
-  float mismatches = synth_set.size() - matches ;
-  if (mismatches<=0.0) mismatches=1;
-  #ifdef BASIC_DBG
-  fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,(matches/mismatches));
-  #endif
-  return (matches/mismatches);
+float mismatches = smallest.size() - matches ;
+float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
+return matching_weight;
+  // float mismatches = synth_set.size() - matches ;
+  // if (mismatches<=0.0) mismatches=1;
+  // #ifdef BASIC_DBG
+  // fmt::print("\t\t\t\t (synth_set_size={}, orig_set_size={}) matches:{}, mismatches:{},returning:{}\n",  synth_set.size(), orig_set.size(),matches, mismatches,(matches/mismatches));
+  // #endif
+  // return (matches/mismatches);
 }
 
 bool Traverse_lg::complete_io_match(bool flop_only) {
@@ -2686,6 +2698,7 @@ void Traverse_lg::report_critical_matches_with_color() {
 	traversed_nodes.clear();
 	fmt::print("\ncolor 34 in orig LG is connected to color 33 in orig LG ? {}\n\n",is_combinationally_connected(orig_34, orig_33, traversed_nodes) );
 #endif
+  fmt::print("Crossovers in this design: {}\n", crossover_count);
   auto end_time_of_algo = std::chrono::system_clock::now();
   std::chrono::duration<double> elapsed_seconds = end_time_of_algo-start_time_of_algo;
   fmt::print("TOTAL_TIME_OF_ALGO: {}s\n", elapsed_seconds.count());
@@ -3036,6 +3049,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     fmt::print("\n||||---||||\n");
     #endif
 
+    const auto& synth_out_set = out_map_of_sets_synth.find(synth_key);
+    bool loop_detected=false; //some common point in synth in set and out set means loop! we don't want to bother any such key.
+    if(synth_out_set != out_map_of_sets_synth.end() ){
+      loop_detected = common_element_present(synth_out_set->second,synth_set);
+    }
+
     float                                       match_prev = 0.0;
     absl::flat_hash_set<Node_pin::Compact_flat> matched_node_pins;
     for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
@@ -3047,20 +3066,30 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
       #endif
-      const auto& in_match  = get_matching_weight(synth_set, orig_set);
+
+      float match_curr = 0.0;
       auto        out_match = 0.0;
-      if (out_map_of_sets_synth.find(synth_key) != out_map_of_sets_synth.end()
+      if (synth_out_set != out_map_of_sets_synth.end()
           && out_map_of_sets_orig.find(orig_key) != out_map_of_sets_orig.end()) {  // both outs are present
         out_match = get_matching_weight(out_map_of_sets_synth[synth_key], out_map_of_sets_orig[orig_key]);
-      } else if (out_map_of_sets_synth.find(synth_key) != out_map_of_sets_synth.end()
+      } else if (synth_out_set != out_map_of_sets_synth.end()
                  || out_map_of_sets_orig.find(orig_key) != out_map_of_sets_orig.end()) {  // only 1 out is present
         out_match = 0.0;                                                                  // no match at all
       } else {                                                                            // no out is present
         out_match = 5.0;                                                                  // complete match
       }
+      const auto& in_match  = get_matching_weight(synth_set, orig_set);
+      match_curr = in_match + out_match;
 
-      float match_curr = in_match + out_match;
-
+      if (match_curr >= match_prev) {
+      if(!loop_detected && synth_out_set != out_map_of_sets_synth.end() ){ //no loop in synth and synth-out set present
+        if(common_element_present(orig_set,synth_out_set->second)){ //some pin of synth-out-set is in orig-in-set
+	  match_curr = 0;
+	  crossover_count++;
+	}
+      } 
+      }
+      
       if (match_curr > match_prev) {
         matched_node_pins.clear();
         matched_node_pins.insert(orig_key);
