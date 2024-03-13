@@ -31,6 +31,7 @@ public:
 private:
   std::string orig_lg_name;
   std::chrono::system_clock::time_point start_time_of_algo;
+  int crossover_count;
   // std::string synth_lg_name;
   typedef absl::node_hash_map<Node::Compact_flat, std::pair<std::set<std::string>, std::set<std::string>>> setMap_nodeKey;
   typedef absl::node_hash_map<std::pair<std::set<std::string>, std::set<std::string>>, std::vector<Node::Compact_flat>>
@@ -115,6 +116,7 @@ private:
   map_of_sets obtain_MoS_LLonly(const map_of_sets &io_map_of_sets);
   void print_set (const absl::flat_hash_set<Node_pin::Compact_flat> &set_of_dpins) const ;
   void print_everything() ;
+  bool common_element_present(const absl::flat_hash_set<Node_pin::Compact_flat>& set1, const absl::flat_hash_set<Node_pin::Compact_flat>& set2) const ;
   float get_matching_weight(const absl::flat_hash_set<Node_pin::Compact_flat> &synth_set, const absl::flat_hash_set<Node_pin::Compact_flat> &orig_set) const;
   absl::flat_hash_set<Node_pin::Compact_flat> get_matching_map_val(const Node_pin::Compact_flat &dpin_cf) const ;
   absl::node_hash_map<Node_pin::Compact_flat, int> crit_node_map;
