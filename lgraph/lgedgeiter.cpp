@@ -266,7 +266,7 @@ void Fwd_edge_iterator::Fwd_iter::fwd_get_from_pending(Lgraph *top) {
           for (auto &dpin : dpin_list) {  // fwd
             if (unvisited.contains(dpin.get_node().get_compact())) {
               // fmt::print("calling for nid:{} type:{}\n", dpin.get_node().get_nid(),dpin.get_node().get_type_name());
-              //dpin.get_node().dump();
+              // dpin.get_node().dump();
               topo_add_chain_fwd(dpin);
             }
           }

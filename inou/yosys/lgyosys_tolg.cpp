@@ -999,6 +999,11 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
         }
 #endif
         Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
+        if (!dpin.has_name()) {
+          dpin.set_name(lhs_wire->name.c_str());
+        } else if (dpin.get_name() != lhs_wire->name.str()) {
+          fmt::print("which pin to assign {} dpin:{}\n", lhs_wire->name.c_str(), dpin.get_wire_name());
+        }
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto prev_dpin = wire2pin[lhs_wire];
 #ifndef NDEBUG
