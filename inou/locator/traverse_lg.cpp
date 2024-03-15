@@ -2201,6 +2201,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
     bool out_matched                    = false;  // FIXME: declaration can be shifted IN the following for loop?
     auto keep_partial_match_checking_on = true;
     std::map<float, absl::flat_hash_set<Node_pin::Compact_flat>> partial_out_match_map;
+    auto find_in_out_MoS_synth = out_map_of_sets_synth.find(it->first);
     for (const auto& [orig_in_np, orig_in_set_np] : inp_map_of_sets_orig) {
       // auto o_s = Node_pin("lgdb", orig_in_np).get_node();
       if(unwanted_orig_NPs.contains(orig_in_np) ) { 
@@ -2231,14 +2232,13 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         /*it->first == orig_in_np for inputs. see if their output sets match as well.
          * 1. both might not have outputs and thus not be present in out_map_of_sets_<>
          * 2. if both are present, then compare the output sets.*/
-	auto find_in_out_MoS_synth = out_map_of_sets_synth.find(it->first);
 	auto find_in_out_MoS_orig = out_map_of_sets_orig.find(orig_in_np);
         if (find_in_out_MoS_synth != out_map_of_sets_synth.end()
             && find_in_out_MoS_orig != out_map_of_sets_orig.end()) {  // both present
 #ifdef BASIC_DBG
           fmt::print("\t\t Outputs present for both \n");
 #endif
-          if (out_map_of_sets_synth[it->first] == out_map_of_sets_orig[orig_in_np]) {
+          if (find_in_out_MoS_synth->second  == out_map_of_sets_orig[orig_in_np]) {
             out_matched                    = true;
             keep_partial_match_checking_on = false;
             partial_out_matched            = false;
@@ -2250,7 +2250,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 #ifdef BASIC_DBG
             fmt::print("\t\t Outputs not exactly matched \n");
 #endif
-            matching_wt         = get_matching_weight(out_map_of_sets_synth[it->first], out_map_of_sets_orig[orig_in_np]);
+            matching_wt         = get_matching_weight(find_in_out_MoS_synth->second , out_map_of_sets_orig[orig_in_np]);
             partial_out_matched = true;
           }
         } else if (find_in_out_MoS_synth == out_map_of_sets_synth.end()
