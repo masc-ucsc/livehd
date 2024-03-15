@@ -3088,8 +3088,14 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       } else if (synth_out_set != out_map_of_sets_synth.end()
                  || out_map_of_sets_orig.find(orig_key) != out_map_of_sets_orig.end()) {  // only 1 out is present
         out_match = 0.0;                                                                  // no match at all
+        #ifdef FULL_RUN_FOR_EVAL
+        fmt::print("0, 0, ");
+        #endif
       } else {                                                                            // no out is present
         out_match = 5.0;                                                                  // complete match
+        #ifdef FULL_RUN_FOR_EVAL
+        fmt::print("F, 0, ");
+        #endif
       }
       const auto& in_match  = get_matching_weight(synth_set, orig_set);
       match_curr = in_match + out_match;
@@ -3116,7 +3122,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       #endif
 
       #ifdef FULL_RUN_FOR_EVAL
-        if (loop_detected) fmt::print("{}, ",loop_detected);
+        fmt::print("{}, ",loop_detected);
       #endif
       
       if (match_curr > match_prev) {
