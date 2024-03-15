@@ -265,6 +265,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     bool change_done=false;
     if (!crit_node_set.empty() && !flop_set_synth.empty()){
       start = std::chrono::system_clock::now();
+      //fmt::print("Before complete_io_match(flop only)"); print_SynthSet_sizes();
       change_done = complete_io_match(true);  // for flop only as matching flop first
       fmt::print("\n complete_io_match - synth - flop only (outside while) done.\n");
       end = std::chrono::system_clock::now();
@@ -291,6 +292,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: resolution_of_synth_map_of_sets-inWhile-flopOnly\n", elapsed_seconds.count());
 
       start = std::chrono::system_clock::now();
+      //fmt::print("Before complete_io_match(flop only)"); print_SynthSet_sizes();
       change_done = complete_io_match(true);  // alters crit_node_set too
       end = std::chrono::system_clock::now();
       elapsed_seconds = end-start;
@@ -366,12 +368,14 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     #endif
 
     start = std::chrono::system_clock::now();
+    //fmt::print("Before complete_io_match(crit comb only)"); print_SynthSet_sizes();
     change_done = complete_io_match(false);  // alters crit_node_set too
     end = std::chrono::system_clock::now();
     elapsed_seconds = end-start;
     
     fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: complete_io_match-combo\n", elapsed_seconds.count());
     fmt::print("\n complete_io_match - synth - combinational done.\n");
+    //fmt::print("AFTER complete_io_match(crit comb only)"); print_SynthSet_sizes();
     #ifdef BASIC_DBG
     fmt::print("10. Printing after all the combinational resolution and matching!");
     print_everything();
@@ -1192,6 +1196,41 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
       fmt::print("n{}\t", n.get_nid());
     }
   }
+}
+
+void Traverse_lg::print_SynthSet_sizes() const {
+  fmt::print("set sizes for out_map_of_sets_synth:\n");
+  int numOfKeys_out = 0;
+  int zero_sets_out=0;
+  int one_sets_out=0;
+  int two_sets_out=0;
+  int three_sets_out=0;
+  for (const auto& [np, np_set]:out_map_of_sets_synth) {
+    numOfKeys_out++;
+    if(np_set.size()==0) zero_sets_out++;
+    if(np_set.size()==1) one_sets_out++;
+    if(np_set.size()==2) two_sets_out++;
+    if(np_set.size()==3) three_sets_out++;
+    fmt::print("{}, ", np_set.size());
+  }
+  fmt::print("\nset sizes for inp_map_of_sets_synth:\n");
+  int numOfKeys_in = 0;
+  int zero_sets_in=0;
+  int one_sets_in=0;
+  int two_sets_in=0;
+  int three_sets_in=0;
+  for (const auto& [np, np_set]:inp_map_of_sets_synth) {
+    numOfKeys_in++;
+    if(np_set.size()==0) zero_sets_in++;
+    if(np_set.size()==1) one_sets_in++;
+    if(np_set.size()==2) two_sets_in++;
+    if(np_set.size()==3) three_sets_in++;
+    fmt::print("{}, ", np_set.size());
+  }
+  fmt::print("\n");
+  fmt::print("{}, {}, {}, {} out of {}\n", zero_sets_out, one_sets_out, two_sets_out, three_sets_out, numOfKeys_out);
+  fmt::print("{}, {}, {}, {} in of {}\n", zero_sets_in, one_sets_in, two_sets_in, three_sets_in, numOfKeys_in);
+  fmt::print("\n");
 }
 
 absl::flat_hash_set<Node_pin::Compact_flat> Traverse_lg::get_matching_map_val(const Node_pin::Compact_flat& dpin_cf) const {
