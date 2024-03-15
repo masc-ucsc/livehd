@@ -515,10 +515,8 @@ static void set_bits_wirename(Node_pin &pin, const RTLIL::Wire *wire) {
     if (wire->name.c_str()[0] != '$'
         && wire->name.str().rfind("\\lg_") != 0
         // dc generated names
-        && !std::regex_match(wire->name.str(), dc_name)
-
-        // skip chisel generated names
-        && wire->name.str().rfind("\\_GEN_") != 0 && wire->name.str().rfind("\\_T_") != 0) {
+        && !std::regex_match(wire->name.str(), dc_name)) {
+      // WARNING: preserve Chisel names!! Helps with network match
       pin.set_name(std::string(&wire->name.c_str()[1]));
     }
   }
@@ -939,11 +937,11 @@ static void dump_partially_assigned() {
         continue;
       }
       const auto &dpin = it.second[i];
-      
+
       if (dpin.is_invalid()) {
         fmt::print("OOPSY! 1st: {}\n", dpin.debug_name());
-      //   i += width;
-      //   continue;
+        //   i += width;
+        //   continue;
       }
       I(!dpin.is_invalid());
 
@@ -1000,7 +998,8 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
 #endif
         Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
         if (!dpin.has_name()) {
-          dpin.set_name(lhs_wire->name.c_str());
+          std::string wname(&lhs_wire->name.c_str()[1]);
+          dpin.set_name(wname);
         } else if (dpin.get_name() != lhs_wire->name.str()) {
           fmt::print("which pin to assign {} dpin:{}\n", lhs_wire->name.c_str(), dpin.get_wire_name());
         }
