@@ -996,24 +996,40 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
           I(dpin.get_bits() == lhs_wire->width);
         }
 #endif
-        Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
+        auto     ss   = rhs.extract(lchunk.offset, lchunk.width);
+        Node_pin dpin = create_pick_concat_dpin(g, ss, lhs_wire->is_signed);
         if (lhs_wire->name.c_str()[0] != '$') {
           std::string wname(&lhs_wire->name.c_str()[1]);
-          if (!dpin.has_name()) {
-            dpin.set_name(wname);
-          } else if (dpin.get_name() != wname) {
-            // fmt::print("which pin to assign {} dpin:{}\n", wname, dpin.get_wire_name());
-            auto or_node = dpin.get_node().create(Ntype_op::Or);
-            auto or_dpin = or_node.setup_driver_pin();
-            or_dpin.set_bits(lhs_wire->width);
-            or_dpin.set_name(wname);
-            or_node.connect_sink(dpin);
+          bool        rhs_adjusted_name = false;
+          if (!lhs_wire->port_output && ss.size() == 1) {
+            auto it = wire2pin.find(ss[0].wire);
+            if (it != wire2pin.end()) {
+              auto &rhs_dpin = it->second;
+              if (!rhs_dpin.has_name()) {
+                rhs_dpin.set_name(wname);
+                rhs_adjusted_name = true;
+                fmt::print("1.which pin to assign {} dpin:{}\n", wname, rhs_dpin.get_wire_name());
+              }
+            }
+          }
+          if (!rhs_adjusted_name) {
+            if (!dpin.has_name()) {
+              dpin.set_name(wname);
+            } else if (dpin.get_name() != wname) {
+              // fmt::print("which pin to assign {} dpin:{}\n", wname, dpin.get_wire_name());
+              auto or_node = dpin.get_node().create(Ntype_op::Or);
+              auto or_dpin = or_node.setup_driver_pin();
+              or_dpin.set_bits(lhs_wire->width);
+              or_dpin.set_name(wname);
+              or_node.connect_sink(dpin);
 
-            // or_node.dump();
-            // dpin.get_node().dump();
-            dpin = or_dpin;
+              // or_node.dump();
+              // dpin.get_node().dump();
+              dpin = or_dpin;
+            }
           }
         }
+        // fmt::print("XXX pin to assign {} dpin:{}\n", lhs_wire->name.c_str(), dpin.get_wire_name());
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto prev_dpin = wire2pin[lhs_wire];
 #ifndef NDEBUG
@@ -1892,7 +1908,8 @@ static void process_cells(RTLIL::Module *mod, Lgraph *g) {
       }
 
       exit_node.setup_sink_pin("clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
-      exit_node.setup_sink_pin("din").connect_driver(get_dpin(g, cell, ID::D));
+      auto flop_dpin = get_dpin(g, cell, ID::D);
+      exit_node.setup_sink_pin("din").connect_driver(flop_dpin);
       //--------------------------------------------------------------
     } else if (std::strncmp(cell->type.c_str(), "$dlatch", 7) == 0) {
       exit_node.set_type(Ntype_op::Latch, get_output_size(cell));

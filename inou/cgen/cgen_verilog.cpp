@@ -684,7 +684,7 @@ void Cgen_verilog::process_simple_node(std::shared_ptr<File_output> fout, Node &
   auto var_it = pin2var.find(dpin.get_compact_class());
   if (var_it == pin2var.end()) {
     pin2expr.emplace(dpin.get_compact_class(), Expr(final_expr, true));
-  } else {
+  } else if (var_it->second != final_expr) {
     fout->append("  ", var_it->second, " = ", final_expr, ";\n");
   }
 }
@@ -898,6 +898,7 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
   if (dpin.is_type_const()) {
     return;  // No point for constants
   }
+  // I(!dpin.is_graph_io());
 
   auto [it, replaced] = pin2var.insert({dpin.get_compact_class(), std::string(name)});
   if (!replaced) {
@@ -905,6 +906,13 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, Node_pin &d
   }
 
   int bits = dpin.get_bits();
+
+#if 0
+  const auto &sub = dpin.get_top_lgraph()->get_self_sub_node();
+  if (sub.has_pin(name)) {
+    return;  // The IO name may be replicated, just ignore the extra declaration
+  }
+#endif
 
   std::string reg_str;
   if (out_unsigned) {
