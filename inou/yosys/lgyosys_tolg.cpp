@@ -997,11 +997,22 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
         }
 #endif
         Node_pin dpin = create_pick_concat_dpin(g, rhs.extract(lchunk.offset, lchunk.width), lhs_wire->is_signed);
-        if (!dpin.has_name()) {
+        if (lhs_wire->name.c_str()[0] != '$') {
           std::string wname(&lhs_wire->name.c_str()[1]);
-          dpin.set_name(wname);
-        } else if (dpin.get_name() != lhs_wire->name.str()) {
-          fmt::print("which pin to assign {} dpin:{}\n", lhs_wire->name.c_str(), dpin.get_wire_name());
+          if (!dpin.has_name()) {
+            dpin.set_name(wname);
+          } else if (dpin.get_name() != wname) {
+            // fmt::print("which pin to assign {} dpin:{}\n", wname, dpin.get_wire_name());
+            auto or_node = dpin.get_node().create(Ntype_op::Or);
+            auto or_dpin = or_node.setup_driver_pin();
+            or_dpin.set_bits(lhs_wire->width);
+            or_dpin.set_name(wname);
+            or_node.connect_sink(dpin);
+
+            // or_node.dump();
+            // dpin.get_node().dump();
+            dpin = or_dpin;
+          }
         }
         if (wire2pin.find(lhs_wire) != wire2pin.end()) {
           auto prev_dpin = wire2pin[lhs_wire];
