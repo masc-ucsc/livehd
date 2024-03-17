@@ -2133,7 +2133,7 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
   float mismatches = smallest.size() - matches ;
   float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
-  #ifdef FULL_RUN_FOR_EVAL
+  #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
     fmt::print("{}, {}, ", matches, mismatches);
   #endif
   return matching_weight;
@@ -3102,7 +3102,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
 #ifdef BASIC_DBG
   fmt::print("In weighted_match:\n\n");
 #endif
-  #ifdef FULL_RUN_FOR_EVAL
+  #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
   fmt::print("SynthNode, SrcNode, OUTmatches, OUTmismatches, INmatches, INmismatches, crossovers, loops, match\n");
   #endif
   const auto num_of_matches = net_to_orig_pin_match_map.size();
@@ -3137,7 +3137,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
       #endif
 
-      #ifdef FULL_RUN_FOR_EVAL
+      #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	const auto& synth_node = Node_pin("lgdb",synth_key).get_node();
 	const auto& orig_node = Node_pin("lgdb",orig_key).get_node();
 	const auto& synth_node_name = synth_node.has_name() ? synth_node.get_name() : "N.A" ;
@@ -3152,12 +3152,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       } else if (synth_out_set != out_map_of_sets_synth.end()
                  || out_map_of_sets_orig.find(orig_key) != out_map_of_sets_orig.end()) {  // only 1 out is present
         out_match = 0.0;                                                                  // no match at all
-        #ifdef FULL_RUN_FOR_EVAL
+        #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
         fmt::print("0, 0, ");
         #endif
       } else {                                                                            // no out is present
         out_match = 5.0;                                                                  // complete match
-        #ifdef FULL_RUN_FOR_EVAL
+        #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
         fmt::print("F, 0, ");
         #endif
       }
@@ -3169,23 +3169,23 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
           if(common_element_present(orig_set,synth_out_set->second)){ //some pin of synth-out-set is in orig-in-set
 	    match_curr = 0;
 	    crossover_count++;
-	    #ifdef FULL_RUN_FOR_EVAL
+	    #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	      fmt::print("Y, ");//crossover detected
             #endif
 	  }
-	  #ifdef FULL_RUN_FOR_EVAL
+	  #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	    else { fmt::print("N, "); } //crossover Not detected
           #endif
         } 
-	#ifdef FULL_RUN_FOR_EVAL
+	#ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	  else { fmt::print("N, "); } //crossover Not detected
         #endif
       }
-      #ifdef FULL_RUN_FOR_EVAL
+      #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
         else { fmt::print("N, "); } //crossover Not detected
       #endif
 
-      #ifdef FULL_RUN_FOR_EVAL
+      #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
         fmt::print("{}, ",loop_detected);
       #endif
       
@@ -3196,7 +3196,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         #ifdef BASIC_DBG
         fmt::print("\t\t\t\t -- Found better match\n");
         #endif
-	#ifdef FULL_RUN_FOR_EVAL
+	#ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	fmt::print("OverwritingPrevious \n");
         #endif
       } else if (match_curr == match_prev) {
@@ -3204,14 +3204,14 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         #ifdef BASIC_DBG
         fmt::print("\t\t\t\t -- Found similar match\n");
         #endif
-	#ifdef FULL_RUN_FOR_EVAL
+	#ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
 	fmt::print("AddingToPrevious \n");
         #endif
       } 
       #ifdef BASIC_DBG 
       else { fmt::print("\t\t\t\t -- It is worse match?\n");  }
       #endif
-      #ifdef FULL_RUN_FOR_EVAL
+      #ifdef FULL_RUN_FOR_EVAL && BASIC_DBG
       else{fmt::print("Worse \n");}
       #endif
     }
