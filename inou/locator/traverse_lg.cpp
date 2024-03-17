@@ -1908,11 +1908,6 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
   // });
   //orig_lg->dump(true);
   for (const auto& original_node : orig_lg->fast(true)) {
-    //#ifndef FULL_RUN_FOR_EVAL
-    if (!original_node.has_loc()) {
-      continue;  // this way non loc nodes will not get matched in default matching
-    }
-    //#endif
     if (original_node.is_type_sub() && original_node.get_type_sub_node().get_name() == "__fir_const") {
       continue;
     }
