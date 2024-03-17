@@ -88,7 +88,7 @@ def log_accuracy_data(log_file_path):
                 accuracy_index[3] += (1 * len(val_list)) 
     # print(log_acc_dict)
     accuracy_index[2] = count - (accuracy_index[0]+accuracy_index[1]+accuracy_index[3])
-    print(count)
+    #print(count)
     # print(len(log_acc_dict.keys()))
     print("'Full Match', 'Alias Match', 'Partial Match', 'No Match'")
     print(accuracy_index)
