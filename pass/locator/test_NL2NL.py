@@ -58,55 +58,72 @@ def createGraphJsonDict():
 
                 if eachCell['name'] not in cell_dict:
                     cell_dict[eachCell['name']] = set()
-                cell_dict[eachCell['name']].add(eachPin['name'])     
+                cell_dict[eachCell['name']].add(eachPin['name'])
+
+def read_by_delimiter(file_path, delimiter=';'):
+    with open(file_path, 'r') as file:
+        buffer = ''
+        while True:
+            chunk = file.read(1024)  # Read in chunks of 1KB
+            if not chunk:  # End of file
+                if buffer:
+                    yield buffer
+                break
+            buffer += chunk
+            while delimiter in buffer:
+                position = buffer.find(delimiter)
+                yield buffer[:position]
+                buffer = buffer[position + len(delimiter):]
+
     
 def getDPins(fname, designName):
-    f = open(fname,'r')
     allDPins = set()
     isComboCell = False
     currCell = ''
     graph_io = set()
-    
+
     module_string = "module "
-    if designName == "RocketTile_yosys_DT2":
+    if designName == "RocketTile_yosys_DT2" or designName == "RocketTile_netlist_wired":
         module_string = "module RocketTile"
+    if "netlist" in designName:
+        module_string = "module "+designName.split('_')[0]
 
     isFlopCell = False
-    for data in f.readlines():
-
+    top_module_found = False
+    for data in read_by_delimiter(fname, delimiter=";"):
+        #start reading only if we are in top module
+        isComboCell = False
+        isFlopCell = False
+        if top_module_found == False:
+            if module_string in data:
+                top_module_found=True
+            else:
+                continue
+        #lines in top module should be processed:
         if module_string in data and "(" in data:
             all_io = data.split("(")[1].split(")")[0].strip()
             all_io_list = all_io.split(",")
 
             for each_io in all_io_list:
                 graph_io.add(each_io.strip()) 
-
-        # elif 'sky130' in data and 'dfxtp' not in data: #do not change the flops (dummy_withoutFlopsChanged)
-        elif 'sky130' in data: #change the flops as well (dummy_withFlopsChanged)
+        elif ('sky130' in data and 'dfxtp' not in data) or ('VT ' in data and 'DFF' not in data): #do not change the flops (dummy_withoutFlopsChanged)
+        #elif ('sky130' in data) or ('VT ' in data): #change the flops as well (dummy_withFlopsChanged)
+            
             isComboCell = True
-            if "dfxtp" in data:
+            if ("dfxtp" in data) or ("DFF" in data):
                 isFlopCell = True
             currCell = data.strip().split(" ")[0]
-            continue
-        elif ';' in data:
-            isComboCell = False
-            isFlopCell = False
-            continue
         if isComboCell:
-            pin = data.split("(")[0]
+            pin = data.split(",")[-1]
+            pin = pin.split("(")[0].strip()
             pin = pin.replace(".","").strip()
-
             if pin in cell_dict[currCell]:
 
-                # print(currCell)
-                # print(pin)
-                dpin = data.split("(")[1].split(")")[0].strip()
+                dpin = data.split("(")[-1].split(")")[0].strip()
                 if "[" in dpin:
                     dpin = dpin.split("[")[0]
                 if "\\" in dpin:
                     dpin = dpin.replace("\\","")
-                # print(dpin)
-                # print(graph_io)
                 if dpin not in graph_io:
                     allDPins.add(dpin.strip())
                 if isFlopCell:
@@ -125,7 +142,7 @@ createGraphJsonDict()
 
 designName = sys.argv[3]
 dpins = getDPins(newNetListName, designName)
-# print(dpins)
+#print(dpins)
 ceilVal = math.ceil((int(sys.argv[2])/100) * len(dpins)) #sys.argv[2] % dpins will be changed
 randomDPins = random.sample(dpins,int(ceilVal))
 flop_select_count = 0
@@ -146,3 +163,4 @@ except:
     print(0)
 # print(cell_dict_new)
 # print(nlistData)
+
