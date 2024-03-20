@@ -104,16 +104,16 @@ void Traverse_lg::travers(Eprp_var& var) {
   fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: remove_lib_loc_from_orig_lg(orig_lg)\n", elapsed_seconds.count());
 #endif
 
-  p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)
+  p.do_travers(orig_lg, synth_lg, true);  // original LG (pre-syn LG)
   fmt::print("\n do_travers - orig done.\n");
 #ifdef BASIC_DBG
-  fmt::print("4. p.do_travers(orig_lg, map_post_synth, true);  // original LG (pre-syn LG)\n");
+  fmt::print("4. p.do_travers(orig_lg, true);  // original LG (pre-syn LG)\n");
   p.print_everything();
 #endif
-  p.do_travers(synth_lg, map_post_synth, false);  // synth LG
+  p.do_travers(orig_lg, synth_lg,  false);  // synth LG
   fmt::print("\n do_travers - synth done.\n");
 #ifdef BASIC_DBG
-  fmt::print("\n5. p.do_travers(synth_lg, map_post_synth, false);  // synth LG\n");
+  fmt::print("\n5. p.do_travers(synth_lg, false);  // synth LG\n");
   p.print_everything();
 #endif
 
@@ -216,17 +216,11 @@ void Traverse_lg::debug_function(Lgraph* lg) {
 
 // FOR SET:
 // DE_DUP
-void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
-                             bool do_matching) {  // FIXME: change do_matching to is_orig_lg
-
-  bool is_orig_lg        = do_matching;  // FIXME: remove this once do_matching changed to is_orig_lg
-  bool req_flops_matched = false;
-  bool dealing_flop      = false;
-  bool dealing_comb      = false;
+void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg) {  
 
   if (!is_orig_lg) {
     auto start = std::chrono::system_clock::now();
-    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);  // has in-place resolution as well.
+    make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);  // has in-place resolution as well.
     fmt::print("\n make_io_maps - synth done.\n");
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
@@ -283,8 +277,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     while (change_done && !crit_node_set.empty() && !flop_set_synth.empty()) {  // for flop only as matching flop first
       start = std::chrono::system_clock::now();
-      make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-      make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+      make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth); //if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
       resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
       end = std::chrono::system_clock::now();
@@ -310,8 +304,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
     if (!flop_set_synth.empty()) {
       if(change_done){
-        make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-        make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+        make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+        make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       }
       start = std::chrono::system_clock::now();
       weighted_match_LoopLastOnly();  // crit_entries_only=f, loopLast_only=t
@@ -336,8 +330,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     // all flops matched and still some crit cells left to map!
     // move to combinational matching
     start = std::chrono::system_clock::now();
-    make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+    make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+    make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
     /*resolution_of_synth_map_of_sets(inp_map_of_sets_synth);//if make_io_maps takes way less time, why not replace resolution_of_synth_map_of_sets with make_io_maps!
     resolution_of_synth_map_of_sets(out_map_of_sets_synth);*/
     end = std::chrono::system_clock::now();
@@ -376,8 +370,8 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
     #endif
 
     if(change_done) {
-      make_io_maps(lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
-      make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
+      make_io_maps(synth_lg, inp_map_of_sets_synth, out_map_of_sets_synth, is_orig_lg);
+      make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, true);
       for (const auto& origpin_cf: flop_set_orig) {
         inp_map_of_sets_orig.erase(origpin_cf);
         out_map_of_sets_orig.erase(origpin_cf);
@@ -445,7 +439,7 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   if (is_orig_lg) {
     auto start = std::chrono::system_clock::now();
-    make_io_maps(lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);	//remove_resolved_from_orig_MoS();//so that the nodes matched in default matching do not go for matching again!
+    make_io_maps(orig_lg, inp_map_of_sets_orig, out_map_of_sets_orig, is_orig_lg);	//remove_resolved_from_orig_MoS();//so that the nodes matched in default matching do not go for matching again!
     fmt::print("\n make_io_maps - orig done.\n");
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
@@ -459,737 +453,11 @@ void Traverse_lg::do_travers(Lgraph* lg, Traverse_lg::setMap_pairKey& nodeIOmap,
 
   I(!inp_map_of_sets_orig.empty() && !out_map_of_sets_orig.empty(),
     "\nCHECK: why is either inp_map_of_sets_orig or out_map_of_sets_orig empty??\n");
-  // if (do_matching){
+  // if (is_orig_lg){
   //   exact_matching();
   // }
 
   I(false, "\nintended exit!\n");
-  //lg->dump(true);  // FIXME: remove this
-  for (const auto& node : lg->fast(true)) {
-    dealing_flop = false;
-    dealing_comb = false;
-    // absl::btree_set<std::string> in_set;
-    // absl::btree_set<std::string> out_set;
-    std::set<std::string> in_set;
-    std::set<std::string> out_set;
-    std::set<std::string> io_set;
-    std::set<std::string> in_comb_set;
-    std::set<std::string> out_comb_set;
-    std::set<std::string> io_comb_set;
-    // fmt::print("{}\n", node.debug_name());
-
-    /* For post syn LG -> if the node is flop then calc all IOs in in_set and out_set and keep in map*/
-    if (node.is_type_flop()
-        || (node.is_type_sub() ? ((std::string(node.get_type_sub_node().get_name())).find("_df") != std::string::npos) : false)
-        || node.is_type_loop_last()) {
-      dealing_flop = true;
-      for (const auto& ine : node.inp_edges()) {
-        get_input_node(ine.driver, in_set, io_set);
-      }
-      for (const auto& oute : node.out_edges()) {
-        get_output_node(oute.sink, out_set, io_set);
-      }
-
-      /*add to crit_flop_list if !do_matching and flop node is colored*/
-      if (!do_matching && node.has_color()) {
-        auto colr = node.get_color();
-        crit_flop_list.emplace_back(node.get_compact_flat());
-        crit_flop_map[node.get_compact_flat()] = colr;
-        fmt::print("Flop color:\n");
-        fmt::print("\t{}\n", colr);
-      }
-
-    } else { /*else if node is in crit_cell_list then keep its IO in cellIOMap_synth*/
-      dealing_comb = true;
-      /*add to crit_cell_list if !do_matching and cell node is colored*/
-      if (!do_matching && node.has_color()) {
-        auto node_val = node.get_compact_flat();
-        auto colr     = node.get_color();
-        crit_cell_list.emplace_back(node_val);
-        crit_cell_map[node.get_compact_flat()] = colr;
-        fmt::print("combo color:\n");
-        fmt::print("\t{}\n", colr);
-
-        // calc node's IO
-        for (const auto& ine : node.inp_edges()) {
-          get_input_node(ine.driver, in_comb_set, io_comb_set, true);
-        }
-        for (const auto& oute : node.out_edges()) {
-          get_output_node(oute.sink, out_comb_set, io_comb_set, true);
-        }
-
-        // insert this node IO in the map
-      }
-    }
-
-    if (in_set.empty() && out_set.empty() && in_comb_set.empty() && out_comb_set.empty()) {  // no i/ps as well as no o/ps
-      continue;  // do not keep such nodes in nodeIOmap or cellIOMap_synth
-    }
-
-    // print the set formed
-    fmt::print("INPUTS:");
-    if (dealing_flop) {
-      for (const auto& i : in_set) {
-        fmt::print("\t{}", i);
-      }
-    } else {
-      for (const auto& i : in_comb_set) {
-        fmt::print("\t{}", i);
-      }
-    }
-    fmt::print("\nOUTPUTS:");
-    if (dealing_flop) {
-      for (const auto& i : out_set) {
-        fmt::print("\t{}", i);
-      }
-    } else {
-      for (const auto& i : out_comb_set) {
-        fmt::print("\t{}", i);
-      }
-    }
-    fmt::print("\nIOs:");
-    if (dealing_flop) {
-      for (const auto& i : io_set) {
-        fmt::print("\t{}", i);
-      }
-    } else {
-      for (const auto& i : io_comb_set) {
-        fmt::print("\t{}", i);
-      }
-    }
-    fmt::print("\n");
-
-    if (!do_matching) {
-      // insert in map
-      const auto&                     nodeid = node.get_compact_flat();
-      std::vector<Node::Compact_flat> tmpVec;
-      if (dealing_flop) { /*dealing with flops*/
-        if (nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-          tmpVec.assign((nodeIOmap[std::make_pair(in_set, out_set)]).begin(), (nodeIOmap[std::make_pair(in_set, out_set)]).end());
-          tmpVec.emplace_back(nodeid);
-        } else {
-          tmpVec.emplace_back(nodeid);
-        }
-        nodeIOmap[std::make_pair(in_set, out_set)] = tmpVec;  // FIXME: make hash of set and change datatype accordingly
-      } else if (dealing_comb) {                              /*dealing with combinational*/
-        if (cellIOMap_synth.find(std::make_pair(in_comb_set, out_comb_set)) != cellIOMap_synth.end()) {
-          tmpVec.assign((cellIOMap_synth[std::make_pair(in_comb_set, out_comb_set)]).begin(),
-                        (cellIOMap_synth[std::make_pair(in_comb_set, out_comb_set)]).end());
-          tmpVec.emplace_back(nodeid);
-        } else {
-          tmpVec.emplace_back(nodeid);
-        }
-        cellIOMap_synth[std::make_pair(in_comb_set, out_comb_set)]
-            = tmpVec;  // FIXME: make hash of set and change datatype accordingly
-      } else {
-        I(false, "not possible to enter this part! node is neither combo nor seq!? Debug! Check!");
-      }
-
-      // the IOtoNodeMap_synth making:
-      if (dealing_flop && !io_set.empty()) {
-        std::vector<Node::Compact_flat> tempnodeVec;
-        setMap_pairKey                  internalMap;
-        if (IOtoNodeMap_synth.find(io_set) != IOtoNodeMap_synth.end()) {
-          // founf IO, insert in internal map against this location.
-          internalMap = IOtoNodeMap_synth[io_set];
-          if (internalMap.find(std::make_pair(in_set, out_set)) != internalMap.end()) {
-            tempnodeVec.assign((internalMap[std::make_pair(in_set, out_set)]).begin(),
-                               (internalMap[std::make_pair(in_set, out_set)]).end());
-            tempnodeVec.emplace_back(nodeid);
-          } else {
-            tempnodeVec.emplace_back(nodeid);
-          }
-          internalMap[std::make_pair(in_set, out_set)] = tempnodeVec;
-
-        } else {
-          // make a new entry in the internal map
-          tempnodeVec.emplace_back(nodeid);
-          internalMap[std::make_pair(in_set, out_set)] = tempnodeVec;
-        }
-        IOtoNodeMap_synth[io_set] = internalMap;  // FIXME: make hash of set and change datatype accordingly
-      }
-    }
-
-    if (do_matching && !req_flops_matched) {
-      /*if orig graph IO-set pair is as-is found in the synth nodeIOmap, then it is direct match!*/
-      if (nodeIOmap.find(std::make_pair(in_set, out_set)) != nodeIOmap.end()) {
-        // put this in matching_map.
-        matched_map[node.get_compact_flat()]
-            = nodeIOmap[std::make_pair(in_set, out_set)];  // FIXME:put this in matching_map. no need of matched_map then
-
-        /*matched_map -> matching_map*/
-        const auto synNodes = nodeIOmap[std::make_pair(in_set, out_set)];
-        // std::vector<Node::Compact_flat> tmpVec;
-        // if(matching_map.find(synNodes) != matching_map.end()) {
-        //   tmpVec.assign((matching_map[synNodes]).begin() , (matching_map[synNodes]).end() );
-        //   tmpVec.emplace_back(node.get_compact_flat());
-        // } else {
-        //   tmpVec.emplace_back(node.get_compact_flat());
-        // }
-        for (const auto& synNode : synNodes) {
-          (matching_map[synNode]).emplace_back(node.get_compact_flat());  // matching_map[synNode]=tmpVec;
-
-          /*if synNode in crit_flop_list, remove from crit_flop_list;*/
-          for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-            if (*cfl_it == synNode) {
-              crit_flop_list.erase(cfl_it);
-              cfl_it--;
-            }
-          }
-          /*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
-          if (crit_flop_list.empty()) {
-            req_flops_matched = true;
-          }
-          if (crit_flop_map.find(synNode) != crit_flop_map.end()) {
-            // if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
-            for (const auto& o_n : matching_map[synNode]) {
-              matched_color_map[o_n] = crit_flop_map[synNode];
-            }
-          }
-        }
-
-      } else {
-        unmatched_map[node.get_compact_flat()] = std::make_pair(
-            in_set,
-            out_set);  // FIXME: (no more needed; kept for debug purposes) (old fixme msg: this won't be needed once matched map is
-                       // removed and entries put in matching_map are erased from the main maps!
-      }
-      /*insert in full_orig_map (against same set of IOs)*/
-      const auto&                     nodeid = node.get_compact_flat();
-      std::vector<Node::Compact_flat> tmpVec;
-      if (full_orig_map.find(std::make_pair(in_set, out_set)) != full_orig_map.end()) {
-        tmpVec.assign((full_orig_map[std::make_pair(in_set, out_set)]).begin(),
-                      (full_orig_map[std::make_pair(in_set, out_set)]).end());
-        tmpVec.emplace_back(nodeid);
-      } else {
-        tmpVec.emplace_back(nodeid);
-      }
-      full_orig_map[std::make_pair(in_set, out_set)] = tmpVec;  // FIXME: make hash of set and change datatype accordingly
-      /*IOtoNodeMap_orig insertion*/
-      std::vector<Node::Compact_flat> tempVec;
-      if (IOtoNodeMap_orig.find(io_set) != IOtoNodeMap_orig.end()) {
-        tempVec.assign((IOtoNodeMap_orig[io_set]).begin(), (IOtoNodeMap_orig[io_set]).end());
-        tempVec.emplace_back(nodeid);
-      } else {
-        tempVec.emplace_back(nodeid);
-      }
-      if (!io_set.empty()) {
-        IOtoNodeMap_orig[io_set] = tempVec;  // FIXME: make hash of set and change datatype accordingly
-      }
-    }  // end of if(do_matching)
-
-  }  // enf of for lg-> traversal
-  if (!do_matching) {
-    /*for the sequential part:*/
-    I(!nodeIOmap.empty(), "\n\nDEBUG?? \tNO FLOP IN THE SYNTHESISED DESIGN\n\n");
-    // print the map
-    fmt::print("\n\nMAP FORMED IS:\n");
-    for (const auto& [ioPair, n_list] : nodeIOmap) {
-      for (const auto& ip : ioPair.first) {
-        fmt::print("{}\t", ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op : ioPair.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("::: \t");
-      for (const auto& n : n_list) {
-        fmt::print("n{}\t", n.get_nid());
-      }
-      fmt::print("\n\n");
-    }
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nIOtoNodeMap_synth MAP FORMED IS:\n");
-    print_IOtoNodeMap_synth(IOtoNodeMap_synth);
-    fmt::print("\n\n\n");
-    /*for the combo part:*/
-    // print the cellIOMap_synth
-    fmt::print("\n\nthe cellIOMap_synth FORMED IS:\n");
-    print_MapOf_SetPairAndVec(cellIOMap_synth);
-  } else if (do_matching) {  // do_matching
-    fmt::print("\n\nThe IOtoNodeMap_orig map is:\n");
-    for (const auto& [iov, fn] : IOtoNodeMap_orig) {
-      for (const auto& ip : iov) {
-        fmt::print("{}\t", ip);
-      }
-      fmt::print("::: \t");
-      for (const auto& op : fn) {
-        fmt::print("n{}\t", op.get_nid());
-      }
-      fmt::print("\n\n");
-    }
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nThe complete orig map (full_orig_map) is:\n");
-    print_MapOf_SetPairAndVec(full_orig_map);
-    fmt::print("\n\n===============================\n");
-
-    fmt::print("\n\n The unmatched flops are:\n");
-    for (const auto& [fn, iov] : unmatched_map) {
-      fmt::print("n{}\n", fn.get_nid());
-      for (const auto& ip : iov.first) {
-        fmt::print("{}\t", ip);
-      }
-      fmt::print("||| \t");
-      for (const auto& op : iov.second) {
-        fmt::print("{}\t", op);
-      }
-      fmt::print("\n\n");
-    }
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nmatched_map (matching done is):\n");
-    for (const auto& [k, n_list] : matched_map) {
-      fmt::print("n{}\t", k.get_nid());
-      fmt::print("::: \t");
-      for (const auto& n : n_list) {
-        fmt::print("n{}\t", n.get_nid());
-      }
-      fmt::print("\n");
-    }
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nmatching_map (@matching done before pass_1 is):\n");
-    for (const auto& [k, n_list] : matching_map) {
-      fmt::print("n{}\t", k.get_nid());
-      fmt::print("::: \t");
-      for (const auto& n : n_list) {
-        fmt::print("n{}\t", n.get_nid());
-      }
-      fmt::print("\n");
-    }
-    fmt::print("\n\n===============================\n");
-  }
-
-  if (do_matching && !req_flops_matched) {
-    /*doing the actual matching here*/  //(pass_1)
-
-    // for(const auto& [iov,fn]: IOtoNodeMap_orig)
-    for (absl::node_hash_map<std::set<std::string>, std::vector<Node::Compact_flat>>::iterator it = IOtoNodeMap_orig.begin();
-         it != IOtoNodeMap_orig.end();) {
-      if (req_flops_matched) {
-        break;
-      }
-      auto iov = it->first;
-      auto fn  = it->second;
-      if (fn.size() != 1) {
-        ++it;
-        continue;
-      }
-      auto orig_node = fn.front();
-      // go to the best match in IOtoNodeMap_synth
-      if (IOtoNodeMap_synth.find(iov) != IOtoNodeMap_synth.end()) {
-        for (const auto& [k, synNodes] : IOtoNodeMap_synth[iov]) {
-          for (const auto& synNode : synNodes) {
-            // std::vector<Node::Compact_flat> vc = synNode;
-            /*inserting in matching_map*/
-            // const auto& nodeid = node.get_compact_flat();
-            std::vector<Node::Compact_flat> tmpVec;
-            if (matching_map.find(synNode) != matching_map.end()) {
-              tmpVec.assign((matching_map[synNode]).begin(), (matching_map[synNode]).end());
-              tmpVec.emplace_back(orig_node);
-            } else {
-              tmpVec.emplace_back(orig_node);
-            }
-            matching_map[synNode] = tmpVec;
-            /*if synNode in crit_flop_list, remove from crit_flop_list;*/
-            for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-              if (*cfl_it == synNode) {
-                crit_flop_list.erase(cfl_it);
-                cfl_it--;
-              }
-            }
-            /*if synNode in crit_flop_map, remove the entry from crit_flop_map*/
-            if (crit_flop_list.empty()) {
-              req_flops_matched = true;
-            }
-            if (crit_flop_map.find(synNode) != crit_flop_map.end()) {
-              // if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
-              for (const auto& o_n : matching_map[synNode]) {
-                // need o_n_node to be of type Node (not compact/compact_flat)
-                // Node o_n_node(lg,o_n);//points to the node in orig LG
-                // o_n_node.set_color(crit_flop_map[synNode]);//FIXME: o_n is compact_flat here. we need it of Node type?
-                matched_color_map[o_n] = crit_flop_map[synNode];
-              }
-            }
-          }
-        }
-        IOtoNodeMap_orig.erase(it++);
-        IOtoNodeMap_synth.erase(iov);
-        // req. for pass_3 //erase the node from full_orig_map  - value has nodes.
-        // req. for pass_3 for (auto it_o = full_orig_map.begin(); it_o!= full_orig_map.end();) {
-        // req. for pass_3   if (std::find( (it_o->second).begin(), (it_o->second).end(), orig_node) != (it_o->second).end() ) {
-        // req. for pass_3     full_orig_map.erase(it_o++);
-        // req. for pass_3   } else ++it_o;
-        // req. for pass_3 }
-      } else {
-        ++it;
-      }
-    }
-
-    I(!matching_map.empty(), "There should be some node in matching_map to further go to pass_2");
-
-    /*entry on the graph IO matched! moving to pass_2 in matching*/
-    bool change_done = true;
-    while (change_done) {
-      change_done = false;
-      /*First: resolve the map*/
-      for (auto& [k, v_map] : IOtoNodeMap_synth) {
-        // for (auto& [iov,n]:v_map)
-        for (auto it = v_map.begin(); it != v_map.end();) {
-          auto& iv = (it->first).first;   // this is i/p set for [n]
-          auto& ov = (it->first).second;  // this is o/p set for [n]
-          // auto& n = it->second; //FIXME: is this correct coding sthyle? (auto& var_name = something;) ?
-
-          /*resolve here: if iv contains any entry from matching_map, resolve and make ivResolved. ||ly for ov*/
-          std::set<std::string> randSet1;
-          for (auto set_it = iv.begin(); set_it != iv.end(); set_it++) {
-            if ((*set_it).find("flop:") != std::string::npos) {        // if iv has flop
-              auto                     SflopID = (*set_it).substr(5);  // synth flop name captured for comparison
-              std::vector<std::string> OflopID = get_map_val(
-                  matching_map,
-                  SflopID);  // FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-              I(OflopID.size() < 2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-              if (!(OflopID).empty()) {
-                std::string i_r = "flop:" + OflopID[0];
-                randSet1.emplace(i_r);  // resolved entry in randSet1
-                // change_done=true;//SG:test (for a bug)
-                // iv.erase(*set_it);
-              } else {
-                randSet1.emplace(*set_it);
-              }
-            } else {  // iv value does NOT have flop
-              randSet1.emplace(*set_it);
-            }
-          } /*now we have iv resolved in randSet1!*/
-          std::set<std::string> randSet2;
-          for (auto set_it = ov.begin(); set_it != ov.end(); set_it++) {
-            if ((*set_it).find("flop:") != std::string::npos) {        // if ov has flop
-              auto                     SflopID = (*set_it).substr(5);  // synth flop name captured for comparison
-              std::vector<std::string> OflopID = get_map_val(
-                  matching_map,
-                  SflopID);  // FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-              I(OflopID.size() < 2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-              if (!(OflopID).empty()) {
-                std::string o_r = "flop:" + OflopID[0];
-                randSet2.emplace(o_r);  // resolved entry in randSet2
-                // change_done=true;//SG:test (for a bug)
-                // ov.erase(*set_it);
-              } else {
-                randSet2.emplace(*set_it);
-              }
-            } else {  // ov value does NOT have flop
-              randSet2.emplace(*set_it);
-            }
-          } /*now we have ov resolved in randSet2!*/
-          /*make pair<randSet1,randSet2> and replace <iv,ov> with it:*/
-          auto extracted_entry  = v_map.extract(it++);
-          extracted_entry.key() = std::make_pair(randSet1, randSet2);
-          v_map.insert(std::move(extracted_entry));
-        }  // end of for(auto it=v_map.begin(); it!=v_map.end();
-      }    // end of for ( auto & [k,v_map]: IOtoNodeMap_synth) //map resolved
-
-      /*printing the resolved map*/
-      fmt::print("\n\nIOtoNodeMap_synth MAP RESOLVED IS:\n");
-      print_IOtoNodeMap_synth(IOtoNodeMap_synth);
-
-      /*Second: do the matching part post resolution*/
-      for (auto& [k, v_map] : IOtoNodeMap_synth) {
-        if (req_flops_matched) {
-          break;
-        }
-        // for (auto& [iov,n]:v_map)
-        for (auto it = v_map.begin(); it != v_map.end();) {
-          if (req_flops_matched) {
-            break;
-          }
-          auto& iv = (it->first).first;   // this is i/p set for [n]
-          auto& ov = (it->first).second;  // this is o/p set for [n]
-          auto& n  = it->second;
-          /*start finding and matching in the resolved map!!:*/
-          bool foundFull    = false;
-          bool foundPartial = false;
-          // for (auto [pairIO, nods]:full_orig_map)
-          for (auto ito = full_orig_map.begin(); ito != full_orig_map.end(); ito++) {
-            if (req_flops_matched) {
-              break;
-            }
-            auto pairIO = ito->first;
-            auto nods   = ito->second;
-            if (iv == pairIO.first && ov == pairIO.second) {
-              foundFull = true;
-              // std::for_each(n.begin(), n.end(), [](const auto& n1) {matching_map[n1]=nods;});
-              for (const auto& n1 : n) {
-                matching_map[n1]
-                    = nods;  // FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-                /*if synNode in crit_flop_list, remove from crit_flop_list;*/
-                for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-                  if (*cfl_it == n1) {
-                    crit_flop_list.erase(cfl_it);
-                    cfl_it--;
-                  }
-                }
-                if (crit_flop_list.empty()) {
-                  req_flops_matched = true;
-                }
-                if (crit_flop_map.find(n1) != crit_flop_map.end()) {
-                  // if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
-                  for (const auto& o_n : matching_map[n1]) {
-                    // o_n.set_color(crit_flop_map[n1]);//FIXME: o_n is compact_flat here. we need it of Node type?
-                    matched_color_map[o_n] = crit_flop_map[n1];
-                  }
-                }
-              }
-              // full_orig_map.erase(ito++);
-              continue;
-            } else if (iv == pairIO.first || ov == pairIO.second) {
-              foundPartial = true;
-              for (const auto& n1 : n) {
-                matching_map[n1]
-                    = nods;  // FIXME: see if the entry is already there in matching_map and then append to the pre-existing vector
-                /*if synNode in crit_flop_list, remove from crit_flop_list;*/
-                for (auto cfl_it = crit_flop_list.begin(); cfl_it != crit_flop_list.end(); cfl_it++) {
-                  if (*cfl_it == n1) {
-                    crit_flop_list.erase(cfl_it);
-                    cfl_it--;
-                  }
-                }
-                if (crit_flop_list.empty()) {
-                  req_flops_matched = true;
-                }
-                if (crit_flop_map.find(n1) != crit_flop_map.end()) {
-                  // if synnode in crit_flop_map, color corresponding orig nodes with this synnode's color
-                  for (const auto& o_n : matching_map[n1]) {
-                    // o_n.set_color(crit_flop_map[n1]);//FIXME: o_n is compact_flat here. we need it of Node type?
-                    matched_color_map[o_n] = crit_flop_map[n1];
-                  }
-                }
-              }
-              // full_orig_map.erase(ito++);
-              continue;
-            }  // else {++ito;}
-          }
-          if (foundFull || foundPartial) {
-            v_map.erase(it++);
-            change_done = true;  // FIXME: should change_done be evaluated here only?
-          } else {
-            ++it;
-          }
-
-        }  // end of for(auto it=v_map.begin(); it!=v_map.end();
-      }    // end of for ( auto & [k,v_map]: IOtoNodeMap_synth)
-
-      /*if no change_done, i.e. nothing happened in pass_2
-       * try pass_3 and then see if some change possible? */
-      if (!change_done && !crit_flop_list.empty()) {  // start pass_3
-        for (auto& [k, v_map] : IOtoNodeMap_synth) {
-          for (auto it = v_map.begin(); it != v_map.end();) {
-            auto& map_entry = *it;
-            auto  synth_set = getUnion(map_entry.first.first, map_entry.first.second);
-            auto& synth_val = map_entry.second;
-            change_done     = set_theory_match(synth_set, synth_val, full_orig_map);
-            if (crit_flop_list.empty()) {
-              req_flops_matched = true;
-            }
-            if (change_done) {
-              v_map.erase(it++);
-            } else {
-              ++it;
-            }
-          }
-        }
-      }  // end of if(!change_done && !crit_flop_list.empty())
-
-    }  // end of while (change_done)
-
-    /*Printing "matching map"*/
-    fmt::print("\n THE MATCHING_MAP is:\n");
-    for (const auto& [k, v] : matching_map) {
-      fmt::print("\nn{}\t:::\t", k.get_nid());
-      for (const auto& v1 : v) {
-        fmt::print("n{}\t", v1.get_nid());
-      }
-    }
-    fmt::print("\n");
-
-    /*printing changed map*/
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nThe complete orig map (full_orig_map) ALTERED is:\n");
-    print_MapOf_SetPairAndVec(full_orig_map);
-    fmt::print("\n\n===============================\n");
-    fmt::print("\n\nThe IOtoNodeMap_orig map ALTERED is:\n");
-    for (const auto& [iov, fn] : IOtoNodeMap_orig) {
-      for (const auto& ip : iov) {
-        fmt::print("{}\t", ip);
-      }
-      fmt::print("::: \t");
-      for (const auto& op : fn) {
-        fmt::print("n{}\t", op.get_nid());
-      }
-      fmt::print("\n\n");
-    }
-    fmt::print("\n\n===============================\n");
-
-    fmt::print("\n\nIOtoNodeMap_synth MAP ALTERED IS:\n");
-    print_IOtoNodeMap_synth(IOtoNodeMap_synth);
-
-  }  // if(do_matching) closes here
-
-  // FIXME: put some assertion to check if req_flops_matched is still false (when the function completes).
-  // coz if it still false at completion, then the combo match will not enter even at the end!
-  // Atleast flag it!!
-  if (do_matching) {
-    // if(!req_flops_matched) { fmt::print("\nMESSAGE: crit_flop_list is not empty. Should have been empty by now.");}
-    fmt::print("\n crit_flop_list at this point: \n");
-    for (auto& n : crit_flop_list) {
-      fmt::print("n{}\t", n.get_nid());
-    }
-    I(req_flops_matched, "\n crit_flop_list is not empty. Should have been empty by now.\n");
-  }
-  bool cellIOMap_synth_resolved = false;
-  if (do_matching && !cellIOMap_synth.empty()) {
-    /*resolve cellIOMap_synth with help of matching_map*/
-    std::set<std::pair<std::set<std::string>, std::set<std::string>>> noOverwrite_in_cellIOMapSynth;
-    for (auto it = cellIOMap_synth.begin(); it != cellIOMap_synth.end();) {
-      auto& iv = (it->first).first;   // this is i/p set for [n]
-      auto& ov = (it->first).second;  // this is o/p set for [n]
-      /*resolve here: if iv contains any entry from matching_map, resolve and make ivResolved. ||ly for ov*/
-      std::set<std::string> randSet1;
-      for (auto set_it = iv.begin(); set_it != iv.end(); set_it++) {
-        if ((*set_it).find("flop:") != std::string::npos) {        // if iv has flop
-          auto                     SflopID = (*set_it).substr(5);  // synth flop name captured for comparison
-          std::vector<std::string> OflopID = get_map_val(
-              matching_map,
-              SflopID);  // FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-          I(OflopID.size() < 2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-          if (!(OflopID).empty()) {
-            std::string i_r = "flop:" + OflopID[0];
-            randSet1.emplace(i_r);  // resolved entry in randSet1
-          } else {
-            randSet1.emplace(*set_it);
-          }
-        } else {  // iv value does NOT have flop
-          randSet1.emplace(*set_it);
-        }
-      } /*now we have iv resolved in randSet1!*/
-      std::set<std::string> randSet2;
-      for (auto set_it = ov.begin(); set_it != ov.end(); set_it++) {
-        if ((*set_it).find("flop:") != std::string::npos) {        // if ov has flop
-          auto                     SflopID = (*set_it).substr(5);  // synth flop name captured for comparison
-          std::vector<std::string> OflopID = get_map_val(
-              matching_map,
-              SflopID);  // FIXME: pass by reference??//get_map_val will give the orig_flop_ID corresponding toSflopID.
-          I(OflopID.size() < 2, "\n\n1 synth flop matched with many orig flops.... look into it... how to process it.\n\n");
-          if (!(OflopID).empty()) {
-            std::string o_r = "flop:" + OflopID[0];
-            randSet2.emplace(o_r);  // resolved entry in randSet2
-            // ov.erase(*set_it);
-          } else {
-            randSet2.emplace(*set_it);
-          }
-        } else {  // ov value does NOT have flop
-          randSet2.emplace(*set_it);
-        }
-      } /*now we have ov resolved in randSet2!*/
-      /*make pair<randSet1,randSet2> and replace <iv,ov> with it:*/
-      auto extracted_entry  = cellIOMap_synth.extract(it++);
-      extracted_entry.key() = std::make_pair(randSet1, randSet2);
-      /*if key already in noOverwrite-Set, then take extracted_entry.mapped() and append to map.find(extracted_entry.key()).
-       * else just store this key in noOverwrite_in_cellIOMapSynth.*/
-      if (noOverwrite_in_cellIOMapSynth.find(extracted_entry.key()) != noOverwrite_in_cellIOMapSynth.end()) {
-        for (const auto& m : cellIOMap_synth[extracted_entry.key()]) {
-          (extracted_entry.mapped()).emplace_back(m);
-        }
-        cellIOMap_synth.erase(extracted_entry.key());  // won't overwrite the same key value!
-      } else {
-        noOverwrite_in_cellIOMapSynth.insert(extracted_entry.key());
-      }
-      /*... and insertion to cellIOMap_synth remains same in both cases.*/
-      cellIOMap_synth.insert(std::move(extracted_entry));
-    }  // end of for(auto it=cellIOMap_synth.begin(); it!=cellIOMap_synth.end();
-
-    // print the cellIOMap_synth
-    fmt::print("\n\nthe cellIOMap_synth RESOLVED IS:\n");
-    print_MapOf_SetPairAndVec(cellIOMap_synth);
-    cellIOMap_synth_resolved = true;
-    // print crit_cell_list
-    fmt::print("\n crit_cell_list at this point: \n");
-    for (auto& n : crit_cell_list) {
-      fmt::print("n{}\t", n.get_nid());
-    }
-  }  // if(do_matching && req_flops_matched && !cellIOMap_synth.empty()) ends here
-
-  fmt::print("\n\n\n");
-  if (do_matching && cellIOMap_synth_resolved) {
-    /*matching of combo part happens here with help of pre-synth LG!
-     * 1. take LGorig and go to the SP for 1st cell in cellIOMap_synth*/
-    for (const auto& [k, v] : cellIOMap_synth) {
-      auto& allSPs = k.first;
-      auto& allEPs = k.second;
-
-      for (const auto& sp : allSPs) {
-        fmt::print("{} ", sp);
-      }
-      fmt::print("\n-\n");
-      for (const auto& ep : allEPs) {
-        fmt::print("{}\n", ep);
-      }
-      fmt::print("\n\n\n");
-
-      auto  synth_set = getUnion(allSPs, allEPs);
-      auto& synth_val = v;
-      /*go to 1st SP of allSPs for 1st entry
-       * and start iterating from there*/
-      const auto required_node = *(allSPs.begin());
-      VISITED_COLORED++;
-      // for (const auto &required_node : allSPs) {
-      if ((required_node).substr(0, 4) != "flop") {  // then it is graph IO
-        // Node startPoint_node(lg, required_node );
-        lg->each_graph_input([required_node, synth_set, synth_val, this](Node_pin& non_h_dpin) {
-	  const auto& dpin = non_h_dpin.get_hierarchical();//to get hierarchical traversal
-          const auto& in_node   = dpin.get_node();
-          std::string comp_name = (dpin.has_name() ? dpin.get_name() : dpin.get_pin_name());
-          if (comp_name == required_node) {
-            Traverse_lg::setMap_pairKey cellIOMap_orig;
-            path_traversal(in_node, synth_set, synth_val, cellIOMap_orig);
-          }
-        });
-      } else {
-        //lg->dump(true);  // FIXME: remove this
-        for (const auto& startPoint_node : lg->fast(true)) {                                 // FIXME:REM
-          if (std::to_string(startPoint_node.get_nid().value) == required_node.substr(5)) {  // FIXME:REM
-            fmt::print("Found node n{}\n", startPoint_node.get_nid());                       // FIXME:REM
-            // keep traversing forward until you hit an EP
-            Traverse_lg::setMap_pairKey cellIOMap_orig;
-            path_traversal(startPoint_node, synth_set, synth_val, cellIOMap_orig);
-
-          }  // FIXME:REM
-        }    // end of for (const auto& startPoint_node : lg->fast())//FIXME:REM
-      }
-      //}
-    }  // for (auto [k,v]: cellIOMap_synth) ends here
-    /*Printing "matching map"*/
-    fmt::print("\n THE FINAL (combo matched) MATCHING_MAP is:\n");
-    for (const auto& [k, v] : matching_map) {
-      fmt::print("\nn{}\t:::\t", k.get_nid());
-      for (const auto& v1 : v) {
-        fmt::print("n{}\t", v1.get_nid());
-      }
-    }
-    fmt::print("\n");
-  }  // if(cellIOMap_synth_resolved) ends here
-
-  if (!matched_color_map.empty()) {
-    /*Printing "matched_color_map"*/
-    fmt::print("\n THE matched_color_map is:\n");
-    for (const auto& [k, v] : matched_color_map) {
-      fmt::print("\tn{}\t:::\t{}\n", k.get_nid(), v);
-    }
-    fmt::print("\n");
-    // print crit_cell_list
-    fmt::print("\n crit_cell_list at this point: \n");
-    for (auto& n : crit_cell_list) {
-      fmt::print("n{}\t", n.get_nid());
-    }
-  }
 }
 
 void Traverse_lg::print_SynthSet_sizes() const {
@@ -1260,7 +528,7 @@ void Traverse_lg::make_io_maps(Lgraph* lg, map_of_sets& inp_map_of_sets, map_of_
   traverse_order.clear();
   fwd_traversal_for_inp_map(lg, inp_map_of_sets, is_orig_lg);
 #ifdef BASIC_DBG
-  fmt::print("9.1 Printing after fwd traversal!");
+  fmt::print("9.1 Printing after fwd traversal! (with {} origLG) ",is_orig_lg);
   print_everything();
 #endif
 
@@ -2127,7 +1395,7 @@ float Traverse_lg::get_matching_weight(const absl::flat_hash_set<Node_pin::Compa
      5 for ins and 5 for outs will make a 10 for complete IO match.*/
   float mismatches = smallest.size() - matches ;
   float matching_weight = 5 * (float((2 * matches) - mismatches) / float(synth_set.size() + orig_set.size()));
-  #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+  #ifdef FULL_RUN_FOR_EVAL_TESTING
     fmt::print("{}, {}, ", matches, mismatches);
   #endif
   return matching_weight;
@@ -3172,7 +2440,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
 #ifdef BASIC_DBG
   fmt::print("In weighted_match:\n\n");
 #endif
-  #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+  #ifdef FULL_RUN_FOR_EVAL_TESTING
   fmt::print("SynthNode, SrcNode, OUTmatches, OUTmismatches, INmatches, INmismatches, crossovers, loops, match\n");
   #endif
   const auto num_of_matches = net_to_orig_pin_match_map.size();
@@ -3207,7 +2475,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
       #endif
 
-      #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+      #ifdef FULL_RUN_FOR_EVAL_TESTING
 	const auto& synth_node = Node_pin("lgdb",synth_key).get_node();
 	const auto& orig_node = Node_pin("lgdb",orig_key).get_node();
 	const auto& synth_node_name = synth_node.has_name() ? synth_node.get_name() : "N.A" ;
@@ -3222,12 +2490,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       } else if (synth_out_set != out_map_of_sets_synth.end()
                  || out_map_of_sets_orig.find(orig_key) != out_map_of_sets_orig.end()) {  // only 1 out is present
         out_match = 0.0;                                                                  // no match at all
-        #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+        #ifdef FULL_RUN_FOR_EVAL_TESTING
         fmt::print("0, 0, ");
         #endif
       } else {                                                                            // no out is present
         out_match = 5.0;                                                                  // complete match
-        #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+        #ifdef FULL_RUN_FOR_EVAL_TESTING
         fmt::print("F, 0, ");
         #endif
       }
@@ -3239,23 +2507,23 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
           if(common_element_present(orig_set,synth_out_set->second)){ //some pin of synth-out-set is in orig-in-set
 	    match_curr = 0;
 	    crossover_count++;
-	    #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+	    #ifdef FULL_RUN_FOR_EVAL_TESTING
 	      fmt::print("Y, ");//crossover detected
             #endif
 	  }
-	  #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+	  #ifdef FULL_RUN_FOR_EVAL_TESTING
 	    else { fmt::print("N, "); } //crossover Not detected
           #endif
         } 
-	#if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+	#ifdef FULL_RUN_FOR_EVAL_TESTING
 	  else { fmt::print("N, "); } //crossover Not detected
         #endif
       }
-      #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+      #ifdef FULL_RUN_FOR_EVAL_TESTING
         else { fmt::print("N, "); } //crossover Not detected
       #endif
 
-      #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+      #ifdef FULL_RUN_FOR_EVAL_TESTING
         fmt::print("{}, ",loop_detected);
       #endif
       
@@ -3266,7 +2534,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         #ifdef BASIC_DBG
         fmt::print("\t\t\t\t -- Found better match\n");
         #endif
-	#if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+	#ifdef FULL_RUN_FOR_EVAL_TESTING
 	fmt::print("OverwritingPrevious \n");
         #endif
       } else if (match_curr == match_prev) {
@@ -3274,15 +2542,12 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         #ifdef BASIC_DBG
         fmt::print("\t\t\t\t -- Found similar match\n");
         #endif
-	#if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
+	#ifdef FULL_RUN_FOR_EVAL_TESTING
 	fmt::print("AddingToPrevious \n");
         #endif
       } 
-      #ifdef BASIC_DBG 
-      else { fmt::print("\t\t\t\t -- It is worse match?\n");  }
-      #endif
-      #if defined(FULL_RUN_FOR_EVAL) && defined(BASIC_DBG)
-      else{fmt::print("Worse \n");}
+      #if defined(BASIC_DBG) || defined(FULL_RUN_FOR_EVAL_TESTING)
+      else{fmt::print("\t--Worse \n");}
       #endif
     }
 

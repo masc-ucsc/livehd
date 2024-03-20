@@ -22,6 +22,7 @@
 #define DE_DUP  // use set
 // #define BASIC_DBG
 // #define EXTENSIVE_DBG
+// #define FULL_RUN_FOR_EVAL_TESTING //to get the csv for matches, non matches etc during nl2nl
 // #define FULL_RUN_FOR_EVAL //if defined then every node is critical node
    		          //possible to compare matching map for every node
                           // used in nl2nl match
@@ -86,7 +87,7 @@ private:
   std::set<Node::Compact_flat> combo_loop_vec;
   typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;
   void debug_function(Lgraph *lg);
-  void                                do_travers(Lgraph *g, Traverse_lg::setMap_pairKey &nodeIOmap, bool do_matching);
+  void                                do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg);
   void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   void                                fwd_traversal_for_inp_map(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   std::vector<Node_pin> traverse_order;
