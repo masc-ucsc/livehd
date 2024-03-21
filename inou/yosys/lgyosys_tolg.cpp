@@ -100,6 +100,10 @@ static void look_for_wire(Lgraph *g, const RTLIL::Wire *wire) {
     set_loc(node, wire->get_src_attribute());
     auto dpin = node.setup_driver_pin();
     pending_outputs.emplace_back(wire);
+    if (wire->name.c_str()[0] != '$') {
+      std::string wname(&wire->name.c_str()[1]);
+      dpin.set_name(wname);
+    }
 #endif
 
     I(!dpin.is_hierarchical());
@@ -171,6 +175,9 @@ static absl::flat_hash_map<Pick_ID, Node_pin> picks;
 
 static Node_pin create_pick_operator(const Node_pin &wide_dpin, int offset, int width, bool is_signed) {
   if (offset == 0 && (int)wide_dpin.get_bits() == width && !is_signed) {
+    return wide_dpin;
+  }
+  if (offset == 0 && width == 1 && (int)wide_dpin.get_bits() == 1) {
     return wide_dpin;
   }
 
@@ -856,7 +863,8 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
           continue;
         }
 
-        // fmt::print("dpin:{} bits:{} wire:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str());
+        // fmt::print("dpin:{} bits:{} wire:{} offset:{}\n", driver_pin.debug_name(), driver_pin.get_bits(), wire->name.str(),
+        // offset);
 
         if (chunk.width == wire->width) {
           if (chunk.width == ss.size()) {
@@ -892,18 +900,24 @@ static void process_cell_drivers_intialization(RTLIL::Module *mod, Lgraph *g) {
                          cell->type.c_str(),
                          dpin.get_node().debug_name());
             }
+            auto n2_dpin = n2.setup_driver_pin();
+            if (wire->name.c_str()[0] != '$') {
+              std::string wname(&wire->name.c_str()[1]);
+              n2_dpin.set_name(wname);
+            }
             wire2pin[wire] = n2.setup_driver_pin();
           }
 
-          auto src_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
-          offset += chunk.width;
 #if 0
-          fmt::print("partial assign from node:{} to wire:{}[{}:{}]\n",
+          fmt::print("partial assign from node:{} to wire:{}[{}:{}] offset:{}\n",
                      driver_pin.get_node().debug_name(),
                      wire->name.str(),
                      chunk.offset,
-                     chunk.offset + chunk.width - 1);
+                     chunk.offset + chunk.width - 1,
+		     offset);
 #endif
+          auto src_pin = create_pick_operator(driver_pin, offset, chunk.width, wire->is_signed);
+          offset += chunk.width;
 
           if (!wire->port_input && !wire->port_output) {
             auto s = chunk.offset;
@@ -1073,9 +1087,20 @@ static void process_assigns(RTLIL::Module *mod, Lgraph *g) {
           if (wire2pin.find(lhs_wire) == wire2pin.end()) {
             auto or_node = g->create_node(Ntype_op::Or, lhs_wire->width).get_non_hierarchical();
             set_loc(or_node, lhs_wire->get_src_attribute());
+            if (lhs_wire->name.c_str()[0] != '$') {
+              std::string wname(&lhs_wire->name.c_str()[1]);
+              or_node.setup_driver_pin().set_name(wname);
+            }
             wire2pin[lhs_wire] = or_node.setup_driver_pin();
           } else {
-            I(wire2pin[lhs_wire].get_bits() == lhs_wire->width);
+            auto &dpin = wire2pin[lhs_wire];
+            I(dpin.get_bits() == lhs_wire->width);
+            if (!dpin.has_name()) {
+              if (lhs_wire->name.c_str()[0] != '$') {
+                std::string wname(&lhs_wire->name.c_str()[1]);
+                dpin.set_name(wname);
+              }
+            }
           }
         }
 
@@ -1351,6 +1376,7 @@ static void process_partially_assigned_self_chains(Lgraph *g) {
 
       auto pre_or_node = g->create_node(Ntype_op::Or, wire->width).get_non_hierarchical();
       set_loc(pre_or_node, wire->get_src_attribute());
+      // WARNING: Can not set name (multiassin.v issue)
 
       // Move all the inputs to the new pre
       for (auto e : master_or_node.inp_edges()) {
