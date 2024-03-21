@@ -225,10 +225,10 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<double> elapsed_seconds = end-start;
     fmt::print("ELAPSED_SEC: {}s, FOR_FUNC: make_io_maps-synthLG\n", elapsed_seconds.count());
-#ifdef BASIC_DBG
+    #ifdef BASIC_DBG
     fmt::print("7.0. Printing before 1st set of resolution -- synth");
     print_everything();
-#endif
+    #endif
     // start = std::chrono::system_clock::now();
     // resolution_of_synth_map_of_sets(inp_map_of_sets_synth); /*Not required because make_io_maps has in-place resolution*/
     // resolution_of_synth_map_of_sets(out_map_of_sets_synth);
@@ -2457,7 +2457,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     fmt::print("\n||||---||||\n");
     #endif
 
-    const auto& synth_out_set = out_map_of_sets_synth.find(synth_key);
+    const auto synth_out_set = out_map_of_sets_synth.find(synth_key);
     bool loop_detected=false; //some common point in synth in set and out set means loop! we don't want to bother any such key.
     if(synth_out_set != out_map_of_sets_synth.end() ){
       loop_detected = common_element_present(synth_out_set->second,synth_set);
@@ -2468,10 +2468,10 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
     for (const auto &[orig_key, orig_set] : inp_map_of_sets_orig) {
       if(unwanted_orig_NPs.contains(orig_key)) { continue; }
       //#ifndef FULL_RUN_FOR_EVAL
-      if( !((Node_pin("lgdb", orig_key).get_node()).has_loc()) ) {continue;}
+      const auto np_o =Node_pin("lgdb", orig_key);
+      if( !((np_o.get_node()).has_loc()) ) {continue;}
       //#endif
       #ifdef BASIC_DBG
-      auto np_o = Node_pin("lgdb", orig_key);
       fmt::print("\t\t\t matching with: {}, n{} ({})\n",np_o.has_name() ? np_o.get_name() : ("n" + std::to_string(np_o.get_node().get_nid())),np_o.get_node().get_nid(), np_o.get_node().get_type_name() );
       #endif
 
@@ -2499,7 +2499,7 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
         fmt::print("F, 0, ");
         #endif
       }
-      const auto& in_match  = get_matching_weight(synth_set, orig_set);
+      const auto in_match  = get_matching_weight(synth_set, orig_set);
       match_curr = in_match + out_match;
 
       if (match_curr >= match_prev) {
@@ -2550,6 +2550,10 @@ void Traverse_lg::weighted_match() {  // only for the crit_node_entries remainin
       else{fmt::print("\t--Worse \n");}
       #endif
     }
+
+    // fmt::print("matched node pins :\n");
+    // print_set(matched_node_pins);
+    // fmt::print("\n");
 
     if (!matched_node_pins.empty() && (match_prev > 0.00)) {
       net_to_orig_pin_match_map[synth_key].insert(matched_node_pins.begin(), matched_node_pins.end());
