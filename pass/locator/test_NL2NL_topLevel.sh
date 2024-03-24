@@ -12,7 +12,7 @@ if [ $ret_val -ne 0 ]; then
   exit $ret_val
 fi
 SRCLOCATION=/home/sgarg3/livehd/pass/locator/tests
-DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_15march2024_DC #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_21march2024 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
 export LIVEHD_THREADS=1
 
 if [ ! -d "$DESTLOCATION" ]; then
@@ -23,7 +23,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in PipelinedCPU_netlist_wired RocketTile_yosys_DT2 #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired
+for FILENAME in  PipelinedCPU_netlist_wired #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -84,7 +84,8 @@ do
   perc_flop_change_arr=()
   num_flop_calculated_arr=()
   num_cells_calculated_arr=()
-  for PERCENTAGE_CHANGE in 0 20 40 #60 80 90 95 100 
+  num_default_matches_arr=()
+  for PERCENTAGE_CHANGE in 0 80 # 0 20 40 60 80 90 95 100 
   do
     echo "************${PERCENTAGE_CHANGE}**********"
     if [ ${PERCENTAGE_CHANGE} != 0 ];
@@ -217,9 +218,25 @@ do
     python3 pass/locator/nl2nlTimePlot.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
     # rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log 
     mv ${DESTLOCATION}/${FILENAME}_1_new.v ${DESTLOCATION}/${FILENAME}_1_new_${PERCENTAGE_CHANGE}.v
+    num_default_matches=`grep "IN_FUNC: netpin_to_ori" ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log | grep -oE '[0-9]+' | head -1`
+    num_default_matches_arr+=( "${num_default_matches}" )
+    echo "num_default_matches_arr: ${num_default_matches_arr[@]}"
   done
 
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+
+  #num of default matches
+  printf "dm${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+  i=1
+  printf ${num_default_matches_arr} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+  while [ $i -lt ${#num_default_matches_arr[@]} ]
+  do
+    printf "," >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+    printf ${num_default_matches_arr[$i]} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+    i=`expr $i + 1`
+  done
+  echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+
   printf "x${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   i=1
   printf ${perc_flop_change_arr} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -230,6 +247,7 @@ do
     i=`expr $i + 1`
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+
   #num_flop_calculated_arr
   printf "z${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   i=1
@@ -241,6 +259,7 @@ do
     i=`expr $i + 1`
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+
   #num_cells_calculated_arr
   printf "w${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   i=1
@@ -255,6 +274,18 @@ do
   echo "plt.plot(w${MODULE_NAME}${COMPLR}, y${MODULE_NAME}${COMPLR}, label = \"${MODULE_NAME}${COMPLR}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
   echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+  #num of default matches
+  printf "dm${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+  i=1
+  printf ${num_default_matches_arr} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+  while [ $i -lt ${#num_default_matches_arr[@]} ]
+  do
+    printf "," >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+    printf ${num_default_matches_arr[$i]} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+    i=`expr $i + 1`
+  done
+  echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+
   printf "x${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
   i=1
   printf ${perc_flop_change_arr} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
@@ -294,6 +325,7 @@ done
 echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -303,6 +335,7 @@ echo "plt.show()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
@@ -311,3 +344,9 @@ echo "plt.show()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
 python3 ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 python3 ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+
+
+# #Annotate each marker with x and y values
+# for i in range(len(xData)):
+#     plt.annotate(f'({xData[i]}, {yData[i]})', (xData[i], yData[i]), textcoords="offset points", xytext=(0,10), ha='center')
+

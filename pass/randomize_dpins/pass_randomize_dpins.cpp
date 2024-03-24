@@ -19,6 +19,7 @@ void Pass_randomize_dpins::setup(){
 Pass_randomize_dpins::Pass_randomize_dpins(const Eprp_var& var) : Pass("pass.randomize_dpins", var) {}
 
 void Pass_randomize_dpins::randomize(Eprp_var& var) {
+  TRACE_EVENT("pass", "randomize_dpins");
 
   auto co = var.get("comb_only");
   bool comb_only = co!= "false" && co!="0";
@@ -35,10 +36,6 @@ void Pass_randomize_dpins::randomize(Eprp_var& var) {
       break;
     }
   }
-  TRACE_EVENT("pass", nullptr, [&lg] (perfetto::EventContext ctx) { //FIXME! not wrorking?
-    auto new_name = absl::StrCat(lg->get_name(),"_changedForEval");
-    ctx.event()->reset_name(new_name);
-  });
   
   p.collect_vectors_from_lg(lg, noise_perc, comb_only);
 
@@ -97,7 +94,7 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph *lg, float noise_perc,
 
   /* Creating comb_pins_vec if comb_only==T; else create combNflop_pins_vec*/
   auto node_count = 0;
-  for (const auto& node: lg->fast(true)) { //FIXME: remove consts?
+  for (const auto& node: lg->fast(true)) { 
     node_count++;
     if(!node.is_type_const()) {
       if(node.is_type_loop_last() && !comb_only){
