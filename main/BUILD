@@ -77,6 +77,7 @@ cc_library(
         "//pass/semantic:pass_semantic",
         "//pass/submatch:pass_submatch",
         "//pass/compiler:pass_compiler",
+        "//pass/randomize_dpins:pass_randomize_dpins",
         # "//pass/mockturtle:pass_mockturtle",
         #add dependencies to new passes here
         #"//inou/hif:inou_hif"
