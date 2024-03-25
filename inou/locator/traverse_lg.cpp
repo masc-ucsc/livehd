@@ -1419,7 +1419,7 @@ Traverse_lg::inverted_map_arr Traverse_lg::convert_set_to_sorted_array(const abs
   return inv_arr;
 }
 
-void Traverse_lg::create_inverted_map(map_of_sets& mapOfSets, inverted_map_of_sets& small_set_inv_map, map_of_sets& big_set_map) {
+void Traverse_lg::create_inverted_map(map_of_sets& mapOfSets, inverted_ArrMap_of_sets& small_set_inv_map, inverted_SetMap_of_sets& big_set_map) {
   
   for(const auto& [np, np_set]: mapOfSets){
     if(np_set.size()<4) {
@@ -1427,7 +1427,7 @@ void Traverse_lg::create_inverted_map(map_of_sets& mapOfSets, inverted_map_of_se
       small_set_inv_map[inv_arr].insert(np);
     } else {
       //large sets will be appended to big_set_map
-      big_set_map[np]=np_set;
+      big_set_map[np_set].insert(np);
     }
   }
   
@@ -1437,8 +1437,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
 
   const auto num_of_matches = net_to_orig_pin_match_map.size();
 
-  Traverse_lg::inverted_map_of_sets inp_invMoS_orig;
-  Traverse_lg::map_of_sets inp_big_set_Mos_orig;
+  Traverse_lg::inverted_ArrMap_of_sets inp_invMoS_orig;
+  Traverse_lg::inverted_SetMap_of_sets inp_big_set_Mos_orig;
   create_inverted_map(inp_map_of_sets_orig, inp_invMoS_orig, inp_big_set_Mos_orig);
   fmt::print("\nsize of inv map: {}, size of inp_big_set_Mos_orig: {}, instead of  inp_map_of_sets_orig: {} \n", inp_invMoS_orig.size(), inp_big_set_Mos_orig.size(), inp_map_of_sets_orig.size());
 
@@ -1568,7 +1568,16 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       }
 
     } else { //synth_set is large, work with the inp_big_set_Mos_orig
-      for (const auto& [orig_in_np, orig_in_set_np] : inp_big_set_Mos_orig) {
+      auto iter_to_origInpBigSetMap_match = inp_big_set_Mos_orig.find(it->second);
+      if (iter_to_origInpBigSetMap_match == inp_big_set_Mos_orig.end()) {
+        /*no input match for this node. move to other node*/
+	it++;
+	continue;
+      }
+
+      /* Found input match for this synth node. process for further complete io matching*/
+      for(const auto& orig_in_np: iter_to_origInpBigSetMap_match->second) {
+      //for (const auto& [orig_in_np, orig_in_set_np] : inp_big_set_Mos_orig) 
         if(unwanted_orig_NPs.contains(orig_in_np) ) { 
           #ifdef BASIC_DBG
           fmt::print("\t   orig node in unwanted_orig_NPs:"); get_node_pin_compact_flat_details(orig_in_np);
@@ -1587,51 +1596,47 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
         auto partial_out_matched = false;
         auto matching_wt         = 0.0;
 
-        if (it->second == orig_in_set_np) {  // in_matched
+        /* see if their output sets match as well.
+         * 1. both might not have outputs and thus not be present in out_map_of_sets_<>
+         * 2. if both are present, then compare the output sets.*/
+        auto node_iter_to_outMoSorig = out_map_of_sets_orig.find(orig_in_np);
+        if (node_iter_to_outMoSsynth != out_map_of_sets_synth.end()
+            && node_iter_to_outMoSorig != out_map_of_sets_orig.end()) {  // both present
           #ifdef BASIC_DBG
-          fmt::print("\t\t Inputs matched \n");
+          fmt::print("\t\t Outputs present for both \n");
           #endif
-          /*it->first == orig_in_np for inputs. see if their output sets match as well.
-           * 1. both might not have outputs and thus not be present in out_map_of_sets_<>
-           * 2. if both are present, then compare the output sets.*/
-          auto node_iter_to_outMoSorig = out_map_of_sets_orig.find(orig_in_np);
-          if (node_iter_to_outMoSsynth != out_map_of_sets_synth.end()
-              && node_iter_to_outMoSorig != out_map_of_sets_orig.end()) {  // both present
+          if (node_iter_to_outMoSsynth->second  == out_map_of_sets_orig[orig_in_np]) {
+            out_matched                    = true;
+            keep_partial_match_checking_on = false;
+            partial_out_matched            = false;
             #ifdef BASIC_DBG
-            fmt::print("\t\t Outputs present for both \n");
+            fmt::print("\t\t Outputs exactly matched \n");
             #endif
-            if (node_iter_to_outMoSsynth->second  == out_map_of_sets_orig[orig_in_np]) {
-              out_matched                    = true;
-              keep_partial_match_checking_on = false;
-              partial_out_matched            = false;
-              #ifdef BASIC_DBG
-              fmt::print("\t\t Outputs exactly matched \n");
-              #endif
-            } else if (keep_partial_match_checking_on) {
-              // input have been exact match . but output is not exact match! get best partial match for output?
-              #ifdef BASIC_DBG
-              fmt::print("\t\t Outputs not exactly matched \n");
-              #endif
-              matching_wt         = get_matching_weight(node_iter_to_outMoSsynth->second , out_map_of_sets_orig[orig_in_np]);
-              partial_out_matched = true;
-            }
-          } else if (node_iter_to_outMoSsynth == out_map_of_sets_synth.end()
-                     && node_iter_to_outMoSorig == out_map_of_sets_orig.end()) {  // both absent. thus a match!?
-            out_matched = true;
+          } else if (keep_partial_match_checking_on) {
+            // input have been exact match . but output is not exact match! get best partial match for output?
             #ifdef BASIC_DBG
-            fmt::print("\t\t matching due to absence !!\n");
+            fmt::print("\t\t Outputs not exactly matched \n");
             #endif
+            matching_wt         = get_matching_weight(node_iter_to_outMoSsynth->second , out_map_of_sets_orig[orig_in_np]);
+            partial_out_matched = true;
           }
+        } else if (node_iter_to_outMoSsynth == out_map_of_sets_synth.end()
+                   && node_iter_to_outMoSorig == out_map_of_sets_orig.end()) {  // both absent. thus a match!?
+          out_matched = true;
           #ifdef BASIC_DBG
-          else {  // outputs did not match
-            auto p_o = Node_pin("lgdb", orig_in_np);
-            auto o_s = Node_pin("lgdb", orig_in_np).get_node();
-            fmt::print("\t\tMatch? : {},n{}\n",
-                       p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
-                       std::to_string(o_s.get_nid()));
-          }
+          fmt::print("\t\t matching due to absence !!\n");
           #endif
         }
+        #ifdef BASIC_DBG
+        else {  // outputs did not match
+          auto p_o = Node_pin("lgdb", orig_in_np);
+          auto o_s = Node_pin("lgdb", orig_in_np).get_node();
+          fmt::print("\t\tMatch? : {},n{}\n",
+                     p_o.has_name() ? p_o.get_name() : std::to_string(p_o.get_pid()),
+                     std::to_string(o_s.get_nid()));
+        }
+        #endif
+        
 
         if (out_matched) {  // in+out matched. complete exact match. put in matching map
           net_to_orig_pin_match_map[it->first].insert(orig_in_np);

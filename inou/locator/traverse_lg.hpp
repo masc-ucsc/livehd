@@ -101,9 +101,10 @@ private:
   void netpin_to_origpin_default_match(Lgraph *orig_lg, Lgraph *synth_lg);
   void matching_pass_io_boundary_only(map_of_sets &map_of_sets_synth, map_of_sets &map_of_sets_orig);
   typedef std::array<Node_pin::Compact_flat, 3> inverted_map_arr;
-  typedef absl::node_hash_map< inverted_map_arr , absl::flat_hash_set<Node_pin::Compact_flat>  > inverted_map_of_sets;
+  typedef absl::node_hash_map< inverted_map_arr , absl::flat_hash_set<Node_pin::Compact_flat>  > inverted_ArrMap_of_sets;
+  typedef absl::node_hash_map< absl::flat_hash_set<Node_pin::Compact_flat> , absl::flat_hash_set<Node_pin::Compact_flat>  > inverted_SetMap_of_sets;
   inverted_map_arr convert_set_to_sorted_array(const absl::flat_hash_set<Node_pin::Compact_flat>& np_set) const ;
-  void create_inverted_map(map_of_sets& mapOfSets, inverted_map_of_sets& small_set_inv_map, map_of_sets& big_set_map);
+  void create_inverted_map(map_of_sets& mapOfSets, inverted_ArrMap_of_sets& small_set_inv_map, inverted_SetMap_of_sets& big_set_map);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
   bool surrounding_cell_match();//returns true if any matching took place
   bool surrounding_cell_match_final();//matches any unmatched cell with resolved surrounding cells. returns T if unmatched still left.

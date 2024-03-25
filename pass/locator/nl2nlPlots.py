@@ -95,6 +95,7 @@ def log_accuracy_data(log_file_path):
 
     #to get the plots:
     accuracy_percentage = ((accuracy_index[0]+accuracy_index[1]+accuracy_index[2])/count)*100
+    print("acc%:", accuracy_percentage)
     return accuracy_percentage
 
 def main():
