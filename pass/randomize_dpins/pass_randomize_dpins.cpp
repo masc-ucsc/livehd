@@ -94,22 +94,30 @@ void Pass_randomize_dpins::collect_vectors_from_lg(Lgraph *lg, float noise_perc,
 
   /* Creating comb_pins_vec if comb_only==T; else create combNflop_pins_vec*/
   auto node_count = 0;
+  const auto &sub = lg->get_self_sub_node();//so that graph IO names do not get changed.
   for (const auto& node: lg->fast(true)) { 
     node_count++;
-    if(!node.is_type_const()) {
-      if(node.is_type_loop_last() && !comb_only){
-        for(const auto& dpins: node.out_connected_pins()){
-	  if(!dpins.has_name()) {continue;}
-          combNflop_pins_vec.emplace_back(dpins.get_compact_flat());
-          flop_pins_vec.emplace_back(dpins.get_compact_flat());
-        }
-      } else if (!node.is_type_loop_last() ) {
-        for(const auto& dpins: node.out_connected_pins()){
-	  if(!dpins.has_name()) {continue;}
-          combNflop_pins_vec.emplace_back(dpins.get_compact_flat());
-          comb_pins_vec.emplace_back(dpins.get_compact_flat());
-        }
-      }
+    if(node.is_type_const()) {
+	    continue;
+    }
+    if(node.is_type_loop_last() && !comb_only){
+	    for(const auto& dpins: node.out_connected_pins()){
+		    if(!dpins.has_name()) {continue;}
+		    if (sub.has_pin(dpins.get_name())) {
+			    continue;
+		    }
+		    combNflop_pins_vec.emplace_back(dpins.get_compact_flat());
+		    flop_pins_vec.emplace_back(dpins.get_compact_flat());
+	    }
+    } else if (!node.is_type_loop_last() ) {
+	    for(const auto& dpins: node.out_connected_pins()){
+		    if(!dpins.has_name()) {continue;}
+		    if (sub.has_pin(dpins.get_name())) {
+			    continue;
+		    }
+		    combNflop_pins_vec.emplace_back(dpins.get_compact_flat());
+		    comb_pins_vec.emplace_back(dpins.get_compact_flat());
+	    }
 
     }
   }
