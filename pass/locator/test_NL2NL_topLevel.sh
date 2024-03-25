@@ -28,7 +28,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in  PipelinedCPU_yosysFlat_DT30p  PipelinedCPU_netlist_wired  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired
+for FILENAME in RocketTile_yosys_DT2 RocketTile_netlist_wired  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -361,7 +361,7 @@ echo "plt.xlabel('Noise (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.ylabel(' Accuracy (%)')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.title('Accuracy graph for netlist to netlist analysis. ')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
+#echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_acc_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -372,7 +372,7 @@ echo "plt.xlabel(' Noise (%)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.ylabel('Time (s)')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.title('Performance graph for netlist to netlist analysis.')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.xticks(range(0, 101, 10))" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
+#echo "plt.yticks(range(10, 101, 10))" >>  ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.legend()" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "# function to show the plot" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 echo "plt.savefig(\"${DESTLOCATION}/nl2nl_time_flop_plot_data.pdf\", format=\"pdf\", bbox_inches=\"tight\")" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
