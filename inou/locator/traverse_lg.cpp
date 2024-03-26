@@ -582,9 +582,14 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
         }
       }
       #else
-      for (const auto &dpins : node.out_connected_pins()) {
+      for (const auto dpins : node.out_connected_pins()) {
         auto cf = dpins.get_compact_flat();
+	std::string_view nl2nl_change_string = "_changedForEval";
+	if(!dpins.has_name() || dpins.get_name().find(nl2nl_change_string)==std::string_view::npos){//dpin name does NOT have "_changedForEval" in it, then continue 
+	  continue;
+	}
         crit_node_map[cf] = 0;  // keep till end for color data
+	  //fmt::print("Coloring node\n");
         if (net_to_orig_pin_match_map.find(cf) == net_to_orig_pin_match_map.end()) {
           #ifdef BASIC_DBG
           fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
@@ -645,7 +650,12 @@ void Traverse_lg::make_io_maps_boundary_only(Lgraph* lg, map_of_sets& inp_map_of
       }
 #else
       for (const auto dpins : node.out_connected_pins()) {
+	std::string_view nl2nl_change_string = "_changedForEval";
+	if(!dpins.has_name() || dpins.get_name().find(nl2nl_change_string)==std::string_view::npos){//dpin name does NOT have "_changedForEval" in it, then continue 
+	  continue;
+	}
         crit_node_map[dpins.get_compact_flat()] = 0;
+	  //fmt::print("Coloring node\n");
         if (net_to_orig_pin_match_map.find(dpins.get_compact_flat()) == net_to_orig_pin_match_map.end()) {
           #ifdef BASIC_DBG
           fmt::print("inserting in crit_node_set: {},n{},{}\n", dpins.has_name()?dpins.get_name():(std::to_string(dpins.get_pid())), dpins.get_node().get_nid(), dpins.get_node().get_class_lgraph()->get_name() );
@@ -730,7 +740,12 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
       #else
       if (!node.is_type_const()) {
         for (const auto dpins : node.out_connected_pins()) {
+	  std::string_view nl2nl_change_string = "_changedForEval";
+	  if(!dpins.has_name() || dpins.get_name().find(nl2nl_change_string)==std::string_view::npos){//dpin name does NOT have "_changedForEval" in it, then continue 
+	    continue;
+	  }
           crit_node_map[dpins.get_compact_flat()] = 0;
+	  //fmt::print("Coloring node\n");get_node_pin_compact_flat_details(dpins.get_compact_flat());
           #ifdef BASIC_DBG
           fmt::print("Inserting in crit_node_map: n{} , 0\n", node.get_nid());
           #endif
@@ -2034,6 +2049,7 @@ void Traverse_lg::get_node_pin_compact_flat_details(const Node_pin::Compact_flat
 }
 
 void Traverse_lg::report_critical_matches_with_color() {
+	//fmt::print("crit_node_map.size() = {}\n", crit_node_map.size());
 #ifdef BASIC_DBG
   fmt::print("\nmatching map:\n");
   print_io_map(net_to_orig_pin_match_map);
