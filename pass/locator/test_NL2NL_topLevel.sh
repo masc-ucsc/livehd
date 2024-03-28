@@ -7,9 +7,11 @@ if [ $ret_val -ne 0 ]; then
   exit $ret_val
 fi
 
+cwd=$(pwd)
+SRCLOCATION=${cwd}/pass/locator/tests
+
 # IMPORTANT: check these values before every run:
-SRCLOCATION=/home/sgarg3/livehd/pass/locator/tests
-DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_28march2024 
+DESTLOCATION=${SRCLOCATION}/dummy_WoFlopChange_28march2024
 COMB_ONLY=true
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
