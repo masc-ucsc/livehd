@@ -174,48 +174,54 @@ do
     then
       echo ""
       echo "Running for PipelinedCPU_yosysFlat_DT30p:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE}
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log 
     elif [ ${FILENAME} == "SingleCycleCPU_yosysFlat" ]
     then
       echo ""
       echo "Running for SingleCycleCPU_yosysFlat:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
     elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
     then
       echo ""
       echo "Running for RocketTile_yosys_DT2:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
     elif [ ${FILENAME} == "PipelinedCPU_netlist_wired" ]
     then
       echo ""
       echo "Running for PipelinedCPU_netlist_wired:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE}
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log 
     elif [ ${FILENAME} == "SingleCycleCPU_netlist_wired" ]
     then
       echo ""
       echo "Running for SingleCycleCPU_netlist_wired:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
     elif [ ${FILENAME} == "RocketTile_netlist_wired" ]
     then
       echo ""
       echo "Running for RocketTile_netlist_wired:"
-      ./bazel-bin/main/lgshell " inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
+      ./bazel-bin/main/lgshell "
       inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
+      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
       lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
       " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
     fi
