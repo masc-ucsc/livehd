@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# NOTE:
-# This script works for flattened netlists only. 
-# Also, This works for sky130 NLs only.
-# The python script will need to be adjusted for multiple modules in single file.
-
 CXX=clang++-14 CC=clang-14 bazel build -c opt //...
 ret_val=$?
 if [ $ret_val -ne 0 ]; then
@@ -14,7 +9,7 @@ fi
 
 # IMPORTANT: check these values before every run:
 SRCLOCATION=/home/sgarg3/livehd/pass/locator/tests
-DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_28march2024 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_28march2024 
 COMB_ONLY=true
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
@@ -95,9 +90,6 @@ do
   printf "\ny${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   printf "\ny${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-  #NOT NEEDED?# perc_flop_change_arr=()
-  #NOT NEEDED?# num_flop_calculated_arr=()
-  #NOT NEEDED?# num_cells_calculated_arr=()
   num_default_matches_arr=()
   for PERCENTAGE_CHANGE in ${NOISE_PERCENTAGE[@]}
   do
@@ -113,41 +105,9 @@ do
         echo "Could not find ${SRCLOCATION}/${FILENAME}.v"
         exit 1
     fi
-    #NOT NEEDED?# sed 's/(\*.*\*)//g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}_1.v #remove (*...*)
-    #NOT NEEDED?# sed -i 's/\/\*.*\*\///g' ${DESTLOCATION}/${FILENAME}_1.v #remove /*...*/
-    #NOT NEEDED?# sed -i 's/\/\/.*//g' ${DESTLOCATION}/${FILENAME}_1.v #remove //...
+
 
     #This is to incorporate noise in the file:
-    #if [ ${COMPLR} == "dc" ]; then
-    #NOT NEEDED?# sed -z -i 's/\([^;]\)\n/\1 /g' ${DESTLOCATION}/${FILENAME}_1.v #putting it all in single line
-    #fi
-    #NOT NEEDED?# flops_changed_percentage=`python3 pass/locator/test_NL2NL.py ${DESTLOCATION}/${FILENAME}_1 ${PERCENTAGE_CHANGE} ${FILENAME}`  # creates _1_new.v file
-    #NOT NEEDED?# perc_flop_change_arr+=( "${flops_changed_percentage}" )
-    #NOT NEEDED?# echo "perc_flop_change_arr: ${perc_flop_change_arr[@]}"
-    #sed -z 's/\([^;]\)\n/\1 /g' ${DESTLOCATION}/${FILENAME}_1_new.v > ${DESTLOCATION}/${FILENAME}_1_new.v
-    #NOT NEEDED?# flops_changed_count=`grep "dfxtp.*\.Q.*changedForEval" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?# total_cells_changed_count=`grep "sky130.*changedForEval.[^,]*;" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?# total_flops=`grep "dfxtp" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?# total_cells_in_NL=`grep "sky130" ${SRCLOCATION}/${FILENAME}.v | wc -l`
-    #NOT NEEDED?# if [ ${COMPLR} == "dc" ]
-    #NOT NEEDED?# then
-    #NOT NEEDED?#   flops_changed_count=`grep "DFF.*\.Q.*changedForEval" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?#   total_cells_changed_count=`grep "_.VT.*changedForEval.[^,]*;" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?#   total_flops=`grep "DFF" ${DESTLOCATION}/${FILENAME}_1_new.v | wc -l`
-    #NOT NEEDED?#   total_cells_in_NL=`grep "_.VT" ${SRCLOCATION}/${FILENAME}.v | wc -l`
-    #NOT NEEDED?# fi
-    #NOT NEEDED?# echo "flops_changed_count: ${flops_changed_count}"
-    #NOT NEEDED?# flops_changed_perc=0.0
-    #NOT NEEDED?# total_cells_changed_perc=0.0
-    #NOT NEEDED?# flops_changed_perc=`python -c "print((${flops_changed_count}/${total_flops})*100.0)"`
-    #NOT NEEDED?# total_cells_changed_perc=`python -c "print((${total_cells_changed_count}/${total_cells_in_NL})*100.0)"`
-    #NOT NEEDED?# num_flop_calculated_arr+=( "${flops_changed_perc}" )
-    #NOT NEEDED?# num_cells_calculated_arr+=( "${total_cells_changed_perc}" )
-    #NOT NEEDED?# echo "num_flop_calculated_arr: ${num_flop_calculated_arr[@]}"
-    #NOT NEEDED?# echo "num_cells_calculated_arr: ${num_cells_calculated_arr[@]}"
-    #NOT NEEDED?# echo "total_flops=${total_flops}"
-    #NOT NEEDED?# mv ${DESTLOCATION}/${FILENAME}_1.v ${DESTLOCATION}/${FILENAME}_1_${PERCENTAGE_CHANGE}.v 
-
     if [[ ${FILENAME} == *"RocketTile"* ]]
     then
       sed 's/module RocketTile/module RocketTile_changedForEval/g' ${SRCLOCATION}/${FILENAME}.v > ${DESTLOCATION}/${FILENAME}.v
@@ -203,8 +163,6 @@ do
 
     python3 pass/locator/nl2nlPlots.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
     python3 pass/locator/nl2nlTimePlot.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-    # rm ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}_time.log 
-    #mv ${DESTLOCATION}/${FILENAME}_1_new.v ${DESTLOCATION}/${FILENAME}_1_new_${PERCENTAGE_CHANGE}.v
     num_default_matches=`grep "IN_FUNC: netpin_to_ori" ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log | grep -oE '[0-9]+' | head -1`
     num_default_matches_arr+=( "${num_default_matches}" )
     echo "num_default_matches_arr: ${num_default_matches_arr[@]}"
@@ -224,40 +182,6 @@ do
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
-  #NOT NEEDED?# printf "x${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${perc_flop_change_arr} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#perc_flop_change_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   printf ${perc_flop_change_arr[$i]} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
-  #NOT NEEDED?# done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-
-  #num_flop_calculated_arr
-  #NOT NEEDED?# printf "z${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${num_flop_calculated_arr} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#num_flop_calculated_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   printf ${num_flop_calculated_arr[$i]} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
- #NOT NEEDED?#  done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-
-  #num_cells_calculated_arr
-  #NOT NEEDED?# printf "w${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${num_cells_calculated_arr} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#num_cells_calculated_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   printf ${num_cells_calculated_arr[$i]} >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
-  #NOT NEEDED?# done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   #noise percentage for plotting
   printf "np = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
   i=1
@@ -270,7 +194,6 @@ do
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
-  #NOT NEEDED?# echo "plt.plot(w${MODULE_NAME}${COMPLR}, y${MODULE_NAME}${COMPLR}, label = \"${MODULE_NAME}${COMPLR}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
   echo "plt.plot(np, y${MODULE_NAME}${COMPLR}, label = \"${MODULE_NAME}${COMPLR}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 
@@ -288,39 +211,6 @@ do
   done
   echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-  #NOT NEEDED?# printf "x${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${perc_flop_change_arr} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#perc_flop_change_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   printf ${perc_flop_change_arr[$i]} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
-  #NOT NEEDED?# done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #num_flop_calculated_arr
-  #NOT NEEDED?# printf "z${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${num_flop_calculated_arr} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#num_flop_calculated_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   printf ${num_flop_calculated_arr[$i]} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
-  #NOT NEEDED?# done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #num_cells_calculated_arr
-  #NOT NEEDED?# printf "w${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# i=1
-  #NOT NEEDED?# printf ${num_cells_calculated_arr} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# while [ $i -lt ${#num_cells_calculated_arr[@]} ]
-  #NOT NEEDED?# do
-  #NOT NEEDED?#   printf "," >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   printf ${num_cells_calculated_arr[$i]} >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?#   i=`expr $i + 1`
-  #NOT NEEDED?# done
-  #NOT NEEDED?# echo "]" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
-  #NOT NEEDED?# echo "plt.plot(w${MODULE_NAME}${COMPLR}, y${MODULE_NAME}${COMPLR}, label = \"${MODULE_NAME}${COMPLR}\", linestyle='dashed', marker='o')" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
   #noise percentage for plotting
   printf "np = [" >> ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
   i=1
