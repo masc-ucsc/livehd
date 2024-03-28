@@ -322,6 +322,10 @@ void Traverse_lg::do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg)
     }
 
     I(flop_set_synth.empty(), "\n\n\tCHECK: flops not resolved. Cannot move on to further matching\n\n");
+    if(!flop_set_synth.empty()) {
+      fmt::print("\nBEWARE: {} FLOPS NOT RESOLVED? \n\n", flop_set_synth.size());
+      print_set(flop_set_synth);
+    }
     if (crit_node_set.empty()) {
       /*all required matching done*/
       report_critical_matches_with_color();
@@ -710,10 +714,6 @@ void Traverse_lg::fast_pass_for_inputs(Lgraph* lg, map_of_sets& inp_map_of_sets,
   /*in fwd, flops are visited last. Thus this fast pass:
    * (Flops could be considered FIRST (Q pin) or LAST (din pin). In the forward iterator, flops are not marked as loop_first, only
    * constants are. This means that the flop is not visited first.) */
-  #ifdef BASIC_DBG
-  fmt::print("In fast -- lg->dump(true):\n");
-  lg->dump(true);  // FIXME: remove this
-  #endif
   fmt::print("\nIn fast pass for inputs for orig lg {} \n", is_orig_lg);
   for (const auto& node : lg->fast(true)) {
     #ifdef BASIC_DBG
@@ -1081,6 +1081,11 @@ void Traverse_lg::remove_pound_and_bus(std::string& dpin_name) {
   if (dpin_name.find(".") != std::string::npos) { // to address: The "pmp.io.addr" in DT2 yosys trial
     std::replace( dpin_name.begin(), dpin_name.end(), '.', '_');// convert all '.' to '_'
   }
+  std::regex pattern("_BAR$");/*for _BAR --> remove it! sometimes DC insert it!*/
+  std::smatch match; 
+  if (std::regex_search(dpin_name, match, pattern)) {
+    dpin_name.erase(match.position(), match.length());
+  }
 }
 
 void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth_lg) {
@@ -1288,7 +1293,7 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
         } else if (name2dpins.find(synth_node_dpin_wire) != name2dpins.end()) {
           /* map_itt was not found in name2dpin; maybe it can be found in name2dpins instead. If so then use this!*/
           auto map_itt_s = name2dpins.find(synth_node_dpin_wire);
-#ifdef BASIC_DBG
+          #ifdef BASIC_DBG
           fmt::print("\t\tFound orig_node_dpin");
           for (const auto& orig_node_dpin_cf : map_itt_s->second) {
             auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
@@ -1298,12 +1303,12 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
           fmt::print("\tDEFAULT INSERTION OF: {}, {}\n",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
                      std::to_string(synth_node_dpin.get_pid()));
-#endif
+          #endif
           net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert((map_itt_s->second).begin(),
                                                                                (map_itt_s->second).end());
           mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
           mark_loop_stop.insert((map_itt_s->second).begin(), (map_itt_s->second).end());
-#ifdef FOR_EVAL
+          #ifdef FOR_EVAL
           fmt::print("Inserting in netpin_to_origpin_default_match s : {} ::: ",
                      synth_node_dpin.has_name() ? synth_node_dpin.get_name()
                                                 : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
@@ -1314,11 +1319,109 @@ void Traverse_lg::netpin_to_origpin_default_match(Lgraph* orig_lg, Lgraph* synth
                                                   : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
           }
           fmt::print("\n");
-#endif
+          #endif
           remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
           out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
           inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
-        }
+        } else { //could not find match for this synth pin in either name2dpin or name2dpins
+		 //maybe the bus got converted to _#_ or _#  --> try by removing _#/_#_
+		 //or maybe (like in DC) ._ was converted to _n_ --> try by making "_n_" -> "__"
+	  int trial=1;
+	  bool not_found=true;
+          do {
+            #ifdef BASIC_DBG
+            fmt::print("\t**  synth_node_dpin_wire {}  -(again)->  ", synth_node_dpin_wire);
+            #endif
+            size_t pos = synth_node_dpin_wire.find("_n_");
+	    /*for _###_ --> remove it!*/
+	    std::regex pattern("_\\d+_$");
+            std::smatch match; // Search for the pattern in the string
+	    /*for _### --> remove it!*/
+	    std::regex pattern2("_\\d+$");
+            std::smatch match2; // Search for the pattern in the string
+            if (pos != std::string::npos) {  // for cases where ._ was converted to _n_ (make _n_ --> __)
+              synth_node_dpin_wire.replace(pos,3,"__");
+            } else if (std::regex_search(synth_node_dpin_wire, match, pattern)) {
+              synth_node_dpin_wire.erase(match.position(), match.length());
+            } else if (std::regex_search(synth_node_dpin_wire, match2, pattern2)) {
+              synth_node_dpin_wire.erase(match2.position(), match2.length());
+            }
+
+            #ifdef BASIC_DBG
+              fmt::print(" {}  .**\n", synth_node_dpin_wire);
+            #endif
+            auto iter1 = name2dpin.find(synth_node_dpin_wire);
+	            
+	    if (iter1 != name2dpin.end()) {//matches in name2dpin
+              #ifdef BASIC_DBG
+              auto orig_node_dpin = Node_pin("lgdb", iter1->second);
+              fmt::print("\t\tFound orig_node_dpin {}\n",
+                         orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
+              fmt::print("\tDEFAULT INSERTION OF: {}, {}\n",
+                         synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
+                         std::to_string(synth_node_dpin.get_pid()));
+              #endif
+              net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert(iter1->second);
+              mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
+              mark_loop_stop.insert(iter1->second);
+              #ifdef FOR_EVAL
+              auto orig_node_dpin1 = Node_pin("lgdb", iter1->second);
+              fmt::print("Inserting in netpin_to_origpin_default_match : {}  :::  {}\n",
+                         synth_node_dpin.has_name() ? synth_node_dpin.get_name()
+                                                    : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())),
+                         orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
+                                                    : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
+              #endif
+              remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+              out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+              inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+	      trial = 3; 
+	      not_found=false;
+	      
+	    } else if (name2dpins.find(synth_node_dpin_wire) != name2dpins.end()) {//matches in name2dpins (if not in name2dpin)?
+	      auto iter2 = name2dpins.find(synth_node_dpin_wire);
+              #ifdef BASIC_DBG
+              fmt::print("\t\tFound orig_node_dpin");
+              for (const auto& orig_node_dpin_cf : iter2->second) {
+                auto orig_node_dpin = Node_pin("lgdb", orig_node_dpin_cf);
+                fmt::print("  {}  ", orig_node_dpin.has_name() ? orig_node_dpin.get_name() : std::to_string(orig_node_dpin.get_pid()));
+              }
+              fmt::print("\n");
+              fmt::print("\tDEFAULT INSERTION OF: {}, {}\n",
+                         synth_node_dpin.has_name() ? synth_node_dpin.get_name() : std::to_string(synth_node_dpin.get_pid()),
+                         std::to_string(synth_node_dpin.get_pid()));
+              #endif
+              net_to_orig_pin_match_map[synth_node_dpin.get_compact_flat()].insert((iter2->second).begin(),
+                                                                                   (iter2->second).end());
+              mark_loop_stop.insert(synth_node_dpin.get_compact_flat());
+              mark_loop_stop.insert((iter2->second).begin(), (iter2->second).end());
+              #ifdef FOR_EVAL
+              fmt::print("Inserting in netpin_to_origpin_default_match s : {} ::: ",
+                         synth_node_dpin.has_name() ? synth_node_dpin.get_name()
+                                                    : ("n" + std::to_string(synth_node_dpin.get_node().get_nid())));
+              for (const auto& orig_node_dpin1_cf : (iter2)->second) {
+                auto orig_node_dpin1 = Node_pin("lgdb", orig_node_dpin1_cf);
+                fmt::print("  {}  ",
+                           orig_node_dpin1.has_name() ? orig_node_dpin1.get_name()
+                                                      : ("n" + std::to_string(orig_node_dpin1.get_node().get_nid())));
+              }
+              fmt::print("\n");
+              #endif
+              remove_from_crit_node_set(synth_node_dpin.get_compact_flat());
+              out_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+              inp_map_of_sets_synth.erase(synth_node_dpin.get_compact_flat());
+	      trial = 3 ;
+	      not_found=false;
+	    }  
+	    ++trial;
+	  } while (trial < 3);
+          if(not_found) {//still not matched with any!?
+	      fmt::print("\"\"\" {}\n", synth_node_dpin_wire);
+	      get_node_pin_compact_flat_details(synth_node_dpin.get_compact_flat());
+	      fmt::print("\"\"\"\n");
+	    }
+
+	}
       }
 #ifdef EXTENSIVE_DBG
       else {
@@ -3062,6 +3165,7 @@ void Traverse_lg::print_set(const absl::flat_hash_set<Node_pin::Compact_flat> &s
     } else {
       fmt::print("\t n{},{} ", n.get_nid(), p.get_pid());
     }
+    get_node_pin_compact_flat_details(v);
   }
 }
 void Traverse_lg::print_name2dpin(const absl::flat_hash_map<std::string, Node_pin::Compact_flat>& name2dpin) const {
