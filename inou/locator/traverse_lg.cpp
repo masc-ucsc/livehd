@@ -220,6 +220,7 @@ void Traverse_lg::debug_function(Lgraph* lg) {
 void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
 
   unsigned int total_named_dpins=0;
+  int unnamed=0;
   /* graph IOs*/
   lg->each_graph_input([&total_named_dpins](const Node_pin non_h_dpin) {
     const auto& dpin = non_h_dpin.get_hierarchical();
@@ -234,9 +235,10 @@ void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
   for (const auto& node : lg->fast(true)) {
     for (const auto dpin : node.out_connected_pins()) {
       if(dpin.has_name()) total_named_dpins++;
+      else unnamed++;
     }
   }
-  fmt::print("total named dpins for {} are: {}\n", is_orig_lg?"orig_lg":"synth_lg", std::to_string(total_named_dpins));
+  fmt::print("total named dpins for {} are: {} and {} unnamed\n", is_orig_lg?"orig_lg":"synth_lg", total_named_dpins,unnamed);
   
 }
 
