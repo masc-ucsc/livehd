@@ -88,6 +88,7 @@ private:
   std::set<Node::Compact_flat> combo_loop_vec;
   typedef absl::node_hash_map<Node_pin::Compact_flat, absl::flat_hash_set<Node_pin::Compact_flat>> map_of_sets;
   void debug_function(Lgraph *lg);
+  void print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const ;
   void                                do_travers(Lgraph *orig_lg, Lgraph *synth_lg, bool is_orig_lg);
   void                                fast_pass_for_inputs(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);
   void                                fwd_traversal_for_inp_map(Lgraph *lg, map_of_sets &inp_map_of_sets, bool is_orig_lg);

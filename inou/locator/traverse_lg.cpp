@@ -32,7 +32,6 @@ void Traverse_lg::travers(Eprp_var& var) {
 
   Traverse_lg p(var);
   p.orig_lg_name = std::string(lg_orig_name);
-  p.start_time_of_algo = std::chrono::system_clock::now();
   p.crossover_count=0;
   // p.synth_lg_name = std::string(lg_synth_name);
 #ifdef DE_DUP
@@ -60,7 +59,11 @@ void Traverse_lg::travers(Eprp_var& var) {
   //p.debug_function(orig_lg);
   //p.debug_function(synth_lg);
   //return;
+
+  p.print_total_named_dpins(synth_lg, false);
+  p.print_total_named_dpins(orig_lg, true);
   
+  p.start_time_of_algo = std::chrono::system_clock::now();
   auto start = std::chrono::system_clock::now();
   p.make_io_maps_boundary_only(orig_lg, p.inp_map_of_sets_orig, p.out_map_of_sets_orig, true);  // orig-boundary only
   fmt::print("\n make_io_maps_boundary_only - orig done.\n");
@@ -212,6 +215,29 @@ void Traverse_lg::debug_function(Lgraph* lg) {
     }
   }
   fmt::print("\n---------------------------------------------------");
+}
+
+void Traverse_lg::print_total_named_dpins(Lgraph* lg, bool is_orig_lg) const {
+
+  unsigned int total_named_dpins=0;
+  /* graph IOs*/
+  lg->each_graph_input([&total_named_dpins](const Node_pin non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();
+    if(dpin.has_name()) {total_named_dpins++;}
+    });
+  lg->each_graph_output([&total_named_dpins](const Node_pin non_h_dpin) {
+    const auto& dpin = non_h_dpin.get_hierarchical();
+    if(dpin.has_name()) total_named_dpins++;
+    });
+
+  /* fast pass*/
+  for (const auto& node : lg->fast(true)) {
+    for (const auto dpin : node.out_connected_pins()) {
+      if(dpin.has_name()) total_named_dpins++;
+    }
+  }
+  fmt::print("total named dpins for {} are: {}\n", is_orig_lg?"orig_lg":"synth_lg", std::to_string(total_named_dpins));
+  
 }
 
 // FOR SET:
@@ -871,8 +897,7 @@ void Traverse_lg::fwd_traversal_for_inp_map(Lgraph* lg, map_of_sets& inp_map_of_
       continue;
     }
     for (const auto node_dpins : node.out_connected_pins()) {
-      traverse_order.emplace_back(
-          node_dpins);  // FIXME: since flops are already matched, do not keep them here for backward matching?
+      traverse_order.emplace_back(node_dpins);  
       const auto node_dpin_cf = node_dpins.get_compact_flat();
       #ifdef BASIC_DBG
       fmt::print("node obtained from fwd traversal: n{},{} \n",
@@ -1554,6 +1579,7 @@ void Traverse_lg::create_inverted_map(map_of_sets& mapOfSets, inverted_ArrMap_of
 bool Traverse_lg::complete_io_match(bool flop_only) {
 
   const auto num_of_matches = net_to_orig_pin_match_map.size();
+  int partial_out_in_complete = 0; //to capture the number of partial out matches in complete_io_match
 
   Traverse_lg::inverted_ArrMap_of_sets inp_invMoS_orig;
   Traverse_lg::inverted_SetMap_of_sets inp_big_set_Mos_orig;
@@ -1796,6 +1822,7 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       inp_map_of_sets_synth.erase(it++);
       // FIXME: add erase from orig Maps here also?
     } else if (partial_out_match_map.size() /*&& (((partial_out_match_map.end())->first)!=0) */) {
+      partial_out_in_complete++;
       net_to_orig_pin_match_map[it->first].insert(((partial_out_match_map.rbegin())->second).begin(),
                                                   ((partial_out_match_map.rbegin())->second).end());
       mark_loop_stop.insert(it->first);
@@ -1836,7 +1863,8 @@ bool Traverse_lg::complete_io_match(bool flop_only) {
       it++;
     }
   }
-  fmt::print("num_of_matches: {}, IN_FUNC: complete_io_match \n",net_to_orig_pin_match_map.size()-num_of_matches);
+  fmt::print("num_of_matches: {}, IN_FUNC: complete_io_match (full IN+OUT)\n",net_to_orig_pin_match_map.size()-num_of_matches-partial_out_in_complete);
+  fmt::print("num_of_matches: {}, IN_FUNC: complete_io_match_partialOUTs \n",partial_out_in_complete);
   return any_matching_done;
 }
 
