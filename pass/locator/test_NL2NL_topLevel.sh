@@ -14,7 +14,7 @@ fi
 
 # IMPORTANT: check these values before every run:
 SRCLOCATION=/home/sgarg3/livehd/pass/locator/tests
-DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_21march2024 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
+DESTLOCATION=/home/sgarg3/livehd/pass/locator/tests/dummy_WoFlopChange_28march2024 #change line 80/81 in test_NL2NL.py for flops/no_flops as well
 COMB_ONLY=true
 NOISE_PERCENTAGE=(0 20 40 60 80 90 95 100)
 
@@ -28,7 +28,7 @@ fi
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
 echo "import matplotlib.pyplot as plt" > ${DESTLOCATION}/nl2nl_time_flop_plot_data.py
 
-for FILENAME in RocketTile_yosys_DT2 RocketTile_netlist_wired  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired
+for FILENAME in RocketTile_yosys_DT2 RocketTile_netlist_wired  #RocketTile_yosys_DT2 SingleCycleCPU_yosysFlat PipelinedCPU_yosysFlat_DT30p MaxPeriodFibonacciLFSR PipelinedCPU_netlist_wired SingleCycleCPU_netlist_wired RocketTile_netlist_wired RocketTile_netlist_p1_again
 do
   if [ ${FILENAME} == "MaxPeriodFibonacciLFSR" ]
     then 
@@ -81,6 +81,15 @@ do
     inou.liberty files:gtech_lib.lib"
     MODULE_NAME=RocketTile
     COMPLR=dc
+  elif [ ${FILENAME} == "RocketTile_netlist_p1_again" ]
+    then
+    rm -r lgdb/
+    ./bazel-bin/main/lgshell "inou.liberty files:saed32hvt_ff1p16vn40c.lib
+    inou.liberty files:saed32lvt_ff1p16vn40c.lib
+    inou.liberty files:saed32rvt_ff1p16vn40c.lib
+    inou.liberty files:gtech_lib.lib"
+    MODULE_NAME=RocketTile
+    COMPLR=dcUnflatten
   fi
 
   printf "\ny${MODULE_NAME}${COMPLR} = [" >> ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py
@@ -170,61 +179,26 @@ do
     #  lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> inou.graphviz.from odir:tmp_1 |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
     #  " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log   
     #el
-    if [ ${FILENAME} == "PipelinedCPU_yosysFlat_DT30p" ]
-    then
-      echo ""
-      echo "Running for PipelinedCPU_yosysFlat_DT30p:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE}
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log 
-    elif [ ${FILENAME} == "SingleCycleCPU_yosysFlat" ]
-    then
-      echo ""
-      echo "Running for SingleCycleCPU_yosysFlat:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
-    elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]
-    then
-      echo ""
-      echo "Running for RocketTile_yosys_DT2:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
-    elif [ ${FILENAME} == "PipelinedCPU_netlist_wired" ]
-    then
-      echo ""
-      echo "Running for PipelinedCPU_netlist_wired:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE}
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log 
-    elif [ ${FILENAME} == "SingleCycleCPU_netlist_wired" ]
-    then
-      echo ""
-      echo "Running for SingleCycleCPU_netlist_wired:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v 
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
-    elif [ ${FILENAME} == "RocketTile_netlist_wired" ]
-    then
-      echo ""
-      echo "Running for RocketTile_netlist_wired:"
-      ./bazel-bin/main/lgshell "
-      inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
-      inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
-      lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
-      " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
+    if [ ${FILENAME} == "PipelinedCPU_yosysFlat_DT30p" ]; then
+      echo -e "\n Running for PipelinedCPU_yosysFlat_DT30p:"
+    elif [ ${FILENAME} == "SingleCycleCPU_yosysFlat" ]; then
+      echo -e "\n Running for SingleCycleCPU_yosysFlat:"
+    elif [ ${FILENAME} == "RocketTile_yosys_DT2" ]; then
+      echo -e "\n Running for RocketTile_yosys_DT2:"
+    elif [ ${FILENAME} == "PipelinedCPU_netlist_wired" ]; then
+      echo -e "\n Running for PipelinedCPU_netlist_wired:"
+    elif [ ${FILENAME} == "SingleCycleCPU_netlist_wired" ]; then
+      echo -e "\n Running for SingleCycleCPU_netlist_wired:"
+    elif [ ${FILENAME} == "RocketTile_netlist_wired" ]; then
+      echo -e "\n Running for RocketTile_netlist_wired:"
+    elif [ ${FILENAME} == "RocketTile_netlist_p1_again" ]; then
+      echo -e "\n Running for RocketTile_netlist_p1_again:"
     fi
+    ./bazel-bin/main/lgshell "
+    inou.yosys.tolg top:${NEW_NL} files:${DESTLOCATION}/${FILENAME}.v |> pass.randomize_dpins srcLG:${NEW_NL} comb_only:${COMB_ONLY} noise_perc:${PERCENTAGE_CHANGE} 
+    inou.yosys.tolg top:${ORIG_NL} files:${SRCLOCATION}/${FILENAME}.v
+    lgraph.open name:${ORIG_NL} |> lgraph.open name:${NEW_NL} |> lgraph.dump hier:true |> inou.traverse_lg LGorig:${ORIG_NL} LGsynth:${NEW_NL} 
+    " > ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log
     echo "--done matching--"
 
     python3 pass/locator/nl2nlPlots.py ${DESTLOCATION}/${FILENAME}_${PERCENTAGE_CHANGE}.log  ${DESTLOCATION}/nl2nl_acc_flop_plot_data.py

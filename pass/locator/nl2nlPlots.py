@@ -46,9 +46,9 @@ def log_accuracy_data(log_file_path):
                             
                             log_acc_dict[str(val_set)].add(key)
                         else:
-                            #print("no matches:")
-                            #print(my_data) #:print no matches
-                            #print("--")
+                            print("no matches:")
+                            print(my_data) #:print no matches
+                            print("--")
                             accuracy_index[3] += 1
 
 
@@ -88,7 +88,7 @@ def log_accuracy_data(log_file_path):
                 accuracy_index[3] += (1 * len(val_list)) 
     # print(log_acc_dict)
     accuracy_index[2] = count - (accuracy_index[0]+accuracy_index[1]+accuracy_index[3])
-    #print(count)
+    print("count:",count)
     # print(len(log_acc_dict.keys()))
     print("'Full Match', 'Alias Match', 'Partial Match', 'No Match'")
     print(accuracy_index)
