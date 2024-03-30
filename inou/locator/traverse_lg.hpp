@@ -107,6 +107,7 @@ private:
   typedef absl::node_hash_map< absl::flat_hash_set<Node_pin::Compact_flat> , absl::flat_hash_set<Node_pin::Compact_flat>  > inverted_SetMap_of_sets;
   inverted_map_arr convert_set_to_sorted_array(const absl::flat_hash_set<Node_pin::Compact_flat>& np_set) const ;
   void create_inverted_map(map_of_sets& mapOfSets, inverted_ArrMap_of_sets& small_set_inv_map, inverted_SetMap_of_sets& big_set_map);
+  void create_inverted_map(map_of_sets& mapOfSets, inverted_SetMap_of_sets& big_set_map);
   bool complete_io_match(bool flop_only);//returns true if any matching took place
   bool surrounding_cell_match();//returns true if any matching took place
   bool surrounding_cell_match_final();//matches any unmatched cell with resolved surrounding cells. returns T if unmatched still left.
